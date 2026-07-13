@@ -21,6 +21,10 @@ Release numbers remain tied to the workspace version.
   filters, differential-voltage and branch-current outputs, normalized,
   magnitude, phase, and dB derivatives, direct APIs, deck execution, and
   cooperative cancellation.
+- Standards-equivalent `.SP donoise` analysis with a full complex Hermitian
+  N-port Norton current-noise correlation matrix (`Cy`) and two-port `Rn`,
+  matched `NF`, `NFmin`, and `Sopt`, available from deck execution and the
+  direct S-parameter API.
 - Typed results and direct APIs for AC data sweeps, N-port S-parameters, STB,
   pole-zero, PSS, HB, PAC, driven and oscillator noise, Monte Carlo,
   sensitivity, parameter stepping, Fourier analysis, transient compression,
@@ -54,8 +58,7 @@ Release numbers remain tied to the workspace version.
 - Corrected sensitivity percent-per-percent scaling and transfer-function UI
   source phase conversion while preserving RF-port, distortion, DC, and
   transient source annotations.
-- Eliminated the silent `.SP donoise` approximation; it remains explicitly
-  unsupported and invalidates automated-verification reports until the
-  standards-equivalent two-port correlation solver is present.
+- Replaced the former `.SP donoise` rejection with the complete correlated
+  port-noise solve; scalar `.NOISE` output is never substituted for `Cy`.
 - Fixed a parallel XSPICE virtual-file test race and workspace-sdist lockfile
   reconciliation without permitting dependency upgrades.

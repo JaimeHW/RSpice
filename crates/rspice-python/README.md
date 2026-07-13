@@ -7,9 +7,10 @@ regression tests in CI the same way you run unit tests.
 ## Features
 
 - **Simulation API** — DC, AC/AC-DATA, third-order Volterra distortion,
-  transient, noise, pole-zero, STB, N-port S-parameters, PSS, HB, PAC, driven
-  PNoise, oscillator phase noise, Monte Carlo, sensitivity, transfer function,
-  Fourier/THD, and parametric analysis
+  transient, noise, pole-zero, STB, N-port S-parameters with complex `Cy`
+  noise correlation and two-port `Rn`/`NF`/`NFmin`/`Sopt`, PSS, HB, PAC,
+  driven PNoise, oscillator phase noise, Monte Carlo, sensitivity, transfer
+  function, Fourier/THD, and parametric analysis
 - **Long-run controls** — resumable netlist-fingerprinted transient
   checkpoints and error-bounded compressed voltage waveforms
 - **Verification first** — `engine.run(netlist)` executes the netlist's own
@@ -283,6 +284,10 @@ print(pz.is_stable, pz.dominant_pole_decay_hz, pz.poles_array)
 # RF and periodic analyses
 sparams = engine.run_s_parameters(netlist, np.logspace(6, 10, 101))
 s21_db = sparams.magnitude_db(2, 1)            # one-based engineering ports
+spnoise = engine.run_s_parameters(netlist, np.logspace(6, 10, 101),
+                                  do_noise=True)
+cy12 = spnoise.cy(1, 2)                        # complex A²/Hz correlation
+print(spnoise.rn, spnoise.nf, spnoise.nfmin, spnoise.sopt)
 pss = engine.run_pss(netlist, fundamental_frequency=1e9)
 hb = engine.run_hb(netlist, fundamental_frequency=1e9, harmonics=9)
 pac = engine.run_pac(netlist, 1e9, 1e3, 100e6, 20, "VRF", "out")

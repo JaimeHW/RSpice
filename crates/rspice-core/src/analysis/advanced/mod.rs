@@ -52,7 +52,7 @@ pub use monte_carlo::{
 };
 pub use noise::{
     IntegratedContribution, IntegratedNoise, NoiseAnalysis, NoiseContribution, NoiseResult,
-    NoiseSource, NoiseSourceType,
+    NoiseSource, NoiseSourceType, PortNoiseCorrelationResult,
 };
 pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};

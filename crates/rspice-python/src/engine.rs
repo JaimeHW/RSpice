@@ -38,7 +38,7 @@ use crate::results::{
     PyMonteCarloResult, PyNoiseResult, PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult,
     PyPoleZeroResult, PyPssResult, PyRunReport, PySParameterResult, PySensitivityResult,
     PySimulationResult, PyStbResult, PyTransferFunctionResult, PyTransientCheckpoint,
-    PyTransientResult, is_ground_name,
+    PyTransientResult, SParameterNoiseData, is_ground_name,
 };
 
 /// Validate that every frequency is finite and non-negative.
@@ -355,6 +355,145 @@ fn s_from_y(
         }
     }
     Ok(scattering)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TwoPortNoisePoint {
+    noise_resistance: f64,
+    noise_factor: f64,
+    minimum_noise_factor: f64,
+    optimum_source_reflection: rspice_core::Complex64,
+    valid: bool,
+}
+
+impl TwoPortNoisePoint {
+    fn undefined() -> Self {
+        Self {
+            noise_resistance: f64::NAN,
+            noise_factor: f64::NAN,
+            minimum_noise_factor: f64::NAN,
+            optimum_source_reflection: rspice_core::Complex64::new(f64::NAN, f64::NAN),
+            valid: false,
+        }
+    }
+}
+
+/// Derive the standard two-port noise parameters from Y and its Norton
+/// current-noise covariance. These are the Maas/ngspice `.SP donoise`
+/// equations, normalized by `4*k*T` at the actual circuit temperature.
+fn derive_two_port_noise_point(
+    admittance: &[Vec<rspice_core::Complex64>],
+    cy: &[Vec<rspice_core::Complex64>],
+    input_reference_impedance: f64,
+    temperature: f64,
+) -> TwoPortNoisePoint {
+    if admittance.len() != 2
+        || cy.len() != 2
+        || admittance.iter().any(|row| row.len() != 2)
+        || cy.iter().any(|row| row.len() != 2)
+        || !input_reference_impedance.is_finite()
+        || input_reference_impedance <= 0.0
+        || !temperature.is_finite()
+        || temperature <= 0.0
+    {
+        return TwoPortNoisePoint::undefined();
+    }
+
+    let finite_complex =
+        |value: rspice_core::Complex64| value.re.is_finite() && value.im.is_finite();
+    if admittance
+        .iter()
+        .flatten()
+        .any(|value| !finite_complex(*value))
+        || cy.iter().flatten().any(|value| !finite_complex(*value))
+    {
+        return TwoPortNoisePoint::undefined();
+    }
+
+    let y21_power = admittance[1][0].norm_sqr();
+    let y_scale = admittance
+        .iter()
+        .flatten()
+        .map(|value| value.norm())
+        .fold(0.0_f64, f64::max);
+    let transmission_floor = (y_scale * f64::EPSILON * 64.0).powi(2);
+    if !y21_power.is_finite() || y21_power <= transmission_floor.max(f64::MIN_POSITIVE) {
+        return TwoPortNoisePoint::undefined();
+    }
+
+    let knorm = 4.0 * rspice_core::analysis::noise::K_BOLTZMANN * temperature;
+    let c11 = cy[0][0] / knorm;
+    let c12 = cy[0][1] / knorm;
+    let c22 = cy[1][1] / knorm;
+    let covariance_scale = c11.norm().max(c12.norm()).max(c22.norm());
+
+    // A noiseless two-port has F=Fmin=1 and Rn=0. Sopt is non-unique;
+    // zero is the deterministic matched-source convention used here.
+    if covariance_scale <= f64::MIN_POSITIVE {
+        return TwoPortNoisePoint {
+            noise_resistance: 0.0,
+            noise_factor: 1.0,
+            minimum_noise_factor: 1.0,
+            optimum_source_reflection: rspice_core::Complex64::new(0.0, 0.0),
+            valid: true,
+        };
+    }
+
+    let covariance_tolerance = covariance_scale * f64::EPSILON * 256.0;
+    if c11.re < -covariance_tolerance
+        || c22.re <= covariance_tolerance
+        || c11.im.abs() > covariance_tolerance
+        || c22.im.abs() > covariance_tolerance
+    {
+        return TwoPortNoisePoint::undefined();
+    }
+
+    let noise_resistance = c22.re.max(0.0) / y21_power;
+    if !noise_resistance.is_finite() || noise_resistance <= 0.0 {
+        return TwoPortNoisePoint::undefined();
+    }
+    let ycor = admittance[0][0] - (c12 / c22.re) * admittance[1][0];
+    let gu = c11.re - noise_resistance * (admittance[0][0] - ycor).norm_sqr();
+    let raw_radicand = ycor.re * ycor.re + gu / noise_resistance;
+    let radicand_scale = ycor.norm_sqr().max((gu / noise_resistance).abs());
+    let radicand_tolerance = radicand_scale * f64::EPSILON * 1024.0;
+    if !raw_radicand.is_finite() || raw_radicand < -radicand_tolerance {
+        return TwoPortNoisePoint::undefined();
+    }
+    let ysopt = rspice_core::Complex64::new(raw_radicand.max(0.0).sqrt(), -ycor.im);
+    let y0 = rspice_core::Complex64::new(1.0 / input_reference_impedance, 0.0);
+    let reflection_denominator = y0 + ysopt;
+    if reflection_denominator.norm_sqr() <= f64::MIN_POSITIVE {
+        return TwoPortNoisePoint::undefined();
+    }
+    let optimum_source_reflection = (y0 - ysopt) / reflection_denominator;
+    let mut minimum_noise_factor = 1.0 + 2.0 * noise_resistance * (ycor.re + ysopt.re);
+    let mut noise_factor =
+        minimum_noise_factor + (noise_resistance / y0.re) * (y0 - ysopt).norm_sqr();
+
+    let factor_tolerance = 4096.0 * f64::EPSILON;
+    if minimum_noise_factor >= 1.0 - factor_tolerance && minimum_noise_factor < 1.0 {
+        minimum_noise_factor = 1.0;
+    }
+    if noise_factor >= 1.0 - factor_tolerance && noise_factor < 1.0 {
+        noise_factor = 1.0;
+    }
+    if !minimum_noise_factor.is_finite()
+        || !noise_factor.is_finite()
+        || minimum_noise_factor < 1.0
+        || noise_factor < minimum_noise_factor - factor_tolerance
+        || !finite_complex(optimum_source_reflection)
+    {
+        return TwoPortNoisePoint::undefined();
+    }
+
+    TwoPortNoisePoint {
+        noise_resistance,
+        noise_factor,
+        minimum_noise_factor,
+        optimum_source_reflection,
+        valid: true,
+    }
 }
 
 /// RSpice simulation engine
@@ -701,6 +840,7 @@ impl PyEngine {
         py: Python<'_>,
         netlist: &PyNetlist,
         frequencies: Vec<f64>,
+        do_noise: bool,
     ) -> PyResult<PySParameterResult> {
         validate_frequencies(&frequencies)?;
         if frequencies.contains(&0.0) {
@@ -718,7 +858,8 @@ impl PyEngine {
             .map(|port| port.reference_impedance)
             .collect::<Vec<_>>();
         let engine = self.engine_for_netlist(&netlist.inner);
-        let parameters = run_interruptible(py, &self.active_runs, |abort| {
+        let temperature = engine.config().temperature;
+        let (parameters, noise) = run_interruptible(py, &self.active_runs, |abort| {
             let num_ports = ports.len();
             let num_points = frequencies.len();
             let zero = rspice_core::Complex64::new(0.0, 0.0);
@@ -775,13 +916,121 @@ impl PyEngine {
                     }
                 }
             }
-            Ok(scattering)
+
+            let noise = if do_noise {
+                let points = engine.run_port_noise_correlation_with_abort(
+                    &netlist.inner,
+                    &port_names,
+                    &frequencies,
+                    temperature,
+                    abort,
+                )?;
+                if points.len() != num_points {
+                    return Err(rspice_core::engine::SimulationError::Circuit(format!(
+                        "SP noise solve returned {} points for {num_points} requested frequencies",
+                        points.len()
+                    )));
+                }
+                let mut current_correlation =
+                    vec![vec![vec![zero; num_points]; num_ports]; num_ports];
+                let mut two_port_points = Vec::with_capacity(num_points);
+                for (frequency_index, point) in points.iter().enumerate() {
+                    if point.frequency.to_bits() != frequencies[frequency_index].to_bits() {
+                        return Err(rspice_core::engine::SimulationError::Circuit(format!(
+                            "SP noise frequency mismatch at point {frequency_index}: expected {}, got {}",
+                            frequencies[frequency_index], point.frequency
+                        )));
+                    }
+                    if point.current_correlation.len() != num_ports
+                        || point
+                            .current_correlation
+                            .iter()
+                            .any(|row| row.len() != num_ports)
+                    {
+                        return Err(rspice_core::engine::SimulationError::Circuit(format!(
+                            "SP noise returned a malformed Cy matrix at frequency point {frequency_index}"
+                        )));
+                    }
+                    for row in 0..num_ports {
+                        for column in 0..num_ports {
+                            current_correlation[row][column][frequency_index] =
+                                point.current_correlation[row][column];
+                        }
+                    }
+                    if num_ports == 2 {
+                        let y = (0..num_ports)
+                            .map(|row| {
+                                (0..num_ports)
+                                    .map(|column| admittances[row][column][frequency_index])
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect::<Vec<_>>();
+                        two_port_points.push(derive_two_port_noise_point(
+                            &y,
+                            &point.current_correlation,
+                            impedances[0],
+                            temperature,
+                        ));
+                    }
+                }
+
+                let (
+                    noise_resistance,
+                    noise_factor,
+                    minimum_noise_factor,
+                    optimum_source_reflection,
+                    parameter_validity,
+                ) = if num_ports == 2 {
+                    (
+                        Some(
+                            two_port_points
+                                .iter()
+                                .map(|point| point.noise_resistance)
+                                .collect(),
+                        ),
+                        Some(
+                            two_port_points
+                                .iter()
+                                .map(|point| point.noise_factor)
+                                .collect(),
+                        ),
+                        Some(
+                            two_port_points
+                                .iter()
+                                .map(|point| point.minimum_noise_factor)
+                                .collect(),
+                        ),
+                        Some(
+                            two_port_points
+                                .iter()
+                                .map(|point| point.optimum_source_reflection)
+                                .collect(),
+                        ),
+                        Some(two_port_points.iter().map(|point| point.valid).collect()),
+                    )
+                } else {
+                    (None, None, None, None, None)
+                };
+                Some(SParameterNoiseData {
+                    temperature,
+                    current_correlation,
+                    noise_resistance,
+                    noise_factor,
+                    minimum_noise_factor,
+                    optimum_source_reflection,
+                    parameter_validity,
+                })
+            } else {
+                None
+            };
+            Ok((scattering, noise))
         })?;
         Ok(PySParameterResult::new(
             frequencies,
             port_names,
             impedances,
             parameters,
+            noise,
         ))
     }
 }
@@ -998,16 +1247,16 @@ impl PyEngine {
                 } => {
                     let frequencies =
                         sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
-                    s_parameters = Some(self.sparameter_impl(py, netlist, frequencies)?);
+                    s_parameters =
+                        Some(self.sparameter_impl(py, netlist, frequencies, *do_noise)?);
                     records.push(PyAnalysisRecord::executed(
                         "sp",
                         describe_analysis(analysis),
                     ));
                     if *do_noise {
-                        records.push(PyAnalysisRecord::skipped(
+                        records.push(PyAnalysisRecord::executed(
                             "sp_noise",
                             describe_analysis(analysis),
-                            ".SP donoise requires the complex port-current noise-correlation matrix (Cy) and, for two ports, Rn/NF/NFmin/Sopt; scalar .NOISE results cannot substitute for them",
                         ));
                     }
                 }
@@ -1605,13 +1854,15 @@ impl PyEngine {
     ///
     /// Port sources use ngspice-compatible `portnum=<n>` and optional
     /// `z0=<ohms>` annotations. Port numbering must be dense starting at 1.
+    #[pyo3(signature = (netlist, frequencies, do_noise=false))]
     fn run_s_parameters(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
         frequencies: Vec<f64>,
+        do_noise: bool,
     ) -> PyResult<PySParameterResult> {
-        self.sparameter_impl(py, netlist, frequencies)
+        self.sparameter_impl(py, netlist, frequencies, do_noise)
     }
 
     /// Run Tian double-injection loop-stability analysis.

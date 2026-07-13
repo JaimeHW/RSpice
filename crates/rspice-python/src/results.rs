@@ -3206,20 +3206,35 @@ pub struct PySParameterResult {
     port_names: Vec<String>,
     reference_impedances: Vec<f64>,
     parameters: Vec<Vec<Vec<rspice_core::Complex64>>>,
+    noise: Option<SParameterNoiseData>,
+}
+
+/// Optional `.SP donoise` data attached to an S-parameter sweep.
+#[derive(Debug, Clone)]
+pub(crate) struct SParameterNoiseData {
+    pub temperature: f64,
+    pub current_correlation: Vec<Vec<Vec<rspice_core::Complex64>>>,
+    pub noise_resistance: Option<Vec<f64>>,
+    pub noise_factor: Option<Vec<f64>>,
+    pub minimum_noise_factor: Option<Vec<f64>>,
+    pub optimum_source_reflection: Option<Vec<rspice_core::Complex64>>,
+    pub parameter_validity: Option<Vec<bool>>,
 }
 
 impl PySParameterResult {
-    pub fn new(
+    pub(crate) fn new(
         frequencies: Vec<f64>,
         port_names: Vec<String>,
         reference_impedances: Vec<f64>,
         parameters: Vec<Vec<Vec<rspice_core::Complex64>>>,
+        noise: Option<SParameterNoiseData>,
     ) -> Self {
         Self {
             frequencies,
             port_names,
             reference_impedances,
             parameters,
+            noise,
         }
     }
 
@@ -3244,6 +3259,35 @@ impl PySParameterResult {
             .and_then(|row| row.get(input_port - 1))
             .map(Vec::as_slice)
             .ok_or_else(|| PyValueError::new_err("malformed S-parameter result matrix"))
+    }
+
+    fn current_noise_correlation(
+        &self,
+        output_port: usize,
+        input_port: usize,
+    ) -> PyResult<&[rspice_core::Complex64]> {
+        let num_ports = self.port_names.len();
+        if !(1..=num_ports).contains(&output_port) {
+            return Err(PyIndexError::new_err(format!(
+                "output_port must be in 1..={num_ports}, got {output_port}"
+            )));
+        }
+        if !(1..=num_ports).contains(&input_port) {
+            return Err(PyIndexError::new_err(format!(
+                "input_port must be in 1..={num_ports}, got {input_port}"
+            )));
+        }
+        let noise = self.noise.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "port-noise data was not computed; pass do_noise=True or use .SP ... donoise",
+            )
+        })?;
+        noise
+            .current_correlation
+            .get(output_port - 1)
+            .and_then(|row| row.get(input_port - 1))
+            .map(Vec::as_slice)
+            .ok_or_else(|| PyValueError::new_err("malformed port-noise correlation matrix"))
     }
 }
 
@@ -3272,6 +3316,26 @@ impl PySParameterResult {
     #[getter]
     fn num_points(&self) -> usize {
         self.frequencies.len()
+    }
+
+    /// Whether this result includes `.SP donoise` data.
+    #[getter]
+    fn has_noise(&self) -> bool {
+        self.noise.is_some()
+    }
+
+    /// Temperature in kelvin used to evaluate device noise.
+    #[getter]
+    fn noise_temperature(&self) -> Option<f64> {
+        self.noise.as_ref().map(|noise| noise.temperature)
+    }
+
+    /// Whether two-port `Rn`, `NF`, `NFmin`, and `Sopt` are available.
+    #[getter]
+    fn has_two_port_noise_parameters(&self) -> bool {
+        self.noise
+            .as_ref()
+            .is_some_and(|noise| noise.noise_resistance.is_some())
     }
 
     fn s<'py>(
@@ -3325,11 +3389,126 @@ impl PySParameterResult {
             .to_pyarray(py))
     }
 
+    /// Complex Norton port-current correlation `Cy(i,j)` in A²/Hz.
+    fn cy<'py>(
+        &self,
+        py: Python<'py>,
+        output_port: usize,
+        input_port: usize,
+    ) -> PyResult<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        Ok(self
+            .current_noise_correlation(output_port, input_port)?
+            .to_pyarray(py))
+    }
+
+    /// Two-port equivalent noise resistance `Rn` in ohms.
+    #[getter]
+    fn noise_resistance<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.noise
+            .as_ref()?
+            .noise_resistance
+            .as_ref()
+            .map(|values| values.to_pyarray(py))
+    }
+
+    /// Two-port matched-source noise factor (linear power ratio).
+    #[getter]
+    fn noise_factor<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.noise
+            .as_ref()?
+            .noise_factor
+            .as_ref()
+            .map(|values| values.to_pyarray(py))
+    }
+
+    /// Two-port matched-source noise figure in dB (`NF`).
+    #[getter]
+    fn noise_figure_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.noise.as_ref()?.noise_factor.as_ref().map(|values| {
+            values
+                .iter()
+                .map(|value| 10.0 * value.log10())
+                .collect::<Vec<_>>()
+                .to_pyarray(py)
+        })
+    }
+
+    /// Minimum two-port noise factor (linear power ratio).
+    #[getter]
+    fn minimum_noise_factor<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.noise
+            .as_ref()?
+            .minimum_noise_factor
+            .as_ref()
+            .map(|values| values.to_pyarray(py))
+    }
+
+    /// Minimum two-port noise figure in dB (`NFmin`).
+    #[getter]
+    fn minimum_noise_figure_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.noise
+            .as_ref()?
+            .minimum_noise_factor
+            .as_ref()
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|value| 10.0 * value.log10())
+                    .collect::<Vec<_>>()
+                    .to_pyarray(py)
+            })
+    }
+
+    /// Optimum source reflection coefficient (`Sopt`) for port 1.
+    #[getter]
+    fn optimum_source_reflection<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> Option<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        self.noise
+            .as_ref()?
+            .optimum_source_reflection
+            .as_ref()
+            .map(|values| values.to_pyarray(py))
+    }
+
+    /// Per-frequency validity of the derived two-port noise parameters.
+    #[getter]
+    fn noise_parameters_valid<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<bool>>> {
+        self.noise
+            .as_ref()?
+            .parameter_validity
+            .as_ref()
+            .map(|values| values.to_pyarray(py))
+    }
+
+    /// ngspice-compatible aliases for common RF notation.
+    #[getter]
+    fn rn<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.noise_resistance(py)
+    }
+
+    #[getter]
+    fn nf<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.noise_figure_db(py)
+    }
+
+    #[getter]
+    fn nfmin<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.minimum_noise_figure_db(py)
+    }
+
+    #[getter]
+    fn sopt<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        self.optimum_source_reflection(py)
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "SParameterResult(ports={}, points={})",
+            "SParameterResult(ports={}, points={}, noise={})",
             self.port_names.len(),
-            self.frequencies.len()
+            self.frequencies.len(),
+            self.noise.is_some()
         )
     }
 }

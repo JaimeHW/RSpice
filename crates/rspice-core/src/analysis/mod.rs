@@ -65,10 +65,11 @@ pub use advanced::{
     HarmonicComponent, IntegratedContribution, IntegratedNoise, MeasureEngine, MeasureResult,
     MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult, MonteCarloRunner,
     NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, ParametricResults, ParametricSweep,
-    PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port, PzMatrix, SMatrix, SParameterAnalyzer,
-    SParameterConfig, SParameterResult, Sensitivity, SensitivityAnalyzer, SensitivityResult,
-    StepSpec, StepTarget, StepType, Tolerance, TransferAnalyzer, TransferFunctionConfig,
-    TransferFunctionResult, TrigSpec, VariableStatistics, VariationSet,
+    PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port, PortNoiseCorrelationResult, PzMatrix,
+    SMatrix, SParameterAnalyzer, SParameterConfig, SParameterResult, Sensitivity,
+    SensitivityAnalyzer, SensitivityResult, StepSpec, StepTarget, StepType, Tolerance,
+    TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult, TrigSpec, VariableStatistics,
+    VariationSet,
 };
 
 // Re-export PSS types

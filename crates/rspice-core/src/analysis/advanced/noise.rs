@@ -20,8 +20,8 @@
 //! ```
 //! This computes noise at output node referenced to input source Vin.
 
-use crate::Value;
 use crate::analysis::AnalysisConfig;
+use crate::{Complex64, Value};
 
 //=============================================================================
 // Constants
@@ -33,6 +33,20 @@ pub const K_BOLTZMANN: Value = 1.380649e-23;
 pub const Q_ELECTRON: Value = 1.602176634e-19;
 /// Default temperature (K): 27°C = 300.15K (SPICE convention, ngspice REFTEMP)
 pub const T_NOMINAL: Value = 300.15;
+
+/// Complex short-circuit port-current noise correlation at one frequency.
+///
+/// `current_correlation[i][j]` is
+/// `E[I_noise(i) * conj(I_noise(j))]` in A²/Hz. The port currents use the
+/// same into-the-network sign convention as an admittance matrix. The matrix
+/// is Hermitian and positive semidefinite up to floating-point roundoff.
+#[derive(Debug, Clone)]
+pub struct PortNoiseCorrelationResult {
+    /// Analysis frequency in hertz.
+    pub frequency: Value,
+    /// Dense `N x N` complex current-noise covariance matrix in A²/Hz.
+    pub current_correlation: Vec<Vec<Complex64>>,
+}
 
 const BSIM4_MIN_LOG_ARG: Value = 1.0e-38;
 const BSIM3_MIN_LOG_ARG: Value = 1.0e-38;

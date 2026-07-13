@@ -57,6 +57,34 @@ impl Engine {
         }
     }
 
+    #[inline]
+    fn add_port_noise_outer_product(
+        covariance: &mut [Vec<Complex64>],
+        compensation: &mut [Vec<Complex64>],
+        amplitude: &[Complex64],
+    ) -> Result<(), SimulationError> {
+        for row in 0..amplitude.len() {
+            for column in 0..amplitude.len() {
+                let contribution = amplitude[row] * amplitude[column].conj();
+                if !contribution.re.is_finite() || !contribution.im.is_finite() {
+                    return Err(SimulationError::Circuit(
+                        "Port-noise transfer produced a non-finite covariance contribution"
+                            .to_string(),
+                    ));
+                }
+
+                // Compensated complex summation preserves small mechanisms in
+                // the presence of much larger contributors and reduces loss of
+                // precision in off-diagonal cancellation.
+                let corrected = contribution - compensation[row][column];
+                let updated = covariance[row][column] + corrected;
+                compensation[row][column] = (updated - covariance[row][column]) - corrected;
+                covariance[row][column] = updated;
+            }
+        }
+        Ok(())
+    }
+
     fn collect_bsim3v3_noise_sources(
         device: &crate::device::mosfet::bsim3v3::Bsim3v3Device,
     ) -> Vec<NoiseSource> {
@@ -1080,6 +1108,236 @@ impl Engine {
         )
     }
 
+    /// Compute the short-circuit port-current noise correlation matrix.
+    ///
+    /// Every entry is a complex cross-power spectral density in A²/Hz using
+    /// `E[I_i * conj(I_j)]`. Each named port must be an independent voltage
+    /// source: its branch enforces zero small-signal port voltage while its
+    /// branch current observes the equivalent Norton noise current. This is
+    /// the `Cy` matrix used by SPICE `.SP ... donoise` analysis.
+    pub fn run_port_noise_correlation(
+        &self,
+        netlist: &Netlist,
+        port_sources: &[String],
+        frequencies: &[Value],
+        temperature: Value,
+    ) -> Result<Vec<PortNoiseCorrelationResult>, SimulationError> {
+        self.run_port_noise_correlation_with_abort(
+            netlist,
+            port_sources,
+            frequencies,
+            temperature,
+            &NoAbort,
+        )
+    }
+
+    /// Compute `Cy` with cooperative cancellation.
+    pub fn run_port_noise_correlation_with_abort(
+        &self,
+        netlist: &Netlist,
+        port_sources: &[String],
+        frequencies: &[Value],
+        temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<PortNoiseCorrelationResult>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if port_sources.is_empty() {
+            return Err(SimulationError::Circuit(
+                "Port-noise analysis requires at least one voltage-source port".to_string(),
+            ));
+        }
+        if frequencies.is_empty() {
+            return Err(SimulationError::Circuit(
+                "Port-noise analysis requires at least one frequency".to_string(),
+            ));
+        }
+        if let Some(frequency) = frequencies
+            .iter()
+            .find(|frequency| !frequency.is_finite() || **frequency <= 0.0)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "Port-noise frequencies must be finite and strictly positive, got {frequency}"
+            )));
+        }
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Port-noise temperature must be finite and strictly positive, got {temperature}"
+            )));
+        }
+
+        let mut unique_names = HashSet::with_capacity(port_sources.len());
+        for source in port_sources {
+            if source.trim().is_empty() {
+                return Err(SimulationError::Circuit(
+                    "Port-noise voltage-source names must not be empty".to_string(),
+                ));
+            }
+            if !unique_names.insert(source.to_ascii_lowercase()) {
+                return Err(SimulationError::Circuit(format!(
+                    "Port-noise voltage source '{source}' is listed more than once"
+                )));
+            }
+        }
+
+        let engine = self.resolved_for_netlist(netlist);
+        let mut circuit = engine.build_circuit(netlist)?;
+        Self::warn_xspice_mif_analysis_boundary(
+            &circuit,
+            "SP noise",
+            "intrinsic XSPICE device-noise sources are not collected because ngspice MIF code models expose DEVnoise = NULL",
+        );
+        Self::ensure_supported_dynamic_charges(&circuit, "SP noise")?;
+        if !circuit.ekv3s.is_empty() {
+            return Err(SimulationError::Circuit(
+                "SP noise does not support the restricted EKV3 LEVEL=301 VANOISE oracle slice"
+                    .to_string(),
+            ));
+        }
+
+        let mut matrix = engine.build_matrix(&circuit)?;
+        circuit.link_indices(&matrix);
+        let dc_solution = engine.solve_dc_operating_point_with_abort(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            abort,
+        )?;
+        circuit.refresh_jiles_atherton_inductances(&dc_solution);
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(&dc_solution);
+        }
+        circuit.prepare_behavioral_small_signal(&dc_solution);
+        let (noise_sources, correlated_noise_sources) =
+            Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+
+        let mut branch_matrix_indices = Vec::with_capacity(port_sources.len());
+        for source_name in port_sources {
+            let source_index = circuit
+                .voltage_sources
+                .names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(source_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Port-noise voltage source '{source_name}' was not found"
+                    ))
+                })?;
+            let branch_ordinal = circuit.voltage_sources.branch_indices[source_index];
+            let matrix_index = circuit.get_branch_matrix_index(branch_ordinal);
+            if matrix_index == 0 || matrix_index > circuit.matrix_size() {
+                return Err(SimulationError::Circuit(format!(
+                    "Port-noise voltage source '{source_name}' has an invalid branch index"
+                )));
+            }
+            branch_matrix_indices.push(matrix_index - 1);
+        }
+
+        let num_nodes = circuit.num_nodes();
+        let size = circuit.matrix_size();
+        let num_ports = branch_matrix_indices.len();
+        let zero = Complex64::new(0.0, 0.0);
+        let mut rhs = vec![zero; size];
+        let mut results = Vec::with_capacity(frequencies.len());
+
+        for &frequency in frequencies {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let omega = 2.0 * PI * frequency;
+            let mut ac_matrix =
+                Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
+            let mut covariance = vec![vec![zero; num_ports]; num_ports];
+            let mut compensation = vec![vec![zero; num_ports]; num_ports];
+
+            let mut solve_transfer = |node_pos: usize,
+                                      node_neg: usize|
+             -> Result<Vec<Complex64>, SimulationError> {
+                rhs.fill(zero);
+                Self::stamp_unit_noise_current_rhs(&mut rhs, node_pos, node_neg, num_nodes);
+                let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                branch_matrix_indices
+                    .iter()
+                    .map(|&index| {
+                        solution
+                            .get(index)
+                            .copied()
+                            .map(|current| -current)
+                            .ok_or_else(|| {
+                                SimulationError::Circuit(
+                                    "Port-noise branch-current solution is malformed".to_string(),
+                                )
+                            })
+                    })
+                    .collect()
+            };
+
+            for source in &noise_sources {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let density = source.spectral_density(frequency, temperature);
+                if !density.is_finite() || density <= 0.0 {
+                    continue;
+                }
+                let scale = density.sqrt();
+                let amplitude = solve_transfer(source.node_pos, source.node_neg)?
+                    .into_iter()
+                    .map(|gain| gain * scale)
+                    .collect::<Vec<_>>();
+                Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
+            }
+
+            for source in &correlated_noise_sources {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let Some(densities) = source.spectral_densities(frequency, temperature) else {
+                    continue;
+                };
+                if !densities.first_psd.is_finite()
+                    || !densities.second_psd.is_finite()
+                    || densities.first_psd < 0.0
+                    || densities.second_psd < 0.0
+                {
+                    continue;
+                }
+                let first = solve_transfer(source.first.node_pos, source.first.node_neg)?;
+                let second = solve_transfer(source.second.node_pos, source.second.node_neg)?;
+                let first_scale = densities.first_psd.sqrt();
+                let second_scale =
+                    Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
+                let amplitude = first
+                    .into_iter()
+                    .zip(second)
+                    .map(|(first_gain, second_gain)| {
+                        first_gain * first_scale + second_gain * second_scale
+                    })
+                    .collect::<Vec<_>>();
+                Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
+            }
+
+            // Make the mathematical Hermitian invariant exact in the public
+            // result and remove only impossible signed zero on its diagonal.
+            for row in 0..num_ports {
+                covariance[row][row] = Complex64::new(covariance[row][row].re.max(0.0), 0.0);
+                for column in (row + 1)..num_ports {
+                    let value = (covariance[row][column] + covariance[column][row].conj()) * 0.5;
+                    covariance[row][column] = value;
+                    covariance[column][row] = value.conj();
+                }
+            }
+
+            results.push(PortNoiseCorrelationResult {
+                frequency,
+                current_correlation: covariance,
+            });
+        }
+
+        Ok(results)
+    }
+
     fn ensure_ekv3_vanoise_noise_fixture(
         circuit: &CircuitData,
         output_pos: usize,
@@ -1513,6 +1771,59 @@ impl Engine {
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+
+    #[test]
+    fn port_noise_correlation_is_hermitian_and_matches_a_series_resistor() {
+        let netlist = Netlist::parse(
+            "Series resistor port-noise fixture\n\
+             V1 p1 0 0 portnum=1 z0=50\n\
+             R1 p1 p2 50\n\
+             V2 p2 0 0 portnum=2 z0=50\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let temperature = 300.15;
+        let frequencies = [1.0e3, 1.0e9];
+        let ports = vec!["V1".to_string(), "v2".to_string()];
+        let results = Engine::default()
+            .run_port_noise_correlation(&netlist, &ports, &frequencies, temperature)
+            .expect("port-noise analysis runs");
+        assert_eq!(results.len(), frequencies.len());
+
+        let expected = 4.0 * crate::analysis::noise::K_BOLTZMANN * temperature / 50.0;
+        for (point, frequency) in results.iter().zip(frequencies) {
+            assert_eq!(point.frequency.to_bits(), frequency.to_bits());
+            assert_eq!(point.current_correlation.len(), 2);
+            let cy = &point.current_correlation;
+            let tolerance = expected * 1.0e-11;
+            assert!((cy[0][0].re - expected).abs() <= tolerance);
+            assert!((cy[1][1].re - expected).abs() <= tolerance);
+            assert!((cy[0][1].re + expected).abs() <= tolerance);
+            assert!((cy[1][0].re + expected).abs() <= tolerance);
+            assert_eq!(cy[0][0].im, 0.0);
+            assert_eq!(cy[1][1].im, 0.0);
+            assert_eq!(cy[1][0], cy[0][1].conj());
+        }
+    }
+
+    #[test]
+    fn port_noise_correlation_rejects_duplicate_and_unknown_ports() {
+        let netlist = Netlist::parse("ports\nV1 p1 0 0\nR1 p1 0 50\n.end\n").expect("deck parses");
+        let engine = Engine::default();
+        let duplicate = vec!["V1".to_string(), "v1".to_string()];
+        let error = engine
+            .run_port_noise_correlation(&netlist, &duplicate, &[1.0e3], 300.15)
+            .expect_err("duplicate port is rejected")
+            .to_string();
+        assert!(error.contains("listed more than once"), "{error}");
+
+        let missing = vec!["Vmissing".to_string()];
+        let error = engine
+            .run_port_noise_correlation(&netlist, &missing, &[1.0e3], 300.15)
+            .expect_err("unknown port is rejected")
+            .to_string();
+        assert!(error.contains("was not found"), "{error}");
+    }
 
     /// onoise_spectrum table of [`RB_NOISE_DECK`] from the official
     /// ngspice-46 binary, in its default root-spectral-density units.
