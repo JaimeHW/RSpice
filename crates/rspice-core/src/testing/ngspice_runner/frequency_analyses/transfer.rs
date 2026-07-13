@@ -137,6 +137,9 @@ impl TestRunner {
 
     fn get_source_dc_value_from_spec(spec: &crate::netlist::SourceSpec) -> Value {
         match spec {
+            crate::netlist::SourceSpec::Distortion { inner, .. } => {
+                Self::get_source_dc_value_from_spec(inner)
+            }
             crate::netlist::SourceSpec::RfPort { inner, .. } => {
                 Self::get_source_dc_value_from_spec(inner)
             }

@@ -80,6 +80,9 @@ impl Engine {
         use crate::netlist::SourceSpec;
 
         match spec {
+            SourceSpec::Distortion { inner, .. } => {
+                Self::add_source_spec_breakpoints(breakpoints, inner, tstop, tstep_hint, dialect);
+            }
             SourceSpec::RfPort { inner, .. } => {
                 Self::add_source_spec_breakpoints(breakpoints, inner, tstop, tstep_hint, dialect);
             }

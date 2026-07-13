@@ -18632,6 +18632,9 @@ impl XyceTestRunner {
         tran: &XyceTranAnalysis,
     ) -> Option<Value> {
         match spec {
+            crate::netlist::SourceSpec::Distortion { inner, .. } => {
+                Self::source_spec_transient_max_step(inner, tran)
+            }
             crate::netlist::SourceSpec::RfPort { inner, .. } => {
                 Self::source_spec_transient_max_step(inner, tran)
             }

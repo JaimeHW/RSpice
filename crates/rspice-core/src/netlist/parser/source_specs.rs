@@ -1,6 +1,7 @@
 //! Source specification parsing for independent, voltage, and current sources.
 
 use super::*;
+use crate::netlist::SourceDistortionTone;
 //=============================================================================
 // Source Specification Parsing
 //=============================================================================
@@ -30,6 +31,8 @@ pub(super) fn parse_source_spec(
     let mut ac_terms: Option<(Value, Value)> = None;
     let mut transient: Option<SourceSpec> = None;
     let mut rf_port = SourceRfPortBuilder::default();
+    let mut distortion_f1: Option<SourceDistortionTone> = None;
+    let mut distortion_f2: Option<SourceDistortionTone> = None;
 
     loop {
         skip_commas(stream);
@@ -136,8 +139,27 @@ pub(super) fn parse_source_spec(
         };
 
         match keyword.as_str() {
-            "DISTOF1" | "DISTOF2" => {
-                consume_distortion_source_annotation(stream, line_num, params)?;
+            "DISTOF1" => {
+                if distortion_f1.is_some() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "DISTOF1 may be specified at most once per source".to_string(),
+                    });
+                }
+                distortion_f1 = Some(parse_distortion_source_annotation(
+                    stream, line_num, params, "DISTOF1",
+                )?);
+            }
+            "DISTOF2" => {
+                if distortion_f2.is_some() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "DISTOF2 may be specified at most once per source".to_string(),
+                    });
+                }
+                distortion_f2 = Some(parse_distortion_source_annotation(
+                    stream, line_num, params, "DISTOF2",
+                )?);
             }
             "DC" if dc_value.is_none() => {
                 stream.advance();
@@ -216,6 +238,16 @@ pub(super) fn parse_source_spec(
         },
     };
 
+    let source = if distortion_f1.is_some() || distortion_f2.is_some() {
+        SourceSpec::Distortion {
+            inner: Box::new(source),
+            f1: distortion_f1,
+            f2: distortion_f2,
+        }
+    } else {
+        source
+    };
+
     Ok(if let Some(port) = rf_port.into_port() {
         SourceSpec::RfPort {
             inner: Box::new(source),
@@ -236,22 +268,29 @@ pub(in crate::netlist) fn parse_source_spec_text(
     parse_source_spec(&mut stream, line_num, params)
 }
 
-fn consume_distortion_source_annotation(
+fn parse_distortion_source_annotation(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(), ParseError> {
+    expected_name: &str,
+) -> Result<SourceDistortionTone, ParseError> {
     let TokenKind::Ident(keyword) = &stream.peek().kind else {
-        return Ok(());
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("expected {expected_name} source annotation"),
+        });
     };
     let source_name = keyword.to_ascii_uppercase();
+    debug_assert_eq!(source_name, expected_name);
     stream.advance();
 
-    let _magnitude =
-        optional_distortion_value(stream, line_num, params, &source_name, "magnitude")?;
-    let _phase = optional_distortion_value(stream, line_num, params, &source_name, "phase")?;
+    let magnitude = optional_distortion_value(stream, line_num, params, &source_name, "magnitude")?
+        .unwrap_or(1.0);
+    let phase = optional_distortion_value(stream, line_num, params, &source_name, "phase")?
+        .unwrap_or(0.0)
+        .to_radians();
 
-    Ok(())
+    Ok(SourceDistortionTone { magnitude, phase })
 }
 
 fn optional_distortion_value(

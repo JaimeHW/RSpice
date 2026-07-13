@@ -1166,9 +1166,28 @@ pub struct SourceRfPort {
     pub phase: Option<Value>,
 }
 
+/// One independent-source excitation used by small-signal Volterra
+/// distortion analysis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SourceDistortionTone {
+    /// Sinusoidal peak magnitude in volts or amperes.
+    pub magnitude: Value,
+    /// Sinusoidal phase in radians.
+    pub phase: Value,
+}
+
 /// Source specification (DC, AC, or transient waveforms)
 #[derive(Debug, Clone)]
 pub enum SourceSpec {
+    /// A source with one or both ngspice-compatible `DISTOF1`/`DISTOF2`
+    /// small-signal distortion excitations. The wrapped source retains its
+    /// independent DC, AC, transient, and RF-port behavior.
+    Distortion {
+        inner: Box<SourceSpec>,
+        f1: Option<SourceDistortionTone>,
+        f2: Option<SourceDistortionTone>,
+    },
+
     /// A source with ngspice RF-port annotations. The wrapped source keeps
     /// ordinary DC/AC/transient electrical behavior.
     RfPort {
@@ -1372,6 +1391,25 @@ impl SourceSpec {
     pub fn rf_port(&self) -> Option<&SourceRfPort> {
         match self {
             SourceSpec::RfPort { port, .. } => Some(port),
+            SourceSpec::Distortion { inner, .. } => inner.rf_port(),
+            _ => None,
+        }
+    }
+
+    /// Return the `DISTOF1` excitation when one was explicitly present.
+    pub fn distortion_f1(&self) -> Option<SourceDistortionTone> {
+        match self {
+            SourceSpec::Distortion { f1, .. } => *f1,
+            SourceSpec::RfPort { inner, .. } => inner.distortion_f1(),
+            _ => None,
+        }
+    }
+
+    /// Return the `DISTOF2` excitation when one was explicitly present.
+    pub fn distortion_f2(&self) -> Option<SourceDistortionTone> {
+        match self {
+            SourceSpec::Distortion { f2, .. } => *f2,
+            SourceSpec::RfPort { inner, .. } => inner.distortion_f2(),
             _ => None,
         }
     }
@@ -1383,6 +1421,11 @@ impl SourceSpec {
     /// value, matching how SPICE treats `AC` annotations on such sources.
     pub fn with_ac(self, magnitude: Value, phase: Value) -> Self {
         match self {
+            SourceSpec::Distortion { inner, f1, f2 } => SourceSpec::Distortion {
+                inner: Box::new(inner.with_ac(magnitude, phase)),
+                f1,
+                f2,
+            },
             SourceSpec::RfPort { inner, port } => SourceSpec::RfPort {
                 inner: Box::new(inner.with_ac(magnitude, phase)),
                 port,
@@ -1425,6 +1468,11 @@ impl SourceSpec {
     /// A purely AC or transient spec gains an explicit DC component.
     pub fn with_dc_value(self, value: Value) -> SourceSpec {
         match self {
+            SourceSpec::Distortion { inner, f1, f2 } => SourceSpec::Distortion {
+                inner: Box::new(inner.with_dc_value(value)),
+                f1,
+                f2,
+            },
             SourceSpec::RfPort { inner, port } => SourceSpec::RfPort {
                 inner: Box::new(inner.with_dc_value(value)),
                 port,

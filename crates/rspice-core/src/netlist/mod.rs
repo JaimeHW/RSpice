@@ -5603,7 +5603,7 @@ mod tests {
     }
 
     #[test]
-    fn source_distortion_terms_after_sin_are_consumed() {
+    fn source_distortion_terms_after_sin_are_retained() {
         let netlist = Netlist::parse(
             "distortion source annotation\n\
              V1 1 0 DC 0 AC 1 SIN 0 1 1K 0 0 DISTOF1 0 DISTOF2 0\n\
@@ -5613,13 +5613,63 @@ mod tests {
         )
         .expect("source distortion annotations should parse");
 
+        let spec = first_source_spec(&netlist);
+        assert_eq!(
+            spec.distortion_f1().expect("DISTOF1 retained").magnitude,
+            0.0
+        );
+        assert_eq!(
+            spec.distortion_f2().expect("DISTOF2 retained").magnitude,
+            0.0
+        );
         assert!(matches!(
-            first_source_spec(&netlist),
-            SourceSpec::DcAcTransient {
-                transient,
-                ..
-            } if matches!(transient.as_ref(), SourceSpec::Sin { .. })
+            spec,
+            SourceSpec::Distortion { inner, .. }
+                if matches!(
+                    inner.as_ref(),
+                    SourceSpec::DcAcTransient { transient, .. }
+                        if matches!(transient.as_ref(), SourceSpec::Sin { .. })
+                )
         ));
+    }
+
+    #[test]
+    fn source_distortion_terms_apply_spice_defaults_and_radian_phase() {
+        let netlist = Netlist::parse(
+            "distortion source defaults\n\
+             V1 in 0 DISTOF1 DISTOF2 2 90 DC 0\n\
+             R1 in 0 1k\n\
+             .disto lin 1 1k 1k 0.9\n\
+             .end\n",
+        )
+        .expect("default and explicit distortion source terms should parse");
+
+        let spec = first_source_spec(&netlist);
+        assert_eq!(
+            spec.distortion_f1(),
+            Some(SourceDistortionTone {
+                magnitude: 1.0,
+                phase: 0.0,
+            })
+        );
+        let f2 = spec.distortion_f2().expect("DISTOF2 retained");
+        assert_eq!(f2.magnitude, 2.0);
+        assert!((f2.phase - std::f64::consts::FRAC_PI_2).abs() < 1e-15);
+    }
+
+    #[test]
+    fn duplicate_source_distortion_tone_is_rejected() {
+        let err = Netlist::parse(
+            "duplicate distortion tone\n\
+             V1 in 0 DISTOF1 1 DISTOF1 2\n\
+             R1 in 0 1k\n\
+             .end\n",
+        )
+        .expect_err("duplicate DISTOF1 must be rejected");
+        assert!(
+            err.to_string()
+                .contains("DISTOF1 may be specified at most once")
+        );
     }
 
     #[test]

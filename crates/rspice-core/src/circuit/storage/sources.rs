@@ -574,6 +574,9 @@ impl VoltageSources {
         use std::f64::consts::PI;
 
         match spec {
+            SourceSpec::Distortion { inner, .. } => {
+                Self::evaluate_source_at_time_with_context(inner, time, context)
+            }
             SourceSpec::RfPort { inner, .. } => {
                 Self::evaluate_source_at_time_with_context(inner, time, context)
             }
