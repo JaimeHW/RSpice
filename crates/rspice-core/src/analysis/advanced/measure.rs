@@ -1015,21 +1015,52 @@ impl MeasureEngine {
             }
         };
 
-        let Some((start, end)) = self.get_range_indices(time, from, to) else {
-            return MeasureResult::failed(name, "Empty range");
+        let sweep_direction = time
+            .first()
+            .zip(time.last())
+            .map_or(1.0, |(first, last)| Value::signum(last - first));
+        let (lower, upper, direction) = match (from, to) {
+            (Some(from), Some(to)) => (from.min(to), from.max(to), Value::signum(to - from)),
+            (Some(from), None) if sweep_direction >= 0.0 => {
+                (from, Value::INFINITY, sweep_direction)
+            }
+            (Some(from), None) => (Value::NEG_INFINITY, from, sweep_direction),
+            (None, Some(to)) if sweep_direction >= 0.0 => {
+                (Value::NEG_INFINITY, to, sweep_direction)
+            }
+            (None, Some(to)) => (to, Value::INFINITY, sweep_direction),
+            (None, None) => (Value::NEG_INFINITY, Value::INFINITY, sweep_direction),
         };
-
-        if start == end {
-            return MeasureResult::success(name, 0.0);
-        }
-
+        let mut selected_points = 0usize;
         let mut integral = 0.0;
-        for i in start..end {
-            let dt = time[i + 1] - time[i];
-            integral += 0.5 * (signal[i] + signal[i + 1]) * dt;
+        let mut previous = None;
+        for (&axis, &value) in time.iter().zip(signal) {
+            let lower_tolerance = if lower.is_finite() {
+                lower.abs() * 1.0e-12
+            } else {
+                0.0
+            };
+            let upper_tolerance = if upper.is_finite() {
+                upper.abs() * 1.0e-12
+            } else {
+                0.0
+            };
+            if axis >= lower - lower_tolerance && axis <= upper + upper_tolerance {
+                selected_points += 1;
+                if let Some((previous_axis, previous_value)) = previous {
+                    let dx = Value::abs(axis - previous_axis);
+                    integral += 0.5 * (value + previous_value) * dx;
+                }
+                previous = Some((axis, value));
+            } else {
+                previous = None;
+            }
         }
-
-        MeasureResult::success(name, integral)
+        if selected_points == 0 {
+            MeasureResult::failed(name, "Empty range")
+        } else {
+            MeasureResult::success(name, integral * direction)
+        }
     }
 }
 

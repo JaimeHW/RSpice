@@ -939,14 +939,14 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::Max { from, to, .. }
         | MeasureType::PeakToPeak { from, to, .. }
         | MeasureType::Avg { from, to, .. }
-        | MeasureType::Rms { from, to, .. }
-        | MeasureType::Integ { from, to, .. } => Some((from, to)),
+        | MeasureType::Rms { from, to, .. } => Some((from, to)),
         MeasureType::Delay { .. }
         | MeasureType::Find { .. }
         | MeasureType::Derivative { .. }
         | MeasureType::Param { .. }
         | MeasureType::RiseTime { .. }
-        | MeasureType::FallTime { .. } => None,
+        | MeasureType::FallTime { .. }
+        | MeasureType::Integ { .. } => None,
     };
     if let Some((Some(from), Some(to))) = bounds {
         if *from > *to {
@@ -1196,6 +1196,41 @@ mod tests {
         assert_eq!(results[0].value, Some(-1.5));
         assert_eq!(results[1].value, Some(-1.5));
         assert_eq!(results[2].value, Some(-2.5));
+        assert!(results.iter().all(|result| result.passed));
+    }
+
+    #[test]
+    fn dc_integration_preserves_requested_and_sweep_directions() {
+        let netlist = Netlist::parse(
+            "directional DC integration\n\
+             V1 out 0 0\n\
+             .dc V1 5 1 -1\n\
+             .meas dc all INTEG V(out)\n\
+             .meas dc from_only INTEG V(out) FROM=4\n\
+             .meas dc to_only INTEG V(out) TO=3\n\
+             .meas dc forward INTEG V(out) FROM=4 TO=2\n\
+             .meas dc reverse INTEG V(out) FROM=2 TO=4\n\
+             .end\n",
+        )
+        .expect("DC integration parses");
+        let sweep = (1..=5)
+            .rev()
+            .map(|axis| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, axis as Value];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis as Value, point)
+            })
+            .collect::<Vec<_>>();
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.value)
+                .collect::<Vec<_>>(),
+            vec![Some(-12.0), Some(-7.5), Some(-8.0), Some(-6.0), Some(6.0)]
+        );
         assert!(results.iter().all(|result| result.passed));
     }
 
