@@ -207,6 +207,8 @@ struct XyceExecutionPlan {
     deck_path: PathBuf,
     execution_dir: Option<PathBuf>,
     reference_path: PathBuf,
+    measurement_reference_paths: Vec<PathBuf>,
+    measurement_tolerance: XyceFileCompareTolerance,
     source: String,
     expression_dialect: ExpressionDialect,
     print: XycePrintRequest,
@@ -2216,12 +2218,23 @@ impl XyceTestRunner {
         source =
             Self::source_with_static_dc_wrapper_bindings(&source, &deck.path, requires_wrapper)?;
 
+        let measurement_reference_paths = self
+            .static_output_reference_path(&deck.path, "ms0")
+            .filter(|path| path.is_file())
+            .into_iter()
+            .collect::<Vec<_>>();
+
         let wrapper_contract = if requires_wrapper {
-            Some(Self::native_static_prn_wrapper_contract(
-                &deck.relative_path,
-                &deck.path,
-                &source,
-            )?)
+            if measurement_reference_paths.is_empty() {
+                Some(Self::native_static_prn_wrapper_contract(
+                    &deck.relative_path,
+                    &deck.path,
+                    &source,
+                )?)
+            } else {
+                Self::validate_scalar_dc_measurement_wrapper_source(&source)?;
+                Some(XyceStaticDcContract::WrapperDefault)
+            }
         } else {
             None
         };
@@ -2267,6 +2280,17 @@ impl XyceTestRunner {
                 execution_dir.as_deref(),
             )?
         };
+        if !measurement_reference_paths.is_empty()
+            && (static_plan.dc_data.is_some()
+                || !static_plan.steps.is_empty()
+                || static_plan.dc.sweep2.is_some()
+                || static_plan.dc.primary_spec().points().len() != 1)
+        {
+            return Err(
+                "scalar DC measurement artifact contract currently requires exactly one unstepped sweep point"
+                    .to_string(),
+            );
+        }
         let contract = if let Some(contract) = wrapper_contract {
             self.validate_native_static_prn_wrapper_contract(contract, &static_plan)?;
             contract
@@ -2283,6 +2307,7 @@ impl XyceTestRunner {
             .static_output_reference_path(&deck.path, contract.reference_extension())
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
         if !reference_path.is_file()
+            && measurement_reference_paths.is_empty()
             && !matches!(
                 contract,
                 XyceStaticDcContract::WrapperFilePrn | XyceStaticDcContract::WrapperNoOutput
@@ -2299,6 +2324,8 @@ impl XyceTestRunner {
             deck_path: static_plan.deck_path,
             execution_dir: static_plan.execution_dir,
             reference_path,
+            measurement_reference_paths,
+            measurement_tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
             source: static_plan.source,
             expression_dialect,
             print: static_plan.print,
@@ -3995,6 +4022,58 @@ impl XyceTestRunner {
 
     fn validate_default_prn_wrapper_source(source: &str) -> Result<(), String> {
         Self::validate_default_prn_wrapper_source_with_format_mode(source, false)
+    }
+
+    fn validate_scalar_dc_measurement_wrapper_source(source: &str) -> Result<(), String> {
+        let mut primary_print_count = 0usize;
+        let mut dc_measurement_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                let tokens = Self::split_print_fields(&trimmed)?;
+                let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+                if !Self::validate_default_prn_print_tokens(&token_refs, false)? {
+                    primary_print_count += 1;
+                }
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".measure") || command.eq_ignore_ascii_case(".meas") {
+                let fields = Self::split_print_fields(&trimmed)?;
+                if !fields
+                    .get(1)
+                    .is_some_and(|field| field.eq_ignore_ascii_case("DC"))
+                {
+                    return Err(format!(
+                        "scalar DC measurement artifact contract does not cover directive '{trimmed}'"
+                    ));
+                }
+                dc_measurement_count += 1;
+                continue;
+            }
+            if Self::is_extra_wrapper_output_analysis_command(command) {
+                return Err(format!(
+                    "scalar DC measurement artifact contract does not cover {command} directives"
+                ));
+            }
+        }
+        if primary_print_count != 1 {
+            return Err(format!(
+                "scalar DC measurement artifact contract requires one primary .PRINT DC statement, found {primary_print_count}"
+            ));
+        }
+        if dc_measurement_count == 0 {
+            return Err(
+                "scalar DC measurement artifact contract requires at least one .MEASURE DC statement"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     fn validate_no_output_dc_wrapper_source(source: &str) -> Result<(), String> {
@@ -6693,7 +6772,12 @@ impl XyceTestRunner {
         plan: XyceExecutionPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = plan.contract.result_contract(false);
+        let contract =
+            if !plan.reference_path.is_file() && !plan.measurement_reference_paths.is_empty() {
+                "wrapper_scalar_measure_dc"
+            } else {
+                plan.contract.result_contract(false)
+            };
         let netlist = match Self::parse_netlist_with_expression_dialect_and_execution_dir(
             &plan.source,
             &plan.deck_path,
@@ -6712,10 +6796,11 @@ impl XyceTestRunner {
             }
         };
 
-        let reference = if matches!(
-            plan.contract,
-            XyceStaticDcContract::WrapperFilePrn | XyceStaticDcContract::WrapperNoOutput
-        ) {
+        let reference = if !plan.reference_path.is_file()
+            || matches!(
+                plan.contract,
+                XyceStaticDcContract::WrapperFilePrn | XyceStaticDcContract::WrapperNoOutput
+            ) {
             None
         } else {
             match Self::parse_dc_reference_file(plan.contract, &plan.reference_path) {
@@ -6892,6 +6977,43 @@ impl XyceTestRunner {
         } else {
             Vec::new()
         };
+
+        if mismatches.is_empty() && !plan.measurement_reference_paths.is_empty() {
+            let measurement_sweep = results
+                .iter()
+                .map(|point| (point.sweep_value, point.result.clone()))
+                .collect::<Vec<_>>();
+            let measurements =
+                crate::analysis::advanced::evaluate_dc_measurements(&netlist, &measurement_sweep);
+            let measurement_mismatches = match self.compare_measurement_references(
+                &plan.measurement_reference_paths,
+                &measurements,
+                plan.measurement_tolerance,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("DC measurement reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            if !measurement_mismatches.is_empty() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce DC measurement mismatch(es)",
+                        measurement_mismatches.len()
+                    ),
+                    measurement_mismatches,
+                );
+            }
+        }
 
         if mismatches.is_empty()
             && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplot)
