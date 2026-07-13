@@ -149,6 +149,20 @@ fn netlist_parse_survives_chaos() {
 }
 
 #[test]
+fn behavioral_poly_probe_survives_multibyte_non_keyword_prefixes() {
+    for expression in ["ca�*2", "cap�2", "éxpr"] {
+        let deck = format!(
+            "unicode behavioral expression\nV1 in 0 1\nB1 out 0 V={{{expression}}}\n.end\n"
+        );
+        let result = catch_unwind(AssertUnwindSafe(|| Netlist::parse(&deck)));
+        assert!(
+            result.is_ok(),
+            "behavioral POLY detection panicked on {expression:?}"
+        );
+    }
+}
+
+#[test]
 fn multi_run_expansion_survives_chaos() {
     chaos("expand_multi_run", SEED_DECKS, 0x5EED_0002, 4000, |input| {
         // Expansion output must itself parse without panicking.

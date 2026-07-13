@@ -660,7 +660,10 @@ fn expand_spice_poly_expression(expression: &str) -> Result<String, String> {
 
 fn parse_spice_poly_header(expression: &str) -> Result<Option<(usize, &str)>, String> {
     let trimmed = expression.trim();
-    if trimmed.len() < 4 || !trimmed[..4].eq_ignore_ascii_case("POLY") {
+    let Some(keyword) = trimmed.get(..4) else {
+        return Ok(None);
+    };
+    if !keyword.eq_ignore_ascii_case("POLY") {
         return Ok(None);
     }
 
