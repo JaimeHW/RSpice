@@ -950,6 +950,31 @@ fn global_parameter_expression_validation_rejects_cycles_and_circuit_probes() {
 }
 
 #[test]
+fn global_parameter_validation_accepts_static_statistical_projections() {
+    let mut params = ParamContext::new();
+    for (name, expression, value) in [
+        ("PA", "AGAUSS(1,1,1)", 1.0),
+        ("PB", "GAUSS(1,1,1)", 1.0),
+        ("PC", "2*RAND()", 1.0),
+        ("PD", "UNIF(1,1)", 1.0),
+        ("PE", "AUNIF(1,1)", 1.0),
+    ] {
+        params.define_global_expression(name, expression, Some(ComplexValue::real(value)));
+    }
+
+    validate_global_parameter_expressions(&params)
+        .expect("statically evaluated statistical globals must remain valid");
+    for name in ["PA", "PB", "PC", "PD", "PE"] {
+        assert_eq!(params.get(name), Some(1.0));
+        let prepared = prepare_behavioral_expression(name, &params)
+            .expect("static statistical global expands from its stored projection");
+        let value = eval_expression(&prepared, &ParamContext::new())
+            .expect("expanded projection remains a scalar expression");
+        assert_eq!(value, 1.0, "{name} expanded as {prepared}");
+    }
+}
+
+#[test]
 fn parser_retains_dynamic_globals_and_static_numeric_projections() {
     let netlist = crate::netlist::Netlist::parse(
         "global expressions\n\

@@ -164,6 +164,38 @@ fn contains_runtime_identifier(expression: &str) -> bool {
         .any(|token| token.eq_ignore_ascii_case("TIME") || token.eq_ignore_ascii_case("FREQ"))
 }
 
+fn contains_statistical_function_call(expression: &str) -> bool {
+    let bytes = expression.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
+            let start = index;
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+            {
+                index += 1;
+            }
+            let name = &expression[start..index];
+            let mut call_index = index;
+            while call_index < bytes.len() && bytes[call_index].is_ascii_whitespace() {
+                call_index += 1;
+            }
+            if call_index < bytes.len()
+                && bytes[call_index] == b'('
+                && ["GAUSS", "AGAUSS", "UNIF", "AUNIF", "RAND"]
+                    .iter()
+                    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            {
+                return true;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    false
+}
+
 struct FunctionExpander<'a, 'p> {
     params: &'a ParamContext,
     probe_protector: &'p mut ProbeProtector,
@@ -227,6 +259,13 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         }
                         NetExpr::Param(name) => {
                             if let Some(expression) = self.params.get_global_expression(&name) {
+                                if contains_statistical_function_call(expression)
+                                    && !contains_runtime_identifier(expression)
+                                    && let Some(value) = self.params.get_complex(&name)
+                                {
+                                    values.push(NetExpr::Number(value.real_projection()));
+                                    continue;
+                                }
                                 let key = name.to_ascii_uppercase();
                                 if self.global_stack.iter().any(|active| active == &key) {
                                     let mut cycle = self.global_stack.clone();
