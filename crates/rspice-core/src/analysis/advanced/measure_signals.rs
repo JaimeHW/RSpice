@@ -531,10 +531,9 @@ impl AcSweepSeries {
 
     /// Signal table used by continuous AC equation measures.
     ///
-    /// Ordinary scalar AC measures historically address `V()`/`I()` as
-    /// magnitude. Xyce equation expressions instead define the unqualified
-    /// accessors as the real projection, so this deliberately supplies a
-    /// distinct view without changing the established scalar-measure API.
+    /// Xyce scalar AC measures and equation expressions define unqualified
+    /// `V()`/`I()` accessors as the real projection. This view overlays those
+    /// aliases without changing the explicit magnitude series in `VM()`/`IM()`.
     pub fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
         let mut signals = self.signal_map();
         insert_case_variants(&mut signals, "Hertz", self.axis.as_slice());
@@ -622,7 +621,7 @@ pub fn evaluate_noise_measurements(
             .collect();
     };
     let signals = series.signal_map();
-    evaluate_statements(&statements, series.axis(), &signals)
+    evaluate_statements(&statements, series.axis(), &signals, &netlist.params)
 }
 
 /// The netlist's measurement statements for one analysis kind
@@ -642,12 +641,86 @@ fn evaluate_statements(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
+    params: &crate::netlist::ParamContext,
 ) -> Vec<MeasureResult> {
+    let derived = materialize_measure_expression_signals(statements, axis, signals, params);
+    let mut augmented_signals = signals.clone();
+    for (name, waveform) in &derived {
+        augmented_signals.insert(name.clone(), waveform.as_slice());
+    }
     let mut engine = MeasureEngine::new();
     for statement in statements {
         engine.add((*statement).clone());
     }
-    engine.evaluate(axis, signals)
+    engine.evaluate(axis, &augmented_signals)
+}
+
+fn materialize_measure_expression_signals(
+    statements: &[&MeasureStatement],
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    params: &crate::netlist::ParamContext,
+) -> Vec<(String, Vec<Value>)> {
+    let mut names = Vec::new();
+    let mut add = |name: &str| {
+        if name.starts_with('{')
+            && name.ends_with('}')
+            && !names.iter().any(|candidate| candidate == name)
+        {
+            names.push(name.to_string());
+        }
+    };
+    for statement in statements {
+        match &statement.measure_type {
+            MeasureType::Delay { trig, targ } => {
+                add(&trig.signal);
+                add(&targ.signal);
+            }
+            MeasureType::Find {
+                signal,
+                when_signal,
+                ..
+            }
+            | MeasureType::Derivative {
+                signal,
+                when_signal,
+                ..
+            } => {
+                add(signal);
+                if let Some(when_signal) = when_signal {
+                    add(when_signal);
+                }
+            }
+            MeasureType::Min { signal, .. }
+            | MeasureType::Max { signal, .. }
+            | MeasureType::PeakToPeak { signal, .. }
+            | MeasureType::Avg { signal, .. }
+            | MeasureType::Rms { signal, .. }
+            | MeasureType::RiseTime { signal, .. }
+            | MeasureType::FallTime { signal, .. }
+            | MeasureType::Integ { signal, .. } => add(signal),
+            MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
+        }
+    }
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let expression = name.strip_prefix('{')?.strip_suffix('}')?;
+            let expression = crate::netlist::expr::parse_expression(expression).ok()?;
+            let mut waveform = Vec::with_capacity(axis.len());
+            let measures = HashMap::new();
+            for row in 0..axis.len() {
+                let bound = bind_equation_expression(&expression, row, signals, &measures).ok()?;
+                let value = crate::netlist::expr::evaluate_complex(&bound, params).ok()?;
+                if !value.is_real() || !value.re.is_finite() {
+                    return None;
+                }
+                waveform.push(value.re);
+            }
+            Some((name, waveform))
+        })
+        .collect()
 }
 
 /// Evaluate the netlist's transient .MEAS statements against a result.
@@ -662,7 +735,7 @@ pub fn evaluate_tran_measurements(
         return Vec::new();
     }
     let signals = transient_signal_map(result);
-    evaluate_statements(&statements, &result.time, &signals)
+    evaluate_statements(&statements, &result.time, &signals, &netlist.params)
 }
 
 /// Evaluate the netlist's DC .MEAS statements against a sweep.
@@ -684,16 +757,17 @@ pub fn evaluate_dc_measurements(
             .collect();
     };
     let signals = series.signal_map();
-    evaluate_statements(&statements, series.axis(), &signals)
+    evaluate_statements(&statements, series.axis(), &signals, &netlist.params)
 }
 
 /// Evaluate the netlist's AC .MEAS statements against a sweep.
 ///
 /// Returns an empty vector when the netlist has no AC measurements; an
 /// empty sweep fails every statement explicitly rather than skipping it.
-/// Signal naming follows [`AcSweepSeries`]: magnitudes under `V(x)`/`VM(x)`,
-/// `VDB`/`VP` (degrees)/`VR`/`VI` variants, and the frequency axis as
-/// `TIME`/`FREQUENCY`/`FREQ`.
+/// Xyce scalar AC semantics project bare `V(x)`/`I(x)` to the real component;
+/// `VM`/`IM`, `VDB`/`IDB`, `VP`/`IP` (degrees), `VR`/`IR`, and `VI`/`II`
+/// select the explicit derived quantities. The frequency axis is available as
+/// `TIME`/`FREQUENCY`/`FREQ`/`HERTZ`.
 pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<MeasureResult> {
     let statements = measurements_for_analysis(netlist, "AC");
     if statements.is_empty() {
@@ -705,8 +779,8 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
             .map(|m| MeasureResult::failed(&m.name, "AC sweep produced no points"))
             .collect();
     };
-    let signals = series.signal_map();
-    let mut results = evaluate_statements(&statements, series.axis(), &signals);
+    let signals = series.equation_signal_map();
+    let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
     match evaluate_ac_equation_measurements(netlist, sweep) {
         Ok(traces) => {
             for (statement, result) in statements.iter().zip(&mut results) {
@@ -843,6 +917,7 @@ mod tests {
              .meas ac hertz EQN {HERTZ}\n\
              .meas ac bounded EQN {VM(out)} FROM=20 TO=20\n\
              .meas ac invalid EQN {VM(out)} FROM=30 TO=40\n\
+             .meas ac expravg AVG {1+VR(out)}\n\
              .end\n",
         )
         .expect("AC equations parse");
@@ -904,6 +979,7 @@ mod tests {
         assert_eq!(result("mag").value, Some(3.0));
         assert_eq!(result("bounded").value, Some(2.0));
         assert_eq!(result("invalid").value, None);
+        assert_eq!(result("expravg").value, Some(2.5));
     }
 
     #[test]

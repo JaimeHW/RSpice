@@ -21500,10 +21500,6 @@ impl XyceTestRunner {
         if netlist.measurements.iter().any(|measurement| {
             measurement.analysis.eq_ignore_ascii_case("AC")
                 && measurement.name.eq_ignore_ascii_case(original)
-                && matches!(
-                    measurement.measure_type,
-                    crate::analysis::MeasureType::Equation { .. }
-                )
         }) {
             return Ok(());
         }

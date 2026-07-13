@@ -1497,6 +1497,11 @@ pub(super) fn parse_meas_signal(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<String, ParseError> {
+    if let TokenKind::Expression(expression) = &stream.peek().kind {
+        let expression = format!("{{{expression}}}");
+        stream.advance();
+        return Ok(expression);
+    }
     let mut signal = expect_ident(stream, line_num)?;
 
     if stream.consume(&TokenKind::LParen) {

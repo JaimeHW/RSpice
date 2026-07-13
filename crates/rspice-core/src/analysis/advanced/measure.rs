@@ -593,14 +593,22 @@ impl MeasureEngine {
         time: &[Value],
         from: Option<Value>,
         to: Option<Value>,
-    ) -> (usize, usize) {
-        let start = from
-            .map(|t| time.iter().position(|&x| x >= t).unwrap_or(0))
-            .unwrap_or(0);
-        let end = to
-            .map(|t| time.iter().rposition(|&x| x <= t).unwrap_or(time.len() - 1))
-            .unwrap_or(time.len() - 1);
-        (start, end.max(start))
+    ) -> Option<(usize, usize)> {
+        let start = match from {
+            Some(bound) => {
+                let inclusive_bound = bound - bound.abs() * 1.0e-12;
+                time.iter().position(|&value| value >= inclusive_bound)?
+            }
+            None => 0,
+        };
+        let end = match to {
+            Some(bound) => {
+                let inclusive_bound = bound + bound.abs() * 1.0e-12;
+                time.iter().rposition(|&value| value <= inclusive_bound)?
+            }
+            None => time.len() - 1,
+        };
+        (start <= end).then_some((start, end))
     }
 
     fn eval_min_max(
@@ -620,7 +628,9 @@ impl MeasureEngine {
             }
         };
 
-        let (start, end) = self.get_range_indices(time, from, to);
+        let Some((start, end)) = self.get_range_indices(time, from, to) else {
+            return MeasureResult::failed(name, "Empty range");
+        };
         let slice = &signal[start..=end];
 
         if slice.is_empty() {
@@ -652,7 +662,9 @@ impl MeasureEngine {
             }
         };
 
-        let (start, end) = self.get_range_indices(time, from, to);
+        let Some((start, end)) = self.get_range_indices(time, from, to) else {
+            return MeasureResult::failed(name, "Empty range");
+        };
         let slice = &signal[start..=end];
 
         if slice.is_empty() {
@@ -681,7 +693,9 @@ impl MeasureEngine {
             }
         };
 
-        let (start, end) = self.get_range_indices(time, from, to);
+        let Some((start, end)) = self.get_range_indices(time, from, to) else {
+            return MeasureResult::failed(name, "Empty range");
+        };
 
         if start >= end {
             return MeasureResult::failed(name, "Empty range");
@@ -714,7 +728,9 @@ impl MeasureEngine {
             }
         };
 
-        let (start, end) = self.get_range_indices(time, from, to);
+        let Some((start, end)) = self.get_range_indices(time, from, to) else {
+            return MeasureResult::failed(name, "Empty range");
+        };
 
         if start >= end {
             return MeasureResult::failed(name, "Empty range");
@@ -928,7 +944,9 @@ impl MeasureEngine {
             }
         };
 
-        let (start, end) = self.get_range_indices(time, from, to);
+        let Some((start, end)) = self.get_range_indices(time, from, to) else {
+            return MeasureResult::failed(name, "Empty range");
+        };
 
         if start >= end {
             return MeasureResult::failed(name, "Empty range");
