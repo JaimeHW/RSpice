@@ -1,7 +1,7 @@
 # CI-only pins. Runtime package metadata keeps semver ranges; workflows use
 # this file so dependency resolver drift cannot silently change release results.
 maturin==1.14.1
-mypy==2.1.0
+mypy==2.3.0
 pytest==9.1.1
 numpy==2.2.6; python_version == "3.10"
 numpy==2.5.0; python_version >= "3.11"
