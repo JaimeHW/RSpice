@@ -20015,6 +20015,21 @@ impl XyceTestRunner {
                         *coefficient,
                     )?;
                 }
+                ElementKind::TransmissionLine {
+                    z0,
+                    td,
+                    freq,
+                    nl,
+                    model,
+                } => Self::validate_lossless_transmission_line_contract(
+                    &element.name,
+                    element.nodes.len(),
+                    *z0,
+                    *td,
+                    *freq,
+                    *nl,
+                    model.as_deref(),
+                )?,
                 ElementKind::BehavioralVoltage { expression, .. }
                 | ElementKind::BehavioralCurrent { expression, .. } => {
                     Self::validate_static_step_tran_behavioral_expression(
