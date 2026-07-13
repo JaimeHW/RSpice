@@ -1200,6 +1200,42 @@ mod tests {
     }
 
     #[test]
+    fn dc_rms_uses_absolute_width_with_descending_one_sided_windows() {
+        let netlist = Netlist::parse(
+            "descending DC RMS\n\
+             V1 out 0 0\n\
+             .dc V1 3 1 -1\n\
+             .meas dc all RMS V(out)\n\
+             .meas dc from_only RMS V(out) FROM=2\n\
+             .meas dc to_only RMS V(out) TO=2\n\
+             .meas dc reversed RMS V(out) FROM=2 TO=3\n\
+             .end\n",
+        )
+        .expect("DC RMS parses");
+        let sweep = (1..=3)
+            .rev()
+            .map(|axis| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, axis as Value];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis as Value, point)
+            })
+            .collect::<Vec<_>>();
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        let expected = [
+            4.5_f64.sqrt(),
+            2.5_f64.sqrt(),
+            6.5_f64.sqrt(),
+            6.5_f64.sqrt(),
+        ];
+        for (result, expected) in results.iter().zip(expected) {
+            assert_eq!(result.value, Some(expected));
+            assert!(result.passed);
+        }
+    }
+
+    #[test]
     fn dc_integration_preserves_requested_and_sweep_directions() {
         let netlist = Netlist::parse(
             "directional DC integration\n\

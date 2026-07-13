@@ -802,25 +802,48 @@ impl MeasureEngine {
             }
         };
 
-        let Some((start, end)) = self.get_range_indices(time, from, to) else {
-            return MeasureResult::failed(name, "Empty range");
+        let ascending = time
+            .first()
+            .zip(time.last())
+            .is_none_or(|(first, last)| last >= first);
+        let (lower, upper) = match (from, to) {
+            (Some(from), Some(to)) => (from.min(to), from.max(to)),
+            (Some(from), None) if ascending => (from, Value::INFINITY),
+            (Some(from), None) => (Value::NEG_INFINITY, from),
+            (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
+            (None, Some(to)) => (to, Value::INFINITY),
+            (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
         };
-
-        if start >= end {
-            return MeasureResult::failed(name, "Empty range");
-        }
-
-        // Trapezoidal integration of squared signal
         let mut integral = 0.0;
-        for i in start..end {
-            let dt = time[i + 1] - time[i];
-            let sq1 = signal[i] * signal[i];
-            let sq2 = signal[i + 1] * signal[i + 1];
-            integral += 0.5 * (sq1 + sq2) * dt;
+        let mut width = 0.0;
+        let mut previous = None;
+        for (&axis, &value) in time.iter().zip(signal) {
+            let lower_tolerance = if lower.is_finite() {
+                lower.abs() * 1.0e-12
+            } else {
+                0.0
+            };
+            let upper_tolerance = if upper.is_finite() {
+                upper.abs() * 1.0e-12
+            } else {
+                0.0
+            };
+            if axis >= lower - lower_tolerance && axis <= upper + upper_tolerance {
+                if let Some((previous_axis, previous_value)) = previous {
+                    let dx = Value::abs(axis - previous_axis);
+                    integral += 0.5 * (value * value + previous_value * previous_value) * dx;
+                    width += dx;
+                }
+                previous = Some((axis, value));
+            } else {
+                previous = None;
+            }
         }
-
-        let total_time = time[end] - time[start];
-        MeasureResult::success(name, (integral / total_time).sqrt())
+        if width == 0.0 {
+            MeasureResult::failed(name, "Empty range")
+        } else {
+            MeasureResult::success(name, (integral / width).sqrt())
+        }
     }
 
     fn eval_rise_fall(
