@@ -64,6 +64,9 @@ Release numbers remain tied to the workspace version.
 
 ### Fixed
 
+- Restored predictor-local/native Gear2's fixed-BDF2 coefficient contract
+  during adaptive retries and forced-accept history commits, while retaining
+  variable-step Gear12 coefficients for Xyce accepted-reference modes.
 - Replaced the oscillator phase-noise solver's resistor/diode-only source
   subset with the complete device-noise model, including colored-source PPV
   averaging, correlated BSIM4 noise, resistor `NOISY` controls, and strict
