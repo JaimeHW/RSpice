@@ -4452,6 +4452,9 @@ pub struct PyRunReport {
     /// Third-order Volterra distortion result (last .disto)
     #[pyo3(get)]
     pub distortion: Option<Py<PyDistortionResult>>,
+    /// Harmonic-balance result (last .hb)
+    #[pyo3(get)]
+    pub hb: Option<PyHbResult>,
     /// N-port scattering parameters (last .sp)
     #[pyo3(get)]
     pub s_parameters: Option<PySParameterResult>,

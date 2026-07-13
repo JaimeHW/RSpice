@@ -67,6 +67,74 @@ R2 out 0 1k
         result.coefficients("missing")
 
 
+def test_engine_run_executes_hb_card_and_hbint_order():
+    netlist = parse(
+        """
+V1 in 0 AC 0.01
+R1 in out 1k
+R2 out 0 1k
+.hb 1meg
+.options hbint numfreq=4
+.end
+"""
+    )
+    report = rspice.Engine().run(netlist)
+    assert isinstance(report.hb, rspice.HbResult)
+    assert report.hb.converged
+    assert report.hb.num_harmonics == 4
+    assert report.hb.harmonic_frequencies.tolist() == pytest.approx(
+        [0.0, F0, 2 * F0, 3 * F0, 4 * F0]
+    )
+    assert abs(report.hb.coefficients("out")[1]) == pytest.approx(0.005, rel=2e-3)
+    assert [record.kind for record in report.records] == ["hb"]
+    assert report.skipped == []
+
+
+def test_multitone_hb_maps_each_tone_to_its_source():
+    netlist = parse(
+        """
+V1 n1 0 AC 1
+R1 n1 0 1k
+V2 n2 0 AC 2
+R2 n2 0 1k
+.end
+"""
+    )
+    result = rspice.Engine().run_hb_multitone(
+        netlist,
+        [F0, 2 * F0],
+        harmonics=[2],
+        source_names=["V1", "V2"],
+    )
+    assert result.fundamental_frequency == pytest.approx(F0)
+    assert result.num_harmonics == 4
+    assert abs(result.coefficients("n1")[1]) == pytest.approx(1.0, rel=2e-3)
+    assert abs(result.coefficients("n1")[2]) < 1e-12
+    assert abs(result.coefficients("n2")[1]) < 1e-12
+    assert abs(result.coefficients("n2")[2]) == pytest.approx(2.0, rel=2e-3)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"frequencies": [F0, F0]}, "more than once"),
+        (
+            {"frequencies": [F0, 2 * F0], "harmonics": [2, 3, 4]},
+            "harmonic orders",
+        ),
+        (
+            {"frequencies": [F0, 2 * F0], "source_names": ["V1"]},
+            "source names",
+        ),
+        ({"frequencies": [F0], "collocation_points": 8}, "must be odd"),
+    ],
+)
+def test_multitone_hb_rejects_ambiguous_or_invalid_configuration(kwargs, message):
+    netlist = parse("V1 n1 0 AC 1\nR1 n1 0 1k\n.end")
+    with pytest.raises(ValueError, match=message):
+        rspice.Engine().run_hb_multitone(netlist, **kwargs)
+
+
 def test_pac_exposes_signed_sideband_conversion():
     netlist = parse(
         """

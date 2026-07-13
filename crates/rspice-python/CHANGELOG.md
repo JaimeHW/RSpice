@@ -25,6 +25,10 @@ Release numbers remain tied to the workspace version.
   N-port Norton current-noise correlation matrix (`Cy`) and two-port `Rn`,
   matched `NF`, `NFmin`, and `Sopt`, available from deck execution and the
   direct S-parameter API.
+- Deck-driven single- and multi-tone `.HB` execution, a typed `RunReport.hb`
+  result, per-tone direct API with optional source mapping, and complete HB
+  numerical controls for collocation, damping, Krylov, mixing, and Jacobian
+  selection.
 - Typed results and direct APIs for AC data sweeps, N-port S-parameters, STB,
   pole-zero, PSS, HB, PAC, driven and oscillator noise, Monte Carlo,
   sensitivity, parameter stepping, Fourier analysis, transient compression,
@@ -58,6 +62,8 @@ Release numbers remain tied to the workspace version.
 - Corrected sensitivity percent-per-percent scaling and transfer-function UI
   source phase conversion while preserving RF-port, distortion, DC, and
   transient source annotations.
+- Corrected multi-tone HB collocation sizing so the FFT grid represents the
+  highest common-basis harmonic and rejects truncated spectra explicitly.
 - Replaced the former `.SP donoise` rejection with the complete correlated
   port-noise solve; scalar `.NOISE` output is never substituted for `Cy`.
 - Fixed a parallel XSPICE virtual-file test race and workspace-sdist lockfile

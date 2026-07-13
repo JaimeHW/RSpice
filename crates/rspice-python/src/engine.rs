@@ -16,7 +16,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
-use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
+use rspice_core::analysis::advanced::harmonic_balance::{HbConfig, HbTone};
 use rspice_core::analysis::advanced::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::advanced::stb::{StbConfig, StbSweepType};
 use rspice_core::analysis::{AcSensitivityOutput, Distribution};
@@ -494,6 +494,169 @@ fn derive_two_port_noise_point(
         optimum_source_reflection,
         valid: true,
     }
+}
+
+fn resolve_hb_harmonic_orders(
+    tone_count: usize,
+    requested: Option<&[usize]>,
+    context: &str,
+) -> PyResult<Vec<usize>> {
+    let Some(requested) = requested else {
+        return Ok(vec![9; tone_count]);
+    };
+    if requested.is_empty() {
+        return Err(PyValueError::new_err(format!(
+            "{context} harmonic orders must not be empty"
+        )));
+    }
+    if requested.contains(&0) {
+        return Err(PyValueError::new_err(format!(
+            "{context} harmonic orders must all be at least 1"
+        )));
+    }
+    match requested.len() {
+        1 => Ok(vec![requested[0]; tone_count]),
+        count if count == tone_count => Ok(requested.to_vec()),
+        count => Err(PyValueError::new_err(format!(
+            "{context} has {tone_count} tones but {count} harmonic orders; provide one order to broadcast or one per tone"
+        ))),
+    }
+}
+
+fn hb_config_from_tones(
+    frequencies: &[f64],
+    harmonic_orders: &[usize],
+    source_names: Option<&[String]>,
+) -> PyResult<HbConfig> {
+    if frequencies.is_empty() {
+        return Err(PyValueError::new_err(
+            "HB requires at least one tone frequency",
+        ));
+    }
+    if harmonic_orders.len() != frequencies.len() {
+        return Err(PyValueError::new_err(
+            "HB requires exactly one harmonic order per tone",
+        ));
+    }
+    if let Some(names) = source_names
+        && names.len() != frequencies.len()
+    {
+        return Err(PyValueError::new_err(format!(
+            "HB has {} tones but {} source names",
+            frequencies.len(),
+            names.len()
+        )));
+    }
+
+    let mut unique = std::collections::BTreeSet::new();
+    let mut tones = Vec::with_capacity(frequencies.len());
+    for (index, (&frequency, &order)) in frequencies.iter().zip(harmonic_orders).enumerate() {
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "HB tone frequency at index {index} must be positive and finite, got {frequency}"
+            )));
+        }
+        if order == 0 {
+            return Err(PyValueError::new_err(format!(
+                "HB harmonic order at index {index} must be at least 1"
+            )));
+        }
+        if !unique.insert(frequency.to_bits()) {
+            return Err(PyValueError::new_err(format!(
+                "HB tone frequency {frequency} is listed more than once"
+            )));
+        }
+        let mut tone = HbTone::new(frequency, order).with_name(format!("tone{}", index + 1));
+        if let Some(source_name) = source_names
+            .and_then(|names| names.get(index))
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            tone = tone.with_source(source_name);
+        }
+        tones.push(tone);
+    }
+
+    if tones.len() == 1 && tones[0].source_name.is_none() {
+        Ok(HbConfig::new(tones[0].frequency).with_harmonics(tones[0].num_harmonics))
+    } else {
+        Ok(HbConfig::multi_tone(tones))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn configure_hb_numerics(
+    config: &mut HbConfig,
+    tolerance: f64,
+    abstol: f64,
+    max_iterations: usize,
+    damping: f64,
+    min_damping: f64,
+    oversample: usize,
+    collocation_points: Option<usize>,
+    max_mixing_order: usize,
+    use_krylov: bool,
+    gmres_restart: usize,
+    source_stepping: bool,
+    use_exact_jacobian: bool,
+) -> PyResult<()> {
+    if !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(PyValueError::new_err(format!(
+            "tolerance must be positive and finite, got {tolerance}"
+        )));
+    }
+    if !abstol.is_finite() || abstol <= 0.0 {
+        return Err(PyValueError::new_err(format!(
+            "abstol must be positive and finite, got {abstol}"
+        )));
+    }
+    if max_iterations == 0 {
+        return Err(PyValueError::new_err("max_iterations must be at least 1"));
+    }
+    if !damping.is_finite() || !(0.1..=1.0).contains(&damping) {
+        return Err(PyValueError::new_err(format!(
+            "damping must be finite and in [0.1, 1.0], got {damping}"
+        )));
+    }
+    if !min_damping.is_finite() || min_damping <= 0.0 || min_damping > damping {
+        return Err(PyValueError::new_err(format!(
+            "min_damping must be finite, positive, and no greater than damping ({damping}), got {min_damping}"
+        )));
+    }
+    if oversample == 0 {
+        return Err(PyValueError::new_err("oversample must be at least 1"));
+    }
+    if max_mixing_order == 0 {
+        return Err(PyValueError::new_err("max_mixing_order must be at least 1"));
+    }
+    if gmres_restart == 0 {
+        return Err(PyValueError::new_err("gmres_restart must be at least 1"));
+    }
+    if let Some(points) = collocation_points {
+        let minimum = config.minimum_collocation_points().ok_or_else(|| {
+            PyValueError::new_err("HB harmonic count exceeds the addressable collocation grid")
+        })?;
+        if points % 2 == 0 || points < minimum {
+            return Err(PyValueError::new_err(format!(
+                "collocation_points must be odd and at least {minimum}, got {points}"
+            )));
+        }
+    }
+
+    config.tolerance = tolerance;
+    config.abstol = abstol;
+    config.max_iterations = max_iterations;
+    config.damping = damping;
+    config.min_damping = min_damping;
+    config.oversample_factor = oversample;
+    config.collocation_points = collocation_points;
+    config.max_mixing_order = max_mixing_order;
+    config.use_krylov = use_krylov;
+    config.gmres_restart = gmres_restart;
+    config.source_stepping = source_stepping;
+    config.use_exact_jacobian = use_exact_jacobian;
+    Ok(())
 }
 
 /// RSpice simulation engine
@@ -1092,9 +1255,10 @@ impl PyEngine {
 
     /// Run every analysis directive in the netlist and evaluate .MEAS
     ///
-    /// Executes the netlist's own `.op`, `.dc`, `.ac`, `.disto`, `.tran`,
-    /// `.noise`, `.tf`, and `.four` directives in order, then evaluates `.MEAS`
-    /// statements against the corresponding results. Directives the engine
+    /// Executes the netlist's own `.op`, `.dc`, `.ac`, `.hb`, `.disto`,
+    /// `.sp`, `.tran`, `.noise`, `.tf`, and `.four` directives in order, then
+    /// evaluates `.MEAS` statements against the corresponding results.
+    /// Directives the engine
     /// cannot execute are reported in `records` with `skipped=True` and a
     /// reason — nothing is dropped silently.
     ///
@@ -1120,6 +1284,7 @@ impl PyEngine {
         let mut tran: Option<Py<PyTransientResult>> = None;
         let mut ac: Option<Py<PyAcResult>> = None;
         let mut distortion: Option<Py<PyDistortionResult>> = None;
+        let mut hb: Option<PyHbResult> = None;
         let mut s_parameters: Option<PySParameterResult> = None;
         let mut noise: Option<Vec<PyNoiseResult>> = None;
         let mut noise_core: Option<Vec<rspice_core::analysis::NoiseResult>> = None;
@@ -1219,6 +1384,42 @@ impl PyEngine {
                     ac = Some(Py::new(py, result)?);
                     records.push(PyAnalysisRecord::executed(
                         "ac_data",
+                        describe_analysis(analysis),
+                    ));
+                }
+                AnalysisCommand::Hb { frequencies } => {
+                    let requested_orders = if net.options.hb_num_frequencies.is_empty() {
+                        None
+                    } else {
+                        Some(net.options.hb_num_frequencies.as_slice())
+                    };
+                    let orders = resolve_hb_harmonic_orders(
+                        frequencies.len(),
+                        requested_orders,
+                        ".OPTIONS HBINT NUMFREQ",
+                    )?;
+                    let mut config = hb_config_from_tones(frequencies, &orders, None)?;
+                    // Xyce's explicit single-tone NUMFREQ contract uses the
+                    // minimal bilateral 2*N+1 collocation grid.
+                    if frequencies.len() == 1 && requested_orders.is_some() {
+                        config.collocation_points = Some(
+                            orders[0]
+                                .checked_mul(2)
+                                .and_then(|count| count.checked_add(1))
+                                .ok_or_else(|| {
+                                    PyValueError::new_err(
+                                        ".OPTIONS HBINT NUMFREQ exceeds the addressable collocation grid",
+                                    )
+                                })?,
+                        );
+                    }
+                    let engine = self.engine_for_netlist(net);
+                    let result = run_interruptible(py, &self.active_runs, |abort| {
+                        engine.run_hb_with_abort(net, config, abort)
+                    })?;
+                    hb = Some(PyHbResult::from_core(&result));
+                    records.push(PyAnalysisRecord::executed(
+                        "hb",
                         describe_analysis(analysis),
                     ));
                 }
@@ -1496,13 +1697,6 @@ impl PyEngine {
                 } => {
                     pending_fourier.push((*fundamental, outputs.clone(), *num_harmonics));
                 }
-                other => {
-                    records.push(PyAnalysisRecord::skipped(
-                        "unknown",
-                        format!("{other:?}"),
-                        "this analysis is not executed by Engine.run()",
-                    ));
-                }
             }
         }
 
@@ -1600,6 +1794,7 @@ impl PyEngine {
             tran,
             ac,
             distortion,
+            hb,
             s_parameters,
             noise,
             tf,
@@ -2274,7 +2469,7 @@ impl PyEngine {
     }
 
     /// Run single-tone harmonic-balance analysis.
-    #[pyo3(signature = (netlist, fundamental_frequency, *, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false))]
+    #[pyo3(signature = (netlist, fundamental_frequency, *, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None))]
     #[allow(clippy::too_many_arguments)]
     fn run_hb(
         &self,
@@ -2288,6 +2483,13 @@ impl PyEngine {
         oversample: usize,
         use_krylov: bool,
         source_stepping: bool,
+        abstol: f64,
+        min_damping: f64,
+        collocation_points: Option<usize>,
+        max_mixing_order: usize,
+        gmres_restart: usize,
+        use_exact_jacobian: bool,
+        source_name: Option<&str>,
     ) -> PyResult<PyHbResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
             return Err(PyValueError::new_err(format!(
@@ -2297,31 +2499,82 @@ impl PyEngine {
         if harmonics == 0 {
             return Err(PyValueError::new_err("harmonics must be at least 1"));
         }
-        if !tolerance.is_finite() || tolerance <= 0.0 {
-            return Err(PyValueError::new_err(format!(
-                "tolerance must be positive and finite, got {tolerance}"
-            )));
-        }
-        if max_iterations == 0 {
-            return Err(PyValueError::new_err("max_iterations must be at least 1"));
-        }
-        if !damping.is_finite() || !(0.1..=1.0).contains(&damping) {
-            return Err(PyValueError::new_err(format!(
-                "damping must be finite and in [0.1, 1.0], got {damping}"
-            )));
-        }
-        if oversample == 0 {
-            return Err(PyValueError::new_err("oversample must be at least 1"));
-        }
+        let source_names = source_name.map(|name| vec![name.to_string()]);
+        let mut config = hb_config_from_tones(
+            &[fundamental_frequency],
+            &[harmonics],
+            source_names.as_deref(),
+        )?;
+        configure_hb_numerics(
+            &mut config,
+            tolerance,
+            abstol,
+            max_iterations,
+            damping,
+            min_damping,
+            oversample,
+            collocation_points,
+            max_mixing_order,
+            use_krylov,
+            gmres_restart,
+            source_stepping,
+            use_exact_jacobian,
+        )?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_hb_with_abort(&netlist.inner, config, abort)
+        })?;
+        Ok(PyHbResult::from_core(&result))
+    }
 
-        let mut config = HbConfig::new(fundamental_frequency);
-        config.num_harmonics = harmonics;
-        config.tolerance = tolerance;
-        config.max_iterations = max_iterations;
-        config.damping = damping;
-        config.oversample_factor = oversample;
-        config.use_krylov = use_krylov;
-        config.source_stepping = source_stepping;
+    /// Run one- or multi-tone harmonic balance on a shared spectral basis.
+    ///
+    /// `harmonics` may contain one order broadcast to every tone or one order
+    /// per frequency. `source_names`, when provided, maps each tone to one
+    /// independent source; an empty name broadcasts that tone.
+    #[pyo3(signature = (netlist, frequencies, *, harmonics=None, source_names=None, tolerance=1e-6, abstol=1e-12, max_iterations=100, damping=1.0, min_damping=0.1, oversample=2, collocation_points=None, max_mixing_order=5, use_krylov=false, gmres_restart=30, source_stepping=false, use_exact_jacobian=true))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_hb_multitone(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        frequencies: Vec<f64>,
+        harmonics: Option<Vec<usize>>,
+        source_names: Option<Vec<String>>,
+        tolerance: f64,
+        abstol: f64,
+        max_iterations: usize,
+        damping: f64,
+        min_damping: f64,
+        oversample: usize,
+        collocation_points: Option<usize>,
+        max_mixing_order: usize,
+        use_krylov: bool,
+        gmres_restart: usize,
+        source_stepping: bool,
+        use_exact_jacobian: bool,
+    ) -> PyResult<PyHbResult> {
+        let orders = resolve_hb_harmonic_orders(
+            frequencies.len(),
+            harmonics.as_deref(),
+            "run_hb_multitone",
+        )?;
+        let mut config = hb_config_from_tones(&frequencies, &orders, source_names.as_deref())?;
+        configure_hb_numerics(
+            &mut config,
+            tolerance,
+            abstol,
+            max_iterations,
+            damping,
+            min_damping,
+            oversample,
+            collocation_points,
+            max_mixing_order,
+            use_krylov,
+            gmres_restart,
+            source_stepping,
+            use_exact_jacobian,
+        )?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_hb_with_abort(&netlist.inner, config, abort)

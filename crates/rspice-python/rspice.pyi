@@ -917,6 +917,8 @@ class RunReport:
     @property
     def distortion(self) -> DistortionResult | None: ...
     @property
+    def hb(self) -> HbResult | None: ...
+    @property
     def s_parameters(self) -> SParameterResult | None: ...
     @property
     def noise(self) -> list[NoiseResult] | None: ...
@@ -1044,6 +1046,33 @@ class Engine:
         oversample: int = 2,
         use_krylov: bool = False,
         source_stepping: bool = False,
+        abstol: float = 1e-12,
+        min_damping: float = 0.1,
+        collocation_points: int | None = None,
+        max_mixing_order: int = 5,
+        gmres_restart: int = 30,
+        use_exact_jacobian: bool = True,
+        source_name: str | None = None,
+    ) -> HbResult: ...
+    def run_hb_multitone(
+        self,
+        netlist: Netlist,
+        frequencies: Sequence[float],
+        *,
+        harmonics: Sequence[int] | None = None,
+        source_names: Sequence[str] | None = None,
+        tolerance: float = 1e-6,
+        abstol: float = 1e-12,
+        max_iterations: int = 100,
+        damping: float = 1.0,
+        min_damping: float = 0.1,
+        oversample: int = 2,
+        collocation_points: int | None = None,
+        max_mixing_order: int = 5,
+        use_krylov: bool = False,
+        gmres_restart: int = 30,
+        source_stepping: bool = False,
+        use_exact_jacobian: bool = True,
     ) -> HbResult: ...
     def run_pac(
         self,

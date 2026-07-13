@@ -121,10 +121,10 @@ def test_rc_step_response():
 ```
 
 `engine.run` executes the netlist's `.op`, `.dc`, `.ac`/`.ac data`, `.disto`,
-`.sp`, `.tran`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC
+`.hb`, `.sp`, `.tran`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC
 and AC `.sens`, and `.four` directives in order and returns a `RunReport`:
 
-- `report.tran` / `report.ac` / `report.distortion` / `report.op` /
+- `report.tran` / `report.ac` / `report.hb` / `report.distortion` / `report.op` /
   `report.dc` / `report.noise` / `report.s_parameters` / `report.tf` /
   `report.stb` / `report.pz` / `report.sensitivity` /
   `report.sensitivity_ac` / `report.fourier` — the analysis results
@@ -290,6 +290,12 @@ cy12 = spnoise.cy(1, 2)                        # complex A²/Hz correlation
 print(spnoise.rn, spnoise.nf, spnoise.nfmin, spnoise.sopt)
 pss = engine.run_pss(netlist, fundamental_frequency=1e9)
 hb = engine.run_hb(netlist, fundamental_frequency=1e9, harmonics=9)
+hb2 = engine.run_hb_multitone(
+    mixer_netlist,
+    [900e6, 800e6],
+    harmonics=[5, 5],
+    source_names=["VRF", "VLO"],
+)
 pac = engine.run_pac(netlist, 1e9, 1e3, 100e6, 20, "VRF", "out")
 pnoise = engine.run_pnoise(netlist, 1e9, [1e3, 10e3], "out")
 

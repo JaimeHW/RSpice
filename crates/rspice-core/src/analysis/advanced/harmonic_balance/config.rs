@@ -327,8 +327,14 @@ impl HbConfig {
             return points;
         }
         // Power of 2 for efficient FFT
-        let min_size = self.num_spectral_components() * self.oversample_factor;
-        min_size.next_power_of_two()
+        let oversampled = self
+            .num_spectral_components()
+            .saturating_mul(self.oversample_factor);
+        // A common-basis multi-tone configuration can place its highest tone
+        // far above the count implied by the per-tone box. The collocation
+        // grid must still represent every +/- common-basis harmonic.
+        let min_size = oversampled.max(self.minimum_collocation_points().unwrap_or(usize::MAX));
+        min_size.checked_next_power_of_two().unwrap_or(usize::MAX)
     }
 
     /// Get the fundamental period
@@ -399,5 +405,16 @@ mod tests {
             config.fundamental_freq
         );
         assert!(config.num_harmonics >= 6);
+    }
+
+    #[test]
+    fn multi_tone_fft_grid_represents_the_highest_common_basis_harmonic() {
+        let config = HbConfig::multi_tone(vec![HbTone::new(900e6, 5), HbTone::new(800e6, 5)]);
+        assert!(
+            config.fft_size() > 2 * config.num_harmonics,
+            "FFT grid {} cannot represent +/- harmonic {}",
+            config.fft_size(),
+            config.num_harmonics
+        );
     }
 }

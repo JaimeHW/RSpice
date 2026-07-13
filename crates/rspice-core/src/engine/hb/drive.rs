@@ -359,6 +359,26 @@ impl Engine {
                 ))
                 .into());
             }
+            let required_harmonic =
+                harmonic
+                    .checked_mul(tone.num_harmonics.max(1))
+                    .ok_or_else(|| {
+                        HbError::InvalidConfig(format!(
+                            "HB tone '{}' harmonic order overflows the addressable spectrum",
+                            tone.name
+                        ))
+                    })?;
+            if required_harmonic > config.num_harmonics {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB tone '{}' requires common-basis harmonic {} (tone harmonic {} x order {}) but the configured spectrum stops at {}",
+                    tone.name,
+                    required_harmonic,
+                    harmonic,
+                    tone.num_harmonics,
+                    config.num_harmonics
+                ))
+                .into());
+            }
             let source_filter = tone
                 .source_name
                 .as_ref()
