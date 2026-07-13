@@ -1229,6 +1229,40 @@ impl ComplexMatrix {
         dense
     }
 
+    /// Multiply the current sparse matrix by a complex vector without
+    /// factorizing it.
+    ///
+    /// Distortion and sensitivity analyses use this to contract directional
+    /// derivatives of the small-signal MNA operator while retaining the
+    /// circuit's sparse structure.
+    pub(crate) fn multiply_vector(
+        &self,
+        vector: &[Complex64],
+    ) -> Result<Vec<Complex64>, SolverError> {
+        self.check_stamping_error()?;
+        if self.ncols != vector.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Matrix column count {} doesn't match vector length {}",
+                self.ncols,
+                vector.len()
+            )));
+        }
+
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        let mut product = vec![Complex64::new(0.0, 0.0); self.nrows];
+        for col in 0..self.ncols {
+            let input = vector[col];
+            if input == Complex64::new(0.0, 0.0) {
+                continue;
+            }
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                product[row_idx[idx]] += self.values[idx] * input;
+            }
+        }
+        Ok(product)
+    }
+
     /// Solve Ax = b for complex values.
     ///
     /// The symbolic analysis is computed once per structure (or inherited

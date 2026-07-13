@@ -212,6 +212,14 @@ pub(super) fn parse_source_spec(
     }
 
     let source = match (dc_value, ac_terms, transient) {
+        (None, None, None)
+            if distortion_f1.is_some() || distortion_f2.is_some() || rf_port.portnum.is_some() =>
+        {
+            // Annotation-only independent sources retain SPICE's default
+            // zero DC value. DISTOF1/DISTOF2 and RF-port metadata are
+            // excitations for their own analyses, not ordinary AC terms.
+            SourceSpec::Dc(0.0)
+        }
         (None, None, None) => {
             // Nothing recognized: surface the same error a bad value gives.
             SourceSpec::Dc(expect_finite_source_value(

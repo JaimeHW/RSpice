@@ -5,6 +5,7 @@
 //! PSTB (Periodic Stability), PXF (Periodic Transfer Function), and Corner Analysis.
 
 pub mod corner;
+pub mod distortion;
 pub mod fourier;
 pub mod harmonic_balance;
 pub mod measure;
@@ -26,6 +27,9 @@ pub mod transfer;
 pub use corner::{
     CornerConfig, CornerPoint, CornerResult, CornerRunner, CornerSimResult, CornerSummary,
     ProcessCorner,
+};
+pub use distortion::{
+    DistortionAnalysisResult, DistortionPointResult, DistortionProduct, DistortionProductResult,
 };
 pub use fourier::{FourierAnalysis, FourierConfig, FourierResult, HarmonicComponent};
 pub use harmonic_balance::{

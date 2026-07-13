@@ -30,6 +30,7 @@ pub mod signal_integrity;
 pub mod post_processing;
 
 // Re-export submodules for backwards-compatible paths (crate::analysis::ac etc)
+pub use advanced::distortion;
 pub use advanced::fourier;
 pub use advanced::measure;
 pub use advanced::monte_carlo;
@@ -58,6 +59,7 @@ pub use core::{
 
 // Re-export key types from advanced
 pub use advanced::{
+    DistortionAnalysisResult, DistortionPointResult, DistortionProduct, DistortionProductResult,
     Distribution, EdgeType, ElementDesc, ElementType, FourierAnalysis, FourierConfig,
     FourierResult, FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise,
     MeasureEngine, MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig,

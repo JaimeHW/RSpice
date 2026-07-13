@@ -3298,7 +3298,8 @@ impl Engine {
                     );
                     // Clone spec for transient analysis if it's a time-varying source
                     let transient_spec = match spec {
-                        crate::netlist::SourceSpec::RfPort { .. }
+                        crate::netlist::SourceSpec::Distortion { .. }
+                        | crate::netlist::SourceSpec::RfPort { .. }
                         | crate::netlist::SourceSpec::Pulse { .. }
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
@@ -3329,7 +3330,8 @@ impl Engine {
                     let dc_value = extract_dc_value(spec);
                     let (ac_mag, ac_phase) = super::extract_ac_value(spec);
                     let transient_spec = match spec {
-                        crate::netlist::SourceSpec::RfPort { .. }
+                        crate::netlist::SourceSpec::Distortion { .. }
+                        | crate::netlist::SourceSpec::RfPort { .. }
                         | crate::netlist::SourceSpec::Pulse { .. }
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }

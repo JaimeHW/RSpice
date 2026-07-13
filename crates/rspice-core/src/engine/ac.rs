@@ -39,6 +39,26 @@ impl MatrixStamper for AcImagStamper<'_> {
 }
 
 impl Engine {
+    /// Align every stateful nonlinear model and behavioral-source Jacobian
+    /// with a supplied operating state before building a small-signal
+    /// operator. Distortion analysis also uses this at nearby bias states for
+    /// circuit-wide directional differentiation.
+    pub(super) fn prepare_small_signal_state(circuit: &mut CircuitData, operating_state: &[Value]) {
+        if circuit.has_nonlinear_devices() {
+            for dev in &circuit.b3soi.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_fd.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_pd.devices {
+                dev.begin_timestep_iteration();
+            }
+            circuit.update_nonlinear(operating_state);
+        }
+        circuit.prepare_behavioral_small_signal(operating_state);
+    }
+
     #[inline]
     fn ac_node_voltage(voltages: &[Value], node: NodeId) -> Value {
         if node == 0 {
@@ -2099,6 +2119,20 @@ impl Engine {
         Ok(ac_matrix)
     }
 
+    /// Build the small-signal operator after reevaluating a private circuit
+    /// clone at an arbitrary nearby state. The caller's converged circuit and
+    /// all of its device caches remain untouched.
+    pub(super) fn try_build_small_signal_ac_matrix_at_state(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        operating_state: &[Value],
+        omega: Value,
+    ) -> Result<ComplexMatrix, SimulationError> {
+        let mut state_circuit = circuit.clone();
+        Self::prepare_small_signal_state(&mut state_circuit, operating_state);
+        Self::try_build_small_signal_ac_matrix(&state_circuit, matrix, operating_state, omega)
+    }
+
     pub(super) fn try_build_small_signal_pz_matrix(
         circuit: &CircuitData,
         matrix: &StaticMatrix,
@@ -2225,22 +2259,14 @@ impl Engine {
         };
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
-            // Align stateful nonlinear models (limited junction voltages, operating region)
-            // with the final converged operating-point solution before AC linearization.
-            for dev in &circuit.b3soi.devices {
-                dev.begin_timestep_iteration();
-            }
-            for dev in &circuit.b3soi_fd.devices {
-                dev.begin_timestep_iteration();
-            }
-            for dev in &circuit.b3soi_pd.devices {
-                dev.begin_timestep_iteration();
-            }
-            circuit.update_nonlinear(&dc_solution);
+            // Align stateful nonlinear models (limited junction voltages,
+            // operating region) with the final converged operating point.
+            Self::prepare_small_signal_state(&mut circuit, &dc_solution);
+        } else {
+            // Behavioral source caches may still be present on an otherwise
+            // linear circuit.
+            circuit.prepare_behavioral_small_signal(&dc_solution);
         }
-        // Cache behavioral-source partials at the operating point so the
-        // (immutable, per-frequency) small-signal assembly can stamp them.
-        circuit.prepare_behavioral_small_signal(&dc_solution);
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();

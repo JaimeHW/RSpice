@@ -26,6 +26,7 @@ mod config_resolver;
 mod convergence;
 mod core;
 mod dc;
+mod distortion;
 mod error;
 mod hb;
 mod matrix;

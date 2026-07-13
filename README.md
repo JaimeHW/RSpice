@@ -79,12 +79,12 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | :--- | :--- |
 | Operating point & sweeps | `.OP`, `.DC` (including two-source sweeps), temperature sweeps, `.STEP` |
 | Time domain | `.TRAN`, with LTE-controlled adaptive timestepping and checkpoint/resume segmentation |
-| Small-signal | `.AC`, `.NOISE`, `.PZ`, `.TF`, `.SENS` |
+| Small-signal | `.AC`, `.NOISE`, `.PZ`, `.TF`, `.SENS`, third-order Volterra `.DISTO` (harmonic and two-tone intermodulation) |
 | Statistical | Operating-point Monte Carlo parameter variation, process corners † |
 | Periodic / RF | Periodic steady state (shooting), harmonic balance, two-port S-parameters with Touchstone export † |
 | Post-processing | `.MEAS` over TRAN/DC/AC/NOISE with `GOAL`/`TOL` pass-fail gating, `.FOUR`; THD/IMD, eye-diagram, and jitter metrics † |
 
-† selected through a mix of deck cards and CLI/IDE surfaces: `.mc` and `.stb` have deck-card paths, while Monte Carlo, process corners, PSS, HB, and S-parameters are also exposed through CLI flags such as `--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, and `--sparam`. There is no dedicated Volterra `.DISTO` engine yet: the IDE uses nonlinear HB harmonic/sideband extraction, the CLI labels its compatibility-only linearized AC mapping, and the Python verification API records `.DISTO` as skipped and refuses to report overall success. PAC, PNoise, PXF, PSTB, envelope, and multi-rate ship as engine-level mathematics (conversion-matrix and monodromy kernels) without a circuit-extraction layer yet; they are not end-to-end analyses and are not claimed as such.
+† selected through a mix of deck cards and CLI/IDE surfaces: `.mc` and `.stb` have deck-card paths, while Monte Carlo, process corners, PSS, HB, and S-parameters are also exposed through CLI flags such as `--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, and `--sparam`. PAC, PNoise, PXF, PSTB, envelope, and multi-rate ship as engine-level mathematics (conversion-matrix and monodromy kernels) without a circuit-extraction layer yet; they are not end-to-end analyses and are not claimed as such.
 
 ### Devices
 
