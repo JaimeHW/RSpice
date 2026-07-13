@@ -1,7 +1,7 @@
 //! Section headers — uppercase letterspaced panel section titles with an
 //! optional inline action.
 
-use egui::{Response, Sense, Ui, vec2};
+use egui::{Response, Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
@@ -30,7 +30,12 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
 
     let width = ui.available_width();
     let height = title_galley.size().y + 9.0 + 5.0;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let (rect, heading_response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    heading_response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), title));
+    ui.ctx()
+        .accesskit_node_builder(heading_response.id, |node| {
+            node.set_role(egui::accesskit::Role::Heading);
+        });
     if !ui.is_rect_visible(rect) {
         return None;
     }
@@ -63,6 +68,13 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
         ui.id().with(("section-action", title, action_label)),
         Sense::click(),
     );
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Button,
+            ui.is_enabled(),
+            format!("{action_label}, {title}"),
+        )
+    });
     let hover = ui
         .ctx()
         .animate_bool_with_time(response.id, response.hovered(), 0.16);
@@ -78,6 +90,7 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
         action_galley,
         mix(c.text_faint, c.text, hover),
     );
+    theme::paint_focus_ring(ui, &response, action_rect);
 
     Some(response.on_hover_cursor(egui::CursorIcon::PointingHand))
 }

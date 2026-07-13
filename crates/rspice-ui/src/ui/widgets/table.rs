@@ -1,7 +1,7 @@
 //! Measurement tables — dimmed metric names left, mono values right, with
 //! hairline row separators.
 
-use egui::{Ui, vec2};
+use egui::{Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -14,7 +14,17 @@ pub fn measurement_table(ui: &mut Ui, rows: &[(&str, &str)]) {
     let width = ui.available_width();
 
     for (i, (name, value)) in rows.iter().enumerate() {
-        let (rect, _) = ui.allocate_exact_size(vec2(width, row_h), egui::Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(vec2(width, row_h), egui::Sense::hover());
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Label,
+                ui.is_enabled(),
+                format!("{name}: {value}"),
+            )
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Row);
+        });
         if !ui.is_rect_visible(rect) {
             continue;
         }

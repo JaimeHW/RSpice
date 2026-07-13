@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use egui::{Sense, Ui};
+use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
 use crate::common::app::AppState;
 use crate::state::{
@@ -229,6 +229,29 @@ fn refresh_symbol_context_after_interactions(
     true
 }
 
+fn schematic_accessibility_label(state: &AppState) -> String {
+    use crate::ui::accessibility::counted;
+    let schematic = &state.schematic;
+    let tool = if schematic.tool.is_place_tool() {
+        format!("Place {}", schematic.tool.display_name())
+    } else {
+        schematic.tool.display_name().to_owned()
+    };
+    format!(
+        "Schematic canvas. {}, {}, {}, {}; {}. Active tool: {}. Use S for select, W for wire, P for probe, F to fit the view, and Escape to cancel the active operation.",
+        counted(schematic.components.len(), "component", "components"),
+        counted(schematic.wires.len(), "wire", "wires"),
+        counted(schematic.junctions.len(), "junction", "junctions"),
+        counted(schematic.net_labels.len(), "net label", "net labels"),
+        counted(
+            schematic.selection.count(),
+            "item selected",
+            "items selected"
+        ),
+        tool,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,6 +402,40 @@ mod tests {
         assert!(refreshed);
         assert!(context.resolved_symbol(component).is_some());
     }
+
+    #[test]
+    fn accessibility_label_summarizes_scene_selection_and_tool() {
+        use crate::state::{Junction, NetLabel, Wire};
+
+        let mut state = AppState::default();
+        state.schematic.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::new(0, 0),
+        ));
+        state
+            .schematic
+            .wires
+            .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 0)]));
+        state
+            .schematic
+            .junctions
+            .push(Junction::new(3, Point::new(10, 0)));
+        state
+            .schematic
+            .net_labels
+            .push(NetLabel::new(4, Point::new(10, 0), "OUT"));
+        state.schematic.selection.select_component(1);
+        state.schematic.tool = crate::state::Tool::Wire;
+
+        let label = schematic_accessibility_label(&state);
+
+        assert!(label.starts_with(
+            "Schematic canvas. 1 component, 1 wire, 1 junction, 1 net label; 1 item selected."
+        ));
+        assert!(label.contains("Active tool: Wire."));
+        assert!(label.contains("Escape to cancel"));
+    }
 }
 
 /// Render the schematic view (central canvas)
@@ -470,6 +527,18 @@ pub fn render_schematic_view(
         .hover_pos()
         .map(|cursor| to_grid_units(cursor, state));
     state.shell.canvas_view_center = Some(to_grid_units(available.center(), state));
+
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Image,
+            ui.is_enabled(),
+            schematic_accessibility_label(state),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Canvas);
+    });
+    crate::ui::theme::paint_focus_ring(ui, &response, available);
 }
 
 /// Paint a component symbol centered in `rect` — used by the component

@@ -94,6 +94,17 @@ The pure-Rust `rspice-veriloga` compiler is a direct dependency on all
 platforms (it backs the Verilog-A dialog), and `ed25519-dalek` is used
 std-only so license verification also works on wasm32.
 
+## Accessibility runtime
+
+Painter-backed controls publish egui widget metadata and visible keyboard
+focus indicators. Native builds enable eframe's AccessKit bridge so the
+semantic tree is handed to supported platform assistive-technology APIs.
+The eframe 0.34 browser backend does not expose that AccessKit tree through
+the DOM; browser builds therefore offer an opt-in **Speak control changes**
+preference backed by eframe's Web Speech event feedback. That spoken-event
+fallback is not a substitute for a browser accessibility tree, so real
+screen-reader and device qualification remains a release gate.
+
 ## Feature flags
 
 | Feature | Default | Effect |

@@ -184,6 +184,17 @@ fn check_status_pill(ui: &mut Ui, state: &mut AppState) {
         .interact(egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text("Run design checks (Ctrl+E)");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            "Run design checks (Ctrl+E)",
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_keyboard_shortcut("Ctrl+E");
+    });
+    crate::ui::theme::paint_focus_ring(ui, &response, response.rect);
     if response.clicked() {
         crate::common::menu_bar::run_design_rule_check(state);
     }

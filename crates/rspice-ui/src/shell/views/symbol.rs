@@ -1,6 +1,8 @@
 //! Symbol view surface.
 
-use egui::{Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{
+    Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+};
 
 use crate::common::{AppState, ConsoleMessage};
 use crate::schematic::view::resolved_symbol_render::draw_resolved_symbol;
@@ -31,6 +33,31 @@ struct SymbolViewport {
     rect: Rect,
     zoom: f32,
     pan: Vec2,
+}
+
+fn symbol_canvas_accessibility_label(
+    document: &SymbolDocument,
+    state: &AppState,
+    read_only: bool,
+) -> String {
+    use crate::ui::accessibility::counted;
+    let placed_pins = document
+        .pins
+        .iter()
+        .filter(|pin| pin.position.is_some())
+        .count();
+    let selection = state.shell.symbol.effective_selection();
+    let selected = selection.pins.len() + selection.shapes.len();
+    let edit_state = if read_only { "Read only." } else { "Editable." };
+    format!(
+        "Symbol editor canvas. {}; {}, {}; {}. Active tool: {}. {} Use S for select, P to place a pin, W for polyline, C for circle, A for arc, D for arrow, O for dot, F to fit the view, and Escape to cancel the active operation.",
+        counted(document.body.len(), "shape", "shapes"),
+        counted(document.pins.len(), "pin", "pins"),
+        counted(placed_pins, "pin placed", "pins placed"),
+        counted(selected, "item selected", "items selected"),
+        state.shell.symbol.tool.label(),
+        edit_state,
+    )
 }
 
 impl SymbolViewport {
@@ -102,6 +129,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         changed |= handle_symbol_keys(ui, state, &mut document);
         changed |= handle_canvas_interaction(state, &mut document, viewport, &response);
         draw_canvas(ui, viewport, &document, &ports, state);
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Image,
+                ui.is_enabled(),
+                symbol_canvas_accessibility_label(&document, state, state.active_view_read_only()),
+            )
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Canvas);
+        });
+        theme::paint_focus_ring(ui, &response, rect);
         if changed && let Err(error) = state.store_active_symbol_document(&document) {
             state.push_user_message(ConsoleMessage::warning(error));
         }
@@ -1138,6 +1176,14 @@ fn pin_row(ui: &mut Ui, pin: &SymbolPin, selected: bool) -> egui::Response {
         "off-grid" => c.err,
         _ => c.err,
     };
+    response.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("{} pin, {}, {state}", pin.name, pin.direction.keyword()),
+        )
+    });
     let y = rect.center().y;
     ui.painter().text(
         pos2(rect.left() + 12.0, y),
@@ -1160,6 +1206,7 @@ fn pin_row(ui: &mut Ui, pin: &SymbolPin, selected: bool) -> egui::Response {
         theme::mono(10.0, FontWeight::Regular),
         state_color,
     );
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1596,5 +1643,31 @@ mod tests {
         );
         assert!(canvas.contains(tile.min));
         assert!(canvas.contains(tile.max));
+    }
+
+    #[test]
+    fn symbol_canvas_accessibility_label_reports_editing_contract() {
+        let mut state = AppState::default();
+        state.shell.symbol.tool = SymbolTool::Circle;
+        state.shell.symbol.select_shape(0);
+        let document = SymbolDocument {
+            pins: vec![SymbolPin::new(
+                "OUT",
+                PortDirection::Out,
+                Some(Point::new(20, 0)),
+            )],
+            body: vec![SymbolShape::Circle {
+                center: Point::origin(),
+                radius: 10,
+            }],
+            ..SymbolDocument::default()
+        };
+
+        let label = symbol_canvas_accessibility_label(&document, &state, false);
+
+        assert!(label.starts_with(
+            "Symbol editor canvas. 1 shape; 1 pin, 1 pin placed; 1 item selected. Active tool: Circle. Editable."
+        ));
+        assert!(label.contains("Escape to cancel"));
     }
 }

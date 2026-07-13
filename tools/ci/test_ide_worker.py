@@ -16,9 +16,48 @@ WORKER_CONTRACT = (
 )
 MAIN = ROOT / "crates" / "rspice-ui" / "src" / "main.rs"
 APP = ROOT / "crates" / "rspice-ui" / "src" / "common" / "app" / "mod.rs"
+BROWSER_ACCESSIBILITY = (
+    ROOT
+    / "crates"
+    / "rspice-ui"
+    / "src"
+    / "common"
+    / "browser_accessibility.rs"
+)
 
 
 class IdeWorkerRoutingTests(unittest.TestCase):
+    def test_browser_spoken_feedback_has_a_dom_bootstrap_and_rust_bridge(self) -> None:
+        for ide in IDE_DIRS:
+            with self.subTest(ide=ide.relative_to(ROOT)):
+                index = (ide / "index.html").read_text(encoding="utf-8")
+                self.assertIn('id="rspice_spoken_feedback"', index)
+                self.assertIn('aria-pressed="false"', index)
+                self.assertRegex(
+                    index,
+                    re.compile(r'id="rspice_canvas"\s+aria-label=', re.S),
+                )
+                self.assertIn(
+                    'id="rspice_loading" role="status" aria-live="polite"',
+                    index,
+                )
+                self.assertIn('el.setAttribute("role", "alert")', index)
+                self.assertIn("data-rspice-spoken-feedback", index)
+                self.assertIn("rspice.web.spoken-feedback", index)
+                self.assertIn("new MutationObserver", index)
+                self.assertIn('new Event("resize")', index)
+                self.assertNotIn("window.location.reload", index)
+
+        bridge = BROWSER_ACCESSIBILITY.read_text(encoding="utf-8")
+        app = APP.read_text(encoding="utf-8")
+        self.assertIn("spoken_feedback_override", bridge)
+        self.assertIn("set_spoken_feedback", bridge)
+        self.assertIn("spoken_feedback_override()", app)
+        main = MAIN.read_text(encoding="utf-8")
+        self.assertIn('loading.set_attribute("role", "alert")', main)
+        self.assertIn("loading.set_text_content(None)", main)
+        self.assertNotIn('loading.set_inner_html("")', main)
+
     def test_browser_ide_constructs_a_simulation_worker(self) -> None:
         for ide in IDE_DIRS:
             with self.subTest(ide=ide.relative_to(ROOT)):

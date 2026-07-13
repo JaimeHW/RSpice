@@ -62,7 +62,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Axis::with_ticks(0.0, ui_count, "UI", &half_ticks),
         XScale::Linear,
         Axis::linear(y0, y1, "V"),
-    );
+    )
+    .accessible_name("Eye diagram");
 
     // Bake (or fetch) the density texture for the current plot size. The
     // bake walks every acquisition once; frames just draw the quad.

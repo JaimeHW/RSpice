@@ -505,6 +505,9 @@ pub struct ShellState {
     /// Autosave checkpoint interval in minutes; 0 = off. Checkpoints write
     /// next to the project file and never touch it.
     pub autosave_minutes: u8,
+    /// Browser-only opt-in for egui's Web Speech interaction feedback.
+    /// Native assistive technology is negotiated automatically by AccessKit.
+    pub browser_spoken_feedback: bool,
     /// Toast queue.
     pub toasts: Toasts,
     /// Schematic-space cursor position, reported by the canvas each frame the
@@ -682,6 +685,8 @@ pub struct ShellStateSer {
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
     #[serde(default)]
+    browser_spoken_feedback: bool,
+    #[serde(default)]
     result_viewer: super::results::ResultViewer,
 }
 
@@ -714,6 +719,7 @@ impl From<&ShellState> for ShellStateSer {
             grid_style: Some(shell.grid),
             panels_hidden: shell.panels_hidden,
             autosave_minutes: shell.autosave_minutes,
+            browser_spoken_feedback: shell.browser_spoken_feedback,
             result_viewer: shell.results.viewer,
         }
     }
@@ -734,6 +740,7 @@ impl From<ShellStateSer> for ShellState {
             grid,
             panels_hidden: ser.panels_hidden,
             autosave_minutes: ser.autosave_minutes,
+            browser_spoken_feedback: ser.browser_spoken_feedback,
             ..Self::new()
         };
         shell.results.viewer = ser.result_viewer;

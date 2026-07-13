@@ -1,7 +1,7 @@
 //! Status pills — a small state dot plus a mono label (engine status, ERC
 //! state). The running state pulses.
 
-use egui::{Response, Sense, Ui, vec2};
+use egui::{Response, Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -48,6 +48,22 @@ impl<'a> Pill<'a> {
             vec2(7.0 + 5.0 + galley.size().x, galley.size().y.max(10.0)),
             Sense::hover(),
         );
+        let state_name = match self.state {
+            PillState::Idle => "Idle",
+            PillState::Ok => "OK",
+            PillState::Running => "Running",
+            PillState::Error => "Error",
+        };
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Label,
+                ui.is_enabled(),
+                format!("{state_name}: {}", self.label),
+            )
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Status);
+        });
         if !ui.is_rect_visible(rect) {
             return response;
         }

@@ -168,7 +168,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let y = Axis::linear_with(y_lo, y_hi, "dBV", 7);
 
     let (x_lo, x_hi) = view.x.unwrap_or((0.0, x1));
-    let mut spec = PlotSpec::new(Axis::linear(x_lo, x_hi, "Hz"), XScale::Linear, y);
+    let mut spec = PlotSpec::new(Axis::linear(x_lo, x_hi, "Hz"), XScale::Linear, y)
+        .accessible_name("FFT magnitude plot");
     spec.left_margin = 60.0;
     spec.traces.push(
         Trace::new(&model.frequency, &model.magnitude_db, c.traces[0])

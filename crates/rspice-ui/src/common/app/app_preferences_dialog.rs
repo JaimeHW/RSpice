@@ -86,6 +86,23 @@ impl RSpiceApp {
                 );
 
                 ui.add_space(tokens::SP_3);
+                section_label(ui, "Accessibility");
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if check_row(
+                        ui,
+                        "Speak control changes (browser)",
+                        &mut state.shell.browser_spoken_feedback,
+                    ) {
+                        crate::common::browser_accessibility::set_spoken_feedback(
+                            state.shell.browser_spoken_feedback,
+                        );
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                kv_row(ui, "Assistive technology", "system managed");
+
+                ui.add_space(tokens::SP_3);
                 section_label(ui, "Files");
 
                 // Checkpoint autosave: writes a .autosave sibling, never

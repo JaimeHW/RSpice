@@ -3,7 +3,7 @@
 //! The active tab treatment follows the design direction: Instrument marks
 //! the top edge with the accent, Meridian underlines, Graphite inverts.
 
-use egui::{Context, Frame, Rect, Sense, TopBottomPanel, Ui, vec2};
+use egui::{Context, Frame, Rect, Sense, TopBottomPanel, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::common::AppState;
 use crate::shell::WorkspaceView;
@@ -188,6 +188,31 @@ fn tab(
     }
 
     let (rect, response) = ui.allocate_exact_size(vec2(width, WTABS_HEIGHT), Sense::click());
+    let accessibility_label = if dirty {
+        format!("{label}, unsaved changes")
+    } else if let Some(count) = badge {
+        format!(
+            "{label}, {}",
+            crate::ui::accessibility::counted(count as usize, "notification", "notifications")
+        )
+    } else {
+        label.to_owned()
+    };
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            &accessibility_label,
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Tab);
+        if active {
+            node.set_selected(true);
+        } else {
+            node.set_selected(false);
+        }
+    });
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -262,6 +287,8 @@ fn tab(
             c.accent_ink,
         );
     }
+
+    theme::paint_focus_ring(ui, &response, rect);
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

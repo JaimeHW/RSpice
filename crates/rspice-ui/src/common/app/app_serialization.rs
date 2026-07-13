@@ -147,6 +147,18 @@ mod tests {
         assert_eq!(restored.simulation.run_count(), 0);
         assert!(restored.simulation.waveforms.is_empty());
         assert!(!restored.simulation.is_running);
+        assert!(!restored.shell.browser_spoken_feedback);
+    }
+
+    #[test]
+    fn browser_spoken_feedback_preference_round_trips() {
+        let mut state = AppState::default();
+        state.shell.browser_spoken_feedback = true;
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert!(restored.shell.browser_spoken_feedback);
     }
 
     #[test]

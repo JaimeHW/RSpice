@@ -360,6 +360,20 @@ fn draw_popover(
                             egui::vec2(geometry.width, 24.0),
                             egui::Sense::click(),
                         );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::SelectableLabel,
+                                ui.is_enabled(),
+                                format!(
+                                    "{} completion: {}, {}",
+                                    candidate.kind, candidate.label, candidate.detail
+                                ),
+                            )
+                        });
+                        ui.ctx().accesskit_node_builder(response.id, |node| {
+                            node.set_role(egui::accesskit::Role::ListBoxOption);
+                            node.set_selected(idx == selected);
+                        });
                         if response.clicked() {
                             clicked = Some(idx);
                         }
@@ -389,6 +403,7 @@ fn draw_popover(
                             theme::mono(tokens::FS_0, FontWeight::Regular),
                             c.text_faint,
                         );
+                        theme::paint_focus_ring(ui, &response, rect);
                     }
 
                     // Doc footer for the selected item.

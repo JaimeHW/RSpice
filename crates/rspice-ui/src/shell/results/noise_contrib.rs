@@ -98,6 +98,23 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             for (rank, row) in summary.rows.iter().enumerate() {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        ui.is_enabled(),
+                        format!(
+                            "Rank {}, device {}, mechanism {}, noise power {:.3e} volts squared, share {:.1} percent",
+                            rank + 1,
+                            row.device,
+                            row.mechanism,
+                            row.power,
+                            row.share_pct,
+                        ),
+                    )
+                });
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.set_role(egui::accesskit::Role::Row);
+                });
                 if !ui.is_rect_visible(rect) {
                     continue;
                 }

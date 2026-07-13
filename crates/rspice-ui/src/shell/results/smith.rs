@@ -66,7 +66,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Axis::linear(-1.12, 1.12, "Re Γ"),
         XScale::Linear,
         Axis::linear(-1.12, 1.12, "Im Γ"),
-    );
+    )
+    .accessible_name("Smith chart");
     for (slot, (index, re, im)) in arrays.iter().enumerate() {
         spec.traces.push(
             Trace::new(re, im, c.traces[slot % c.traces.len()])

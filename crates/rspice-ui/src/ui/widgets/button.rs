@@ -1,11 +1,17 @@
 //! Buttons: the labeled control button (`Button`) and the square tool button
 //! (`IconButton`).
 
-use egui::{Rect, Response, Sense, Stroke, Ui, vec2};
+use egui::{Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
+
+fn trailing_shortcut(text: &str) -> Option<&str> {
+    let (prefix, suffix) = text.rsplit_once('(')?;
+    let shortcut = suffix.strip_suffix(')')?.trim();
+    (!prefix.trim().is_empty() && !shortcut.is_empty() && shortcut.len() <= 24).then_some(shortcut)
+}
 
 /// A labeled button: bordered by default, filled when [`Button::accent`].
 ///
@@ -147,6 +153,19 @@ impl<'a> Button<'a> {
             },
         );
 
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Button,
+                self.enabled && ui.is_enabled(),
+                self.label,
+            )
+        });
+        if let Some(shortcut) = self.hint {
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_keyboard_shortcut(shortcut);
+            });
+        }
+
         if !ui.is_rect_visible(rect) {
             return response;
         }
@@ -217,6 +236,7 @@ impl<'a> Button<'a> {
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         }
+        theme::paint_focus_ring(ui, &response, rect);
         response
     }
 }
@@ -230,6 +250,7 @@ pub struct IconButton<'a> {
     on: bool,
     enabled: bool,
     tooltip: Option<&'a str>,
+    toggle: bool,
     side: f32,
 }
 
@@ -241,6 +262,7 @@ impl<'a> IconButton<'a> {
             on: false,
             enabled: true,
             tooltip: None,
+            toggle: false,
             side: 28.0,
         }
     }
@@ -248,6 +270,7 @@ impl<'a> IconButton<'a> {
     /// Latched ("on") state — accent wash background, accent icon.
     pub fn on(mut self, on: bool) -> Self {
         self.on = on;
+        self.toggle = true;
         self
     }
 
@@ -282,6 +305,28 @@ impl<'a> IconButton<'a> {
                 Sense::hover()
             },
         );
+        let accessible_label = self.tooltip.unwrap_or_else(|| self.icon.accessible_label());
+        response.widget_info(|| {
+            if self.toggle {
+                WidgetInfo::selected(
+                    WidgetType::Button,
+                    self.enabled && ui.is_enabled(),
+                    self.on,
+                    accessible_label,
+                )
+            } else {
+                WidgetInfo::labeled(
+                    WidgetType::Button,
+                    self.enabled && ui.is_enabled(),
+                    accessible_label,
+                )
+            }
+        });
+        if let Some(shortcut) = trailing_shortcut(accessible_label) {
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_keyboard_shortcut(shortcut);
+            });
+        }
         if !ui.is_rect_visible(rect) {
             return response;
         }
@@ -317,6 +362,64 @@ impl<'a> IconButton<'a> {
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         }
+        theme::paint_focus_ring(ui, &response, rect);
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn accesskit_nodes(
+        mut add_contents: impl FnMut(&mut egui::Ui),
+    ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| add_contents(ui));
+        })
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree update")
+        .nodes
+    }
+
+    #[test]
+    fn labeled_button_publishes_button_role_and_name() {
+        let nodes = accesskit_nodes(|ui| {
+            Button::new("Run simulation").show(ui);
+        });
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Button && node.label() == Some("Run simulation")
+        }));
+    }
+
+    #[test]
+    fn latched_icon_button_publishes_toggle_state() {
+        let nodes = accesskit_nodes(|ui| {
+            IconButton::new(Icon::Grid)
+                .tooltip("Grid visibility")
+                .on(true)
+                .show(ui);
+        });
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Button
+                && node.label() == Some("Grid visibility")
+                && node.toggled() == Some(egui::accesskit::Toggled::True)
+        }));
+    }
+
+    #[test]
+    fn shortcut_suffix_is_exposed_without_guessing_non_shortcut_tooltips() {
+        assert_eq!(trailing_shortcut("Run simulation (F5)"), Some("F5"));
+        assert_eq!(
+            trailing_shortcut("Redo (Ctrl+Shift+Z)"),
+            Some("Ctrl+Shift+Z")
+        );
+        assert_eq!(trailing_shortcut("Grid: dots - click for lines"), None);
     }
 }

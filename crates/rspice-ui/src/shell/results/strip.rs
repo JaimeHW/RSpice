@@ -1,7 +1,7 @@
 //! Strip chrome — the 28 px header (kind tag · subtitle · legend chips ·
 //! actions) over a document-well body. Every plot in the product wears this.
 
-use egui::{Rect, Sense, Stroke, Ui, vec2};
+use egui::{Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
@@ -249,6 +249,7 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
     });
     let (rect, response) =
         ui.allocate_exact_size(vec2(galley.size().x + 14.0, 18.0), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), tooltip));
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -273,6 +274,8 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
         c.accent,
     );
 
+    theme::paint_focus_ring(ui, &response, rect);
+
     response
         .on_hover_text(tooltip)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -294,6 +297,14 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
         vec2(6.0 + 14.0 + 5.0 + galley.size().x + 6.0, 20.0),
         Sense::click(),
     );
+    response.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            chip.on,
+            format!("{} trace visibility", chip.name),
+        )
+    });
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -327,6 +338,8 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
         galley,
         mix(c.text_dim, c.text, hover).gamma_multiply(opacity),
     );
+
+    theme::paint_focus_ring(ui, &response, rect);
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

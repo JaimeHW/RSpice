@@ -15,6 +15,7 @@
 //! - [`widgets`] — the widget vocabulary (buttons, chips, pills, trees, …)
 //! - [`plot`] — the strip-plot engine (axes, traces, markers, cursors)
 
+pub(crate) mod accessibility;
 pub mod fonts;
 pub mod icons;
 pub mod palette;

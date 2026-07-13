@@ -1,12 +1,16 @@
 //! The plot painter — turns a [`PlotSpec`] into egui shapes.
 
-use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{
+    Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, pos2,
+    vec2,
+};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 
 use super::cursor::CursorPair;
 use super::decimate::DecimationCache;
+use super::format::tick_label;
 use super::spec::{PlotSpec, YSide};
 
 /// A view-range change requested by a navigation gesture this frame.
@@ -81,6 +85,52 @@ fn inner_rect(rect: Rect, spec: &PlotSpec<'_>) -> Rect {
     )
 }
 
+fn axis_accessibility_range(axis: &super::spec::Axis) -> String {
+    let unit = if axis.unit.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", axis.unit)
+    };
+    format!(
+        "{} to {}{}",
+        tick_label(axis.min),
+        tick_label(axis.max),
+        unit
+    )
+}
+
+fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -> String {
+    use crate::ui::accessibility::counted;
+    let trace_count = spec
+        .traces
+        .iter()
+        .filter(|trace| !trace.x.is_empty() && !trace.y.is_empty())
+        .count();
+    let right_axis = spec.y_right.as_ref().map_or_else(String::new, |(axis, _)| {
+        format!(" Right Y axis {}.", axis_accessibility_range(axis))
+    });
+    let cursor_summary = cursors.map_or_else(String::new, |pair| match (pair.a, pair.b) {
+        (Some(a), Some(b)) => format!(
+            " Cursor A {}, cursor B {}, delta {}.",
+            tick_label(a),
+            tick_label(b),
+            tick_label(b - a)
+        ),
+        (Some(a), None) => format!(" Cursor A {}.", tick_label(a)),
+        _ => String::new(),
+    });
+    format!(
+        "{}. {}. X axis {}. Left Y axis {}.{} {}.{} Drag to pan, use the mouse wheel to zoom, Shift-drag or right-drag to zoom a region, and double-click to fit the data.",
+        spec.accessible_name,
+        counted(trace_count, "visible trace", "visible traces"),
+        axis_accessibility_range(&spec.x),
+        axis_accessibility_range(&spec.y),
+        right_axis,
+        counted(spec.markers.len(), "marker", "markers"),
+        cursor_summary,
+    )
+}
+
 /// A rect centered in `avail` whose INNER plot area (after this spec's
 /// margins) is square. The XY viewers (Smith, Nyquist, pole-zero) need
 /// circle grids and trace geometry on identical X/Y scales — a square
@@ -112,6 +162,16 @@ pub fn show(
 
     let rect = ui.available_rect_before_wrap();
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Image,
+            ui.is_enabled(),
+            plot_accessibility_label(spec, cursors),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::GraphicsDocument);
+    });
     let plot_rect = inner_rect(rect, spec);
 
     let mut out = PlotResponse {
@@ -132,6 +192,7 @@ pub fn show(
             Some(std::cmp::Ordering::Greater)
         )
     {
+        theme::paint_focus_ring(ui, &out.response, rect);
         return out;
     }
 
@@ -434,6 +495,8 @@ pub fn show(
     // ---- navigation gestures: wheel zoom, drag pan, zoom box, fit
     handle_navigation(ui, spec, &painter, plot_rect, &mut out, &t);
 
+    theme::paint_focus_ring(ui, &out.response, rect);
+
     out
 }
 
@@ -627,5 +690,81 @@ fn draw_readout(
             vg,
             c.text,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::plot::{Axis, Marker, Trace, XScale};
+
+    #[test]
+    fn accessibility_label_reports_axes_traces_markers_and_cursors() {
+        let x = [1.0, 10.0];
+        let y = [-3.0, 4.0];
+        let mut spec = PlotSpec::new(
+            Axis::log_decades(1.0, 10.0, "Hz"),
+            XScale::Log10,
+            Axis::linear(-5.0, 5.0, "dB"),
+        )
+        .accessible_name("Bode plot");
+        spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
+        spec.markers.push(Marker {
+            x: 10.0,
+            y: 4.0,
+            side: YSide::Left,
+            color: egui::Color32::WHITE,
+            label: "UGF".to_owned(),
+            drop_line: true,
+            label_dy: 0.0,
+        });
+
+        let label = plot_accessibility_label(
+            &spec,
+            Some(&CursorPair {
+                a: Some(2.0),
+                b: Some(5.0),
+            }),
+        );
+
+        assert!(label.starts_with("Bode plot. 1 visible trace."));
+        assert!(label.contains("X axis 1 to 10 Hz."));
+        assert!(label.contains(&format!("Left Y axis {} to 5 dB.", tick_label(-5.0))));
+        assert!(label.contains("1 marker."));
+        assert!(label.contains("Cursor A 2, cursor B 5, delta 3."));
+    }
+
+    #[test]
+    fn plot_publishes_graphics_document_role_and_scene_summary() {
+        let x = [0.0, 1.0];
+        let y = [0.0, 1.0];
+        let mut spec = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::linear(0.0, 1.0, "V"),
+        )
+        .accessible_name("Transient waveform plot");
+        spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut cache = DecimationCache::default();
+                show(ui, &spec, &mut cache, None, None);
+            });
+        });
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::GraphicsDocument
+                && node
+                    .label()
+                    .is_some_and(|label| label.starts_with("Transient waveform plot. 1 visible"))
+        }));
     }
 }

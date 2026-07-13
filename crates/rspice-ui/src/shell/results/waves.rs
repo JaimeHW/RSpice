@@ -949,7 +949,8 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         XScale::Log10 => Axis::log_decades(x0, x1, model.x_unit),
         XScale::Linear => Axis::linear(x0, x1, model.x_unit),
     };
-    let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, model.y_unit));
+    let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, model.y_unit))
+        .accessible_name("Waveform plot");
 
     // Right (phase) axis when phase traces are visible.
     let has_phase = model

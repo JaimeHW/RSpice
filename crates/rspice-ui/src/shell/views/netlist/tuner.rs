@@ -272,7 +272,8 @@ fn mini_bode_spec<'a>(
         Axis::log_decades(x0, x1, "Hz"),
         XScale::Log10,
         Axis::linear_with(y0, y1, "dB", 4),
-    );
+    )
+    .accessible_name("Tuning response preview");
     spec.left_margin = 46.0;
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
 

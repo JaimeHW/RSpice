@@ -109,6 +109,13 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
             egui::Sense::click(),
         );
         let active = state.shell.rail_tab == tab;
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, ui.is_enabled(), label)
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Tab);
+            node.set_selected(active);
+        });
         let hover =
             ui.ctx()
                 .animate_bool_with_time(response.id, response.hovered() && !active, 0.16);
@@ -139,6 +146,7 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
                 egui::Stroke::new(2.0, c.accent),
             );
         }
+        theme::paint_focus_ring(ui, &response, tab_rect);
         if response.clicked() {
             state.shell.rail_tab = tab;
         }
@@ -248,7 +256,13 @@ fn rail_search_input(
         egui::pos2(outer_rect.left() + 10.0, outer_rect.top()),
         egui::pos2(outer_rect.right() - 10.0, outer_rect.bottom()),
     );
-    let field_response = ui.interact(rect, ui.id().with("premium.search"), egui::Sense::click());
+    // accessibility-pointer-shim: the real TextEdit below owns focus and
+    // semantics; this outer hit target only forwards pointer focus to it.
+    let field_response = ui.interact(
+        rect,
+        ui.id().with("premium.search"),
+        egui::Sense::click().difference(egui::Sense::focusable_noninteractive()),
+    );
     let painter = ui.painter();
     let hovered = field_response.hovered();
     painter.rect(
@@ -468,6 +482,13 @@ fn premium_nameplate(ui: &mut Ui, state: &mut AppState) {
             egui::Sense::click(),
         )
         .on_hover_text("Open this view in Library");
+    chip_response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            format!("Open {} view in Library", capsule.view),
+        )
+    });
     paint_premium_view_chip(
         ui,
         chip_rect,
@@ -475,6 +496,7 @@ fn premium_nameplate(ui: &mut Ui, state: &mut AppState) {
         chip_response.hovered(),
         chip_response.is_pointer_button_down_on(),
     );
+    theme::paint_focus_ring(ui, &chip_response, chip_rect);
     if chip_response.clicked() {
         focus_active_project_view_in_library(state, &capsule);
     }
@@ -721,6 +743,17 @@ fn nav_segments(ui: &mut Ui, state: &mut AppState) {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(third, 24.0), egui::Sense::click());
                 let active = state.shell.nav_mode == mode;
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::SelectableLabel,
+                        ui.is_enabled(),
+                        label,
+                    )
+                });
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.set_role(egui::accesskit::Role::Tab);
+                    node.set_selected(active);
+                });
                 let hover = ui.ctx().animate_bool_with_time(
                     response.id,
                     response.hovered() && !active,
@@ -749,6 +782,7 @@ fn nav_segments(ui: &mut Ui, state: &mut AppState) {
                     theme::mono(10.0, FontWeight::SemiBold),
                     if active { c.text } else { c.text_faint },
                 );
+                theme::paint_focus_ring(ui, &response, rect);
                 if response.clicked() {
                     state.shell.nav_mode = mode;
                 }

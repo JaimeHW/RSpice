@@ -156,6 +156,14 @@ fn render_points_table(ui: &mut Ui, state: &mut PwlEditorState, result: &mut Pwl
                         egui::vec2(INDEX_COL, t.metrics.ctl_h),
                         egui::Sense::click(),
                     );
+                    index_response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            ui.is_enabled(),
+                            is_selected,
+                            format!("Select PWL point {}", i + 1),
+                        )
+                    });
                     if is_selected {
                         ui.painter().rect_filled(index_rect, t.radius, c.accent_dim);
                     } else if index_response.hovered() {
@@ -168,6 +176,7 @@ fn render_points_table(ui: &mut Ui, state: &mut PwlEditorState, result: &mut Pwl
                         theme::mono(tokens::FS_0, FontWeight::Regular),
                         if is_selected { c.accent } else { c.text_faint },
                     );
+                    theme::paint_focus_ring(ui, &index_response, index_rect);
                     if index_response.clicked() {
                         state.selected_row = Some(i);
                     }

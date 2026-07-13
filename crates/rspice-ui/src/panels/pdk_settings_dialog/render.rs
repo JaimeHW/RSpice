@@ -313,6 +313,14 @@ fn source_row(
             // and remove zones added after it sit on top and win clicks.
             let row_id = ui.id().with(("volta.pdk.source", idx));
             let row_response = ui.interact(rect, row_id, Sense::click());
+            row_response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    selected,
+                    format!("Select model source {}", entry.path),
+                )
+            });
             let hovered = ui.rect_contains_pointer(rect);
             let hover = ui
                 .ctx()
@@ -341,6 +349,14 @@ fn source_row(
 
             ui.add_space(8.0);
             let (box_rect, box_response) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::click());
+            box_response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    entry.enabled,
+                    format!("Include {} in model scans", entry.path),
+                )
+            });
             {
                 let painter = ui.painter();
                 if entry.enabled {
@@ -364,6 +380,7 @@ fn source_row(
                     );
                 }
             }
+            theme::paint_focus_ring(ui, &box_response, box_rect);
             if box_response
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .on_hover_text(if entry.enabled {
@@ -394,6 +411,13 @@ fn source_row(
 
             let (name_rect, name_response) =
                 ui.allocate_exact_size(vec2(name_w, ROW_H), Sense::click());
+            name_response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    format!("Edit model source path {}", entry.path),
+                )
+            });
             let name_galley = ui.fonts_mut(|f| {
                 let mut job = egui::text::LayoutJob::simple_singleline(
                     entry.path.clone(),
@@ -411,6 +435,7 @@ fn source_row(
                 name_galley,
                 mix(c.text_dim, c.text, hover).gamma_multiply(alpha),
             );
+            theme::paint_focus_ring(ui, &name_response, name_rect);
             let tooltip = if expanded != entry.path {
                 format!("{}\n→ {}\nclick to edit", entry.path, expanded)
             } else {
@@ -451,6 +476,7 @@ fn source_row(
             if row_response.clicked() {
                 action = Some(SourceAction::Select(idx));
             }
+            theme::paint_focus_ring(ui, &row_response, rect);
         },
     );
 
@@ -614,6 +640,13 @@ fn env_add_prompt_row(ui: &mut Ui) -> bool {
     let c = t.color;
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), ENV_ROW_H), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            "Add environment variable",
+        )
+    });
     if !ui.is_rect_visible(rect) {
         return false;
     }
@@ -635,6 +668,7 @@ fn env_add_prompt_row(ui: &mut Ui) -> bool {
         theme::mono(tokens::FS_1, FontWeight::Regular),
         mix(c.text_faint, c.text_dim, hover),
     );
+    theme::paint_focus_ring(ui, &response, rect);
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
@@ -850,6 +884,22 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
     let c = t.color;
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), FILE_ROW_H), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            format!(
+                "Load model file {}, type {}, sections {}",
+                file.file_name(),
+                file.file_type(),
+                if file.sections.is_empty() {
+                    "none".to_owned()
+                } else {
+                    file.sections.join(", ")
+                }
+            ),
+        )
+    });
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -921,6 +971,8 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
         sections_galley,
         c.text_faint,
     );
+
+    theme::paint_focus_ring(ui, &response, rect);
 
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)

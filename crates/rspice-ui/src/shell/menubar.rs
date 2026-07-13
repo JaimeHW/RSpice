@@ -5,7 +5,7 @@
 //! action layer (`common::menu_bar` dispatchers and direct state methods), so
 //! behavior matches the previous chrome exactly.
 
-use egui::{Context, Frame, Sense, TopBottomPanel, Ui, vec2};
+use egui::{Context, Frame, Sense, TopBottomPanel, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::common::RSpiceApp;
 use crate::common::menu_bar::{FileMenuAction, dispatch_file_menu_action};
@@ -279,6 +279,14 @@ fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> (boo
             Sense::hover()
         },
     );
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled && ui.is_enabled(), label));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::MenuItem);
+        if let Some(shortcut) = kbd {
+            node.set_keyboard_shortcut(shortcut);
+        }
+    });
     if !ui.is_rect_visible(rect) {
         return (false, response);
     }
@@ -303,6 +311,7 @@ fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> (boo
             c.text_faint,
         );
     }
+    theme::paint_focus_ring(ui, &response, rect);
 
     if enabled && response.clicked() {
         ui.close();

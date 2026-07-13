@@ -336,6 +336,53 @@ class CiConfigurationTests(unittest.TestCase):
             readme,
         )
 
+    def test_ui_enables_accessibility_backend_for_each_runtime(self) -> None:
+        manifest = read_text("crates/rspice-ui/Cargo.toml")
+
+        native_dependencies = re.search(
+            r'^\[target\.\'cfg\(not\(target_arch = "wasm32"\)\)\'\.dependencies\]'
+            r"(.*?)^\[",
+            manifest,
+            flags=re.DOTALL | re.MULTILINE,
+        )
+        wasm_dependencies = re.search(
+            r'^\[target\.\'cfg\(target_arch = "wasm32"\)\'\.dependencies\]'
+            r"(.*?)\Z",
+            manifest,
+            flags=re.DOTALL | re.MULTILINE,
+        )
+
+        self.assertIsNotNone(native_dependencies)
+        self.assertIsNotNone(wasm_dependencies)
+
+        native_eframe = re.search(r"^eframe\s*=\s*\{([^}]*)\}", native_dependencies.group(1), re.MULTILINE)
+        wasm_eframe = re.search(r"^eframe\s*=\s*\{([^}]*)\}", wasm_dependencies.group(1), re.MULTILINE)
+        self.assertIsNotNone(native_eframe)
+        self.assertIsNotNone(wasm_eframe)
+
+        native_features = set(re.findall(r'"([^"]+)"', native_eframe.group(1)))
+        wasm_features = set(re.findall(r'"([^"]+)"', wasm_eframe.group(1)))
+        self.assertIn("accesskit", native_features)
+        self.assertNotIn("web_screen_reader", native_features)
+        self.assertIn("web_screen_reader", wasm_features)
+        self.assertNotIn("accesskit", wasm_features)
+
+        app = read_text("crates/rspice-ui/src/common/app/mod.rs")
+        preferences = read_text(
+            "crates/rspice-ui/src/common/app/app_preferences_dialog.rs"
+        )
+        self.assertIn(
+            "options.screen_reader = self.state.shell.browser_spoken_feedback",
+            app,
+        )
+        self.assertIn("Speak control changes (browser)", preferences)
+        readme = read_text("crates/rspice-ui/README.md")
+        self.assertIn(
+            "browser backend does not expose that AccessKit tree through",
+            readme,
+        )
+        self.assertIn("remains a release gate", readme)
+
     def test_browser_surface_docs_distinguish_ide_and_playground(self) -> None:
         ui_readme = read_text("crates/rspice-ui/README.md")
         playground_readme = read_text("crates/rspice-wasm/web/README.md")
@@ -405,6 +452,41 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("supported analog subset", veriloga_lib)
         self.assertNotIn("full Verilog-A Language Reference Manual", veriloga_lib)
+
+    def test_custom_ui_interactions_have_semantics_and_visible_focus(self) -> None:
+        """Painter-backed controls must not bypass egui's accessibility contract."""
+        click_pattern = re.compile(
+            r"(?<![A-Za-z0-9_])(?:egui::)?Sense::(?:click|click_and_drag)\(\)"
+        )
+        offenders = []
+
+        for path in sorted((ROOT / "crates" / "rspice-ui" / "src").rglob("*.rs")):
+            source = path.read_text(encoding="utf-8")
+            custom_clicks = len(click_pattern.findall(source))
+            if custom_clicks == 0:
+                continue
+
+            pointer_only_shims = source.count("accessibility-pointer-shim")
+            semantic_contracts = source.count(".widget_info(")
+            focus_contracts = source.count("paint_focus_ring(")
+            required = custom_clicks - pointer_only_shims
+            if semantic_contracts < required or focus_contracts < required:
+                offenders.append(
+                    (
+                        path.relative_to(ROOT).as_posix(),
+                        custom_clicks,
+                        pointer_only_shims,
+                        semantic_contracts,
+                        focus_contracts,
+                    )
+                )
+
+        self.assertEqual(
+            [],
+            offenders,
+            "every custom click/drag target needs WidgetInfo semantics and a visible "
+            "focus ring; pointer-only forwarding shims must be explicitly annotated",
+        )
 
 
 if __name__ == "__main__":

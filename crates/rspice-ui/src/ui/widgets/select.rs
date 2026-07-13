@@ -1,7 +1,7 @@
 //! Select — the design-system dropdown: an inset mono well with a chevron,
 //! opening a token-styled option list. Returns the picked index.
 
-use egui::{Sense, Shape, Stroke, Ui, vec2};
+use egui::{Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -11,6 +11,7 @@ use crate::ui::tokens::{self, Tokens};
 pub fn select(
     ui: &mut Ui,
     id_salt: &str,
+    accessible_label: &str,
     selected: &str,
     options: &[String],
     width: f32,
@@ -19,6 +20,12 @@ pub fn select(
     let c = t.color;
 
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
+    response.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::ComboBox, ui.is_enabled(), accessible_label)
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_value(selected);
+    });
     let hover = ui
         .ctx()
         .animate_bool_with_time(response.id, response.hovered(), 0.16);
@@ -47,6 +54,7 @@ pub fn select(
         ],
         Stroke::new(1.4, c.text_dim),
     ));
+    theme::paint_focus_ring(ui, &response, rect);
 
     let popup_id = ui.make_persistent_id(("volta.select", id_salt));
     if response.clicked() {
@@ -66,6 +74,13 @@ pub fn select(
                 let is_current = option == selected;
                 let (row, row_response) =
                     ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+                row_response.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::SelectableLabel, ui.is_enabled(), option)
+                });
+                ui.ctx().accesskit_node_builder(row_response.id, |node| {
+                    node.set_role(egui::accesskit::Role::ListBoxOption);
+                    node.set_selected(is_current);
+                });
                 let painter = ui.painter();
                 if row_response.hovered() {
                     painter.rect_filled(row, t.radius, c.bg_hover);
@@ -77,6 +92,7 @@ pub fn select(
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     if is_current { c.accent } else { c.text },
                 );
+                theme::paint_focus_ring(ui, &row_response, row);
                 if row_response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()

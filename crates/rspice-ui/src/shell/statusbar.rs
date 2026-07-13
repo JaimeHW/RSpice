@@ -135,7 +135,10 @@ fn selection_text(state: &AppState) -> String {
     if count == 0 {
         "No selection".to_owned()
     } else {
-        format!("Sel: {count} items")
+        format!(
+            "Sel: {}",
+            crate::ui::accessibility::counted(count, "item", "items")
+        )
     }
 }
 

@@ -105,7 +105,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Axis::linear(-extent, extent, "Re"),
         XScale::Linear,
         Axis::linear(-extent, extent, "Im"),
-    );
+    )
+    .accessible_name("Nyquist plot");
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
     spec.traces
         .push(Trace::new(&re, &im, c.traces[0]).cache_key(0x917_00FF));

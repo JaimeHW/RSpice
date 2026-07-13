@@ -213,8 +213,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
                     .map(|(idx, _)| idx);
 
-                let (rect, _) =
+                let (rect, row_response) =
                     ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
+                row_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        ui.is_enabled(),
+                        format!(
+                            "Specification {}, acceptance rule {}",
+                            spec.measurement,
+                            rail_text(spec)
+                        ),
+                    )
+                });
+                ui.ctx().accesskit_node_builder(row_response.id, |node| {
+                    node.set_role(egui::accesskit::Role::Row);
+                });
                 if !ui.is_rect_visible(rect) {
                     continue;
                 }
@@ -277,16 +291,33 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         }
                         None => ("—".to_owned(), c.text_faint),
                     };
+                    let verdict = match cell {
+                        Some(Some(value)) if spec.passes(*value) => "pass",
+                        Some(Some(_)) => "fail",
+                        Some(None) => "measurement failed",
+                        None => "no result",
+                    };
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            ui.is_enabled(),
+                            format!(
+                                "Focus run {} for specification {}: {}, {verdict}",
+                                runs[idx].1, spec.measurement, text
+                            ),
+                        )
+                    });
                     if response.hovered() {
                         ui.painter().rect_filled(cell_rect, 2.0, c.bg_hover);
                     }
                     ui.painter().text(
                         egui::pos2(right, rect.center().y),
                         egui::Align2::RIGHT_CENTER,
-                        text,
+                        &text,
                         theme::mono(tokens::FS_1, FontWeight::Regular),
                         color,
                     );
+                    theme::paint_focus_ring(ui, &response, cell_rect);
                     if response.clicked() {
                         focus_run = Some(runs[idx].0);
                     }

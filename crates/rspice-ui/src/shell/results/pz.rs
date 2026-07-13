@@ -66,7 +66,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Axis::linear(-extent, extent, "σ"),
         XScale::Linear,
         Axis::linear(-extent, extent, "jω"),
-    );
+    )
+    .accessible_name("Pole-zero plot");
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
     // Stable left half-plane.
     spec.bands.push(plot::Band {

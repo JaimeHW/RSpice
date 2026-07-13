@@ -14,6 +14,22 @@ use serde::{Deserialize, Serialize};
 use super::fonts;
 use super::tokens::{self, Density, Direction, Mode, Tokens};
 
+/// Paint the design-system keyboard focus indicator for a custom widget.
+/// Stock egui widgets draw their own focus state; painter-backed controls
+/// must call this after their normal content so focus is never hidden by fill.
+pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response, rect: egui::Rect) {
+    if !response.has_focus() || !ui.is_rect_visible(rect) {
+        return;
+    }
+    let tokens = Tokens::get(ui.ctx());
+    ui.painter().rect_stroke(
+        rect.shrink(1.0),
+        tokens.radius,
+        Stroke::new(2.0, tokens.color.accent),
+        egui::StrokeKind::Inside,
+    );
+}
+
 /// The user-selected theme. Cheap to copy and compare; persisted with the
 /// application state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

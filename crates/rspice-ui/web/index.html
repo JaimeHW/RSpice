@@ -9,6 +9,18 @@
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
   body { background: #11171B; }
+  #rspice_spoken_feedback {
+    position: fixed; top: 8px; left: 8px; z-index: 30;
+    transform: translateY(calc(-100% - 16px));
+    border: 1px solid #F2B824; border-radius: 4px;
+    padding: 9px 12px; background: #171D21; color: #F4F6F7;
+    font: 600 14px/1.2 "Segoe UI", system-ui, sans-serif;
+    transition: transform 120ms ease;
+  }
+  #rspice_spoken_feedback:focus-visible {
+    transform: translateY(0);
+    outline: 3px solid #F2B824; outline-offset: 2px;
+  }
   canvas#rspice_canvas {
     display: block; width: 100%; height: 100%;
     outline: none; touch-action: none;
@@ -31,11 +43,13 @@
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
   @media (prefers-reduced-motion: reduce) {
     #rspice_loading .tile { animation: none; }
+    #rspice_spoken_feedback { transition: none; }
   }
 </style>
 </head>
 <body>
-<div id="rspice_loading">
+<button id="rspice_spoken_feedback" type="button" aria-pressed="false">Enable spoken interaction feedback</button>
+<div id="rspice_loading" role="status" aria-live="polite" aria-atomic="true">
   <div class="tile" aria-hidden="true">
     <svg viewBox="0 0 96 96">
       <g fill="#17181A" stroke="#17181A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
@@ -48,9 +62,12 @@
   </div>
   <p>loading the RSpice IDE — engine, schematic editor, waveforms…</p>
 </div>
-<canvas id="rspice_canvas"></canvas>
+<canvas
+  id="rspice_canvas"
+  aria-label="RSpice application canvas. Use the preceding control to enable spoken interaction feedback."
+>RSpice requires a browser with canvas and WebGPU support.</canvas>
 <script>
-  // The egui 0.29 WebGPU stack still requests the WebGPU limit
+  // The current egui/WebGPU stack still requests the WebGPU limit
   // `maxInterStageShaderComponents`, which the spec dropped and Chrome 129+
   // rejects. Strip it before the module's requestDevice call.
   // TODO: remove once the egui/WebGPU stack no longer requests that limit.
@@ -63,6 +80,54 @@
       return origRequestDevice.call(this, desc);
     };
   }
+
+  // Semantic DOM bootstrap for users who need spoken feedback before they
+  // enter eframe's canvas. Rust and this control synchronize through an
+  // attribute so changing the setting never reloads or discards work.
+  (() => {
+    const attribute = "data-rspice-spoken-feedback";
+    const storageKey = "rspice.web.spoken-feedback";
+    const root = document.documentElement;
+    const button = document.getElementById("rspice_spoken_feedback");
+
+    function enabledFromAttribute() {
+      return root.getAttribute(attribute) === "true";
+    }
+
+    function updateControlAndStorage() {
+      const enabled = enabledFromAttribute();
+      button.setAttribute("aria-pressed", String(enabled));
+      button.textContent = enabled
+        ? "Disable spoken interaction feedback"
+        : "Enable spoken interaction feedback";
+      try {
+        localStorage.setItem(storageKey, String(enabled));
+      } catch (_) {
+        // Storage can be unavailable in hardened/private contexts. The DOM
+        // attribute still keeps the preference active for this page session.
+      }
+    }
+
+    let enabled = false;
+    try {
+      enabled = localStorage.getItem(storageKey) === "true";
+    } catch (_) {
+      // Keep the safe opt-in default when storage is unavailable.
+    }
+    root.setAttribute(attribute, String(enabled));
+    updateControlAndStorage();
+
+    new MutationObserver(updateControlAndStorage).observe(root, {
+      attributes: true,
+      attributeFilter: [attribute],
+    });
+    button.addEventListener("click", () => {
+      root.setAttribute(attribute, String(!enabledFromAttribute()));
+      // eframe listens for resize and schedules a repaint, allowing Rust to
+      // consume the updated attribute without a destructive page reload.
+      window.dispatchEvent(new Event("resize"));
+    });
+  })();
 </script>
 <script type="module">
   function showStartupError(message) {
@@ -70,6 +135,8 @@
     if (!el) {
       return;
     }
+    el.setAttribute("role", "alert");
+    el.setAttribute("aria-live", "assertive");
     el.replaceChildren();
     for (const text of [
       message,

@@ -546,6 +546,16 @@ impl eframe::App for RSpiceApp {
     /// Called on each frame
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(enabled) = crate::common::browser_accessibility::spoken_feedback_override()
+            {
+                self.state.shell.browser_spoken_feedback = enabled;
+            }
+            ctx.options_mut(|options| {
+                options.screen_reader = self.state.shell.browser_spoken_feedback;
+            });
+        }
         self.prepare_frame(&ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.autosave_tick(&ctx);

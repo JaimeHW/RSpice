@@ -196,6 +196,8 @@ pub type Underlay<'a> = Box<dyn Fn(&egui::Painter, &PlotMapper) + 'a>;
 
 /// The full declarative plot description for one frame.
 pub struct PlotSpec<'a> {
+    /// Concise screen-reader name for this engineering graphic.
+    pub accessible_name: &'a str,
     /// X axis.
     pub x: Axis,
     /// X scale (linear or log decades).
@@ -222,6 +224,7 @@ impl<'a> PlotSpec<'a> {
     /// A plot with the given axes and defaults for everything else.
     pub fn new(x: Axis, x_scale: XScale, y: Axis) -> Self {
         Self {
+            accessible_name: "Simulation results plot",
             x,
             x_scale,
             y,
@@ -233,5 +236,11 @@ impl<'a> PlotSpec<'a> {
             underlay: None,
             left_margin: 56.0,
         }
+    }
+
+    /// Set the screen-reader name for this engineering graphic.
+    pub fn accessible_name(mut self, name: &'a str) -> Self {
+        self.accessible_name = name;
+        self
     }
 }

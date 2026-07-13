@@ -200,7 +200,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .unwrap_or(((g_min - pad).min(-10.0), (g_max + pad).max(10.0)));
     let y = Axis::linear(y0, y1, "dB");
 
-    let mut spec = PlotSpec::new(Axis::log_decades(x0, x1, "Hz"), XScale::Log10, y);
+    let mut spec = PlotSpec::new(Axis::log_decades(x0, x1, "Hz"), XScale::Log10, y)
+        .accessible_name("Bode plot");
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
 
     if let Some(phase) = &model.phase_deg {

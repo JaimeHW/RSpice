@@ -304,6 +304,26 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
 
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::click());
+    let command_name = row.command.display_name();
+    let accessibility_label = row.blocked.map_or_else(
+        || command_name.to_owned(),
+        |reason| format!("{command_name}, unavailable: {reason}"),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::SelectableLabel,
+            row.blocked.is_none() && ui.is_enabled(),
+            &accessibility_label,
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::ListBoxOption);
+        node.set_selected(selected);
+        let shortcut = row.command.shortcut_string();
+        if !shortcut.is_empty() {
+            node.set_keyboard_shortcut(shortcut);
+        }
+    });
     if !ui.is_rect_visible(rect) {
         return false;
     }
@@ -336,7 +356,7 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
     } else {
         c.text_dim
     };
-    let name = row.command.display_name();
+    let name = command_name;
     let mut job = egui::text::LayoutJob::default();
     let mut next_mark = 0;
     for (index, ch) in name.chars().enumerate() {
@@ -377,6 +397,8 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
             c.text_faint,
         );
     }
+
+    theme::paint_focus_ring(ui, &response, rect);
 
     if blocked {
         return false;

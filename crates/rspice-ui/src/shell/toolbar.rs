@@ -522,9 +522,14 @@ fn corner_select(ui: &mut Ui, state: &mut AppState) {
         .map(|index| LABELS[index].clone())
         .unwrap_or_else(|| state.shell.corner.clone());
 
-    if let Some(index) =
-        crate::ui::widgets::select(ui, "volta.corner", &current_label, &LABELS, 120.0)
-    {
+    if let Some(index) = crate::ui::widgets::select(
+        ui,
+        "volta.corner",
+        "Simulation corner",
+        &current_label,
+        &LABELS,
+        120.0,
+    ) {
         state.shell.corner = corners[index].name.clone();
     }
 }

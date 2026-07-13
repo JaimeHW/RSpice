@@ -70,7 +70,6 @@ winit = "0.30"
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = "0.34.3"
-eframe = { version = "0.34.3", default-features = false, features = ["wgpu", "persistence"] }
 
 # SVG parsing for component symbols (lightweight, pure Rust)
 usvg = { version = "0.47", default-features = false }
@@ -91,6 +90,11 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "f
 rand = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Native builds expose egui's semantic tree to platform assistive technology
+# through AccessKit. Keep this target-specific: eframe's browser backend does
+# not currently publish its AccessKit tree to the DOM.
+eframe = { version = "0.34.3", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
+
 # Default features on: faer-parallel/parallel/simd so the desktop app gets
 # the same fast solver paths as the CLI (incl. the Verilog-A JIT).
 rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga-native"] }
@@ -104,6 +108,11 @@ tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"
 winresource = "0.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# eframe 0.34 does not bridge AccessKit into the browser DOM. Its
+# web_screen_reader feature still announces egui interaction events through
+# the Web Speech API, which is the supported fallback for this backend.
+eframe = { version = "0.34.3", default-features = false, features = ["wgpu", "persistence", "web_screen_reader"] }
+
 # No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen and the
 # browser entropy source (getrandom/js) that faer needs on this target.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }

@@ -66,7 +66,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Axis::linear(x0, x1, ""),
         XScale::Linear,
         Axis::linear_with(y0, y1, "n", 5),
-    );
+    )
+    .accessible_name("Statistical histogram");
     spec.left_margin = 48.0;
 
     // ±1σ band + µ marker + normal overlay from the fitted stats.

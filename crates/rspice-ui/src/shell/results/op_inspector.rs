@@ -211,10 +211,29 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         ui.id().with(("op-sort", family, key)),
                         egui::Sense::click(),
                     );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            ui.is_enabled(),
+                            format!(
+                                "Sort {} devices by {} {}",
+                                family,
+                                key,
+                                if sorted_here
+                                    && sort.as_ref().is_some_and(|(_, ascending)| *ascending)
+                                {
+                                    "descending"
+                                } else {
+                                    "ascending"
+                                }
+                            ),
+                        )
+                    });
                     if response.hovered() {
                         ui.painter().rect_filled(hit, 2.0, c.bg_hover);
                     }
                     ui.painter().galley(pos, galley, c.text_faint);
+                    theme::paint_focus_ring(ui, &response, hit);
                     if response.clicked() {
                         clicked_sort = Some((*key).to_owned());
                     }
@@ -224,6 +243,39 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 for row in &rows {
                     let (rect, response) =
                         ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
+                    response.widget_info(|| {
+                        let values = columns
+                            .iter()
+                            .map(|(key, unit)| {
+                                let value = row.value(key).map_or_else(
+                                    || "not available".to_owned(),
+                                    |value| {
+                                        if unit.is_empty() {
+                                            format!("{value:.1}")
+                                        } else {
+                                            fmt_si(value, unit, 3)
+                                        }
+                                    },
+                                );
+                                format!("{key} {value}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Label,
+                            ui.is_enabled(),
+                            format!(
+                                "{} device {}, region {}, {}",
+                                family,
+                                row.entry.name,
+                                row.entry.region.unwrap_or("not reported"),
+                                values,
+                            ),
+                        )
+                    });
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.set_role(egui::accesskit::Role::Row);
+                    });
                     if !ui.is_rect_visible(rect) {
                         continue;
                     }

@@ -156,6 +156,13 @@ fn card_header(
         ui.id().with(("card-action", title)),
         egui::Sense::click(),
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            format!("{action_label}, {title}"),
+        )
+    });
     if response.hovered() {
         ui.painter().rect_filled(action_rect, t.radius, c.bg_hover);
     }
@@ -171,6 +178,7 @@ fn card_header(
             c.text_dim
         },
     );
+    theme::paint_focus_ring(ui, &response, action_rect);
     Some(response.on_hover_cursor(egui::CursorIcon::PointingHand))
 }
 
@@ -211,6 +219,20 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
 
             let (rect, response) = ui
                 .allocate_exact_size(egui::vec2(ui.available_width(), 33.0), egui::Sense::click());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    format!(
+                        "Configure {name}: {description}. {}",
+                        state.sim_setup.summary(*tab_idx)
+                    ),
+                )
+            });
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::ListBoxOption);
+                node.set_selected(selected);
+            });
             let hovered = ui.rect_contains_pointer(rect);
             let painter = ui.painter();
             if selected {
@@ -234,6 +256,14 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
                 ui.id().with(("an-enable", tab_idx)),
                 egui::Sense::click(),
             );
+            box_response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    enabled,
+                    format!("Include {name} in run set"),
+                )
+            });
             if enabled {
                 painter.rect_filled(box_rect, t.radius.min(2.0), c.accent);
                 let s = box_rect.width();
@@ -261,6 +291,7 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
                     state.sim_setup.enabled.insert(*tab_idx);
                 }
             }
+            theme::paint_focus_ring(ui, &box_response, box_rect.expand(4.0));
 
             // Name + description (dimmed while unticked) + live summary.
             let alpha = if enabled { 1.0 } else { 0.55 };
@@ -301,6 +332,13 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
                     ui.id().with(("an-remove", tab_idx)),
                     egui::Sense::click(),
                 );
+                x_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        format!("Remove {name} from analyses list"),
+                    )
+                });
                 if x_response.hovered() {
                     ui.painter().rect_filled(x_rect, t.radius, c.bg_hover);
                 }
@@ -316,6 +354,7 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
                     theme::mono(tokens::FS_2, FontWeight::Regular),
                     x_color,
                 );
+                theme::paint_focus_ring(ui, &x_response, x_rect);
                 if x_response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text("Remove from the list")
@@ -345,6 +384,7 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
             if response.clicked() {
                 state.shell.selected_analysis = Some(*tab_idx);
             }
+            theme::paint_focus_ring(ui, &response, rect);
         }
     });
 
@@ -415,10 +455,19 @@ fn outputs_card(ui: &mut Ui, state: &mut AppState) {
                 ui.id().with(("out-plot", idx)),
                 egui::Sense::click(),
             );
+            plot_response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    *visible,
+                    format!("Plot output {name}"),
+                )
+            });
             flag(ui, plot_rect, "plot", *visible);
             if plot_response.clicked() {
                 state.simulation.toggle_waveform_visibility(name);
             }
+            theme::paint_focus_ring(ui, &plot_response, plot_rect);
             let save_rect = egui::Rect::from_min_size(
                 egui::pos2(rect.right() - 14.0 - 44.0, rect.top() + 4.0),
                 egui::vec2(44.0, 22.0),
@@ -743,6 +792,26 @@ fn palette_row(ui: &mut Ui, state: &AppState, index: usize, active: bool) -> egu
     }
 
     let (id, description) = analysis_meta(index);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            format!(
+                "{id}: {description}. {meta}",
+                meta = if enabled {
+                    "Already in run set"
+                } else if listed {
+                    "Already listed"
+                } else {
+                    "Available to add"
+                }
+            ),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::ListBoxOption);
+        node.set_selected(active);
+    });
     painter.text(
         egui::pos2(rect.left() + 24.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
@@ -795,6 +864,8 @@ fn palette_row(ui: &mut Ui, state: &AppState, index: usize, active: bool) -> egu
         desc_galley,
         c.text_dim,
     );
+
+    theme::paint_focus_ring(ui, &response, rect);
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

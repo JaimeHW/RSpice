@@ -198,7 +198,7 @@ pub(super) fn library(
             mono_input(ui, &mut state.shell.cell_search, search_width.max(60.0));
             let libs = cell_sources(state);
             let current = state.shell.cell_lib_filter.clone();
-            if let Some(index) = select(ui, "volta.cell.lib", &current, &libs, 90.0) {
+            if let Some(index) = select(ui, "volta.cell.lib", "Library", &current, &libs, 90.0) {
                 state.shell.cell_lib_filter = libs[index].clone();
             }
         },

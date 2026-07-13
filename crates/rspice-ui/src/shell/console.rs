@@ -1,7 +1,7 @@
 //! Console panel — filterable structured log with severity tabs, counts,
 //! clear, and collapse, docked above the status bar.
 
-use egui::{Context, Frame, ScrollArea, Sense, TopBottomPanel, Ui, vec2};
+use egui::{Context, Frame, ScrollArea, Sense, TopBottomPanel, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::common::AppState;
 use crate::panels::{LogSeverity, LogSource};
@@ -159,6 +159,30 @@ fn console_tab(ui: &mut Ui, label: &str, count: Option<usize>, active: bool) -> 
         width += 4.0 + g.size().x;
     }
     let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
+    let accessibility_label = count.map_or_else(
+        || label.to_owned(),
+        |count| {
+            format!(
+                "{label}, {}",
+                crate::ui::accessibility::counted(count, "entry", "entries")
+            )
+        },
+    );
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            &accessibility_label,
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Tab);
+        if active {
+            node.set_selected(true);
+        } else {
+            node.set_selected(false);
+        }
+    });
     if !ui.is_rect_visible(rect) {
         return false;
     }
@@ -195,6 +219,7 @@ fn console_tab(ui: &mut Ui, label: &str, count: Option<usize>, active: bool) -> 
             c.text_faint,
         );
     }
+    theme::paint_focus_ring(ui, &response, rect);
 
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -366,6 +391,15 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
                     Sense::hover()
                 };
                 let (rect, response) = ui.allocate_exact_size(vec2(width, row_height), sense);
+                if entry.anchor.is_some() {
+                    response.widget_info(|| {
+                        WidgetInfo::labeled(
+                            WidgetType::Button,
+                            ui.is_enabled(),
+                            format!("Open source for {}: {}", level_label, entry.message),
+                        )
+                    });
+                }
                 let painter = ui.painter();
                 if entry.anchor.is_some() {
                     if response.hovered() {
@@ -378,6 +412,7 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
                     {
                         jump = entry.anchor.clone();
                     }
+                    theme::paint_focus_ring(ui, &response, rect);
                 }
                 let cy = rect.center().y;
                 painter.text(

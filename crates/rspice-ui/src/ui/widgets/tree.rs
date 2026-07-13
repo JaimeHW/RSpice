@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use egui::{Rect, Response, Sense, Stroke, Ui, vec2};
+use egui::{Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
@@ -119,17 +119,55 @@ impl<'a> TreeRow<'a> {
         let row_h = self.height.unwrap_or(t.metrics.row_h);
 
         let width = ui.available_width();
-        let (rect, response) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
+        let (rect, mut response) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
 
         let mut checkbox_changed = false;
+        let has_checkbox = self.checkbox.is_some();
         let mut checkbox_value_after = self.checkbox.as_ref().map(|v| **v);
         if let Some(value) = self.checkbox {
             if response.clicked() {
                 *value = !*value;
                 checkbox_changed = true;
+                response.mark_changed();
             }
             checkbox_value_after = Some(*value);
         }
+        let accessible_label = self.meta.map_or_else(
+            || self.label.to_owned(),
+            |meta| format!("{}, {}", self.label, meta),
+        );
+        response.widget_info(|| {
+            if let Some(value) = checkbox_value_after.filter(|_| has_checkbox) {
+                WidgetInfo::selected(
+                    WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    value,
+                    &accessible_label,
+                )
+            } else if self.twist.is_some() {
+                WidgetInfo::labeled(
+                    WidgetType::CollapsingHeader,
+                    ui.is_enabled(),
+                    &accessible_label,
+                )
+            } else {
+                WidgetInfo::labeled(
+                    WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    &accessible_label,
+                )
+            }
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            if !has_checkbox {
+                node.set_role(egui::accesskit::Role::TreeItem);
+                node.set_selected(self.selected);
+                node.set_level(usize::from(self.indent) + 1);
+                if let Some(expanded) = self.twist {
+                    node.set_expanded(expanded);
+                }
+            }
+        });
 
         if !ui.is_rect_visible(rect) {
             return TreeRowResult {
@@ -283,6 +321,8 @@ impl<'a> TreeRow<'a> {
             );
         }
 
+        theme::paint_focus_ring(ui, &response, rect);
+
         let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         if label_elided {
             response = response.on_hover_text(self.label);
@@ -361,6 +401,21 @@ fn highlight_match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
 mod tests {
     use super::*;
 
+    fn accesskit_nodes(
+        mut add_contents: impl FnMut(&mut egui::Ui),
+    ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| add_contents(ui));
+        })
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree update")
+        .nodes
+    }
+
     #[test]
     fn highlight_ranges_match_case_insensitive_ascii() {
         assert_eq!(highlight_match_ranges("VDD_net", "dd"), vec![1..3]);
@@ -379,5 +434,40 @@ mod tests {
     #[test]
     fn highlight_ranges_are_empty_when_no_match() {
         assert!(highlight_match_ranges("VDD_net", "clk").is_empty());
+    }
+
+    #[test]
+    fn tree_row_publishes_tree_state_without_toggle_state() {
+        let nodes = accesskit_nodes(|ui| {
+            TreeRow::new("amplifier")
+                .meta("sheet")
+                .twist(true)
+                .indent(2)
+                .selected(true)
+                .show(ui);
+        });
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::TreeItem
+                && node.label() == Some("amplifier, sheet")
+                && node.is_selected() == Some(true)
+                && node.is_expanded() == Some(true)
+                && node.level() == Some(3)
+                && node.toggled().is_none()
+        }));
+    }
+
+    #[test]
+    fn checkbox_tree_row_publishes_checkbox_state() {
+        let mut checked = true;
+        let nodes = accesskit_nodes(|ui| {
+            TreeRow::new("V(out)").checkbox(&mut checked).show(ui);
+        });
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::CheckBox
+                && node.label() == Some("V(out)")
+                && node.toggled() == Some(egui::accesskit::Toggled::True)
+        }));
     }
 }

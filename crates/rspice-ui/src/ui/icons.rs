@@ -94,6 +94,44 @@ pub enum Icon {
 }
 
 impl Icon {
+    /// Stable text alternative used by icon-only controls when a more
+    /// specific tooltip has not been supplied by the caller.
+    pub const fn accessible_label(self) -> &'static str {
+        match self {
+            Self::Select => "Select",
+            Self::Wire => "Draw wire",
+            Self::NetLabel => "Place net label",
+            Self::Pin => "Place pin",
+            Self::Probe => "Probe",
+            Self::SymbolCircle => "Draw circle",
+            Self::SymbolArc => "Draw arc",
+            Self::SymbolArrow => "Place arrow",
+            Self::SymbolDot => "Place dot",
+            Self::ZoomIn => "Zoom in",
+            Self::ZoomOut => "Zoom out",
+            Self::ZoomFit => "Zoom to fit",
+            Self::Grid => "Grid",
+            Self::GridDots => "Dot grid",
+            Self::Undo => "Undo",
+            Self::Redo => "Redo",
+            Self::Check => "Run checks",
+            Self::File => "Document",
+            Self::Stop => "Stop",
+            Self::Run => "Run",
+            Self::Library => "Library workspace",
+            Self::Schematic => "Schematic workspace",
+            Self::Simulate => "Simulation workspace",
+            Self::Results => "Results workspace",
+            Self::Ground => "Ground",
+            Self::Supply => "Supply",
+            Self::Trash => "Delete",
+            Self::ChevronUp => "Move up",
+            Self::ChevronDown => "Move down",
+            Self::Close => "Close",
+            Self::Brand => "RSpice",
+        }
+    }
+
     fn segments(self) -> &'static [Seg] {
         use Seg::*;
         match self {

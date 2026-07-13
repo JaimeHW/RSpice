@@ -17,7 +17,9 @@
 //! Dialogs edit a draft and commit on the primary — the primary and
 //! cancel are never the same operation.
 
-use egui::{Context, Frame, Id, Key, Margin, Order, Rect, Sense, Stroke, Ui, vec2};
+use egui::{
+    Context, Frame, Id, Key, Margin, Order, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2,
+};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -160,7 +162,12 @@ impl<'a> Dialog<'a> {
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
                 // Scrim: swallow pointer interaction with everything below.
-                ui.allocate_rect(screen, Sense::click_and_drag());
+                // accessibility-pointer-shim: the scrim consumes pointer
+                // gestures but is deliberately absent from keyboard/AT order.
+                ui.allocate_rect(
+                    screen,
+                    Sense::click_and_drag().difference(Sense::focusable_noninteractive()),
+                );
                 ui.painter()
                     .rect_filled(screen, 0.0, c.canvas_bg.gamma_multiply(0.55));
 
@@ -328,6 +335,17 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
             let galley = ui.fonts_mut(|f| f.layout_job(job));
             let (rect, response) =
                 ui.allocate_exact_size(vec2(galley.size().x + 22.0, 24.0), Sense::click());
+            response.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::SelectableLabel, ui.is_enabled(), label)
+            });
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::Tab);
+                if selected {
+                    node.set_selected(true);
+                } else {
+                    node.set_selected(false);
+                }
+            });
             let hover =
                 ui.ctx()
                     .animate_bool_with_time(response.id, response.hovered() && !selected, 0.16);
@@ -348,6 +366,7 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
                     Stroke::new(2.0, c.accent),
                 );
             }
+            theme::paint_focus_ring(ui, &response, rect);
             if response.clicked() {
                 *active = index;
             }

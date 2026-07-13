@@ -112,7 +112,9 @@ fn report_web_startup_error(document: Option<&web_sys::Document>, message: &str)
         return;
     };
 
-    loading.set_inner_html("");
+    let _ = loading.set_attribute("role", "alert");
+    let _ = loading.set_attribute("aria-live", "assertive");
+    loading.set_text_content(None);
     for text in [message, WEB_STARTUP_REQUIREMENT] {
         let Ok(paragraph) = document.create_element("p") else {
             return;

@@ -24,7 +24,7 @@ pub(crate) use waves::toggle_visibility;
 
 use std::collections::HashSet;
 
-use egui::Ui;
+use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
 
 use crate::common::app::ActiveViewer;
@@ -871,6 +871,7 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
                         },
                         run.elapsed_time
                     );
+                    let accessibility_body = body.clone();
                     let text = egui::RichText::new(body)
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                         .color(if is_active {
@@ -878,11 +879,22 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
                         } else {
                             t.color.text_dim
                         });
-                    if ui
+                    let run_response = ui
                         .add(egui::Label::new(text).sense(egui::Sense::click()))
-                        .on_hover_text("Activate this run")
-                        .clicked()
-                    {
+                        .on_hover_text("Activate this run");
+                    run_response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::SelectableLabel,
+                            ui.is_enabled(),
+                            &accessibility_body,
+                        )
+                    });
+                    ui.ctx().accesskit_node_builder(run_response.id, |node| {
+                        node.set_role(egui::accesskit::Role::ListBoxOption);
+                        node.set_selected(is_active);
+                    });
+                    theme::paint_focus_ring(ui, &run_response, run_response.rect);
+                    if run_response.clicked() {
                         select_run = Some(index);
                         ui.close();
                     }
@@ -1000,6 +1012,21 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
             egui::Sense::hover()
         },
     );
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::SelectableLabel,
+            enabled && ui.is_enabled(),
+            viewer.label(),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Tab);
+        if active {
+            node.set_selected(true);
+        } else {
+            node.set_selected(false);
+        }
+    });
     if !ui.is_rect_visible(rect) {
         return false;
     }
@@ -1034,6 +1061,8 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
         galley,
         text_color,
     );
+
+    theme::paint_focus_ring(ui, &response, rect);
 
     if !enabled {
         response.on_hover_text("No data for this viewer in the active run");

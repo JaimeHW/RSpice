@@ -1,7 +1,7 @@
 //! Toggle chips — compact mono-labeled toggles (corners, temperatures,
 //! output flags).
 
-use egui::{Response, Sense, Stroke, Ui, vec2};
+use egui::{Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
@@ -21,6 +21,9 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
     });
     let (rect, response) =
         ui.allocate_exact_size(vec2(galley.size().x + 18.0, 22.0), Sense::click());
+    response.widget_info(|| {
+        WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), on, label)
+    });
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -55,6 +58,8 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
         galley,
         text_color,
     );
+
+    theme::paint_focus_ring(ui, &response, rect);
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

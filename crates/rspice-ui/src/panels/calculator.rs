@@ -492,6 +492,13 @@ fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
     let c = t.color;
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            format!("Insert signal {}, unit {}", row.name, row.unit),
+        )
+    });
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -528,6 +535,7 @@ fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
         theme::mono(tokens::FS_0, FontWeight::Regular),
         c.text_faint,
     );
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -536,6 +544,13 @@ fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
     let c = t.color;
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            format!("Insert function {}, {}", entry.label, entry.hint),
+        )
+    });
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -564,6 +579,7 @@ fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
         theme::mono(tokens::FS_0, FontWeight::Regular),
         c.text_faint,
     );
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

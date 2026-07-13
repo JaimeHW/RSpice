@@ -17,6 +17,8 @@
 
 pub mod app;
 #[cfg(target_arch = "wasm32")]
+pub(crate) mod browser_accessibility;
+#[cfg(target_arch = "wasm32")]
 pub(crate) mod browser_download;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) mod browser_file_import;
