@@ -881,12 +881,8 @@ impl MeasureEngine {
 
         if let Some(t_at) = at {
             // FIND ... AT=time
-            for i in 0..time.len() - 1 {
-                if time[i] <= t_at && time[i + 1] > t_at {
-                    let frac = (t_at - time[i]) / (time[i + 1] - time[i]);
-                    let value = signal[i] + frac * (signal[i + 1] - signal[i]);
-                    return MeasureResult::success(name, value);
-                }
+            if let Some(value) = interpolate_measure_signal(time, signal, t_at) {
+                return MeasureResult::success(name, value);
             }
             return MeasureResult::failed(name, "Time point not in simulation range");
         }
@@ -906,13 +902,8 @@ impl MeasureEngine {
             if let Some(t_when) =
                 self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1, None)
             {
-                // Interpolate signal at this time
-                for i in 0..time.len() - 1 {
-                    if time[i] <= t_when && time[i + 1] > t_when {
-                        let frac = (t_when - time[i]) / (time[i + 1] - time[i]);
-                        let value = signal[i] + frac * (signal[i + 1] - signal[i]);
-                        return MeasureResult::success(name, value);
-                    }
+                if let Some(value) = interpolate_measure_signal(time, signal, t_when) {
+                    return MeasureResult::success(name, value);
                 }
             }
             return MeasureResult::failed(name, "WHEN condition not found");
@@ -953,6 +944,24 @@ impl MeasureEngine {
     }
 }
 
+fn interpolate_measure_signal(axis: &[Value], signal: &[Value], target: Value) -> Option<Value> {
+    if axis.len() != signal.len() || axis.is_empty() || !target.is_finite() {
+        return None;
+    }
+    if let Some(index) = axis.iter().position(|value| *value == target) {
+        return signal.get(index).copied();
+    }
+    axis.windows(2).enumerate().find_map(|(index, segment)| {
+        let left = segment[0];
+        let right = segment[1];
+        if left == right || target < left.min(right) || target > left.max(right) {
+            return None;
+        }
+        let fraction = (target - left) / (right - left);
+        Some(signal[index] + fraction * (signal[index + 1] - signal[index]))
+    })
+}
+
 impl Default for MeasureEngine {
     fn default() -> Self {
         Self::new()
@@ -971,6 +980,20 @@ mod tests {
         let mut engine = MeasureEngine::new();
         engine.add(statement);
         engine
+    }
+
+    #[test]
+    fn measurement_interpolation_accepts_exact_singleton_and_final_samples() {
+        assert_eq!(interpolate_measure_signal(&[1.0], &[2.5], 1.0), Some(2.5));
+        assert_eq!(
+            interpolate_measure_signal(&[1.0, 2.0], &[3.0, 5.0], 2.0),
+            Some(5.0)
+        );
+        assert_eq!(
+            interpolate_measure_signal(&[1.0, 2.0], &[3.0, 5.0], 1.5),
+            Some(4.0)
+        );
+        assert_eq!(interpolate_measure_signal(&[1.0], &[2.5], 2.0), None);
     }
 
     fn max_statement(signal: &str) -> MeasureStatement {

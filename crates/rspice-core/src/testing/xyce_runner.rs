@@ -409,6 +409,8 @@ impl XyceStaticTranPlanPurpose {
 struct XyceStaticAcPlan {
     deck_path: PathBuf,
     reference_path: Option<PathBuf>,
+    measurement_reference_paths: Vec<PathBuf>,
+    measurement_tolerance: XyceFileCompareTolerance,
     source: String,
     print: Option<XycePrintRequest>,
     primary_ac_file: Option<String>,
@@ -418,6 +420,33 @@ struct XyceStaticAcPlan {
     frequency_bound: bool,
     steps: Vec<StepCommand>,
     contract: XyceStaticAcContract,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum XyceMeasurementReferenceValue {
+    Failed,
+    Numeric(Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct XyceMeasurementReference {
+    name: String,
+    value: XyceMeasurementReferenceValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct XyceFileCompareTolerance {
+    absolute: Value,
+    relative: Value,
+    zero: Value,
+}
+
+impl XyceFileCompareTolerance {
+    const MEASURE_COMMON_DEFAULT: Self = Self {
+        absolute: 1.0e-5,
+        relative: 1.0e-3,
+        zero: 1.0e-10,
+    };
 }
 
 #[derive(Debug, Clone)]
@@ -3094,6 +3123,19 @@ impl XyceTestRunner {
             );
         }
 
+        let measurement_reference_paths = if netlist
+            .measurements
+            .iter()
+            .any(|measurement| measurement.analysis.eq_ignore_ascii_case("AC"))
+        {
+            let path = self
+                .static_output_reference_path(&deck.path, "ma0")
+                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+            path.is_file().then_some(path).into_iter().collect()
+        } else {
+            Vec::new()
+        };
+
         let primary_ac_ic_file = primary_ac_ic_output
             .as_ref()
             .and_then(|request| request.file.clone());
@@ -3107,9 +3149,9 @@ impl XyceTestRunner {
                 let reference_path = self
                     .static_output_reference_path(&deck.path, contract.reference_extension())
                     .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-                if !reference_path.is_file() {
+                if !reference_path.is_file() && measurement_reference_paths.is_empty() {
                     return Err(format!(
-                        "no checked-in static .{} oracle at {}",
+                        "no checked-in static .{} or AC measurement oracle at {}",
                         contract.reference_extension(),
                         self.display_path(&reference_path)
                     ));
@@ -3118,7 +3160,12 @@ impl XyceTestRunner {
                     probes: print_output.probes,
                 };
                 Self::validate_static_ac_contract(&netlist, &ac, &print)?;
-                (contract, Some(reference_path), Some(print), primary_ac_file)
+                (
+                    contract,
+                    reference_path.is_file().then_some(reference_path),
+                    Some(print),
+                    primary_ac_file,
+                )
             } else if let Some(print_output) = primary_ac_ic_output {
                 if !steps.is_empty() {
                     return Err(
@@ -3145,9 +3192,18 @@ impl XyceTestRunner {
                 unreachable!("AC output request presence was checked before parsing");
             };
 
+        if reference_path.is_some() && !measurement_reference_paths.is_empty() {
+            return Err(
+                "combined AC waveform and measurement artifact comparison is not yet implemented"
+                    .to_string(),
+            );
+        }
+
         Ok(XyceStaticAcPlan {
             deck_path: deck.path.clone(),
             reference_path,
+            measurement_reference_paths,
+            measurement_tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
             source,
             print,
             primary_ac_file,
@@ -5524,7 +5580,12 @@ impl XyceTestRunner {
         plan: XyceStaticAcPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = plan.contract.result_contract(!plan.steps.is_empty());
+        let contract =
+            if plan.reference_path.is_none() && !plan.measurement_reference_paths.is_empty() {
+                "wrapper_scalar_measure_ac"
+            } else {
+                plan.contract.result_contract(!plan.steps.is_empty())
+            };
         let frequencies = plan.ac.frequencies();
         if frequencies.is_empty() {
             return self.failure_result(
@@ -5556,6 +5617,67 @@ impl XyceTestRunner {
                 );
             }
         };
+
+        if plan.reference_path.is_none() && plan.print.is_some() {
+            if !plan.steps.is_empty() || plan.ac.data_points().is_some() || plan.frequency_bound {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_contract",
+                    "measurement-only AC oracle comparison currently requires an ordinary, unstepped frequency sweep",
+                );
+            }
+            let engine = self.create_xyce_engine();
+            let results = match engine.run_ac(&netlist, &frequencies) {
+                Ok(results) => results,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this static AC deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let measurements =
+                crate::analysis::advanced::evaluate_ac_measurements(&netlist, &results);
+            let mismatches = match self.compare_measurement_references(
+                &plan.measurement_reference_paths,
+                &measurements,
+                plan.measurement_tolerance,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("AC measurement reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            return if mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("{} Xyce AC measurement mismatch(es)", mismatches.len()),
+                    mismatches,
+                )
+            };
+        }
 
         let Some(primary_reference_path) = plan.reference_path.as_ref() else {
             let ac_ic_mismatches = match self.compare_ac_initial_condition_outputs(&plan, &netlist)
@@ -19902,12 +20024,7 @@ impl XyceTestRunner {
         }
 
         for measurement in &netlist.measurements {
-            if !measurement.analysis.eq_ignore_ascii_case("AC")
-                || !matches!(
-                    measurement.measure_type,
-                    crate::analysis::MeasureType::Equation { .. }
-                )
-            {
+            if !measurement.analysis.eq_ignore_ascii_case("AC") {
                 return Err(format!(
                     "native static AC comparison does not cover .MEASURE {} '{}'",
                     measurement.analysis, measurement.name
@@ -26868,6 +26985,154 @@ impl XyceTestRunner {
             || token.starts_with("delimiter=")
             || token.starts_with("noindex")
             || token.starts_with("index=")
+    }
+
+    fn parse_measurement_reference_file(
+        path: &Path,
+    ) -> Result<Vec<XyceMeasurementReference>, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        let mut references = Vec::new();
+        let mut names = BTreeSet::new();
+        for (line_index, raw_line) in content.lines().enumerate() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('*') {
+                continue;
+            }
+            let (raw_name, raw_value) = line.split_once('=').ok_or_else(|| {
+                format!(
+                    "{}:{}: expected '<measurement> = <value|FAILED>'",
+                    path.display(),
+                    line_index + 1
+                )
+            })?;
+            let name = raw_name.trim();
+            if name.is_empty() {
+                return Err(format!(
+                    "{}:{}: measurement name is empty",
+                    path.display(),
+                    line_index + 1
+                ));
+            }
+            let normalized_name = name.to_ascii_uppercase();
+            if !names.insert(normalized_name) {
+                return Err(format!(
+                    "{}:{}: duplicate measurement '{}'",
+                    path.display(),
+                    line_index + 1,
+                    name
+                ));
+            }
+            let raw_value = raw_value.trim();
+            if raw_value.split_whitespace().count() != 1 {
+                return Err(format!(
+                    "{}:{}: measurement result must be one token",
+                    path.display(),
+                    line_index + 1
+                ));
+            }
+            let value = if raw_value == "FAILED" {
+                XyceMeasurementReferenceValue::Failed
+            } else {
+                let value = crate::netlist::lexer::parse_spice_value(raw_value).map_err(|err| {
+                    format!(
+                        "{}:{}: invalid measurement value '{}': {err}",
+                        path.display(),
+                        line_index + 1,
+                        raw_value
+                    )
+                })?;
+                if !value.is_finite() {
+                    return Err(format!(
+                        "{}:{}: measurement value must be finite",
+                        path.display(),
+                        line_index + 1
+                    ));
+                }
+                XyceMeasurementReferenceValue::Numeric(value)
+            };
+            references.push(XyceMeasurementReference {
+                name: name.to_string(),
+                value,
+            });
+        }
+        if references.is_empty() {
+            return Err(format!("{} has no measurement results", path.display()));
+        }
+        Ok(references)
+    }
+
+    fn compare_measurement_references(
+        &self,
+        paths: &[PathBuf],
+        actual: &[crate::analysis::MeasureResult],
+        tolerance: XyceFileCompareTolerance,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if paths.len() != 1 {
+            return Err(format!(
+                "unstepped measurement comparison requires exactly one artifact, found {}",
+                paths.len()
+            ));
+        }
+        let expected = Self::parse_measurement_reference_file(&paths[0])?;
+        if expected.len() != actual.len() {
+            return Err(format!(
+                "measurement artifact contains {} results but the netlist evaluated {} statements",
+                expected.len(),
+                actual.len()
+            ));
+        }
+        let mut mismatches = Vec::new();
+        for (row, (reference, result)) in expected.iter().zip(actual).enumerate() {
+            if reference.name != result.name {
+                return Err(format!(
+                    "measurement {} is '{}' in the artifact but '{}' in declaration order",
+                    row, reference.name, result.name
+                ));
+            }
+            match reference.value {
+                XyceMeasurementReferenceValue::Failed if result.value.is_none() => {}
+                XyceMeasurementReferenceValue::Failed => {
+                    return Err(format!(
+                        "measurement '{}' was expected to be FAILED but evaluated to {}",
+                        reference.name,
+                        result.value.expect("matched nonempty measurement result")
+                    ));
+                }
+                XyceMeasurementReferenceValue::Numeric(expected_value) => {
+                    let Some(actual_value) = result.value else {
+                        return Err(format!(
+                            "measurement '{}' was expected to evaluate to {} but FAILED: {}",
+                            reference.name,
+                            expected_value,
+                            result.error.as_deref().unwrap_or("no failure reason")
+                        ));
+                    };
+                    let absolute_error = (expected_value - actual_value).abs();
+                    let both_zero = expected_value.abs() <= tolerance.zero
+                        && actual_value.abs() <= tolerance.zero;
+                    let relative_error = if expected_value == 0.0 {
+                        f64::INFINITY
+                    } else {
+                        absolute_error / expected_value.abs()
+                    };
+                    let matches = expected_value == actual_value
+                        || both_zero
+                        || (absolute_error < tolerance.absolute
+                            && relative_error < tolerance.relative);
+                    if !matches {
+                        mismatches.push(XyceValueMismatch {
+                            row,
+                            probe: reference.name.clone(),
+                            expected: expected_value,
+                            actual: actual_value,
+                            relative_error,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn parse_prn_file(path: &Path) -> Result<XycePrnTable, String> {
