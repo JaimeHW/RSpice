@@ -1521,15 +1521,10 @@ pub(super) fn parse_meas_command(
             let targ = parse_meas_delay_spec(stream, line_num, params, "TARG", false)?;
             MeasureType::Delay { trig, targ }
         }
-        "PARAM" => {
+        "PARAM" | "EQN" => {
             // .MEAS <an> name PARAM='expr' — an expression over previously
             // evaluated measurement results.
-            if !stream.consume(&TokenKind::Equals) {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Expected '=' after PARAM in .MEAS".to_string(),
-                });
-            }
+            let _optional_equals = stream.consume(&TokenKind::Equals);
             let expression = match &stream.peek().kind {
                 TokenKind::Expression(expr) => {
                     let expr = expr.clone();
@@ -1551,7 +1546,21 @@ pub(super) fn parse_meas_command(
                     });
                 }
             };
-            MeasureType::Param { expression }
+            if measure_type_key == "EQN"
+                || params.expression_dialect() == crate::netlist::ExpressionDialect::Xyce
+            {
+                let (from, to, td, default_value) =
+                    parse_measure_equation_options(stream, line_num, params)?;
+                MeasureType::Equation {
+                    expression,
+                    from,
+                    to,
+                    td,
+                    default_value,
+                }
+            } else {
+                MeasureType::Param { expression }
+            }
         }
         _ => {
             // Parse signal name - handle V(node), V(pos,neg), or just node
@@ -1931,6 +1940,58 @@ pub(super) fn parse_measure_range_options(
     }
 
     Ok((from, to))
+}
+
+fn parse_measure_equation_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<
+    (
+        Option<crate::Value>,
+        Option<crate::Value>,
+        Option<crate::Value>,
+        Option<crate::Value>,
+    ),
+    ParseError,
+> {
+    let mut from = None;
+    let mut to = None;
+    let mut td = None;
+    let mut default_value = None;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token {:?} after .MEAS equation expression",
+                    stream.peek().kind
+                ),
+            });
+        };
+        let key = key.to_ascii_uppercase();
+        if !matches!(key.as_str(), "FROM" | "TO" | "TD" | "DEFAULT_VAL") {
+            break;
+        }
+        stream.advance();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected '=' after {key} in .MEAS equation"),
+            });
+        }
+        let value = expect_value(stream, line_num, params)?;
+        match key.as_str() {
+            "FROM" => from = Some(value),
+            "TO" => to = Some(value),
+            "TD" => td = Some(value),
+            "DEFAULT_VAL" => default_value = Some(value),
+            _ => unreachable!(),
+        }
+    }
+
+    Ok((from, to, td, default_value))
 }
 
 pub(super) fn parse_param_statement(

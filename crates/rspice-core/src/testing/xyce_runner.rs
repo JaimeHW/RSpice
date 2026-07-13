@@ -4255,6 +4255,18 @@ impl XyceTestRunner {
                 if Self::is_ignorable_wrapper_tran_measure_side_output(&trimmed)? {
                     continue;
                 }
+                let fields = Self::split_print_fields(&trimmed)?;
+                if fields
+                    .get(1)
+                    .is_some_and(|field| field.eq_ignore_ascii_case("TRAN"))
+                    && fields.get(3).is_some_and(|field| {
+                        field.eq_ignore_ascii_case("EQN")
+                            || field.eq_ignore_ascii_case("PARAM")
+                            || field.to_ascii_uppercase().starts_with("PARAM=")
+                    })
+                {
+                    continue;
+                }
                 return Err(format!(
                     "wrapper-origin transient .prn contract does not cover {command} directives"
                 ));
@@ -17611,7 +17623,7 @@ impl XyceTestRunner {
         Self::validate_transient_result_time_grid(result)?;
         let stateful_waveforms = data_columns
             .iter()
-            .map(|probe| Self::stateful_tran_probe_waveform(probe, netlist, result))
+            .map(|probe| Self::derived_tran_probe_waveform(probe, netlist, result))
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut mismatches = Vec::new();
@@ -20899,6 +20911,21 @@ impl XyceTestRunner {
                     netlist,
                 );
             }
+            let expression_upper = expression.to_ascii_uppercase();
+            if netlist.measurements.iter().any(|measurement| {
+                measurement.analysis.eq_ignore_ascii_case("TRAN")
+                    && matches!(
+                        measurement.measure_type,
+                        crate::analysis::MeasureType::Equation { .. }
+                    )
+                    && expression_upper.contains(&measurement.name.to_ascii_uppercase())
+            }) {
+                let context = Self::print_tran_eval_context(netlist, 0.0);
+                crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                    format!("unsupported .PRINT TRAN expression '{{{expression}}}': {err}")
+                })?;
+                return Ok(());
+            }
             if Self::stateful_tran_print_expression(probe, netlist)?.is_some() {
                 return Self::validate_tran_probe_expression(expression, netlist);
             }
@@ -21076,6 +21103,16 @@ impl XyceTestRunner {
             ));
         }
         if Self::normalize_probe(original) == "time" {
+            return Ok(());
+        }
+        if netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("TRAN")
+                && measurement.name.eq_ignore_ascii_case(original)
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Equation { .. }
+                )
+        }) {
             return Ok(());
         }
         Err(format!("unsupported .PRINT TRAN probe '{}'", original))
@@ -22441,6 +22478,59 @@ impl XyceTestRunner {
             )?);
         }
         Ok(Some(values))
+    }
+
+    fn derived_tran_probe_waveform(
+        probe: &str,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<Option<Vec<Value>>, String> {
+        let traces =
+            crate::analysis::advanced::evaluate_tran_equation_measurements(netlist, result)?;
+        if let Some(trace) = traces
+            .iter()
+            .find(|trace| trace.name.eq_ignore_ascii_case(probe))
+        {
+            return Ok(Some(trace.values.clone()));
+        }
+
+        if let Some(expression) = Self::print_expression_inner(probe) {
+            let upper = expression.to_ascii_uppercase();
+            let references_measure = traces.iter().any(|trace| {
+                let name = trace.name.to_ascii_uppercase();
+                upper.match_indices(&name).any(|(start, _)| {
+                    let end = start + name.len();
+                    let identifier = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+                    (start == 0 || !identifier(upper.as_bytes()[start - 1]))
+                        && (end == upper.len() || !identifier(upper.as_bytes()[end]))
+                })
+            });
+            if references_measure {
+                let mut values = Vec::with_capacity(result.time.len());
+                for (row, &time) in result.time.iter().enumerate() {
+                    let mut context = Self::print_tran_eval_context(netlist, time);
+                    for trace in &traces {
+                        context.set(&trace.name, trace.values[row]);
+                    }
+                    let mut call_value = |call: &str| {
+                        Self::evaluate_atomic_tran_probe(
+                            &Self::normalize_probe(call),
+                            netlist,
+                            result,
+                            time,
+                        )
+                    };
+                    values.push(Self::evaluate_print_expression_with_probe_calls(
+                        expression,
+                        context,
+                        &mut call_value,
+                    )?);
+                }
+                return Ok(Some(values));
+            }
+        }
+
+        Self::stateful_tran_probe_waveform(probe, netlist, result)
     }
 
     fn expression_contains_sdt(expression: &Expr) -> bool {
@@ -25049,6 +25139,15 @@ impl XyceTestRunner {
     fn print_tran_eval_context(netlist: &Netlist, time: Value) -> crate::netlist::ParamContext {
         let mut context = Self::print_eval_context(netlist, None, None);
         context.set("TIME", time);
+        for measurement in &netlist.measurements {
+            if measurement.analysis.eq_ignore_ascii_case("TRAN") {
+                if let crate::analysis::MeasureType::Equation { default_value, .. } =
+                    &measurement.measure_type
+                {
+                    context.set(&measurement.name, default_value.unwrap_or(-1.0));
+                }
+            }
+        }
         context
     }
 

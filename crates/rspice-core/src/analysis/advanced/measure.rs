@@ -103,6 +103,18 @@ pub enum MeasureType {
     /// .MEAS TRAN name PARAM='expr'
     Param { expression: String },
 
+    /// Xyce continuous equation measure. `PARAM` and `EQN` are aliases in
+    /// Xyce mode: the expression is evaluated at every accepted analysis
+    /// point and its current value can be consumed by later equation measures
+    /// and output probes.
+    Equation {
+        expression: String,
+        from: Option<Value>,
+        to: Option<Value>,
+        td: Option<Value>,
+        default_value: Option<Value>,
+    },
+
     /// Minimum value over range
     Min {
         signal: String,
@@ -349,7 +361,7 @@ impl MeasureEngine {
             .measurements
             .iter()
             .map(|m| match &m.measure_type {
-                MeasureType::Param { .. } => {
+                MeasureType::Param { .. } | MeasureType::Equation { .. } => {
                     MeasureResult::failed(&m.name, "PARAM expression not yet evaluated")
                 }
                 _ => self.evaluate_one(m, time, signals),
@@ -407,6 +419,10 @@ impl MeasureEngine {
             MeasureType::Param { .. } => MeasureResult::failed(
                 &measurement.name,
                 "PARAM measures evaluate after the directly computed set",
+            ),
+            MeasureType::Equation { .. } => MeasureResult::failed(
+                &measurement.name,
+                "continuous equation measures evaluate on the analysis-point stream",
             ),
             MeasureType::Min { signal, from, to } => {
                 self.eval_min_max(&measurement.name, signal, *from, *to, time, signals, false)

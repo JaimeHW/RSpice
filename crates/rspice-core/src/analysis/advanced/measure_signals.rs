@@ -12,11 +12,12 @@
 
 use std::collections::HashMap;
 
-use super::measure::{MeasureEngine, MeasureResult, MeasureStatement};
+use super::measure::{MeasureEngine, MeasureResult, MeasureStatement, MeasureType};
 use crate::Value;
 use crate::analysis::AcResult;
 use crate::engine::TransientResult;
 use crate::netlist::Netlist;
+use crate::netlist::expr::Expr as NetExpr;
 use crate::solver::SimulationResult;
 
 /// Insert `key` plus its lower/upper-case spellings.
@@ -94,6 +95,206 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
     }
 
     signals
+}
+
+/// One continuous Xyce `PARAM`/`EQN` measurement evaluated at every
+/// transient result point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EquationMeasureTrace {
+    pub name: String,
+    pub values: Vec<Value>,
+    /// Whether at least one point landed inside the measure's time window.
+    pub initialized: bool,
+}
+
+struct EquationProgram<'a> {
+    statement: &'a MeasureStatement,
+    expression: NetExpr,
+    from: Option<Value>,
+    to: Option<Value>,
+    td: Option<Value>,
+    current: Value,
+    initialized: bool,
+    values: Vec<Value>,
+}
+
+/// Evaluate Xyce continuous equation measurements over a transient result.
+///
+/// Equations run in netlist statement order at each point. Consequently a
+/// reference to an earlier equation observes its value from the current point,
+/// while a forward reference observes that equation's previous/default value.
+pub fn evaluate_tran_equation_measurements(
+    netlist: &Netlist,
+    result: &TransientResult,
+) -> Result<Vec<EquationMeasureTrace>, String> {
+    let mut programs = netlist
+        .measurements
+        .iter()
+        .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"))
+        .filter_map(|statement| {
+            let MeasureType::Equation {
+                expression,
+                from,
+                to,
+                td,
+                default_value,
+            } = &statement.measure_type
+            else {
+                return None;
+            };
+            Some((statement, expression, *from, *to, *td, *default_value))
+        })
+        .map(|(statement, expression, from, to, td, default_value)| {
+            let expression = crate::netlist::expr::parse_expression(expression).map_err(|err| {
+                format!(
+                    "failed to parse continuous measure '{}': {err}",
+                    statement.name
+                )
+            })?;
+            Ok(EquationProgram {
+                statement,
+                expression,
+                from,
+                to,
+                td,
+                current: default_value.unwrap_or(-1.0),
+                initialized: false,
+                values: Vec::with_capacity(result.time.len()),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    if programs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let signals = transient_signal_map(result);
+    let mut current_values = programs
+        .iter()
+        .map(|program| (program.statement.name.to_ascii_uppercase(), program.current))
+        .collect::<HashMap<_, _>>();
+
+    for (row, &time) in result.time.iter().enumerate() {
+        for program in &mut programs {
+            if equation_time_is_in_window(time, program.from, program.to, program.td) {
+                let bound =
+                    bind_equation_expression(&program.expression, row, &signals, &current_values)?;
+                let value = crate::netlist::expr::evaluate_complex(&bound, &netlist.params)
+                    .map_err(|err| {
+                        format!(
+                            "continuous measure '{}' evaluation failed at row {row}: {err}",
+                            program.statement.name
+                        )
+                    })?;
+                if !value.is_real() || !value.re.is_finite() {
+                    return Err(format!(
+                        "continuous measure '{}' produced non-real or non-finite value at row {row}",
+                        program.statement.name
+                    ));
+                }
+                program.current = value.re;
+                program.initialized = true;
+                current_values.insert(program.statement.name.to_ascii_uppercase(), program.current);
+            }
+            program.values.push(program.current);
+        }
+    }
+
+    Ok(programs
+        .into_iter()
+        .map(|program| EquationMeasureTrace {
+            name: program.statement.name.clone(),
+            values: program.values,
+            initialized: program.initialized,
+        })
+        .collect())
+}
+
+fn equation_time_is_in_window(
+    time: Value,
+    from: Option<Value>,
+    to: Option<Value>,
+    td: Option<Value>,
+) -> bool {
+    const XYCE_MEASURE_WINDOW_TOLERANCE: Value = 1.0e-12;
+    td.is_none_or(|bound| time >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
+        && from.is_none_or(|bound| time >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
+        && to.is_none_or(|bound| time <= bound * (1.0 + XYCE_MEASURE_WINDOW_TOLERANCE))
+}
+
+fn bind_equation_expression(
+    expression: &NetExpr,
+    row: usize,
+    signals: &HashMap<String, &[Value]>,
+    measures: &HashMap<String, Value>,
+) -> Result<NetExpr, String> {
+    Ok(match expression {
+        NetExpr::Param(name) => measures
+            .get(&name.to_ascii_uppercase())
+            .copied()
+            .map(NetExpr::Number)
+            .unwrap_or_else(|| expression.clone()),
+        NetExpr::UnaryOp { op, operand } => NetExpr::UnaryOp {
+            op: *op,
+            operand: Box::new(bind_equation_expression(operand, row, signals, measures)?),
+        },
+        NetExpr::BinOp { op, left, right } => NetExpr::BinOp {
+            op: *op,
+            left: Box::new(bind_equation_expression(left, row, signals, measures)?),
+            right: Box::new(bind_equation_expression(right, row, signals, measures)?),
+        },
+        NetExpr::FnCall { name, args }
+            if name.eq_ignore_ascii_case("V") || name.eq_ignore_ascii_case("I") =>
+        {
+            let prefix = name.to_ascii_uppercase();
+            let first = equation_probe_argument(args.first()).ok_or_else(|| {
+                format!("{prefix}() in continuous measure has an invalid first argument")
+            })?;
+            let first_value = lookup_equation_signal(signals, &format!("{prefix}({first})"), row)?;
+            if prefix == "V" && args.len() == 2 {
+                let second = equation_probe_argument(args.get(1)).ok_or_else(|| {
+                    "V() in continuous measure has an invalid second argument".to_string()
+                })?;
+                let second_value = lookup_equation_signal(signals, &format!("V({second})"), row)?;
+                NetExpr::Number(first_value - second_value)
+            } else if args.len() == 1 {
+                NetExpr::Number(first_value)
+            } else {
+                return Err(format!(
+                    "{prefix}() in continuous measure has invalid arity"
+                ));
+            }
+        }
+        NetExpr::FnCall { name, args } => NetExpr::FnCall {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| bind_equation_expression(arg, row, signals, measures))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => expression.clone(),
+    })
+}
+
+fn equation_probe_argument(argument: Option<&NetExpr>) -> Option<String> {
+    match argument? {
+        NetExpr::Param(name) => Some(name.clone()),
+        NetExpr::Number(value) if value.is_finite() && value.fract() == 0.0 => {
+            Some(format!("{value:.0}"))
+        }
+        _ => None,
+    }
+}
+
+fn lookup_equation_signal(
+    signals: &HashMap<String, &[Value]>,
+    name: &str,
+    row: usize,
+) -> Result<Value, String> {
+    signals
+        .iter()
+        .find_map(|(candidate, values)| candidate.eq_ignore_ascii_case(name).then_some(*values))
+        .and_then(|values| values.get(row).copied())
+        .ok_or_else(|| format!("continuous measure signal '{name}' is unavailable at row {row}"))
 }
 
 /// Owned per-signal series extracted from a DC sweep, from which a
