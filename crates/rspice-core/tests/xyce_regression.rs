@@ -5120,6 +5120,21 @@ fn test_xyce_stepped_continuous_equation_measure_oracle() {
     assert!(result.mismatches.is_empty());
 }
 
+#[test]
+fn test_xyce_lotka_volterra_stepped_behavioral_transient_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_1145_SON/lotka_volterra.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should rebuild solution-dependent behavioral sources and UIC state for every parameter step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.

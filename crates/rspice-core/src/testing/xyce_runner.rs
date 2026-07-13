@@ -20758,14 +20758,12 @@ impl XyceTestRunner {
         expression: &str,
         params: &crate::netlist::ParamContext,
     ) -> Result<(), String> {
-        let ast = Self::parse_transient_behavioral_expression(element_name, expression, params)?;
-        if Self::expression_depends_on_solution_quantity(&ast) {
-            return Err(format!(
-                "native .STEP .PRINT TRAN comparison does not yet support behavioral expression '{}' on element '{}' because it references circuit nodes or branch currents",
-                expression, element_name
-            ));
-        }
-        Ok(())
+        // Every parameter-step member is reparsed by
+        // `create_perturbed_netlist_multi`, then built by a fresh Engine run.
+        // Behavioral programs therefore receive the member's parameter scope
+        // and may safely retain ordinary solution probes such as V(...) and
+        // I(...), just as they do in an unstepped transient analysis.
+        Self::validate_transient_behavioral_expression(element_name, expression, params)
     }
 
     fn parse_transient_behavioral_expression(
@@ -30316,6 +30314,60 @@ M1 d g s b nmod W=1u L=0.18u
                     amplitude, ..
                 }) => assert_eq!(*amplitude, expected_amp),
                 other => panic!("unexpected Va kind: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn stepped_solution_behavioral_source_rebinds_initial_condition_per_run() {
+        let netlist = Netlist::parse_with_options(
+            "stepped behavioral rebinding\n\
+             .global_param seed=1 gain=0.5\n\
+             B1 0 out I={gain*v(out)}\n\
+             C1 out 0 1\n\
+             .IC V(out)={seed}\n\
+             .TRAN 0 1 UIC\n\
+             .STEP seed LIST 1 2\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                statistical_mode: crate::netlist::StatisticalParamMode::Sample,
+                expression_dialect: ExpressionDialect::Xyce,
+            },
+        )
+        .expect("deck parses");
+        let steps = XyceTestRunner::step_commands(&netlist).expect("step parses");
+        let engine = Engine::new(SimulationConfig::default());
+
+        let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &steps)
+            .expect("parameter steps reparse into fresh netlists");
+
+        assert_eq!(runs.len(), 2);
+        for (run, expected_seed) in runs.iter().zip([1.0, 2.0]) {
+            assert_eq!(run.netlist.params.get("seed"), Some(expected_seed));
+            assert_eq!(run.netlist.initial_conditions.len(), 1);
+            assert!(
+                run.netlist.initial_conditions[0]
+                    .node
+                    .eq_ignore_ascii_case("out")
+            );
+            assert_eq!(run.netlist.initial_conditions[0].voltage, expected_seed);
+            let source = run
+                .netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("B1"))
+                .expect("behavioral source remains present");
+            match &source.kind {
+                ElementKind::BehavioralCurrent { expression, .. } => {
+                    let prepared = prepare_behavioral_expression(expression, &run.netlist.params)
+                        .expect("member expression prepares in its own parameter scope");
+                    let ast = parse_expression_strict(&prepared)
+                        .expect("solution-dependent expression compiles per member");
+                    assert!(XyceTestRunner::expression_depends_on_solution_quantity(
+                        &ast
+                    ));
+                }
+                other => panic!("unexpected B1 kind: {other:?}"),
             }
         }
     }
