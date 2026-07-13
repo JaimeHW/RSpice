@@ -561,6 +561,8 @@ class AcSensitivityResult:
 @final
 class ElementSensitivity:
     @property
+    def vector_name(self) -> str: ...
+    @property
     def element(self) -> str: ...
     @property
     def element_type(self) -> str: ...
@@ -583,6 +585,8 @@ class SensitivityResult:
     def output_value(self) -> float: ...
     @property
     def sensitivities(self) -> list[ElementSensitivity]: ...
+    @property
+    def vector_names(self) -> list[str]: ...
     def __len__(self) -> int: ...
     def get(
         self, element: str, parameter: str | None = None
@@ -1184,6 +1188,14 @@ class Engine:
         netlist: Netlist,
         output_node: int | str,
         reference_node: int | str | None = None,
+    ) -> SensitivityResult: ...
+    def run_sensitivity_dc_complete(
+        self,
+        netlist: Netlist,
+        output: int | str,
+        reference: int | str | None = None,
+        filters: Sequence[str] | None = None,
+        output_is_current: bool = False,
     ) -> SensitivityResult: ...
     def run_sensitivity_ac(
         self,

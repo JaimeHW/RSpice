@@ -950,6 +950,44 @@ impl PyEngine {
         Ok(PySensitivityResult::from_core(&result))
     }
 
+    fn sensitivity_dc_complete_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output: &NodeIdentifier,
+        reference: Option<&NodeIdentifier>,
+        output_is_current: bool,
+        filters: &[String],
+    ) -> PyResult<PySensitivityResult> {
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let output = if output_is_current {
+            if reference.is_some() {
+                return Err(PyValueError::new_err(
+                    "a branch-current sensitivity output cannot have a reference node",
+                ));
+            }
+            let NodeIdentifier::Name(element) = output else {
+                return Err(PyTypeError::new_err(
+                    "a branch-current sensitivity output must be an element name",
+                ));
+            };
+            AcSensitivityOutput::BranchCurrent(element.clone())
+        } else {
+            let positive =
+                self.resolve_node(&engine, &netlist.inner, output, "DC sensitivity output")?;
+            let negative = reference
+                .map(|node| {
+                    self.resolve_node(&engine, &netlist.inner, node, "DC sensitivity reference")
+                })
+                .transpose()?;
+            AcSensitivityOutput::Voltage { positive, negative }
+        };
+        let result = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_sensitivity_dc_complete_with_abort(&netlist.inner, output, filters, abort)
+        })?;
+        Ok(PySensitivityResult::from_core(&result))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn sensitivity_ac_complete_impl(
         &self,
@@ -1664,25 +1702,17 @@ impl PyEngine {
                             describe_analysis(analysis),
                         ));
                     } else {
-                        if *output_is_current {
-                            return Err(crate::errors::SimulationError::new_err(
-                                "DC .SENS I(element) is not supported by the current DC adjoint solver",
-                            ));
-                        }
-                        if !filters.is_empty() {
-                            return Err(crate::errors::SimulationError::new_err(
-                                "DC .SENS device filters are not supported by the current DC adjoint solver",
-                            ));
-                        }
                         let output = NodeIdentifier::Name(output_node.clone());
                         let reference = reference_node
                             .as_ref()
                             .map(|name| NodeIdentifier::Name(name.clone()));
-                        sensitivity = Some(self.sensitivity_linearized_impl(
+                        sensitivity = Some(self.sensitivity_dc_complete_impl(
                             py,
                             netlist,
                             &output,
                             reference.as_ref(),
+                            *output_is_current,
+                            filters,
                         )?);
                         records.push(PyAnalysisRecord::executed(
                             "sens",
@@ -2880,6 +2910,31 @@ impl PyEngine {
         reference_node: Option<NodeIdentifier>,
     ) -> PyResult<PySensitivityResult> {
         self.sensitivity_linearized_impl(py, netlist, &output_node, reference_node.as_ref())
+    }
+
+    /// Run complete netlist-wide DC sensitivity.
+    ///
+    /// Covers every eligible real instance/model/source parameter across
+    /// flattened hierarchy. Outputs may be differential voltages or branch
+    /// currents, and SPICE wildcard filters select devices or parameters.
+    #[pyo3(signature = (netlist, output, reference=None, filters=None, output_is_current=false))]
+    fn run_sensitivity_dc_complete(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output: NodeIdentifier,
+        reference: Option<NodeIdentifier>,
+        filters: Option<Vec<String>>,
+        output_is_current: bool,
+    ) -> PyResult<PySensitivityResult> {
+        self.sensitivity_dc_complete_impl(
+            py,
+            netlist,
+            &output,
+            reference.as_ref(),
+            output_is_current,
+            filters.as_deref().unwrap_or(&[]),
+        )
     }
 
     /// Run AC sensitivity analysis

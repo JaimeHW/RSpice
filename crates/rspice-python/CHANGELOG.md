@@ -21,6 +21,10 @@ Release numbers remain tied to the workspace version.
   filters, differential-voltage and branch-current outputs, normalized,
   magnitude, phase, and dB derivatives, direct APIs, deck execution, and
   cooperative cancellation.
+- Complete netlist-wide DC `.SENS` analysis with nonlinear instance/model
+  parameters, flattened hierarchy, differential-voltage and branch-current
+  outputs, device/parameter filters, normalized derivatives, direct APIs,
+  deck execution, and cooperative cancellation.
 - Standards-equivalent `.SP donoise` analysis with a full complex Hermitian
   N-port Norton current-noise correlation matrix (`Cy`) and two-port `Rn`,
   matched `NF`, `NFmin`, and `Sopt`, available from deck execution and the

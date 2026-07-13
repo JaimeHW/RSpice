@@ -130,6 +130,8 @@ impl AcSensitivityResult {
 /// A single sensitivity value
 #[derive(Debug, Clone)]
 pub struct Sensitivity {
+    /// Stable SPICE-compatible vector name (`R1`, `M1_W`, `MOD:VTO`, ...).
+    pub vector_name: String,
     /// Element name (e.g., "R1", "C2")
     pub element: String,
     /// Element type
@@ -166,6 +168,7 @@ impl Sensitivity {
         };
 
         Self {
+            vector_name: element.to_string(),
             element: element.to_string(),
             element_type,
             parameter: parameter.to_string(),
@@ -181,6 +184,29 @@ impl Sensitivity {
         // S percent output change. The numeric percent-per-percent value is
         // therefore the normalized sensitivity itself, not 100*S.
         self.normalized
+    }
+
+    /// Create an entry with a distinct SPICE vector name.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_named(
+        vector_name: &str,
+        element: &str,
+        element_type: ElementType,
+        parameter: &str,
+        nominal: Value,
+        absolute: Value,
+        output_value: Value,
+    ) -> Self {
+        let mut sensitivity = Self::new(
+            element,
+            element_type,
+            parameter,
+            nominal,
+            absolute,
+            output_value,
+        );
+        sensitivity.vector_name = vector_name.to_string();
+        sensitivity
     }
 }
 
@@ -212,7 +238,9 @@ impl SensitivityResult {
 
     /// Get sensitivity for a specific element
     pub fn get(&self, element: &str) -> Option<&Sensitivity> {
-        self.sensitivities.iter().find(|s| s.element == element)
+        self.sensitivities.iter().find(|s| {
+            s.vector_name.eq_ignore_ascii_case(element) || s.element.eq_ignore_ascii_case(element)
+        })
     }
 
     /// Get top N most sensitive elements by absolute normalized sensitivity

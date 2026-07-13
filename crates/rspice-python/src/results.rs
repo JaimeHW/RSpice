@@ -2463,6 +2463,8 @@ impl PyAcSensitivityResult {
 #[derive(Debug, Clone)]
 pub struct PyElementSensitivity {
     #[pyo3(get)]
+    pub vector_name: String,
+    #[pyo3(get)]
     pub element: String,
     #[pyo3(get)]
     pub element_type: String,
@@ -2479,6 +2481,7 @@ pub struct PyElementSensitivity {
 impl PyElementSensitivity {
     fn from_core(value: &rspice_core::analysis::Sensitivity) -> Self {
         Self {
+            vector_name: value.vector_name.clone(),
             element: value.element.clone(),
             element_type: format!("{:?}", value.element_type),
             parameter: value.parameter.clone(),
@@ -2498,8 +2501,8 @@ impl PyElementSensitivity {
 
     fn __repr__(&self) -> String {
         format!(
-            "ElementSensitivity(element='{}', parameter='{}', absolute={:.6e}, normalized={:.6e})",
-            self.element, self.parameter, self.absolute, self.normalized
+            "ElementSensitivity(vector_name='{}', element='{}', parameter='{}', absolute={:.6e}, normalized={:.6e})",
+            self.vector_name, self.element, self.parameter, self.absolute, self.normalized
         )
     }
 }
@@ -2536,6 +2539,14 @@ impl PySensitivityResult {
         self.sensitivities.clone()
     }
 
+    #[getter]
+    fn vector_names(&self) -> Vec<String> {
+        self.sensitivities
+            .iter()
+            .map(|value| value.vector_name.clone())
+            .collect()
+    }
+
     fn __len__(&self) -> usize {
         self.sensitivities.len()
     }
@@ -2546,7 +2557,8 @@ impl PySensitivityResult {
         self.sensitivities
             .iter()
             .find(|value| {
-                value.element.eq_ignore_ascii_case(element)
+                (value.vector_name.eq_ignore_ascii_case(element)
+                    || value.element.eq_ignore_ascii_case(element))
                     && parameter
                         .is_none_or(|parameter| value.parameter.eq_ignore_ascii_case(parameter))
             })
@@ -2565,7 +2577,7 @@ impl PySensitivityResult {
             b.normalized
                 .abs()
                 .total_cmp(&a.normalized.abs())
-                .then_with(|| a.element.cmp(&b.element))
+                .then_with(|| a.vector_name.cmp(&b.vector_name))
         });
         values.truncate(count);
         values

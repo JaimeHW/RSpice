@@ -2051,6 +2051,224 @@ impl Engine {
         }
     }
 
+    fn dc_sensitivity_output_value(
+        result: &SimulationResult,
+        output: &AcSensitivityOutput,
+    ) -> Result<Value, SimulationError> {
+        match output {
+            AcSensitivityOutput::Voltage { positive, negative } => {
+                let positive_value = result.try_voltage(*positive).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "DC sensitivity output node {positive} is outside the solved node range"
+                    ))
+                })?;
+                let negative_value = negative
+                    .map(|node| {
+                        result.try_voltage(node).ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "DC sensitivity reference node {node} is outside the solved node range"
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(0.0);
+                Ok(positive_value - negative_value)
+            }
+            AcSensitivityOutput::BranchCurrent(element) => {
+                let matches = result
+                    .branch_names
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, name)| name.eq_ignore_ascii_case(element))
+                    .map(|(index, _)| index)
+                    .collect::<Vec<_>>();
+                match matches.as_slice() {
+                    [] => Err(SimulationError::Circuit(format!(
+                        "DC sensitivity branch-current output '{element}' was not found"
+                    ))),
+                    [index] => result.branch_currents.get(*index).copied().ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "DC sensitivity branch-current result is malformed".to_string(),
+                        )
+                    }),
+                    _ => Err(SimulationError::Circuit(format!(
+                        "DC sensitivity branch-current output '{element}' is ambiguous"
+                    ))),
+                }
+            }
+        }
+    }
+
+    fn dc_sensitivity_target_active(target: &AcSensitivityTarget) -> bool {
+        !matches!(
+            target.location,
+            AcSensitivityLocation::SourceAcMagnitude { .. }
+                | AcSensitivityLocation::SourceAcPhaseDegrees { .. }
+        )
+    }
+
+    /// Run complete netlist-wide DC sensitivity for every eligible real
+    /// parameter in the flattened circuit. Unlike the legacy adjoint helper,
+    /// this covers nonlinear devices, models, hierarchy, branch-current
+    /// outputs, and SPICE device filters.
+    pub fn run_sensitivity_dc_complete(
+        &self,
+        netlist: &Netlist,
+        output: AcSensitivityOutput,
+        filters: &[String],
+    ) -> Result<SensitivityResult, SimulationError> {
+        self.run_sensitivity_dc_complete_with_abort(netlist, output, filters, &NoAbort)
+    }
+
+    /// Complete DC sensitivity with cooperative cancellation.
+    pub fn run_sensitivity_dc_complete_with_abort(
+        &self,
+        netlist: &Netlist,
+        output: AcSensitivityOutput,
+        filters: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<SensitivityResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if let AcSensitivityOutput::Voltage { positive: 0, .. } = output {
+            return Err(SimulationError::Circuit(
+                "Sensitivity output node must not be ground".to_string(),
+            ));
+        }
+        if let AcSensitivityOutput::Voltage {
+            positive,
+            negative: Some(negative),
+        } = output
+            && positive == negative
+        {
+            return Err(SimulationError::Circuit(
+                "Sensitivity output and reference nodes must differ".to_string(),
+            ));
+        }
+
+        let flat = Self::flattened_sensitivity_netlist(netlist)?;
+        let nominal_result = self.run_dc_op_with_abort(&flat, abort)?;
+        let nominal_output = Self::dc_sensitivity_output_value(&nominal_result, &output)?;
+        let targets = Self::collect_ac_sensitivity_targets(&flat)?
+            .into_iter()
+            .filter(Self::dc_sensitivity_target_active)
+            .filter(|target| Self::sensitivity_target_selected(target, filters))
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            let detail = if filters.is_empty() {
+                "the flattened circuit has no eligible real-valued DC parameters".to_string()
+            } else {
+                format!("no DC parameter matched filter(s) {}", filters.join(", "))
+            };
+            return Err(SimulationError::Circuit(format!(
+                "DC sensitivity cannot run: {detail}"
+            )));
+        }
+
+        let output_name = match &output {
+            AcSensitivityOutput::Voltage { positive, negative } => negative.map_or_else(
+                || format!("V({positive})"),
+                |negative| format!("V({positive},{negative})"),
+            ),
+            AcSensitivityOutput::BranchCurrent(element) => format!("I({element})"),
+        };
+        let mut result = SensitivityResult::new(&output_name, nominal_output);
+        result.sensitivities.reserve(targets.len());
+
+        for target in targets {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let h = Self::complete_sensitivity_step(&target);
+            let mut plus_netlist = flat.clone();
+            let mut minus_netlist = flat.clone();
+            Self::apply_ac_sensitivity_target(
+                &mut plus_netlist,
+                &target,
+                target.nominal_value + h,
+            )?;
+            Self::apply_ac_sensitivity_target(
+                &mut minus_netlist,
+                &target,
+                target.nominal_value - h,
+            )?;
+
+            let plus = self.run_dc_op_with_abort(&plus_netlist, abort);
+            let minus = self.run_dc_op_with_abort(&minus_netlist, abort);
+            let derivative = match (plus, minus) {
+                (Ok(plus), Ok(minus)) => {
+                    (Self::dc_sensitivity_output_value(&plus, &output)?
+                        - Self::dc_sensitivity_output_value(&minus, &output)?)
+                        / (2.0 * h)
+                }
+                (Ok(plus), Err(minus_error)) => {
+                    let mut plus_two_netlist = flat.clone();
+                    Self::apply_ac_sensitivity_target(
+                        &mut plus_two_netlist,
+                        &target,
+                        target.nominal_value + 2.0 * h,
+                    )?;
+                    let plus_two = self
+                        .run_dc_op_with_abort(&plus_two_netlist, abort)
+                        .map_err(|plus_two_error| {
+                            SimulationError::Circuit(format!(
+                                "DC sensitivity '{}' failed for the negative and second positive perturbations: {}; {}",
+                                target.vector_name, minus_error, plus_two_error
+                            ))
+                        })?;
+                    (-3.0 * nominal_output
+                        + 4.0 * Self::dc_sensitivity_output_value(&plus, &output)?
+                        - Self::dc_sensitivity_output_value(&plus_two, &output)?)
+                        / (2.0 * h)
+                }
+                (Err(plus_error), Ok(minus)) => {
+                    let mut minus_two_netlist = flat.clone();
+                    Self::apply_ac_sensitivity_target(
+                        &mut minus_two_netlist,
+                        &target,
+                        target.nominal_value - 2.0 * h,
+                    )?;
+                    let minus_two = self
+                        .run_dc_op_with_abort(&minus_two_netlist, abort)
+                        .map_err(|minus_two_error| {
+                            SimulationError::Circuit(format!(
+                                "DC sensitivity '{}' failed for the positive and second negative perturbations: {}; {}",
+                                target.vector_name, plus_error, minus_two_error
+                            ))
+                        })?;
+                    (3.0 * nominal_output
+                        - 4.0 * Self::dc_sensitivity_output_value(&minus, &output)?
+                        + Self::dc_sensitivity_output_value(&minus_two, &output)?)
+                        / (2.0 * h)
+                }
+                (Err(plus_error), Err(minus_error)) => {
+                    return Err(SimulationError::Circuit(format!(
+                        "DC sensitivity '{}' failed at both perturbations: positive: {}; negative: {}",
+                        target.vector_name, plus_error, minus_error
+                    )));
+                }
+            };
+            if !derivative.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "DC sensitivity '{}' produced a non-finite derivative",
+                    target.vector_name
+                )));
+            }
+            result.add(Sensitivity::new_named(
+                &target.vector_name,
+                &target.element,
+                target.element_type,
+                &target.parameter,
+                target.nominal_value,
+                derivative,
+                nominal_output,
+            ));
+        }
+
+        Ok(result)
+    }
+
     /// Run complete AC sensitivity for every eligible real-valued parameter
     /// in the flattened netlist. The returned derivatives are complex and
     /// unnormalized, matching SPICE `.SENS AC` semantics; normalized,
@@ -2280,6 +2498,90 @@ R1 in out 1k
 R2 out 0 1k
 .end
 ";
+
+    const DC_DIVIDER: &str = "\
+DC sensitivity divider
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.end
+";
+
+    #[test]
+    fn complete_dc_sensitivity_reports_device_and_source_derivatives() {
+        let netlist = Netlist::parse(DC_DIVIDER).expect("deck parses");
+        let result = Engine::default()
+            .run_sensitivity_dc_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 2,
+                    negative: None,
+                },
+                &[],
+            )
+            .expect("complete DC sensitivity runs");
+        assert!(
+            (result.output_value - 5.0).abs() < 1e-9,
+            "output={}",
+            result.output_value
+        );
+        let r1 = result.get("R1").expect("R1 sensitivity");
+        let r2 = result.get("R2").expect("R2 sensitivity");
+        let v1 = result.get("V1").expect("source sensitivity");
+        assert!((r1.absolute + 2.5e-3).abs() < 1e-8);
+        assert!((r2.absolute - 2.5e-3).abs() < 1e-8);
+        assert!((v1.absolute - 0.5).abs() < 1e-9);
+        assert!((r1.normalized + 0.5).abs() < 2e-7);
+    }
+
+    #[test]
+    fn complete_dc_sensitivity_supports_branch_current_and_filters() {
+        let netlist = Netlist::parse(DC_DIVIDER).expect("deck parses");
+        let result = Engine::default()
+            .run_sensitivity_dc_complete(
+                &netlist,
+                AcSensitivityOutput::BranchCurrent("v1".to_string()),
+                &["R1".to_string()],
+            )
+            .expect("branch-current DC sensitivity runs");
+        assert_eq!(result.output, "I(v1)");
+        assert_eq!(result.len(), 1);
+        assert!((result.output_value + 5.0e-3).abs() < 1e-12);
+        assert!((result.sensitivities[0].absolute - 2.5e-6).abs() < 1e-11);
+    }
+
+    #[test]
+    fn complete_dc_sensitivity_flattens_hierarchy_and_filters_parameters() {
+        let netlist = Netlist::parse(
+            "Hierarchical DC sensitivity\n\
+V1 in 0 10\n\
+XDIV in out DIVIDER\n\
+.subckt DIVIDER input output\n\
+RTOP input output 1k\n\
+RBOT output 0 1k\n\
+.ends\n\
+.end\n",
+        )
+        .expect("deck parses");
+        let result = Engine::default()
+            .run_sensitivity_dc_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 2,
+                    negative: None,
+                },
+                &["*RTOP".to_string()],
+            )
+            .expect("hierarchical filtered DC sensitivity runs");
+        assert_eq!(result.len(), 1);
+        assert!(
+            result.sensitivities[0]
+                .vector_name
+                .to_ascii_uppercase()
+                .ends_with("RTOP")
+        );
+        assert!((result.sensitivities[0].absolute + 2.5e-3).abs() < 1e-8);
+    }
 
     #[test]
     fn complete_ac_sensitivity_reports_complex_device_and_source_derivatives() {

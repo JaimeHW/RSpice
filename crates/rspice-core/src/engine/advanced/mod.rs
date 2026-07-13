@@ -19,7 +19,7 @@ use crate::analysis::noise::{
 };
 use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
 use crate::analysis::sensitivity::{
-    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType,
+    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
     SensitivityAnalyzer, SensitivityResult,
 };
 use crate::device::semiconductor::{

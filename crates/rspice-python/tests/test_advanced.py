@@ -262,6 +262,60 @@ R2 out 0 1k
         assert report.sensitivity.output_value == pytest.approx(5.0, abs=1e-9)
         assert report.analyses_run == ["sens"]
 
+    def test_complete_dc_sensitivity_is_netlist_wide_and_filterable(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* Complete DC sensitivity
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.end
+"""
+        )
+        result = engine.run_sensitivity_dc_complete(netlist, "out", filters=["R*"])
+        assert isinstance(result, rspice.SensitivityResult)
+        assert result.output == "V(2)"
+        assert result.output_value == pytest.approx(5.0, abs=1e-9)
+        assert result.vector_names == ["R1", "R2"]
+        assert result.get("R1").vector_name == "R1"
+        assert result.get("R1").absolute == pytest.approx(-2.5e-3, rel=1e-6)
+        assert result.get("R2").absolute == pytest.approx(2.5e-3, rel=1e-6)
+        assert result.get("R1").normalized == pytest.approx(-0.5, rel=1e-6)
+
+    def test_complete_dc_sensitivity_supports_branch_current_output(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* Branch current DC sensitivity
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.end
+"""
+        )
+        result = engine.run_sensitivity_dc_complete(
+            netlist, "V1", filters=["R1"], output_is_current=True
+        )
+        assert result.output == "I(V1)"
+        assert result.output_value == pytest.approx(-5e-3, rel=1e-9)
+        assert result.vector_names == ["R1"]
+        assert result.get("R1").absolute == pytest.approx(2.5e-6, rel=1e-6)
+
+    def test_engine_run_executes_filtered_branch_current_dc_sensitivity(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* Filtered branch-current SENS directive
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.sens I(V1) R1
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert report.sensitivity is not None
+        assert report.sensitivity.output == "I(V1)"
+        assert report.sensitivity.vector_names == ["R1"]
+        assert report.sensitivity.get("R1").absolute == pytest.approx(2.5e-6, rel=1e-6)
+        assert report.analyses_run == ["sens"]
+        assert report.skipped == []
+
     def test_divider_sensitivity_matches_analytic(self, engine, param_divider):
         # V(out) = 10 * 1k / (rval + 1k); dV/drval at 1k = -10*1k/(2k)^2.
         sens = engine.run_sensitivity(param_divider, "out", "rval", 1000.0)

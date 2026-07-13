@@ -319,6 +319,7 @@ R2 out 0 1k
 .end
 """)
 s = engine.run_sensitivity(divider, "out", "rval", 1e3)
+s_dc = engine.run_sensitivity_dc_complete(divider, "out", filters=["R*"])
 s_ac = engine.run_sensitivity_ac(divider, "out", "rval", 1e3, [1e3, 1e4])
 complete = engine.run_sensitivity_ac_complete(
     divider,
