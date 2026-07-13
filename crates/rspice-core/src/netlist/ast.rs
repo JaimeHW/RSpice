@@ -1877,6 +1877,52 @@ impl TransientLteReference {
     }
 }
 
+/// Xyce nonlinear solve/continuation policy selected by
+/// `.OPTIONS NONLIN CONTINUATION=...`.
+///
+/// The variants preserve the canonical Xyce selectors so configuration
+/// resolution never silently turns an unsupported continuation algorithm into
+/// a different solve. Execution sites must explicitly match the modes they
+/// implement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonlinearContinuationMode {
+    Standard,
+    Natural,
+    Mosfet,
+    Gmin,
+    PseudoTransient,
+    SimultaneousSourceStep,
+    SequentialSourceStep,
+}
+
+impl NonlinearContinuationMode {
+    /// Canonical numeric selector accepted by Xyce 7.10.
+    pub fn xyce_selector(self) -> i64 {
+        match self {
+            Self::Standard => 0,
+            Self::Natural => 1,
+            Self::Mosfet => 2,
+            Self::Gmin => 3,
+            Self::PseudoTransient => 9,
+            Self::SimultaneousSourceStep => 34,
+            Self::SequentialSourceStep => 35,
+        }
+    }
+
+    pub fn from_xyce_selector(selector: i64) -> Option<Self> {
+        match selector {
+            0 => Some(Self::Standard),
+            1 => Some(Self::Natural),
+            2 => Some(Self::Mosfet),
+            3 => Some(Self::Gmin),
+            9 => Some(Self::PseudoTransient),
+            34 => Some(Self::SimultaneousSourceStep),
+            35 => Some(Self::SequentialSourceStep),
+            _ => None,
+        }
+    }
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -1886,6 +1932,8 @@ pub struct SimulationOptions {
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
+    /// Explicit Xyce nonlinear continuation policy.
+    pub nonlinear_continuation: Option<NonlinearContinuationMode>,
     /// Relative tolerance for convergence (default: 1e-3)
     pub reltol: Option<Value>,
     /// Absolute current tolerance (default: 1e-12 A)
@@ -2082,6 +2130,9 @@ impl SimulationOptions {
         }
         if other.b3soi_gmin_scaling.is_some() {
             self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;
+        }
+        if other.nonlinear_continuation.is_some() {
+            self.nonlinear_continuation = other.nonlinear_continuation;
         }
         if !other.hb_num_frequencies.is_empty() {
             self.hb_num_frequencies = other.hb_num_frequencies.clone();

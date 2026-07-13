@@ -9113,4 +9113,45 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn xyce_nonlinear_continuation_aliases_and_selectors_are_typed() {
+        use NonlinearContinuationMode as Mode;
+
+        for (value, expected) in [
+            ("standard", Mode::Standard),
+            ("natural", Mode::Natural),
+            ("mos", Mode::Mosfet),
+            ("gmin", Mode::Gmin),
+            ("pseudo", Mode::PseudoTransient),
+            ("sourcestep", Mode::SimultaneousSourceStep),
+            ("sourcestep2", Mode::SequentialSourceStep),
+            ("0", Mode::Standard),
+            ("1", Mode::Natural),
+            ("2", Mode::Mosfet),
+            ("3", Mode::Gmin),
+            ("9", Mode::PseudoTransient),
+            ("34", Mode::SimultaneousSourceStep),
+            ("35", Mode::SequentialSourceStep),
+        ] {
+            let deck = format!("typed continuation\n.options nonlin continuation={value}\n.end\n");
+            let netlist = Netlist::parse(&deck).expect("continuation mode should parse");
+            assert_eq!(netlist.options.nonlinear_continuation, Some(expected));
+            assert_eq!(
+                Mode::from_xyce_selector(expected.xyce_selector()),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_nonlinear_continuation_rejects_unknown_modes() {
+        for value in ["arbitrary", "4", "33", "1.5"] {
+            let deck = format!("bad continuation\n.options nonlin continuation={value}\n.end\n");
+            let message = Netlist::parse(&deck)
+                .expect_err("unknown continuation mode must fail closed")
+                .to_string();
+            assert!(message.contains("CONTINUATION"), "{message}");
+        }
+    }
 }

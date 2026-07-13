@@ -1,7 +1,7 @@
 //! Engine configuration types.
 
 use crate::Value;
-use crate::netlist::TransientLteReference;
+use crate::netlist::{NonlinearContinuationMode, TransientLteReference};
 
 /// Broad SPICE compatibility policy for internal device-model selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -160,6 +160,9 @@ impl SimulationConfig {
 /// computational cost.
 #[derive(Debug, Clone)]
 pub struct ConvergenceConfig {
+    /// Explicit netlist-selected nonlinear continuation policy. `None` uses
+    /// the frontend's normal convergence-aid sequence.
+    pub nonlinear_continuation: Option<NonlinearContinuationMode>,
     /// Enable GMIN stepping (small conductances to ground)
     pub gmin_stepping: bool,
     /// Enable source stepping (ramp sources from 0 to 100%)
@@ -222,6 +225,7 @@ pub enum DampingStrategy {
 impl Default for ConvergenceConfig {
     fn default() -> Self {
         Self {
+            nonlinear_continuation: None,
             gmin_stepping: true,
             source_stepping: true,
             pseudo_transient: true,

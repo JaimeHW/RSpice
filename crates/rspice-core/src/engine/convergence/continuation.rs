@@ -2,6 +2,132 @@
 
 use super::*;
 
+/// Controls the predictor step used by monotonic source continuation.
+///
+/// Keeping this policy separate from the corrector makes explicit LOCA runs
+/// reproducible without changing the robust fallback policy used by ordinary
+/// operating-point solves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SourceContinuationPolicy {
+    initial_step: Value,
+    maximum_step: Value,
+    minimum_step: Value,
+    aggressiveness: Value,
+    maximum_steps: usize,
+    corrector_iterations: usize,
+}
+
+#[cfg(test)]
+mod source_continuation_policy_tests {
+    use super::{SourceContinuationPolicy, explicit_source_continuation_policy};
+    use crate::netlist::NonlinearContinuationMode;
+
+    #[test]
+    fn xyce_simultaneous_policy_matches_loca_defaults() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+        assert_eq!(policy.initial_step, 0.2);
+        assert_eq!(policy.maximum_step, 0.2);
+        assert_eq!(policy.minimum_step, 1.0e-4);
+        assert_eq!(policy.aggressiveness, 1.0);
+        assert_eq!(policy.maximum_steps, 400);
+        assert_eq!(policy.corrector_iterations, 20);
+    }
+
+    #[test]
+    fn xyce_success_adapts_from_corrector_work_and_clips_to_maximum() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+
+        // 10/20 unused iterations gives a 1 + (1/2)^2 = 1.25 factor.
+        assert!((policy.step_after_success(0.1, 10) - 0.125).abs() < 1.0e-15);
+        // A zero-iteration corrector doubles the step, then the configured
+        // maximum clips it.
+        assert!((policy.step_after_success(0.15, 0) - 0.2).abs() < 1.0e-15);
+        // A fully spent corrector budget neither grows nor shrinks a success.
+        assert!((policy.step_after_success(0.1, 20) - 0.1).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn xyce_failure_halves_until_the_minimum_step() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+        assert_eq!(policy.step_after_failure(0.2), Some(0.1));
+        assert_eq!(policy.step_after_failure(2.0e-4), Some(1.0e-4));
+        assert_eq!(policy.step_after_failure(1.0e-4), None);
+    }
+
+    #[test]
+    fn only_explicit_simultaneous_source_step_selects_this_policy() {
+        assert_eq!(
+            explicit_source_continuation_policy(Some(
+                NonlinearContinuationMode::SimultaneousSourceStep
+            )),
+            Some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
+        );
+        assert_eq!(
+            explicit_source_continuation_policy(Some(NonlinearContinuationMode::Natural)),
+            None
+        );
+        assert_eq!(explicit_source_continuation_policy(None), None);
+    }
+}
+
+impl SourceContinuationPolicy {
+    /// Xyce/LOCA natural-parameter defaults used by simultaneous source
+    /// stepping when the deck explicitly requests continuation.
+    pub(crate) const XYCE_SIMULTANEOUS: Self = Self {
+        initial_step: 0.2,
+        maximum_step: 0.2,
+        minimum_step: 1.0e-4,
+        aggressiveness: 1.0,
+        maximum_steps: 400,
+        corrector_iterations: 20,
+    };
+
+    const ROBUST_FALLBACK: Self = Self {
+        initial_step: 0.02,
+        maximum_step: 0.2,
+        minimum_step: 1.0e-4,
+        // A negative value selects the established fixed 1.35 growth factor.
+        aggressiveness: -1.0,
+        maximum_steps: 512,
+        corrector_iterations: 0,
+    };
+
+    fn corrector_budget(self, engine: &Engine) -> usize {
+        if self.corrector_iterations == 0 {
+            engine.continuation_iteration_budget(20, 16)
+        } else {
+            self.corrector_iterations
+        }
+    }
+
+    fn step_after_success(self, step: Value, used_iterations: usize) -> Value {
+        let growth = if self.aggressiveness < 0.0 {
+            1.35
+        } else {
+            let iteration_fraction = self.corrector_iterations.saturating_sub(used_iterations)
+                as Value
+                / self.corrector_iterations.max(1) as Value;
+            1.0 + self.aggressiveness * iteration_fraction * iteration_fraction
+        };
+        (step * growth).min(self.maximum_step)
+    }
+
+    fn step_after_failure(self, step: Value) -> Option<Value> {
+        let reduced = step * 0.5;
+        (reduced >= self.minimum_step).then_some(reduced)
+    }
+}
+
+pub(in crate::engine::convergence) fn explicit_source_continuation_policy(
+    mode: Option<crate::netlist::NonlinearContinuationMode>,
+) -> Option<SourceContinuationPolicy> {
+    matches!(
+        mode,
+        Some(crate::netlist::NonlinearContinuationMode::SimultaneousSourceStep)
+    )
+    .then_some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
+}
+
 impl Engine {
     pub(in crate::engine::convergence) fn build_descending_schedule(
         mut start: Value,
@@ -179,13 +305,29 @@ impl Engine {
         initial_guess: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        const INITIAL_SOURCE_STEP: Value = 0.02;
-        const MAX_SOURCE_STEP: Value = 0.2;
-        const MIN_SOURCE_STEP: Value = 1.0e-4;
-        const SOURCE_STEP_GROWTH: Value = 1.35;
-        const SOURCE_STEP_SHRINK: Value = 0.5;
+        self.source_stepping_nonlinear_with_policy_and_abort(
+            circuit,
+            matrix,
+            initial_guess,
+            SourceContinuationPolicy::ROBUST_FALLBACK,
+            abort,
+        )
+    }
+
+    /// Run source continuation with an explicit predictor/corrector policy.
+    ///
+    /// Explicit deck-requested LOCA continuation uses this entry point so it
+    /// can run before direct Newton while ordinary solves retain their existing
+    /// direct-Newton-first fallback sequence.
+    pub(crate) fn source_stepping_nonlinear_with_policy_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        policy: SourceContinuationPolicy,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         const SOURCE_SCALE_EPS: Value = 1.0e-12;
-        const MAX_SOURCE_ATTEMPTS: usize = 512;
 
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
@@ -202,7 +344,7 @@ impl Engine {
         };
         Self::apply_b3soi_pd_initial_guess_correction(&mut solution, circuit);
         let mut damping_state = NewtonDampingState::default();
-        let source_iterations = self.continuation_iteration_budget(20, 16);
+        let source_iterations = policy.corrector_budget(self);
         let mut total_iterations = 0usize;
         let (bootstrap_solution, bootstrap_converged, bootstrap_iterations) = self
             .solve_scaled_nonlinear_corrector(
@@ -228,11 +370,11 @@ impl Engine {
         solution = bootstrap_solution;
 
         let mut accepted_scale = 0.0;
-        let mut source_step = INITIAL_SOURCE_STEP;
+        let mut source_step = policy.initial_step;
         let mut attempts = 0usize;
 
         while accepted_scale < 1.0 - SOURCE_SCALE_EPS {
-            if attempts >= MAX_SOURCE_ATTEMPTS {
+            if attempts >= policy.maximum_steps {
                 circuit.restore_nonlinear_state(entry_state);
                 return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
             }
@@ -269,14 +411,14 @@ impl Engine {
                 solution = candidate;
                 accepted_scale = target_scale;
                 damping_state = trial_damping_state;
-                source_step = (source_step * SOURCE_STEP_GROWTH).min(MAX_SOURCE_STEP);
+                source_step = policy.step_after_success(source_step, used_iterations);
             } else {
                 circuit.restore_nonlinear_state(accepted_state);
-                source_step *= SOURCE_STEP_SHRINK;
-                if source_step < MIN_SOURCE_STEP {
+                let Some(reduced_step) = policy.step_after_failure(source_step) else {
                     circuit.restore_nonlinear_state(entry_state);
                     return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
-                }
+                };
+                source_step = reduced_step;
             }
 
             attempts += 1;

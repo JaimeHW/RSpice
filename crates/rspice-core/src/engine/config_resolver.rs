@@ -107,8 +107,12 @@ pub fn resolve_simulation_config(
     let gmin_target = base.convergence_config.gmin_target;
     let mut junction_gmin_target = base.convergence_config.junction_gmin_target;
     let mut b3soi_gmin_scaling = base.b3soi_gmin_scaling;
+    let mut nonlinear_continuation = base.convergence_config.nonlinear_continuation;
 
     if let Some(opts) = netlist_options {
+        if let Some(mode) = opts.nonlinear_continuation {
+            nonlinear_continuation = Some(mode);
+        }
         if let Some(temp_celsius) = opts.temp {
             temperature = temp_celsius + 273.15;
         }
@@ -274,6 +278,7 @@ pub fn resolve_simulation_config(
     resolved.convergence_config.gmin_initial = gmin_initial;
     resolved.convergence_config.gmin_target = gmin_target;
     resolved.convergence_config.junction_gmin_target = junction_gmin_target;
+    resolved.convergence_config.nonlinear_continuation = nonlinear_continuation;
     resolved.b3soi_gmin_scaling = b3soi_gmin_scaling;
     if resolved.convergence_config.gmin_target > resolved.convergence_config.gmin_initial {
         resolved.convergence_config.gmin_initial = resolved.convergence_config.gmin_target;
@@ -617,6 +622,25 @@ mod tests {
         assert_eq!(
             resolved.resolved_jfet_level2_model(),
             crate::engine::JfetLevel2Model::ParkerSkellern
+        );
+    }
+
+    #[test]
+    fn deck_nonlinear_continuation_mode_propagates_to_engine_config() {
+        use crate::netlist::NonlinearContinuationMode;
+
+        let base = SimulationConfig::default();
+        let options = NetlistSimulationOptions {
+            nonlinear_continuation: Some(NonlinearContinuationMode::SimultaneousSourceStep),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
+
+        assert_eq!(
+            resolved.convergence_config.nonlinear_continuation,
+            Some(NonlinearContinuationMode::SimultaneousSourceStep)
         );
     }
 }

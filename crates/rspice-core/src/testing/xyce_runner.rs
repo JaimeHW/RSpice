@@ -11645,6 +11645,7 @@ impl XyceTestRunner {
             device_zero_resistance_tol,
             b3soi_gmin_scaling,
             hb_num_frequencies,
+            nonlinear_continuation,
         } = options;
         reltol.is_none()
             && abstol.is_none()
@@ -11679,6 +11680,7 @@ impl XyceTestRunner {
             && topology_supernode.is_none()
             && device_zero_resistance_tol.is_none()
             && b3soi_gmin_scaling.is_none()
+            && nonlinear_continuation.is_none()
             && hb_num_frequencies.is_empty()
     }
 

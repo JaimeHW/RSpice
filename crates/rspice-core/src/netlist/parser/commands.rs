@@ -835,6 +835,11 @@ pub(super) fn parse_options_command(
             .map(|package| format!("{package}.{key_upper}"));
 
         match (option_package.as_deref(), key_upper.as_str()) {
+            (Some("NONLIN"), "CONTINUATION") | (Some("NONLIN-CONTINUATION"), "CONTINUATION") => {
+                options.nonlinear_continuation = Some(parse_nonlinear_continuation_option(
+                    stream, line_num, params,
+                )?);
+            }
             (Some("HBINT"), key) if key.starts_with("NUMFREQ") => {
                 let value = expect_value(stream, line_num, params)?;
                 let count = parse_usize_option("HBINT.NUMFREQ", value, line_num)?;
@@ -1259,6 +1264,60 @@ fn parse_method_option(
             ),
         }),
     }
+}
+
+fn parse_nonlinear_continuation_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<crate::netlist::NonlinearContinuationMode, ParseError> {
+    use crate::netlist::NonlinearContinuationMode as Mode;
+
+    if let TokenKind::Ident(name) = &stream.peek().kind {
+        let name = name.clone();
+        let upper = name.to_ascii_uppercase();
+        stream.advance();
+        let mode = if upper.starts_with("SOURCESTEP2") {
+            Some(Mode::SequentialSourceStep)
+        } else if upper.starts_with("SOURCESTEP") {
+            Some(Mode::SimultaneousSourceStep)
+        } else if upper.starts_with("STAN") {
+            Some(Mode::Standard)
+        } else if upper.starts_with("NAT") {
+            Some(Mode::Natural)
+        } else if upper.starts_with("MOS") {
+            Some(Mode::Mosfet)
+        } else if upper.starts_with("GMIN") {
+            Some(Mode::Gmin)
+        } else if upper.starts_with("PSEUDO") {
+            Some(Mode::PseudoTransient)
+        } else {
+            None
+        };
+        return mode.ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unsupported .OPTIONS NONLIN CONTINUATION mode '{name}'; expected STANDARD, NATURAL, MOS, GMIN, PSEUDO, SOURCESTEP, or SOURCESTEP2"
+            ),
+        });
+    }
+
+    let value = expect_value(stream, line_num, params)?;
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".OPTIONS NONLIN CONTINUATION expects an integer selector or mode name, found {value}"
+            ),
+        });
+    }
+    let selector = value as i64;
+    Mode::from_xyce_selector(selector).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "unsupported .OPTIONS NONLIN CONTINUATION selector {selector}; expected 0, 1, 2, 3, 9, 34, or 35"
+        ),
+    })
 }
 
 pub(super) fn parse_global_command(

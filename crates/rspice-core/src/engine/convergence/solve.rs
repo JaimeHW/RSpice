@@ -1,5 +1,6 @@
 //! Linear, nonlinear, and transient operating-point solve entry points.
 
+use super::continuation::explicit_source_continuation_policy;
 use super::*;
 use crate::SpiceDialect;
 
@@ -343,6 +344,24 @@ impl Engine {
         };
         let startup_seed = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
+
+        // An explicit simultaneous source-step request defines the nonlinear
+        // solve path; it is not merely a fallback hint. Run its lambda=0..1
+        // continuation before attempting the physical-system Newton solve.
+        if let Some(policy) = explicit_source_continuation_policy(
+            self.config.convergence_config.nonlinear_continuation,
+        ) {
+            return self.source_stepping_nonlinear_with_policy_and_abort(
+                circuit, matrix, &solution, policy, abort,
+            );
+        }
+        if let Some(mode) = self.config.convergence_config.nonlinear_continuation
+            && mode != crate::netlist::NonlinearContinuationMode::Standard
+        {
+            return Err(SimulationError::Circuit(format!(
+                "nonlinear continuation mode {mode:?} is parsed but has no native solver implementation"
+            )));
+        }
         let mut rhs = vec![0.0; size];
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
