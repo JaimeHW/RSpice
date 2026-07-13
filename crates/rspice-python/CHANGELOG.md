@@ -6,6 +6,10 @@ Release numbers remain tied to the workspace version.
 
 ## Unreleased
 
+- Marked the package as private/Do Not Upload, documented that release
+  artifacts are not published to PyPI, and aligned distribution language with
+  the repository-wide RSpice Personal Use License.
+
 ### Added
 
 - Typed results and direct APIs for AC data sweeps, N-port S-parameters, STB,

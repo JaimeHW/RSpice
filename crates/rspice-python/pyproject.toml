@@ -11,6 +11,7 @@ license = { text = "RSpice Personal Use License" }
 authors = [{ name = "RSpice Contributors" }]
 keywords = ["spice", "circuit", "simulation", "eda", "analog"]
 classifiers = [
+    "Private :: Do Not Upload",
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",

@@ -32,6 +32,11 @@ regression tests in CI the same way you run unit tests.
 
 ## Installation
 
+The Python package is private and is not published to PyPI. Install it from an
+authorized source checkout or from a privately supplied build artifact. Its
+use and distribution are governed by the same RSpice Personal Use License as
+the rest of the repository.
+
 ### From Source
 
 ```bash
@@ -41,11 +46,13 @@ cd crates/rspice-python
 maturin develop --release --locked
 ```
 
-`maturin build --release --locked` produces a redistributable abi3 wheel that
-works on Python 3.10+. Release CI builds manylinux2014 x86-64/AArch64, macOS
-Intel/Apple-Silicon, and Windows x86-64/ARM64 wheels. The same six targets also
-ship version-specific `cp314t` wheels for free-threaded CPython 3.14; the full
-binding suite runs with the GIL disabled on Linux, macOS, and Windows.
+`maturin build --release --locked` produces an installable abi3 wheel for
+authorized testing and private delivery; it does not grant redistribution
+rights. CI builds manylinux2014 x86-64/AArch64, macOS Intel/Apple-Silicon, and
+Windows x86-64/ARM64 wheels as private workflow artifacts and never uploads
+them to PyPI. The same six targets also produce version-specific `cp314t`
+wheels for free-threaded CPython 3.14; the full binding suite runs with the GIL
+disabled on Linux, macOS, and Windows.
 
 The workspace-aware source distribution requires one post-processing step to
 reconcile maturin's pruned workspace with the repository lockfile:
