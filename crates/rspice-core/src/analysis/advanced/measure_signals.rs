@@ -128,7 +128,7 @@ pub fn evaluate_tran_equation_measurements(
     result: &TransientResult,
 ) -> Result<Vec<EquationMeasureTrace>, String> {
     let signals = transient_signal_map(result);
-    evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, false)
+    evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, None)
 }
 
 /// Evaluate Xyce continuous equation measurements over a DC sweep.
@@ -145,7 +145,14 @@ pub fn evaluate_dc_equation_measurements(
         return Ok(Vec::new());
     };
     let signals = series.signal_map();
-    evaluate_equation_measurements(netlist, "DC", series.axis(), &signals, 0.0, true)
+    evaluate_equation_measurements(
+        netlist,
+        "DC",
+        series.axis(),
+        &signals,
+        0.0,
+        Some(dc_primary_sweep_is_ascending(netlist, series.axis())),
+    )
 }
 
 /// Evaluate Xyce continuous equation measurements over an AC sweep.
@@ -163,7 +170,40 @@ pub fn evaluate_ac_equation_measurements(
         return Ok(Vec::new());
     };
     let signals = series.equation_signal_map();
-    evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, false)
+    evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, None)
+}
+
+fn dc_primary_sweep_is_ascending(netlist: &Netlist, axis: &[Value]) -> bool {
+    netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| {
+            let crate::netlist::AnalysisCommand::Dc {
+                start,
+                stop,
+                step,
+                mode,
+                ..
+            } = analysis
+            else {
+                return None;
+            };
+            Some(match mode {
+                crate::netlist::DcSweepMode::Linear if *step != 0.0 => *step > 0.0,
+                crate::netlist::DcSweepMode::List(values) => values
+                    .windows(2)
+                    .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
+                    .unwrap_or(true),
+                crate::netlist::DcSweepMode::Linear
+                | crate::netlist::DcSweepMode::Decade { .. }
+                | crate::netlist::DcSweepMode::Octave { .. } => *stop >= *start,
+            })
+        })
+        .or_else(|| {
+            axis.windows(2)
+                .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
+        })
+        .unwrap_or(true)
 }
 
 /// Shared continuous-equation evaluator for analyses with a real-valued
@@ -174,7 +214,7 @@ fn evaluate_equation_measurements(
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     implicit_default: Value,
-    normalize_window: bool,
+    dc_sweep_ascending: Option<bool>,
 ) -> Result<Vec<EquationMeasureTrace>, String> {
     let mut programs = netlist
         .measurements
@@ -200,7 +240,7 @@ fn evaluate_equation_measurements(
                     statement.name
                 )
             })?;
-            let (from, to) = if normalize_window {
+            let (from, to) = if dc_sweep_ascending.is_some() {
                 match (from, to) {
                     (Some(from), Some(to)) if from > to => (Some(to), Some(from)),
                     bounds => bounds,
@@ -231,7 +271,13 @@ fn evaluate_equation_measurements(
 
     for (row, &axis_value) in axis.iter().enumerate() {
         for program in &mut programs {
-            if equation_axis_is_in_window(axis_value, program.from, program.to, program.td) {
+            if equation_axis_is_in_window(
+                axis_value,
+                program.from,
+                program.to,
+                program.td,
+                dc_sweep_ascending,
+            ) {
                 let bound =
                     bind_equation_expression(&program.expression, row, signals, &current_values)?;
                 let value = crate::netlist::expr::evaluate_complex(&bound, &netlist.params)
@@ -270,11 +316,26 @@ fn equation_axis_is_in_window(
     from: Option<Value>,
     to: Option<Value>,
     td: Option<Value>,
+    dc_sweep_ascending: Option<bool>,
 ) -> bool {
     const XYCE_MEASURE_WINDOW_TOLERANCE: Value = 1.0e-12;
-    td.is_none_or(|bound| axis_value >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
-        && from.is_none_or(|bound| axis_value >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
-        && to.is_none_or(|bound| axis_value <= bound * (1.0 + XYCE_MEASURE_WINDOW_TOLERANCE))
+    let at_or_above =
+        |bound: Value| axis_value >= bound - bound.abs() * XYCE_MEASURE_WINDOW_TOLERANCE;
+    let at_or_below =
+        |bound: Value| axis_value <= bound + bound.abs() * XYCE_MEASURE_WINDOW_TOLERANCE;
+
+    if let Some(ascending) = dc_sweep_ascending {
+        return match (from, to) {
+            (Some(from), Some(to)) => at_or_above(from.min(to)) && at_or_below(from.max(to)),
+            (Some(from), None) if ascending => at_or_above(from),
+            (Some(from), None) => at_or_below(from),
+            (None, Some(to)) if ascending => at_or_below(to),
+            (None, Some(to)) => at_or_above(to),
+            (None, None) => true,
+        };
+    }
+
+    td.is_none_or(at_or_above) && from.is_none_or(at_or_above) && to.is_none_or(at_or_below)
 }
 
 fn bind_equation_expression(
@@ -1385,7 +1446,7 @@ mod tests {
     }
 
     #[test]
-    fn dc_equations_honor_explicit_default_and_inclusive_td() {
+    fn dc_equations_ignore_time_delay_qualifiers() {
         let netlist = Netlist::parse(
             "* continuous DC equation default\n\
              V1 out 0 0\n\
@@ -1398,7 +1459,51 @@ mod tests {
         let traces = evaluate_dc_equation_measurements(&netlist, &dc_equation_sweep())
             .expect("DC equation evaluates");
 
-        assert_eq!(traces[0].values, vec![-7.0, -7.0, 2.0, 3.0, 4.0]);
+        assert_eq!(traces[0].values, vec![0.0, 1.0, 2.0, 3.0, 4.0]);
+        assert!(traces[0].initialized);
+    }
+
+    #[test]
+    fn dc_equations_orient_one_sided_windows_to_descending_sweeps() {
+        let netlist = Netlist::parse(
+            "descending DC equations\n\
+             V1 out 0 0\n\
+             .dc V1 4 0 -1\n\
+             .meas dc from_only EQN {V(out)} FROM=2\n\
+             .meas dc to_only EQN {V(out)} TO=2\n\
+             .meas dc paired EQN {V(out)} FROM=3 TO=1\n\
+             .end\n",
+        )
+        .expect("descending DC equations parse");
+        let sweep = dc_equation_sweep().into_iter().rev().collect::<Vec<_>>();
+
+        let traces = evaluate_dc_equation_measurements(&netlist, &sweep)
+            .expect("descending DC equations evaluate");
+
+        assert_eq!(traces[0].values, vec![0.0, 0.0, 2.0, 1.0, 0.0]);
+        assert_eq!(traces[1].values, vec![4.0, 3.0, 2.0, 2.0, 2.0]);
+        assert_eq!(traces[2].values, vec![0.0, 3.0, 2.0, 1.0, 1.0]);
+        assert!(traces.iter().all(|trace| trace.initialized));
+    }
+
+    #[test]
+    fn dc_equation_singleton_uses_declared_sweep_direction() {
+        let netlist = Netlist::parse(
+            "singleton descending DC equation\n\
+             V1 out 0 0\n\
+             .dc V1 1 1 -1\n\
+             .meas dc bounded EQN {V(out)} FROM=2\n\
+             .end\n",
+        )
+        .expect("singleton descending DC equation parses");
+        let mut point = SimulationResult::new(1, 0);
+        point.node_voltages = vec![0.0, 1.0];
+        point.node_names = vec!["0".to_string(), "out".to_string()];
+
+        let traces = evaluate_dc_equation_measurements(&netlist, &[(1.0, point)])
+            .expect("singleton descending DC equation evaluates");
+
+        assert_eq!(traces[0].values, vec![1.0]);
         assert!(traces[0].initialized);
     }
 
