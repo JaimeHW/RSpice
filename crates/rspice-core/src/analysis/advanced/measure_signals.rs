@@ -1234,6 +1234,40 @@ mod tests {
         assert!(results.iter().all(|result| result.passed));
     }
 
+    #[test]
+    fn dc_average_retains_state_across_secondary_sweep_cycles() {
+        let netlist = Netlist::parse(
+            "nested DC average\n\
+             V1 out 0 0\n\
+             V2 bias 0 0\n\
+             .dc V1 3 1 -1 V2 0 1 1\n\
+             .meas dc combined AVG V(out)\n\
+             .end\n",
+        )
+        .expect("nested DC average parses");
+        let sweep = [
+            (3.0, 9.0),
+            (2.0, 4.0),
+            (1.0, 1.0),
+            (3.0, 19.0),
+            (2.0, 14.0),
+            (1.0, 11.0),
+        ]
+        .into_iter()
+        .map(|(axis, voltage)| {
+            let mut point = SimulationResult::new(1, 0);
+            point.node_voltages = vec![0.0, voltage];
+            point.node_names = vec!["0".to_string(), "out".to_string()];
+            (axis, point)
+        })
+        .collect::<Vec<_>>();
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, Some(58.0 / 6.0));
+        assert!(results[0].passed);
+    }
+
     fn dc_equation_sweep() -> Vec<(Value, SimulationResult)> {
         (0..=4)
             .map(|axis| {

@@ -2312,11 +2312,9 @@ impl XyceTestRunner {
                 execution_dir.as_deref(),
             )?
         };
-        if !measurement_reference_paths.is_empty()
-            && (static_plan.dc_data.is_some() || static_plan.dc.sweep2.is_some())
-        {
+        if !measurement_reference_paths.is_empty() && static_plan.dc_data.is_some() {
             return Err(
-                "scalar DC measurement artifact contract currently requires one ordinary primary sweep"
+                "scalar DC measurement artifact contract does not yet cover .DC DATA sweeps"
                     .to_string(),
             );
         }
