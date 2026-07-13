@@ -770,7 +770,10 @@ fn build_hierarchical_rc_project(app: &mut crate::common::app::AppState) {
         DEFAULT_SCHEMATIC_VIEW,
     );
 
-    app.workspace.project.name = HIERARCHICAL_RC_FILTER.to_owned();
+    app.workspace
+        .project
+        .rename(HIERARCHICAL_RC_FILTER)
+        .expect("built-in example project name is valid");
     app.workspace.project.root_library = DEFAULT_PROJECT_LIBRARY.to_owned();
     app.workspace.project.top_cell = HIERARCHICAL_RC_TOP_CELL.to_owned();
     app.workspace.active_view = top_ref.clone();

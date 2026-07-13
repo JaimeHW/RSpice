@@ -34,7 +34,10 @@ pub use symbol_resolver::{
     ResolvedCellSymbol, ResolvedSymbolIssue, ResolvedSymbolIssueKind, ResolvedSymbolPin,
     ResolvedSymbolSource, SymbolResolver,
 };
-pub use workspace::{CellViewRef, OpenCellView, ProjectDescriptor, ProjectWorkspace, SpecEntry};
+pub use workspace::{
+    CellViewRef, OpenCellView, PROJECT_DESCRIPTOR_SCHEMA_VERSION, ProjectDescriptor,
+    ProjectDescriptorError, ProjectWorkspace, SpecEntry,
+};
 
 #[cfg(test)]
 mod symbol_document_tests {

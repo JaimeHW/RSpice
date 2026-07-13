@@ -73,6 +73,10 @@ pub mod ui;
 /// The IDE shell - menubar, toolbar, workspace tabs, panels, console, status bar
 pub mod shell;
 
+/// Canonical commercial product model, typed identities, command outcomes,
+/// and fail-closed object lifecycles. This layer is UI-framework independent.
+pub mod product;
+
 // =============================================================================
 // Core Infrastructure
 // =============================================================================

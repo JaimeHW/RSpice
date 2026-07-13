@@ -98,6 +98,10 @@ impl ProjectFile {
                 app_version: ProjectVersion::current().to_string(),
             });
         }
+        self.workspace
+            .project
+            .validate()
+            .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
         self.validate_library_tree_keys()?;
         self.validate_workspace_references()?;
         Ok(())
@@ -1425,9 +1429,9 @@ mod tests {
             libraries,
             ProjectSimulationResults::from_state(&simulation),
         );
-        let json = serialize_project_file(&project)
-            .expect("project serializes")
-            .replace("\"schema_version\": 1", "\"schema_version\": 999");
+        let mut value = serde_json::to_value(project).expect("project converts to JSON");
+        value["simulation_results"]["schema_version"] = serde_json::Value::from(999);
+        let json = serde_json::to_string_pretty(&value).expect("fixture serializes");
 
         let loaded = load_project_text(&json, None).expect("workspace still loads");
 
@@ -1678,7 +1682,7 @@ mod tests {
     }
 
     #[test]
-    fn project_text_load_validates_and_overrides_source_path() {
+    fn project_text_load_updates_source_path_without_renaming_identity() {
         let mut libraries = LibraryManager::with_primitives();
         let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
         workspace
@@ -1694,7 +1698,11 @@ mod tests {
             loaded.workspace.project.path.as_deref(),
             Some(Path::new("browser-import.rspiceproj"))
         );
-        assert_eq!(loaded.workspace.project.display_name(), "browser-import");
+        assert_eq!(
+            loaded.workspace.project.display_name(),
+            "stale-native-path",
+            "moving a project file must not silently rename its logical identity"
+        );
     }
 
     #[test]
@@ -1711,6 +1719,59 @@ mod tests {
 
         assert!(loaded.workspace.project.path.is_none());
         assert_eq!(loaded.workspace.project.display_name(), "stale-native-path");
+    }
+
+    #[test]
+    fn legacy_project_migration_assigns_stable_identity_metadata() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new(workspace, libraries);
+        let mut value = serde_json::to_value(project).expect("project converts to JSON");
+        let descriptor = value["workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor is an object");
+        descriptor.remove("id");
+        descriptor.remove("schema_version");
+        descriptor.remove("revision");
+        let legacy = serde_json::to_string_pretty(&value).expect("legacy fixture serializes");
+
+        let migrated = load_project_text(&legacy, None).expect("legacy project migrates");
+
+        assert!(!migrated.workspace.project.id().as_uuid().is_nil());
+        assert_eq!(
+            migrated.workspace.project.schema_version(),
+            crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION
+        );
+        assert_eq!(migrated.workspace.project.revision().get(), 1);
+
+        let migrated_json =
+            serialize_project_file(&migrated).expect("migrated identity persists on save");
+        let reloaded = load_project_text(&migrated_json, None).expect("migrated project reloads");
+        assert_eq!(
+            reloaded.workspace.project.id(),
+            migrated.workspace.project.id()
+        );
+        assert_eq!(
+            reloaded.workspace.project.revision(),
+            migrated.workspace.project.revision()
+        );
+    }
+
+    #[test]
+    fn project_load_rejects_unsupported_descriptor_schema() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new(workspace, libraries);
+        let mut value = serde_json::to_value(project).expect("project converts to JSON");
+        value["workspace"]["project"]["schema_version"] =
+            serde_json::Value::from(crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION + 1);
+        let contents = serde_json::to_string_pretty(&value).expect("fixture serializes");
+
+        let error = load_project_text(&contents, None)
+            .expect_err("future project descriptor schema must fail closed");
+
+        assert!(matches!(error, ProjectIoError::InvalidData(_)));
+        assert!(error.to_string().contains("project schema version"));
     }
 
     #[test]

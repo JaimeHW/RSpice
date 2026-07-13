@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
+use crate::product::{ObjectRevision, ProjectId, RevisionError};
 use crate::state::{Cell, Library, LibraryManager, SchematicState, View, ViewType};
 
 /// Default editable design library created for new projects.
@@ -18,6 +20,16 @@ pub const DEFAULT_PROJECT_LIBRARY: &str = "user";
 pub const DEFAULT_TOP_CELL: &str = "top";
 /// Default schematic view name.
 pub const DEFAULT_SCHEMATIC_VIEW: &str = "schematic";
+/// Persisted schema for project identity metadata.
+pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
+
+fn default_project_name() -> String {
+    "Untitled Project".to_owned()
+}
+
+const fn default_project_descriptor_schema_version() -> u16 {
+    PROJECT_DESCRIPTOR_SCHEMA_VERSION
+}
 
 /// A stable reference to one Library/Cell/View document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -60,7 +72,18 @@ impl CellViewRef {
 /// Metadata for the active RSpice project.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectDescriptor {
-    pub name: String,
+    /// Stable product identity. Legacy project files receive an ID exactly
+    /// once during deserialization and retain it on every later save.
+    #[serde(default)]
+    id: ProjectId,
+    /// Schema of this object, independent of the outer project container.
+    #[serde(default = "default_project_descriptor_schema_version")]
+    schema_version: u16,
+    /// Monotonic logical revision. Runtime-only path changes do not alter it.
+    #[serde(default)]
+    revision: ObjectRevision,
+    #[serde(default = "default_project_name")]
+    name: String,
     pub path: Option<PathBuf>,
     pub root_library: String,
     pub top_cell: String,
@@ -71,7 +94,10 @@ pub struct ProjectDescriptor {
 impl Default for ProjectDescriptor {
     fn default() -> Self {
         Self {
-            name: "Untitled Project".to_string(),
+            id: ProjectId::new(),
+            schema_version: PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+            revision: ObjectRevision::INITIAL,
+            name: default_project_name(),
             path: None,
             root_library: DEFAULT_PROJECT_LIBRARY.to_string(),
             top_cell: DEFAULT_TOP_CELL.to_string(),
@@ -82,6 +108,26 @@ impl Default for ProjectDescriptor {
 }
 
 impl ProjectDescriptor {
+    #[must_use]
+    pub const fn id(&self) -> ProjectId {
+        self.id
+    }
+
+    #[must_use]
+    pub const fn schema_version(&self) -> u16 {
+        self.schema_version
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> ObjectRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
     pub fn display_name(&self) -> &str {
         if self.name.trim().is_empty() {
             "Untitled Project"
@@ -90,11 +136,85 @@ impl ProjectDescriptor {
         }
     }
 
-    pub fn set_path(&mut self, path: PathBuf) {
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-            && !stem.trim().is_empty()
+    /// Validate the persisted identity boundary before saving or accepting a
+    /// project file. Remote uniqueness and authority checks remain service
+    /// responsibilities because they require the selected project location.
+    pub fn validate(&self) -> Result<(), ProjectDescriptorError> {
+        if self.schema_version != PROJECT_DESCRIPTOR_SCHEMA_VERSION {
+            return Err(ProjectDescriptorError::UnsupportedSchema {
+                found: self.schema_version,
+                supported: PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+            });
+        }
+        if self.id.as_uuid().is_nil() {
+            return Err(ProjectDescriptorError::NilIdentity);
+        }
+        Self::validate_name(&self.name)?;
+        if self.root_library.trim().is_empty() {
+            return Err(ProjectDescriptorError::RequiredField("root_library"));
+        }
+        if self.top_cell.trim().is_empty() {
+            return Err(ProjectDescriptorError::RequiredField("top_cell"));
+        }
+        Ok(())
+    }
+
+    /// Validate the local portion of `project.name` from the frozen field
+    /// contract. The exact Unicode scalar sequence is retained; no case or
+    /// normalization folding is performed.
+    pub fn validate_name(value: &str) -> Result<(), ProjectDescriptorError> {
+        if value != value.trim() {
+            return Err(ProjectDescriptorError::SurroundingWhitespace);
+        }
+        let grapheme_count = value.graphemes(true).count();
+        if grapheme_count == 0 {
+            return Err(ProjectDescriptorError::EmptyName);
+        }
+        if grapheme_count > 120 {
+            return Err(ProjectDescriptorError::NameTooLong { grapheme_count });
+        }
+        if let Some(character) = value.chars().find(|character| character.is_control()) {
+            return Err(ProjectDescriptorError::ControlCharacter(character));
+        }
+        if let Some(separator) = value
+            .chars()
+            .find(|character| matches!(character, '/' | '\\'))
         {
-            self.name = stem.to_string();
+            return Err(ProjectDescriptorError::PathSeparator(separator));
+        }
+        Ok(())
+    }
+
+    /// Rename as one fail-closed logical transaction. A rejected name leaves
+    /// both the value and revision unchanged.
+    pub fn rename(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<ObjectRevision, ProjectDescriptorError> {
+        let name = name.into();
+        Self::validate_name(&name)?;
+        if self.name == name {
+            return Ok(self.revision);
+        }
+        let next_revision = self.revision.next()?;
+        self.name = name;
+        self.revision = next_revision;
+        Ok(next_revision)
+    }
+
+    pub fn set_path(&mut self, path: PathBuf) {
+        // The first save may supply a useful name for an otherwise untitled
+        // project. Reopening or moving a named project must not silently
+        // rename it or change its logical revision.
+        if self.path.is_none()
+            && self.name == default_project_name()
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            && Self::validate_name(stem).is_ok()
+        {
+            // Validation above and an available next revision make this
+            // infallible for every practical project lifetime. If the
+            // revision space is exhausted, retaining the old name is safer.
+            let _ = self.rename(stem.to_owned());
         }
         self.path = Some(path);
     }
@@ -102,6 +222,28 @@ impl ProjectDescriptor {
     pub fn directory(&self) -> Option<&Path> {
         self.path.as_deref().and_then(Path::parent)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProjectDescriptorError {
+    #[error("project schema version {found} is unsupported; this build supports {supported}")]
+    UnsupportedSchema { found: u16, supported: u16 },
+    #[error("project identity must not be the nil UUID")]
+    NilIdentity,
+    #[error("project name must contain at least one grapheme cluster")]
+    EmptyName,
+    #[error("project name contains {grapheme_count} grapheme clusters; the maximum is 120")]
+    NameTooLong { grapheme_count: usize },
+    #[error("project name must not begin or end with whitespace")]
+    SurroundingWhitespace,
+    #[error("project name contains control character {0:?}")]
+    ControlCharacter(char),
+    #[error("project name contains path separator {0:?}")]
+    PathSeparator(char),
+    #[error("project field {0} is required")]
+    RequiredField(&'static str),
+    #[error(transparent)]
+    Revision(#[from] RevisionError),
 }
 
 /// One open view tab in the workspace.
@@ -608,6 +750,75 @@ mod tests {
         assert!(
             !workspace.schematic_buffers.contains_key(&reference.key()),
             "session restore/save paths must not persist default schematics under symbol views"
+        );
+    }
+
+    #[test]
+    fn project_identity_is_stable_and_rename_is_atomic() {
+        let mut project = ProjectDescriptor::default();
+        let id = project.id();
+        let initial_revision = project.revision();
+
+        let renamed_revision = project
+            .rename("Precision ΔΣ ADC")
+            .expect("valid Unicode name");
+
+        assert_eq!(project.id(), id);
+        assert_eq!(project.name(), "Precision ΔΣ ADC");
+        assert_eq!(renamed_revision.get(), initial_revision.get() + 1);
+        assert_eq!(
+            project.rename("Precision ΔΣ ADC").expect("no-op rename"),
+            renamed_revision
+        );
+
+        let rejected = project.rename("bad/name");
+        assert!(matches!(
+            rejected,
+            Err(ProjectDescriptorError::PathSeparator('/'))
+        ));
+        assert_eq!(project.name(), "Precision ΔΣ ADC");
+        assert_eq!(project.revision(), renamed_revision);
+        assert_eq!(project.id(), id);
+    }
+
+    #[test]
+    fn project_name_contract_counts_graphemes_and_rejects_unsafe_text() {
+        let family = "👨‍👩‍👧‍👦";
+        assert!(ProjectDescriptor::validate_name(&family.repeat(120)).is_ok());
+        assert!(matches!(
+            ProjectDescriptor::validate_name(&family.repeat(121)),
+            Err(ProjectDescriptorError::NameTooLong {
+                grapheme_count: 121
+            })
+        ));
+        assert!(matches!(
+            ProjectDescriptor::validate_name(" leading"),
+            Err(ProjectDescriptorError::SurroundingWhitespace)
+        ));
+        assert!(matches!(
+            ProjectDescriptor::validate_name("line\nfeed"),
+            Err(ProjectDescriptorError::ControlCharacter('\n'))
+        ));
+        assert!(matches!(
+            ProjectDescriptor::validate_name("path\\name"),
+            Err(ProjectDescriptorError::PathSeparator('\\'))
+        ));
+    }
+
+    #[test]
+    fn changing_source_path_does_not_rename_an_existing_project() {
+        let mut project = ProjectDescriptor::default();
+        project.set_path(PathBuf::from("first-save.rspiceproj"));
+        let revision = project.revision();
+
+        assert_eq!(project.name(), "first-save");
+        project.set_path(PathBuf::from("moved-copy.rspiceproj"));
+
+        assert_eq!(project.name(), "first-save");
+        assert_eq!(project.revision(), revision);
+        assert_eq!(
+            project.path.as_deref(),
+            Some(Path::new("moved-copy.rspiceproj"))
         );
     }
 }
