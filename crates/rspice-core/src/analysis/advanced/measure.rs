@@ -236,7 +236,7 @@ impl MeasureResult {
     }
 
     /// Apply a statement's GOAL/TOL contract to a computed result.
-    fn check_goal(mut self, statement: &MeasureStatement) -> Self {
+    pub(super) fn check_goal(mut self, statement: &MeasureStatement) -> Self {
         let Some(goal) = statement.goal else {
             return self;
         };

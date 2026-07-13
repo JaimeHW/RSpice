@@ -2218,11 +2218,7 @@ impl XyceTestRunner {
         source =
             Self::source_with_static_dc_wrapper_bindings(&source, &deck.path, requires_wrapper)?;
 
-        let measurement_reference_paths = self
-            .static_output_reference_path(&deck.path, "ms0")
-            .filter(|path| path.is_file())
-            .into_iter()
-            .collect::<Vec<_>>();
+        let measurement_reference_paths = self.measurement_reference_paths(&deck.path, "ms")?;
 
         let wrapper_contract = if requires_wrapper {
             if measurement_reference_paths.is_empty() {
@@ -3155,10 +3151,7 @@ impl XyceTestRunner {
             .iter()
             .any(|measurement| measurement.analysis.eq_ignore_ascii_case("AC"))
         {
-            let path = self
-                .static_output_reference_path(&deck.path, "ma0")
-                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-            path.is_file().then_some(path).into_iter().collect()
+            self.measurement_reference_paths(&deck.path, "ma")?
         } else {
             Vec::new()
         };
@@ -5698,7 +5691,16 @@ impl XyceTestRunner {
         };
 
         if plan.reference_path.is_none() && plan.print.is_some() {
-            if !plan.steps.is_empty() || plan.ac.data_points().is_some() || plan.frequency_bound {
+            if !plan.steps.is_empty() {
+                return self.run_static_step_ac_measurement_plan(
+                    deck,
+                    plan,
+                    netlist,
+                    frequencies,
+                    start,
+                );
+            }
+            if plan.ac.data_points().is_some() || plan.frequency_bound {
                 return self.expected_unsupported_result(
                     deck,
                     start,
@@ -6328,6 +6330,122 @@ impl XyceTestRunner {
                     mismatches.len()
                 ),
                 mismatches,
+            )
+        }
+    }
+
+    fn run_static_step_ac_measurement_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticAcPlan,
+        netlist: Netlist,
+        frequencies: Vec<Value>,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = "wrapper_scalar_measure_step_ac";
+        let expansion_engine = self.create_xyce_engine();
+        let step_runs =
+            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
+                Ok(runs) => runs,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(".STEP expansion error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        if step_runs.len() != plan.measurement_reference_paths.len() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    ".STEP expansion produced {} batches but {} contiguous measurement artifacts exist",
+                    step_runs.len(),
+                    plan.measurement_reference_paths.len()
+                ),
+                Vec::new(),
+            );
+        }
+
+        let engine = self.create_xyce_engine();
+        let mut all_mismatches = Vec::new();
+        for (step_index, (run, reference_path)) in step_runs
+            .iter()
+            .zip(&plan.measurement_reference_paths)
+            .enumerate()
+        {
+            let results = match engine.run_ac(&run.netlist, &frequencies) {
+                Ok(results) => results,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error in AC step {}: {err}", step_index + 1),
+                        Vec::new(),
+                    );
+                }
+            };
+            let measurements =
+                crate::analysis::advanced::evaluate_ac_measurements(&run.netlist, &results);
+            let mut mismatches = match self.compare_measurement_references(
+                std::slice::from_ref(reference_path),
+                &measurements,
+                plan.measurement_tolerance,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("AC step {step_index} measurement comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("step {step_index}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if all_mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce stepped AC measurement mismatch(es)",
+                    all_mismatches.len()
+                ),
+                all_mismatches,
             )
         }
     }
@@ -28565,6 +28683,62 @@ impl XyceTestRunner {
 
     fn static_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
         self.static_output_reference_path(deck_path, "prn")
+    }
+
+    fn measurement_reference_paths(
+        &self,
+        deck_path: &Path,
+        analysis_prefix: &str,
+    ) -> Result<Vec<PathBuf>, String> {
+        let first = self
+            .static_output_reference_path(deck_path, &format!("{analysis_prefix}0"))
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        let Some(parent) = first.parent() else {
+            return Err("measurement artifact path has no parent directory".to_string());
+        };
+        if !parent.is_dir() {
+            return Ok(Vec::new());
+        }
+        let deck_name = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "deck filename is not valid UTF-8".to_string())?;
+        let file_prefix = format!("{deck_name}.{analysis_prefix}");
+        let mut indexed = BTreeMap::new();
+        for entry in fs::read_dir(parent)
+            .map_err(|err| format!("failed to scan {}: {err}", parent.display()))?
+        {
+            let entry =
+                entry.map_err(|err| format!("failed to scan {}: {err}", parent.display()))?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some(raw_index) = name.strip_prefix(&file_prefix) else {
+                continue;
+            };
+            if raw_index.is_empty() || !raw_index.chars().all(|ch| ch.is_ascii_digit()) {
+                continue;
+            }
+            let index = raw_index.parse::<usize>().map_err(|err| {
+                format!("measurement artifact index '{raw_index}' is invalid: {err}")
+            })?;
+            if indexed.insert(index, entry.path()).is_some() {
+                return Err(format!(
+                    "duplicate measurement artifact index {index} for {}",
+                    deck_path.display()
+                ));
+            }
+        }
+        for (expected, actual) in indexed.keys().copied().enumerate() {
+            if expected != actual {
+                return Err(format!(
+                    "measurement artifacts for {} are not contiguous: expected index {expected}, found {actual}",
+                    deck_path.display()
+                ));
+            }
+        }
+        Ok(indexed.into_values().collect())
     }
 
     fn tran_gsfile_reference_path(deck_path: &Path) -> Option<PathBuf> {

@@ -706,7 +706,56 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
             .collect();
     };
     let signals = series.signal_map();
-    evaluate_statements(&statements, series.axis(), &signals)
+    let mut results = evaluate_statements(&statements, series.axis(), &signals);
+    match evaluate_ac_equation_measurements(netlist, sweep) {
+        Ok(traces) => {
+            for (statement, result) in statements.iter().zip(&mut results) {
+                if !matches!(statement.measure_type, MeasureType::Equation { .. }) {
+                    continue;
+                }
+                let Some(trace) = traces
+                    .iter()
+                    .find(|trace| trace.name.eq_ignore_ascii_case(&statement.name))
+                else {
+                    *result = MeasureResult::failed(
+                        &statement.name,
+                        "continuous AC equation trace was not produced",
+                    );
+                    continue;
+                };
+                *result = if trace.initialized {
+                    trace
+                        .values
+                        .last()
+                        .copied()
+                        .map(|value| MeasureResult::success(&statement.name, value))
+                        .unwrap_or_else(|| {
+                            MeasureResult::failed(
+                                &statement.name,
+                                "continuous AC equation trace is empty",
+                            )
+                        })
+                } else {
+                    MeasureResult::failed(
+                        &statement.name,
+                        "continuous AC equation window was never active",
+                    )
+                }
+                .check_goal(statement);
+            }
+        }
+        Err(err) => {
+            for (statement, result) in statements.iter().zip(&mut results) {
+                if matches!(statement.measure_type, MeasureType::Equation { .. }) {
+                    *result = MeasureResult::failed(
+                        &statement.name,
+                        &format!("continuous AC equation evaluation failed: {err}"),
+                    );
+                }
+            }
+        }
+    }
+    results
 }
 
 /// Explicit not-evaluated entries for measurements whose analysis did not
@@ -844,6 +893,17 @@ mod tests {
         assert_eq!(trace("bounded").values, vec![-1.0, 2.0]);
         assert!(!trace("invalid").initialized);
         assert_eq!(trace("invalid").values, vec![-1.0, -1.0]);
+
+        let results = evaluate_ac_measurements(&netlist, &sweep);
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named measurement result")
+        };
+        assert_eq!(result("mag").value, Some(3.0));
+        assert_eq!(result("bounded").value, Some(2.0));
+        assert_eq!(result("invalid").value, None);
     }
 
     #[test]
