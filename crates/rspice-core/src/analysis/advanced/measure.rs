@@ -739,23 +739,42 @@ impl MeasureEngine {
             }
         };
 
-        let Some((start, end)) = self.get_range_indices(time, from, to) else {
-            return MeasureResult::failed(name, "Empty range");
+        let (lower, upper) = match (from, to) {
+            (Some(from), Some(to)) => (from.min(to), from.max(to)),
+            (Some(from), None) => (from, Value::INFINITY),
+            (None, Some(to)) => (Value::NEG_INFINITY, to),
+            (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
         };
-
-        if start >= end {
-            return MeasureResult::failed(name, "Empty range");
-        }
-
-        // Trapezoidal integration for accurate average
         let mut integral = 0.0;
-        for i in start..end {
-            let dt = time[i + 1] - time[i];
-            integral += 0.5 * (signal[i] + signal[i + 1]) * dt;
+        let mut width = 0.0;
+        let mut previous = None;
+        for (&axis, &value) in time.iter().zip(signal) {
+            let lower_tolerance = if lower.is_finite() {
+                lower.abs() * 1.0e-12
+            } else {
+                0.0
+            };
+            let upper_tolerance = if upper.is_finite() {
+                upper.abs() * 1.0e-12
+            } else {
+                0.0
+            };
+            if axis >= lower - lower_tolerance && axis <= upper + upper_tolerance {
+                if let Some((previous_axis, previous_value)) = previous {
+                    let dx = Value::abs(axis - previous_axis);
+                    integral += 0.5 * (value + previous_value) * dx;
+                    width += dx;
+                }
+                previous = Some((axis, value));
+            } else {
+                previous = None;
+            }
         }
-
-        let total_time = time[end] - time[start];
-        MeasureResult::success(name, integral / total_time)
+        if width == 0.0 {
+            MeasureResult::failed(name, "Empty range")
+        } else {
+            MeasureResult::success(name, integral / width)
+        }
     }
 
     fn eval_rms(

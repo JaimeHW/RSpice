@@ -4088,6 +4088,12 @@ impl XyceTestRunner {
                 dc_measurement_count += 1;
                 continue;
             }
+            // Xyce parses .FFT in every deck but activates it only for
+            // transient analysis. The typed netlist parser below remains
+            // responsible for validating the complete directive.
+            if command.eq_ignore_ascii_case(".fft") {
+                continue;
+            }
             if Self::is_extra_wrapper_output_analysis_command(command) {
                 return Err(format!(
                     "scalar DC measurement artifact contract does not cover {command} directives"
@@ -22340,7 +22346,8 @@ impl XyceTestRunner {
                 && measurement.name.eq_ignore_ascii_case(original)
                 && matches!(
                     measurement.measure_type,
-                    crate::analysis::MeasureType::Equation { .. }
+                    crate::analysis::MeasureType::Avg { .. }
+                        | crate::analysis::MeasureType::Equation { .. }
                 )
         }) {
             return Ok(());

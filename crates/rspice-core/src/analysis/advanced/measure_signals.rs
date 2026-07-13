@@ -779,6 +779,97 @@ fn materialize_measure_expression_signals(
         .collect()
 }
 
+fn materialize_differential_voltage_signals(
+    statements: &[&MeasureStatement],
+    point_count: usize,
+    signals: &HashMap<String, &[Value]>,
+) -> Vec<(String, Vec<Value>)> {
+    let mut names = Vec::new();
+    let mut add = |name: &str| {
+        let trimmed = name.trim();
+        if differential_voltage_nodes(trimmed).is_some()
+            && !names
+                .iter()
+                .any(|candidate: &String| candidate.eq_ignore_ascii_case(trimmed))
+        {
+            names.push(trimmed.to_string());
+        }
+    };
+    for statement in statements {
+        match &statement.measure_type {
+            MeasureType::Delay { trig, targ } => {
+                add(&trig.signal);
+                add(&targ.signal);
+            }
+            MeasureType::Find {
+                signal,
+                when_signal,
+                ..
+            }
+            | MeasureType::Derivative {
+                signal,
+                when_signal,
+                ..
+            } => {
+                add(signal);
+                if let Some(when_signal) = when_signal {
+                    add(when_signal);
+                }
+            }
+            MeasureType::Min { signal, .. }
+            | MeasureType::Max { signal, .. }
+            | MeasureType::PeakToPeak { signal, .. }
+            | MeasureType::Avg { signal, .. }
+            | MeasureType::Rms { signal, .. }
+            | MeasureType::RiseTime { signal, .. }
+            | MeasureType::FallTime { signal, .. }
+            | MeasureType::Integ { signal, .. } => add(signal),
+            MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
+        }
+    }
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let (positive, negative) = differential_voltage_nodes(&name)?;
+            let positive = measurement_node_waveform(positive, point_count, signals)?;
+            let negative = measurement_node_waveform(negative, point_count, signals)?;
+            let waveform = positive
+                .iter()
+                .zip(negative)
+                .map(|(positive, negative)| positive - negative)
+                .collect();
+            Some((name, waveform))
+        })
+        .collect()
+}
+
+fn differential_voltage_nodes(signal: &str) -> Option<(&str, &str)> {
+    let (operator, arguments) = signal.split_once('(')?;
+    if !operator.eq_ignore_ascii_case("V") {
+        return None;
+    }
+    let arguments = arguments.strip_suffix(')')?;
+    let (positive, negative) = arguments.split_once(',')?;
+    let positive = positive.trim();
+    let negative = negative.trim();
+    (!positive.is_empty() && !negative.is_empty()).then_some((positive, negative))
+}
+
+fn measurement_node_waveform(
+    node: &str,
+    point_count: usize,
+    signals: &HashMap<String, &[Value]>,
+) -> Option<Vec<Value>> {
+    if matches!(node.to_ascii_lowercase().as_str(), "0" | "gnd" | "ground") {
+        return Some(vec![0.0; point_count]);
+    }
+    signals
+        .iter()
+        .find_map(|(candidate, waveform)| candidate.eq_ignore_ascii_case(node).then_some(*waveform))
+        .map(ToOwned::to_owned)
+}
+
 /// Evaluate the netlist's transient .MEAS statements against a result.
 ///
 /// Returns an empty vector when the netlist has no transient measurements.
@@ -813,13 +904,24 @@ pub fn evaluate_dc_measurements(
     if statements.is_empty() {
         return Vec::new();
     }
+    let normalized_statements = statements
+        .into_iter()
+        .cloned()
+        .map(normalize_dc_measurement_window)
+        .collect::<Vec<_>>();
+    let statements = normalized_statements.iter().collect::<Vec<_>>();
     let Some(series) = DcSweepSeries::from_sweep(sweep) else {
         return statements
             .iter()
             .map(|m| MeasureResult::failed(&m.name, "DC sweep produced no points"))
             .collect();
     };
-    let signals = series.signal_map();
+    let mut signals = series.signal_map();
+    let differential_signals =
+        materialize_differential_voltage_signals(&statements, series.axis().len(), &signals);
+    for (name, waveform) in &differential_signals {
+        insert_case_variants(&mut signals, name, waveform);
+    }
     let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
     overlay_continuous_equation_results(
         &statements,
@@ -828,6 +930,30 @@ pub fn evaluate_dc_measurements(
         "DC",
     );
     results
+}
+
+fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureStatement {
+    let bounds = match &mut statement.measure_type {
+        MeasureType::Equation { from, to, .. }
+        | MeasureType::Min { from, to, .. }
+        | MeasureType::Max { from, to, .. }
+        | MeasureType::PeakToPeak { from, to, .. }
+        | MeasureType::Avg { from, to, .. }
+        | MeasureType::Rms { from, to, .. }
+        | MeasureType::Integ { from, to, .. } => Some((from, to)),
+        MeasureType::Delay { .. }
+        | MeasureType::Find { .. }
+        | MeasureType::Derivative { .. }
+        | MeasureType::Param { .. }
+        | MeasureType::RiseTime { .. }
+        | MeasureType::FallTime { .. } => None,
+    };
+    if let Some((Some(from), Some(to))) = bounds {
+        if *from > *to {
+            std::mem::swap(from, to);
+        }
+    }
+    statement
 }
 
 /// Evaluate the netlist's AC .MEAS statements against a sweep.
@@ -1041,6 +1167,32 @@ mod tests {
         let signals = series.signal_map();
         assert!(signals.contains_key("TIME"));
         assert_eq!(signals["V(out)"], &[2.5, 2.5][..]);
+    }
+
+    #[test]
+    fn dc_average_supports_differential_ground_and_reversed_decreasing_windows() {
+        let netlist = Netlist::parse(
+            "differential DC average\n\
+             V1 out 0 0\n\
+             .dc V1 3 1 -1\n\
+             .meas dc reversed AVG V(GND,out) FROM=2 TO=1\n\
+             .end\n",
+        )
+        .expect("DC average parses");
+        let sweep = (1..=3)
+            .rev()
+            .map(|axis| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, axis as Value];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis as Value, point)
+            })
+            .collect::<Vec<_>>();
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, Some(-1.5));
+        assert!(results[0].passed);
     }
 
     fn dc_equation_sweep() -> Vec<(Value, SimulationResult)> {
