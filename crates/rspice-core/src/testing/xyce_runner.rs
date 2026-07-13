@@ -3790,7 +3790,8 @@ impl XyceTestRunner {
                 }
                 ".subckt" => subckt_count += 1,
                 ".ends" => ends_count += 1,
-                ".print" | ".op" | ".step" | ".param" | ".func" | ".options" | ".end" => {}
+                ".print" | ".measure" | ".meas" | ".op" | ".step" | ".param" | ".func"
+                | ".options" | ".end" => {}
                 other => {
                     return Err(format!(
                         "wrapper-origin plain static DC contract does not cover {other} directives"
@@ -3996,6 +3997,23 @@ impl XyceTestRunner {
                     primary_print_count += 1;
                 }
                 continue;
+            }
+            if command.eq_ignore_ascii_case(".measure") || command.eq_ignore_ascii_case(".meas") {
+                let fields = Self::split_print_fields(&trimmed)?;
+                if fields
+                    .get(1)
+                    .is_some_and(|field| field.eq_ignore_ascii_case("DC"))
+                    && fields.get(3).is_some_and(|field| {
+                        field.eq_ignore_ascii_case("EQN")
+                            || field.eq_ignore_ascii_case("PARAM")
+                            || field.to_ascii_uppercase().starts_with("PARAM=")
+                    })
+                {
+                    continue;
+                }
+                return Err(format!(
+                    "wrapper-origin default .prn contract does not cover {command} directive '{trimmed}'"
+                ));
             }
             if Self::is_extra_wrapper_output_analysis_command(command) {
                 return Err(format!(
@@ -17138,6 +17156,15 @@ impl XyceTestRunner {
         let mut mismatches = Vec::new();
         let mut global_row_index = 0usize;
         for (batch_index, batch) in batches.iter().enumerate() {
+            let equation_sweep = batch
+                .results
+                .iter()
+                .map(|point| (point.sweep_value, point.result.clone()))
+                .collect::<Vec<_>>();
+            let equation_traces = crate::analysis::advanced::evaluate_dc_equation_measurements(
+                &batch.netlist,
+                &equation_sweep,
+            )?;
             for (local_row_index, point) in batch.results.iter().enumerate() {
                 let row = reference.rows.get(global_row_index).ok_or_else(|| {
                     format!("missing reference row for simulation row {global_row_index}")
@@ -17208,14 +17235,26 @@ impl XyceTestRunner {
                         }
                         XyceReferenceColumn::Probe { name } => (
                             name.as_str(),
-                            Self::evaluate_dc_probe(
-                                name,
-                                probe_netlist,
-                                dc,
-                                sweep_point,
-                                &point.result,
-                                &point.device_op_report,
-                            )?,
+                            if let Some(trace) = equation_traces
+                                .iter()
+                                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                            {
+                                *trace.values.get(local_row_index).ok_or_else(|| {
+                                    format!(
+                                        "DC equation measure '{}' has no value for row {}",
+                                        trace.name, local_row_index
+                                    )
+                                })?
+                            } else {
+                                Self::evaluate_dc_probe(
+                                    name,
+                                    probe_netlist,
+                                    dc,
+                                    sweep_point,
+                                    &point.result,
+                                    &point.device_op_report,
+                                )?
+                            },
                         ),
                     };
                     let normalized_probe = Self::normalize_probe(probe);
@@ -21844,6 +21883,16 @@ impl XyceTestRunner {
                 "power probe '{}' targets an unsupported branch/device",
                 original
             ));
+        }
+        if netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("DC")
+                && measurement.name.eq_ignore_ascii_case(original)
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Equation { .. }
+                )
+        }) {
+            return Ok(());
         }
         Err(format!("unsupported .PRINT DC probe '{}'", original))
     }

@@ -5233,6 +5233,21 @@ fn test_xyce_mutual_inductor_device_parameter_print_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_dc_continuous_equation_measure_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_DC/EquationEvalTestDC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass ordered live DC equation-measure traces, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.

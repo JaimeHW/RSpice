@@ -556,6 +556,36 @@ impl<'a> ExprParser<'a> {
 
         // Check for function call
         if self.consume('(') {
+            if matches!(name.as_str(), "V" | "I") {
+                let mut args = Vec::new();
+                loop {
+                    self.skip_ws();
+                    let argument_start = self.pos;
+                    while let Some(ch) = self.peek() {
+                        if matches!(ch, ',' | ')') {
+                            break;
+                        }
+                        self.advance();
+                    }
+                    let argument = self.input[argument_start..self.pos].trim();
+                    if argument.is_empty() {
+                        if args.is_empty() && self.check(')') {
+                            break;
+                        }
+                        return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
+                    }
+                    args.push(Expr::Param(argument.to_uppercase()));
+                    self.skip_ws();
+                    if self.consume(',') {
+                        continue;
+                    }
+                    break;
+                }
+                if !self.consume(')') {
+                    return Err(ExprError::MissingCloseParen);
+                }
+                return Ok(Expr::FnCall { name, args });
+            }
             let mut args = Vec::new();
 
             self.skip_ws();

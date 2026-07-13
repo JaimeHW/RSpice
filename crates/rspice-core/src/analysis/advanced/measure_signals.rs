@@ -127,10 +127,41 @@ pub fn evaluate_tran_equation_measurements(
     netlist: &Netlist,
     result: &TransientResult,
 ) -> Result<Vec<EquationMeasureTrace>, String> {
+    let signals = transient_signal_map(result);
+    evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, false)
+}
+
+/// Evaluate Xyce continuous equation measurements over a DC sweep.
+///
+/// The swept value is the equation axis. Xyce initializes DC equations to
+/// zero when no explicit `DEFAULT_VAL` is present and accepts window bounds
+/// in either order. As with transient equations, statements execute in
+/// netlist order at each sweep point and retain their last in-window value.
+pub fn evaluate_dc_equation_measurements(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+) -> Result<Vec<EquationMeasureTrace>, String> {
+    let Some(series) = DcSweepSeries::from_sweep(sweep) else {
+        return Ok(Vec::new());
+    };
+    let signals = series.signal_map();
+    evaluate_equation_measurements(netlist, "DC", series.axis(), &signals, 0.0, true)
+}
+
+/// Shared continuous-equation evaluator for analyses with a real-valued
+/// axis and real signal waveforms.
+fn evaluate_equation_measurements(
+    netlist: &Netlist,
+    analysis: &str,
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    implicit_default: Value,
+    normalize_window: bool,
+) -> Result<Vec<EquationMeasureTrace>, String> {
     let mut programs = netlist
         .measurements
         .iter()
-        .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"))
+        .filter(|statement| statement.analysis.eq_ignore_ascii_case(analysis))
         .filter_map(|statement| {
             let MeasureType::Equation {
                 expression,
@@ -151,15 +182,23 @@ pub fn evaluate_tran_equation_measurements(
                     statement.name
                 )
             })?;
+            let (from, to) = if normalize_window {
+                match (from, to) {
+                    (Some(from), Some(to)) if from > to => (Some(to), Some(from)),
+                    bounds => bounds,
+                }
+            } else {
+                (from, to)
+            };
             Ok(EquationProgram {
                 statement,
                 expression,
                 from,
                 to,
                 td,
-                current: default_value.unwrap_or(-1.0),
+                current: default_value.unwrap_or(implicit_default),
                 initialized: false,
-                values: Vec::with_capacity(result.time.len()),
+                values: Vec::with_capacity(axis.len()),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -167,17 +206,16 @@ pub fn evaluate_tran_equation_measurements(
     if programs.is_empty() {
         return Ok(Vec::new());
     }
-    let signals = transient_signal_map(result);
     let mut current_values = programs
         .iter()
         .map(|program| (program.statement.name.to_ascii_uppercase(), program.current))
         .collect::<HashMap<_, _>>();
 
-    for (row, &time) in result.time.iter().enumerate() {
+    for (row, &axis_value) in axis.iter().enumerate() {
         for program in &mut programs {
-            if equation_time_is_in_window(time, program.from, program.to, program.td) {
+            if equation_axis_is_in_window(axis_value, program.from, program.to, program.td) {
                 let bound =
-                    bind_equation_expression(&program.expression, row, &signals, &current_values)?;
+                    bind_equation_expression(&program.expression, row, signals, &current_values)?;
                 let value = crate::netlist::expr::evaluate_complex(&bound, &netlist.params)
                     .map_err(|err| {
                         format!(
@@ -209,16 +247,16 @@ pub fn evaluate_tran_equation_measurements(
         .collect())
 }
 
-fn equation_time_is_in_window(
-    time: Value,
+fn equation_axis_is_in_window(
+    axis_value: Value,
     from: Option<Value>,
     to: Option<Value>,
     td: Option<Value>,
 ) -> bool {
     const XYCE_MEASURE_WINDOW_TOLERANCE: Value = 1.0e-12;
-    td.is_none_or(|bound| time >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
-        && from.is_none_or(|bound| time >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
-        && to.is_none_or(|bound| time <= bound * (1.0 + XYCE_MEASURE_WINDOW_TOLERANCE))
+    td.is_none_or(|bound| axis_value >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
+        && from.is_none_or(|bound| axis_value >= bound * (1.0 - XYCE_MEASURE_WINDOW_TOLERANCE))
+        && to.is_none_or(|bound| axis_value <= bound * (1.0 + XYCE_MEASURE_WINDOW_TOLERANCE))
 }
 
 fn bind_equation_expression(
@@ -683,6 +721,58 @@ mod tests {
         let signals = series.signal_map();
         assert!(signals.contains_key("TIME"));
         assert_eq!(signals["V(out)"], &[2.5, 2.5][..]);
+    }
+
+    fn dc_equation_sweep() -> Vec<(Value, SimulationResult)> {
+        (0..=4)
+            .map(|axis| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, axis as Value];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis as Value, point)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dc_equations_use_zero_default_ordered_dependencies_and_held_values() {
+        let netlist = Netlist::parse(
+            "* continuous DC equations\n\
+             V1 out 0 0\n\
+             .dc V1 0 4 1\n\
+             .meas dc bounded EQN {V(out)+1} FROM=3 TO=1\n\
+             .meas dc derived EQN {bounded*2}\n\
+             .end\n",
+        )
+        .expect("DC equations parse");
+
+        let traces = evaluate_dc_equation_measurements(&netlist, &dc_equation_sweep())
+            .expect("DC equations evaluate");
+
+        assert_eq!(traces.len(), 2);
+        assert_eq!(traces[0].name, "BOUNDED");
+        assert_eq!(traces[0].values, vec![0.0, 2.0, 3.0, 4.0, 4.0]);
+        assert!(traces[0].initialized);
+        assert_eq!(traces[1].name, "DERIVED");
+        assert_eq!(traces[1].values, vec![0.0, 4.0, 6.0, 8.0, 8.0]);
+    }
+
+    #[test]
+    fn dc_equations_honor_explicit_default_and_inclusive_td() {
+        let netlist = Netlist::parse(
+            "* continuous DC equation default\n\
+             V1 out 0 0\n\
+             .dc V1 0 4 1\n\
+             .meas dc delayed EQN {V(out)} TD=2 DEFAULT_VAL=-7\n\
+             .end\n",
+        )
+        .expect("DC equation parses");
+
+        let traces = evaluate_dc_equation_measurements(&netlist, &dc_equation_sweep())
+            .expect("DC equation evaluates");
+
+        assert_eq!(traces[0].values, vec![-7.0, -7.0, 2.0, 3.0, 4.0]);
+        assert!(traces[0].initialized);
     }
 
     #[test]

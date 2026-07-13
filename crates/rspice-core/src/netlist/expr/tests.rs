@@ -22,6 +22,28 @@ fn bare_named_constants_parse_as_numbers() {
 }
 
 #[test]
+fn circuit_probe_arguments_preserve_digit_leading_node_names() {
+    let expression = parse_expression("v(1b)+v(2a,0)").expect("probe expression parses");
+    let Expr::BinOp { left, right, .. } = expression else {
+        panic!("expected binary probe expression");
+    };
+    let Expr::FnCall { name, args } = *left else {
+        panic!("expected left voltage probe");
+    };
+    assert_eq!(name, "V");
+    assert!(matches!(args.as_slice(), [Expr::Param(node)] if node == "1B"));
+
+    let Expr::FnCall { name, args } = *right else {
+        panic!("expected right voltage probe");
+    };
+    assert_eq!(name, "V");
+    assert!(matches!(
+        args.as_slice(),
+        [Expr::Param(pos), Expr::Param(neg)] if pos == "2A" && neg == "0"
+    ));
+}
+
+#[test]
 fn modulo_operator_matches_xyce_precedence() {
     let ctx = ParamContext::new();
     assert_eq!(eval_with(&ctx, "2 + 6*5/2%4 - 1"), 4.0);
