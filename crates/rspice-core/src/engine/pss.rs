@@ -85,6 +85,26 @@ fn monodromy_from_newton_jacobian(mut jacobian: Vec<Vec<Value>>) -> Vec<Vec<Valu
     jacobian
 }
 
+/// Select the PSS integration formula without making the fixed shooting grid
+/// depend on state-sensitive TrapGear switching decisions.
+fn pss_integration_method(
+    first_step: bool,
+    fixed_grid: bool,
+    requested: Option<IntegrationMethod>,
+    adaptive_trapgear_method: IntegrationMethod,
+) -> IntegrationMethod {
+    if first_step {
+        return IntegrationMethod::BackwardEuler;
+    }
+    match requested {
+        Some(IntegrationMethod::TrapGear) if fixed_grid => IntegrationMethod::Trapezoidal,
+        Some(IntegrationMethod::TrapGear) => adaptive_trapgear_method,
+        Some(method) => method,
+        None if fixed_grid => IntegrationMethod::Trapezoidal,
+        None => adaptive_trapgear_method,
+    }
+}
+
 /// PSS-specific error types
 #[derive(Debug, Clone)]
 pub enum PssError {
@@ -286,6 +306,14 @@ impl Engine {
 
             shooting_state.x_t = x_t;
             shooting_state.compute_residual();
+            if config.verbose {
+                log::debug!(
+                    "PSS iteration {}: period={:.6e}s residual={:.6e}",
+                    iteration,
+                    detected_period,
+                    shooting_state.residual_norm()
+                );
+            }
 
             // Check convergence
             if solver.check_convergence(&shooting_state) {
@@ -512,6 +540,7 @@ impl Engine {
                 max_step,
                 false,
                 None,
+                config.integration_method,
                 abort,
             )?;
 
@@ -593,7 +622,15 @@ impl Engine {
         // The period map must vary smoothly with the shooting state: run on
         // the fixed grid (see pss_run_tran_internal).
         let waveform = self.pss_run_tran_internal(
-            circuit, matrix, solution, period, max_step, true, None, abort,
+            circuit,
+            matrix,
+            solution,
+            period,
+            max_step,
+            true,
+            None,
+            config.integration_method,
+            abort,
         )?;
 
         let final_state = self.pss_extract_reactive_state(circuit);
@@ -1104,7 +1141,8 @@ impl Engine {
 
     /// Internal transient simulation
     /// `fixed_grid` integrates on a uniform time grid with a deterministic
-    /// method sequence (backward Euler first step, trapezoidal after): the
+    /// method sequence (backward Euler first step, then the configured method;
+    /// TrapGear resolves to trapezoidal on the fixed grid): the
     /// period map then varies SMOOTHLY with the initial state, which is what
     /// makes finite-difference shooting Jacobians and monodromy columns
     /// accurate — an LTE-adaptive grid changes its step decisions
@@ -1119,6 +1157,7 @@ impl Engine {
         max_step: Value,
         fixed_grid: bool,
         mut trace: Option<&mut PssStateTrace>,
+        integration_method: Option<IntegrationMethod>,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
         if abort.is_aborted() {
@@ -1196,13 +1235,12 @@ impl Engine {
             // First step runs backward Euler: it reads no capacitor-current or
             // inductor-voltage history, so the trajectory depends only on the
             // shooting state that pss_set_reactive_state installed.
-            let current_method = if first_step {
-                IntegrationMethod::BackwardEuler
-            } else if fixed_grid {
-                IntegrationMethod::Trapezoidal
-            } else {
-                trapgear.current_method()
-            };
+            let current_method = pss_integration_method(
+                first_step,
+                fixed_grid,
+                integration_method,
+                trapgear.current_method(),
+            );
             let coeff = accepted_step_history.coefficients_for_trial(current_method, dt);
 
             let Some(new_solution) =
@@ -1328,6 +1366,50 @@ mod tests {
         assert!(
             (actual - expected).abs() <= tolerance,
             "expected {expected:.17e}, got {actual:.17e}"
+        );
+    }
+
+    #[test]
+    fn pss_integration_override_is_honored_without_state_dependent_fixed_grid_switching() {
+        assert_eq!(
+            pss_integration_method(
+                true,
+                true,
+                Some(IntegrationMethod::Gear2),
+                IntegrationMethod::Gear2,
+            ),
+            IntegrationMethod::BackwardEuler
+        );
+        assert_eq!(
+            pss_integration_method(
+                false,
+                true,
+                Some(IntegrationMethod::Gear2),
+                IntegrationMethod::BackwardEuler,
+            ),
+            IntegrationMethod::Gear2
+        );
+        assert_eq!(
+            pss_integration_method(
+                false,
+                true,
+                Some(IntegrationMethod::TrapGear),
+                IntegrationMethod::Gear2,
+            ),
+            IntegrationMethod::Trapezoidal
+        );
+        assert_eq!(
+            pss_integration_method(
+                false,
+                false,
+                Some(IntegrationMethod::TrapGear),
+                IntegrationMethod::Gear2,
+            ),
+            IntegrationMethod::Gear2
+        );
+        assert_eq!(
+            pss_integration_method(false, true, None, IntegrationMethod::Gear2),
+            IntegrationMethod::Trapezoidal
         );
     }
 

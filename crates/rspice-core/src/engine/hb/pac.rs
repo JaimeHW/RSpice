@@ -89,9 +89,14 @@ impl Engine {
             .max(config.sideband_max.unsigned_abs())) as usize;
         let op_harmonics = span.max(extreme).max(8);
 
-        let hb_config = HbConfig::new(config.fundamental_freq)
+        let mut hb_config = HbConfig::new(config.fundamental_freq)
             .with_harmonics(op_harmonics)
             .with_oversample(4);
+        // PAC's tolerances govern the nonlinear periodic operating point.
+        // The subsequent sideband systems use deterministic direct solves and
+        // therefore have no iterative tolerance of their own.
+        hb_config.tolerance = config.reltol;
+        hb_config.abstol = config.abstol;
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
 
         let mut solver = HbSolver::new(hb_config.clone(), num_nodes);

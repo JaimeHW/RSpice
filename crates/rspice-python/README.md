@@ -288,7 +288,14 @@ spnoise = engine.run_s_parameters(netlist, np.logspace(6, 10, 101),
                                   do_noise=True)
 cy12 = spnoise.cy(1, 2)                        # complex A²/Hz correlation
 print(spnoise.rn, spnoise.nf, spnoise.nfmin, spnoise.sopt)
-pss = engine.run_pss(netlist, fundamental_frequency=1e9)
+pss = engine.run_pss(
+    netlist,
+    fundamental_frequency=1e9,
+    harmonics=15,
+    abstol=1e-13,
+    integration_method=rspice.IntegrationMethod.TRAPEZOIDAL,
+)
+pss_spectrum = pss.harmonic_coefficients("out")
 hb = engine.run_hb(netlist, fundamental_frequency=1e9, harmonics=9)
 hb2 = engine.run_hb_multitone(
     mixer_netlist,

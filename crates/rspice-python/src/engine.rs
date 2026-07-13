@@ -29,7 +29,7 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
 use crate::abort::{ActiveRuns, run_interruptible};
-use crate::config::PySimulationConfig;
+use crate::config::{PyIntegrationMethod, PySimulationConfig};
 use crate::measure;
 use crate::netlist::{PyNetlist, describe_analysis};
 use crate::results::{
@@ -600,6 +600,7 @@ fn configure_hb_numerics(
     gmres_restart: usize,
     source_stepping: bool,
     use_exact_jacobian: bool,
+    verbose: bool,
 ) -> PyResult<()> {
     if !tolerance.is_finite() || tolerance <= 0.0 {
         return Err(PyValueError::new_err(format!(
@@ -656,6 +657,7 @@ fn configure_hb_numerics(
     config.gmres_restart = gmres_restart;
     config.source_stepping = source_stepping;
     config.use_exact_jacobian = use_exact_jacobian;
+    config.verbose = verbose;
     Ok(())
 }
 
@@ -2422,7 +2424,7 @@ impl PyEngine {
     }
 
     /// Run shooting periodic steady-state analysis.
-    #[pyo3(signature = (netlist, fundamental_frequency=None, *, harmonics=9, tstab=0.0, tstab_periods=None, max_iterations=100, tolerance=1e-6, points_per_period=256, autonomous=false, period_guess=None))]
+    #[pyo3(signature = (netlist, fundamental_frequency=None, *, harmonics=9, tstab=0.0, tstab_periods=None, max_iterations=100, tolerance=1e-6, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, autonomous=false, period_guess=None, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_pss(
         &self,
@@ -2434,9 +2436,14 @@ impl PyEngine {
         tstab_periods: Option<usize>,
         max_iterations: usize,
         tolerance: f64,
+        abstol: f64,
+        damping: f64,
+        max_period_change: f64,
         points_per_period: usize,
+        integration_method: Option<PyIntegrationMethod>,
         autonomous: bool,
         period_guess: Option<f64>,
+        verbose: bool,
     ) -> PyResult<PyPssResult> {
         if harmonics == 0 {
             return Err(PyValueError::new_err("harmonics must be at least 1"));
@@ -2486,7 +2493,17 @@ impl PyEngine {
         }
         config.max_iterations = max_iterations;
         config.tolerance = tolerance;
+        config.abstol = abstol;
+        config.damping_factor = damping;
+        if !max_period_change.is_finite() || max_period_change <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "max_period_change must be positive and finite, got {max_period_change}"
+            )));
+        }
+        config.max_period_change = max_period_change;
         config.points_per_period = points_per_period;
+        config.integration_method = integration_method.map(Into::into);
+        config.verbose = verbose;
         config.validate().map_err(|message| {
             PyValueError::new_err(format!("invalid PSS configuration: {message}"))
         })?;
@@ -2495,11 +2512,11 @@ impl PyEngine {
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pss_with_abort(&netlist.inner, config, abort)
         })?;
-        Ok(PyPssResult::from_core(&result))
+        Ok(PyPssResult::from_core(&result, harmonics))
     }
 
     /// Run single-tone harmonic-balance analysis.
-    #[pyo3(signature = (netlist, fundamental_frequency, *, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None))]
+    #[pyo3(signature = (netlist, fundamental_frequency, *, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_hb(
         &self,
@@ -2520,6 +2537,7 @@ impl PyEngine {
         gmres_restart: usize,
         use_exact_jacobian: bool,
         source_name: Option<&str>,
+        verbose: bool,
     ) -> PyResult<PyHbResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
             return Err(PyValueError::new_err(format!(
@@ -2549,6 +2567,7 @@ impl PyEngine {
             gmres_restart,
             source_stepping,
             use_exact_jacobian,
+            verbose,
         )?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -2562,7 +2581,7 @@ impl PyEngine {
     /// `harmonics` may contain one order broadcast to every tone or one order
     /// per frequency. `source_names`, when provided, maps each tone to one
     /// independent source; an empty name broadcasts that tone.
-    #[pyo3(signature = (netlist, frequencies, *, harmonics=None, source_names=None, tolerance=1e-6, abstol=1e-12, max_iterations=100, damping=1.0, min_damping=0.1, oversample=2, collocation_points=None, max_mixing_order=5, use_krylov=false, gmres_restart=30, source_stepping=false, use_exact_jacobian=true))]
+    #[pyo3(signature = (netlist, frequencies, *, harmonics=None, source_names=None, tolerance=1e-6, abstol=1e-12, max_iterations=100, damping=1.0, min_damping=0.1, oversample=2, collocation_points=None, max_mixing_order=5, use_krylov=false, gmres_restart=30, source_stepping=false, use_exact_jacobian=true, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_hb_multitone(
         &self,
@@ -2583,6 +2602,7 @@ impl PyEngine {
         gmres_restart: usize,
         source_stepping: bool,
         use_exact_jacobian: bool,
+        verbose: bool,
     ) -> PyResult<PyHbResult> {
         let orders = resolve_hb_harmonic_orders(
             frequencies.len(),
@@ -2604,6 +2624,7 @@ impl PyEngine {
             gmres_restart,
             source_stepping,
             use_exact_jacobian,
+            verbose,
         )?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -2613,7 +2634,7 @@ impl PyEngine {
     }
 
     /// Run periodic small-signal AC analysis around an HB operating point.
-    #[pyo3(signature = (netlist, fundamental_frequency, start_frequency, stop_frequency, points, input_source, output_node, *, variation="dec", sideband_min=None, sideband_max=5, reference_node=None))]
+    #[pyo3(signature = (netlist, fundamental_frequency, start_frequency, stop_frequency, points, input_source, output_node, *, variation="dec", sideband_min=None, sideband_max=5, reference_node=None, reltol=1e-3, abstol=1e-12))]
     #[allow(clippy::too_many_arguments)]
     fn run_pac(
         &self,
@@ -2629,6 +2650,8 @@ impl PyEngine {
         sideband_min: Option<i32>,
         sideband_max: i32,
         reference_node: Option<&str>,
+        reltol: f64,
+        abstol: f64,
     ) -> PyResult<PyPacResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
             return Err(PyValueError::new_err(format!(
@@ -2657,6 +2680,7 @@ impl PyEngine {
             .with_sweep(start_frequency, stop_frequency, points)
             .with_sweep_type(sweep_type)
             .with_sidebands(sideband_min, sideband_max)
+            .with_tolerances(reltol, abstol)
             .with_input_source(input_source)
             .with_output_node(output_node);
         if let Some(reference) = reference_node {
@@ -2723,7 +2747,7 @@ impl PyEngine {
     }
 
     /// Run autonomous-oscillator phase noise using PSS and PPV projection.
-    #[pyo3(signature = (netlist, offsets, *, period_guess, tstab_periods=20, max_iterations=100, tolerance=1e-6, points_per_period=256))]
+    #[pyo3(signature = (netlist, offsets, *, period_guess, harmonics=9, tstab=0.0, tstab_periods=20, max_iterations=100, tolerance=1e-6, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_oscillator_noise(
         &self,
@@ -2731,10 +2755,17 @@ impl PyEngine {
         netlist: &PyNetlist,
         offsets: Vec<f64>,
         period_guess: f64,
+        harmonics: usize,
+        tstab: f64,
         tstab_periods: usize,
         max_iterations: usize,
         tolerance: f64,
+        abstol: f64,
+        damping: f64,
+        max_period_change: f64,
         points_per_period: usize,
+        integration_method: Option<PyIntegrationMethod>,
+        verbose: bool,
     ) -> PyResult<PyOscillatorNoiseResult> {
         validate_frequencies(&offsets)?;
         if offsets.contains(&0.0) {
@@ -2747,13 +2778,28 @@ impl PyEngine {
                 "period_guess must be positive and finite, got {period_guess}"
             )));
         }
+        if harmonics == 0 {
+            return Err(PyValueError::new_err("harmonics must be at least 1"));
+        }
         let mut config = PssConfig::autonomous();
         config.period_guess = period_guess;
         config.fundamental_freq = 1.0 / period_guess;
+        config.num_harmonics = harmonics;
+        config.tstab = tstab;
         config.tstab_periods = tstab_periods;
         config.max_iterations = max_iterations;
         config.tolerance = tolerance;
+        config.abstol = abstol;
+        config.damping_factor = damping;
+        if !max_period_change.is_finite() || max_period_change <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "max_period_change must be positive and finite, got {max_period_change}"
+            )));
+        }
+        config.max_period_change = max_period_change;
         config.points_per_period = points_per_period;
+        config.integration_method = integration_method.map(Into::into);
+        config.verbose = verbose;
         config.validate().map_err(|message| {
             PyValueError::new_err(format!("invalid oscillator PSS configuration: {message}"))
         })?;

@@ -202,6 +202,9 @@ impl PssConfig {
 
     /// Validate public configuration before the engine starts solving.
     pub fn validate(&self) -> Result<(), String> {
+        if self.num_harmonics == 0 {
+            return Err("num_harmonics must be > 0".to_string());
+        }
         if !self.fundamental_freq.is_finite() || self.fundamental_freq < 0.0 {
             return Err("fundamental_freq must be finite and >= 0".to_string());
         }
@@ -230,6 +233,16 @@ impl PssConfig {
         }
         if self.points_per_period < 16 {
             return Err("points_per_period must be >= 16".to_string());
+        }
+        if self
+            .num_harmonics
+            .checked_mul(2)
+            .is_none_or(|samples| samples > self.points_per_period)
+        {
+            return Err(
+                "points_per_period must be at least twice num_harmonics to avoid aliasing"
+                    .to_string(),
+            );
         }
         if !self.effective_tstab().is_finite() {
             return Err("effective_tstab must be finite".to_string());
@@ -291,6 +304,26 @@ impl PssConfig {
         } else {
             self.tstab_periods as Value * self.period()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validation_rejects_unrepresentable_harmonic_bandwidth() {
+        let mut zero = PssConfig::new(1.0e6);
+        zero.num_harmonics = 0;
+        assert!(zero.validate().is_err());
+
+        let mut aliased = PssConfig::new(1.0e6);
+        aliased.num_harmonics = 9;
+        aliased.points_per_period = 16;
+        assert!(aliased.validate().is_err());
+
+        aliased.num_harmonics = 8;
+        assert!(aliased.validate().is_ok());
     }
 }
 

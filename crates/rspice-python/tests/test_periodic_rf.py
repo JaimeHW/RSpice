@@ -26,7 +26,11 @@ C1 out 0 159.154943091895p
         harmonics=5,
         tstab_periods=8,
         tolerance=1e-7,
+        abstol=1e-13,
+        damping=0.8,
+        max_period_change=0.05,
         points_per_period=64,
+        integration_method=rspice.IntegrationMethod.TRAPEZOIDAL,
     )
 
     assert isinstance(result, rspice.PssResult)
@@ -34,12 +38,30 @@ C1 out 0 159.154943091895p
     assert result.period == pytest.approx(1.0 / F0, rel=1e-8)
     assert result.num_points == len(result.time)
     assert result.num_nodes == len(result.node_names)
+    assert result.num_harmonics == 5
+    assert result.harmonic_frequencies.tolist() == pytest.approx(
+        [0.0, F0, 2 * F0, 3 * F0, 4 * F0, 5 * F0]
+    )
     waveform = result.voltage_waveform("out")
     assert waveform.shape == result.time.shape
     assert result.peak_to_peak("out") == pytest.approx(np.ptp(waveform), rel=1e-12)
     assert result.voltage_waveform("0").tolist() == [0.0] * result.num_points
+    coefficients = result.harmonic_coefficients("out")
+    assert coefficients.dtype == np.complex128
+    assert abs(coefficients[1]) == pytest.approx(1 / np.sqrt(2), rel=0.03)
+    assert result.harmonic_magnitude("out")[1] == pytest.approx(
+        abs(coefficients[1]), rel=1e-12
+    )
+    # SIN starts at its zero crossing (-90-degree cosine-reference phasor),
+    # and the one-pole network contributes another -45 degrees.
+    assert result.harmonic_phase_degrees("out")[1] == pytest.approx(-135.0, abs=2.0)
+    assert result.harmonics("out")[0].n == 1
+    assert result.thd_percent("out") < 0.1
+    assert np.count_nonzero(result.harmonic_coefficients("0")) == 0
     with pytest.raises(KeyError):
         result.voltage_waveform("missing")
+    with pytest.raises(KeyError):
+        result.harmonic_coefficients("missing")
 
 
 def test_hb_exposes_complex_spectra_without_silent_node_fallback():
@@ -155,6 +177,8 @@ C1 out 0 159.154943091895p
         variation="lin",
         sideband_min=-2,
         sideband_max=2,
+        reltol=1e-7,
+        abstol=1e-13,
     )
 
     assert isinstance(result, rspice.PacResult)
@@ -217,6 +241,10 @@ I1 0 osc PULSE(0 1 10u 10n 10n 1u 1)
         tstab_periods=30,
         max_iterations=60,
         tolerance=1e-6,
+        abstol=1e-12,
+        damping=0.8,
+        max_period_change=0.05,
+        integration_method=rspice.IntegrationMethod.TRAPEZOIDAL,
     )
 
     assert isinstance(result, rspice.OscillatorNoiseResult)
@@ -237,6 +265,15 @@ I1 0 osc PULSE(0 1 10u 10n 10n 1u 1)
             netlist, F0, 1.0, 10.0, 0, "V1", "out"
         ),
         lambda engine, netlist: engine.run_pnoise(netlist, F0, [0.0], "out"),
+        lambda engine, netlist: engine.run_pss(netlist, F0, abstol=0.0),
+        lambda engine, netlist: engine.run_pss(netlist, F0, damping=0.05),
+        lambda engine, netlist: engine.run_pss(netlist, F0, max_period_change=0.0),
+        lambda engine, netlist: engine.run_pac(
+            netlist, F0, 1.0, 10.0, 2, "V1", "out", reltol=0.0
+        ),
+        lambda engine, netlist: engine.run_oscillator_noise(
+            netlist, [1.0], period_guess=1.0 / F0, harmonics=0
+        ),
     ],
 )
 def test_periodic_analysis_arguments_are_validated(call):

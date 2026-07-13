@@ -3535,6 +3535,8 @@ impl PySParameterResult {
 pub struct PyPssResult {
     inner: rspice_core::analysis::PssResult,
     #[pyo3(get)]
+    pub num_harmonics: usize,
+    #[pyo3(get)]
     pub iterations: usize,
     #[pyo3(get)]
     pub residual_norm: f64,
@@ -3545,9 +3547,13 @@ pub struct PyPssResult {
 }
 
 impl PyPssResult {
-    pub fn from_core(result: &rspice_core::engine::PssAnalysisResult) -> Self {
+    pub fn from_core(
+        result: &rspice_core::engine::PssAnalysisResult,
+        num_harmonics: usize,
+    ) -> Self {
         Self {
             inner: result.result.clone(),
+            num_harmonics,
             iterations: result.iterations,
             residual_norm: result.final_residual,
             period: result.period,
@@ -3574,6 +3580,23 @@ impl PyPssResult {
                 .position(|candidate| candidate.eq_ignore_ascii_case(name))
                 .map(Some)
                 .ok_or_else(|| unknown_node_name_error(name).into()),
+        }
+    }
+
+    fn harmonic_components(
+        &self,
+        node: &NodeIdentifier,
+    ) -> PyResult<Vec<rspice_core::analysis::HarmonicComponent>> {
+        match self.waveform_index(node)? {
+            Some(index) => Ok(self.inner.harmonics(index + 1, self.num_harmonics)),
+            None => Ok((0..=self.num_harmonics)
+                .map(|harmonic_number| rspice_core::analysis::HarmonicComponent {
+                    harmonic_number,
+                    frequency: harmonic_number as f64 * self.inner.frequency,
+                    magnitude: 0.0,
+                    phase: 0.0,
+                })
+                .collect()),
         }
     }
 }
@@ -3658,10 +3681,96 @@ impl PyPssResult {
         }
     }
 
+    /// Frequencies of the configured DC-through-N harmonic spectrum.
+    #[getter]
+    fn harmonic_frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        (0..=self.num_harmonics)
+            .map(|harmonic| harmonic as f64 * self.inner.frequency)
+            .collect::<Vec<_>>()
+            .to_pyarray(py)
+    }
+
+    /// Complex peak phasors for a node's configured harmonic spectrum.
+    fn harmonic_coefficients<'py>(
+        &self,
+        py: Python<'py>,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        let values = self
+            .harmonic_components(&node)?
+            .into_iter()
+            .map(|component| {
+                rspice_core::Complex64::from_polar(
+                    component.magnitude,
+                    component.phase.to_radians(),
+                )
+            })
+            .collect::<Vec<_>>();
+        Ok(values.to_pyarray(py))
+    }
+
+    fn harmonic_magnitude<'py>(
+        &self,
+        py: Python<'py>,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let values = self
+            .harmonic_components(&node)?
+            .into_iter()
+            .map(|component| component.magnitude.abs())
+            .collect::<Vec<_>>();
+        Ok(values.to_pyarray(py))
+    }
+
+    fn harmonic_phase_degrees<'py>(
+        &self,
+        py: Python<'py>,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let values = self
+            .harmonic_components(&node)?
+            .into_iter()
+            .map(|component| component.phase)
+            .collect::<Vec<_>>();
+        Ok(values.to_pyarray(py))
+    }
+
+    /// Non-DC harmonic records, beginning with the fundamental.
+    fn harmonics(&self, node: NodeIdentifier) -> PyResult<Vec<PyHarmonic>> {
+        Ok(self
+            .harmonic_components(&node)?
+            .into_iter()
+            .filter(|component| component.harmonic_number > 0)
+            .map(|component| PyHarmonic {
+                n: component.harmonic_number,
+                frequency: component.frequency,
+                magnitude: component.magnitude,
+                phase: component.phase.to_radians(),
+            })
+            .collect())
+    }
+
+    fn thd_percent(&self, node: NodeIdentifier) -> PyResult<f64> {
+        let components = self.harmonic_components(&node)?;
+        let Some(fundamental) = components.get(1).map(|component| component.magnitude.abs()) else {
+            return Ok(0.0);
+        };
+        if fundamental <= f64::EPSILON {
+            return Ok(0.0);
+        }
+        let distortion_power = components
+            .iter()
+            .skip(2)
+            .map(|component| component.magnitude * component.magnitude)
+            .sum::<f64>();
+        Ok(100.0 * distortion_power.sqrt() / fundamental)
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "PssResult(frequency={:.6e}Hz, nodes={}, points={}, iterations={}, residual={:.3e})",
+            "PssResult(frequency={:.6e}Hz, harmonics={}, nodes={}, points={}, iterations={}, residual={:.3e})",
             self.inner.frequency,
+            self.num_harmonics,
             self.inner.waveforms.len(),
             self.inner.time.len(),
             self.iterations,

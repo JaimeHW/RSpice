@@ -114,6 +114,7 @@ impl Engine {
             max_step,
             true,
             Some(&mut base),
+            config.integration_method,
             abort,
         )?;
 
@@ -157,6 +158,7 @@ impl Engine {
                 max_step,
                 true,
                 Some(&mut tr_plus),
+                config.integration_method,
                 abort,
             )?;
 
@@ -174,6 +176,7 @@ impl Engine {
                 max_step,
                 true,
                 Some(&mut tr_minus),
+                config.integration_method,
                 abort,
             )?;
 

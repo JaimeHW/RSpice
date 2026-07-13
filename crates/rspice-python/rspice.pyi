@@ -764,10 +764,23 @@ class PssResult:
     def num_nodes(self) -> int: ...
     @property
     def num_points(self) -> int: ...
+    @property
+    def num_harmonics(self) -> int: ...
+    @property
+    def harmonic_frequencies(self) -> npt.NDArray[np.float64]: ...
     def voltage_waveform(self, node: int | str) -> npt.NDArray[np.float64]: ...
     def voltage_at(self, node: int | str, time: float) -> float: ...
     def dc(self, node: int | str) -> float: ...
     def peak_to_peak(self, node: int | str) -> float: ...
+    def harmonic_coefficients(
+        self, node: int | str
+    ) -> npt.NDArray[np.complex128]: ...
+    def harmonic_magnitude(self, node: int | str) -> npt.NDArray[np.float64]: ...
+    def harmonic_phase_degrees(
+        self, node: int | str
+    ) -> npt.NDArray[np.float64]: ...
+    def harmonics(self, node: int | str) -> list[Harmonic]: ...
+    def thd_percent(self, node: int | str) -> float: ...
 
 @final
 class HbResult:
@@ -1034,9 +1047,14 @@ class Engine:
         tstab_periods: int | None = None,
         max_iterations: int = 100,
         tolerance: float = 1e-6,
+        abstol: float = 1e-12,
+        damping: float = 1.0,
+        max_period_change: float = 0.1,
         points_per_period: int = 256,
+        integration_method: IntegrationMethod | None = None,
         autonomous: bool = False,
         period_guess: float | None = None,
+        verbose: bool = False,
     ) -> PssResult: ...
     def run_hb(
         self,
@@ -1057,6 +1075,7 @@ class Engine:
         gmres_restart: int = 30,
         use_exact_jacobian: bool = True,
         source_name: str | None = None,
+        verbose: bool = False,
     ) -> HbResult: ...
     def run_hb_multitone(
         self,
@@ -1077,6 +1096,7 @@ class Engine:
         gmres_restart: int = 30,
         source_stepping: bool = False,
         use_exact_jacobian: bool = True,
+        verbose: bool = False,
     ) -> HbResult: ...
     def run_pac(
         self,
@@ -1092,6 +1112,8 @@ class Engine:
         sideband_min: int | None = None,
         sideband_max: int = 5,
         reference_node: str | None = None,
+        reltol: float = 1e-3,
+        abstol: float = 1e-12,
     ) -> PacResult: ...
     def run_pnoise(
         self,
@@ -1110,10 +1132,17 @@ class Engine:
         offsets: Sequence[float],
         *,
         period_guess: float,
+        harmonics: int = 9,
+        tstab: float = 0.0,
         tstab_periods: int = 20,
         max_iterations: int = 100,
         tolerance: float = 1e-6,
+        abstol: float = 1e-12,
+        damping: float = 1.0,
+        max_period_change: float = 0.1,
         points_per_period: int = 256,
+        integration_method: IntegrationMethod | None = None,
+        verbose: bool = False,
     ) -> OscillatorNoiseResult: ...
     def run_tran(
         self,

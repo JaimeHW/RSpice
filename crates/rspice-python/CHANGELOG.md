@@ -25,6 +25,10 @@ Release numbers remain tied to the workspace version.
   parameters, flattened hierarchy, differential-voltage and branch-current
   outputs, device/parameter filters, normalized derivatives, direct APIs,
   deck execution, and cooperative cancellation.
+- Complete periodic/RF numerical controls in Python: PSS and oscillator-noise
+  absolute tolerances, damping, period-update limits, integration-method
+  overrides, and diagnostics; PAC operating-point tolerances; HB verbosity;
+  and PSS harmonic phasors, magnitudes, phases, records, and THD.
 - Standards-equivalent `.SP donoise` analysis with a full complex Hermitian
   N-port Norton current-noise correlation matrix (`Cy`) and two-port `Rn`,
   matched `NF`, `NFmin`, and `Sopt`, available from deck execution and the
