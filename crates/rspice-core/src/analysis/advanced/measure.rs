@@ -948,8 +948,8 @@ impl MeasureEngine {
             return MeasureResult::failed(name, "Empty range");
         };
 
-        if start >= end {
-            return MeasureResult::failed(name, "Empty range");
+        if start == end {
+            return MeasureResult::success(name, 0.0);
         }
 
         let mut integral = 0.0;
@@ -1012,6 +1012,30 @@ mod tests {
             Some(4.0)
         );
         assert_eq!(interpolate_measure_signal(&[1.0], &[2.5], 2.0), None);
+    }
+
+    #[test]
+    fn integration_over_one_selected_sample_is_zero() {
+        let statement = MeasureStatement {
+            goal: None,
+            tolerance: None,
+            name: "area".to_string(),
+            measure_type: MeasureType::Integ {
+                signal: "V(out)".to_string(),
+                from: Some(2.0),
+                to: Some(2.0),
+            },
+            analysis: "AC".to_string(),
+        };
+        let axis = [1.0, 2.0, 3.0];
+        let values = [4.0, 5.0, 6.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &values);
+
+        let results = engine_with(statement).evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, Some(0.0));
+        assert!(results[0].passed);
     }
 
     fn max_statement(signal: &str) -> MeasureStatement {

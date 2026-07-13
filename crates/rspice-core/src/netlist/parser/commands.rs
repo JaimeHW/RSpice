@@ -1674,7 +1674,7 @@ pub(super) fn parse_meas_command(
                         to,
                     }
                 }
-                "INTEG" => {
+                "INTEG" | "INTEGRAL" => {
                     let (from, to) = parse_measure_range_options(stream, line_num, params)?;
                     MeasureType::Integ {
                         signal: signal.clone(),

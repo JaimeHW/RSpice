@@ -1329,6 +1329,28 @@ mod tests {
     }
 
     #[test]
+    fn measure_integral_alias_preserves_range() {
+        let netlist = Netlist::parse(
+            "integral measurement alias\n\
+             V1 out 0 AC 1\n\
+             .ac dec 5 1 1k\n\
+             .measure ac area integral vm(out) from=10 to=100\n\
+             .end\n",
+        )
+        .expect("INTEGRAL alias parses");
+
+        assert_eq!(netlist.measurements.len(), 1);
+        match &netlist.measurements[0].measure_type {
+            crate::analysis::MeasureType::Integ { signal, from, to } => {
+                assert_eq!(signal, "VM(OUT)");
+                assert_eq!(*from, Some(10.0));
+                assert_eq!(*to, Some(100.0));
+            }
+            other => panic!("expected INTEG measurement, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn dc_sweep_accepts_omitted_step_for_equal_bounds() {
         let netlist = Netlist::parse(
             "single point dc\n\
