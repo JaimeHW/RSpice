@@ -190,6 +190,12 @@ impl BehavioralVoltageSource {
         self.evaluate_with_cached_inputs(time)
     }
 
+    /// Evaluate and commit stateful expression operators at an accepted point.
+    pub(crate) fn accept_transient_step(&mut self, solution: &[Value], time: Value) {
+        let _ = self.evaluate(solution, time);
+        self.vm.accept_transient_step(time);
+    }
+
     #[inline]
     pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.node_bindings
@@ -1126,6 +1132,7 @@ fn eval_function_with_derivative(
         | Function::WodickaFile
         | Function::Barycentric
         | Function::BarycentricFile => Some((0.0, 0.0)),
+        Function::Sdt => None,
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
             None
         }
@@ -1465,6 +1472,12 @@ impl BehavioralCurrentSource {
         self.evaluate_with_cached_inputs(time)
     }
 
+    /// Evaluate and commit stateful expression operators at an accepted point.
+    pub(crate) fn accept_transient_step(&mut self, solution: &[Value], time: Value) {
+        let _ = self.evaluate(solution, time);
+        self.vm.accept_transient_step(time);
+    }
+
     #[inline]
     pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.node_bindings
@@ -1801,6 +1814,16 @@ impl BehavioralSources {
             (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
         });
         breakpoints
+    }
+
+    /// Commit stateful expression operators once at a successful timestep.
+    pub(crate) fn accept_transient_step(&mut self, solution: &[Value], time: Value) {
+        for source in &mut self.voltage_sources {
+            source.accept_transient_step(solution, time);
+        }
+        for source in &mut self.current_sources {
+            source.accept_transient_step(solution, time);
+        }
     }
 
     /// Stamp all behavioral sources

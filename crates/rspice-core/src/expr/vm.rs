@@ -100,6 +100,8 @@ pub enum Instruction {
     SpiceSin(usize),
     SpiceExp(usize),
     SpiceSffm(usize),
+    /// Rollback-safe trapezoidal time integral for one expression occurrence.
+    Sdt(usize),
 
     /// Conditional: if cond != 0, keep second, else keep third
     IfElse,
@@ -116,6 +118,8 @@ pub struct CompiledExpr {
     pub branch_map: HashMap<String, usize>,
     /// File-backed lookup tables resolved during circuit build.
     pub lookup_tables: Vec<LookupTable>,
+    /// Number of independently stateful SDT occurrences in this program.
+    pub sdt_count: usize,
 }
 
 impl CompiledExpr {
@@ -151,6 +155,13 @@ impl CompiledExpr {
         let idx = self.lookup_tables.len();
         self.lookup_tables.push(table);
         idx
+    }
+
+    /// Assign the next independent SDT state slot.
+    pub fn add_sdt(&mut self) -> usize {
+        let index = self.sdt_count;
+        self.sdt_count += 1;
+        index
     }
 }
 
@@ -216,6 +227,16 @@ impl<'a> Context<'a> {
 #[derive(Debug, Clone)]
 pub struct Vm {
     stack: Vec<Value>,
+    sdt_states: Vec<SdtState>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SdtState {
+    accepted_time: Value,
+    accepted_input: Value,
+    accepted_integral: Value,
+    trial_input: Value,
+    trial_integral: Value,
 }
 
 impl Default for Vm {
@@ -229,6 +250,16 @@ impl Vm {
     pub fn new() -> Self {
         Self {
             stack: Vec::with_capacity(32),
+            sdt_states: Vec::new(),
+        }
+    }
+
+    /// Commit every SDT occurrence after a successful transient timestep.
+    pub fn accept_transient_step(&mut self, time: Value) {
+        for state in &mut self.sdt_states {
+            state.accepted_time = time;
+            state.accepted_input = state.trial_input;
+            state.accepted_integral = state.trial_integral;
         }
     }
 
@@ -469,6 +500,22 @@ impl Vm {
                         self.stack.truncate(start);
                         self.stack.push(result);
                     }
+                }
+                Instruction::Sdt(index) => {
+                    let input = self.stack.pop().unwrap_or(0.0);
+                    if self.sdt_states.len() <= *index {
+                        self.sdt_states.resize(*index + 1, SdtState::default());
+                    }
+                    let state = &mut self.sdt_states[*index];
+                    let dt = if ctx.time == 0.0 {
+                        0.0
+                    } else {
+                        (ctx.time - state.accepted_time).max(0.0)
+                    };
+                    state.trial_input = input;
+                    state.trial_integral =
+                        state.accepted_integral + 0.5 * (state.accepted_input + input) * dt;
+                    self.stack.push(state.trial_integral);
                 }
 
                 Instruction::Limit => {
@@ -786,4 +833,55 @@ fn xyce_atanh(value: Value) -> Value {
     value
         .clamp(XYCE_ATANH_EPSILON - 1.0, 1.0 - XYCE_ATANH_EPSILON)
         .atanh()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expr::{compile, parse_expression_strict};
+
+    #[test]
+    fn sdt_uses_committed_trapezoidal_history_without_trial_accumulation() {
+        let program = compile(&parse_expression_strict("sdt(v(in))").expect("SDT parses"));
+        assert_eq!(program.sdt_count, 1);
+        let mut vm = Vm::new();
+
+        assert_eq!(
+            vm.execute(&program, &Context::transient(&[2.0], &[], 0.0)),
+            0.0
+        );
+        vm.accept_transient_step(0.0);
+
+        assert_eq!(
+            vm.execute(&program, &Context::transient(&[4.0], &[], 1.0)),
+            3.0
+        );
+        assert_eq!(
+            vm.execute(&program, &Context::transient(&[6.0], &[], 1.0)),
+            4.0,
+            "a repeated Newton trial must replace, not accumulate, candidate state"
+        );
+        assert_eq!(
+            vm.execute(&program, &Context::transient(&[4.0], &[], 0.5)),
+            1.5,
+            "a rejected larger trial must not alter committed history"
+        );
+    }
+
+    #[test]
+    fn distinct_sdt_occurrences_have_independent_state_slots() {
+        let program = compile(&parse_expression_strict("sdt(1)+sdt(2)").expect("SDTs parse"));
+        assert_eq!(program.sdt_count, 2);
+        let mut vm = Vm::new();
+
+        assert_eq!(
+            vm.execute(&program, &Context::transient(&[], &[], 0.0)),
+            0.0
+        );
+        vm.accept_transient_step(0.0);
+        assert_eq!(
+            vm.execute(&program, &Context::transient(&[], &[], 1.0)),
+            3.0
+        );
+    }
 }

@@ -771,6 +771,7 @@ impl<'a> Parser<'a> {
                 "WODICKAFILE" => Some(Function::WodickaFile),
                 "BLI" => Some(Function::Barycentric),
                 "BLIFILE" => Some(Function::BarycentricFile),
+                "SDT" => Some(Function::Sdt),
                 "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
                 "SPICE_PULSE" => Some(Function::SpicePulse),
@@ -810,7 +811,8 @@ impl<'a> Parser<'a> {
             | Function::Wodicka
             | Function::WodickaFile
             | Function::Barycentric
-            | Function::BarycentricFile => Some((1, 1)),
+            | Function::BarycentricFile
+            | Function::Sdt => Some((1, 1)),
             _ => None,
         };
 

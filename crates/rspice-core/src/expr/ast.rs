@@ -125,6 +125,7 @@ pub enum Function {
     WodickaFile, // wodickafile("path") alias
     Barycentric, // bli("path") = file-backed barycentric Lagrange interpolation
     BarycentricFile, // blifile("path") alias
+    Sdt,       // sdt(x) = rollback-safe trapezoidal time integral
     Mod,       // mod(x, y) = x % y - modulo
     SpicePulse, // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     SpiceSin,  // spice_sin(vo, va, freq, td, theta[, phase_degrees])

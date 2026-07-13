@@ -4890,6 +4890,32 @@ fn test_xyce_inline_library_definition_and_selected_section_case_runs() {
 }
 
 #[test]
+fn test_xyce_stateful_sdt_transient_cases_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_963_SON/nonzeroInitialValue.cir",
+        "Netlists/Certification_Tests/BUG_963_SON/sdtWithFunc.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run with rollback-safe stateful SDT integration, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_complex_param_harmonic_balance_wrapper_case_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

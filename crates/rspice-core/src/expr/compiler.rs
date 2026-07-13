@@ -145,6 +145,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 | Function::WodickaFile
                 | Function::Barycentric
                 | Function::BarycentricFile => Instruction::PushConst(0.0),
+                Function::Sdt => Instruction::Sdt(program.add_sdt()),
                 Function::Mod => Instruction::Mod,
                 Function::SpicePulse => Instruction::SpicePulse(args.len()),
                 Function::SpiceSin => Instruction::SpiceSin(args.len()),

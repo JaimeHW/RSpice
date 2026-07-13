@@ -15,7 +15,7 @@ use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     TransientResult, extract_ac_value, extract_dc_value,
 };
-use crate::expr::{Expr, parse_expression_strict};
+use crate::expr::{CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict};
 use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
@@ -43,6 +43,12 @@ const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
 const XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION: usize = 8;
 const XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION: usize = 16;
+
+#[derive(Debug)]
+struct StatefulTranPrintExpression {
+    program: CompiledExpr,
+    vm: Vm,
+}
 const PRN_TIME_NEIGHBOR_HALF_ULPS: f64 = 4.0;
 const XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-2;
 const XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE: f64 = 1.0e-12;
@@ -11001,14 +11007,25 @@ impl XyceTestRunner {
         Self::validate_transient_result_time_grid(result)?;
         let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
         let columns = Self::transient_prn_header_columns(&plan.print, true);
+        let mut stateful_expressions = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::stateful_tran_print_expression(probe, netlist))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut rows = Vec::with_capacity(result.time.len());
         for (index, &time) in result.time.iter().enumerate() {
             let mut row = Vec::with_capacity(columns.len());
             row.push(index as Value);
             row.push(time * time_scale);
-            for probe in &plan.print.probes {
-                let value = Self::evaluate_tran_probe(probe, netlist, result, time)?;
+            for (probe, stateful) in plan.print.probes.iter().zip(&mut stateful_expressions) {
+                let value = match stateful {
+                    Some(runtime) => Self::evaluate_stateful_tran_print_expression(
+                        runtime, netlist, result, time,
+                    )?,
+                    None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
+                };
                 if !value.is_finite() {
                     return Err(format!(
                         "baseline probe '{probe}' produced non-finite value {value} at time {time}"
@@ -17592,6 +17609,10 @@ impl XyceTestRunner {
         let output_initial_interval = Self::output_initial_interval(source)?;
         let tran_time_scale_factor = Self::tran_print_time_scale_factor(source)?;
         Self::validate_transient_result_time_grid(result)?;
+        let stateful_waveforms = data_columns
+            .iter()
+            .map(|probe| Self::stateful_tran_probe_waveform(probe, netlist, result))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut mismatches = Vec::new();
         for (row_index, row) in reference.rows.iter().enumerate() {
@@ -17630,7 +17651,12 @@ impl XyceTestRunner {
 
             for (column_index, probe) in data_columns.iter().enumerate() {
                 let expected = row[column_index + layout.data_column_offset];
-                let actual = Self::evaluate_tran_probe(probe, netlist, result, time)?;
+                let actual = match &stateful_waveforms[column_index] {
+                    Some(values) => {
+                        Self::interpolate_transient_waveform_at(&result.time, values, time)?
+                    }
+                    None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
+                };
                 let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
                     .get(&normalized_probe)
@@ -17639,7 +17665,8 @@ impl XyceTestRunner {
                     .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
                 if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
                     let time_tolerance = Self::default_prn_time_quantization_tolerance(time);
-                    if time_tolerance > 0.0
+                    if stateful_waveforms[column_index].is_none()
+                        && time_tolerance > 0.0
                         && self.transient_probe_matches_within_time_quantization(
                             probe,
                             netlist,
@@ -17653,19 +17680,22 @@ impl XyceTestRunner {
                     {
                         continue;
                     }
-                    if self.transient_probe_matches_reference_time_neighborhood(
-                        reference,
-                        layout.time_column,
-                        row_index,
-                        column_index + layout.data_column_offset,
-                        actual,
-                        tolerance,
-                        time_tolerance,
-                        tran_time_scale_factor,
-                    ) {
+                    if stateful_waveforms[column_index].is_none()
+                        && self.transient_probe_matches_reference_time_neighborhood(
+                            reference,
+                            layout.time_column,
+                            row_index,
+                            column_index + layout.data_column_offset,
+                            actual,
+                            tolerance,
+                            time_tolerance,
+                            tran_time_scale_factor,
+                        )
+                    {
                         continue;
                     }
-                    if let Some(output_interval) = output_initial_interval
+                    if stateful_waveforms[column_index].is_none()
+                        && let Some(output_interval) = output_initial_interval
                         && self.transient_probe_matches_output_interval_corridor(
                             probe,
                             netlist,
@@ -20869,6 +20899,9 @@ impl XyceTestRunner {
                     netlist,
                 );
             }
+            if Self::stateful_tran_print_expression(probe, netlist)?.is_some() {
+                return Self::validate_tran_probe_expression(expression, netlist);
+            }
             if Self::print_expression_contains_probe_reference(expression) {
                 return Self::validate_tran_probe_expression(expression, netlist);
             }
@@ -21049,6 +21082,21 @@ impl XyceTestRunner {
     }
 
     fn validate_tran_probe_expression(expression: &str, netlist: &Netlist) -> Result<(), String> {
+        let prepared =
+            prepare_behavioral_expression(expression, &netlist.params).map_err(|err| {
+                format!("could not prepare .PRINT TRAN expression '{{{expression}}}': {err}")
+            })?;
+        let ast = parse_expression_strict(&prepared).map_err(|err| {
+            format!("could not parse .PRINT TRAN expression '{{{expression}}}': {err}")
+        })?;
+        if Self::expression_contains_sdt(&ast) {
+            let program = compile(&ast);
+            for branch in program.branch_map.keys() {
+                let probe = format!("i({branch})");
+                Self::validate_atomic_tran_probe(&Self::normalize_probe(&probe), &probe, netlist)?;
+            }
+            return Ok(());
+        }
         let mut call_value = |call: &str| {
             let normalized = Self::normalize_probe(call);
             Self::validate_atomic_tran_probe(&normalized, call, netlist)?;
@@ -22348,6 +22396,97 @@ impl XyceTestRunner {
 
         let normalized = Self::normalize_probe(probe);
         Self::evaluate_atomic_tran_probe(&normalized, netlist, result, time)
+    }
+
+    fn stateful_tran_print_expression(
+        probe: &str,
+        netlist: &Netlist,
+    ) -> Result<Option<StatefulTranPrintExpression>, String> {
+        let Some(expression) = Self::print_expression_inner(probe) else {
+            return Ok(None);
+        };
+        let prepared =
+            prepare_behavioral_expression(expression, &netlist.params).map_err(|err| {
+                format!(
+                    "could not prepare stateful .PRINT TRAN expression '{{{expression}}}': {err}"
+                )
+            })?;
+        let ast = parse_expression_strict(&prepared).map_err(|err| {
+            format!("could not parse stateful .PRINT TRAN expression '{{{expression}}}': {err}")
+        })?;
+        if !Self::expression_contains_sdt(&ast) {
+            return Ok(None);
+        }
+        Ok(Some(StatefulTranPrintExpression {
+            program: compile(&ast),
+            vm: Vm::new(),
+        }))
+    }
+
+    fn stateful_tran_probe_waveform(
+        probe: &str,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<Option<Vec<Value>>, String> {
+        let Some(mut runtime) = Self::stateful_tran_print_expression(probe, netlist)? else {
+            return Ok(None);
+        };
+        let mut values = Vec::with_capacity(result.time.len());
+        for &time in &result.time {
+            values.push(Self::evaluate_stateful_tran_print_expression(
+                &mut runtime,
+                netlist,
+                result,
+                time,
+            )?);
+        }
+        Ok(Some(values))
+    }
+
+    fn expression_contains_sdt(expression: &Expr) -> bool {
+        match expression {
+            Expr::Function { func, args } => {
+                matches!(func, crate::expr::Function::Sdt)
+                    || args.iter().any(Self::expression_contains_sdt)
+            }
+            Expr::Unary { operand, .. } => Self::expression_contains_sdt(operand),
+            Expr::Binary { left, right, .. } => {
+                Self::expression_contains_sdt(left) || Self::expression_contains_sdt(right)
+            }
+            Expr::Const(_)
+            | Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
+            | Expr::StringLiteral(_)
+            | Expr::LookupTable(_)
+            | Expr::Time
+            | Expr::Frequency
+            | Expr::Temperature => false,
+        }
+    }
+
+    fn evaluate_stateful_tran_print_expression(
+        runtime: &mut StatefulTranPrintExpression,
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+    ) -> Result<Value, String> {
+        let mut voltages = vec![0.0; runtime.program.node_map.len()];
+        for (name, &index) in &runtime.program.node_map {
+            voltages[index] = Self::transient_voltage_named(result, netlist, name, time)?;
+        }
+        let mut currents = vec![0.0; runtime.program.branch_map.len()];
+        for (name, &index) in &runtime.program.branch_map {
+            currents[index] = Self::transient_branch_current_named(result, name, time)
+                .or_else(|| {
+                    Self::evaluate_independent_current_source_probe(netlist, result, name, time)
+                })
+                .ok_or_else(|| format!("branch current '{name}' not found in transient result"))?;
+        }
+        let context = Context::transient(&voltages, &currents, time)
+            .with_expression_dialect(ExpressionDialect::Xyce);
+        let value = runtime.vm.execute(&runtime.program, &context);
+        runtime.vm.accept_transient_step(time);
+        Ok(value)
     }
 
     fn evaluate_atomic_tran_probe(

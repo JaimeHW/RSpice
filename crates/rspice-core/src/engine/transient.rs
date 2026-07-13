@@ -934,6 +934,11 @@ impl Engine {
                 .iter()
                 .map(|&branch| Self::derived_transient_branch_name(&circuit, branch)),
         );
+        if resume.is_none() {
+            circuit
+                .behavioral_sources
+                .accept_transient_step(&solution, resume_time);
+        }
         let mut result = TransientResult {
             time: vec![resume_time],
             voltages: (0..num_nodes)
