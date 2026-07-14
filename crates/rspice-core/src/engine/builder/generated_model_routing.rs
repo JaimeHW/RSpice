@@ -620,6 +620,9 @@ fn append_generated_instance_params(
 ) -> Result<(), SimulationError> {
     if !is_generated_bjt_target(target.model_name) {
         for (name, value) in instance_params {
+            if is_internal_routing_param(name) {
+                continue;
+            }
             params.push((name.clone(), ParametricValue::Resolved(*value)));
         }
         for (name, expr) in deferred_params {
@@ -632,7 +635,9 @@ fn append_generated_instance_params(
     let mut multiplier_given = false;
     let mut multiplier_exprs = Vec::new();
     for (name, value) in instance_params {
-        if is_bjt_multiplier_param(name) {
+        if is_internal_routing_param(name) {
+            continue;
+        } else if is_bjt_multiplier_param(name) {
             if !value.is_finite() || *value <= 0.0 {
                 return Err(SimulationError::Circuit(format!(
                     "Generated Verilog-A BJT model '{}' instance parameter {}={} must be finite and > 0",
@@ -678,6 +683,13 @@ fn append_generated_instance_params(
         }
     }
     Ok(())
+}
+
+fn is_internal_routing_param(name: &str) -> bool {
+    // Parser-owned metadata controls compatibility resolution and is not a
+    // Verilog-A instance parameter. Generated devices must see only canonical
+    // model/instance parameters from the user's netlist.
+    name.eq_ignore_ascii_case(crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER)
 }
 
 fn is_generated_bjt_target(model_name: &str) -> bool {
