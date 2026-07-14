@@ -2331,6 +2331,40 @@ r1 a 0 rmod
         );
     }
 
+    #[cfg(feature = "veriloga-builtins")]
+    #[test]
+    fn generated_vbic13_noise_initializes_for_the_new_analysis() {
+        let netlist = Netlist::parse(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/xyce/Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir"
+        )))
+        .expect("VBIC13 3T oracle deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("VBIC13 circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("VBIC13 matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("VBIC13 operating point converges");
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(&solution);
+        }
+
+        let (sources, correlated) = Engine::try_collect_noise_sources(&circuit, &solution)
+            .expect("VBIC13 generated noise state initializes");
+        assert!(correlated.is_empty());
+        let vbic = sources
+            .iter()
+            .filter(|source| source.identity.device.eq_ignore_ascii_case("q1"))
+            .collect::<Vec<_>>();
+        assert_eq!(vbic.len(), 13, "the 3T model exports 13 mechanisms");
+        assert!(vbic.iter().all(|source| source.parameter.is_finite()));
+        assert!(vbic.iter().all(|source| source.af.is_finite()));
+        assert!(vbic.iter().all(|source| source.ef.is_finite()));
+    }
+
     #[test]
     fn noise_retains_the_canonical_multi_source_ac_solution() {
         let netlist = Netlist::parse(

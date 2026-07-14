@@ -537,8 +537,12 @@ impl BuiltinVerilogAInstance {
             self.temperature,
             num_nodes,
             GeneratedAnalysisKind::Noise,
-            self.analysis_initial_step,
-            self.analysis_final_step,
+            // Noise-source collection begins a new analysis after the DC
+            // operating point. Canonical compact models initialize model and
+            // temperature state under $analysis("initial_step"), so stale DC
+            // step flags must not leak into this evaluation.
+            true,
+            false,
             simparams,
         );
         self.kind
