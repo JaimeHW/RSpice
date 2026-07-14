@@ -11815,6 +11815,45 @@ fn generated_noise_term_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
+fn generated_zero_noise_evaluator_compiles_and_returns_typed_range_error() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module quiet_resistor(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real resistance = 1000.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / resistance;
+endmodule
+"#,
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile quiet resistor");
+    let noise = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "noise.rs")
+        .expect("noise ABI file")
+        .contents
+        .as_str();
+
+    assert!(
+        noise.contains("NOISE_SOURCES: [GeneratedNoiseDescriptor; 0]"),
+        "{noise}"
+    );
+    assert!(
+        noise.contains("SourceIndexOutOfRange { index: source_index, count: 0 }"),
+        "{noise}"
+    );
+    assert!(!noise.contains("match source_index"), "{noise}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_lowers_intrinsic_math_with_analytic_derivatives() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(math_device_source())

@@ -135,6 +135,18 @@ pub(super) fn generate_noise_file(
         .expect("write noise descriptor");
     }
     out.push_str("];\n\nimpl Instance {\n");
+    if artifact.noise_sources.sources.is_empty() {
+        out.push_str(
+            "    pub fn evaluate_noise_source(&self, source_index: usize, _ctx: &GeneratedEvalContext<'_>) -> Result<GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError> {\n\
+             \x20       Err(GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index: source_index, count: 0 })\n\
+             \x20   }\n\
+             }\n",
+        );
+        return Ok(GeneratedRustFile {
+            relative_path: "noise.rs".to_string(),
+            contents: out,
+        });
+    }
     out.push_str(
         "    pub fn evaluate_noise_source(&self, source_index: usize, ctx: &GeneratedEvalContext<'_>) -> Result<GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError> {\n\
          \x20       if source_index >= NOISE_SOURCES.len() {\n\
