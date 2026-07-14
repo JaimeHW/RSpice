@@ -1,6 +1,7 @@
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
 use crate::device::veriloga_generated::GeneratedDdtCoefficients;
+use crate::device::veriloga_generated::kernel_runtime::{ReactiveScratch as KernelReactiveScratch, Scratch as KernelScratch};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -830,6 +831,8 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+    pub(crate) scratch: Option<Box<KernelScratch<1096, 13, 8>>>,
+    pub(crate) reactive_scratch: Option<Box<KernelReactiveScratch<1096, 13, 8>>>,
 }
 
 impl Clone for Instance {
@@ -853,6 +856,8 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
+            scratch: None,
+            reactive_scratch: None,
         }
     }
 }
@@ -893,11 +898,15 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+            scratch: None,
+            reactive_scratch: None,
         }
     }
 
     #[inline]
     pub fn restore_from_snapshot(&mut self, snapshot: Self) {
+        let scratch = self.scratch.take();
+        let reactive_scratch = self.reactive_scratch.take();
         let Self {
             nodes,
             branches,
@@ -916,6 +925,8 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
+            scratch: _,
+            reactive_scratch: _,
         } = snapshot;
         *self = Self {
             nodes,
@@ -935,6 +946,8 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
+            scratch,
+            reactive_scratch,
         };
     }
 
