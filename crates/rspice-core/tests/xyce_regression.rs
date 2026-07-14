@@ -5279,6 +5279,21 @@ fn test_xyce_ac_single_point_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_ac_derivative_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_AC/DerivTestAC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should reject constant-signal WHEN events while preserving AC derivative artifacts, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_dc_single_point_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

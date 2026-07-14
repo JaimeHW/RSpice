@@ -1207,7 +1207,8 @@ fn measurement_condition_crossings(
     for segment in 0..point_count - 1 {
         let left_previous = left[segment];
         let left_current = left[segment + 1];
-        if left_current == left_previous {
+        let left_scale = left_previous.abs().max(left_current.abs()).max(1.0);
+        if (left_current - left_previous).abs() <= XYCE_WHEN_ABSOLUTE_TOLERANCE * left_scale {
             continue;
         }
         let Some(right_previous) = right.value_at(segment) else {
@@ -1745,7 +1746,9 @@ mod tests {
         let squares = [1.0, 4.0, 9.0, 16.0, 25.0];
         let four_x = [4.0, 8.0, 12.0, 16.0, 20.0];
         let double_crossing = [4.2, 1.1, 0.0, 0.9, 3.8];
-        let constant = [1.0; 5];
+        // Linear solves can leave roundoff-scale jitter on a physically
+        // constant waveform; it must not fabricate a WHEN event.
+        let constant = [1.0, 1.0 + 1.0e-14, 1.0 - 1.0e-14, 1.0, 1.0 + 5.0e-15];
         let mut signals = HashMap::new();
         signals.insert("Y".to_string(), squares.as_slice());
         signals.insert("TARGET".to_string(), four_x.as_slice());
