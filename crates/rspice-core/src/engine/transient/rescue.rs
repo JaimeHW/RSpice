@@ -48,6 +48,7 @@ impl Engine {
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         let snapshot = circuit.nonlinear_state_snapshot();
+        let vbic_snapshot = vbic_snapshot_cache.to_vec();
         let rescued = self.walk_gmin_continuation_levels(
             circuit,
             matrix,
@@ -65,6 +66,7 @@ impl Engine {
         );
         if !matches!(rescued, Ok(Some(_))) {
             circuit.restore_nonlinear_state(snapshot);
+            vbic_snapshot_cache.clone_from_slice(&vbic_snapshot);
         }
         rescued
     }
@@ -122,9 +124,8 @@ impl Engine {
                     true,
                     extra_gmin,
                 )?;
-                let base_merit = self
-                    .residual_inf_norm(circuit, matrix, &iterate, rhs)
-                    .unwrap_or(Value::INFINITY);
+                let line_search_base_state = circuit.nonlinear_state_snapshot();
+                let line_search_vbic_cache = vbic_snapshot_cache.to_vec();
 
                 let Ok(mut sol) = matrix.solve(rhs) else {
                     if debug {
@@ -177,10 +178,31 @@ impl Engine {
                 // converts wandering around a stiff feedback loop into
                 // monotone descent toward the level's solution.
                 let full_step = sol;
+                circuit.restore_nonlinear_state(line_search_base_state.clone());
+                vbic_snapshot_cache.clone_from_slice(&line_search_vbic_cache);
+                self.stamp_transient_system_with_generated_mode(
+                    circuit,
+                    matrix,
+                    rhs,
+                    &iterate,
+                    time,
+                    dt,
+                    ctx,
+                    vbic_snapshot_cache,
+                    VbicCachedSnapshotReuse::NewtonBypass,
+                    true,
+                    extra_gmin,
+                    crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
+                )?;
+                let base_merit = self
+                    .residual_inf_norm(circuit, matrix, &iterate, rhs)
+                    .unwrap_or(Value::INFINITY);
                 let mut best_point: Option<Vec<Value>> = None;
                 let mut best_merit = Value::INFINITY;
                 let mut alpha: Value = 1.0;
                 for _trial in 0..RESCUE_LINE_SEARCH_TRIALS {
+                    circuit.restore_nonlinear_state(line_search_base_state.clone());
+                    vbic_snapshot_cache.clone_from_slice(&line_search_vbic_cache);
                     let trial: Vec<Value> = if alpha >= 1.0 {
                         full_step.clone()
                     } else {
@@ -190,7 +212,7 @@ impl Engine {
                             .map(|(from, to)| from + alpha * (to - from))
                             .collect()
                     };
-                    self.stamp_transient_system(
+                    self.stamp_transient_system_with_generated_mode(
                         circuit,
                         matrix,
                         rhs,
@@ -202,6 +224,7 @@ impl Engine {
                         VbicCachedSnapshotReuse::NewtonBypass,
                         true,
                         extra_gmin,
+                        crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
                     )?;
                     let trial_merit = self
                         .residual_inf_norm(circuit, matrix, &trial, rhs)
@@ -220,17 +243,36 @@ impl Engine {
                 let accepted = best_point.unwrap_or(full_step);
                 let accepted_merit = best_merit;
 
+                // Every merit trial starts from the same base state and uses
+                // raw generated-device equations. Commit exactly one limited
+                // Newton stamp at the selected point so matrix/RHS, limiter
+                // history, and convergence flags all describe `accepted`.
+                circuit.restore_nonlinear_state(line_search_base_state);
+                vbic_snapshot_cache.clone_from_slice(&line_search_vbic_cache);
+                self.stamp_transient_system(
+                    circuit,
+                    matrix,
+                    rhs,
+                    &accepted,
+                    time,
+                    dt,
+                    ctx,
+                    vbic_snapshot_cache,
+                    VbicCachedSnapshotReuse::NewtonBypass,
+                    true,
+                    extra_gmin,
+                )?;
+
                 let voltage_converged = Self::check_voltage_convergence_with_tolerances(
                     &iterate[..num_nodes],
                     &accepted[..num_nodes],
                     self.voltage_abstol(),
                     self.voltage_reltol(),
                 );
-                // The line search leaves the freshest stamp at (or near) the
-                // accepted point, so this judges the true deformed-system
-                // residual rather than the linear solve's.
-                let residual_converged = accepted_merit <= 1.0
-                    || self.residual_convergence_met(circuit, matrix, &accepted, rhs);
+                // `accepted_merit` came from the raw physical probe. The
+                // committed Newton stamp may be affine-limited and therefore
+                // cannot replace the physical residual as an acceptance test.
+                let residual_converged = accepted_merit <= 1.0;
                 if debug && level_iter >= budget.saturating_sub(6) {
                     let max_dv = Self::max_abs_delta_prefix(&iterate, &accepted, num_nodes);
                     log::warn!(

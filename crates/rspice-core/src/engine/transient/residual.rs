@@ -68,6 +68,38 @@ impl Engine {
         refresh_nonlinear: bool,
         extra_diag_gmin: Value,
     ) -> Result<(), SimulationError> {
+        self.stamp_transient_system_with_generated_mode(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            time,
+            dt,
+            ctx,
+            vbic_snapshot_cache,
+            vbic_reuse,
+            refresh_nonlinear,
+            extra_diag_gmin,
+            crate::device::veriloga_generated::GeneratedEvaluationMode::NewtonLimited,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn stamp_transient_system_with_generated_mode(
+        &self,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+        dt: Value,
+        ctx: &TransientSystemContext<'_>,
+        vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
+        vbic_reuse: VbicCachedSnapshotReuse,
+        refresh_nonlinear: bool,
+        extra_diag_gmin: Value,
+        generated_evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
+    ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
         matrix.clear_values();
         rhs.fill(0.0);
@@ -231,12 +263,13 @@ impl Engine {
             circuit
                 .stamp_nonlinear(matrix, rhs, solution)
                 .map_err(SimulationError::Circuit)?;
-            circuit.stamp_behavioral(
+            circuit.stamp_behavioral_with_generated_mode(
                 matrix,
                 rhs,
                 solution,
                 time,
                 crate::xspice::AnalysisType::Transient,
+                generated_evaluation_mode,
             );
         } else {
             circuit.stamp_behavioral_sources(matrix, rhs, solution, time);
@@ -266,7 +299,7 @@ impl Engine {
             return Ok(false);
         }
 
-        self.stamp_transient_system(
+        self.stamp_transient_system_with_generated_mode(
             circuit,
             matrix,
             rhs,
@@ -278,6 +311,7 @@ impl Engine {
             VbicCachedSnapshotReuse::SeedOnly,
             true,
             0.0,
+            crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
         )?;
         Ok(self.residual_convergence_met(circuit, matrix, solution, rhs))
     }

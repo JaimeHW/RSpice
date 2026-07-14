@@ -80,30 +80,41 @@ impl Engine {
         solution: &[Value],
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
+        self.try_stamp_static_probe_nonlinear_devices_for_operating_point(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+            junction_gmin,
+        )
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn try_stamp_static_probe_nonlinear_devices_for_operating_point(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
+        junction_gmin: Value,
+    ) -> Result<(), SimulationError> {
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.update_bjt_static_linearizations(solution);
         circuit.update_b3soi_static_linearizations(solution);
         circuit.update_jfet_static_linearizations(solution);
-        circuit.stamp_generic_switches(matrix, rhs, 0.0);
+        circuit.stamp_generic_switches(matrix, rhs, time);
         circuit
             .try_stamp_static_probe_nonlinear(matrix, rhs, solution)
             .map_err(SimulationError::Circuit)?;
-        circuit.stamp_behavioral(
-            matrix,
-            rhs,
-            solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-        );
+        circuit.stamp_behavioral_static_probe(matrix, rhs, solution, time, analysis);
         if circuit.has_xspice_devices() {
-            circuit.evaluate_xspice_with_analysis(
-                0.0,
-                0.0,
-                solution,
-                crate::xspice::AnalysisType::DcOp,
-            );
+            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
             circuit.stamp_xspice(matrix, rhs);
         }
         Ok(())

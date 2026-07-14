@@ -152,6 +152,10 @@ impl Engine {
         circuit: &crate::circuit::Circuit,
     ) -> bool {
         let criteria = self.device_convergence_criteria();
+        #[cfg(feature = "veriloga-builtins")]
+        let generated_veriloga_converged = circuit.generated_veriloga_devices.all_converged();
+        #[cfg(not(feature = "veriloga-builtins"))]
+        let generated_veriloga_converged = true;
 
         circuit.diodes.all_converged(criteria)
             && circuit.mosfets.all_converged(criteria)
@@ -160,6 +164,7 @@ impl Engine {
             && circuit.iswitches.iter().all(|sw| sw.is_converged(criteria))
             && circuit.xspice_converged(criteria.voltage_tolerance())
             && circuit.bjts.all_converged(criteria)
+            && generated_veriloga_converged
     }
 
     #[inline]

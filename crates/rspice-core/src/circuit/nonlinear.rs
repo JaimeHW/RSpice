@@ -2,6 +2,8 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NonlinearDeviceStateSnapshot {
+    inductors: Inductors,
+    jiles_atherton_inductors: Vec<JilesAthertonBinding>,
     diodes: Diodes,
     bjts: Bjts,
     mosfets: Mosfets,
@@ -73,6 +75,18 @@ mod tests {
             circuit.generated_simulation_parameters.get("gmin"),
             Some(0.0)
         );
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_dynamic_inductor_coefficients() {
+        let mut circuit = CircuitData::new();
+        circuit.inductors.add("lcore".to_string(), 1, 0, 1, 2.0e-3);
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.inductors.inductances[0] = 7.0e-3;
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(circuit.inductors.inductances, vec![2.0e-3]);
     }
 
     #[test]
@@ -448,6 +462,8 @@ impl CircuitData {
     /// voltages, behavioral-source linearization scratch, or code-model context.
     pub(crate) fn nonlinear_state_snapshot(&self) -> NonlinearDeviceStateSnapshot {
         NonlinearDeviceStateSnapshot {
+            inductors: self.inductors.clone(),
+            jiles_atherton_inductors: self.jiles_atherton_inductors.clone(),
             diodes: self.diodes.clone(),
             bjts: self.bjts.clone(),
             mosfets: self.mosfets.clone(),
@@ -481,6 +497,8 @@ impl CircuitData {
 
     /// Restore mutable nonlinear evaluation state after a trial residual probe.
     pub(crate) fn restore_nonlinear_state(&mut self, snapshot: NonlinearDeviceStateSnapshot) {
+        self.inductors = snapshot.inductors;
+        self.jiles_atherton_inductors = snapshot.jiles_atherton_inductors;
         self.diodes = snapshot.diodes;
         self.bjts = snapshot.bjts;
         self.mosfets = snapshot.mosfets;
@@ -755,7 +773,46 @@ impl CircuitData {
         rhs: &mut [Value],
         solution: &[Value],
         time: Value,
+        analysis: crate::xspice::AnalysisType,
+    ) {
+        self.stamp_behavioral_with_generated_mode(
+            matrix,
+            rhs,
+            solution,
+            time,
+            analysis,
+            crate::device::veriloga_generated::GeneratedEvaluationMode::NewtonLimited,
+        );
+    }
+
+    /// Stamp behavioral devices for a physical residual probe. Generated
+    /// Verilog-A limiters are bypassed and their Newton history is untouched.
+    pub fn stamp_behavioral_static_probe(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
+    ) {
+        self.stamp_behavioral_with_generated_mode(
+            matrix,
+            rhs,
+            solution,
+            time,
+            analysis,
+            crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
+        );
+    }
+
+    pub(crate) fn stamp_behavioral_with_generated_mode(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
         _analysis: crate::xspice::AnalysisType,
+        _evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
     ) {
         self.stamp_behavioral_sources(matrix, rhs, solution, time);
         #[cfg(feature = "veriloga-builtins")]
@@ -774,13 +831,14 @@ impl CircuitData {
             };
             let num_nodes = self.num_nodes;
             let simparams = self.generated_simulation_parameters;
-            self.generated_veriloga_devices_mut().stamp_all(
+            self.generated_veriloga_devices_mut().stamp_all_with_mode(
                 matrix,
                 rhs,
                 solution,
                 num_nodes,
                 generated_analysis,
                 simparams,
+                _evaluation_mode,
             );
         }
     }
@@ -788,6 +846,10 @@ impl CircuitData {
     /// Check if all nonlinear devices have converged
     pub fn nonlinear_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         use crate::device::NonlinearDevice;
+        #[cfg(feature = "veriloga-builtins")]
+        let generated_veriloga_converged = self.generated_veriloga_devices.all_converged();
+        #[cfg(not(feature = "veriloga-builtins"))]
+        let generated_veriloga_converged = true;
         self.diodes.all_converged(criteria)
             && self.bjts.all_converged(criteria)
             && self.mosfets.all_converged(criteria)
@@ -803,6 +865,7 @@ impl CircuitData {
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.xspice_converged(criteria.voltage_tolerance())
+            && generated_veriloga_converged
     }
 
     pub fn behavioral_linearizations_converged(

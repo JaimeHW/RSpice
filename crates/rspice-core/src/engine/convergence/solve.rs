@@ -238,7 +238,7 @@ impl Engine {
             Self::stamp_transient_operating_point_linear(
                 circuit, probe, rhs, time, gmin_floor, false,
             );
-            self.try_stamp_nonlinear_devices_for_operating_point(
+            self.try_stamp_static_probe_nonlinear_devices_for_operating_point(
                 circuit,
                 probe,
                 rhs,
@@ -1220,10 +1220,13 @@ impl Engine {
                         &mut damping_state,
                         junction_owns_steps,
                         |trial| {
-                            self.nonlinear_merit_with_linear_stamp(
+                            self.nonlinear_merit_with_linear_stamp_for_operating_point(
                                 circuit,
                                 matrix,
                                 trial,
+                                time,
+                                crate::xspice::AnalysisType::Transient,
+                                junction_gmin,
                                 |circuit, matrix, rhs| {
                                     circuit.refresh_jiles_atherton_inductances(trial);
                                     Self::stamp_transient_operating_point_linear(
@@ -1254,10 +1257,13 @@ impl Engine {
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && self.nonlinear_residual_converged_with_linear_stamp(
+                && self.nonlinear_residual_converged_with_linear_stamp_for_operating_point(
                     circuit,
                     matrix,
                     &new_solution,
+                    time,
+                    crate::xspice::AnalysisType::Transient,
+                    junction_gmin,
                     |circuit, matrix, rhs| {
                         circuit.refresh_jiles_atherton_inductances(&new_solution);
                         Self::stamp_transient_operating_point_linear(

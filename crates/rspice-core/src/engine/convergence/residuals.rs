@@ -125,34 +125,15 @@ impl Engine {
         }
     }
 
-    pub(in crate::engine::convergence) fn nonlinear_residual_converged_with_linear_stamp<F>(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        solution: &[Value],
-        linear_stamp: F,
-    ) -> bool
-    where
-        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
-    {
-        let junction_gmin =
-            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
-        self.nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
-            circuit,
-            matrix,
-            solution,
-            junction_gmin,
-            linear_stamp,
-        )
-    }
-
-    pub(in crate::engine::convergence) fn nonlinear_residual_converged_with_linear_stamp_and_junction_gmin<
+    pub(in crate::engine::convergence) fn nonlinear_residual_converged_with_linear_stamp_for_operating_point<
         F,
     >(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
         junction_gmin: Value,
         mut linear_stamp: F,
     ) -> bool
@@ -168,11 +149,13 @@ impl Engine {
         let converged = matrix.with_probe_values(|probe, rhs| {
             linear_stamp(circuit, probe, rhs);
             if self
-                .try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                .try_stamp_static_probe_nonlinear_devices_for_operating_point(
                     circuit,
                     probe,
                     rhs,
                     solution,
+                    time,
+                    analysis,
                     junction_gmin,
                 )
                 .is_err()
@@ -346,6 +329,30 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
         junction_gmin: Value,
+        linear_stamp: F,
+    ) -> Option<Value>
+    where
+        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
+    {
+        self.nonlinear_merit_with_linear_stamp_for_operating_point(
+            circuit,
+            matrix,
+            solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+            junction_gmin,
+            linear_stamp,
+        )
+    }
+
+    pub(in crate::engine::convergence) fn nonlinear_merit_with_linear_stamp_for_operating_point<F>(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
+        junction_gmin: Value,
         mut linear_stamp: F,
     ) -> Option<Value>
     where
@@ -360,11 +367,13 @@ impl Engine {
         let merit = matrix.with_probe_values(|probe, rhs| {
             linear_stamp(circuit, probe, rhs);
             if self
-                .try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                .try_stamp_static_probe_nonlinear_devices_for_operating_point(
                     circuit,
                     probe,
                     rhs,
                     solution,
+                    time,
+                    analysis,
                     junction_gmin,
                 )
                 .is_err()
