@@ -424,20 +424,29 @@ impl VerilogACompiler {
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         trace_canonical_ir_phase(trace, &module.name, "hir", None);
         let phase_started = std::time::Instant::now();
-        let hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
+        let mut hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
         trace_canonical_ir_phase(trace, &module.name, "hir", Some(phase_started.elapsed()));
         trace_canonical_ir_phase(trace, &module.name, "mir", None);
         let phase_started = std::time::Instant::now();
-        let mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
+        let mut mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
         trace_canonical_ir_phase(trace, &module.name, "mir", Some(phase_started.elapsed()));
+        let noise_sources =
+            canonical_ir::CanonicalNoiseSourcePlan::from_hir_and_mir(&mut hir, &mut mir)
+                .map_err(Self::canonical_ir_error)?;
         trace_canonical_ir_phase(trace, &module.name, "opt", None);
         let phase_started = std::time::Instant::now();
         let opt = canonical_ir::OptModel::from_hir_and_mir(&hir, &mir)
             .map_err(Self::canonical_ir_error)?;
         trace_canonical_ir_phase(trace, &module.name, "opt", Some(phase_started.elapsed()));
 
-        canonical_ir::CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-            .map_err(Self::canonical_ir_error)
+        canonical_ir::CanonicalIrArtifact::from_parts_with_noise_plan(
+            metadata,
+            hir,
+            mir,
+            opt,
+            noise_sources,
+        )
+        .map_err(Self::canonical_ir_error)
     }
 
     /// Resolve which analyzed module to compile.

@@ -10,12 +10,12 @@ use rspice_veriloga::canonical_ir::{
     PortId, ScheduleId, SourceId, StateId, ValueId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
-    CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DerivativeLane, DerivativeLaneKind,
-    DiagnosticSeverity, HirAnalogOperator, HirContributionKind, HirExprKind, HirLaplaceKind,
-    HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic, MirAnalysisDomain,
-    MirEquationKind, MirModel, MirStateSlot, OptBinaryOp, OptDerivative, OptEvalInputs, OptModel,
-    OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType, SourceSpanRef,
-    StableDigest,
+    CanonicalIrArtifact, CanonicalMetadata, CanonicalNoiseSourceKind, CompilerPhase,
+    DerivativeLane, DerivativeLaneKind, DiagnosticSeverity, HirAnalogOperator, HirContributionKind,
+    HirExprKind, HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic,
+    MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptBinaryOp, OptDerivative,
+    OptEvalInputs, OptModel, OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType,
+    SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -38,6 +38,244 @@ fn analyze_fixture(
         .get(module_name)
         .cloned()
         .ok_or_else(|| rspice_veriloga::CompileError::ModuleSelection(module_name.to_string()))
+}
+
+#[test]
+fn canonical_noise_plan_retains_scaled_guarded_sources_and_vbic13_names() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module canonical_vbic13_noise(c, b, e);
+    inout c, b, e;
+    electrical c, b, e;
+    electrical bi;
+    parameter real gain = 2.0;
+    analog begin
+        I(b, bi) <+ gain * white_noise(2.0, "Ibei shot noise");
+        I(b, bi) <+ (gain > 0.0) ? flicker_noise(3.0, 1.25, "Ibei flicker noise") : 0.0;
+        V(bi, e) <+ white_noise(4.0, "rcx thermal noise");
+        I(c, e) <+ noise_table({1.0, 2.0, 10.0, 5.0}, "transport table noise");
+        I(c, b) <+ noise_table_log({1.0, 2.0, 10.0, 5.0}, "transport log table noise");
+    end
+endmodule
+"#,
+        )
+        .expect("canonical noise plan");
+
+    let sources = &artifact.noise_sources.sources;
+    assert_eq!(sources.len(), 5);
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.label.as_deref().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        [
+            "Ibei shot noise",
+            "Ibei flicker noise",
+            "rcx thermal noise",
+            "transport table noise",
+            "transport log table noise",
+        ]
+    );
+    assert_eq!(sources[0].mechanism, "WHITE_B_BI_IBEI_SHOT_NOISE");
+    assert_eq!(sources[1].mechanism, "FLICKER_B_BI_IBEI_FLICKER_NOISE");
+    assert_eq!(sources[2].mechanism, "WHITE_BI_E_RCX_THERMAL_NOISE");
+    assert_eq!(sources[0].kind, CanonicalNoiseSourceKind::White);
+    assert_eq!(sources[1].kind, CanonicalNoiseSourceKind::Flicker);
+    assert!(sources[1].exponent.is_some());
+    assert_eq!(sources[3].kind, CanonicalNoiseSourceKind::Table);
+    assert_eq!(sources[3].table.as_ref().unwrap().operands.len(), 4);
+    assert!(!sources[3].table.as_ref().unwrap().log_interp);
+    assert!(sources[4].table.as_ref().unwrap().log_interp);
+    assert!(sources[0].pos.is_internal || sources[0].neg.is_internal);
+    assert!(sources[2].branch_ordinal.is_some());
+    assert!(!sources[2].is_current);
+
+    for source in sources {
+        let psd = &artifact.hir.expressions[usize::from(source.psd.id)];
+        assert!(matches!(
+            psd.kind,
+            HirExprKind::Binary { ref op, .. } if op == "Mul"
+        ));
+    }
+    let scaled_psd = &artifact.hir.expressions[usize::from(sources[0].psd.id)];
+    let squared = match scaled_psd.kind {
+        HirExprKind::Binary { ref op, left, .. } if op == "Mul" => left,
+        ref other => panic!("expected PSD multiply, got {other:?}"),
+    };
+    let squared = &artifact.hir.expressions[usize::from(squared)];
+    assert!(matches!(
+        squared.kind,
+        HirExprKind::Binary {
+            ref op,
+            left,
+            right,
+        } if op == "Mul" && left == right
+    ));
+    let guarded_psd = &artifact.hir.expressions[usize::from(sources[1].psd.id)];
+    let guarded_square = match guarded_psd.kind {
+        HirExprKind::Binary { ref op, left, .. } if op == "Mul" => left,
+        ref other => panic!("expected guarded PSD multiply, got {other:?}"),
+    };
+    let guarded_square = &artifact.hir.expressions[usize::from(guarded_square)];
+    assert!(matches!(
+        guarded_square.kind,
+        HirExprKind::Binary {
+            ref op,
+            left,
+            right,
+        } if op == "Mul" && left == right
+    ));
+    assert_eq!(artifact.hir.expressions, artifact.mir.expressions);
+    assert!(artifact.validate().is_ok());
+}
+
+#[test]
+fn canonical_noise_plan_rejects_nonlinear_noise_placement() {
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module canonical_bad_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ sqrt(white_noise(1.0, "bad placement"));
+endmodule
+"#,
+        )
+        .expect_err("nonlinear noise placement must fail");
+
+    let message = error.to_string();
+    assert!(message.contains("noise function in a nonlinear or dynamic position"));
+    assert!(message.contains("must enter contributions additively"));
+}
+
+#[test]
+fn canonical_noise_plan_rejects_products_divisors_and_noisy_conditions() {
+    let cases = [
+        (
+            "white_noise(1.0, \"left\") * white_noise(2.0, \"right\")",
+            "product of noise terms",
+        ),
+        ("1.0 / white_noise(1.0, \"divisor\")", "divisor"),
+        ("white_noise(1.0, \"condition\") ? 1.0 : 0.0", "condition"),
+    ];
+
+    for (expression, expected) in cases {
+        let source = format!(
+            "module bad(p,n); inout p,n; electrical p,n; analog I(p,n) <+ {expression}; endmodule"
+        );
+        let message = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .expect_err("unsupported placement must fail")
+            .to_string();
+        assert!(
+            message.contains(expected),
+            "unexpected diagnostic: {message}"
+        );
+    }
+}
+
+#[test]
+fn canonical_noise_plan_preserves_all_vbic13_mechanism_spellings() {
+    let specifications = [
+        ("white", "bi", "ei", "Ibei shot noise"),
+        ("flicker", "bi", "ei", "Ibei flicker noise"),
+        ("white", "bx", "ei", "Ibex shot noise"),
+        ("flicker", "bx", "ei", "Ibex flicker noise"),
+        ("white", "ci", "ei", "transport current shot noise"),
+        ("white", "bx", "bp", "Ibep shot noise"),
+        ("flicker", "bx", "bp", "Ibep flicker noise"),
+        ("white", "c", "cx", "rcx thermal noise"),
+        ("white", "cx", "ci", "rci thermal noise"),
+        ("white", "b", "bx", "rbx thermal noise"),
+        ("white", "bx", "bi", "rbi thermal noise"),
+        ("white", "e", "ei", "re thermal noise"),
+        ("white", "bp", "cx", "rbp thermal noise"),
+        (
+            "white",
+            "bx",
+            "si",
+            "parasitic transport current shot noise",
+        ),
+        ("white", "s", "si", "rs thermal noise"),
+    ];
+    let expected = [
+        "WHITE_BI_EI_IBEI_SHOT_NOISE",
+        "FLICKER_BI_EI_IBEI_FLICKER_NOISE",
+        "WHITE_BX_EI_IBEX_SHOT_NOISE",
+        "FLICKER_BX_EI_IBEX_FLICKER_NOISE",
+        "WHITE_CI_EI_TRANSPORT_CURRENT_SHOT_NOISE",
+        "WHITE_BX_BP_IBEP_SHOT_NOISE",
+        "FLICKER_BX_BP_IBEP_FLICKER_NOISE",
+        "WHITE_C_CX_RCX_THERMAL_NOISE",
+        "WHITE_CX_CI_RCI_THERMAL_NOISE",
+        "WHITE_B_BX_RBX_THERMAL_NOISE",
+        "WHITE_BX_BI_RBI_THERMAL_NOISE",
+        "WHITE_E_EI_RE_THERMAL_NOISE",
+        "WHITE_BP_CX_RBP_THERMAL_NOISE",
+        "WHITE_BX_SI_PARASITIC_TRANSPORT_CURRENT_SHOT_NOISE",
+        "WHITE_S_SI_RS_THERMAL_NOISE",
+    ];
+    let contributions = specifications
+        .iter()
+        .enumerate()
+        .map(|(index, (kind, pos, neg, label))| {
+            if *kind == "flicker" {
+                format!(
+                    "I({pos},{neg}) <+ flicker_noise({}.0, 1.0, \"{label}\");",
+                    index + 1
+                )
+            } else {
+                format!(
+                    "I({pos},{neg}) <+ white_noise({}.0, \"{label}\");",
+                    index + 1
+                )
+            }
+        })
+        .collect::<String>();
+    let source = format!(
+        "module vbic13_names(c,b,e,s); inout c,b,e,s; electrical c,b,e,s; electrical bi,ei,bx,ci,bp,cx,si; analog begin {contributions} end endmodule"
+    );
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("VBIC 1.3 name fixture");
+    let actual = artifact
+        .noise_sources
+        .sources
+        .iter()
+        .map(|source| source.mechanism.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn canonical_noise_plan_uses_xyce_endpoint_and_label_sanitization() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module canonical_noise_names(di);
+    inout di;
+    electrical di;
+    analog begin
+        I(di, 0) <+ white_noise(1.0, "thermal noise in channel internal nodes #2");
+        I(di, 0) <+ white_noise(2.0);
+    end
+endmodule
+"#,
+        )
+        .expect("canonical Xyce noise names");
+
+    assert_eq!(
+        artifact.noise_sources.sources[0].mechanism,
+        "WHITE_DI_GND_THERMAL_NOISE_IN_CHANNEL_INTERNAL_NODES_#2"
+    );
+    assert_eq!(artifact.noise_sources.sources[1].mechanism, "WHITE_DI_GND");
+    assert_eq!(
+        artifact.noise_sources.sources[0].label.as_deref(),
+        Some("thermal noise in channel internal nodes #2")
+    );
+    assert_eq!(artifact.noise_sources.sources[1].label, None);
 }
 
 fn validation_messages(hir: &HirModel) -> Vec<String> {

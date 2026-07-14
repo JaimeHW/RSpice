@@ -11,6 +11,7 @@ pub mod hir;
 pub mod ids;
 pub mod metadata;
 pub mod mir;
+pub mod noise;
 pub mod opt;
 pub mod opt_eval;
 
@@ -33,6 +34,10 @@ pub use metadata::{CanonicalMetadata, StableDigest};
 pub use mir::{
     MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind,
     MirModel, MirNode, MirParameterSlot, MirStateSlot,
+};
+pub use noise::{
+    CanonicalNoiseEndpoint, CanonicalNoiseSource, CanonicalNoiseSourceKind,
+    CanonicalNoiseSourcePlan, CanonicalNoiseTable,
 };
 pub use opt::{
     DerivativeLane, DerivativeLaneKind, InvalidationClass, OptBinaryOp, OptDerivative, OptModel,

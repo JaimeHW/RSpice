@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::fmt::Write;
 
+use super::CanonicalNoiseSourcePlan;
 use super::{
     CanonicalMetadata, CanonicalValueType, CompilerPhase, HirAnalogOperator, HirArray,
     HirAssignment, HirBranch, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
@@ -18,6 +19,8 @@ pub struct CanonicalIrArtifact {
     pub hir_digest: SmolStr,
     pub mir_digest: SmolStr,
     pub opt_digest: SmolStr,
+    #[serde(default)]
+    pub noise_sources: CanonicalNoiseSourcePlan,
     pub hir: HirModel,
     pub mir: MirModel,
     pub opt: OptModel,
@@ -27,10 +30,22 @@ impl CanonicalIrArtifact {
     pub fn from_parts(
         metadata: CanonicalMetadata,
         hir: HirModel,
-        mir: MirModel,
+        mut mir: MirModel,
         opt: OptModel,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        let diagnostics = validate_parts(&metadata, &hir, &mir, &opt);
+        let mut hir = hir;
+        let noise_sources = CanonicalNoiseSourcePlan::from_hir_and_mir(&mut hir, &mut mir)?;
+        Self::from_parts_with_noise_plan(metadata, hir, mir, opt, noise_sources)
+    }
+
+    pub fn from_parts_with_noise_plan(
+        metadata: CanonicalMetadata,
+        hir: HirModel,
+        mir: MirModel,
+        opt: OptModel,
+        noise_sources: CanonicalNoiseSourcePlan,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        let diagnostics = validate_parts(&metadata, &hir, &mir, &opt, &noise_sources);
         if !diagnostics.is_empty() {
             return Err(diagnostics);
         }
@@ -42,6 +57,7 @@ impl CanonicalIrArtifact {
             hir_digest,
             mir_digest,
             opt_digest,
+            noise_sources,
             hir,
             mir,
             opt,
@@ -49,7 +65,13 @@ impl CanonicalIrArtifact {
     }
 
     pub fn validate(&self) -> IrValidationResult {
-        let mut diagnostics = validate_parts(&self.metadata, &self.hir, &self.mir, &self.opt);
+        let mut diagnostics = validate_parts(
+            &self.metadata,
+            &self.hir,
+            &self.mir,
+            &self.opt,
+            &self.noise_sources,
+        );
         let (hir_digest, mir_digest, opt_digest) = phase_digests(&self.hir, &self.mir, &self.opt);
 
         if self.hir_digest != hir_digest {
@@ -115,6 +137,8 @@ impl CanonicalIrArtifact {
             self.opt.equation_count
         )
         .expect("write to string");
+        writeln!(out, "noise sources={}", self.noise_sources.sources.len())
+            .expect("write to string");
         out
     }
 }
@@ -124,6 +148,7 @@ fn validate_parts(
     hir: &HirModel,
     mir: &MirModel,
     opt: &OptModel,
+    noise_sources: &CanonicalNoiseSourcePlan,
 ) -> Vec<IrDiagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -136,6 +161,7 @@ fn validate_parts(
     if let Err(mut child) = opt.validate() {
         diagnostics.append(&mut child);
     }
+    diagnostics.extend(noise_sources.diagnostics(hir, mir));
 
     diagnostics.extend(artifact_diagnostics(metadata, hir, mir, opt));
     diagnostics
