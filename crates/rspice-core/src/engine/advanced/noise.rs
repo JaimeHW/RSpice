@@ -728,11 +728,11 @@ impl Engine {
             }
         }
 
-        // Builder-owned MOS series resistors are physical resistor
+        // Builder-owned device series resistors are physical resistor
         // stamps, but Xyce exposes their noise under the parent MOS device as
-        // its RD/RS mechanisms.  Build the ownership table from device
+        // their parent device mechanisms.  Build the ownership table from device
         // topology rather than inferring arbitrary user resistor names.
-        let mut mos_series_noise_owners = circuit
+        let mut device_series_noise_owners = circuit
             .mosfets
             .devices
             .iter()
@@ -751,7 +751,7 @@ impl Engine {
             })
             .collect::<HashMap<_, _>>();
         for mos in &circuit.bsim3v3.devices {
-            mos_series_noise_owners.extend([
+            device_series_noise_owners.extend([
                 (
                     format!("{}.__rd", mos.name).to_ascii_lowercase(),
                     crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RD"),
@@ -759,6 +759,27 @@ impl Engine {
                 (
                     format!("{}.__rs", mos.name).to_ascii_lowercase(),
                     crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RS"),
+                ),
+            ]);
+        }
+        for bjt in circuit
+            .bjts
+            .devices
+            .iter()
+            .filter(|bjt| bjt.uses_legacy_gummel_poon())
+        {
+            device_series_noise_owners.extend([
+                (
+                    format!("{}.__rc", bjt.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "RC"),
+                ),
+                (
+                    format!("{}.__rb", bjt.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "RB"),
+                ),
+                (
+                    format!("{}.__re", bjt.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "RE"),
                 ),
             ]);
         }
@@ -790,7 +811,7 @@ impl Engine {
 
             let mut source =
                 NoiseSource::thermal(name.clone(), stamp.pp.row, stamp.nn.row, resistance);
-            if let Some(identity) = mos_series_noise_owners.get(&name.to_ascii_lowercase()) {
+            if let Some(identity) = device_series_noise_owners.get(&name.to_ascii_lowercase()) {
                 source.identity = identity.clone();
             }
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
@@ -920,42 +941,62 @@ impl Engine {
 
             let (ic, ibe, ibc) = bjt.noise_branch_currents();
             if ic > 1e-18 {
-                noise_sources.push(NoiseSource::shot(
-                    format!("{}:IC", bjt.name),
-                    bjt.node_collector,
-                    bjt.node_emitter,
-                    ic,
-                ));
+                noise_sources.push(
+                    NoiseSource::shot(
+                        format!("{}:IC", bjt.name),
+                        bjt.node_collector,
+                        bjt.node_emitter,
+                        ic,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IC"),
+                    ),
+                );
             }
             if ibe > 1e-18 {
-                noise_sources.push(NoiseSource::shot(
-                    format!("{}:IBE", bjt.name),
-                    bjt.node_base,
-                    bjt.node_emitter,
-                    ibe,
-                ));
+                noise_sources.push(
+                    NoiseSource::shot(
+                        format!("{}:IBE", bjt.name),
+                        bjt.node_base,
+                        bjt.node_emitter,
+                        ibe,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IB"),
+                    ),
+                );
             }
             if ibc > 1e-18 {
-                noise_sources.push(NoiseSource::shot(
-                    format!("{}:IBC", bjt.name),
-                    bjt.node_base,
-                    bjt.node_collector,
-                    ibc,
-                ));
+                noise_sources.push(
+                    NoiseSource::shot(
+                        format!("{}:IBC", bjt.name),
+                        bjt.node_base,
+                        bjt.node_collector,
+                        ibc,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IB"),
+                    ),
+                );
             }
 
             if let Some((kf, af, ef)) = bjt.flicker_noise_coefficients() {
                 let (_, ib, _) = bjt.operating_point_currents();
                 if ib.abs() > 1e-18 {
-                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                        format!("{}:flicker", bjt.name),
-                        bjt.node_base,
-                        bjt.node_emitter,
-                        kf,
-                        af,
-                        ef,
-                        ib,
-                    ));
+                    noise_sources.push(
+                        NoiseSource::flicker_with_frequency_exponent(
+                            format!("{}:flicker", bjt.name),
+                            bjt.node_base,
+                            bjt.node_emitter,
+                            kf,
+                            af,
+                            ef,
+                            ib,
+                        )
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "FN"),
+                        ),
+                    );
                 }
             }
         }
@@ -1691,6 +1732,16 @@ impl Engine {
         for mos in &circuit.bsim3v3.devices {
             contribution_catalog.extend(["RD", "RS", "ID", "FN"].map(|mechanism| {
                 crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
+            }));
+        }
+        for bjt in circuit
+            .bjts
+            .devices
+            .iter()
+            .filter(|bjt| bjt.uses_legacy_gummel_poon())
+        {
+            contribution_catalog.extend(["RC", "RB", "RE", "IC", "IB", "FN"].map(|mechanism| {
+                crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, mechanism)
             }));
         }
         let mut unique_catalog = Vec::with_capacity(contribution_catalog.len());
@@ -2657,6 +2708,34 @@ Q1 C B 0 QN
                 relative,
             );
         }
+    }
+
+    #[test]
+    fn gp_noise_catalog_owns_parasitics_and_retains_inactive_flicker() {
+        let netlist = Netlist::parse(GP_RB_NOISE_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("c").expect("output node");
+        let result = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &[1.0e5], 300.15)
+            .expect("noise analysis runs")
+            .into_iter()
+            .next()
+            .expect("one noise point");
+
+        let contribution = |probe: &str| {
+            let probe = crate::analysis::NoiseContributionProbe::parse(probe)
+                .expect("contribution probe parses");
+            result.contribution(&probe).expect("mechanism is valid")
+        };
+        let mechanisms = ["rc", "RB", "re", "IC", "ib"]
+            .map(|mechanism| contribution(&format!("DNO(q1,{mechanism})")));
+        assert!(mechanisms.iter().all(|value| *value > 0.0));
+        let fn_noise = contribution("DNO(Q1,FN)");
+        assert_eq!(fn_noise, 0.0, "KF=0 keeps valid GP FN inactive");
+        let parts = mechanisms.into_iter().sum::<f64>() + fn_noise;
+        let whole = contribution("DNO(Q1)");
+        assert!((whole - parts).abs() <= 1.0e-14 * whole.max(parts));
     }
 
     /// onoise tables of the DTEMP=150 variants of the VBIC rb deck and the
