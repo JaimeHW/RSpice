@@ -22,6 +22,20 @@ use crate::netlist::{AnalysisCommand, SaveSignal};
 use crate::{Netlist, Value};
 use std::collections::HashMap;
 
+type TransientMeritRollback = (
+    crate::circuit::NonlinearDeviceStateSnapshot,
+    Vec<Option<BjtChargeSnapshot>>,
+);
+
+fn restore_transient_merit_rollback(
+    circuit: &mut crate::circuit::CircuitData,
+    vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
+    rollback: &TransientMeritRollback,
+) {
+    circuit.restore_nonlinear_state(rollback.0.clone());
+    vbic_snapshot_cache.clone_from_slice(&rollback.1);
+}
+
 /// Per-iteration Newton merit tracing (`RSPICE_NEWTON_DEBUG=1`), the
 /// transient-Newton sibling of `RSPICE_LTE_DEBUG`.
 fn newton_merit_debug_enabled() -> bool {
@@ -1673,10 +1687,13 @@ impl Engine {
             // residual norm of the previously stamped iterate, the iterate
             // itself, and any backtracking search currently walking a
             // rejected step (see transient/globalization.rs).
-            let mut merit_backtrack: Option<globalization::NewtonMeritBacktrack> = None;
+            let mut merit_backtrack: Option<(
+                globalization::NewtonMeritBacktrack,
+                TransientMeritRollback,
+            )> = None;
             let mut last_stamped_iterate: Vec<Value> = Vec::new();
             let mut last_stamped_merit = Value::INFINITY;
-            let mut have_stamped_iterate = false;
+            let mut last_stamped_rollback: Option<TransientMeritRollback> = None;
 
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
@@ -1777,21 +1794,26 @@ impl Engine {
                             merit_backtrack.is_some(),
                         );
                     }
-                    if let Some(mut search) = merit_backtrack.take() {
+                    if let Some((mut search, rollback)) = merit_backtrack.take() {
                         match search.judge(current_merit) {
                             globalization::BacktrackAction::Trial(trial) => {
+                                restore_transient_merit_rollback(
+                                    &mut circuit,
+                                    &mut vbic_snapshot_cache,
+                                    &rollback,
+                                );
                                 new_solution = trial;
                                 circuit
                                     .enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                                 nonlinear_state_matches_new_solution = false;
-                                merit_backtrack = Some(search);
+                                merit_backtrack = Some((search, rollback));
                                 total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
                                 total_merit_trials += 1;
                                 continue;
                             }
                             globalization::BacktrackAction::Accept => {}
                         }
-                    } else if have_stamped_iterate
+                    } else if let Some(base_rollback) = last_stamped_rollback.as_ref()
                         && globalization::NewtonMeritBacktrack::step_needs_globalization(
                             last_stamped_merit,
                             current_merit,
@@ -1816,17 +1838,26 @@ impl Engine {
                             &new_solution,
                             current_merit,
                         );
+                        let rollback = base_rollback.clone();
+                        restore_transient_merit_rollback(
+                            &mut circuit,
+                            &mut vbic_snapshot_cache,
+                            &rollback,
+                        );
                         new_solution = trial;
                         circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                         nonlinear_state_matches_new_solution = false;
-                        merit_backtrack = Some(search);
+                        merit_backtrack = Some((search, rollback));
                         total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
                         total_merit_trials += 1;
                         continue;
                     }
                     last_stamped_iterate.clone_from(&new_solution);
                     last_stamped_merit = current_merit;
-                    have_stamped_iterate = true;
+                    last_stamped_rollback = Some((
+                        circuit.nonlinear_state_snapshot(),
+                        vbic_snapshot_cache.to_vec(),
+                    ));
                 }
                 total_merit_nanos += merit_phase_start.elapsed().as_nanos();
 
@@ -4255,6 +4286,33 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 mod tests {
     use super::*;
     use crate::SimulationConfig;
+
+    #[test]
+    fn transient_merit_rollback_restores_circuit_and_vbic_cache() {
+        let mut circuit = crate::circuit::CircuitData::new();
+        circuit.inductors.add("lcore".to_string(), 1, 0, 1, 2.0e-3);
+
+        let mut charge_snapshot = BjtChargeSnapshot::default();
+        charge_snapshot.branches[0].charge = 3.25;
+        let rollback = (
+            circuit.nonlinear_state_snapshot(),
+            vec![Some(charge_snapshot)],
+        );
+
+        circuit.inductors.inductances[0] = 7.0e-3;
+        let mut vbic_snapshot_cache = vec![None];
+
+        restore_transient_merit_rollback(&mut circuit, &mut vbic_snapshot_cache, &rollback);
+
+        assert_eq!(circuit.inductors.inductances, vec![2.0e-3]);
+        assert_eq!(
+            vbic_snapshot_cache[0]
+                .expect("VBIC charge snapshot should be restored")
+                .branches[0]
+                .charge,
+            3.25
+        );
+    }
 
     #[test]
     fn transient_fft_fails_closed_until_postprocessing_is_implemented() {

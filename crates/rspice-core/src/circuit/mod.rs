@@ -30,6 +30,7 @@ pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
 mod nonlinear;
+pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
 
 /// Node identifier (0 = ground, always)
 pub type NodeId = usize;
