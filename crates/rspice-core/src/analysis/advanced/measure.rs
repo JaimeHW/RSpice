@@ -56,11 +56,28 @@ pub enum MeasureOperand {
     Waveform(String),
 }
 
+/// Selects a particular conditional crossing in accepted-point order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventOccurrence {
+    pub edge: EdgeType,
+    pub number: usize,
+}
+
+impl Default for EventOccurrence {
+    fn default() -> Self {
+        Self {
+            edge: EdgeType::Cross,
+            number: 1,
+        }
+    }
+}
+
 /// A typed conditional event used by FIND and DERIV measurements.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhenCondition {
     pub left: String,
     pub right: MeasureOperand,
+    pub occurrence: EventOccurrence,
 }
 
 /// Trigger/Target specification for delay measurements
@@ -114,6 +131,14 @@ pub enum MeasureType {
         signal: String,
         at: Option<Value>,
         when: Option<WhenCondition>,
+        from: Option<Value>,
+        to: Option<Value>,
+    },
+
+    /// Independent-axis value where a conditional event is first met.
+    /// .MEAS DC name WHEN left=right
+    When {
+        condition: WhenCondition,
         from: Option<Value>,
         to: Option<Value>,
     },
@@ -352,8 +377,47 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> Vec<MeasureResult> {
+        self.evaluate_with_segment_starts(time, signals, &[])
+    }
+
+    /// Evaluate measurements while treating selected sample indices as the
+    /// start of a new accepted-point segment. This is required for nested DC
+    /// sweeps: the primary sweep restarts for every secondary value, and the
+    /// synthetic jump between cycles is not a physical interpolation interval.
+    pub fn evaluate_with_segment_starts(
+        &self,
+        time: &[Value],
+        signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
+    ) -> Vec<MeasureResult> {
+        self.evaluate_with_signal_maps(time, &[signals], segment_starts)
+    }
+
+    /// Evaluate each statement against its own signal view. Continuous Xyce
+    /// equation measures update in netlist order, so a point-event statement
+    /// can legitimately observe a different equation trace depending on its
+    /// position relative to the equation statement.
+    pub(crate) fn evaluate_with_segment_starts_and_signal_maps(
+        &self,
+        time: &[Value],
+        signal_maps: &[HashMap<String, &[Value]>],
+        segment_starts: &[usize],
+    ) -> Vec<MeasureResult> {
+        let signal_map_refs = signal_maps.iter().collect::<Vec<_>>();
+        self.evaluate_with_signal_maps(time, &signal_map_refs, segment_starts)
+    }
+
+    fn evaluate_with_signal_maps(
+        &self,
+        time: &[Value],
+        signal_maps: &[&HashMap<String, &[Value]>],
+        segment_starts: &[usize],
+    ) -> Vec<MeasureResult> {
         if self.measurements.is_empty() {
             return Vec::new();
+        }
+        if signal_maps.len() != 1 && signal_maps.len() != self.measurements.len() {
+            return self.fail_all("measurement signal-map count does not match statement count");
         }
         if time.is_empty() {
             return self.fail_all("measurement axis is empty");
@@ -363,8 +427,9 @@ impl MeasureEngine {
                 "measurement axis contains non-finite sample at index {index}"
             ));
         }
-        if let Some((name, signal)) = signals
+        if let Some((name, signal)) = signal_maps
             .iter()
+            .flat_map(|signals| signals.iter())
             .find(|(_, signal)| signal.len() != time.len())
         {
             return self.fail_all(&format!(
@@ -373,16 +438,25 @@ impl MeasureEngine {
                 time.len()
             ));
         }
-        if let Some((name, index, value)) = signals.iter().find_map(|(name, signal)| {
-            signal
-                .iter()
-                .enumerate()
-                .find(|(_, value)| !value.is_finite())
-                .map(|(index, value)| (name, index, *value))
-        }) {
+        if let Some((name, index, value)) = signal_maps
+            .iter()
+            .flat_map(|signals| signals.iter())
+            .find_map(|(name, signal)| {
+                signal
+                    .iter()
+                    .enumerate()
+                    .find(|(_, value)| !value.is_finite())
+                    .map(|(index, value)| (name, index, *value))
+            })
+        {
             return self.fail_all(&format!(
                 "signal '{name}' contains non-finite sample at index {index}: {value}"
             ));
+        }
+        if segment_starts.iter().enumerate().any(|(index, start)| {
+            *start == 0 || *start >= time.len() || index > 0 && *start <= segment_starts[index - 1]
+        }) {
+            return self.fail_all("measurement segment starts are invalid or unordered");
         }
 
         // Expression measures (PARAM='...') read other results by name, so
@@ -391,11 +465,19 @@ impl MeasureEngine {
         let mut results: Vec<MeasureResult> = self
             .measurements
             .iter()
-            .map(|m| match &m.measure_type {
+            .enumerate()
+            .map(|(index, m)| match &m.measure_type {
                 MeasureType::Param { .. } | MeasureType::Equation { .. } => {
                     MeasureResult::failed(&m.name, "PARAM expression not yet evaluated")
                 }
-                _ => self.evaluate_one(m, time, signals),
+                _ => {
+                    let signals = if signal_maps.len() == 1 {
+                        signal_maps[0]
+                    } else {
+                        signal_maps[index]
+                    };
+                    self.evaluate_one(m, time, signals, segment_starts)
+                }
             })
             .collect();
         for (idx, m) in self.measurements.iter().enumerate() {
@@ -418,8 +500,9 @@ impl MeasureEngine {
         measurement: &MeasureStatement,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
     ) -> MeasureResult {
-        self.evaluate_kind(measurement, time, signals)
+        self.evaluate_kind(measurement, time, signals, segment_starts)
             .check_goal(measurement)
     }
 
@@ -428,6 +511,7 @@ impl MeasureEngine {
         measurement: &MeasureStatement,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
     ) -> MeasureResult {
         match &measurement.measure_type {
             MeasureType::Delay { trig, targ } => {
@@ -448,6 +532,7 @@ impl MeasureEngine {
                 *to,
                 time,
                 signals,
+                segment_starts,
             ),
             MeasureType::Param { .. } => MeasureResult::failed(
                 &measurement.name,
@@ -541,6 +626,20 @@ impl MeasureEngine {
                 *to,
                 time,
                 signals,
+                segment_starts,
+            ),
+            MeasureType::When {
+                condition,
+                from,
+                to,
+            } => self.eval_when(
+                &measurement.name,
+                condition,
+                *from,
+                *to,
+                time,
+                signals,
+                segment_starts,
             ),
             MeasureType::Integ { signal, from, to } => self.eval_integ(
                 &measurement.name,
@@ -949,6 +1048,7 @@ impl MeasureEngine {
         to: Option<Value>,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
     ) -> MeasureResult {
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
@@ -965,7 +1065,7 @@ impl MeasureEngine {
             if !Self::axis_in_measurement_window(target, lower, upper) {
                 return MeasureResult::failed(name, "AT point is outside the measurement window");
             }
-            let Some(segment) = measurement_segment_containing(time, target) else {
+            let Some(segment) = measurement_segment_containing(time, target, segment_starts) else {
                 return MeasureResult::failed(name, "Time point not in simulation range");
             };
             return measurement_segment_slope(name, time, signal, segment);
@@ -987,10 +1087,20 @@ impl MeasureEngine {
             Ok(operand) => operand,
             Err(error) => return MeasureResult::failed(name, &error),
         };
-        for (segment, fraction) in measurement_condition_crossings(left, right, time.len()) {
+        let mut matching = 0usize;
+        for (segment, fraction) in measurement_condition_crossings(
+            left,
+            right,
+            time.len(),
+            segment_starts,
+            condition.occurrence.edge,
+        ) {
             let axis = time[segment] + fraction * (time[segment + 1] - time[segment]);
             if Self::axis_in_measurement_window(axis, lower, upper) {
-                return measurement_segment_slope(name, time, signal, segment);
+                matching += 1;
+                if matching == condition.occurrence.number {
+                    return measurement_segment_slope(name, time, signal, segment);
+                }
             }
         }
         MeasureResult::failed(name, "WHEN condition never met in the measurement window")
@@ -1041,6 +1151,7 @@ impl MeasureEngine {
         to: Option<Value>,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
     ) -> MeasureResult {
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
@@ -1055,7 +1166,9 @@ impl MeasureEngine {
             if !Self::axis_in_measurement_window(t_at, lower, upper) {
                 return MeasureResult::failed(name, "AT point is outside the measurement window");
             }
-            if let Some(value) = interpolate_measure_signal(time, signal, t_at) {
+            if let Some(value) =
+                interpolate_measure_signal_segmented(time, signal, t_at, segment_starts)
+            {
                 return MeasureResult::success(name, value);
             }
             return MeasureResult::failed(name, "Time point not in simulation range");
@@ -1075,12 +1188,22 @@ impl MeasureEngine {
                 Ok(operand) => operand,
                 Err(error) => return MeasureResult::failed(name, &error),
             };
-            for (segment, fraction) in measurement_condition_crossings(left, right, time.len()) {
+            let mut matching = 0usize;
+            for (segment, fraction) in measurement_condition_crossings(
+                left,
+                right,
+                time.len(),
+                segment_starts,
+                condition.occurrence.edge,
+            ) {
                 let axis = time[segment] + fraction * (time[segment + 1] - time[segment]);
                 if Self::axis_in_measurement_window(axis, lower, upper) {
-                    let value =
-                        signal[segment] + fraction * (signal[segment + 1] - signal[segment]);
-                    return MeasureResult::success(name, value);
+                    matching += 1;
+                    if matching == condition.occurrence.number {
+                        let value =
+                            signal[segment] + fraction * (signal[segment + 1] - signal[segment]);
+                        return MeasureResult::success(name, value);
+                    }
                 }
             }
             return MeasureResult::failed(
@@ -1090,6 +1213,27 @@ impl MeasureEngine {
         }
 
         MeasureResult::failed(name, "FIND requires AT= or WHEN condition")
+    }
+
+    fn eval_when(
+        &self,
+        name: &str,
+        condition: &WhenCondition,
+        from: Option<Value>,
+        to: Option<Value>,
+        time: &[Value],
+        signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
+    ) -> MeasureResult {
+        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
+        match first_measure_condition_event(condition, time, signals, lower, upper, segment_starts)
+        {
+            Ok(Some((_, _, axis))) => MeasureResult::success(name, axis),
+            Ok(None) => {
+                MeasureResult::failed(name, "WHEN condition not found in the measurement window")
+            }
+            Err(error) => MeasureResult::failed(name, &error),
+        }
     }
 
     fn eval_integ(
@@ -1190,6 +1334,33 @@ fn resolve_measure_operand<'a>(
     }
 }
 
+fn first_measure_condition_event(
+    condition: &WhenCondition,
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    lower: Value,
+    upper: Value,
+    segment_starts: &[usize],
+) -> Result<Option<(usize, Value, Value)>, String> {
+    let left = lookup_signal(signals, &condition.left)
+        .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
+    let right = resolve_measure_operand(&condition.right, signals)?;
+    Ok(measurement_condition_crossings(
+        left,
+        right,
+        axis.len(),
+        segment_starts,
+        condition.occurrence.edge,
+    )
+    .into_iter()
+    .filter_map(|(segment, fraction)| {
+        let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
+        MeasureEngine::axis_in_measurement_window(event_axis, lower, upper)
+            .then_some((segment, fraction, event_axis))
+    })
+    .nth(condition.occurrence.number.saturating_sub(1)))
+}
+
 /// Return every qualifying `WHEN left=right` crossing interval in traversal
 /// order. Xyce requires the left operand itself to change over the interval;
 /// a moving right operand cannot trigger against a constant left operand.
@@ -1197,6 +1368,8 @@ fn measurement_condition_crossings(
     left: &[Value],
     right: ResolvedMeasureOperand<'_>,
     point_count: usize,
+    segment_starts: &[usize],
+    edge: EdgeType,
 ) -> Vec<(usize, Value)> {
     const XYCE_WHEN_ABSOLUTE_TOLERANCE: Value = 1.0e-12;
     if left.len() != point_count || point_count < 2 {
@@ -1205,6 +1378,9 @@ fn measurement_condition_crossings(
 
     let mut crossings = Vec::new();
     for segment in 0..point_count - 1 {
+        if segment_starts.binary_search(&(segment + 1)).is_ok() {
+            continue;
+        }
         let left_previous = left[segment];
         let left_current = left[segment + 1];
         let left_scale = left_previous.abs().max(left_current.abs()).max(1.0);
@@ -1225,6 +1401,14 @@ fn measurement_condition_crossings(
         if !current_equal && !strict_crossing {
             continue;
         }
+        let edge_matches = match edge {
+            EdgeType::Rise => left_current > left_previous,
+            EdgeType::Fall => left_current < left_previous,
+            EdgeType::Cross => true,
+        };
+        if !edge_matches {
+            continue;
+        }
 
         let denominator = current_difference - previous_difference;
         let fraction = if denominator == 0.0 {
@@ -1241,9 +1425,16 @@ fn measurement_condition_crossings(
     crossings
 }
 
-fn measurement_segment_containing(axis: &[Value], target: Value) -> Option<usize> {
+fn measurement_segment_containing(
+    axis: &[Value],
+    target: Value,
+    segment_starts: &[usize],
+) -> Option<usize> {
     const XYCE_AT_ABSOLUTE_TOLERANCE: Value = 1.0e-12;
     axis.windows(2).enumerate().find_map(|(segment, pair)| {
+        if segment_starts.binary_search(&(segment + 1)).is_ok() {
+            return None;
+        }
         let previous = pair[0];
         let current = pair[1];
         if previous == current {
@@ -1270,7 +1461,17 @@ fn measurement_segment_slope(
     MeasureResult::success(name, slope)
 }
 
+#[cfg(test)]
 fn interpolate_measure_signal(axis: &[Value], signal: &[Value], target: Value) -> Option<Value> {
+    interpolate_measure_signal_segmented(axis, signal, target, &[])
+}
+
+fn interpolate_measure_signal_segmented(
+    axis: &[Value],
+    signal: &[Value],
+    target: Value,
+    segment_starts: &[usize],
+) -> Option<Value> {
     if axis.len() != signal.len() || axis.is_empty() || !target.is_finite() {
         return None;
     }
@@ -1278,6 +1479,9 @@ fn interpolate_measure_signal(axis: &[Value], signal: &[Value], target: Value) -
         return signal.get(index).copied();
     }
     axis.windows(2).enumerate().find_map(|(index, segment)| {
+        if segment_starts.binary_search(&(index + 1)).is_ok() {
+            return None;
+        }
         let left = segment[0];
         let right = segment[1];
         if left == right || target < left.min(right) || target > left.max(right) {
@@ -1762,6 +1966,7 @@ mod tests {
             Some(WhenCondition {
                 left: "Y".to_string(),
                 right: MeasureOperand::Waveform("TARGET".to_string()),
+                occurrence: EventOccurrence::default(),
             }),
             None,
             None,
@@ -1773,6 +1978,7 @@ mod tests {
             Some(WhenCondition {
                 left: "DOUBLE".to_string(),
                 right: MeasureOperand::Constant(0.5),
+                occurrence: EventOccurrence::default(),
             }),
             Some(2.75),
             None,
@@ -1784,6 +1990,7 @@ mod tests {
             Some(WhenCondition {
                 left: "CONSTANT".to_string(),
                 right: MeasureOperand::Constant(1.0),
+                occurrence: EventOccurrence::default(),
             }),
             None,
             None,
@@ -1793,6 +2000,153 @@ mod tests {
         assert_eq!(results[0].value, Some(7.0));
         assert_eq!(results[1].value, Some(0.9));
         assert!(!results[2].passed);
+    }
+
+    #[test]
+    fn when_returns_interpolated_axis_and_honors_inclusive_windows() {
+        let axis = [5.0, 4.0, 3.0, 2.0, 1.0];
+        let condition = [5.0, 4.0, 3.0, 2.0, 1.0];
+        let mut signals = HashMap::new();
+        signals.insert("CONDITION".to_string(), condition.as_slice());
+        let statement = |name: &str, from: Option<Value>, to: Option<Value>| MeasureStatement {
+            name: name.to_string(),
+            measure_type: MeasureType::When {
+                condition: WhenCondition {
+                    left: "CONDITION".to_string(),
+                    right: MeasureOperand::Constant(2.5),
+                    occurrence: EventOccurrence::default(),
+                },
+                from,
+                to,
+            },
+            analysis: "DC".to_string(),
+            goal: None,
+            tolerance: None,
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(statement("unbounded", None, None));
+        engine.add(statement("singleton_window", Some(2.5), Some(2.5)));
+        engine.add(statement("excluded", Some(5.0), Some(3.0)));
+
+        let results = engine.evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, Some(2.5));
+        assert_eq!(results[1].value, Some(2.5));
+        assert!(!results[2].passed);
+    }
+
+    #[test]
+    fn find_and_when_do_not_interpolate_across_dc_cycle_restarts() {
+        let axis = [5.0, 4.0, 3.0, 2.0, 1.0, 5.0, 4.0, 3.0, 2.0, 1.0];
+        // The first cycle stays below four. Crossing the flattened 1 -> 5
+        // restart would be synthetic; the physical crossing is 4.0625 ->
+        // 3.4375 in the second cycle, at an axis value of 3.9.
+        let condition = [
+            3.75, 3.125, 2.5, 1.875, 1.25, 4.6875, 4.0625, 3.4375, 2.8125, 2.1875,
+        ];
+        let found = [1.0, 2.0, 3.0, 4.0, 5.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let mut signals = HashMap::new();
+        signals.insert("CONDITION".to_string(), condition.as_slice());
+        signals.insert("FOUND".to_string(), found.as_slice());
+        let when = WhenCondition {
+            left: "CONDITION".to_string(),
+            right: MeasureOperand::Constant(4.0),
+            occurrence: EventOccurrence::default(),
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(MeasureStatement {
+            name: "event_axis".to_string(),
+            measure_type: MeasureType::When {
+                condition: when.clone(),
+                from: None,
+                to: None,
+            },
+            analysis: "DC".to_string(),
+            goal: None,
+            tolerance: None,
+        });
+        engine.add(MeasureStatement {
+            name: "found_value".to_string(),
+            measure_type: MeasureType::Find {
+                signal: "FOUND".to_string(),
+                at: None,
+                when: Some(when),
+                from: None,
+                to: None,
+            },
+            analysis: "DC".to_string(),
+            goal: None,
+            tolerance: None,
+        });
+
+        let results = engine.evaluate_with_segment_starts(&axis, &signals, &[5]);
+
+        assert_eq!(results[0].value, Some(3.9));
+        assert_eq!(results[1].value, Some(4.1));
+    }
+
+    #[test]
+    fn conditional_occurrences_select_rise_fall_and_windowed_cross_counts() {
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let alternating = [-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let mut signals = HashMap::new();
+        signals.insert("ALT".to_string(), alternating.as_slice());
+        let statement =
+            |name: &str, edge: EdgeType, number: usize, from: Option<Value>| -> MeasureStatement {
+                MeasureStatement {
+                    name: name.to_string(),
+                    measure_type: MeasureType::When {
+                        condition: WhenCondition {
+                            left: "ALT".to_string(),
+                            right: MeasureOperand::Constant(0.0),
+                            occurrence: EventOccurrence { edge, number },
+                        },
+                        from,
+                        to: None,
+                    },
+                    analysis: "DC".to_string(),
+                    goal: None,
+                    tolerance: None,
+                }
+            };
+        let mut engine = MeasureEngine::new();
+        engine.add(statement("fourth_cross", EdgeType::Cross, 4, None));
+        engine.add(statement("second_rise", EdgeType::Rise, 2, None));
+        engine.add(statement("third_fall", EdgeType::Fall, 3, None));
+        engine.add(statement(
+            "second_windowed_cross",
+            EdgeType::Cross,
+            2,
+            Some(2.0),
+        ));
+
+        let results = engine.evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, Some(3.5));
+        assert_eq!(results[1].value, Some(2.5));
+        assert_eq!(results[2].value, Some(5.5));
+        assert_eq!(results[3].value, Some(3.5));
+    }
+
+    #[test]
+    fn invalid_segment_boundaries_fail_all_measurements_without_panicking() {
+        let axis = [0.0, 1.0, 2.0];
+        let values = [0.0, 1.0, 2.0];
+        let mut signals = HashMap::new();
+        signals.insert("V(out)".to_string(), values.as_slice());
+
+        for invalid in [&[0][..], &[3][..], &[2, 1][..], &[1, 1][..]] {
+            let results = engine_with(max_statement("V(out)"))
+                .evaluate_with_segment_starts(&axis, &signals, invalid);
+            assert_eq!(results[0].value, None);
+            assert!(!results[0].passed);
+            assert!(
+                results[0]
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("segment starts"))
+            );
+        }
     }
 
     #[test]

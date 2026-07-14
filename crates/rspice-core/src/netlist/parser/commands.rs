@@ -1973,6 +1973,26 @@ pub(super) fn parse_meas_command(
                         to: options.to,
                     }
                 }
+                "WHEN" => {
+                    if !stream.consume(&TokenKind::Equals) {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: "Expected '=' after left operand in .MEAS WHEN".to_string(),
+                        });
+                    }
+                    let right = parse_measure_when_operand(stream, line_num, params)?;
+                    let (from, to, occurrence) =
+                        parse_measure_when_event_options(stream, line_num, params)?;
+                    MeasureType::When {
+                        condition: crate::analysis::WhenCondition {
+                            left: signal.clone(),
+                            right,
+                            occurrence,
+                        },
+                        from,
+                        to,
+                    }
+                }
                 _ => {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -1999,6 +2019,7 @@ struct PointMeasureOptions {
     when: Option<crate::analysis::WhenCondition>,
     from: Option<Value>,
     to: Option<Value>,
+    occurrence_given: bool,
 }
 
 fn parse_point_measure_options(
@@ -2007,13 +2028,14 @@ fn parse_point_measure_options(
     params: &ParamContext,
     measure_type: &str,
 ) -> Result<PointMeasureOptions, ParseError> {
-    use crate::analysis::{MeasureOperand, WhenCondition};
+    use crate::analysis::WhenCondition;
 
     let mut options = PointMeasureOptions {
         at: None,
         when: None,
         from: None,
         to: None,
+        occurrence_given: false,
     };
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -2047,19 +2069,47 @@ fn parse_point_measure_options(
                         message: format!("Expected '=' after WHEN signal in .MEAS {measure_type}"),
                     });
                 }
-                let right = match &stream.peek().kind {
-                    TokenKind::Expression(_) => {
-                        MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?)
-                    }
-                    TokenKind::Ident(_) if matches!(stream.peek_n(1).kind, TokenKind::LParen) => {
-                        MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?)
-                    }
-                    TokenKind::Ident(name) if params.get(name).is_none() => {
-                        MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?)
-                    }
-                    _ => MeasureOperand::Constant(expect_value(stream, line_num, params)?),
+                let right = parse_measure_when_operand(stream, line_num, params)?;
+                options.when = Some(WhenCondition {
+                    left,
+                    right,
+                    occurrence: crate::analysis::EventOccurrence::default(),
+                });
+            }
+            "RISE" | "FALL" | "CROSS" => {
+                let Some(condition) = options.when.as_mut() else {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "{keyword} occurrence must follow WHEN in .MEAS {measure_type}"
+                        ),
+                    });
                 };
-                options.when = Some(WhenCondition { left, right });
+                if options.occurrence_given {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Only one RISE, FALL, or CROSS qualifier is allowed in .MEAS {measure_type}"
+                        ),
+                    });
+                }
+                stream.advance();
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected '=' after {keyword} in .MEAS {measure_type}"),
+                    });
+                }
+                condition.occurrence = crate::analysis::EventOccurrence {
+                    edge: match keyword.as_str() {
+                        "RISE" => crate::analysis::EdgeType::Rise,
+                        "FALL" => crate::analysis::EdgeType::Fall,
+                        "CROSS" => crate::analysis::EdgeType::Cross,
+                        _ => unreachable!(),
+                    },
+                    number: parse_measure_occurrence(stream, line_num, params, &keyword)?,
+                };
+                options.occurrence_given = true;
             }
             "GOAL" | "TOL" => break,
             // Preserve the legacy parser's tolerance of analysis-specific
@@ -2071,6 +2121,99 @@ fn parse_point_measure_options(
         }
     }
     Ok(options)
+}
+
+fn parse_measure_when_operand(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<crate::analysis::MeasureOperand, ParseError> {
+    use crate::analysis::MeasureOperand;
+
+    match &stream.peek().kind {
+        TokenKind::Expression(_) => Ok(MeasureOperand::Waveform(parse_meas_signal(
+            stream, line_num,
+        )?)),
+        TokenKind::Ident(_) if matches!(stream.peek_n(1).kind, TokenKind::LParen) => Ok(
+            MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?),
+        ),
+        TokenKind::Ident(name) if params.get(name).is_none() => Ok(MeasureOperand::Waveform(
+            parse_meas_signal(stream, line_num)?,
+        )),
+        _ => Ok(MeasureOperand::Constant(expect_value(
+            stream, line_num, params,
+        )?)),
+    }
+}
+
+fn parse_measure_when_event_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<
+    (
+        Option<crate::Value>,
+        Option<crate::Value>,
+        crate::analysis::EventOccurrence,
+    ),
+    ParseError,
+> {
+    let mut from = None;
+    let mut to = None;
+    let mut occurrence = crate::analysis::EventOccurrence::default();
+    let mut occurrence_given = false;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let TokenKind::Ident(keyword) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected token '{}' in .MEAS WHEN", stream.peek().kind),
+            });
+        };
+        let keyword = keyword.to_ascii_uppercase();
+        if matches!(keyword.as_str(), "GOAL" | "TOL") {
+            break;
+        }
+        if !matches!(keyword.as_str(), "FROM" | "TO" | "RISE" | "FALL" | "CROSS") {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected option '{keyword}' in .MEAS WHEN"),
+            });
+        }
+        stream.advance();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected '=' after {keyword} in .MEAS WHEN"),
+            });
+        }
+        match keyword.as_str() {
+            "FROM" => from = Some(expect_value(stream, line_num, params)?),
+            "TO" => to = Some(expect_value(stream, line_num, params)?),
+            "RISE" | "FALL" | "CROSS" => {
+                if occurrence_given {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Only one RISE, FALL, or CROSS qualifier is allowed in .MEAS WHEN"
+                            .to_string(),
+                    });
+                }
+                occurrence = crate::analysis::EventOccurrence {
+                    edge: match keyword.as_str() {
+                        "RISE" => crate::analysis::EdgeType::Rise,
+                        "FALL" => crate::analysis::EdgeType::Fall,
+                        "CROSS" => crate::analysis::EdgeType::Cross,
+                        _ => unreachable!(),
+                    },
+                    number: parse_measure_occurrence(stream, line_num, params, &keyword)?,
+                };
+                occurrence_given = true;
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    Ok((from, to, occurrence))
 }
 
 fn parse_measure_name(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {

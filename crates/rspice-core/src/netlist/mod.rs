@@ -1412,6 +1412,81 @@ mod tests {
     }
 
     #[test]
+    fn standalone_when_measurements_preserve_typed_operands_and_windows() {
+        let netlist = Netlist::parse(
+            "typed standalone WHEN conditions\n\
+             V1 one 0 0\n\
+             V2 two 0 0\n\
+             .dc V1 5 1 -1\n\
+             .measure dc waveform WHEN V(one)={2*V(two)} FROM=4 TO=2 CROSS=2\n\
+             .measure dc constant WHEN V(one)=2.5\n\
+             .end\n",
+        )
+        .expect("standalone WHEN conditions parse");
+
+        match &netlist.measurements[0].measure_type {
+            crate::analysis::MeasureType::When {
+                condition,
+                from,
+                to,
+            } => {
+                assert_eq!(condition.left, "V(ONE)");
+                assert_eq!(
+                    condition.right,
+                    crate::analysis::MeasureOperand::Waveform("{2*V(two)}".to_string())
+                );
+                assert_eq!(*from, Some(4.0));
+                assert_eq!(*to, Some(2.0));
+                assert_eq!(condition.occurrence.edge, crate::analysis::EdgeType::Cross);
+                assert_eq!(condition.occurrence.number, 2);
+            }
+            other => panic!("expected standalone WHEN measurement, got {other:?}"),
+        }
+        match &netlist.measurements[1].measure_type {
+            crate::analysis::MeasureType::When { condition, .. } => {
+                assert_eq!(condition.left, "V(ONE)");
+                assert_eq!(
+                    condition.right,
+                    crate::analysis::MeasureOperand::Constant(2.5)
+                );
+            }
+            other => panic!("expected standalone WHEN measurement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn point_event_occurrences_are_typed_and_conflicts_fail_loudly() {
+        let netlist = Netlist::parse(
+            "typed point-event occurrence\n\
+             V1 one 0 0\n\
+             .dc V1 0 4 1\n\
+             .measure dc selected FIND V(one) WHEN V(one)=2 RISE=2\n\
+             .end\n",
+        )
+        .expect("point-event occurrence parses");
+        match &netlist.measurements[0].measure_type {
+            crate::analysis::MeasureType::Find {
+                when: Some(condition),
+                ..
+            } => {
+                assert_eq!(condition.occurrence.edge, crate::analysis::EdgeType::Rise);
+                assert_eq!(condition.occurrence.number, 2);
+            }
+            other => panic!("expected FIND-WHEN measurement, got {other:?}"),
+        }
+
+        let error = Netlist::parse(
+            "conflicting point-event occurrence\n\
+             V1 one 0 0\n\
+             .dc V1 0 4 1\n\
+             .measure dc invalid WHEN V(one)=2 CROSS=1 FALL=2\n\
+             .end\n",
+        )
+        .expect_err("conflicting occurrence qualifiers must not be ignored");
+        assert!(error.to_string().contains("Only one RISE, FALL, or CROSS"));
+    }
+
+    #[test]
     fn extrema_output_frequency_alias_selects_independent_axis() {
         let netlist = Netlist::parse(
             "extrema output frequency\n\

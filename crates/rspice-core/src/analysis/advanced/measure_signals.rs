@@ -740,6 +740,16 @@ fn evaluate_statements(
     signals: &HashMap<String, &[Value]>,
     params: &crate::netlist::ParamContext,
 ) -> Vec<MeasureResult> {
+    evaluate_statements_with_segment_starts(statements, axis, signals, params, &[])
+}
+
+fn evaluate_statements_with_segment_starts(
+    statements: &[&MeasureStatement],
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    params: &crate::netlist::ParamContext,
+    segment_starts: &[usize],
+) -> Vec<MeasureResult> {
     let derived = materialize_measure_expression_signals(statements, axis, signals, params);
     let mut augmented_signals = signals.clone();
     for (name, waveform) in &derived {
@@ -749,7 +759,88 @@ fn evaluate_statements(
     for statement in statements {
         engine.add((*statement).clone());
     }
-    engine.evaluate(axis, &augmented_signals)
+    engine.evaluate_with_segment_starts(axis, &augmented_signals, segment_starts)
+}
+
+fn evaluate_dc_statements_with_equation_traces(
+    statements: &[&MeasureStatement],
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    params: &crate::netlist::ParamContext,
+    segment_starts: &[usize],
+    traces: &[EquationMeasureTrace],
+) -> Vec<MeasureResult> {
+    let equation_positions = traces
+        .iter()
+        .map(|trace| {
+            statements.iter().position(|statement| {
+                matches!(statement.measure_type, MeasureType::Equation { .. })
+                    && statement.name.eq_ignore_ascii_case(&trace.name)
+            })
+        })
+        .collect::<Vec<_>>();
+    let previous_values = traces
+        .iter()
+        .zip(&equation_positions)
+        .map(|(trace, position)| {
+            let default = position
+                .and_then(|position| match &statements[position].measure_type {
+                    MeasureType::Equation { default_value, .. } => *default_value,
+                    _ => None,
+                })
+                .unwrap_or(0.0);
+            std::iter::once(default)
+                .chain(
+                    trace
+                        .values
+                        .iter()
+                        .copied()
+                        .take(axis.len().saturating_sub(1)),
+                )
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    // Xyce updates measurements sequentially at every accepted point. A
+    // consumer after an equation sees its current-point value; a forward
+    // consumer sees the previous-point value (or DEFAULT_VAL at row zero).
+    let mut signal_maps = statements
+        .iter()
+        .enumerate()
+        .map(|(statement_index, _)| {
+            let mut map = signals.clone();
+            for (trace_index, trace) in traces.iter().enumerate() {
+                let values = if equation_positions[trace_index]
+                    .is_some_and(|equation_index| statement_index > equation_index)
+                {
+                    trace.values.as_slice()
+                } else {
+                    previous_values[trace_index].as_slice()
+                };
+                insert_case_variants(&mut map, &trace.name, values);
+            }
+            map
+        })
+        .collect::<Vec<_>>();
+
+    let expression_signals = statements
+        .iter()
+        .zip(&signal_maps)
+        .map(|(statement, map)| {
+            materialize_measure_expression_signals(&[*statement], axis, map, params)
+        })
+        .collect::<Vec<_>>();
+    for (map, derived) in signal_maps.iter_mut().zip(&expression_signals) {
+        for (name, waveform) in derived {
+            map.insert(name.clone(), waveform.as_slice());
+        }
+    }
+
+    let mut engine = MeasureEngine::new();
+    for statement in statements {
+        engine.add((*statement).clone());
+    }
+    engine.evaluate_with_segment_starts_and_signal_maps(axis, &signal_maps, segment_starts)
 }
 
 fn overlay_continuous_equation_results(
@@ -839,6 +930,12 @@ fn materialize_measure_expression_signals(
                     }
                 }
             }
+            MeasureType::When { condition, .. } => {
+                add(&condition.left);
+                if let MeasureOperand::Waveform(right) = &condition.right {
+                    add(right);
+                }
+            }
             MeasureType::Min { signal, .. }
             | MeasureType::Max { signal, .. }
             | MeasureType::PeakToPeak { signal, .. }
@@ -901,6 +998,12 @@ fn materialize_differential_voltage_signals(
                     if let MeasureOperand::Waveform(right) = &when.right {
                         add(right);
                     }
+                }
+            }
+            MeasureType::When { condition, .. } => {
+                add(&condition.left);
+                if let MeasureOperand::Waveform(right) = &condition.right {
+                    add(right);
                 }
             }
             MeasureType::Min { signal, .. }
@@ -1009,14 +1112,67 @@ pub fn evaluate_dc_measurements(
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
-    let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
-    overlay_continuous_equation_results(
-        &statements,
-        &mut results,
-        evaluate_dc_equation_measurements(netlist, sweep),
-        "DC",
-    );
+    // Continuous equation measures are live waveforms, not merely final
+    // scalars. Their visibility at each statement depends on netlist order.
+    let equation_traces = evaluate_dc_equation_measurements(netlist, sweep);
+    let segment_starts = dc_primary_segment_starts(netlist, series.axis().len());
+    let mut results = match &equation_traces {
+        Ok(traces) => evaluate_dc_statements_with_equation_traces(
+            &statements,
+            series.axis(),
+            &signals,
+            &netlist.params,
+            &segment_starts,
+            traces,
+        ),
+        Err(_) => evaluate_statements_with_segment_starts(
+            &statements,
+            series.axis(),
+            &signals,
+            &netlist.params,
+            &segment_starts,
+        ),
+    };
+    overlay_continuous_equation_results(&statements, &mut results, equation_traces, "DC");
     results
+}
+
+fn dc_primary_segment_starts(netlist: &Netlist, point_count: usize) -> Vec<usize> {
+    let primary_point_counts = netlist.analyses.iter().filter_map(|analysis| {
+        let crate::netlist::AnalysisCommand::Dc {
+            start,
+            stop,
+            step,
+            mode,
+            sweep2: Some(sweep2),
+            ..
+        } = analysis
+        else {
+            return None;
+        };
+        let primary_points = crate::netlist::DcSweepSpec {
+            start: *start,
+            stop: *stop,
+            step: *step,
+            mode: mode.clone(),
+        }
+        .points()
+        .len();
+        let secondary_points = sweep2.spec().points().len();
+        (primary_points > 0
+            && secondary_points > 0
+            && primary_points.checked_mul(secondary_points) == Some(point_count))
+        .then_some(primary_points)
+    });
+    let mut matching_primary_points = primary_point_counts.collect::<Vec<_>>();
+    matching_primary_points.sort_unstable();
+    matching_primary_points.dedup();
+    let [primary_points] = matching_primary_points.as_slice() else {
+        return Vec::new();
+    };
+    (*primary_points..point_count)
+        .step_by(*primary_points)
+        .collect()
 }
 
 fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureStatement {
@@ -1028,7 +1184,8 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::Avg { from, to, .. }
         | MeasureType::Rms { from, to, .. }
         | MeasureType::Find { from, to, .. }
-        | MeasureType::Derivative { from, to, .. } => Some((from, to)),
+        | MeasureType::Derivative { from, to, .. }
+        | MeasureType::When { from, to, .. } => Some((from, to)),
         MeasureType::Delay { .. }
         | MeasureType::Param { .. }
         | MeasureType::RiseTime { .. }
@@ -1469,6 +1626,52 @@ mod tests {
         assert_eq!(results[0].value, Some(4.0));
         assert_eq!(results[1].value, Some(8.0));
         assert!(results.iter().all(|result| result.passed));
+    }
+
+    #[test]
+    fn dc_point_events_observe_equations_in_netlist_update_order() {
+        let netlist = Netlist::parse(
+            "DC equation visibility order\n\
+             V1 out 0 0\n\
+             .dc V1 0 4 1\n\
+             .meas dc before WHEN tracked=2.5\n\
+             .meas dc tracked EQN {V(out)}\n\
+             .meas dc after WHEN tracked=2.5\n\
+             .end\n",
+        )
+        .expect("ordered DC equation consumers parse");
+
+        let results = evaluate_dc_measurements(&netlist, &dc_equation_sweep());
+
+        assert_eq!(results[0].value, Some(3.5));
+        assert_eq!(results[1].value, Some(4.0));
+        assert_eq!(results[2].value, Some(2.5));
+        assert!(results.iter().all(|result| result.passed));
+    }
+
+    #[test]
+    fn nested_dc_boundaries_require_an_exact_unambiguous_sweep_shape() {
+        let matching = Netlist::parse(
+            "nested DC shape\n\
+             V1 one 0 0\n\
+             V2 two 0 0\n\
+             .dc V1 0 2 1 V2 0 1 1\n\
+             .end\n",
+        )
+        .expect("nested DC parses");
+        assert_eq!(dc_primary_segment_starts(&matching, 6), vec![3]);
+        assert!(dc_primary_segment_starts(&matching, 5).is_empty());
+
+        let ambiguous = Netlist::parse(
+            "ambiguous nested DC shapes\n\
+             V1 one 0 0\n\
+             V2 two 0 0\n\
+             .dc V1 0 2 1 V2 0 1 1\n\
+             .dc V1 0 1 1 V2 0 2 1\n\
+             .end\n",
+        )
+        .expect("multiple nested DC analyses parse");
+        assert!(dc_primary_segment_starts(&ambiguous, 6).is_empty());
     }
 
     #[test]

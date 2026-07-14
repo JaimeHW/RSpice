@@ -61,9 +61,9 @@ pub use core::{
 pub use advanced::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, DistortionAnalysisResult,
     DistortionPointResult, DistortionProduct, DistortionProductResult, Distribution, EdgeType,
-    ElementDesc, ElementType, ExtremaOutput, FourierAnalysis, FourierConfig, FourierResult,
-    FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise, MeasureEngine,
-    MeasureOperand, MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig,
+    ElementDesc, ElementType, EventOccurrence, ExtremaOutput, FourierAnalysis, FourierConfig,
+    FourierResult, FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise,
+    MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig,
     MonteCarloResult, MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType,
     ParametricResults, ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port,
     PortNoiseCorrelationResult, PzMatrix, SMatrix, SParameterAnalyzer, SParameterConfig,
