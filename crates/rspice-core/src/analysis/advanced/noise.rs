@@ -913,6 +913,10 @@ pub struct NoiseResult {
     /// Squared small-signal gain used to refer output noise to the input.
     /// This retains Xyce's `N_MINGAIN` floor at transfer nulls.
     pub input_gain_squared: Value,
+    /// Valid contribution identities exported by the device models.  This
+    /// catalog is independent of operating-point activation so a valid zero
+    /// mechanism remains distinguishable from an unknown mechanism.
+    pub contribution_catalog: Vec<NoiseSourceIdentity>,
     /// Individual noise contributions from each source
     pub contributions: Vec<NoiseContribution>,
 }
@@ -1066,34 +1070,45 @@ impl NoiseResult {
         probe: &NoiseContributionProbe,
     ) -> Result<Value, NoiseContributionProbeError> {
         let matching_device = self
-            .contributions
+            .contribution_catalog
             .iter()
-            .filter(|entry| entry.identity.device.eq_ignore_ascii_case(&probe.device))
+            .filter(|identity| identity.device.eq_ignore_ascii_case(&probe.device))
             .collect::<Vec<_>>();
         if matching_device.is_empty() {
             return Err(NoiseContributionProbeError::UnknownDevice(
                 probe.device.clone(),
             ));
         }
-        let matching = matching_device
+        let matching_catalog = matching_device
             .into_iter()
-            .filter(|entry| match &probe.mechanism {
+            .filter(|identity| match &probe.mechanism {
                 None => true,
-                Some(mechanism) => entry
-                    .identity
+                Some(mechanism) => identity
                     .mechanism
                     .as_deref()
                     .is_some_and(|candidate| candidate.eq_ignore_ascii_case(mechanism)),
             })
             .collect::<Vec<_>>();
-        if matching.is_empty() {
+        if matching_catalog.is_empty() {
             return Err(NoiseContributionProbeError::UnknownMechanism {
                 device: probe.device.clone(),
                 mechanism: probe.mechanism.clone().unwrap_or_default(),
             });
         }
-        Ok(matching
-            .into_iter()
+        Ok(self
+            .contributions
+            .iter()
+            .filter(|entry| {
+                entry.identity.device.eq_ignore_ascii_case(&probe.device)
+                    && match &probe.mechanism {
+                        None => true,
+                        Some(mechanism) => entry
+                            .identity
+                            .mechanism
+                            .as_deref()
+                            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(mechanism)),
+                    }
+            })
             .map(|entry| match probe.kind {
                 NoiseContributionKind::Output => entry.output_contribution,
                 NoiseContributionKind::Input => entry.input_contribution,
@@ -1334,6 +1349,10 @@ mod summary_tests {
             output_noise_density: r1 + d1,
             input_referred_density: r1 + d1,
             input_gain_squared: 1.0,
+            contribution_catalog: vec![
+                NoiseSourceIdentity::device("r1"),
+                NoiseSourceIdentity::device("d1"),
+            ],
             contributions: vec![
                 NoiseContribution {
                     identity: NoiseSourceIdentity::device("r1"),
@@ -1435,6 +1454,11 @@ mod summary_tests {
                 percentage: 0.0,
             },
         ];
+        result.contribution_catalog = result
+            .contributions
+            .iter()
+            .map(|entry| entry.identity.clone())
+            .collect();
 
         let output = NoiseContributionProbe::parse("DNO(m1,Id)").unwrap();
         let input = NoiseContributionProbe::parse("DNI(M1)").unwrap();

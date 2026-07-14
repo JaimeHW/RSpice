@@ -4134,53 +4134,12 @@ impl Engine {
                     let source_external = circuit.get_or_create_node(&element.nodes[2]);
                     let bulk = circuit.get_or_create_node(bulk_node_name);
 
-                    let sheet_resistance = params_map
-                        .as_ref()
-                        .and_then(|params| params.get("RSH").copied())
-                        .filter(|value| value.is_finite() && *value > 0.0)
-                        .unwrap_or(0.0);
-                    let default_squares = if sheet_resistance > 0.0 { 1.0 } else { 0.0 };
-                    let drain_squares = instance_param(
-                        instance_params,
-                        &["NRD", "NRD_SQ", "NRDS", "DRAIN_SQUARES"],
-                    )
-                    .unwrap_or(default_squares)
-                    .max(0.0);
-                    let source_squares = instance_param(
-                        instance_params,
-                        &["NRS", "NRS_SQ", "NRSS", "SOURCE_SQUARES"],
-                    )
-                    .unwrap_or(default_squares)
-                    .max(0.0);
-
-                    let drain_resistance = sheet_resistance * drain_squares;
-                    let source_resistance = sheet_resistance * source_squares;
-                    let drain = if drain_resistance > 0.0 {
-                        let internal =
-                            circuit.get_or_create_node(&format!("{}.__rd.internal", element.name));
-                        circuit.resistors.add(
-                            format!("{}.__rd", element.name),
-                            drain_external,
-                            internal,
-                            drain_resistance,
-                        );
-                        internal
-                    } else {
-                        drain_external
-                    };
-                    let source = if source_resistance > 0.0 {
-                        let internal =
-                            circuit.get_or_create_node(&format!("{}.__rs.internal", element.name));
-                        circuit.resistors.add(
-                            format!("{}.__rs", element.name),
-                            source_external,
-                            internal,
-                            source_resistance,
-                        );
-                        internal
-                    } else {
-                        source_external
-                    };
+                    // Series RD/RS topology is constructed once below, after
+                    // all model and instance parameters have been applied, so
+                    // explicit RD/RS precedence, RSH squares, multiplicity,
+                    // and noise temperature share one canonical path.
+                    let drain = drain_external;
+                    let source = source_external;
 
                     let mut mosfet = match resolved_mos_type {
                         crate::netlist::MosType::Nmos => crate::device::Mosfet::new_nmos(

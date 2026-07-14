@@ -712,6 +712,29 @@ impl Engine {
             }
         }
 
+        // Builder-owned classic-MOS series resistors are physical resistor
+        // stamps, but Xyce exposes their noise under the parent MOS device as
+        // its RD/RS mechanisms.  Build the ownership table from device
+        // topology rather than inferring arbitrary user resistor names.
+        let classic_mos_series_noise_owners = circuit
+            .mosfets
+            .devices
+            .iter()
+            .filter(|mos| matches!(mos.level, 1..=3))
+            .flat_map(|mos| {
+                [
+                    (
+                        format!("{}.__rd", mos.name).to_ascii_lowercase(),
+                        crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RD"),
+                    ),
+                    (
+                        format!("{}.__rs", mos.name).to_ascii_lowercase(),
+                        crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RS"),
+                    ),
+                ]
+            })
+            .collect::<HashMap<_, _>>();
+
         // Resistor thermal noise (4kT/R) and model-card flicker noise
         // (resnoise.c), both gated by the per-instance `noisy` switch.
         for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
@@ -739,6 +762,10 @@ impl Engine {
 
             let mut source =
                 NoiseSource::thermal(name.clone(), stamp.pp.row, stamp.nn.row, resistance);
+            if let Some(identity) = classic_mos_series_noise_owners.get(&name.to_ascii_lowercase())
+            {
+                source.identity = identity.clone();
+            }
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
             noise_sources.push(source);
 
@@ -908,6 +935,7 @@ impl Engine {
 
         // MOS channel thermal noise and 1/f noise.
         for mos in &circuit.mosfets.devices {
+            let is_classic_noise_model = matches!(mos.level, 1..=3);
             let gm = mos.transconductance();
             let gamma = mos.channel_thermal_noise_gamma();
             if gm > 1e-18 && gamma > 0.0 {
@@ -919,6 +947,10 @@ impl Engine {
                     resistance,
                 );
                 source.temperature_offset = mos.noise_temperature_offset;
+                if is_classic_noise_model {
+                    source.identity =
+                        crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "ID");
+                }
                 noise_sources.push(source);
             }
 
@@ -929,7 +961,7 @@ impl Engine {
                 && coefficient > 0.0
                 && current.abs() > 1e-18
             {
-                noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                let source = NoiseSource::flicker_with_frequency_exponent(
                     format!("{}:flicker", mos.name),
                     mos.node_drain,
                     mos.node_source,
@@ -937,7 +969,14 @@ impl Engine {
                     af,
                     ef,
                     current,
-                ));
+                );
+                noise_sources.push(if is_classic_noise_model {
+                    source.with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                        &mos.name, "FN",
+                    ))
+                } else {
+                    source
+                });
             }
         }
 
@@ -1277,7 +1316,6 @@ impl Engine {
         circuit.prepare_behavioral_small_signal(&dc_solution);
         let (noise_sources, correlated_noise_sources) =
             Self::try_collect_noise_sources(&circuit, &dc_solution)?;
-
         let mut branch_matrix_indices = Vec::with_capacity(port_sources.len());
         for source_name in port_sources {
             let source_index = circuit
@@ -1604,6 +1642,42 @@ impl Engine {
             Self::try_collect_noise_sources(&circuit, &dc_solution)?;
 
         // Compute noise at each frequency
+        let mut contribution_catalog = noise_sources
+            .iter()
+            .map(|source| source.identity.clone())
+            .collect::<Vec<_>>();
+        contribution_catalog.extend(
+            correlated_noise_sources
+                .iter()
+                .map(|source| crate::analysis::NoiseSourceIdentity::device(&source.device_name)),
+        );
+        for mos in circuit
+            .mosfets
+            .devices
+            .iter()
+            .filter(|mos| matches!(mos.level, 1..=3))
+        {
+            contribution_catalog.extend(["RD", "RS", "ID", "FN"].map(|mechanism| {
+                crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
+            }));
+        }
+        let mut unique_catalog = Vec::with_capacity(contribution_catalog.len());
+        for identity in contribution_catalog {
+            if !unique_catalog
+                .iter()
+                .any(|existing: &crate::analysis::NoiseSourceIdentity| {
+                    existing.device.eq_ignore_ascii_case(&identity.device)
+                        && match (&existing.mechanism, &identity.mechanism) {
+                            (None, None) => true,
+                            (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+                            _ => false,
+                        }
+                })
+            {
+                unique_catalog.push(identity);
+            }
+        }
+
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
         let node_names = circuit.node_names_sorted();
@@ -1827,6 +1901,7 @@ impl Engine {
                         total_noise_v2_hz
                     },
                     input_gain_squared: input_gain_sq,
+                    contribution_catalog: unique_catalog.clone(),
                     contributions,
                 })
             })
@@ -2206,6 +2281,35 @@ M1 D G 0 0 NM W=20u L=2u
     /// from the official ngspice-46 binary.
     const MOS_DTEMP_NOISE_ORACLE: &str =
         include_str!("../../../tests/testdata/mos_dtemp_noise_ngspice46.dat");
+
+    #[test]
+    fn classic_mos_noise_catalog_owns_series_sources_and_retains_inactive_flicker() {
+        let netlist = Netlist::parse(MOS_RDRS_NOISE_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("d").expect("output node");
+        let result = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &[1.0e3], 300.15)
+            .expect("noise analysis runs")
+            .into_iter()
+            .next()
+            .expect("one noise point");
+
+        let contribution = |probe: &str| {
+            let probe = crate::analysis::NoiseContributionProbe::parse(probe)
+                .expect("contribution probe parses");
+            result.contribution(&probe).expect("mechanism is valid")
+        };
+        let rd = contribution("DNO(M1,RD)");
+        let rs = contribution("DNO(m1,rs)");
+        let id = contribution("DNO(M1,id)");
+        let fn_noise = contribution("DNO(m1,FN)");
+        assert!(rd > 0.0, "externalized RD must contribute under M1");
+        assert!(rs > 0.0, "externalized RS must contribute under M1");
+        assert!(id > 0.0, "channel thermal noise must contribute under M1");
+        assert_eq!(fn_noise, 0.0, "KF=0 keeps valid FN inactive");
+        assert_eq!(contribution("DNO(M1)"), rd + rs + id + fn_noise);
+    }
 
     /// Instance DTEMP must heat the channel thermal source and both
     /// externalized drain/source resistances exactly as mos1noi.c does

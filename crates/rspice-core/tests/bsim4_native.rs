@@ -4143,8 +4143,8 @@ fn rgatemod2_gate_resistance_noise_matches_ngspice46() {
         .contributions
         .iter()
         .find(|contrib| {
-            (contrib.device_name.eq_ignore_ascii_case("m1.rg")
-                || contrib.device_name.eq_ignore_ascii_case("m1.__rg"))
+            (contrib.identity.device.eq_ignore_ascii_case("m1.rg")
+                || contrib.identity.device.eq_ignore_ascii_case("m1.__rg"))
                 && contrib.noise_type.label() == "thermal"
         })
         .unwrap_or_else(|| {
@@ -4181,7 +4181,7 @@ fn rgatemod3_gate_resistance_noise_matches_ngspice46() {
         .contributions
         .iter()
         .find(|contrib| {
-            contrib.device_name.eq_ignore_ascii_case("m1.__rg")
+            contrib.identity.device.eq_ignore_ascii_case("m1.__rg")
                 && contrib.noise_type.label() == "thermal"
         })
         .unwrap_or_else(|| {
@@ -4230,7 +4230,7 @@ fn rgatemod1_gate_resistor_contributes_noise() {
         .contributions
         .iter()
         .find(|contrib| {
-            contrib.device_name.eq_ignore_ascii_case("m1.__rg")
+            contrib.identity.device.eq_ignore_ascii_case("m1.__rg")
                 && contrib.noise_type.label() == "thermal"
         })
         .unwrap_or_else(|| {

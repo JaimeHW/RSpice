@@ -32859,6 +32859,7 @@ mod tests {
                 output_noise_density: 0.0,
                 input_referred_density: 0.0,
                 input_gain_squared: 1.0,
+                contribution_catalog: Vec::new(),
                 contributions: Vec::new(),
             })
             .collect::<Vec<_>>();
