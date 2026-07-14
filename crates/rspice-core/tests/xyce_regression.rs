@@ -5939,6 +5939,21 @@ fn test_xyce_stepped_noise_continuous_find_when_mixed_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_stepped_noise_continuous_trigger_target_mixed_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_CONT/STEP/TrigTargTestNoise.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should reset and compare mixed scalar and NOISE_CONT trigger/target metadata for every materialized step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_cascode_bjt_noise_waveform_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
