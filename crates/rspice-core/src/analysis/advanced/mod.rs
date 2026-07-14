@@ -39,8 +39,8 @@ pub use harmonic_balance::{
 };
 pub use measure::{
     ContinuousMeasureRecord, ContinuousMeasureResult, EdgeType, ErrorFunctionNorm, EventOccurrence,
-    ExtremaOutput, FileErrorNorm, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement,
-    MeasureType, TrigSpec, TriggerEvent, WhenCondition,
+    ExtremaOutput, FileErrorNorm, MeasureEngine, MeasureOperand, MeasurePrintPolicy, MeasureResult,
+    MeasureStatement, MeasureType, TrigSpec, TriggerEvent, WhenCondition,
 };
 pub use measure_signals::{
     AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,

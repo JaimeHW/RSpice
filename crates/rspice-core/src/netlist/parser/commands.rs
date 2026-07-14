@@ -299,7 +299,25 @@ pub(super) fn parse_command(
         )?,
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
-            measurements.push(parse_meas_command(stream, line_num, params)?);
+            let statement = parse_meas_command(stream, line_num, params)?;
+            if let Some(previous) = measurements
+                .iter()
+                .position(|candidate| candidate.name.eq_ignore_ascii_case(&statement.name))
+            {
+                let previous_name = measurements[previous].name.clone();
+                measurements.remove(previous);
+                let message = format!(
+                    "measure '{previous_name}' redefined as '{}'; ignoring the previous definition",
+                    statement.name
+                );
+                log::warn!("line {line_num}: {message}");
+                diagnostics.push(ParseDiagnostic::warning(
+                    line_num,
+                    "measure-redefined",
+                    message,
+                ));
+            }
+            measurements.push(statement);
         }
         ".SAVE" | ".PROBE" => {
             parse_save_command(stream, line_num, saves, false)?;
@@ -874,6 +892,16 @@ pub(super) fn parse_options_command(
                     });
                 }
                 options.measure_default_value = Some(value);
+            }
+            (Some("MEASURE"), "USE_CONT_FILES") => {
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("MEASURE.USE_CONT_FILES must be finite, found {value}"),
+                    });
+                }
+                options.measure_use_cont_files = Some(value.trunc() != 0.0);
             }
             (Some("MEASURE"), _) => {
                 let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
@@ -1871,7 +1899,24 @@ pub(super) fn parse_meas_command(
     use crate::analysis::{MeasureStatement, MeasureType};
 
     // Parse analysis type (TRAN, AC, DC)
-    let analysis = expect_ident(stream, line_num)?;
+    let parsed_analysis = expect_ident(stream, line_num)?.to_ascii_uppercase();
+    let analysis = if parsed_analysis == "TR" {
+        "TRAN".to_string()
+    } else if parsed_analysis.ends_with("_CONT")
+        && !matches!(
+            parsed_analysis.as_str(),
+            "TRAN_CONT" | "AC_CONT" | "DC_CONT" | "NOISE_CONT"
+        )
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Unknown continuous .MEASURE mode '{parsed_analysis}'; expected TRAN_CONT, AC_CONT, DC_CONT, or NOISE_CONT"
+            ),
+        });
+    } else {
+        parsed_analysis
+    };
 
     // Xyce treats the measurement name as one whitespace-delimited source
     // field.  It may therefore contain punctuation (for example
@@ -1882,7 +1927,21 @@ pub(super) fn parse_meas_command(
     // Parse measurement type keyword
     let measure_type_str = expect_ident(stream, line_num)?;
     let measure_type_key = measure_type_str.to_ascii_uppercase();
-    let (goal, tolerance, default_value) = scan_meas_statement_options(stream, line_num, params)?;
+    if analysis.ends_with("_CONT")
+        && !matches!(
+            measure_type_key.as_str(),
+            "DERIV" | "DERIVATIVE" | "FIND" | "TRIG" | "TARG" | "WHEN"
+        )
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Illegal .MEASURE type '{measure_type_str}' for {analysis}; expected DERIV, DERIVATIVE, FIND, TRIG, TARG, or WHEN"
+            ),
+        });
+    }
+    let (goal, tolerance, default_value, print_policy) =
+        scan_meas_statement_options(stream, line_num, params)?;
 
     // Create the measurement type based on keyword
     let measure_type = match measure_type_key.as_str() {
@@ -2090,6 +2149,7 @@ pub(super) fn parse_meas_command(
         goal,
         tolerance,
         default_value,
+        print_policy,
     })
 }
 
@@ -2117,7 +2177,7 @@ fn parse_point_measure_options(
         occurrence_given: false,
     };
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -2292,7 +2352,7 @@ fn parse_measure_error_function_options(
         weight: None,
     };
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -2378,7 +2438,7 @@ fn parse_measure_file_error_options(
     let mut seen = std::collections::HashSet::new();
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -2534,7 +2594,14 @@ fn measure_file_option_ahead(stream: &TokenStream) -> bool {
     };
     matches!(
         keyword.to_ascii_uppercase().as_str(),
-        "FILE" | "COMP_FUNCTION" | "INDEPVARCOL" | "DEPVARCOL" | "GOAL" | "TOL" | "DEFAULT_VAL"
+        "FILE"
+            | "COMP_FUNCTION"
+            | "INDEPVARCOL"
+            | "DEPVARCOL"
+            | "GOAL"
+            | "TOL"
+            | "DEFAULT_VAL"
+            | "PRINT"
     )
 }
 
@@ -2556,7 +2623,7 @@ fn parse_measure_when_event_options(
     let mut occurrence_given = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -2659,7 +2726,7 @@ fn collect_measure_equation_expression(
                     && matches!(stream.peek_n(1).kind, TokenKind::Equals)
                     && matches!(
                         name.to_ascii_uppercase().as_str(),
-                        "FROM" | "TO" | "TD" | "DEFAULT_VAL" | "GOAL" | "TOL"
+                        "FROM" | "TO" | "TD" | "DEFAULT_VAL" | "GOAL" | "TOL" | "PRINT"
                     ) =>
             {
                 break;
@@ -2688,41 +2755,59 @@ fn scan_meas_statement_options(
     stream: &TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(Option<Value>, Option<Value>, Option<Value>), ParseError> {
+) -> Result<
+    (
+        Option<Value>,
+        Option<Value>,
+        Option<Value>,
+        crate::analysis::MeasurePrintPolicy,
+    ),
+    ParseError,
+> {
     let mut stream = stream.clone();
     let mut goal = None;
     let mut tolerance = None;
     let mut default_value = None;
+    let mut print_policy = crate::analysis::MeasurePrintPolicy::All;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         let base_assignment_ahead = matches!(stream.peek().kind, TokenKind::Ident(_))
             && matches!(stream.peek_n(1).kind, TokenKind::Equals);
         if base_assignment_ahead {
-            if let Some((key, value)) = consume_meas_base_qualifier(&mut stream, line_num, params)?
+            if let Some(qualifier) =
+                consume_meas_statement_qualifier(&mut stream, line_num, params)?
             {
-                match key.as_str() {
-                    "GOAL" => goal = Some(value),
-                    "TOL" => tolerance = Some(value),
-                    "DEFAULT_VAL" => default_value = Some(value),
-                    _ => unreachable!(),
+                match qualifier {
+                    ParsedMeasStatementQualifier::Numeric { key, value } => match key.as_str() {
+                        "GOAL" => goal = Some(value),
+                        "TOL" => tolerance = Some(value),
+                        "DEFAULT_VAL" => default_value = Some(value),
+                        _ => unreachable!(),
+                    },
+                    ParsedMeasStatementQualifier::Print(policy) => print_policy = policy,
                 }
                 continue;
             }
         }
         stream.advance();
     }
-    Ok((goal, tolerance, default_value))
+    Ok((goal, tolerance, default_value, print_policy))
 }
 
-fn consume_meas_base_qualifier(
+enum ParsedMeasStatementQualifier {
+    Numeric { key: String, value: Value },
+    Print(crate::analysis::MeasurePrintPolicy),
+}
+
+fn consume_meas_statement_qualifier(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<Option<(String, Value)>, ParseError> {
+) -> Result<Option<ParsedMeasStatementQualifier>, ParseError> {
     let TokenKind::Ident(key) = &stream.peek().kind else {
         return Ok(None);
     };
     let key = key.to_ascii_uppercase();
-    if !matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL") {
+    if !matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL" | "PRINT") {
         return Ok(None);
     }
     stream.advance();
@@ -2732,6 +2817,18 @@ fn consume_meas_base_qualifier(
             message: format!("Expected '=' after {key} in .MEAS"),
         });
     }
+    if key == "PRINT" {
+        let value = expect_ident(stream, line_num)?;
+        let policy = match value.to_ascii_uppercase().as_str() {
+            "ALL" => crate::analysis::MeasurePrintPolicy::All,
+            "STDOUT" => crate::analysis::MeasurePrintPolicy::Stdout,
+            "NONE" => crate::analysis::MeasurePrintPolicy::None,
+            // Xyce leaves the constructor's ALL default in place for an
+            // unrecognized per-measure PRINT value.
+            _ => crate::analysis::MeasurePrintPolicy::All,
+        };
+        return Ok(Some(ParsedMeasStatementQualifier::Print(policy)));
+    }
     let value = expect_value(stream, line_num, params)?;
     if key == "DEFAULT_VAL" && !value.is_finite() {
         return Err(ParseError::Syntax {
@@ -2739,7 +2836,7 @@ fn consume_meas_base_qualifier(
             message: format!(".MEAS DEFAULT_VAL must be finite, found {value}"),
         });
     }
-    Ok(Some((key, value)))
+    Ok(Some(ParsedMeasStatementQualifier::Numeric { key, value }))
 }
 
 pub(super) fn parse_meas_delay_spec(
@@ -2784,7 +2881,7 @@ pub(super) fn parse_meas_delay_spec(
     let mut td_given = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         match &stream.peek().kind {
@@ -2927,7 +3024,7 @@ pub(super) fn parse_measure_range_options(
     let mut to = None;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         match &stream.peek().kind {
@@ -2983,7 +3080,7 @@ fn parse_measure_extrema_options(
     let mut to = None;
     let mut output = ExtremaOutput::Value;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         let TokenKind::Ident(key) = &stream.peek().kind else {
@@ -3039,7 +3136,7 @@ fn parse_measure_equation_options(
     let mut td = None;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_base_qualifier(stream, line_num, params)?.is_some() {
+        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
             continue;
         }
         let TokenKind::Ident(key) = &stream.peek().kind else {
@@ -4072,6 +4169,89 @@ mod tests {
         };
         assert_eq!(signal, "V(DEFAULT_VAL)");
         assert_eq!((*from, *to), (Some(0.25), Some(0.75)));
+    }
+
+    #[test]
+    fn continuous_measure_modes_types_and_print_policies_are_typed() {
+        use crate::analysis::MeasurePrintPolicy;
+
+        let netlist = Netlist::parse(
+            "continuous measures\n\
+             V1 out 0 1\n\
+             .tran 1n 10n\n\
+             .measure tran_cont first WHEN V(out)=0.5 PRINT=stdout\n\
+             .measure ac_cont second FIND VM(out) AT=1k PRINT=NONE\n\
+             .measure dc_cont third DERIV V(out) AT=0.5 PRINT=ALL\n\
+             .end\n",
+        )
+        .expect("canonical continuous modes and point-event types parse");
+
+        assert_eq!(netlist.measurements.len(), 3);
+        assert_eq!(netlist.measurements[0].analysis, "TRAN_CONT");
+        assert_eq!(
+            netlist.measurements[0].print_policy,
+            MeasurePrintPolicy::Stdout
+        );
+        assert_eq!(
+            netlist.measurements[1].print_policy,
+            MeasurePrintPolicy::None
+        );
+        assert_eq!(
+            netlist.measurements[2].print_policy,
+            MeasurePrintPolicy::All
+        );
+
+        for line in [
+            ".measure hb_cont bad WHEN V(out)=0.5",
+            ".measure tran_cont bad AVG V(out)",
+        ] {
+            let deck = format!("invalid continuous measure\nV1 out 0 1\n{line}\n.end\n");
+            assert!(Netlist::parse(&deck).is_err(), "{line} must be rejected");
+        }
+    }
+
+    #[test]
+    fn continuous_file_option_defaults_enabled_and_merges_without_clobbering() {
+        let defaults = crate::netlist::SimulationOptions::default();
+        assert!(defaults.measure_use_cont_files());
+
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options measure use_cont_files=0\n.options measure measfail=0",
+        ))
+        .expect("separate MEASURE option cards merge");
+        assert_eq!(netlist.options.measure_use_cont_files, Some(false));
+        assert!(!netlist.options.measure_use_cont_files());
+        assert_eq!(netlist.options.measure_fail_output, Some(false));
+
+        let mut merged = crate::netlist::SimulationOptions::default();
+        let override_options = crate::netlist::SimulationOptions {
+            measure_use_cont_files: Some(false),
+            ..crate::netlist::SimulationOptions::default()
+        };
+        merged.merge(&override_options);
+        assert!(!merged.measure_use_cont_files());
+    }
+
+    #[test]
+    fn duplicate_measure_names_are_global_case_insensitive_last_wins() {
+        let netlist = Netlist::parse(
+            "duplicate measures\n\
+             V1 out 0 1\n\
+             .measure tran Shared WHEN V(out)=0.1\n\
+             .measure ac shared FIND VM(out) AT=1k PRINT=NONE\n\
+             .end\n",
+        )
+        .expect("Xyce replacement semantics preserve the final definition");
+
+        assert_eq!(netlist.measurements.len(), 1);
+        assert_eq!(netlist.measurements[0].name, "SHARED");
+        assert_eq!(netlist.measurements[0].analysis, "AC");
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "measure-redefined"
+                && diagnostic
+                    .message
+                    .contains("ignoring the previous definition")
+        }));
     }
 
     #[test]

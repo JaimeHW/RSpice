@@ -2058,6 +2058,10 @@ pub struct SimulationOptions {
     /// and failure value. It overrides a per-equation default and defaults to
     /// zero when `MEASFAIL=0` serializes an unevaluated measurement.
     pub measure_default_value: Option<Value>,
+    /// Xyce `.OPTIONS MEASURE USE_CONT_FILES`: route continuous measurement
+    /// records to per-measure files instead of the aggregate measurement
+    /// file. Xyce enables this by default.
+    pub measure_use_cont_files: Option<bool>,
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
@@ -2159,6 +2163,11 @@ impl SimulationOptions {
         Self::default()
     }
 
+    /// Effective Xyce continuous-measurement file-routing policy.
+    pub fn measure_use_cont_files(&self) -> bool {
+        self.measure_use_cont_files.unwrap_or(true)
+    }
+
     /// Merge another options set, preferring values from `other`
     pub fn merge(&mut self, other: &SimulationOptions) {
         if other.measure_fail_output.is_some() {
@@ -2166,6 +2175,9 @@ impl SimulationOptions {
         }
         if other.measure_default_value.is_some() {
             self.measure_default_value = other.measure_default_value;
+        }
+        if other.measure_use_cont_files.is_some() {
+            self.measure_use_cont_files = other.measure_use_cont_files;
         }
         if other.reltol.is_some() {
             self.reltol = other.reltol;

@@ -291,6 +291,22 @@ pub enum MeasureType {
     },
 }
 
+/// Per-statement Xyce measurement-output routing.
+///
+/// This is independent of whether the measurement is evaluated. It controls
+/// whether a successful or failed result is emitted to the aggregate
+/// measurement file, standard output, both, or neither.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MeasurePrintPolicy {
+    /// Emit to both the aggregate measurement file and standard output.
+    #[default]
+    All,
+    /// Emit only to standard output.
+    Stdout,
+    /// Suppress both aggregate-file and standard-output emission.
+    None,
+}
+
 /// A complete measurement statement
 #[derive(Debug, Clone)]
 pub struct MeasureStatement {
@@ -309,6 +325,8 @@ pub struct MeasureStatement {
     /// Per-statement Xyce `DEFAULT_VAL`. The global
     /// `.OPTIONS MEASURE DEFAULT_VAL` setting takes precedence when present.
     pub default_value: Option<Value>,
+    /// Per-statement Xyce `PRINT=ALL|STDOUT|NONE` output policy.
+    pub print_policy: MeasurePrintPolicy,
 }
 
 /// Result of a measurement
@@ -2516,6 +2534,7 @@ mod tests {
     fn integration_over_one_selected_sample_is_zero() {
         let statement = MeasureStatement {
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             goal: None,
             tolerance: None,
             name: "area".to_string(),
@@ -2543,6 +2562,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "average".to_string(),
             measure_type: MeasureType::Avg {
                 signal: "V(out)".to_string(),
@@ -2569,6 +2589,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::Integ {
                 signal: "V(out)".to_string(),
@@ -2599,6 +2620,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "rms".to_string(),
             measure_type: MeasureType::Rms {
                 signal: "V(out)".to_string(),
@@ -2625,6 +2647,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "maximum".to_string(),
             measure_type: MeasureType::Max {
                 signal: "V(out)".to_string(),
@@ -2638,6 +2661,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "peak_to_peak".to_string(),
             measure_type: MeasureType::PeakToPeak {
                 signal: "V(out)".to_string(),
@@ -2666,6 +2690,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "peak_frequency".to_string(),
             measure_type: MeasureType::Max {
                 signal: "V(out)".to_string(),
@@ -2690,6 +2715,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "peak".to_string(),
             measure_type: MeasureType::Max {
                 signal: signal.to_string(),
@@ -2820,6 +2846,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "bad_param".to_string(),
             measure_type: MeasureType::Param {
                 expression: "sqrt(-1)".to_string(),
@@ -2864,6 +2891,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
         }
     }
 
@@ -3006,6 +3034,7 @@ mod tests {
         signals.insert("CONDITION".to_string(), condition.as_slice());
         let statement = |name: &str, from: Option<Value>, to: Option<Value>| MeasureStatement {
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::When {
                 condition: WhenCondition {
@@ -3053,6 +3082,7 @@ mod tests {
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "event_axis".to_string(),
             measure_type: MeasureType::When {
                 condition: when.clone(),
@@ -3065,6 +3095,7 @@ mod tests {
         });
         engine.add(MeasureStatement {
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "found_value".to_string(),
             measure_type: MeasureType::Find {
                 signal: "FOUND".to_string(),
@@ -3094,6 +3125,7 @@ mod tests {
             |name: &str, edge: EdgeType, number: isize, from: Option<Value>| -> MeasureStatement {
                 MeasureStatement {
                     default_value: None,
+                    print_policy: MeasurePrintPolicy::All,
                     name: name.to_string(),
                     measure_type: MeasureType::When {
                         condition: WhenCondition {
@@ -3145,6 +3177,7 @@ mod tests {
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "inherited_td".to_string(),
             measure_type: MeasureType::Delay {
                 trig: TrigSpec {
@@ -3162,6 +3195,7 @@ mod tests {
         });
         engine.add(MeasureStatement {
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "last_is_signed".to_string(),
             measure_type: MeasureType::Delay {
                 trig: TrigSpec {
@@ -3179,6 +3213,7 @@ mod tests {
         });
         engine.add(MeasureStatement {
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
             name: "unsupported_negative_occurrence".to_string(),
             measure_type: MeasureType::Delay {
                 trig: TrigSpec {
@@ -3255,6 +3290,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            print_policy: MeasurePrintPolicy::All,
         }
     }
 

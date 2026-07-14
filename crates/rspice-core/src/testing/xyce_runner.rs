@@ -12924,6 +12924,7 @@ impl XyceTestRunner {
         let crate::netlist::SimulationOptions {
             measure_fail_output: _,
             measure_default_value: _,
+            measure_use_cont_files: _,
             reltol,
             abstol,
             vntol,
