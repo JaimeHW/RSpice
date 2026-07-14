@@ -2565,6 +2565,16 @@ fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
 
 fn push_analog_operator_children(op: &HirAnalogOperator, children: &mut Vec<ExprId>) {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => {
+            children.extend([*proposed, *candidate]);
+            children.extend(type_metadata.iter().copied());
+        }
+        HirAnalogOperator::LimiterArgument { .. } => {}
         HirAnalogOperator::Ddt { expr, abstol } => {
             children.push(*expr);
             children.extend(abstol.iter().copied());

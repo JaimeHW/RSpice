@@ -844,6 +844,64 @@ fn source_defined_typed_limit_excludes_both_metadata_arguments() {
 }
 
 #[test]
+fn source_defined_typed_limit_lowers_to_explicit_stateful_operator() {
+    let module = analyze_one(&module_src(
+        r#"
+            analog function real trunc_ev;
+                input proposed, previous, lower, upper;
+                real proposed, previous, lower, upper;
+                begin
+                    if (proposed > previous + upper)
+                        trunc_ev = previous + upper;
+                    else if (proposed < previous + lower)
+                        trunc_ev = previous + lower;
+                    else
+                        trunc_ev = proposed;
+                end
+            endfunction
+
+            real x;
+            analog begin
+                x = $limit(V(p, n), "trunc_ev", "typed", -1.0, -0.7, 0.7);
+                I(p, n) <+ x;
+            end
+            "#,
+    ));
+    let assignment = flat_assignments(&module)
+        .into_iter()
+        .find(|assignment| assignment.target == "x")
+        .expect("x assignment");
+    let Expression::AnalogOperator(AnalogOperator::Limit {
+        proposed,
+        candidate,
+        type_metadata,
+        selector,
+        ..
+    }) = &assignment.expression
+    else {
+        panic!("custom named $limit was not retained as a stateful operator");
+    };
+    assert_eq!(selector, "trunc_ev");
+    assert!(matches!(proposed.as_ref(), Expression::BranchAccess(_)));
+    assert!(matches!(
+        type_metadata.as_deref(),
+        Some(Expression::Unary(UnaryExpr {
+            op: UnaryOp::Neg,
+            operand,
+            ..
+        })) if matches!(operand.as_ref(), Expression::Number(number) if number.value == 1.0)
+    ));
+
+    let lowered = format!("{candidate:#?}");
+    assert!(lowered.contains("argument: Proposed"), "{lowered}");
+    assert!(lowered.contains("argument: Previous"), "{lowered}");
+    assert!(
+        !lowered.contains("value: \"typed\""),
+        "typed ABI marker leaked into limiter body: {lowered}"
+    );
+}
+
+#[test]
 fn source_defined_typed_limit_requires_type_metadata_and_forwarded_signature() {
     let missing_metadata = analyze(&module_src(
         r#"

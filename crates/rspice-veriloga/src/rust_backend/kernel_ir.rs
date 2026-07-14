@@ -375,6 +375,13 @@ fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
 
 fn analog_operator_children(op: &HirAnalogOperator) -> Vec<ExprId> {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => optional_children(*proposed, [Some(*candidate), *type_metadata]),
+        HirAnalogOperator::LimiterArgument { .. } => Vec::new(),
         HirAnalogOperator::Ddt { expr, abstol } => optional_children(*expr, [*abstol]),
         HirAnalogOperator::Idt {
             expr,

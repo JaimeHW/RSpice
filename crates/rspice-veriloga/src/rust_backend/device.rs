@@ -14794,6 +14794,26 @@ fn collect_large_signal_analog_operator_derivative_identifiers(
     visited: &mut HashSet<ExprId>,
 ) -> Result<(), RustBackendError> {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => {
+            for child in [Some(*proposed), Some(*candidate), *type_metadata]
+                .into_iter()
+                .flatten()
+            {
+                collect_large_signal_expression_derivative_identifiers(
+                    artifact,
+                    child,
+                    values,
+                    derivatives,
+                    visited,
+                )?;
+            }
+        }
+        HirAnalogOperator::LimiterArgument { .. } => {}
         HirAnalogOperator::Ddt { expr, .. }
         | HirAnalogOperator::Idt { expr, .. }
         | HirAnalogOperator::IdtMod { expr, .. }
@@ -15013,6 +15033,16 @@ fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
 
 fn push_analog_operator_children(op: &HirAnalogOperator, children: &mut Vec<ExprId>) {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => {
+            children.extend([*proposed, *candidate]);
+            children.extend(type_metadata.iter().copied());
+        }
+        HirAnalogOperator::LimiterArgument { .. } => {}
         HirAnalogOperator::Ddt { expr, abstol } => {
             children.push(*expr);
             children.extend(abstol.iter().copied());
@@ -15284,6 +15314,19 @@ impl DdtSlotCollector<'_> {
         op: &HirAnalogOperator,
     ) -> Result<(), RustBackendError> {
         match op {
+            HirAnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                ..
+            } => {
+                self.collect(*proposed)?;
+                self.collect(*candidate)?;
+                if let Some(type_metadata) = type_metadata {
+                    self.collect(*type_metadata)?;
+                }
+            }
+            HirAnalogOperator::LimiterArgument { .. } => {}
             HirAnalogOperator::Ddt { expr, abstol } => {
                 if abstol.is_some() {
                     return Err(unsupported(self.artifact, "ddt abstol argument"));

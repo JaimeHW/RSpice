@@ -1117,6 +1117,21 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
 
 fn analog_operator_label(op: &HirAnalogOperator) -> String {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            selector,
+        } => format!(
+            "analog_operator limit selector:{} proposed:{} candidate:{} type_metadata:{}",
+            enc_str(selector),
+            proposed.index(),
+            candidate.index(),
+            option_expr_id(*type_metadata)
+        ),
+        HirAnalogOperator::LimiterArgument { argument } => {
+            format!("analog_operator limiter_argument {argument:?}")
+        }
         HirAnalogOperator::Ddt { expr, abstol } => {
             format!(
                 "analog_operator ddt expr:{} abstol:{}",

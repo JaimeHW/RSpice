@@ -745,6 +745,25 @@ pub struct ArrayLiteralExpr {
 /// Analog operator
 #[derive(Debug, Clone)]
 pub enum AnalogOperator {
+    /// Stateful Newton limiter. This internal form is produced by semantic
+    /// lowering for named `$limit` calls; the parser never constructs it.
+    Limit {
+        /// Raw proposed value at the call site.
+        proposed: Box<Expression>,
+        /// Inlined limiter function body. Its implicit arguments are carried
+        /// by `LimiterArgument` nodes so they cannot collide with source names.
+        candidate: Box<Expression>,
+        /// Xyce typed-limiter polarity metadata. `None` is the untyped ABI.
+        type_metadata: Option<Box<Expression>>,
+        /// Canonical selector retained for diagnostics and artifacts.
+        selector: SmolStr,
+        span: Span,
+    },
+    /// Implicit argument inside the inlined body of a named limiter.
+    LimiterArgument {
+        argument: LimiterArgument,
+        span: Span,
+    },
     /// Time derivative: ddt(expr)
     Ddt {
         expr: Box<Expression>,
@@ -822,7 +841,9 @@ pub enum AnalogOperator {
 impl AnalogOperator {
     pub fn span(&self) -> Span {
         match self {
-            AnalogOperator::Ddt { span, .. }
+            AnalogOperator::Limit { span, .. }
+            | AnalogOperator::LimiterArgument { span, .. }
+            | AnalogOperator::Ddt { span, .. }
             | AnalogOperator::Idt { span, .. }
             | AnalogOperator::IdtMod { span, .. }
             | AnalogOperator::Ddx { span, .. }
@@ -835,6 +856,13 @@ impl AnalogOperator {
             | AnalogOperator::Zi { span, .. } => *span,
         }
     }
+}
+
+/// Implicit named-`$limit` function inputs supplied by the simulator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimiterArgument {
+    Proposed,
+    Previous,
 }
 
 /// Laplace transform kinds

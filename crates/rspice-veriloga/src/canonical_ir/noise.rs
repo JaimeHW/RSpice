@@ -757,6 +757,16 @@ fn string_literal(hir: &HirModel, id: ExprId) -> Option<SmolStr> {
 
 fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => {
+            stack.extend([*proposed, *candidate]);
+            stack.extend(type_metadata.iter().copied());
+        }
+        HirAnalogOperator::LimiterArgument { .. } => {}
         HirAnalogOperator::Ddt { expr, abstol } => {
             stack.push(*expr);
             stack.extend(abstol.iter().copied());

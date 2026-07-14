@@ -3,8 +3,8 @@ use smol_str::SmolStr;
 use std::collections::HashSet;
 
 use crate::ast::{
-    AnalogOperator, BranchAccess, CrossDirection, Expression, LaplaceKind, NoiseSource,
-    PortDirection, ZiKind,
+    AnalogOperator, BranchAccess, CrossDirection, Expression, LaplaceKind, LimiterArgument,
+    NoiseSource, PortDirection, ZiKind,
 };
 use crate::semantic::{AnalyzedModule, AnalyzedStatement};
 use crate::types::{ParameterRange, ValueType};
@@ -153,6 +153,15 @@ impl From<CrossDirection> for HirCrossDirection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HirAnalogOperator {
+    Limit {
+        proposed: ExprId,
+        candidate: ExprId,
+        type_metadata: Option<ExprId>,
+        selector: SmolStr,
+    },
+    LimiterArgument {
+        argument: HirLimiterArgument,
+    },
     Ddt {
         expr: ExprId,
         abstol: Option<ExprId>,
@@ -198,6 +207,21 @@ pub enum HirAnalogOperator {
         expr: ExprId,
         edge: Option<HirCrossDirection>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirLimiterArgument {
+    Proposed,
+    Previous,
+}
+
+impl From<LimiterArgument> for HirLimiterArgument {
+    fn from(value: LimiterArgument) -> Self {
+        match value {
+            LimiterArgument::Proposed => Self::Proposed,
+            LimiterArgument::Previous => Self::Previous,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -709,6 +733,22 @@ impl HirModel {
         op: &HirAnalogOperator,
     ) {
         match op {
+            HirAnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                ..
+            } => {
+                self.validate_expression_child(diagnostics, expression, "proposed", *proposed);
+                self.validate_expression_child(diagnostics, expression, "candidate", *candidate);
+                self.validate_optional_expression_child(
+                    diagnostics,
+                    expression,
+                    "type_metadata",
+                    *type_metadata,
+                );
+            }
+            HirAnalogOperator::LimiterArgument { .. } => {}
             HirAnalogOperator::Ddt { expr, abstol } => {
                 self.validate_expression_child(diagnostics, expression, "expr", *expr);
                 self.validate_optional_expression_child(diagnostics, expression, "abstol", *abstol);
@@ -1642,6 +1682,23 @@ impl HirLowerer {
 
     fn lower_analog_operator(&mut self, operator: &AnalogOperator) -> HirExprKind {
         let op = match operator {
+            AnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                selector,
+                ..
+            } => HirAnalogOperator::Limit {
+                proposed: self.lower_expr(proposed).id,
+                candidate: self.lower_expr(candidate).id,
+                type_metadata: self.lower_optional_expr_id(type_metadata),
+                selector: selector.clone(),
+            },
+            AnalogOperator::LimiterArgument { argument, .. } => {
+                HirAnalogOperator::LimiterArgument {
+                    argument: (*argument).into(),
+                }
+            }
             AnalogOperator::Ddt { expr, abstol, .. } => HirAnalogOperator::Ddt {
                 expr: self.lower_expr(expr).id,
                 abstol: self.lower_optional_expr_id(abstol),

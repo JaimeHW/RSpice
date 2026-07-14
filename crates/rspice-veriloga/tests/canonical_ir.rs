@@ -12,10 +12,10 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalMetadata, CanonicalNoiseSourceKind, CompilerPhase,
     DerivativeLane, DerivativeLaneKind, DiagnosticSeverity, HirAnalogOperator, HirContributionKind,
-    HirExprKind, HirExprRef, HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass,
-    IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptBinaryOp,
-    OptDerivative, OptEvalInputs, OptModel, OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind,
-    OptValueType, SourceSpanRef, StableDigest,
+    HirExprKind, HirExprRef, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirStatement,
+    InvalidationClass, IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot,
+    OptBinaryOp, OptDerivative, OptEvalInputs, OptModel, OptOp, OptSchedule, OptUnaryOp, OptValue,
+    OptValueKind, OptValueType, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -489,6 +489,76 @@ fn lower_tiny_resistor_mir() -> MirModel {
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
 
     MirModel::from_hir(&hir).expect("lower MIR")
+}
+
+#[test]
+fn hir_retains_typed_custom_limit_abi_and_implicit_inputs() {
+    let source = r#"
+module typed_limit(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real trunc_ev;
+        input proposed, previous, lower, upper;
+        real proposed, previous, lower, upper;
+        begin
+            if (proposed > previous + upper)
+                trunc_ev = previous + upper;
+            else
+                trunc_ev = proposed;
+        end
+    endfunction
+    analog I(p, n) <+ $limit(V(p, n), "trunc_ev", "typed", -1.0, -0.7, 0.7);
+endmodule
+"#;
+    let analyzed = analyze_fixture(source, "typed_limit").expect("analyze typed limiter");
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    hir.validate().expect("valid limiter HIR");
+
+    let (candidate, proposed, type_metadata) = hir
+        .expressions
+        .iter()
+        .find_map(|expression| match &expression.kind {
+            HirExprKind::AnalogOperator {
+                op:
+                    HirAnalogOperator::Limit {
+                        proposed,
+                        candidate,
+                        type_metadata,
+                        selector,
+                    },
+            } => {
+                assert_eq!(selector, "trunc_ev");
+                Some((*candidate, *proposed, *type_metadata))
+            }
+            _ => None,
+        })
+        .expect("stateful limit HIR node");
+    assert!(matches!(
+        hir.expressions[usize::from(proposed)].kind,
+        HirExprKind::BranchAccess { .. }
+    ));
+    assert!(type_metadata.is_some());
+
+    let mut stack = vec![candidate];
+    let mut arguments = Vec::new();
+    while let Some(id) = stack.pop() {
+        match &hir.expressions[usize::from(id)].kind {
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::LimiterArgument { argument },
+            } => arguments.push(*argument),
+            HirExprKind::Binary { left, right, .. } => stack.extend([*left, *right]),
+            HirExprKind::Unary { operand, .. } => stack.push(*operand),
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => stack.extend([*condition, *then_expr, *else_expr]),
+            _ => {}
+        }
+    }
+    assert!(arguments.contains(&HirLimiterArgument::Proposed));
+    assert!(arguments.contains(&HirLimiterArgument::Previous));
 }
 
 fn lower_fixture_parts(

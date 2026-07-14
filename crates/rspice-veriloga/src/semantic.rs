@@ -3146,6 +3146,27 @@ impl SemanticAnalyzer {
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<AnalogOperator> {
         Ok(match op {
+            AnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                selector,
+                span,
+            } => AnalogOperator::Limit {
+                proposed: self.materialize_output_function_calls_box(proposed, module, sink)?,
+                candidate: self.materialize_output_function_calls_box(candidate, module, sink)?,
+                type_metadata: self.materialize_output_function_calls_opt_box(
+                    type_metadata,
+                    module,
+                    sink,
+                )?,
+                selector: selector.clone(),
+                span: *span,
+            },
+            AnalogOperator::LimiterArgument { argument, span } => AnalogOperator::LimiterArgument {
+                argument: *argument,
+                span: *span,
+            },
             AnalogOperator::Ddt { expr, abstol, span } => AnalogOperator::Ddt {
                 expr: self.materialize_output_function_calls_box(expr, module, sink)?,
                 abstol: self.materialize_output_function_calls_opt_box(abstol, module, sink)?,
@@ -3442,6 +3463,17 @@ impl SemanticAnalyzer {
                 .is_some_and(|expr| self.expression_contains_output_function_call(expr))
         };
         match op {
+            AnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                ..
+            } => {
+                self.expression_contains_output_function_call(proposed)
+                    || self.expression_contains_output_function_call(candidate)
+                    || contains_opt(type_metadata)
+            }
+            AnalogOperator::LimiterArgument { .. } => false,
             AnalogOperator::Ddt { expr, abstol, .. } => {
                 self.expression_contains_output_function_call(expr) || contains_opt(abstol)
             }
@@ -3643,6 +3675,9 @@ impl SemanticAnalyzer {
             }),
             Expression::SystemFunction(f) => {
                 self.validate_limit_call(f)?;
+                if let Some(limit) = self.lower_custom_limit_call(f)? {
+                    return Ok(limit);
+                }
                 let args = f
                     .args
                     .iter()
@@ -3895,6 +3930,71 @@ impl SemanticAnalyzer {
         }
 
         Ok(())
+    }
+
+    /// Lower a user-defined named `$limit` into an explicit stateful operator.
+    ///
+    /// Xyce supplies the first two analog-function inputs implicitly: the
+    /// (possibly polarity-oriented) proposed value and the previous Newton
+    /// iterate's limited value. Typed custom limiters encode the literal
+    /// `"typed"` and the following polarity expression as call metadata; those
+    /// two arguments are deliberately not forwarded to the source function.
+    fn lower_custom_limit_call(
+        &mut self,
+        function: &SystemFunction,
+    ) -> CompileResult<Option<Expression>> {
+        if function.name != "$limit" {
+            return Ok(None);
+        }
+        let Some(Expression::StringLit(selector_literal)) = function.args.get(1) else {
+            return Ok(None);
+        };
+        let selector = selector_literal.value.clone();
+        if matches!(
+            selector.as_str(),
+            "pnjlim" | "pnjlim_new" | "dummy" | "typedpnjlim" | "typedpnjlim_new" | "typeddummy"
+        ) {
+            return Ok(None);
+        }
+        if !self.user_functions.contains_key(&selector) {
+            // Validation reports the authoritative unknown-function error.
+            return Ok(None);
+        }
+
+        let typed = function.args.get(2).is_some_and(
+            |argument| matches!(argument, Expression::StringLit(marker) if marker.value == "typed"),
+        );
+        let proposed = self.lower_expression(
+            function
+                .args
+                .first()
+                .expect("validated custom $limit has a proposed value"),
+        )?;
+        let type_metadata = typed
+            .then(|| self.lower_expression(&function.args[3]))
+            .transpose()?
+            .map(Box::new);
+        let implicit_proposed = Expression::AnalogOperator(AnalogOperator::LimiterArgument {
+            argument: LimiterArgument::Proposed,
+            span: function.span,
+        });
+        let implicit_previous = Expression::AnalogOperator(AnalogOperator::LimiterArgument {
+            argument: LimiterArgument::Previous,
+            span: function.span,
+        });
+        let forwarded_start = if typed { 4 } else { 2 };
+        let mut limiter_args = Vec::with_capacity(2 + function.args.len() - forwarded_start);
+        limiter_args.extend([implicit_proposed, implicit_previous]);
+        limiter_args.extend(function.args[forwarded_start..].iter().cloned());
+        let candidate = self.inline_function(&selector, &limiter_args, function.span)?;
+
+        Ok(Some(Expression::AnalogOperator(AnalogOperator::Limit {
+            proposed: Box::new(proposed),
+            candidate: Box::new(candidate),
+            type_metadata,
+            selector,
+            span: function.span,
+        })))
     }
 
     fn validate_builtin_call_arity(&self, call: &CallExpr) -> CompileResult<()> {

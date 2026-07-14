@@ -1084,6 +1084,29 @@ fn validate_analog_operator_children(
     op: &HirAnalogOperator,
 ) {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => {
+            validate_expression_child(diagnostics, expressions, expression, "proposed", *proposed);
+            validate_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "candidate",
+                *candidate,
+            );
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "type_metadata",
+                *type_metadata,
+            );
+        }
+        HirAnalogOperator::LimiterArgument { .. } => {}
         HirAnalogOperator::Ddt { expr, abstol } => {
             validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
             validate_optional_expression_child(

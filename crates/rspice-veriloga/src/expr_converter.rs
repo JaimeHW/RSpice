@@ -1419,6 +1419,18 @@ impl<'a> ExprConverter<'a> {
     /// Convert an analog operator
     fn convert_analog_operator(&self, op: &AnalogOperator) -> CompileResult<IrExpr> {
         match op {
+            AnalogOperator::Limit { selector, .. } => Err(CodeGenError::new(
+                CodeGenErrorKind::UnsupportedFeature(format!(
+                    "stateful named $limit selector '{selector}' requires the canonical backend"
+                )),
+            )
+            .into()),
+            AnalogOperator::LimiterArgument { .. } => {
+                Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                    "named $limit implicit argument escaped its limiter body".into(),
+                ))
+                .into())
+            }
             AnalogOperator::Ddt { expr, .. } => {
                 let inner = self.convert(expr)?;
                 Ok(IrExpr::Ddt(Box::new(inner)))
