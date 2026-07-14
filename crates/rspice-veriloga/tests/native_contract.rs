@@ -16,21 +16,25 @@ use rspice_veriloga::native::compile_native;
 use rspice_veriloga::native::compile_native_with_canonical_ir;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
+#[cfg(not(feature = "native-bytecode-contract-tests"))]
 use std::sync::{Mutex, OnceLock};
 
 fn compile(source: &str) -> rspice_veriloga::CompiledModel {
     let model = VerilogACompiler::new(CompilerOptions::default())
         .compile(source)
         .expect("Verilog-A source must compile");
+    #[cfg(not(feature = "native-bytecode-contract-tests"))]
     register_compiled_source(&model, source);
     model
 }
 
+#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn source_registry() -> &'static Mutex<HashMap<String, String>> {
     static SOURCES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn source_key(model: &rspice_veriloga::CompiledModel) -> String {
     if model.source_digest.is_empty() {
         model.name.to_string()
@@ -39,6 +43,7 @@ fn source_key(model: &rspice_veriloga::CompiledModel) -> String {
     }
 }
 
+#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn register_compiled_source(model: &rspice_veriloga::CompiledModel, source: &str) {
     source_registry()
         .lock()
@@ -46,6 +51,7 @@ fn register_compiled_source(model: &rspice_veriloga::CompiledModel, source: &str
         .insert(source_key(model), source.to_string());
 }
 
+#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn canonical_artifact_for_model(model: &rspice_veriloga::CompiledModel) -> CanonicalIrArtifact {
     let source = source_registry()
         .lock()
