@@ -54,6 +54,18 @@ pub enum ErrorFunctionNorm {
     MeanAbsolute,
 }
 
+/// Norm applied to the absolute difference vector by Xyce's file-backed
+/// `ERROR` measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileErrorNorm {
+    /// Maximum absolute difference.
+    Infinity,
+    /// Sum of absolute differences.
+    L1,
+    /// Euclidean (Frobenius) norm.
+    L2,
+}
+
 /// Right-hand operand of a `WHEN left=right` measurement condition.
 ///
 /// Numeric values are retained as scalars. Signal references and braced
@@ -205,6 +217,18 @@ pub enum MeasureType {
         ymax: Value,
         /// Xyce parses WEIGHT but intentionally does not apply it here.
         weight: Option<Value>,
+    },
+
+    /// Difference norm between an accepted-point waveform and one column of
+    /// an external Xyce PRN, CSV, or CSDF table.
+    FileError {
+        signal: String,
+        file: String,
+        norm: FileErrorNorm,
+        /// Retained for non-DC interpolation support. Xyce deliberately
+        /// ignores this option for DC measurements.
+        independent_column: Option<isize>,
+        dependent_column: usize,
     },
 
     /// Minimum value over range
@@ -604,6 +628,21 @@ impl MeasureEngine {
                 time,
                 signals,
             ),
+            MeasureType::FileError {
+                signal,
+                file,
+                norm,
+                dependent_column,
+                ..
+            } => self.eval_file_error(
+                &measurement.name,
+                &measurement.analysis,
+                signal,
+                file,
+                *norm,
+                *dependent_column,
+                signals,
+            ),
             MeasureType::Min {
                 signal,
                 from,
@@ -713,6 +752,76 @@ impl MeasureEngine {
                 signals,
             ),
         }
+    }
+
+    fn eval_file_error(
+        &self,
+        name: &str,
+        analysis: &str,
+        signal_name: &str,
+        file: &str,
+        norm: FileErrorNorm,
+        dependent_column: usize,
+        signals: &HashMap<String, &[Value]>,
+    ) -> MeasureResult {
+        if !analysis.eq_ignore_ascii_case("DC") {
+            return MeasureResult::failed(
+                name,
+                "file-backed ERROR currently requires DC accepted-point semantics",
+            );
+        }
+        let Some(signal) = lookup_signal(signals, signal_name) else {
+            return MeasureResult::failed(name, &format!("Signal '{signal_name}' not found"));
+        };
+        let comparison =
+            match super::measure_file::read_error_comparison_column(file, dependent_column) {
+                Ok(values) => values,
+                Err(error) => {
+                    return MeasureResult::failed(
+                        name,
+                        &format!("could not load ERROR comparison file '{file}': {error}"),
+                    );
+                }
+            };
+        if signal.len() != comparison.len() {
+            return MeasureResult::failed(
+                name,
+                &format!(
+                    "ERROR comparison has {} rows but the simulation produced {} accepted points",
+                    comparison.len(),
+                    signal.len()
+                ),
+            );
+        }
+
+        let mut l1 = 0.0;
+        let mut l1_compensation = 0.0;
+        let mut l2: Value = 0.0;
+        let mut infinity: Value = 0.0;
+        for (simulated, reference) in signal.iter().zip(comparison.iter()) {
+            let difference = simulated - reference;
+            if !difference.is_finite() {
+                return MeasureResult::failed(name, "ERROR difference vector is non-finite");
+            }
+            let magnitude = difference.abs();
+            infinity = infinity.max(magnitude);
+            // Neumaier-compensated L1 and hypot-folded L2 preserve useful
+            // precision and avoid intermediate square overflow/underflow.
+            let next_l1 = l1 + magnitude;
+            if l1.abs() >= magnitude {
+                l1_compensation += (l1 - next_l1) + magnitude;
+            } else {
+                l1_compensation += (magnitude - next_l1) + l1;
+            }
+            l1 = next_l1;
+            l2 = l2.hypot(difference);
+        }
+        let value = match norm {
+            FileErrorNorm::Infinity => infinity,
+            FileErrorNorm::L1 => l1 + l1_compensation,
+            FileErrorNorm::L2 => l2,
+        };
+        MeasureResult::success(name, value)
     }
 
     /// Find time when signal crosses threshold

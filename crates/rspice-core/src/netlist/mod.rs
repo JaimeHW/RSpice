@@ -246,6 +246,7 @@ impl Netlist {
         let mut netlist = Self::parse_with_options(&processed, options)?;
         Self::normalize_model_string_paths(&mut netlist, file_path);
         Self::normalize_source_file_paths(&mut netlist, file_path);
+        Self::normalize_measure_file_paths(&mut netlist, file_path);
         Self::apply_spef_includes(&mut netlist, file_path)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(file_path.to_path_buf());
@@ -334,6 +335,7 @@ impl Netlist {
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, path);
         Self::normalize_source_file_paths(&mut netlist, path);
+        Self::normalize_measure_file_paths(&mut netlist, path);
         Self::apply_spef_includes(&mut netlist, path)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(path.to_path_buf());
@@ -745,6 +747,26 @@ impl Netlist {
                     normalize_source_spec_file_paths(spec, base_dir);
                 }
                 _ => {}
+            }
+        }
+    }
+
+    fn normalize_measure_file_paths(&mut self, file_path: &std::path::Path) {
+        let Some(base_dir) = file_path.parent() else {
+            return;
+        };
+        for measurement in &mut self.measurements {
+            let crate::analysis::MeasureType::FileError { file, .. } =
+                &mut measurement.measure_type
+            else {
+                continue;
+            };
+            if file.contains("://") {
+                continue;
+            }
+            let candidate = Path::new(file);
+            if !candidate.is_absolute() {
+                *file = base_dir.join(candidate).to_string_lossy().into_owned();
             }
         }
     }
@@ -1560,6 +1582,46 @@ mod tests {
                 assert_eq!(*ymin, 2.5);
             }
             other => panic!("expected ERR2 measurement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_error_measurements_preserve_typed_options_and_deck_relative_paths() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-measure-file-error")
+            .join("deck.cir");
+        let netlist = Netlist::parse_with_path(
+            "typed file error\n\
+             V1 one 0 0\n\
+             .dc V1 0 1 1\n\
+             .measure dc fit ERROR V(one) FILE=Reference.MixedCase.prn COMP_FUNCTION=INFNORM INDEPVARCOL=-1 DEPVARCOL=2\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("file-backed ERROR measurement parses");
+
+        match &netlist.measurements[0].measure_type {
+            crate::analysis::MeasureType::FileError {
+                signal,
+                file,
+                norm,
+                independent_column,
+                dependent_column,
+            } => {
+                assert_eq!(signal, "V(ONE)");
+                assert_eq!(
+                    file,
+                    &deck_path
+                        .parent()
+                        .expect("deck has parent")
+                        .join("Reference.MixedCase.prn")
+                        .to_string_lossy()
+                );
+                assert_eq!(*norm, crate::analysis::FileErrorNorm::Infinity);
+                assert_eq!(*independent_column, Some(-1));
+                assert_eq!(*dependent_column, 2);
+            }
+            other => panic!("expected file-backed ERROR measurement, got {other:?}"),
         }
     }
 

@@ -953,7 +953,8 @@ fn materialize_measure_expression_signals(
                 add(measured);
                 add(comparison);
             }
-            MeasureType::Min { signal, .. }
+            MeasureType::FileError { signal, .. }
+            | MeasureType::Min { signal, .. }
             | MeasureType::Max { signal, .. }
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
@@ -1037,7 +1038,8 @@ fn materialize_differential_voltage_signals(
                 add(measured);
                 add(comparison);
             }
-            MeasureType::Min { signal, .. }
+            MeasureType::FileError { signal, .. }
+            | MeasureType::Min { signal, .. }
             | MeasureType::Max { signal, .. }
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
@@ -1219,6 +1221,7 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::When { from, to, .. }
         | MeasureType::ErrorFunction { from, to, .. } => Some((from, to)),
         MeasureType::Delay { .. }
+        | MeasureType::FileError { .. }
         | MeasureType::Param { .. }
         | MeasureType::RiseTime { .. }
         | MeasureType::FallTime { .. }

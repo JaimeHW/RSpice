@@ -9,6 +9,7 @@ pub mod distortion;
 pub mod fourier;
 pub mod harmonic_balance;
 pub mod measure;
+mod measure_file;
 pub mod measure_signals;
 pub mod monte_carlo;
 pub mod noise;
@@ -37,8 +38,9 @@ pub use harmonic_balance::{
     SpectralVoltage,
 };
 pub use measure::{
-    EdgeType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, MeasureEngine, MeasureOperand,
-    MeasureResult, MeasureStatement, MeasureType, TrigSpec, TriggerEvent, WhenCondition,
+    EdgeType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm, MeasureEngine,
+    MeasureOperand, MeasureResult, MeasureStatement, MeasureType, TrigSpec, TriggerEvent,
+    WhenCondition,
 };
 pub use measure_signals::{
     AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,

@@ -1914,6 +1914,17 @@ pub(super) fn parse_meas_command(
                 weight: options.weight,
             }
         }
+        "ERROR" => {
+            let signal = parse_meas_signal(stream, line_num)?;
+            let options = parse_measure_file_error_options(stream, line_num, params)?;
+            MeasureType::FileError {
+                signal,
+                file: options.file,
+                norm: options.norm,
+                independent_column: options.independent_column,
+                dependent_column: options.dependent_column,
+            }
+        }
         _ => {
             // Parse signal name - handle V(node), V(pos,neg), or just node
             let signal = parse_meas_signal(stream, line_num)?;
@@ -2284,6 +2295,185 @@ fn parse_measure_error_function_options(
         }
     }
     Ok(options)
+}
+
+struct FileErrorOptions {
+    file: String,
+    norm: crate::analysis::FileErrorNorm,
+    independent_column: Option<isize>,
+    dependent_column: usize,
+}
+
+fn parse_measure_file_error_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<FileErrorOptions, ParseError> {
+    use crate::analysis::FileErrorNorm;
+
+    let mut file = None;
+    let mut norm = FileErrorNorm::L2;
+    let mut independent_column = None;
+    let mut dependent_column = None;
+    let mut seen = std::collections::HashSet::new();
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let TokenKind::Ident(keyword) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected token '{}' in .MEAS ERROR", stream.peek().kind),
+            });
+        };
+        let keyword = keyword.to_ascii_uppercase();
+        if matches!(keyword.as_str(), "GOAL" | "TOL") {
+            break;
+        }
+        if !matches!(
+            keyword.as_str(),
+            "FILE" | "COMP_FUNCTION" | "INDEPVARCOL" | "DEPVARCOL"
+        ) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected option '{keyword}' in .MEAS ERROR"),
+            });
+        }
+        if !seen.insert(keyword.clone()) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Duplicate option '{keyword}' in .MEAS ERROR"),
+            });
+        }
+        stream.advance();
+        // Xyce accepts both `KEY=value` and `KEY value` spellings for these
+        // measure qualifiers.
+        let _optional_equals = stream.consume(&TokenKind::Equals);
+        match keyword.as_str() {
+            "FILE" => file = Some(parse_measure_file_path(stream, line_num)?),
+            "COMP_FUNCTION" => {
+                let value = match &stream.peek().kind {
+                    TokenKind::Ident(_) => stream.peek().lexeme.clone(),
+                    TokenKind::StringLit(value) => value.clone(),
+                    other => {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "Expected comparison-function name in .MEAS ERROR, found {other:?}"
+                            ),
+                        });
+                    }
+                };
+                stream.advance();
+                norm = if value.eq_ignore_ascii_case("INFNORM") {
+                    FileErrorNorm::Infinity
+                } else if value.eq_ignore_ascii_case("L1NORM") {
+                    FileErrorNorm::L1
+                } else {
+                    // Xyce defaults both an omitted and an unrecognized
+                    // comparison function to the Frobenius/L2 norm.
+                    FileErrorNorm::L2
+                };
+            }
+            "INDEPVARCOL" => {
+                independent_column = Some(parse_measure_column(stream, line_num, params, true)?);
+            }
+            "DEPVARCOL" => {
+                let value = parse_measure_column(stream, line_num, params, false)?;
+                dependent_column = usize::try_from(value).ok();
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    let file = file.ok_or_else(|| {
+        ParseError::MissingParameter(format!("FILE in .MEAS ERROR at line {line_num}"))
+    })?;
+    let dependent_column = dependent_column.ok_or_else(|| {
+        ParseError::MissingParameter(format!(
+            "non-negative DEPVARCOL in .MEAS ERROR at line {line_num}"
+        ))
+    })?;
+    Ok(FileErrorOptions {
+        file,
+        norm,
+        independent_column,
+        dependent_column,
+    })
+}
+
+fn parse_measure_column(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    allow_negative: bool,
+) -> Result<isize, ParseError> {
+    let value = expect_value(stream, line_num, params)?;
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || value < isize::MIN as Value
+        || value > isize::MAX as Value
+        || !allow_negative && value < 0.0
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".MEAS ERROR column index must be {}integer-valued, found {value}",
+                if allow_negative {
+                    "an "
+                } else {
+                    "a non-negative "
+                }
+            ),
+        });
+    }
+    Ok(value as isize)
+}
+
+fn parse_measure_file_path(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    if let TokenKind::StringLit(path) = &stream.peek().kind {
+        let path = path.clone();
+        stream.advance();
+        if path.is_empty() {
+            return Err(ParseError::MissingParameter(format!(
+                "FILE path in .MEAS ERROR at line {line_num}"
+            )));
+        }
+        return Ok(path);
+    }
+
+    let mut path = String::new();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if measure_file_option_assignment_ahead(stream) {
+            break;
+        }
+        match stream.peek().kind {
+            TokenKind::Equals | TokenKind::StringLit(_) | TokenKind::Expression(_) => break,
+            _ => {
+                path.push_str(&stream.peek().lexeme);
+                stream.advance();
+            }
+        }
+    }
+    if path.is_empty() {
+        Err(ParseError::MissingParameter(format!(
+            "FILE path in .MEAS ERROR at line {line_num}"
+        )))
+    } else {
+        Ok(path)
+    }
+}
+
+fn measure_file_option_assignment_ahead(stream: &TokenStream) -> bool {
+    let TokenKind::Ident(keyword) = &stream.peek().kind else {
+        return false;
+    };
+    matches!(stream.peek_n(1).kind, TokenKind::Equals)
+        && matches!(
+            keyword.to_ascii_uppercase().as_str(),
+            "FILE" | "COMP_FUNCTION" | "INDEPVARCOL" | "DEPVARCOL" | "GOAL" | "TOL"
+        )
 }
 
 fn parse_measure_when_event_options(

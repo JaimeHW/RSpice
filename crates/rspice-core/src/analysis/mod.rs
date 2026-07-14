@@ -61,16 +61,16 @@ pub use core::{
 pub use advanced::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, DistortionAnalysisResult,
     DistortionPointResult, DistortionProduct, DistortionProductResult, Distribution, EdgeType,
-    ElementDesc, ElementType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FourierAnalysis,
-    FourierConfig, FourierResult, FrequencySweep, HarmonicComponent, IntegratedContribution,
-    IntegratedNoise, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType,
-    MonteCarloConfig, MonteCarloResult, MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource,
-    NoiseSourceType, ParametricResults, ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig,
-    PoleZeroResult, Port, PortNoiseCorrelationResult, PzMatrix, SMatrix, SParameterAnalyzer,
-    SParameterConfig, SParameterResult, Sensitivity, SensitivityAnalyzer, SensitivityResult,
-    StepSpec, StepTarget, StepType, Tolerance, TransferAnalyzer, TransferFunctionConfig,
-    TransferFunctionResult, TrigSpec, TriggerEvent, VariableStatistics, VariationSet,
-    WhenCondition,
+    ElementDesc, ElementType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm,
+    FourierAnalysis, FourierConfig, FourierResult, FrequencySweep, HarmonicComponent,
+    IntegratedContribution, IntegratedNoise, MeasureEngine, MeasureOperand, MeasureResult,
+    MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult, MonteCarloRunner,
+    NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, ParametricResults, ParametricSweep,
+    PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port, PortNoiseCorrelationResult, PzMatrix,
+    SMatrix, SParameterAnalyzer, SParameterConfig, SParameterResult, Sensitivity,
+    SensitivityAnalyzer, SensitivityResult, StepSpec, StepTarget, StepType, Tolerance,
+    TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult, TrigSpec, TriggerEvent,
+    VariableStatistics, VariationSet, WhenCondition,
 };
 
 // Re-export PSS types
