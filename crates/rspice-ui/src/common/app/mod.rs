@@ -77,7 +77,9 @@ mod app_viewer_capabilities;
 pub use app_viewer_capabilities::ViewerCapability;
 
 mod sim_setup_state;
-pub use sim_setup_state::{AcSetup, DcSetup, NoiseSetup, SimSetupState, TranSetup};
+pub use sim_setup_state::{
+    AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, TranSetup,
+};
 
 mod app_simulation_dialogs;
 
@@ -255,6 +257,27 @@ impl AppState {
         }
         if self.schematic.components.is_empty() {
             return Some("Add a component before running a schematic simulation".to_string());
+        }
+        if let Some((index, error)) = (0..25)
+            .filter(|index| self.sim_setup.enabled.contains(index))
+            .find_map(|index| {
+                self.sim_setup
+                    .validation_error(index)
+                    .map(|error| (index, error))
+            })
+        {
+            let name = crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES
+                .iter()
+                .flat_map(|(_, analyses)| analyses.iter())
+                .find_map(|(candidate, name)| (*candidate == index).then_some(*name))
+                .unwrap_or("analysis");
+            return Some(format!("Correct {name} configuration: {error}"));
+        }
+        if let Err(error) = self
+            .model_library_manager
+            .reference_process_directives(self.sim_setup.reference_pvt.process)
+        {
+            return Some(error);
         }
         if let Some(result) = self.current_blocking_drc_result() {
             let summary = result.summary();

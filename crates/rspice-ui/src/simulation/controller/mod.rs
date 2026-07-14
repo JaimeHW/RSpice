@@ -339,6 +339,18 @@ impl SimulationController {
             result.netlist
         };
 
+        let model_directives = match state
+            .model_library_manager
+            .reference_process_directives(state.sim_setup.reference_pvt.process)
+        {
+            Ok(directives) => directives,
+            Err(error) => {
+                state.push_sim_message(ConsoleMessage::error(error));
+                state.simulation.status = "Model binding error".to_owned();
+                return;
+            }
+        };
+        netlist = Self::apply_reference_model_bindings_to_netlist(&netlist, &model_directives);
         netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
 
         log::info!(

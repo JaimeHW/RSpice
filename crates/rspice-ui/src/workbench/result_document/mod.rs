@@ -106,24 +106,6 @@ impl ResultViewer {
         }
     }
 
-    /// The legacy viewer this tab corresponds to, for capability checks and
-    /// the derived-data loader.
-    fn legacy(self) -> Option<ActiveViewer> {
-        match self {
-            ResultViewer::Fft => Some(ActiveViewer::Fft),
-            ResultViewer::Eye => Some(ActiveViewer::EyeDiagram),
-            ResultViewer::Hist => Some(ActiveViewer::Histogram),
-            ResultViewer::Nyquist => Some(ActiveViewer::Nyquist),
-            ResultViewer::Smith => Some(ActiveViewer::SmithChart),
-            ResultViewer::PoleZero => Some(ActiveViewer::PoleZero),
-            ResultViewer::Waves
-            | ResultViewer::Bode
-            | ResultViewer::Op
-            | ResultViewer::NoiseContrib
-            | ResultViewer::Specs => None,
-        }
-    }
-
     const PRIMARY: [ResultViewer; 8] = [
         ResultViewer::Waves,
         ResultViewer::Bode,
@@ -139,6 +121,28 @@ impl ResultViewer {
         ResultViewer::Smith,
         ResultViewer::PoleZero,
     ];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ViewerAvailability {
+    available: bool,
+    reason: &'static str,
+}
+
+impl ViewerAvailability {
+    const fn available(reason: &'static str) -> Self {
+        Self {
+            available: true,
+            reason,
+        }
+    }
+
+    const fn unavailable(reason: &'static str) -> Self {
+        Self {
+            available: false,
+            reason,
+        }
+    }
 }
 
 /// User zoom/pan override for one plot. `None` per axis means automatic
@@ -687,6 +691,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     results.cache.ensure_version(data_version);
     results.derived.ensure_version(data_version);
 
+    reconcile_active_viewer(&mut app.state);
+
     show_docbar(ui, &mut app.state);
 
     let t = Tokens::get(ui.ctx());
@@ -958,7 +964,12 @@ fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
     let mut clicked: Option<ResultViewer> = None;
 
     for viewer in ResultViewer::PRIMARY {
-        if viewer_tab(ui, viewer, current == viewer, true) {
+        if viewer_tab(
+            ui,
+            viewer,
+            current == viewer,
+            viewer_availability(state, viewer),
+        ) {
             clicked = Some(viewer);
         }
     }
@@ -970,10 +981,12 @@ fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
         egui::Stroke::new(1.0, t.color.border),
     );
     for viewer in ResultViewer::LEGACY {
-        let available = viewer
-            .legacy()
-            .is_some_and(|legacy| state.viewer_is_available(legacy));
-        if viewer_tab(ui, viewer, current == viewer, available) {
+        if viewer_tab(
+            ui,
+            viewer,
+            current == viewer,
+            viewer_availability(state, viewer),
+        ) {
             clicked = Some(viewer);
         }
     }
@@ -982,10 +995,115 @@ fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
+fn reconcile_active_viewer(state: &mut AppState) {
+    if !state.simulation.has_results()
+        || viewer_availability(state, state.ui.results.viewer).available
+    {
+        return;
+    }
+    if let Some(viewer) = ResultViewer::PRIMARY
+        .into_iter()
+        .chain(ResultViewer::LEGACY)
+        .find(|viewer| viewer_availability(state, *viewer).available)
+    {
+        state.ui.results.viewer = viewer;
+    }
+}
+
+fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailability {
+    let active_run = state.simulation.active_run();
+    match viewer {
+        ResultViewer::Waves => {
+            if active_run.is_some_and(|run| {
+                run.analyses
+                    .iter()
+                    .any(|analysis| !analysis.waveforms.is_empty())
+            }) {
+                ViewerAvailability::available("Waveforms are present in the active dataset")
+            } else {
+                ViewerAvailability::unavailable("Requires waveform data in the active dataset")
+            }
+        }
+        ResultViewer::Bode => {
+            if active_run
+                .and_then(crate::state::ac_bode_summary_for_run)
+                .is_some()
+            {
+                ViewerAvailability::available("AC magnitude response is available")
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires a usable AC magnitude response in the active dataset",
+                )
+            }
+        }
+        ResultViewer::Fft => specialized_availability(state, ActiveViewer::Fft),
+        ResultViewer::Eye => specialized_availability(state, ActiveViewer::EyeDiagram),
+        ResultViewer::Hist => specialized_availability(state, ActiveViewer::Histogram),
+        ResultViewer::Op => {
+            if active_run.is_some_and(|run| {
+                run.analyses.iter().any(|analysis| {
+                    analysis
+                        .device_op
+                        .as_ref()
+                        .is_some_and(|report| !report.is_empty())
+                })
+            }) {
+                ViewerAvailability::available("Device operating-point data is available")
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires a device operating-point report in the active dataset",
+                )
+            }
+        }
+        ResultViewer::NoiseContrib => {
+            if active_run.is_some_and(|run| {
+                run.analyses.iter().any(|analysis| {
+                    analysis
+                        .noise_summary
+                        .as_ref()
+                        .is_some_and(|summary| !summary.rows.is_empty())
+                })
+            }) {
+                ViewerAvailability::available("Noise-contributor data is available")
+            } else {
+                ViewerAvailability::unavailable("Requires a noise analysis with contributor data")
+            }
+        }
+        ResultViewer::Specs => {
+            let has_measurements = state.simulation.runs.iter().any(|run| {
+                run.analyses
+                    .iter()
+                    .any(|analysis| !analysis.measurements.is_empty())
+            });
+            if !state.workspace.specs.is_empty() || has_measurements {
+                ViewerAvailability::available("Specification or measurement data is available")
+            } else {
+                ViewerAvailability::unavailable("Requires specifications or measured results")
+            }
+        }
+        ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
+        ResultViewer::Smith => specialized_availability(state, ActiveViewer::SmithChart),
+        ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
+    }
+}
+
+fn specialized_availability(state: &AppState, viewer: ActiveViewer) -> ViewerAvailability {
+    let capability = state.viewer_capability(viewer);
+    ViewerAvailability {
+        available: capability.available,
+        reason: capability.reason,
+    }
+}
+
 /// One viewer tab, per the design: a 24 px chip with 11 px side padding,
 /// letterspaced mono label, hover fill, and an accent wash when active
 /// (inverted in the Graphite direction).
-fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) -> bool {
+fn viewer_tab(
+    ui: &mut Ui,
+    viewer: ResultViewer,
+    active: bool,
+    availability: ViewerAvailability,
+) -> bool {
     use crate::ui::theme::mix;
 
     let t = Tokens::get(ui.ctx());
@@ -1006,7 +1124,7 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
 
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(galley.size().x + 22.0, 24.0),
-        if enabled {
+        if availability.available {
             egui::Sense::click()
         } else {
             egui::Sense::hover()
@@ -1015,7 +1133,7 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
     response.widget_info(|| {
         WidgetInfo::labeled(
             WidgetType::SelectableLabel,
-            enabled && ui.is_enabled(),
+            availability.available && ui.is_enabled(),
             viewer.label(),
         )
     });
@@ -1033,7 +1151,7 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
 
     let hover = ui.ctx().animate_bool_with_time(
         response.id,
-        enabled && !active && response.hovered(),
+        availability.available && !active && response.hovered(),
         0.16,
     );
     let graphite = t.direction == crate::ui::Direction::Graphite;
@@ -1043,7 +1161,7 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
         } else {
             (c.accent_dim, c.accent)
         }
-    } else if !enabled {
+    } else if !availability.available {
         (egui::Color32::TRANSPARENT, c.text_faint)
     } else {
         (
@@ -1064,8 +1182,8 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
 
     theme::paint_focus_ring(ui, &response, rect);
 
-    if !enabled {
-        response.on_hover_text("No data for this viewer in the active run");
+    if !availability.available {
+        response.on_hover_text(availability.reason);
         return false;
     }
     response
@@ -1134,5 +1252,58 @@ pub fn status_summary(state: &AppState) -> String {
     match state.simulation.active_run() {
         Some(run) => format!("{} · run #{}", viewer.status(), run.id),
         None => viewer.status().to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::*;
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+
+    fn state_with_analysis(analysis: AnalysisResult) -> AppState {
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        state
+    }
+
+    #[test]
+    fn waveform_data_does_not_enable_incompatible_result_viewers() {
+        let state = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 1.0, 0.0],
+                    "#00aaff",
+                ),
+            ]),
+        );
+
+        assert!(viewer_availability(&state, ResultViewer::Waves).available);
+        assert!(!viewer_availability(&state, ResultViewer::Bode).available);
+        assert!(!viewer_availability(&state, ResultViewer::Hist).available);
+        assert!(!viewer_availability(&state, ResultViewer::NoiseContrib).available);
+    }
+
+    #[test]
+    fn incompatible_active_viewer_falls_back_to_compatible_view() {
+        let mut state = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 1.0, 0.0],
+                    "#00aaff",
+                ),
+            ]),
+        );
+        state.ui.results.viewer = ResultViewer::Hist;
+
+        reconcile_active_viewer(&mut state);
+
+        assert_eq!(state.ui.results.viewer, ResultViewer::Waves);
     }
 }

@@ -546,16 +546,27 @@ impl Command {
             }
             Self::ResetActiveView => reset_active_view(app),
             Self::ToggleNavigator => {
-                app.state.workbench.navigator_visible = !app.state.workbench.navigator_visible
+                if app.state.workbench.navigator_visible {
+                    app.state.workbench.dismiss_navigator();
+                } else {
+                    app.state.workbench.navigator_visible = true;
+                }
             }
             Self::ToggleInspector => {
-                app.state.workbench.inspector_visible = !app.state.workbench.inspector_visible
+                if app.state.workbench.inspector_visible {
+                    app.state.workbench.dismiss_inspector();
+                } else {
+                    app.state.workbench.inspector_visible = true;
+                }
             }
             Self::ToggleConsole => {
                 app.state.workbench.console_visible = !app.state.workbench.console_visible
             }
             Self::ToggleFocusMode => {
-                app.state.workbench.focus_mode = !app.state.workbench.focus_mode
+                app.state.workbench.focus_mode = !app.state.workbench.focus_mode;
+                if app.state.workbench.focus_mode {
+                    app.state.workbench.close_drawer();
+                }
             }
             Self::ResetLayout => app.state.workbench.reset_layout(),
             Self::PreviousWorkspace => app.state.workbench.cycle_workspace(true),

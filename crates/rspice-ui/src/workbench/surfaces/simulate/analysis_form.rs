@@ -44,7 +44,9 @@ fn action_line(ui: &mut Ui, label: &str) -> bool {
 pub(super) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usize) -> &'static str {
     match index {
         0 => {
+            setup.op.ensure_initialized();
             input_row(ui, "Temperature", &mut setup.op.temperature);
+            let _ = setup.apply_reference_temperature_from_op();
             input_row(ui, "GMIN steps", &mut setup.op.gmin_steps);
             check_row(ui, "Source stepping", &mut setup.op.source_stepping);
             check_row(ui, "Save all signals", &mut setup.op.save_all);

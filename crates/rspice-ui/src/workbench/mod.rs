@@ -42,7 +42,11 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
         app.state.workbench.full_screen,
     ));
-    let layout = LayoutSpec::resolve(ctx.content_rect().width(), &app.state.workbench);
+    let viewport = ctx.content_rect().size();
+    let layout = LayoutSpec::resolve(viewport.x, viewport.y, &app.state.workbench);
+    app.state
+        .workbench
+        .reconcile_drawer_mode(layout.width_class);
 
     // Outer bars first, then activity/docks, then the owner surface.
     chrome::status_bar::show(ctx, app, layout);
@@ -120,7 +124,7 @@ fn handle_workbench_shortcuts(ctx: &Context, app: &mut RSpiceApp) {
 
     match command {
         Some(Some(command)) => command.execute(app),
-        Some(None) => app.state.workbench.drawer = None,
+        Some(None) => app.state.workbench.close_drawer(),
         None => {}
     }
 }

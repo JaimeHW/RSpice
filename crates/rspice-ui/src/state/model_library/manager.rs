@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{DeviceModel, ModelLevel, ModelLibrary, ModelType, ProcessCorner};
+use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
 
 /// Manager for all model libraries
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -122,31 +123,72 @@ impl ModelLibraryManager {
             .unwrap_or("unnamed")
             .to_string();
 
-        let library = self.libraries.entry(lib_name.clone()).or_insert_with(|| {
-            let mut lib = ModelLibrary::new(&lib_name);
-            lib.root_path = Some(path.to_path_buf());
-            lib
-        });
-
         let mut parser = LibParser::new(base_dir);
         let result = parser.parse_file(path).map_err(|e| e.to_string())?;
+
+        if let Some(existing) = self.libraries.get(&lib_name)
+            && existing.root_path.as_deref() != Some(path)
+        {
+            return Err(format!(
+                "Cannot load '{}': library name '{}' is already owned by a different model source",
+                path.display(),
+                lib_name
+            ));
+        }
+
+        // Build a complete replacement and publish it only after every parse
+        // and section check succeeds. A failed refresh never leaves a partly
+        // updated model catalog behind.
+        let mut library = self
+            .libraries
+            .get(&lib_name)
+            .cloned()
+            .unwrap_or_else(|| ModelLibrary::new(&lib_name));
+        library.root_path = Some(path.to_path_buf());
+        library.models.clear();
+        library.corners.clear();
+        library.selected_corner = None;
 
         for section_name in result.section_names() {
             let corner = ProcessCorner {
                 name: section_name.to_string(),
                 description: format!("Process corner from {}", lib_name),
+                file_path: Some(path.to_path_buf()),
+                is_default: false,
                 ..ProcessCorner::default()
             };
             library.corners.insert(corner.name.clone(), corner);
         }
 
-        if let Some(section_name) = section {
+        let section_names = result.section_names();
+        let selected_section = if let Some(section_name) = section {
+            Some(section_name.to_owned())
+        } else {
+            section_names
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case("tt"))
+                .or_else(|| section_names.first())
+                .map(|name| (*name).to_owned())
+        };
+
+        for model in &result.top_level_models {
+            let device_model = Self::convert_parsed_model(model, path);
+            library
+                .models
+                .insert(device_model.name.clone(), device_model);
+        }
+
+        if let Some(section_name) = selected_section.as_deref() {
             if let Some(lib_section) = result.get_section(section_name) {
                 for model in &lib_section.models {
                     let device_model = Self::convert_parsed_model(model, path);
                     library
                         .models
                         .insert(device_model.name.clone(), device_model);
+                }
+                library.selected_corner = Some(lib_section.name.clone());
+                if let Some(corner) = library.corners.get_mut(&lib_section.name) {
+                    corner.is_default = true;
                 }
             } else {
                 return Err(format!(
@@ -155,25 +197,111 @@ impl ModelLibraryManager {
                     result.section_names()
                 ));
             }
-        } else {
-            for model in &result.top_level_models {
-                let device_model = Self::convert_parsed_model(model, path);
-                library
-                    .models
-                    .insert(device_model.name.clone(), device_model);
-            }
-
-            for section in &result.sections {
-                for model in &section.models {
-                    let device_model = Self::convert_parsed_model(model, path);
-                    library
-                        .models
-                        .insert(device_model.name.clone(), device_model);
-                }
-            }
         }
 
+        self.libraries.insert(lib_name.clone(), library);
         Ok(lib_name)
+    }
+
+    /// Resolve deterministic model directives for a nominal/reference run.
+    pub fn reference_process_directives(
+        &self,
+        process: crate::simulation::dialog::corner::ProcessCorner,
+    ) -> Result<Vec<String>, String> {
+        let process = match process {
+            crate::simulation::dialog::corner::ProcessCorner::TT => CornerProcess::TT,
+            crate::simulation::dialog::corner::ProcessCorner::SS => CornerProcess::SS,
+            crate::simulation::dialog::corner::ProcessCorner::FF => CornerProcess::FF,
+            crate::simulation::dialog::corner::ProcessCorner::SF => CornerProcess::SF,
+            crate::simulation::dialog::corner::ProcessCorner::FS => CornerProcess::FS,
+        };
+        self.bindings_for_processes(&[process]).map(|bindings| {
+            bindings
+                .into_iter()
+                .map(|binding| binding.spice_directive())
+                .collect()
+        })
+    }
+
+    /// Resolve all process-specific sources required by a PVT run.
+    pub fn corner_model_bindings(
+        &self,
+        processes: &[CornerProcess],
+    ) -> Result<Vec<CornerModelBinding>, String> {
+        self.bindings_for_processes(processes)
+    }
+
+    fn bindings_for_processes(
+        &self,
+        processes: &[CornerProcess],
+    ) -> Result<Vec<CornerModelBinding>, String> {
+        let mut libraries: Vec<&ModelLibrary> = self
+            .libraries
+            .values()
+            .filter(|library| library.root_path.is_some())
+            .collect();
+        libraries.sort_by(|left, right| left.name.cmp(&right.name));
+
+        if libraries.is_empty() {
+            if let Some(process) = processes
+                .iter()
+                .find(|process| **process != CornerProcess::TT)
+            {
+                return Err(format!(
+                    "{} requires a PDK model library with an explicit process section",
+                    process.as_keyword()
+                ));
+            }
+            return Ok(Vec::new());
+        }
+
+        let mut bindings = Vec::new();
+        for process in processes {
+            for library in &libraries {
+                let path = library
+                    .root_path
+                    .as_deref()
+                    .expect("external model libraries have a source path");
+                if !path.is_file() {
+                    return Err(format!(
+                        "Model library '{}' is unavailable at '{}'",
+                        library.name,
+                        path.display()
+                    ));
+                }
+                let path = path.to_str().ok_or_else(|| {
+                    format!(
+                        "Model library '{}' has a path that cannot be represented in a SPICE deck",
+                        library.name
+                    )
+                })?;
+                let keyword = process.as_keyword();
+                let section = library.corners.values().find(|corner| {
+                    corner.name.eq_ignore_ascii_case(keyword) && corner.file_path.is_some()
+                });
+                let binding = if let Some(section) = section {
+                    CornerModelBinding {
+                        process: *process,
+                        library_path: path.to_owned(),
+                        section: Some(section.name.clone()),
+                    }
+                } else if *process == CornerProcess::TT && library.corners.is_empty() {
+                    CornerModelBinding {
+                        process: *process,
+                        library_path: path.to_owned(),
+                        section: None,
+                    }
+                } else {
+                    return Err(format!(
+                        "Model library '{}' does not define the {} process section",
+                        library.name, keyword
+                    ));
+                };
+                binding.validate()?;
+                bindings.push(binding);
+            }
+        }
+        Ok(bindings)
     }
 
     /// Get available sections/corners from a .lib file without fully loading it
@@ -287,5 +415,85 @@ impl ModelLibraryManager {
             CoreType::Njfet | CoreType::Pjfet => ModelType::Other,
             CoreType::Other => ModelType::Other,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-model-manager-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).expect("create model fixture directory");
+        let path = directory.join("foundry.lib");
+        fs::write(
+            &path,
+            ".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n.lib FF\n.model nch NMOS (LEVEL=1 KP=2e-3)\n.endl FF\n",
+        )
+        .expect("write model fixture");
+        (directory, path)
+    }
+
+    #[test]
+    fn loaded_sections_resolve_to_exact_reference_and_corner_bindings() {
+        let (directory, path) = model_fixture();
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .load_library_file(&path, None)
+            .expect("load sectioned model library");
+
+        let reference = manager
+            .reference_process_directives(crate::simulation::dialog::corner::ProcessCorner::FF)
+            .expect("FF binding exists");
+        let bindings = manager
+            .corner_model_bindings(&[CornerProcess::TT, CornerProcess::FF])
+            .expect("TT and FF bindings exist");
+
+        assert_eq!(reference.len(), 1);
+        assert!(reference[0].starts_with(".lib \""));
+        assert!(reference[0].ends_with(" FF"));
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].process, CornerProcess::TT);
+        assert_eq!(bindings[0].section.as_deref(), Some("TT"));
+        assert_eq!(bindings[1].process, CornerProcess::FF);
+        assert_eq!(bindings[1].section.as_deref(), Some("FF"));
+
+        let error = manager
+            .corner_model_bindings(&[CornerProcess::SS])
+            .expect_err("undefined SS section must fail closed");
+        assert!(error.contains("does not define the SS process section"));
+        fs::remove_dir_all(directory).expect("remove model fixture directory");
+    }
+
+    #[test]
+    fn failed_section_refresh_is_transactional() {
+        let (directory, path) = model_fixture();
+        let mut manager = ModelLibraryManager::new();
+        let name = manager
+            .load_library_file(&path, Some("TT"))
+            .expect("load TT section");
+        let before = manager
+            .get_library(&name)
+            .expect("loaded library exists")
+            .clone();
+
+        let error = manager
+            .load_library_file(&path, Some("MISSING"))
+            .expect_err("missing section must fail");
+
+        assert!(error.contains("Section 'MISSING' not found"));
+        let after = manager.get_library(&name).expect("library remains loaded");
+        assert_eq!(after.selected_corner, before.selected_corner);
+        assert_eq!(after.models.len(), before.models.len());
+        fs::remove_dir_all(directory).expect("remove model fixture directory");
     }
 }

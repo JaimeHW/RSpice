@@ -9,6 +9,26 @@
 
 use std::collections::HashSet;
 
+/// The nominal/reference operating point selected in the workbench chrome.
+///
+/// This is execution state, not display state: temperature is copied into the
+/// effective solver options and process is used when resolving model-library
+/// sections for a run.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReferencePvtPoint {
+    pub process: crate::simulation::dialog::corner::ProcessCorner,
+    pub temperature_celsius: f64,
+}
+
+impl Default for ReferencePvtPoint {
+    fn default() -> Self {
+        Self {
+            process: crate::simulation::dialog::corner::ProcessCorner::TT,
+            temperature_celsius: 27.0,
+        }
+    }
+}
+
 /// `.tran` draft. SI suffixes allowed; "auto" max step defers to the
 /// engine's LTE control.
 #[derive(Debug, Clone)]
@@ -130,6 +150,8 @@ impl Default for NoiseSetup {
 /// All analysis configuration plus the engine options, in one place.
 #[derive(Debug, Clone, Default)]
 pub struct SimSetupState {
+    /// Authoritative reference PVT point used by nominal analyses.
+    pub reference_pvt: ReferencePvtPoint,
     /// Enabled analysis indices; run order is ascending index.
     pub enabled: HashSet<usize>,
     /// Transient sweep.
@@ -208,9 +230,65 @@ impl SimSetupState {
     pub fn new() -> Self {
         let mut setup = Self::default();
         setup
+            .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::TT, 27.0)
+            .expect("the built-in reference PVT point is valid");
+        setup
             .enabled
             .insert(crate::common::simulation_analysis_tabs::TAB_TRANSIENT);
         setup
+    }
+
+    /// Select the nominal/reference PVT point consumed by subsequent runs.
+    pub fn set_reference_pvt(
+        &mut self,
+        process: crate::simulation::dialog::corner::ProcessCorner,
+        temperature_celsius: f64,
+    ) -> Result<(), String> {
+        if !temperature_celsius.is_finite() {
+            return Err("Reference temperature must be finite".to_owned());
+        }
+        if temperature_celsius < -273.15 {
+            return Err("Reference temperature cannot be below absolute zero".to_owned());
+        }
+
+        self.reference_pvt = ReferencePvtPoint {
+            process,
+            temperature_celsius,
+        };
+        self.options.temp = temperature_celsius;
+        self.options_draft.temp = format_temperature(temperature_celsius);
+        self.op.ensure_initialized();
+        self.op.temperature = format_temperature(temperature_celsius);
+        Ok(())
+    }
+
+    /// Synchronize a valid temperature edited in the OP analysis form without
+    /// replacing its in-progress text buffer.
+    pub fn apply_reference_temperature_from_op(&mut self) -> Result<(), String> {
+        let temperature_celsius = self
+            .op
+            .temperature
+            .parse::<f64>()
+            .map_err(|_| "Invalid temperature".to_owned())?;
+        if !temperature_celsius.is_finite() {
+            return Err("Reference temperature must be finite".to_owned());
+        }
+        if temperature_celsius < -273.15 {
+            return Err("Reference temperature cannot be below absolute zero".to_owned());
+        }
+        self.reference_pvt.temperature_celsius = temperature_celsius;
+        self.options.temp = temperature_celsius;
+        self.options_draft.temp = format_temperature(temperature_celsius);
+        Ok(())
+    }
+
+    /// Commit globally validated options while keeping the workbench reference
+    /// point and OP editor aligned with the temperature the solver will use.
+    pub fn commit_options(&mut self, options: &crate::simulation::dialog::SimulationOptions) {
+        self.options = options.clone();
+        self.reference_pvt.temperature_celsius = options.temp;
+        self.op.ensure_initialized();
+        self.op.temperature = format_temperature(options.temp);
     }
 
     /// One-line mono summary of an analysis configuration, for list rows.
@@ -712,5 +790,51 @@ impl SimSetupState {
         self.reliability.ensure_initialized();
         self.optimization.ensure_initialized();
         self.soa.ensure_initialized();
+    }
+}
+
+fn format_temperature(value: f64) -> String {
+    if value.fract().abs() < f64::EPSILON {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.6}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::dialog::corner::ProcessCorner;
+
+    #[test]
+    fn reference_pvt_is_the_temperature_consumed_by_solver_and_op() {
+        let mut setup = SimSetupState::new();
+
+        setup
+            .set_reference_pvt(ProcessCorner::FF, -40.0)
+            .expect("reference point is valid");
+
+        assert_eq!(setup.reference_pvt.process, ProcessCorner::FF);
+        assert_eq!(setup.reference_pvt.temperature_celsius, -40.0);
+        assert_eq!(setup.options.temp, -40.0);
+        assert_eq!(setup.options_draft.temp, "-40");
+        assert_eq!(setup.op.temperature, "-40");
+    }
+
+    #[test]
+    fn reference_pvt_rejects_non_physical_temperature_without_mutation() {
+        let mut setup = SimSetupState::new();
+        let before = setup.reference_pvt;
+
+        let error = setup
+            .set_reference_pvt(ProcessCorner::SS, -274.0)
+            .expect_err("temperature below absolute zero must fail");
+
+        assert!(error.contains("absolute zero"));
+        assert_eq!(setup.reference_pvt, before);
+        assert_eq!(setup.options.temp, before.temperature_celsius);
     }
 }

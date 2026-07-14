@@ -33,6 +33,12 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
+    let close_label = if app.state.workbench.drawer == Some(super::super::state::Drawer::Navigator)
+    {
+        "Close navigator"
+    } else {
+        "Hide navigator"
+    };
     ui.horizontal(|ui| {
         ui.add_space(8.0);
         ui.label(
@@ -44,13 +50,13 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             if icon_button(
                 ui,
                 WorkbenchIcon::Close,
-                "Hide navigator",
+                close_label,
                 false,
                 egui::vec2(30.0, 30.0),
             )
             .clicked()
             {
-                app.state.workbench.navigator_visible = false;
+                app.state.workbench.dismiss_navigator();
             }
         });
     });

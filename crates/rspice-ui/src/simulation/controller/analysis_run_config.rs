@@ -300,7 +300,7 @@ impl SimulationController {
         };
         use crate::simulation::dialog::corner::{CornerBaseAnalysis, ProcessCorner};
 
-        let process_corners = corner_cfg
+        let process_corners: Vec<CornerProcess> = corner_cfg
             .process_corners
             .iter()
             .map(|corner| match corner {
@@ -311,6 +311,9 @@ impl SimulationController {
                 ProcessCorner::FS => CornerProcess::FS,
             })
             .collect();
+        let model_bindings = state
+            .model_library_manager
+            .corner_model_bindings(&process_corners)?;
 
         let nominal_voltage = match corner_cfg.voltages.len() {
             0 => None,
@@ -371,6 +374,7 @@ impl SimulationController {
             full_matrix: corner_cfg.full_matrix,
             nominal_voltage,
             base_mode,
+            model_bindings,
         })
     }
 

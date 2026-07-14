@@ -45,6 +45,7 @@ struct TunedMetricRow {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let editable = state.workspace.has_editable_netlist_source();
 
     section_header(ui, "Tuner", None);
     let rows = scan_params(&state.simulation.netlist_content);
@@ -52,28 +53,30 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let mut reset_requested = false;
 
     // Mode toggle: live re-sim vs on-release.
-    ui.horizontal(|ui| {
-        ui.add_space(8.0);
-        let live = state.ui.netlist.tuner_live;
-        if chip(ui, "live", live)
-            .on_hover_text("Re-simulate on every slider change")
-            .clicked()
-        {
-            state.ui.netlist.tuner_live = true;
-        }
-        if chip(ui, "on release", !live)
-            .on_hover_text("Re-simulate when the drag commits")
-            .clicked()
-        {
-            state.ui.netlist.tuner_live = false;
-        }
-        if !reset_payload.is_empty()
-            && chip(ui, "reset", false)
-                .on_hover_text("Reset numeric .param values to the last successful run")
+    ui.add_enabled_ui(editable, |ui| {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let live = state.ui.netlist.tuner_live;
+            if chip(ui, "live", live)
+                .on_hover_text("Re-simulate on every slider change")
                 .clicked()
-        {
-            reset_requested = true;
-        }
+            {
+                state.ui.netlist.tuner_live = true;
+            }
+            if chip(ui, "on release", !live)
+                .on_hover_text("Re-simulate when the drag commits")
+                .clicked()
+            {
+                state.ui.netlist.tuner_live = false;
+            }
+            if !reset_payload.is_empty()
+                && chip(ui, "reset", false)
+                    .on_hover_text("Reset numeric .param values to the last successful run")
+                    .clicked()
+            {
+                reset_requested = true;
+            }
+        });
     });
     ui.add_space(6.0);
 
@@ -141,7 +144,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ui.add_space(8.0);
             ui.spacing_mut().slider_width = slider_width_for_available(ui.available_width());
             let logarithmic = lo > 0.0;
-            let response = ui.add(
+            let response = ui.add_enabled(
+                editable,
                 egui::Slider::new(&mut slider_value, lo..=hi)
                     .logarithmic(logarithmic)
                     .show_value(false),
@@ -361,6 +365,10 @@ fn slider_range(
 /// The run request fires even when the value is already written — the
 /// on-release commit lands on a frame where the drag updated nothing.
 fn apply_param_edit(ui: &Ui, state: &mut AppState, row: &ParamRow, value: f64, fire_run: bool) {
+    if !state.workspace.has_editable_netlist_source() {
+        return;
+    }
+
     let formatted = format_engineering_value(value);
     let buffer = &state.simulation.netlist_content;
 
@@ -383,12 +391,17 @@ fn apply_param_edit(ui: &Ui, state: &mut AppState, row: &ParamRow, value: f64, f
         next.push_str(&formatted);
         next.push_str(&buffer[end..]);
 
-        state.simulation.netlist_content = next.clone();
-        state.workspace.netlist_source = Some(next);
-        state.workspace.netlist_source_path = None;
+        let replaced = state
+            .workspace
+            .replace_editable_netlist_source(next.clone());
+        debug_assert!(replaced, "an editable source changed before tuner commit");
+        if !replaced {
+            return;
+        }
+        state.simulation.netlist_content = next;
 
         let netlist = &mut state.ui.netlist;
-        netlist.revision += 1;
+        netlist.revision = netlist.revision.wrapping_add(1);
         netlist.last_edit_time = ui.input(|input| input.time);
         netlist.edited_lines.insert(row.line);
         super::refresh_diff_pips_from_baseline(state);
@@ -756,5 +769,56 @@ mod tests {
         assert_eq!(spec.traces[0].side, crate::ui::plot::YSide::Right);
         assert!(spec.traces[0].dashed);
         assert_eq!(spec.traces[1].side, crate::ui::plot::YSide::Left);
+    }
+
+    #[test]
+    fn tuner_cannot_mutate_or_promote_generated_output() {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = ".param gain=1\n.end\n".to_owned();
+        let row = scan_params(&state.simulation.netlist_content)
+            .into_iter()
+            .next()
+            .expect("numeric parameter");
+        let ctx = egui::Context::default();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                apply_param_edit(ui, &mut state, &row, 2.0, false);
+            });
+        });
+
+        assert_eq!(state.simulation.netlist_content, ".param gain=1\n.end\n");
+        assert!(state.workspace.netlist_source.is_none());
+        assert!(!state.workspace.netlist_source_dirty);
+        assert_eq!(state.ui.netlist.revision, 0);
+    }
+
+    #[test]
+    fn tuner_updates_and_dirties_an_owned_source() {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = ".param gain=1\n.end\n".to_owned();
+        state.workspace.netlist_source = Some(state.simulation.netlist_content.clone());
+        state.workspace.netlist_source_path = Some(std::path::PathBuf::from("decks/owned.cir"));
+        let row = scan_params(&state.simulation.netlist_content)
+            .into_iter()
+            .next()
+            .expect("numeric parameter");
+        let ctx = egui::Context::default();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                apply_param_edit(ui, &mut state, &row, 2.0, false);
+            });
+        });
+
+        assert_eq!(state.simulation.netlist_content, ".param gain=2\n.end\n");
+        assert_eq!(
+            state.workspace.netlist_source.as_deref(),
+            Some(".param gain=2\n.end\n")
+        );
+        assert!(state.workspace.netlist_source_path.is_none());
+        assert!(state.workspace.netlist_source_dirty);
+        assert_eq!(state.ui.netlist.revision, 1);
+        assert!(state.ui.netlist.edited_lines.contains(&0));
     }
 }

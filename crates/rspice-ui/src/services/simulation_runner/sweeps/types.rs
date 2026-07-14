@@ -1,5 +1,8 @@
 use rspice_core::Value;
 
+pub(crate) const REFERENCE_MODEL_BINDING_BEGIN: &str = "* RSPICE REFERENCE MODEL BINDING BEGIN";
+pub(crate) const REFERENCE_MODEL_BINDING_END: &str = "* RSPICE REFERENCE MODEL BINDING END";
+
 /// Parametric sweep data.
 #[derive(Debug, Clone)]
 pub struct ParametricData {
@@ -39,7 +42,7 @@ impl TempRunConfig {
 }
 
 /// Process-corner designation for UI corner sweeps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CornerProcess {
     TT,
     SS,
@@ -48,30 +51,66 @@ pub enum CornerProcess {
     FS,
 }
 
+/// One explicit foundry/library model binding for a process point.
+///
+/// `section = Some(..)` represents `.lib <path> <section>`; `None`
+/// represents a process-independent `.include <path>`. Paths remain data and
+/// are validated before being rendered into a SPICE directive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CornerModelBinding {
+    pub process: CornerProcess,
+    pub library_path: String,
+    pub section: Option<String>,
+}
+
+impl CornerModelBinding {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let path = self.library_path.trim();
+        if path.is_empty() {
+            return Err("Corner model binding requires a library path".to_owned());
+        }
+        if path.chars().any(|character| {
+            character == '"' || character == '\0' || character == '\r' || character == '\n'
+        }) {
+            return Err(format!(
+                "Corner model library path contains a character that cannot be represented safely: {path}"
+            ));
+        }
+        if let Some(section) = self.section.as_deref() {
+            let section = section.trim();
+            if section.is_empty() {
+                return Err("Corner model section cannot be empty".to_owned());
+            }
+            if section.chars().any(|character| {
+                character.is_whitespace()
+                    || character == '"'
+                    || character == '\''
+                    || character.is_control()
+            }) {
+                return Err(format!(
+                    "Corner model section contains an unsupported character: {section}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn spice_directive(&self) -> String {
+        match self.section.as_deref() {
+            Some(section) => format!(".lib \"{}\" {section}", self.library_path.trim()),
+            None => format!(".include \"{}\"", self.library_path.trim()),
+        }
+    }
+}
+
 impl CornerProcess {
-    pub(super) fn as_keyword(self) -> &'static str {
+    pub(crate) fn as_keyword(self) -> &'static str {
         match self {
             Self::TT => "TT",
             Self::SS => "SS",
             Self::FF => "FF",
             Self::SF => "SF",
             Self::FS => "FS",
-        }
-    }
-
-    pub(super) fn nmos_factor(self) -> Value {
-        match self {
-            Self::TT => 1.0,
-            Self::SS | Self::SF => 0.9,
-            Self::FF | Self::FS => 1.1,
-        }
-    }
-
-    pub(super) fn pmos_factor(self) -> Value {
-        match self {
-            Self::TT => 1.0,
-            Self::SS | Self::FS => 0.9,
-            Self::FF | Self::SF => 1.1,
         }
     }
 }
@@ -85,6 +124,10 @@ pub struct CornerRunConfig {
     pub full_matrix: bool,
     pub nominal_voltage: Option<Value>,
     pub base_mode: CornerBaseMode,
+    /// Explicit model sources keyed to process. Non-typical corners must be
+    /// backed by a real library section; RSpice never fabricates a foundry
+    /// corner by scaling model parameters heuristically.
+    pub model_bindings: Vec<CornerModelBinding>,
 }
 
 /// Frequency sweep type used by corner AC base analysis.
@@ -156,6 +199,7 @@ impl Default for CornerRunConfig {
             full_matrix: true,
             nominal_voltage: Some(1.0),
             base_mode: CornerBaseMode::default(),
+            model_bindings: Vec::new(),
         }
     }
 }
@@ -185,6 +229,22 @@ impl CornerRunConfig {
             return Err(
                 "Corner analysis nominal voltage must be a positive finite value".to_string(),
             );
+        }
+        for binding in &self.model_bindings {
+            binding.validate()?;
+        }
+        for process in &self.process_corners {
+            if *process != CornerProcess::TT
+                && !self
+                    .model_bindings
+                    .iter()
+                    .any(|binding| binding.process == *process && binding.section.is_some())
+            {
+                return Err(format!(
+                    "{} corner requires an explicit PDK model-library section",
+                    process.as_keyword()
+                ));
+            }
         }
         validate_base_mode("Corner", &self.base_mode)?;
         Ok(())
@@ -339,4 +399,34 @@ pub struct CornerData {
     pub voltages: Vec<(String, Vec<Value>)>,
     pub num_points: usize,
     pub num_failures: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_typical_corner_requires_real_model_section() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::FF],
+            ..CornerRunConfig::default()
+        };
+
+        let error = config
+            .validate()
+            .expect_err("synthetic process scaling must not be accepted");
+
+        assert!(error.contains("explicit PDK model-library section"));
+    }
+
+    #[test]
+    fn binding_rejects_directive_injection_characters() {
+        let binding = CornerModelBinding {
+            process: CornerProcess::FF,
+            library_path: "models.lib\n.end".to_owned(),
+            section: Some("ff".to_owned()),
+        };
+
+        assert!(binding.validate().is_err());
+    }
 }

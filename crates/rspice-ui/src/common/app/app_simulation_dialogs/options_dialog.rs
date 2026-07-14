@@ -53,7 +53,7 @@ fn parse_and_validate_options(setup: &mut SimSetupState) -> Option<SimulationOpt
 
 /// Make `options` effective and refresh the draft from it.
 fn commit_validated_options(setup: &mut SimSetupState, options: &SimulationOptions) {
-    setup.options = options.clone();
+    setup.commit_options(options);
     let active_tab = setup.options_draft.active_tab;
     setup.options_draft = OptionsDialogState::from_options(options);
     setup.options_draft.active_tab = active_tab;

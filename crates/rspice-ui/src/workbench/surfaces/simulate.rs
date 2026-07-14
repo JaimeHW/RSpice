@@ -58,9 +58,16 @@ fn plan_summary(ui: &mut Ui, app: &mut RSpiceApp) {
         property_row(
             ui,
             "Process corner",
-            &app.state.workbench.corner.to_uppercase(),
+            app.state.sim_setup.reference_pvt.process.short_name(),
         );
-        property_row(ui, "Temperature", "27 °C");
+        property_row(
+            ui,
+            "Temperature",
+            &format!(
+                "{} °C",
+                app.state.sim_setup.reference_pvt.temperature_celsius
+            ),
+        );
         property_row(
             ui,
             "Model libraries",

@@ -1,47 +1,5 @@
-use super::types::CornerProcess;
 use rspice_core::Value;
 use rspice_core::netlist::{ElementKind, SourceSpec};
-
-pub(super) fn apply_process_corner(netlist: &mut rspice_core::Netlist, process: CornerProcess) {
-    let nmos_factor = process.nmos_factor();
-    let pmos_factor = process.pmos_factor();
-
-    for model in &mut netlist.models {
-        let factor = process_factor_for_model_type(&model.model_type, nmos_factor, pmos_factor);
-        if (factor - 1.0).abs() < 1e-15 {
-            continue;
-        }
-        for (param_name, param_value) in &mut model.params {
-            if is_mobility_like_model_param(param_name) {
-                *param_value *= factor;
-            }
-        }
-    }
-}
-
-fn process_factor_for_model_type(
-    model_type: &str,
-    nmos_factor: Value,
-    pmos_factor: Value,
-) -> Value {
-    let ty = model_type.trim().to_ascii_uppercase();
-    if ty.contains("PMOS") || ty.contains("PJF") || ty.contains("PMF") || ty.contains("PNP") {
-        pmos_factor
-    } else if ty.contains("NMOS") || ty.contains("NJF") || ty.contains("NMF") || ty.contains("NPN")
-    {
-        nmos_factor
-    } else {
-        (nmos_factor + pmos_factor) * 0.5
-    }
-}
-
-fn is_mobility_like_model_param(param_name: &str) -> bool {
-    let upper = param_name.trim().to_ascii_uppercase();
-    matches!(
-        upper.as_str(),
-        "KP" | "BETA" | "U0" | "UO" | "MU" | "MOBILITY" | "KP0" | "KP1"
-    )
-}
 
 pub(super) fn apply_voltage_corner(
     netlist: &mut rspice_core::Netlist,

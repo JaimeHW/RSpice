@@ -38,8 +38,8 @@ pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
     TopBottomPanel::bottom("workbench.console")
         .default_height(layout.console_height)
-        .height_range(112.0..=640.0)
-        .resizable(!app.state.workbench.console_maximized)
+        .height_range(layout.console_min_height..=layout.console_max_height)
+        .resizable(!layout.width_class.uses_drawers() && !app.state.workbench.console_maximized)
         .frame(Frame::new().fill(t.color.bg_inset))
         .show_separator_line(true)
         .show(ctx, |ui| console::show(ui, app));

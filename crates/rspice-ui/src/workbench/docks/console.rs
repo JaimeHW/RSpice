@@ -2,8 +2,9 @@
 
 use egui::{Align, Layout, ScrollArea, Ui};
 
-use crate::common::RSpiceApp;
+use crate::common::{AppState, RSpiceApp};
 use crate::panels::{ConsoleHistoryItem, LogSeverity};
+use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
@@ -79,18 +80,19 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             {
                 app.state.workbench.console_maximized = !app.state.workbench.console_maximized;
             }
-            if ui
-                .add(
-                    egui::Button::new(egui::RichText::new("Clear").color(t.color.text_dim))
-                        .frame(false),
-                )
-                .clicked()
+            // Problems, Measurements, and Task log are projections of owned
+            // engineering records. A generic console action must never erase
+            // DRC evidence, immutable measurement data, or run history.
+            if page_owns_clear_action(app.state.workbench.console_page)
+                && ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("Clear").color(t.color.text_dim))
+                            .frame(false),
+                    )
+                    .on_hover_text("Clear console output")
+                    .clicked()
             {
-                match app.state.workbench.console_page {
-                    ConsolePage::Console | ConsolePage::Problems => app.state.clear_primary_log(),
-                    ConsolePage::Measurements => {}
-                    ConsolePage::TaskLog => app.state.clear_simulation_results(),
-                }
+                clear_console_output(&mut app.state);
             }
         });
     });
@@ -152,7 +154,7 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
                         violation.severity.display_name(),
                         &violation.message,
                         &violation.location.display(),
-                        violation.severity < crate::services::drc::DrcSeverity::Error,
+                        drc_tone(violation.severity),
                     );
                 }
             }
@@ -167,7 +169,7 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
                     entry.severity.name(),
                     &entry.message,
                     entry.context.as_deref().unwrap_or(entry.source.name()),
-                    entry.severity == LogSeverity::Error,
+                    log_tone(entry.severity),
                 );
             }
             if !any {
@@ -196,8 +198,8 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
                 any = true;
                 ui.label(egui::RichText::new(&analysis.label).strong());
                 for measurement in &analysis.measurements {
-                    let text = format!("{measurement:?}");
-                    issue_row(ui, "MEAS", &text, &analysis.label, true);
+                    let row = measurement_presentation(measurement, &analysis.label);
+                    issue_row(ui, row.status, &row.name, &row.detail, row.tone);
                 }
             }
             if !any {
@@ -223,7 +225,11 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                         run.analyses.len(),
                         run.elapsed_time
                     ),
-                    run.success,
+                    if run.success {
+                        SemanticTone::Success
+                    } else {
+                        SemanticTone::Error
+                    },
                 );
             }
         });
@@ -231,11 +237,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn log_row(ui: &mut Ui, entry: &crate::panels::LogEntry) {
     let t = Tokens::get(ui.ctx());
-    let color = match entry.severity {
-        LogSeverity::Error => t.color.err,
-        LogSeverity::Warning => t.color.warn,
-        _ => t.color.text_dim,
-    };
+    let color = tone_color(&t, log_tone(entry.severity));
     let message = entry.context.as_ref().map_or_else(
         || entry.message.clone(),
         |context| format!("{} · {context}", entry.message),
@@ -267,14 +269,14 @@ fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
     }
 }
 
-fn issue_row(ui: &mut Ui, level: &str, message: &str, context: &str, positive: bool) {
+fn issue_row(ui: &mut Ui, level: &str, message: &str, context: &str, tone: SemanticTone) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    let color = if positive { t.color.ok } else { t.color.err };
+    let color = tone_color(&t, tone);
     ui.painter().text(
         egui::pos2(rect.left() + 10.0, rect.top() + 11.0),
         egui::Align2::LEFT_CENTER,
@@ -296,6 +298,127 @@ fn issue_row(ui: &mut Ui, level: &str, message: &str, context: &str, positive: b
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
+}
+
+/// Semantic row tones are kept independent of the active palette so severity
+/// cannot accidentally collapse into a success/error boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticTone {
+    Error,
+    Warning,
+    Success,
+    Info,
+    Debug,
+    Trace,
+}
+
+fn tone_color(tokens: &Tokens, tone: SemanticTone) -> egui::Color32 {
+    match tone {
+        SemanticTone::Error => tokens.color.err,
+        SemanticTone::Warning => tokens.color.warn,
+        SemanticTone::Success => tokens.color.ok,
+        SemanticTone::Info => tokens.color.accent,
+        SemanticTone::Debug => tokens.color.text_dim,
+        SemanticTone::Trace => tokens.color.text_faint,
+    }
+}
+
+fn log_tone(severity: LogSeverity) -> SemanticTone {
+    match severity {
+        LogSeverity::Error => SemanticTone::Error,
+        LogSeverity::Warning => SemanticTone::Warning,
+        LogSeverity::Info => SemanticTone::Info,
+        LogSeverity::Debug => SemanticTone::Debug,
+        LogSeverity::Trace => SemanticTone::Trace,
+    }
+}
+
+fn drc_tone(severity: crate::services::drc::DrcSeverity) -> SemanticTone {
+    match severity {
+        crate::services::drc::DrcSeverity::Critical | crate::services::drc::DrcSeverity::Error => {
+            SemanticTone::Error
+        }
+        crate::services::drc::DrcSeverity::Warning => SemanticTone::Warning,
+        crate::services::drc::DrcSeverity::Info => SemanticTone::Info,
+    }
+}
+
+struct MeasurementPresentation {
+    status: &'static str,
+    name: String,
+    detail: String,
+    tone: SemanticTone,
+}
+
+/// Convert the structured `.MEAS` contract into a stable presentation row.
+/// This deliberately names every field instead of relying on Rust's Debug
+/// output, which is neither user-facing nor a compatibility contract.
+fn measurement_presentation(
+    measurement: &rspice_core::MeasureResult,
+    analysis_label: &str,
+) -> MeasurementPresentation {
+    let mut details = Vec::new();
+    if let Some(value) = measurement.value {
+        details.push(format!("value {}", format_measure_value(value)));
+    } else {
+        details.push("no computed value".to_owned());
+    }
+
+    if let Some(expected) = measurement.expected {
+        let goal = format_measure_value(expected);
+        if let Some(tolerance) = measurement.tolerance {
+            details.push(format!("goal {goal} ± {}", format_measure_value(tolerance)));
+        } else {
+            details.push(format!("goal {goal}"));
+        }
+        if let Some(value) = measurement.value {
+            details.push(format!(
+                "deviation {}",
+                format_measure_value(value - expected)
+            ));
+        }
+    } else if let Some(tolerance) = measurement.tolerance {
+        // Imported data may retain a tolerance after its source goal was
+        // removed. Surface that inconsistency faithfully; do not invent a
+        // requirement or silently discard the retained field.
+        details.push(format!("tolerance {}", format_measure_value(tolerance)));
+    }
+
+    if let Some(error) = measurement
+        .error
+        .as_deref()
+        .filter(|error| !error.is_empty())
+    {
+        details.push(error.to_owned());
+    }
+    details.push(analysis_label.to_owned());
+
+    MeasurementPresentation {
+        status: if measurement.passed { "PASS" } else { "FAIL" },
+        name: measurement.name.clone(),
+        detail: details.join(" · "),
+        tone: if measurement.passed {
+            SemanticTone::Success
+        } else {
+            SemanticTone::Error
+        },
+    }
+}
+
+fn format_measure_value(value: f64) -> String {
+    fmt_si(value, "", 6).trim().to_owned()
+}
+
+/// Clear only the two output streams owned by the Console page. Diagnostic
+/// evidence and simulation result history live in other owners and are never
+/// touched by this action.
+fn clear_console_output(state: &mut AppState) {
+    state.clear_primary_log();
+    state.script_console.history.clear();
+}
+
+fn page_owns_clear_action(page: ConsolePage) -> bool {
+    matches!(page, ConsolePage::Console)
 }
 
 fn row(ui: &mut Ui, time: &str, source: &str, message: &str, color: egui::Color32) {
@@ -342,4 +465,93 @@ fn muted(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(10.0);
     ui.label(egui::RichText::new(text).color(t.color.text_faint));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::panels::LogSource;
+    use crate::services::drc::{DrcResult, DrcSeverity};
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+
+    #[test]
+    fn severity_tones_preserve_warning_info_and_diagnostic_meaning() {
+        assert_eq!(log_tone(LogSeverity::Error), SemanticTone::Error);
+        assert_eq!(log_tone(LogSeverity::Warning), SemanticTone::Warning);
+        assert_eq!(log_tone(LogSeverity::Info), SemanticTone::Info);
+        assert_eq!(log_tone(LogSeverity::Debug), SemanticTone::Debug);
+        assert_eq!(log_tone(LogSeverity::Trace), SemanticTone::Trace);
+
+        assert_eq!(drc_tone(DrcSeverity::Critical), SemanticTone::Error);
+        assert_eq!(drc_tone(DrcSeverity::Error), SemanticTone::Error);
+        assert_eq!(drc_tone(DrcSeverity::Warning), SemanticTone::Warning);
+        assert_eq!(drc_tone(DrcSeverity::Info), SemanticTone::Info);
+    }
+
+    #[test]
+    fn measurement_rows_are_derived_from_structured_fields() {
+        let passing = rspice_core::MeasureResult {
+            name: "gain_margin".to_owned(),
+            value: Some(1.2e-3),
+            error: None,
+            passed: true,
+            expected: Some(1.0e-3),
+            tolerance: Some(0.25e-3),
+        };
+        let row = measurement_presentation(&passing, "Transient");
+        assert_eq!(row.status, "PASS");
+        assert_eq!(row.name, "gain_margin");
+        assert_eq!(row.tone, SemanticTone::Success);
+        assert!(row.detail.contains("value 1.200000 m"));
+        assert!(row.detail.contains("goal 1.000000 m ± 250.000000 µ"));
+        assert!(row.detail.contains("deviation 200.000000 µ"));
+        assert!(row.detail.ends_with("Transient"));
+
+        let failed = rspice_core::MeasureResult::failed("rise_time", "crossing not found");
+        let row = measurement_presentation(&failed, "TRAN (10 ms)");
+        assert_eq!(row.status, "FAIL");
+        assert_eq!(row.name, "rise_time");
+        assert_eq!(row.tone, SemanticTone::Error);
+        assert!(row.detail.contains("no computed value"));
+        assert!(row.detail.contains("crossing not found"));
+        assert!(row.detail.ends_with("TRAN (10 ms)"));
+    }
+
+    #[test]
+    fn only_console_exposes_the_clear_action() {
+        assert!(page_owns_clear_action(ConsolePage::Console));
+        assert!(!page_owns_clear_action(ConsolePage::Problems));
+        assert!(!page_owns_clear_action(ConsolePage::Measurements));
+        assert!(!page_owns_clear_action(ConsolePage::TaskLog));
+    }
+
+    #[test]
+    fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
+        let mut state = AppState::default();
+        state
+            .log_buffer
+            .warning(LogSource::Simulation, "visible console warning");
+        state.script_console.input_buffer = "pending command".to_owned();
+        state.script_console.history.push(ConsoleHistoryItem {
+            command: "help".to_owned(),
+            output: Default::default(),
+        });
+        state.dialogs.drc_results = Some(DrcResult::new());
+
+        let measurement = rspice_core::MeasureResult::success("gain", 42.0);
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_measurements(vec![measurement]);
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        state.simulation.runs.push(run);
+
+        clear_console_output(&mut state);
+
+        assert!(state.log_buffer.is_empty());
+        assert!(state.script_console.history.is_empty());
+        assert_eq!(state.script_console.input_buffer, "pending command");
+        assert!(state.dialogs.drc_results.is_some());
+        assert_eq!(state.simulation.runs.len(), 1);
+        assert_eq!(state.simulation.runs[0].analyses[0].measurements.len(), 1);
+    }
 }

@@ -37,7 +37,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         })
         .inner;
     if scrim.clicked() {
-        app.state.workbench.drawer = None;
+        app.state.workbench.close_drawer();
         return;
     }
 

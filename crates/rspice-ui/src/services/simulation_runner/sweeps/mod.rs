@@ -11,6 +11,7 @@ mod sweep_points;
 mod types;
 
 pub(crate) use sweep_points::expand_step_sweep_values;
+pub(crate) use types::{REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END};
 
 pub use corner::{
     run_corner_analysis, run_corner_analysis_with_config,
@@ -21,6 +22,6 @@ pub use parametric::{
     run_parametric_analysis_with_config_and_source_path, run_parametric_analysis_with_source_path,
 };
 pub use types::{
-    CornerBaseMode, CornerData, CornerFrequencySweep, CornerProcess, CornerRunConfig,
-    ParametricData, TempRunConfig,
+    CornerBaseMode, CornerData, CornerFrequencySweep, CornerModelBinding, CornerProcess,
+    CornerRunConfig, ParametricData, TempRunConfig,
 };

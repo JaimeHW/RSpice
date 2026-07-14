@@ -1,4 +1,4 @@
-use super::netlist_mutation::{apply_process_corner, apply_voltage_corner};
+use super::netlist_mutation::apply_voltage_corner;
 use super::types::{
     CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig, SweepPointResult,
 };
@@ -68,7 +68,6 @@ pub(super) fn run_corner_sweep(
         }
 
         let mut corner_netlist = netlist.clone();
-        apply_process_corner(&mut corner_netlist, point.process);
         apply_voltage_corner(&mut corner_netlist, point.voltage, nominal_voltage)?;
 
         let mut sim_config = super::super::build_engine_config(&corner_netlist, None);

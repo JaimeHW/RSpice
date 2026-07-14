@@ -43,7 +43,19 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                     separator(ui);
                 }
 
-                workspace_tools(ui, app, layout);
+                // Context tools own the flexible middle lane. The mockup
+                // keeps navigator/run/inspector controls reachable and lets
+                // this lane scroll when a dense engineering toolbar exceeds
+                // the tablet or phone budget.
+                let context_width = context_tools_width(ui.available_width(), layout);
+                egui::ScrollArea::horizontal()
+                    .id_salt("workbench.context_toolbar.tools")
+                    .max_width(context_width)
+                    .auto_shrink([false, true])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.horizontal_centered(|ui| workspace_tools(ui, app, layout));
+                    });
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if layout.width_class.uses_drawers()
@@ -59,12 +71,38 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         app.state.workbench.toggle_drawer(Drawer::Inspector);
                     }
                     run_controls(ui, app, layout);
-                    if !layout.width_class.is_phone() {
+                    if layout.show_pvt_selector {
                         pvt_selector(ui, app);
                     }
                 });
             });
         });
+}
+
+fn context_tools_width(available_width: f32, layout: LayoutSpec) -> f32 {
+    (available_width - trailing_controls_width(layout)).max(1.0)
+}
+
+fn trailing_controls_width(layout: LayoutSpec) -> f32 {
+    const TOOLBAR_GAP: f32 = 3.0;
+    let run_width = if layout.width_class.is_phone() {
+        100.0
+    } else {
+        132.0
+    };
+    let mut width = run_width;
+    let mut controls = 1;
+    if layout.show_pvt_selector {
+        width += 96.0;
+        controls += 1;
+    }
+    if layout.width_class.uses_drawers() {
+        width += 36.0;
+        controls += 1;
+    }
+    // One gap separates the flexible context lane from the trailing lane;
+    // the remaining gaps separate controls within that lane.
+    width + controls as f32 * TOOLBAR_GAP
 }
 
 fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -354,25 +392,53 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
+    let reference = app.state.sim_setup.reference_pvt;
     egui::ComboBox::from_id_salt("workbench.pvt")
         .selected_text(
             egui::RichText::new(format!(
-                "{} · 27 °C",
-                app.state.workbench.corner.to_uppercase()
+                "{} · {} °C",
+                reference.process.short_name(),
+                pvt_temperature_label(reference.temperature_celsius),
             ))
             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
             .color(t.color.text),
         )
         .width(96.0)
         .show_ui(ui, |ui| {
-            for corner in ["ff", "fs", "tt", "sf", "ss"] {
-                ui.selectable_value(
-                    &mut app.state.workbench.corner,
-                    corner.to_owned(),
-                    corner.to_uppercase(),
-                );
+            use crate::simulation::dialog::corner::ProcessCorner;
+            for process in [
+                ProcessCorner::FF,
+                ProcessCorner::FS,
+                ProcessCorner::TT,
+                ProcessCorner::SF,
+                ProcessCorner::SS,
+            ] {
+                for temperature in [-40.0, 27.0, 125.0] {
+                    let selected = reference.process == process
+                        && (reference.temperature_celsius - temperature).abs() < f64::EPSILON;
+                    let label = format!(
+                        "{} · {} °C",
+                        process.short_name(),
+                        pvt_temperature_label(temperature)
+                    );
+                    if ui.selectable_label(selected, label).clicked() {
+                        app.state
+                            .sim_setup
+                            .set_reference_pvt(process, temperature)
+                            .expect("the mockup-defined reference PVT points are valid");
+                    }
+                }
             }
         });
+}
+
+fn pvt_temperature_label(value: f64) -> String {
+    let text = if value.fract().abs() < f64::EPSILON {
+        format!("{value:.0}")
+    } else {
+        value.to_string()
+    };
+    text.replace('-', "−")
 }
 
 fn separator(ui: &mut egui::Ui) {
@@ -392,10 +458,26 @@ fn label_width(label: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::state::WorkbenchState;
 
     #[test]
     fn long_toolbar_labels_remain_bounded() {
         assert_eq!(label_width("Run"), 76.0);
         assert!(label_width("A very long engineering command label") <= 162.0);
+    }
+
+    #[test]
+    fn responsive_toolbar_reserves_fixed_trailing_controls() {
+        let tablet = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchState::default());
+        let available_after_navigator = 780.0;
+        assert_eq!(trailing_controls_width(tablet), 273.0);
+        assert_eq!(
+            context_tools_width(available_after_navigator, tablet),
+            507.0
+        );
+
+        let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
+        assert_eq!(trailing_controls_width(phone), 142.0);
+        assert!(context_tools_width(336.0, phone) > 0.0);
     }
 }

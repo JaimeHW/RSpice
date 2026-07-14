@@ -100,13 +100,16 @@ pub use stb::{
     StbData, run_stb_analysis, run_stb_analysis_with_source_path,
     run_stb_analysis_with_sweep_and_source_path,
 };
-pub(crate) use sweeps::expand_step_sweep_values;
 pub use sweeps::{
-    CornerBaseMode, CornerData, CornerFrequencySweep, CornerProcess, CornerRunConfig,
-    ParametricData, TempRunConfig, run_corner_analysis, run_corner_analysis_with_config,
-    run_corner_analysis_with_config_and_source_path, run_corner_analysis_with_source_path,
-    run_parametric_analysis, run_parametric_analysis_with_config,
-    run_parametric_analysis_with_config_and_source_path, run_parametric_analysis_with_source_path,
+    CornerBaseMode, CornerData, CornerFrequencySweep, CornerModelBinding, CornerProcess,
+    CornerRunConfig, ParametricData, TempRunConfig, run_corner_analysis,
+    run_corner_analysis_with_config, run_corner_analysis_with_config_and_source_path,
+    run_corner_analysis_with_source_path, run_parametric_analysis,
+    run_parametric_analysis_with_config, run_parametric_analysis_with_config_and_source_path,
+    run_parametric_analysis_with_source_path,
+};
+pub(crate) use sweeps::{
+    REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, expand_step_sweep_values,
 };
 pub use tf::{
     TfData, TfFrequencySweep, TfRunConfig, run_tf_analysis, run_tf_analysis_with_config,

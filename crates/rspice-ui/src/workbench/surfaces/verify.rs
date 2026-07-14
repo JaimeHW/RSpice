@@ -338,6 +338,7 @@ fn history(ui: &mut Ui, app: &mut RSpiceApp) {
         if app.state.simulation.runs.is_empty() {
             ui.label("No simulation runs have produced verification evidence.");
         }
+        let mut selected_run = None;
         for (index, run) in app.state.simulation.runs.iter().enumerate() {
             ui.horizontal(|ui| {
                 status_dot(
@@ -355,10 +356,14 @@ fn history(ui: &mut Ui, app: &mut RSpiceApp) {
                     run.elapsed_time
                 ));
                 if ui.button("Open dataset").clicked() {
-                    app.state.simulation.active_run_idx = Some(index);
-                    app.state.workbench.workspace = super::super::state::Workspace::Results;
+                    selected_run = Some(index);
                 }
             });
+        }
+        if selected_run.is_some_and(|index| app.state.simulation.select_run(index)) {
+            app.state
+                .workbench
+                .activate(super::super::state::Workspace::Results);
         }
     });
 }

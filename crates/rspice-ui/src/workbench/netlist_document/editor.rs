@@ -1,5 +1,6 @@
-//! The editable netlist surface: syntax-highlighted `TextEdit`, a gutter
-//! with line numbers and diagnostic/diff pips, and the diagnostics strip.
+//! The netlist source surface: a selectable, immutable generated view or an
+//! editable project-owned `TextEdit`, plus line numbers, diagnostic/diff pips,
+//! and the diagnostics strip.
 //!
 //! Diagnostics come from one debounced parse of the buffer with the same
 //! resolver the runner uses; the squiggle (underline), the gutter pip,
@@ -40,12 +41,20 @@ fn line_for_char_index(text: &str, char_index: usize) -> usize {
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let editable = state.workspace.has_editable_netlist_source();
 
     refresh_diagnostics(ui, state);
 
     // Popover keys (⇥, ↑↓, Esc) must be consumed before the TextEdit so
     // an open popover owns them.
-    let completion_keys = completion::consume_keys(ui, &state.ui.netlist);
+    let completion_keys = if editable {
+        completion::consume_keys(ui, &state.ui.netlist)
+    } else {
+        // Generated output owns no editor state. Close a popover that may have
+        // survived a transition away from an owned source document.
+        state.ui.netlist.completion_open = false;
+        (0, false, false)
+    };
 
     // Document well backdrop.
     let well = ui.available_rect_before_wrap();
@@ -75,7 +84,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
 
     let mut changed = false;
-    let mut source_changed = false;
+    let mut completion_changed = false;
     let mut cursor_line = state.ui.netlist.cursor_line;
     let mut te_output: Option<egui::text_edit::TextEditOutput> = None;
 
@@ -84,21 +93,32 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .id_salt("volta.netlist.editor")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let output = egui::TextEdit::multiline(&mut buffer)
-                    .id(editor_id())
-                    .code_editor()
-                    .font(font.clone())
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(30)
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin {
-                        left: GUTTER_W as i8,
-                        right: 12,
-                        top: 6,
-                        bottom: 6,
-                    })
-                    .layouter(&mut layouter)
-                    .show(ui);
+                let mut show_text = |text: &mut dyn egui::TextBuffer| {
+                    egui::TextEdit::multiline(text)
+                        .id(editor_id())
+                        .code_editor()
+                        .font(font.clone())
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(30)
+                        .frame(egui::Frame::NONE)
+                        .margin(egui::Margin {
+                            left: GUTTER_W as i8,
+                            right: 12,
+                            top: 6,
+                            bottom: 6,
+                        })
+                        .layouter(&mut layouter)
+                        .show(ui)
+                };
+                let output = if editable {
+                    show_text(&mut buffer)
+                } else {
+                    // `&str` implements egui's immutable `TextBuffer`: users can
+                    // focus, select, and copy generated source, but no keyboard,
+                    // paste, IME, or accessibility edit can mutate its bytes.
+                    let mut read_only = buffer.as_str();
+                    show_text(&mut read_only)
+                };
 
                 if let Some(range) = output.cursor_range {
                     cursor_line = line_for_char_index(&buffer, range.primary.index);
@@ -145,39 +165,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             });
     });
 
-    // Post-edit bookkeeping, after the buffer borrow ends.
     let now = ui.input(|input| input.time);
     state.ui.netlist.cursor_line = cursor_line;
-    if changed {
-        source_changed = true;
-        let netlist = &mut state.ui.netlist;
-        netlist.revision += 1;
-        netlist.last_edit_time = now;
-        netlist.edited_lines.insert(cursor_line);
-        // Editing makes the buffer the source of truth for runs.
-        state.workspace.netlist_source = Some(buffer.clone());
-        state.workspace.netlist_source_path = None;
-        state.workspace.set_netlist_source_dirty(true);
-    }
 
-    // Completion popover: trigger, render, and apply an acceptance.
-    if let Some(output) = &te_output
+    // Completion is an edit and therefore exists only for project-owned source.
+    if editable
+        && let Some(output) = &te_output
         && let Some((start, end, text, caret)) =
             completion::show(ui, &mut state.ui.netlist, output, &buffer, completion_keys)
     {
-        source_changed = true;
+        completion_changed = true;
         buffer.replace_range(start..end, &text);
         completion::place_caret(ui, editor_id(), caret);
-        let netlist = &mut state.ui.netlist;
-        netlist.revision += 1;
-        netlist.last_edit_time = now;
-        netlist.edited_lines.insert(cursor_line);
-        state.workspace.netlist_source = Some(buffer.clone());
-        state.workspace.netlist_source_path = None;
-        state.workspace.set_netlist_source_dirty(true);
     }
 
-    state.simulation.netlist_content = buffer;
+    // All editor writes pass through the ownership guard. Even if a future UI
+    // path reports a change for read-only content, it cannot implicitly create
+    // `workspace.netlist_source`.
+    let source_changed = (changed || completion_changed)
+        && commit_owned_source_edit(state, &buffer, cursor_line, now);
+    if !source_changed {
+        // The buffer was taken at the beginning of the frame; restore it on
+        // unchanged and generated-document frames.
+        state.simulation.netlist_content = buffer;
+    }
     if source_changed {
         super::refresh_diff_pips_from_baseline(state);
     }
@@ -185,6 +196,29 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if strip_rows > 0 {
         diagnostics_strip(ui, state, strip_rows);
     }
+}
+
+/// Commit a text/completion edit without promoting generated output to owned
+/// source. Returns whether an existing owned source actually changed.
+fn commit_owned_source_edit(
+    state: &mut AppState,
+    buffer: &str,
+    cursor_line: usize,
+    now: f64,
+) -> bool {
+    if !state
+        .workspace
+        .replace_editable_netlist_source(buffer.to_owned())
+    {
+        return false;
+    }
+
+    state.simulation.netlist_content = buffer.to_owned();
+    let netlist = &mut state.ui.netlist;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    netlist.last_edit_time = now;
+    netlist.edited_lines.insert(cursor_line);
+    true
 }
 
 /// Bottom strip: the first few diagnostics as `line N · message` rows.
@@ -461,5 +495,53 @@ mod tests {
         assert!(!text.contains("fix:"));
         assert!(text.ends_with("..."), "{text}");
         assert!(diagnostic_strip_text_fits(&text, 160.0));
+    }
+
+    #[test]
+    fn editor_commit_rejects_generated_artifact_mutation() {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = "generated\n.op\n.end\n".to_owned();
+        state.ui.netlist.revision = 4;
+
+        assert!(!commit_owned_source_edit(
+            &mut state,
+            "silently edited\n.end\n",
+            1,
+            2.5,
+        ));
+        assert!(state.workspace.netlist_source.is_none());
+        assert_eq!(state.simulation.netlist_content, "generated\n.op\n.end\n");
+        assert!(!state.workspace.netlist_source_dirty);
+        assert_eq!(state.ui.netlist.revision, 4);
+        assert!(state.ui.netlist.edited_lines.is_empty());
+    }
+
+    #[test]
+    fn editor_commit_updates_only_an_existing_owned_source() {
+        let mut state = AppState::default();
+        state.workspace.netlist_source = Some("owned\n.op\n.end\n".to_owned());
+        state.workspace.netlist_source_path = Some(std::path::PathBuf::from("imported/owned.cir"));
+        state.simulation.netlist_content = "owned\n.op\n.end\n".to_owned();
+        state.ui.netlist.revision = 9;
+
+        assert!(commit_owned_source_edit(
+            &mut state,
+            "owned\n.tran 1n 1u\n.end\n",
+            1,
+            7.25,
+        ));
+        assert_eq!(
+            state.workspace.netlist_source.as_deref(),
+            Some("owned\n.tran 1n 1u\n.end\n")
+        );
+        assert_eq!(
+            state.simulation.netlist_content,
+            "owned\n.tran 1n 1u\n.end\n"
+        );
+        assert!(state.workspace.netlist_source_path.is_none());
+        assert!(state.workspace.netlist_source_dirty);
+        assert_eq!(state.ui.netlist.revision, 10);
+        assert_eq!(state.ui.netlist.last_edit_time, 7.25);
+        assert!(state.ui.netlist.edited_lines.contains(&1));
     }
 }

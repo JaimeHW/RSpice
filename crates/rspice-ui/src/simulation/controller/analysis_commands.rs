@@ -281,4 +281,33 @@ impl SimulationController {
         }
         merged
     }
+
+    /// Inject the exact model sources selected for the nominal/reference PVT
+    /// point. The marker block lets the corner executor replace this binding
+    /// per process without retaining or double-applying the reference models.
+    pub(super) fn apply_reference_model_bindings_to_netlist(
+        netlist: &str,
+        directives: &[String],
+    ) -> String {
+        if directives.is_empty() {
+            return netlist.to_owned();
+        }
+
+        let mut lines: Vec<String> = netlist.lines().map(str::to_owned).collect();
+        let insertion_idx = lines
+            .iter()
+            .position(|line| line.trim_start().to_ascii_lowercase().starts_with(".end"))
+            .unwrap_or(lines.len());
+        let mut block = Vec::with_capacity(directives.len() + 2);
+        block.push(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_BEGIN.to_owned());
+        block.extend(directives.iter().cloned());
+        block.push(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_END.to_owned());
+        lines.splice(insertion_idx..insertion_idx, block);
+
+        let mut merged = lines.join("\n");
+        if netlist.ends_with('\n') {
+            merged.push('\n');
+        }
+        merged
+    }
 }

@@ -336,9 +336,6 @@ pub struct WorkbenchState {
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
-    /// Process corner selected by the workbench-level PVT control.
-    #[serde(default = "default_corner")]
-    pub corner: String,
     /// Filter local to the simulation analysis catalog.
     #[serde(default)]
     pub analysis_query: String,
@@ -388,10 +385,6 @@ const fn default_analysis_index() -> usize {
     crate::common::simulation_analysis_tabs::TAB_TRANSIENT
 }
 
-fn default_corner() -> String {
-    "tt".to_owned()
-}
-
 impl Default for WorkbenchState {
     fn default() -> Self {
         Self {
@@ -417,7 +410,6 @@ impl Default for WorkbenchState {
             active_analysis: default_analysis_index(),
             selected_spec: None,
             selected_model: None,
-            corner: default_corner(),
             analysis_query: String::new(),
             navigator_query: String::new(),
             command_query: String::new(),
@@ -440,11 +432,11 @@ impl WorkbenchState {
 
     pub fn activate(&mut self, workspace: Workspace) {
         if self.workspace == workspace {
-            self.drawer = None;
+            self.close_drawer();
             return;
         }
         self.workspace = workspace;
-        self.drawer = None;
+        self.close_drawer();
         self.workspace_history.retain(|entry| *entry != workspace);
         self.workspace_history.push(workspace);
         self.workspace_history.truncate(16);
@@ -464,7 +456,44 @@ impl WorkbenchState {
     }
 
     pub fn toggle_drawer(&mut self, drawer: Drawer) {
-        self.drawer = (self.drawer != Some(drawer)).then_some(drawer);
+        if self.drawer == Some(drawer) {
+            self.close_drawer();
+        } else {
+            self.drawer = Some(drawer);
+        }
+    }
+
+    pub fn close_drawer(&mut self) {
+        self.drawer = None;
+    }
+
+    /// Dismiss the navigator's current presentation. Closing a compact
+    /// drawer must not overwrite the saved desktop dock preference.
+    pub fn dismiss_navigator(&mut self) {
+        if self.drawer == Some(Drawer::Navigator) {
+            self.close_drawer();
+        } else {
+            self.navigator_visible = false;
+        }
+    }
+
+    /// Dismiss the inspector's current presentation. Closing a compact
+    /// drawer must not overwrite the saved desktop dock preference.
+    pub fn dismiss_inspector(&mut self) {
+        if self.drawer == Some(Drawer::Inspector) {
+            self.close_drawer();
+        } else {
+            self.inspector_visible = false;
+        }
+    }
+
+    /// Drawers are a compact-width navigation mechanism. Clear a transient
+    /// drawer as soon as the shell returns to a docked composition so a later
+    /// resize cannot resurrect an already-dismissed overlay.
+    pub fn reconcile_drawer_mode(&mut self, width_class: WidthClass) {
+        if !width_class.uses_drawers() {
+            self.close_drawer();
+        }
     }
 
     pub fn reset_layout(&mut self) {
@@ -476,7 +505,7 @@ impl WorkbenchState {
         self.navigator_width = default_navigator_width();
         self.inspector_width = default_inspector_width();
         self.console_height = default_console_height();
-        self.drawer = None;
+        self.close_drawer();
     }
 }
 
@@ -511,5 +540,43 @@ mod tests {
             state.workspace_history,
             vec![Workspace::Results, Workspace::Design]
         );
+    }
+
+    #[test]
+    fn toggling_the_active_drawer_closes_it_deterministically() {
+        let mut state = WorkbenchState::default();
+
+        state.toggle_drawer(Drawer::Navigator);
+        assert_eq!(state.drawer, Some(Drawer::Navigator));
+        state.toggle_drawer(Drawer::Navigator);
+        assert_eq!(state.drawer, None);
+
+        state.toggle_drawer(Drawer::Navigator);
+        state.dismiss_navigator();
+        assert!(state.navigator_visible);
+        assert_eq!(state.drawer, None);
+        state.dismiss_navigator();
+        assert!(!state.navigator_visible);
+
+        state.navigator_visible = true;
+        state.toggle_drawer(Drawer::Navigator);
+        state.toggle_drawer(Drawer::Inspector);
+        assert_eq!(state.drawer, Some(Drawer::Inspector));
+        state.dismiss_inspector();
+        assert!(state.inspector_visible);
+        assert_eq!(state.drawer, None);
+
+        state.dismiss_inspector();
+        assert!(!state.inspector_visible);
+    }
+
+    #[test]
+    fn docked_composition_clears_transient_drawer_state() {
+        let mut state = WorkbenchState::default();
+        state.toggle_drawer(Drawer::Navigator);
+
+        state.reconcile_drawer_mode(WidthClass::Desktop);
+
+        assert_eq!(state.drawer, None);
     }
 }

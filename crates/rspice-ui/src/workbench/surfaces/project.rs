@@ -372,7 +372,11 @@ fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
                     .as_deref()
                     .unwrap_or("Not attached"),
             );
-            property_row(ui, "Process corner", &app.state.workbench.corner);
+            property_row(
+                ui,
+                "Process corner",
+                app.state.sim_setup.reference_pvt.process.short_name(),
+            );
             property_row(
                 ui,
                 "Model libraries",

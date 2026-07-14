@@ -1080,6 +1080,18 @@ mod tests {
                 stop_time: 5.0e-6,
                 step_time: 10.0e-9,
             },
+            model_bindings: vec![
+                crate::services::simulation_runner::CornerModelBinding {
+                    process: crate::services::simulation_runner::CornerProcess::SS,
+                    library_path: "C:/pdk/models.lib".to_owned(),
+                    section: Some("ss".to_owned()),
+                },
+                crate::services::simulation_runner::CornerModelBinding {
+                    process: crate::services::simulation_runner::CornerProcess::FF,
+                    library_path: "C:/pdk/models.lib".to_owned(),
+                    section: Some("ff".to_owned()),
+                },
+            ],
         };
         let request = SimulationRequest::Spec {
             spec: Box::new(AnalysisSpec::Corner),
@@ -1696,6 +1708,7 @@ mod tests {
         assert_eq!(actual.temperatures_c, expected.temperatures_c);
         assert_eq!(actual.full_matrix, expected.full_matrix);
         assert_eq!(actual.nominal_voltage, expected.nominal_voltage);
+        assert_eq!(actual.model_bindings, expected.model_bindings);
         assert_corner_base_mode_matches(&actual.base_mode, &expected.base_mode);
     }
 
@@ -1947,6 +1960,34 @@ pub(crate) struct WorkerCornerRunConfig {
     pub full_matrix: bool,
     pub nominal_voltage: Option<f64>,
     pub base_mode: WorkerCornerBaseMode,
+    pub model_bindings: Vec<WorkerCornerModelBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WorkerCornerModelBinding {
+    pub process: WorkerCornerProcess,
+    pub library_path: String,
+    pub section: Option<String>,
+}
+
+impl From<&crate::services::simulation_runner::CornerModelBinding> for WorkerCornerModelBinding {
+    fn from(value: &crate::services::simulation_runner::CornerModelBinding) -> Self {
+        Self {
+            process: WorkerCornerProcess::from(value.process),
+            library_path: value.library_path.clone(),
+            section: value.section.clone(),
+        }
+    }
+}
+
+impl From<WorkerCornerModelBinding> for crate::services::simulation_runner::CornerModelBinding {
+    fn from(value: WorkerCornerModelBinding) -> Self {
+        Self {
+            process: crate::services::simulation_runner::CornerProcess::from(value.process),
+            library_path: value.library_path,
+            section: value.section,
+        }
+    }
 }
 
 impl From<&crate::services::simulation_runner::CornerRunConfig> for WorkerCornerRunConfig {
@@ -1963,6 +2004,11 @@ impl From<&crate::services::simulation_runner::CornerRunConfig> for WorkerCorner
             full_matrix: value.full_matrix,
             nominal_voltage: value.nominal_voltage,
             base_mode: WorkerCornerBaseMode::from(&value.base_mode),
+            model_bindings: value
+                .model_bindings
+                .iter()
+                .map(WorkerCornerModelBinding::from)
+                .collect(),
         }
     }
 }
@@ -1980,6 +2026,11 @@ impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerR
             full_matrix: value.full_matrix,
             nominal_voltage: value.nominal_voltage,
             base_mode: crate::services::simulation_runner::CornerBaseMode::from(value.base_mode),
+            model_bindings: value
+                .model_bindings
+                .into_iter()
+                .map(crate::services::simulation_runner::CornerModelBinding::from)
+                .collect(),
         }
     }
 }

@@ -492,6 +492,66 @@ impl ProjectWorkspace {
         self.netlist_source_dirty = dirty;
     }
 
+    /// Whether the Netlist workspace owns an editable source deck.
+    ///
+    /// A missing source is intentional: in that state the editor is showing a
+    /// generated schematic artifact and must never promote edits implicitly.
+    pub fn has_editable_netlist_source(&self) -> bool {
+        self.netlist_source.is_some()
+    }
+
+    /// Create a project-owned source deck from the current generated artifact.
+    ///
+    /// This is the one ownership transition used by the explicit Netlist
+    /// workspace "Make editable copy" action. Creating the source changes the
+    /// persisted project, so it participates in the ordinary project dirty and
+    /// save lifecycle on both native and browser targets.
+    pub fn make_netlist_editable_copy(&mut self, generated: &str) -> bool {
+        if self.netlist_source.is_some() {
+            return false;
+        }
+
+        self.netlist_source = Some(generated.to_owned());
+        self.netlist_source_path = None;
+        self.netlist_source_dirty = true;
+        true
+    }
+
+    /// Replace an existing project-owned source deck.
+    ///
+    /// Returns `false` for generated artifacts instead of silently creating an
+    /// editable source. That guard makes editor, completion, and tuner writes
+    /// safe even if a caller accidentally reaches a mutation path while the
+    /// generated document is active.
+    pub fn replace_editable_netlist_source(&mut self, source: String) -> bool {
+        let Some(owned_source) = self.netlist_source.as_mut() else {
+            return false;
+        };
+
+        if *owned_source == source {
+            return false;
+        }
+
+        *owned_source = source;
+        self.netlist_source_path = None;
+        self.netlist_source_dirty = true;
+        true
+    }
+
+    /// Remove the project-owned source and return to schematic-generated output.
+    ///
+    /// Removing persisted source ownership is itself a project modification;
+    /// the dirty bit remains set until an actual project save succeeds.
+    pub fn return_to_generated_netlist(&mut self) -> bool {
+        if self.netlist_source.take().is_none() {
+            return false;
+        }
+
+        self.netlist_source_path = None;
+        self.netlist_source_dirty = true;
+        true
+    }
+
     pub fn open_view(&mut self, reference: CellViewRef, view_type: ViewType) {
         self.active_view = reference.clone();
         if !self
@@ -820,5 +880,64 @@ mod tests {
             project.path.as_deref(),
             Some(Path::new("moved-copy.rspiceproj"))
         );
+    }
+
+    #[test]
+    fn generated_netlist_cannot_be_promoted_by_an_editor_write() {
+        let mut workspace = ProjectWorkspace::default();
+
+        assert!(!workspace.replace_editable_netlist_source("edited\n.end\n".to_owned()));
+        assert!(workspace.netlist_source.is_none());
+        assert!(!workspace.netlist_source_dirty);
+        assert!(!workspace.any_dirty());
+    }
+
+    #[test]
+    fn explicit_editable_copy_enters_project_dirty_lifecycle() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.netlist_source_path = Some(PathBuf::from("generated.sp"));
+
+        assert!(workspace.make_netlist_editable_copy("generated\n.op\n.end\n"));
+        assert_eq!(
+            workspace.netlist_source.as_deref(),
+            Some("generated\n.op\n.end\n")
+        );
+        assert!(workspace.netlist_source_path.is_none());
+        assert!(workspace.netlist_source_dirty);
+        assert!(workspace.any_dirty());
+
+        workspace.mark_all_clean();
+        assert!(workspace.has_editable_netlist_source());
+        assert!(!workspace.netlist_source_dirty);
+        assert!(!workspace.any_dirty());
+    }
+
+    #[test]
+    fn editable_copy_does_not_overwrite_existing_owned_source() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.netlist_source = Some("owned\n.end\n".to_owned());
+        workspace.netlist_source_path = Some(PathBuf::from("owned.cir"));
+
+        assert!(!workspace.make_netlist_editable_copy("generated\n.end\n"));
+        assert_eq!(workspace.netlist_source.as_deref(), Some("owned\n.end\n"));
+        assert_eq!(
+            workspace.netlist_source_path.as_deref(),
+            Some(Path::new("owned.cir"))
+        );
+        assert!(!workspace.netlist_source_dirty);
+    }
+
+    #[test]
+    fn returning_to_generated_output_is_saved_as_a_project_change() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.netlist_source = Some("owned\n.end\n".to_owned());
+        workspace.netlist_source_path = Some(PathBuf::from("owned.cir"));
+
+        assert!(workspace.return_to_generated_netlist());
+        assert!(workspace.netlist_source.is_none());
+        assert!(workspace.netlist_source_path.is_none());
+        assert!(workspace.netlist_source_dirty);
+        assert!(workspace.any_dirty());
+        assert!(!workspace.return_to_generated_netlist());
     }
 }

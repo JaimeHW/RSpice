@@ -29,6 +29,12 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
+    let close_label = if app.state.workbench.drawer == Some(super::super::state::Drawer::Inspector)
+    {
+        "Close inspector"
+    } else {
+        "Hide inspector"
+    };
     ui.horizontal(|ui| {
         ui.add_space(8.0);
         ui.label(
@@ -40,13 +46,13 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             if icon_button(
                 ui,
                 WorkbenchIcon::Close,
-                "Hide inspector",
+                close_label,
                 false,
                 egui::vec2(30.0, 30.0),
             )
             .clicked()
             {
-                app.state.workbench.inspector_visible = false;
+                app.state.workbench.dismiss_inspector();
             }
         });
     });
@@ -202,8 +208,19 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         status_dot(ui, Tokens::get(ui.ctx()).color.ok, "Configuration valid");
     }
     section_header(ui, "Execution context", None);
-    property_row(ui, "Corner", &app.state.workbench.corner.to_uppercase());
-    property_row(ui, "Temperature", "27 °C");
+    property_row(
+        ui,
+        "Corner",
+        app.state.sim_setup.reference_pvt.process.short_name(),
+    );
+    property_row(
+        ui,
+        "Temperature",
+        &format!(
+            "{} °C",
+            app.state.sim_setup.reference_pvt.temperature_celsius
+        ),
+    );
     property_row(
         ui,
         "Enabled analyses",
@@ -254,6 +271,8 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         property_row(ui, "Waveforms", &analysis.waveforms.len().to_string());
         property_row(ui, "Measurements", &analysis.measurements.len().to_string());
     }
+    ui.add_space(8.0);
+    crate::workbench::result_document::right_panel(ui, &mut app.state);
 }
 
 fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
