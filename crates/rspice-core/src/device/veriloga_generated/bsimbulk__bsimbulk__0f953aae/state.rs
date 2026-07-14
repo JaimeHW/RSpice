@@ -2926,4 +2926,8 @@ impl Instance {
             0.0
         }
     }
+    #[inline]
+    pub fn limiter_converged(&self) -> bool {
+        true
+    }
 }

@@ -1184,6 +1184,14 @@ mod tests {
         let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
 
         assert!(
+            registry.contains("Self::Device0(device) => device.limiter_converged()"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("Self::Device1(device) => device.limiter_converged()"),
+            "{registry}"
+        );
+        assert!(
             registry.contains(
                 "pub fn noise_descriptors(&self) -> &'static [super::GeneratedNoiseDescriptor]"
             ),
@@ -1221,6 +1229,8 @@ mod tests {
         write_registry(&root, &[]).expect("write empty generated registry");
         let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
 
+        assert!(registry.contains("pub fn limiter_converged(&self) -> bool"));
+        assert!(registry.contains("        true\n"));
         assert!(registry.contains("        &[]"), "{registry}");
         assert!(
             registry.contains(
@@ -1275,6 +1285,22 @@ fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
             )?;
         }
         out.push_str("            (active, snapshot) => *active = snapshot,\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
+    out.push_str("    pub fn limiter_converged(&self) -> bool {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        true\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.limiter_converged(),"
+            )?;
+        }
         out.push_str("        }\n");
     }
     out.push_str("    }\n");

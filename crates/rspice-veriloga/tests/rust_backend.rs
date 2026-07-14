@@ -165,7 +165,10 @@ endmodule
         1
     );
     assert_eq!(state.matches("scalar_limit_previous,\n").count(), 2);
-    assert!(stamp.contains("self.scalar_limit_active=false;"), "{stamp}");
+    assert!(
+        stamp.contains("if ctx.limiting_enabled(){self.scalar_limit_active=false;}"),
+        "{stamp}"
+    );
     assert!(
         stamp.contains("self.scalar_limit_active|=candidate!=proposed"),
         "{stamp}"
@@ -178,15 +181,63 @@ endmodule
         stamp.contains("self.scalar_limit_initialized[0]=true"),
         "{stamp}"
     );
-    assert!(stamp.contains("-((1.0)*("), "{stamp}");
-    assert!(stamp.contains("-((ddt_scale)*("), "{stamp}");
+    assert!(
+        stamp.contains("-((1.0)*(if ctx.limiting_enabled(){"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("-((ddt_scale)*(if ctx.limiting_enabled(){"),
+        "{stamp}"
+    );
     let reactive = stamp
         .split_once("pub fn stamp_reactive")
         .expect("reactive stamp")
         .1;
     assert!(!reactive.contains("scalar_limit_previous"), "{reactive}");
     assert!(!reactive.contains("scalar_limit_active"), "{reactive}");
-    assert_generated_rust_compiles(&generated);
+    assert_generated_rust_compiles_with_tests(
+        &generated,
+        r#"
+#[test]
+fn limiter_probe_modes_are_pure_and_newton_mode_tracks_convergence() {
+    use generated_device::Instance;
+    use runtime::{GeneratedEvalContext, GeneratedStamper};
+
+    fn stamp(instance: &mut Instance, voltages: &[f64], limiting_enabled: bool) -> f64 {
+        let context = GeneratedEvalContext::with_limiting_enabled(voltages, limiting_enabled);
+        let mut touched = 0.0;
+        let mut stamper = GeneratedStamper { touched: &mut touched };
+        instance.stamp(&context, &mut stamper);
+        touched
+    }
+
+    let mut instance = Instance::new(&[0, 1]);
+    stamp(&mut instance, &[0.0, 0.0], true);
+    assert!(instance.limiter_converged());
+
+    stamp(&mut instance, &[10.0, 0.0], true);
+    assert!(!instance.limiter_converged());
+    let previous = instance.scalar_limit_previous.clone();
+    let initialized = instance.scalar_limit_initialized.clone();
+    let active = instance.scalar_limit_active;
+
+    let static_current = stamp(&mut instance, &[-10.0, 0.0], false);
+    assert!((static_current.abs() - 10.0).abs() <= 1.0e-12, "{static_current}");
+    assert_eq!(instance.scalar_limit_previous.as_ref(), previous.as_ref());
+    assert_eq!(instance.scalar_limit_initialized.as_ref(), initialized.as_ref());
+    assert_eq!(instance.scalar_limit_active, active);
+
+    let small_signal_current = stamp(&mut instance, &[20.0, 0.0], false);
+    assert!((small_signal_current.abs() - 20.0).abs() <= 1.0e-12, "{small_signal_current}");
+    assert_eq!(instance.scalar_limit_previous.as_ref(), previous.as_ref());
+    assert_eq!(instance.scalar_limit_initialized.as_ref(), initialized.as_ref());
+    assert_eq!(instance.scalar_limit_active, active);
+
+    stamp(&mut instance, &[0.7, 0.0], true);
+    assert!(instance.limiter_converged());
+}
+"#,
+    );
 }
 
 #[test]
@@ -13827,6 +13878,10 @@ fn assert_bool_condition_locals_are_not_self_contradictory(stamp: &str) {
 }
 
 fn assert_generated_rust_compiles(generated: &GeneratedRustDevice) {
+    assert_generated_rust_compiles_with_tests(generated, "");
+}
+
+fn assert_generated_rust_compiles_with_tests(generated: &GeneratedRustDevice, tests: &str) {
     let temp = temp_dir("rspice-rust-backend-compile");
 
     write_generated_device(&temp, generated).expect("write generated device");
@@ -13928,6 +13983,7 @@ pub mod runtime {{
     pub struct GeneratedEvalContext<'a> {{
         voltages: &'a [f64],
         analysis: GeneratedAnalysisKind,
+        limiting_enabled: bool,
     }}
 
     impl<'a> GeneratedEvalContext<'a> {{
@@ -13935,6 +13991,15 @@ pub mod runtime {{
             Self {{
                 voltages,
                 analysis: GeneratedAnalysisKind::Dc,
+                limiting_enabled: true,
+            }}
+        }}
+
+        pub fn with_limiting_enabled(voltages: &'a [f64], limiting_enabled: bool) -> Self {{
+            Self {{
+                voltages,
+                analysis: GeneratedAnalysisKind::Dc,
+                limiting_enabled,
             }}
         }}
 
@@ -14002,6 +14067,8 @@ pub mod runtime {{
                 GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
             )
         }}
+
+        pub fn limiting_enabled(&self) -> bool {{ self.limiting_enabled }}
 
         pub fn analysis_initial_step(&self) -> bool {{ false }}
 
@@ -14603,23 +14670,37 @@ pub mod runtime {{
 
 #[path = "{}"]
 pub mod generated_device;
+
+{}
 "#,
             render_runtime_support_module(),
             temp.join(&generated.folder_name)
                 .join("mod.rs")
                 .display()
                 .to_string()
-                .replace('\\', "\\\\")
+                .replace('\\', "\\\\"),
+            tests,
         ),
     )
     .expect("write compile smoke file");
 
-    let output = std::process::Command::new(std::env::var("RUSTC").unwrap_or("rustc".to_string()))
-        .arg("--edition=2024")
-        .arg("--crate-type=lib")
+    let output_path = if tests.is_empty() {
+        temp.join("compile_smoke.rlib")
+    } else {
+        temp.join("compile_smoke_tests.exe")
+    };
+    let mut command =
+        std::process::Command::new(std::env::var("RUSTC").unwrap_or("rustc".to_string()));
+    command.arg("--edition=2024");
+    if tests.is_empty() {
+        command.arg("--crate-type=lib");
+    } else {
+        command.arg("--test");
+    }
+    let output = command
         .arg(&lib)
         .arg("-o")
-        .arg(temp.join("compile_smoke.rlib"))
+        .arg(&output_path)
         .output()
         .expect("run rustc");
 
@@ -14629,6 +14710,18 @@ pub mod generated_device;
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+
+    if !tests.is_empty() {
+        let output = std::process::Command::new(&output_path)
+            .output()
+            .expect("run generated rust tests");
+        assert!(
+            output.status.success(),
+            "generated rust tests failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     let _ = std::fs::remove_dir_all(temp);
 }
@@ -14772,6 +14865,8 @@ pub mod runtime {{
                 GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
             )
         }}
+
+        pub fn limiting_enabled(&self) -> bool {{ true }}
 
         pub fn analysis_initial_step(&self) -> bool {{ false }}
 

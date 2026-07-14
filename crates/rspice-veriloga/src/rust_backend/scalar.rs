@@ -566,7 +566,7 @@ fn generate_stamp_file(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
     if !limit_slots.is_empty() {
-        out.push_str("        self.scalar_limit_active=false;\n");
+        out.push_str("        if ctx.limiting_enabled(){self.scalar_limit_active=false;}\n");
     }
     out.push_str("        let n=self.nodes;\n");
     out.push_str("        let nodes=n;\n");
@@ -1678,7 +1678,7 @@ pub(super) fn scalar_state_extensions(
     let mut methods = String::new();
 
     push_scalar_static_cache_state_fields(&mut extensions, static_cache);
-    push_scalar_limit_state_fields(&mut extensions, limit_slots, &mut methods);
+    push_scalar_limit_state_fields(&mut extensions, limit_slots);
 
     if !static_cache.instance_values.is_empty() {
         methods.push_str("\n    #[inline]\n");
@@ -1765,7 +1765,6 @@ pub(super) fn scalar_state_extensions(
 fn push_scalar_limit_state_fields(
     extensions: &mut device::StateFileExtensions,
     limit_slots: &ScalarLimitSlots,
-    methods: &mut String,
 ) {
     if limit_slots.is_empty() {
         return;
@@ -1786,9 +1785,7 @@ fn push_scalar_limit_state_fields(
     extensions.restore_initializers.push_str(
         "            scalar_limit_previous,\n            scalar_limit_initialized,\n            scalar_limit_active,\n",
     );
-    methods.push_str(
-        "\n    #[inline]\n    pub fn limiter_converged(&self) -> bool {\n        !self.scalar_limit_active\n    }\n",
-    );
+    extensions.limiter_converged_expr = "!self.scalar_limit_active".to_string();
 }
 
 fn cached_values_need_param_given(artifact: &CanonicalIrArtifact, values: &[ValueId]) -> bool {
@@ -2448,7 +2445,7 @@ fn affine_corrected_root_expr(
     };
     let correction = value_ref(artifact, parameter_fields, correction, context)?;
     Ok(format!(
-        "(({root_expr})-(({derivative_scale})*({correction})))"
+        "(({root_expr})-(({derivative_scale})*(if ctx.limiting_enabled(){{{correction}}}else{{0.0}})))"
     ))
 }
 
@@ -3548,7 +3545,7 @@ fn emit_value_expr(
                         )
                     })?;
                     format!(
-                        "if self.scalar_limit_initialized[{slot}]{{self.scalar_limit_previous[{slot}]}}else{{{proposed}}}"
+                        "if ctx.limiting_enabled(){{if self.scalar_limit_initialized[{slot}]{{self.scalar_limit_previous[{slot}]}}else{{{proposed}}}}}else{{{proposed}}}"
                     )
                 }
                 DdtEmitMode::ReactiveLinearized => proposed,
@@ -3577,7 +3574,7 @@ fn emit_value_expr(
                         )
                     })?;
                     format!(
-                        "{{let proposed={proposed};let candidate={candidate};self.scalar_limit_active|=candidate!=proposed;self.scalar_limit_previous[{slot}]=candidate;self.scalar_limit_initialized[{slot}]=true;candidate}}"
+                        "{{let proposed={proposed};if ctx.limiting_enabled(){{let candidate={candidate};self.scalar_limit_active|=candidate!=proposed;self.scalar_limit_previous[{slot}]=candidate;self.scalar_limit_initialized[{slot}]=true;candidate}}else{{proposed}}}}"
                     )
                 }
                 DdtEmitMode::ReactiveLinearized => proposed,

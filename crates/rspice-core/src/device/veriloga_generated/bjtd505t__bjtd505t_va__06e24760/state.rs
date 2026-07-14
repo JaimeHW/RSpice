@@ -754,6 +754,10 @@ impl Instance {
             0.0
         }
     }
+    #[inline]
+    pub fn limiter_converged(&self) -> bool {
+        true
+    }
 
     #[inline]
     fn recompute_instance_static(&mut self) {

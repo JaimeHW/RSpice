@@ -222,6 +222,53 @@ impl GeneratedBuiltinKind {
         }
     }
 
+    pub fn limiter_converged(&self) -> bool {
+        match self {
+            Self::Device0(device) => device.limiter_converged(),
+            Self::Device1(device) => device.limiter_converged(),
+            Self::Device2(device) => device.limiter_converged(),
+            Self::Device3(device) => device.limiter_converged(),
+            Self::Device4(device) => device.limiter_converged(),
+            Self::Device5(device) => device.limiter_converged(),
+            Self::Device6(device) => device.limiter_converged(),
+            Self::Device7(device) => device.limiter_converged(),
+            Self::Device8(device) => device.limiter_converged(),
+            Self::Device9(device) => device.limiter_converged(),
+            Self::Device10(device) => device.limiter_converged(),
+            Self::Device11(device) => device.limiter_converged(),
+            Self::Device12(device) => device.limiter_converged(),
+            Self::Device13(device) => device.limiter_converged(),
+            Self::Device14(device) => device.limiter_converged(),
+            Self::Device15(device) => device.limiter_converged(),
+            Self::Device16(device) => device.limiter_converged(),
+            Self::Device17(device) => device.limiter_converged(),
+            Self::Device18(device) => device.limiter_converged(),
+            Self::Device19(device) => device.limiter_converged(),
+            Self::Device20(device) => device.limiter_converged(),
+            Self::Device21(device) => device.limiter_converged(),
+            Self::Device22(device) => device.limiter_converged(),
+            Self::Device23(device) => device.limiter_converged(),
+            Self::Device24(device) => device.limiter_converged(),
+            Self::Device25(device) => device.limiter_converged(),
+            Self::Device26(device) => device.limiter_converged(),
+            Self::Device27(device) => device.limiter_converged(),
+            Self::Device28(device) => device.limiter_converged(),
+            Self::Device29(device) => device.limiter_converged(),
+            Self::Device30(device) => device.limiter_converged(),
+            Self::Device31(device) => device.limiter_converged(),
+            Self::Device32(device) => device.limiter_converged(),
+            Self::Device33(device) => device.limiter_converged(),
+            Self::Device34(device) => device.limiter_converged(),
+            Self::Device35(device) => device.limiter_converged(),
+            Self::Device36(device) => device.limiter_converged(),
+            Self::Device37(device) => device.limiter_converged(),
+            Self::Device38(device) => device.limiter_converged(),
+            Self::Device39(device) => device.limiter_converged(),
+            Self::Device40(device) => device.limiter_converged(),
+            Self::Device41(device) => device.limiter_converged(),
+        }
+    }
+
     pub fn noise_descriptors(&self) -> &'static [super::GeneratedNoiseDescriptor] {
         match self {
             Self::Device0(_) => &diode_cmc__diode_cmc__cdfab304::NOISE_SOURCES,

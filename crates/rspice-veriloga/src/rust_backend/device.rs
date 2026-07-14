@@ -15479,6 +15479,7 @@ pub(super) struct StateFileExtensions {
     pub restore_initializers: String,
     pub set_parameter_hook: String,
     pub impl_methods: String,
+    pub limiter_converged_expr: String,
 }
 
 impl Default for StateFileExtensions {
@@ -15493,6 +15494,7 @@ impl Default for StateFileExtensions {
             restore_initializers: String::new(),
             set_parameter_hook: String::new(),
             impl_methods: String::new(),
+            limiter_converged_expr: "true".to_string(),
         }
     }
 }
@@ -16070,6 +16072,11 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        }\n");
         out.push_str("    }\n");
     }
+    out.push_str("    #[inline]\n");
+    out.push_str("    pub fn limiter_converged(&self) -> bool {\n");
+    out.push_str("        ");
+    out.push_str(&extensions.limiter_converged_expr);
+    out.push_str("\n    }\n");
     out.push_str(&extensions.impl_methods);
     out.push_str("}\n");
     Ok(out)
@@ -31071,7 +31078,7 @@ fn emit_stamp_body(
         && scalar_hybrid_plan.is_some()
         && !super::scalar::ScalarLimitSlots::from_artifact(artifact).is_empty()
     {
-        out.push_str("        self.scalar_limit_active=false;\n");
+        out.push_str("        if ctx.limiting_enabled(){self.scalar_limit_active=false;}\n");
     }
 
     let operator_usage = if reactive {

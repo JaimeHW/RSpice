@@ -442,9 +442,45 @@ impl BuiltinVerilogADevices {
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
     ) {
+        self.stamp_all_with_mode(
+            matrix,
+            rhs,
+            voltages,
+            num_nodes,
+            analysis,
+            simparams,
+            GeneratedEvaluationMode::default_for_analysis(analysis),
+        );
+    }
+
+    pub(crate) fn stamp_all_with_mode(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
+        evaluation_mode: GeneratedEvaluationMode,
+    ) {
         for device in &mut self.devices {
-            device.stamp(matrix, rhs, voltages, num_nodes, analysis, simparams);
+            device.stamp_with_mode(
+                matrix,
+                rhs,
+                voltages,
+                num_nodes,
+                analysis,
+                simparams,
+                evaluation_mode,
+            );
         }
+    }
+
+    #[inline]
+    pub fn all_converged(&self) -> bool {
+        self.devices
+            .iter()
+            .all(BuiltinVerilogAInstance::is_converged)
     }
 
     #[inline]
@@ -521,6 +557,11 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
+    pub fn is_converged(&self) -> bool {
+        self.kind.limiter_converged()
+    }
+
+    #[inline]
     pub fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
         self.static_stamp_cache
             .link(matrix, &self.nodes, &self.branches, num_nodes);
@@ -581,9 +622,30 @@ impl BuiltinVerilogAInstance {
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
     ) {
+        self.stamp_with_mode(
+            matrix,
+            rhs,
+            voltages,
+            num_nodes,
+            analysis,
+            simparams,
+            GeneratedEvaluationMode::default_for_analysis(analysis),
+        );
+    }
+
+    fn stamp_with_mode(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
+        evaluation_mode: GeneratedEvaluationMode,
+    ) {
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
-        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
+        let ctx = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
             voltages,
             self.temperature,
             num_nodes,
@@ -591,6 +653,7 @@ impl BuiltinVerilogAInstance {
             self.analysis_initial_step,
             self.analysis_final_step,
             simparams,
+            evaluation_mode,
         );
         let mut stamper = GeneratedStamper::new_with_static_cache(
             matrix,
@@ -801,6 +864,28 @@ pub enum GeneratedAnalysisKind {
     Ic,
 }
 
+/// Controls whether a generated evaluation may apply Newton limiting and
+/// advance per-instance limiter history. This is intentionally orthogonal to
+/// the physical analysis queried through Verilog-A `$analysis(...)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedEvaluationMode {
+    NewtonLimited,
+    StaticProbe,
+    SmallSignal,
+}
+
+impl GeneratedEvaluationMode {
+    #[inline]
+    pub const fn default_for_analysis(analysis: GeneratedAnalysisKind) -> Self {
+        match analysis {
+            GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise => Self::SmallSignal,
+            GeneratedAnalysisKind::Dc | GeneratedAnalysisKind::Tran | GeneratedAnalysisKind::Ic => {
+                Self::NewtonLimited
+            }
+        }
+    }
+}
+
 /// Simulator-owned parameters visible to generated Verilog-A `$simparam` calls.
 ///
 /// `Option` distinguishes an explicitly configured zero from an unavailable
@@ -874,6 +959,7 @@ pub struct GeneratedEvalContext<'a> {
     analysis_initial_step: bool,
     analysis_final_step: bool,
     simparams: GeneratedSimulationParameters,
+    evaluation_mode: GeneratedEvaluationMode,
 }
 
 impl<'a> GeneratedEvalContext<'a> {
@@ -922,6 +1008,30 @@ impl<'a> GeneratedEvalContext<'a> {
         final_step: bool,
         simparams: GeneratedSimulationParameters,
     ) -> Self {
+        let evaluation_mode = GeneratedEvaluationMode::default_for_analysis(analysis);
+        Self::with_analysis_step_simparams_and_mode(
+            voltages,
+            temperature,
+            num_nodes,
+            analysis,
+            initial,
+            final_step,
+            simparams,
+            evaluation_mode,
+        )
+    }
+
+    #[inline]
+    pub fn with_analysis_step_simparams_and_mode(
+        voltages: &'a [Value],
+        temperature: Value,
+        num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
+        initial: bool,
+        final_step: bool,
+        simparams: GeneratedSimulationParameters,
+        evaluation_mode: GeneratedEvaluationMode,
+    ) -> Self {
         Self {
             voltages,
             temperature,
@@ -930,7 +1040,13 @@ impl<'a> GeneratedEvalContext<'a> {
             analysis_initial_step: initial,
             analysis_final_step: final_step,
             simparams,
+            evaluation_mode,
         }
+    }
+
+    #[inline]
+    pub fn limiting_enabled(&self) -> bool {
+        matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
     }
 
     #[inline]
@@ -5516,9 +5632,9 @@ impl<'a> GeneratedReactiveStamper<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        GeneratedAnalysisKind, GeneratedEvalContext, GeneratedNoiseDescriptor,
-        GeneratedNoiseEndpoint, GeneratedNoiseInjection, GeneratedNoiseKind,
-        GeneratedNoiseTopologyError, GeneratedSimulationParameters,
+        GeneratedAnalysisKind, GeneratedEvalContext, GeneratedEvaluationMode,
+        GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseInjection,
+        GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedSimulationParameters,
     };
 
     fn noise_descriptor(
@@ -5563,6 +5679,7 @@ mod tests {
         assert!(!dc.analysis_smallsig());
         assert!(dc.analysis_initial_step());
         assert!(dc.analysis_final_step());
+        assert!(dc.limiting_enabled());
 
         let ac =
             GeneratedEvalContext::with_analysis(&voltages, 300.15, 1, GeneratedAnalysisKind::Ac);
@@ -5570,6 +5687,20 @@ mod tests {
         assert!(ac.analysis_smallsig());
         assert!(!ac.analysis_initial_step());
         assert!(!ac.analysis_final_step());
+        assert!(!ac.limiting_enabled());
+
+        let dc_probe = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Dc,
+            false,
+            false,
+            GeneratedSimulationParameters::default(),
+            GeneratedEvaluationMode::StaticProbe,
+        );
+        assert!(dc_probe.analysis_dc());
+        assert!(!dc_probe.limiting_enabled());
     }
 
     #[test]
