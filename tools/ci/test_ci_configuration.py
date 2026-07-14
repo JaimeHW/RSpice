@@ -160,7 +160,7 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("Smoke Verilog-A native JIT benchmark gate (Linux x64)", workflow)
         self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10",
+            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
             workflow,
         )
         self.assertIn("Test UI library (Linux)", workflow)
@@ -211,7 +211,7 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10",
+            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
             workflow,
         )
 
