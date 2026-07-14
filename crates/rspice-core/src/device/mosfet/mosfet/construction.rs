@@ -702,14 +702,21 @@ impl Mosfet {
         }
         if kp_explicit.is_none() {
             // SPICE convention: U0/UO is in cm^2/(V*s), convert to m^2/(V*s).
-            let u0_cm = params
+            let explicit_u0 = params
                 .get("U0")
                 .or_else(|| params.get("UO"))
                 .copied()
                 .filter(|v| v.is_finite() && *v > 0.0);
-            let u0_cm = u0_cm.or_else(|| {
-                (self.level == 2 && self.u0.is_finite() && self.u0 > 0.0).then_some(self.u0)
-            });
+            // Berkeley model-card preprocessing differs by level:
+            // - MOS1 keeps its historical KP default unless TOX was given;
+            // - MOS2 derives from its default/explicit TOX and mobility;
+            // - MOS3 likewise derives from its 0.1um TOX and 600cm²/Vs
+            //   defaults even when neither parameter appears on the card.
+            let derives_kp =
+                self.level == 2 || self.level == 3 || (self.level == 1 && tox.is_some());
+            let u0_cm = derives_kp
+                .then(|| explicit_u0.unwrap_or(self.u0))
+                .filter(|value| value.is_finite() && *value > 0.0);
             if let Some(u0_cm) = u0_cm {
                 let u0_m = u0_cm * 1e-4;
                 let kp_derived = u0_m * self.cox;
@@ -1318,6 +1325,54 @@ mod tests {
         assert_eq!(mos.cgdo, 0.0);
         assert_eq!(mos.cgbo, 0.0);
         assert!(mos.kp > 0.0);
+    }
+
+    #[test]
+    fn level1_kp_derivation_requires_explicit_tox() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 1.0);
+        params.insert("UO".to_string(), 700.0);
+
+        let without_tox = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+        assert_eq!(without_tox.kp, 2.0e-5);
+
+        let tox = 80.0e-9;
+        params.insert("TOX".to_string(), tox);
+        let with_tox = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+        let expected = 700.0 * 1.0e-4 * (3.9 * 8.854_214_871e-12 / tox);
+        assert!((with_tox.kp - expected).abs() <= expected * 1.0e-14);
+    }
+
+    #[test]
+    fn level1_explicit_tox_uses_default_mobility_when_kp_and_u0_are_absent() {
+        let tox = 1.0e-7;
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 1.0);
+        params.insert("TOX".to_string(), tox);
+
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+        let expected = 600.0 * 1.0e-4 * (3.9 * 8.854_214_871e-12 / tox);
+        assert!((mos.kp - expected).abs() <= expected * 1.0e-14);
+    }
+
+    #[test]
+    fn level3_defaults_derive_kp_and_explicit_kp_wins() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 3.0);
+
+        let derived = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+        let expected = 600.0 * 1.0e-4 * (3.9 * 8.854_214_871e-12 / 1.0e-7);
+        assert!((derived.kp - expected).abs() <= expected * 1.0e-14);
+
+        params.insert("U0".to_string(), 800.0);
+        params.insert("TOX".to_string(), 50.0e-9);
+        let mobility_derived = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+        let mobility_expected = 800.0 * 1.0e-4 * (3.9 * 8.854_214_871e-12 / 50.0e-9);
+        assert!((mobility_derived.kp - mobility_expected).abs() <= mobility_expected * 1.0e-14);
+
+        params.insert("KP".to_string(), 90.0e-6);
+        let explicit = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+        assert_eq!(explicit.kp, 90.0e-6);
     }
 
     #[test]
