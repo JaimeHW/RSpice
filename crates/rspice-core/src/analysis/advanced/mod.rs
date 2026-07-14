@@ -57,8 +57,9 @@ pub use monte_carlo::{
     VariableStatistics, VariationSet,
 };
 pub use noise::{
-    IntegratedContribution, IntegratedNoise, NoiseAnalysis, NoiseContribution, NoiseResult,
-    NoiseSource, NoiseSourceType, PortNoiseCorrelationResult,
+    IntegratedContribution, IntegratedNoise, NoiseAnalysis, NoiseContribution,
+    NoiseContributionKind, NoiseContributionProbe, NoiseContributionProbeError, NoiseResult,
+    NoiseSource, NoiseSourceIdentity, NoiseSourceType, PortNoiseCorrelationResult,
 };
 pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};

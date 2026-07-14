@@ -3384,9 +3384,6 @@ impl XyceTestRunner {
         let print = print_output.as_ref().map(|request| XycePrintRequest {
             probes: request.probes.clone(),
         });
-        if let Some(print) = &print {
-            Self::reject_unsupported_noise_print_probes(print)?;
-        }
         if print_output
             .as_ref()
             .and_then(|request| request.format.as_deref())
@@ -3493,19 +3490,6 @@ impl XyceTestRunner {
             frequencies,
             steps,
         })
-    }
-
-    fn reject_unsupported_noise_print_probes(print: &XycePrintRequest) -> Result<(), String> {
-        if print.probes.iter().any(|probe| {
-            let normalized = Self::normalize_probe(probe);
-            normalized.contains("dno(") || normalized.contains("dni(")
-        }) {
-            return Err(
-                "native NOISE .PRINT DNO/DNI device-mechanism contributions are not implemented"
-                    .to_string(),
-            );
-        }
-        Ok(())
     }
 
     fn static_dc_plan_for_path(
@@ -18941,6 +18925,13 @@ impl XyceTestRunner {
                         }
                     }
                     let mut call_value = |call: &str| {
+                        if call.get(..3).is_some_and(|prefix| {
+                            prefix.eq_ignore_ascii_case("dno") || prefix.eq_ignore_ascii_case("dni")
+                        }) {
+                            let probe = crate::analysis::NoiseContributionProbe::parse(call)
+                                .map_err(|err| err.to_string())?;
+                            return result.contribution(&probe).map_err(|err| err.to_string());
+                        }
                         let normalized = Self::normalize_probe(call);
                         signals
                             .iter()
@@ -25674,8 +25665,8 @@ impl XyceTestRunner {
 
         let rest = &expression[index..];
         for prefix in [
-            "idb", "ir", "ii", "im", "ip", "id", "ig", "is", "ib", "ic", "ie", "vdb", "vr", "vi",
-            "vm", "vp", "v", "i", "p", "w", "n",
+            "dno", "dni", "idb", "ir", "ii", "im", "ip", "id", "ig", "is", "ib", "ic", "ie", "vdb",
+            "vr", "vi", "vm", "vp", "v", "i", "p", "w", "n",
         ] {
             let next_index = index + prefix.len();
             if rest.len() <= prefix.len()
@@ -32804,13 +32795,20 @@ mod tests {
     }
 
     #[test]
-    fn noise_preflight_names_unsupported_contribution_surfaces() {
-        let print = XycePrintRequest {
-            probes: vec!["{sqrt(abs(DNO(M1,fn)))}".to_string()],
+    fn noise_print_expression_scanner_recognizes_dno_and_dni_calls() {
+        let expression = "log(DNO(R1))+sqrt(DNI(XTOP:M1,fn))";
+        let mut calls = Vec::new();
+        let mut call_value = |call: &str| {
+            calls.push(call.to_string());
+            Ok(1.0)
         };
-        let error = XyceTestRunner::reject_unsupported_noise_print_probes(&print)
-            .expect_err("DNO mechanism probes must remain explicitly unsupported");
-        assert!(error.contains("DNO/DNI"));
+        XyceTestRunner::evaluate_print_expression_with_probe_calls(
+            expression,
+            crate::netlist::ParamContext::new(),
+            &mut call_value,
+        )
+        .expect("DNO/DNI calls must be extracted as symbolic probes");
+        assert_eq!(calls, vec!["DNO(R1)", "DNI(XTOP:M1,fn)"]);
     }
 
     #[test]
@@ -32860,6 +32858,7 @@ mod tests {
                 currents: Vec::new(),
                 output_noise_density: 0.0,
                 input_referred_density: 0.0,
+                input_gain_squared: 1.0,
                 contributions: Vec::new(),
             })
             .collect::<Vec<_>>();

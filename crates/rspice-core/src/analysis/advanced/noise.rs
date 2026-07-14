@@ -411,11 +411,41 @@ pub enum NoiseSourceType {
 /// interpolation flag.
 pub type NoiseTable = std::sync::Arc<(Vec<(Value, Value)>, bool)>;
 
+/// Stable identity of one elementary device-noise mechanism.
+///
+/// Several elementary sources may intentionally share an identity.  Xyce's
+/// `DNO(device, mechanism)`/`DNI(device, mechanism)` semantics sum those
+/// duplicate sources rather than selecting only the first one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NoiseSourceIdentity {
+    /// Device instance name, including any hierarchical prefix.
+    pub device: String,
+    /// Canonical device mechanism name.  `None` denotes a device whose model
+    /// exposes only its whole-device contribution (for example a resistor).
+    pub mechanism: Option<String>,
+}
+
+impl NoiseSourceIdentity {
+    pub fn device(device: impl Into<String>) -> Self {
+        Self {
+            device: device.into(),
+            mechanism: None,
+        }
+    }
+
+    pub fn mechanism(device: impl Into<String>, mechanism: impl Into<String>) -> Self {
+        Self {
+            device: device.into(),
+            mechanism: Some(mechanism.into()),
+        }
+    }
+}
+
 /// A noise source in the circuit
 #[derive(Debug, Clone)]
 pub struct NoiseSource {
-    /// Name of the device generating this noise
-    pub device_name: String,
+    /// Device and canonical mechanism generating this noise.
+    pub identity: NoiseSourceIdentity,
     /// Type of noise
     pub noise_type: NoiseSourceType,
     /// Node where noise current is injected (+)
@@ -446,6 +476,12 @@ pub struct NoiseSource {
 }
 
 impl NoiseSource {
+    /// Assign the canonical identity exported by the owning device model.
+    pub fn with_identity(mut self, identity: NoiseSourceIdentity) -> Self {
+        self.identity = identity;
+        self
+    }
+
     /// Create a thermal noise source (resistor)
     pub fn thermal(
         device_name: String,
@@ -454,7 +490,7 @@ impl NoiseSource {
         resistance: Value,
     ) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::Thermal,
             node_pos,
             node_neg,
@@ -473,7 +509,7 @@ impl NoiseSource {
     /// Create a shot noise source (diode/BJT junction)
     pub fn shot(device_name: String, node_pos: usize, node_neg: usize, current: Value) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::Shot,
             node_pos,
             node_neg,
@@ -512,7 +548,7 @@ impl NoiseSource {
         current: Value,
     ) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::Flicker,
             node_pos,
             node_neg,
@@ -532,7 +568,7 @@ impl NoiseSource {
     /// (A²/Hz for current injection, V²/Hz when injected at a branch row)
     pub fn white(device_name: String, node_pos: usize, node_neg: usize, psd: Value) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::White,
             node_pos,
             node_neg,
@@ -571,7 +607,7 @@ impl NoiseSource {
         log_interp: bool,
     ) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::Table,
             node_pos,
             node_neg,
@@ -595,7 +631,7 @@ impl NoiseSource {
         model: Bsim4FlickerNoise,
     ) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::Bsim4Flicker,
             node_pos,
             node_neg,
@@ -619,7 +655,7 @@ impl NoiseSource {
         model: Bsim3FlickerNoise,
     ) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::Bsim3Flicker,
             node_pos,
             node_neg,
@@ -650,7 +686,7 @@ impl NoiseSource {
         corner_freq: Value,
     ) -> Self {
         Self {
-            device_name,
+            identity: NoiseSourceIdentity::device(device_name),
             noise_type: NoiseSourceType::Burst,
             node_pos,
             node_neg,
@@ -874,6 +910,9 @@ pub struct NoiseResult {
     pub output_noise_density: Value,
     /// Input-referred noise spectral density (V²/Hz)
     pub input_referred_density: Value,
+    /// Squared small-signal gain used to refer output noise to the input.
+    /// This retains Xyce's `N_MINGAIN` floor at transfer nulls.
+    pub input_gain_squared: Value,
     /// Individual noise contributions from each source
     pub contributions: Vec<NoiseContribution>,
 }
@@ -881,14 +920,111 @@ pub struct NoiseResult {
 /// Contribution from a single noise source
 #[derive(Debug, Clone)]
 pub struct NoiseContribution {
-    /// Device name
-    pub device_name: String,
+    /// Device and canonical mechanism identity.
+    pub identity: NoiseSourceIdentity,
     /// Noise type
     pub noise_type: NoiseSourceType,
     /// Contribution to output noise (V²/Hz)
     pub output_contribution: Value,
+    /// Contribution referred to the input (V²/Hz).
+    pub input_contribution: Value,
     /// Percentage of total noise
     pub percentage: Value,
+}
+
+/// Output- or input-referred device-noise contribution query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoiseContributionKind {
+    Output,
+    Input,
+}
+
+/// Typed representation of `DNO(device[, mechanism])` and
+/// `DNI(device[, mechanism])`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoiseContributionProbe {
+    pub kind: NoiseContributionKind,
+    pub device: String,
+    pub mechanism: Option<String>,
+}
+
+/// Error produced while parsing or resolving a device-noise probe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoiseContributionProbeError {
+    InvalidSyntax(String),
+    InvalidArity(usize),
+    UnknownDevice(String),
+    UnknownMechanism { device: String, mechanism: String },
+}
+
+impl std::fmt::Display for NoiseContributionProbeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidSyntax(probe) => {
+                write!(formatter, "invalid noise contribution probe '{probe}'")
+            }
+            Self::InvalidArity(count) => {
+                write!(
+                    formatter,
+                    "DNO/DNI requires one or two arguments, got {count}"
+                )
+            }
+            Self::UnknownDevice(device) => {
+                write!(formatter, "noise device '{device}' was not found")
+            }
+            Self::UnknownMechanism { device, mechanism } => write!(
+                formatter,
+                "noise mechanism '{mechanism}' was not found for device '{device}'"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NoiseContributionProbeError {}
+
+impl NoiseContributionProbe {
+    pub fn parse(probe: &str) -> Result<Self, NoiseContributionProbeError> {
+        let trimmed = probe.trim();
+        let open = trimmed
+            .find('(')
+            .ok_or_else(|| NoiseContributionProbeError::InvalidSyntax(trimmed.to_string()))?;
+        if !trimmed.ends_with(')') {
+            return Err(NoiseContributionProbeError::InvalidSyntax(
+                trimmed.to_string(),
+            ));
+        }
+        let kind = match trimmed[..open].trim().to_ascii_lowercase().as_str() {
+            "dno" => NoiseContributionKind::Output,
+            "dni" => NoiseContributionKind::Input,
+            _ => {
+                return Err(NoiseContributionProbeError::InvalidSyntax(
+                    trimmed.to_string(),
+                ));
+            }
+        };
+        let arguments = trimmed[open + 1..trimmed.len() - 1]
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        if !(1..=2).contains(&arguments.len()) {
+            return Err(NoiseContributionProbeError::InvalidArity(arguments.len()));
+        }
+        if arguments.iter().any(|argument| {
+            argument.is_empty()
+                || !argument.chars().all(|ch| {
+                    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$' | ':' | '#')
+                })
+        }) {
+            return Err(NoiseContributionProbeError::InvalidSyntax(
+                trimmed.to_string(),
+            ));
+        }
+        Ok(Self {
+            kind,
+            device: arguments[0].to_string(),
+            mechanism: arguments.get(1).map(|argument| (*argument).to_string()),
+        })
+    }
 }
 
 impl NoiseSourceType {
@@ -923,6 +1059,48 @@ pub struct IntegratedContribution {
 }
 
 impl NoiseResult {
+    /// Resolve a device contribution with Xyce-compatible case-insensitive
+    /// matching and duplicate-mechanism summation.
+    pub fn contribution(
+        &self,
+        probe: &NoiseContributionProbe,
+    ) -> Result<Value, NoiseContributionProbeError> {
+        let matching_device = self
+            .contributions
+            .iter()
+            .filter(|entry| entry.identity.device.eq_ignore_ascii_case(&probe.device))
+            .collect::<Vec<_>>();
+        if matching_device.is_empty() {
+            return Err(NoiseContributionProbeError::UnknownDevice(
+                probe.device.clone(),
+            ));
+        }
+        let matching = matching_device
+            .into_iter()
+            .filter(|entry| match &probe.mechanism {
+                None => true,
+                Some(mechanism) => entry
+                    .identity
+                    .mechanism
+                    .as_deref()
+                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(mechanism)),
+            })
+            .collect::<Vec<_>>();
+        if matching.is_empty() {
+            return Err(NoiseContributionProbeError::UnknownMechanism {
+                device: probe.device.clone(),
+                mechanism: probe.mechanism.clone().unwrap_or_default(),
+            });
+        }
+        Ok(matching
+            .into_iter()
+            .map(|entry| match probe.kind {
+                NoiseContributionKind::Output => entry.output_contribution,
+                NoiseContributionKind::Input => entry.input_contribution,
+            })
+            .sum())
+    }
+
     /// Get total output noise in V/√Hz (RMS voltage noise density)
     pub fn output_noise_rms(&self) -> Value {
         self.output_noise_density.sqrt()
@@ -1012,7 +1190,7 @@ impl IntegratedNoise {
             for contribution in &b.contributions {
                 right.insert(
                     (
-                        contribution.device_name.as_str(),
+                        contribution.identity.device.as_str(),
                         contribution.noise_type.label(),
                     ),
                     contribution.output_contribution,
@@ -1021,7 +1199,7 @@ impl IntegratedNoise {
 
             for contribution in &a.contributions {
                 let key = (
-                    contribution.device_name.as_str(),
+                    contribution.identity.device.as_str(),
                     contribution.noise_type.label(),
                 );
                 let s_right = right
@@ -1031,7 +1209,7 @@ impl IntegratedNoise {
                 let power = 0.5 * (contribution.output_contribution + s_right) * df;
                 let entry = totals
                     .entry((
-                        contribution.device_name.clone(),
+                        contribution.identity.device.clone(),
                         contribution.noise_type.label(),
                     ))
                     .or_insert((contribution.noise_type, 0.0));
@@ -1155,17 +1333,20 @@ mod summary_tests {
             currents: Vec::new(),
             output_noise_density: r1 + d1,
             input_referred_density: r1 + d1,
+            input_gain_squared: 1.0,
             contributions: vec![
                 NoiseContribution {
-                    device_name: "r1".to_string(),
+                    identity: NoiseSourceIdentity::device("r1"),
                     noise_type: NoiseSourceType::Thermal,
                     output_contribution: r1,
+                    input_contribution: r1,
                     percentage: 0.0,
                 },
                 NoiseContribution {
-                    device_name: "d1".to_string(),
+                    identity: NoiseSourceIdentity::device("d1"),
                     noise_type: NoiseSourceType::Shot,
                     output_contribution: d1,
+                    input_contribution: d1,
                     percentage: 0.0,
                 },
             ],
@@ -1196,5 +1377,78 @@ mod summary_tests {
         // Band total agrees with the per-contributor sum.
         let total_v = integrated.total_output_noise();
         assert!(((total_v * total_v) - 5e-16).abs() < 1e-27);
+    }
+
+    #[test]
+    fn contribution_probe_parses_case_and_hierarchical_names() {
+        assert_eq!(
+            NoiseContributionProbe::parse("dNi(XTOP:M1, Fn)"),
+            Ok(NoiseContributionProbe {
+                kind: NoiseContributionKind::Input,
+                device: "XTOP:M1".to_string(),
+                mechanism: Some("Fn".to_string()),
+            })
+        );
+        assert_eq!(
+            NoiseContributionProbe::parse("DNO(R1)"),
+            Ok(NoiseContributionProbe {
+                kind: NoiseContributionKind::Output,
+                device: "R1".to_string(),
+                mechanism: None,
+            })
+        );
+        assert_eq!(
+            NoiseContributionProbe::parse("DNO()"),
+            Err(NoiseContributionProbeError::InvalidSyntax(
+                "DNO()".to_string()
+            ))
+        );
+        assert_eq!(
+            NoiseContributionProbe::parse("DNO(M1,id,extra)"),
+            Err(NoiseContributionProbeError::InvalidArity(3))
+        );
+    }
+
+    #[test]
+    fn contribution_probe_sums_duplicates_and_retains_valid_zero_mechanisms() {
+        let mut result = result_at(1.0, 0.0, 0.0);
+        result.contributions = vec![
+            NoiseContribution {
+                identity: NoiseSourceIdentity::mechanism("M1", "id"),
+                noise_type: NoiseSourceType::Thermal,
+                output_contribution: 2.0,
+                input_contribution: 0.5,
+                percentage: 0.0,
+            },
+            NoiseContribution {
+                identity: NoiseSourceIdentity::mechanism("m1", "ID"),
+                noise_type: NoiseSourceType::Thermal,
+                output_contribution: 3.0,
+                input_contribution: 0.75,
+                percentage: 0.0,
+            },
+            NoiseContribution {
+                identity: NoiseSourceIdentity::mechanism("M1", "fn"),
+                noise_type: NoiseSourceType::Flicker,
+                output_contribution: 0.0,
+                input_contribution: 0.0,
+                percentage: 0.0,
+            },
+        ];
+
+        let output = NoiseContributionProbe::parse("DNO(m1,Id)").unwrap();
+        let input = NoiseContributionProbe::parse("DNI(M1)").unwrap();
+        let zero = NoiseContributionProbe::parse("DNO(m1,FN)").unwrap();
+        assert_eq!(result.contribution(&output), Ok(5.0));
+        assert_eq!(result.contribution(&input), Ok(1.25));
+        assert_eq!(result.contribution(&zero), Ok(0.0));
+        assert!(matches!(
+            result.contribution(&NoiseContributionProbe::parse("DNO(M1,rs)").unwrap()),
+            Err(NoiseContributionProbeError::UnknownMechanism { .. })
+        ));
+        assert!(matches!(
+            result.contribution(&NoiseContributionProbe::parse("DNO(M2)").unwrap()),
+            Err(NoiseContributionProbeError::UnknownDevice(_))
+        ));
     }
 }

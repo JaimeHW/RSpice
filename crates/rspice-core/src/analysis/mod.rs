@@ -65,13 +65,14 @@ pub use advanced::{
     EventOccurrence, ExtremaOutput, FileErrorNorm, FourierAnalysis, FourierConfig, FourierResult,
     FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise, MeasureEngine,
     MeasureOperand, MeasurePrintPolicy, MeasureResult, MeasureStatement, MeasureType,
-    MonteCarloConfig, MonteCarloResult, MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource,
-    NoiseSourceType, ParametricResults, ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig,
-    PoleZeroResult, Port, PortNoiseCorrelationResult, PzMatrix, SMatrix, SParameterAnalyzer,
-    SParameterConfig, SParameterResult, Sensitivity, SensitivityAnalyzer, SensitivityResult,
-    StepSpec, StepTarget, StepType, Tolerance, TransferAnalyzer, TransferFunctionConfig,
-    TransferFunctionResult, TrigSpec, TriggerEvent, VariableStatistics, VariationSet,
-    WhenCondition,
+    MonteCarloConfig, MonteCarloResult, MonteCarloRunner, NoiseAnalysis, NoiseContributionKind,
+    NoiseContributionProbe, NoiseContributionProbeError, NoiseResult, NoiseSource,
+    NoiseSourceIdentity, NoiseSourceType, ParametricResults, ParametricSweep, PoleZeroAnalyzer,
+    PoleZeroConfig, PoleZeroResult, Port, PortNoiseCorrelationResult, PzMatrix, SMatrix,
+    SParameterAnalyzer, SParameterConfig, SParameterResult, Sensitivity, SensitivityAnalyzer,
+    SensitivityResult, StepSpec, StepTarget, StepType, Tolerance, TransferAnalyzer,
+    TransferFunctionConfig, TransferFunctionResult, TrigSpec, TriggerEvent, VariableStatistics,
+    VariationSet, WhenCondition,
 };
 
 // Re-export PSS types

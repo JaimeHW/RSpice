@@ -523,7 +523,7 @@ struct PssNoiseIdentity {
 impl From<&NoiseSource> for PssNoiseIdentity {
     fn from(source: &NoiseSource) -> Self {
         Self {
-            device_name: source.device_name.clone(),
+            device_name: source.identity.device.clone(),
             noise_type: source.noise_type,
             node_pos: source.node_pos,
             node_neg: source.node_neg,

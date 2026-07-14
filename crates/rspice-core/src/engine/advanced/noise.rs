@@ -1714,32 +1714,33 @@ impl Engine {
                         return Err(SimulationError::Aborted);
                     }
                     let si = source.spectral_density(freq, temperature);
-                    if !si.is_finite() || si <= 0.0 {
-                        continue;
-                    }
+                    let output_v2 = if si.is_finite() && si > 0.0 {
+                        rhs.fill(Complex64::new(0.0, 0.0));
+                        Self::stamp_unit_noise_current_rhs(
+                            &mut rhs,
+                            source.node_pos,
+                            source.node_neg,
+                            num_nodes,
+                        );
 
-                    rhs.fill(Complex64::new(0.0, 0.0));
-                    Self::stamp_unit_noise_current_rhs(
-                        &mut rhs,
-                        source.node_pos,
-                        source.node_neg,
-                        num_nodes,
-                    );
-
-                    let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
-                    let v_out = Self::differential_noise_output(
-                        &solution, output_pos, output_neg, num_nodes,
-                    );
-                    let output_v2 = si * v_out * v_out;
+                        let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                        let v_out = Self::differential_noise_output(
+                            &solution, output_pos, output_neg, num_nodes,
+                        );
+                        si * v_out * v_out
+                    } else {
+                        0.0
+                    };
                     if output_v2.is_finite() && output_v2 > 0.0 {
                         total_noise_v2_hz += output_v2;
-                        contributions.push(NoiseContribution {
-                            device_name: source.device_name.clone(),
-                            noise_type: source.noise_type,
-                            output_contribution: output_v2,
-                            percentage: 0.0,
-                        });
                     }
+                    contributions.push(NoiseContribution {
+                        identity: source.identity.clone(),
+                        noise_type: source.noise_type,
+                        output_contribution: output_v2.max(0.0),
+                        input_contribution: output_v2.max(0.0) / input_gain_sq,
+                        percentage: 0.0,
+                    });
                 }
 
                 for source in &correlated_noise_sources {
@@ -1794,9 +1795,12 @@ impl Engine {
                     if output_v2.is_finite() && output_v2 > 0.0 {
                         total_noise_v2_hz += output_v2;
                         contributions.push(NoiseContribution {
-                            device_name: source.device_name.clone(),
+                            identity: crate::analysis::NoiseSourceIdentity::device(
+                                source.device_name.clone(),
+                            ),
                             noise_type: source.noise_type,
                             output_contribution: output_v2,
+                            input_contribution: output_v2 / input_gain_sq,
                             percentage: 0.0,
                         });
                     }
@@ -1822,6 +1826,7 @@ impl Engine {
                     } else {
                         total_noise_v2_hz
                     },
+                    input_gain_squared: input_gain_sq,
                     contributions,
                 })
             })
@@ -2833,7 +2838,7 @@ Q1 C B 0 QN
         for (name, node_pos, node_neg, conductance) in expected {
             let source = sources
                 .iter()
-                .find(|source| source.device_name.eq_ignore_ascii_case(name))
+                .find(|source| source.identity.device.eq_ignore_ascii_case(name))
                 .unwrap_or_else(|| {
                     panic!("{name} thermal noise missing; sources={sources:#?}");
                 });
@@ -2874,7 +2879,7 @@ Q1 C B 0 QN
         let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
         let mut rbody_names = sources
             .iter()
-            .map(|source| source.device_name.to_ascii_lowercase())
+            .map(|source| source.identity.device.to_ascii_lowercase())
             .filter(|name| {
                 matches!(
                     name.as_str(),
@@ -2891,7 +2896,7 @@ Q1 C B 0 QN
 
         let rbpb = sources
             .iter()
-            .find(|source| source.device_name.eq_ignore_ascii_case("m1.rbpb"))
+            .find(|source| source.identity.device.eq_ignore_ascii_case("m1.rbpb"))
             .expect("m1.rbpb thermal noise source");
         assert_eq!(rbpb.node_pos, device.node_bulk);
         assert_eq!(rbpb.node_neg, device.node_bulk_external);
@@ -3267,13 +3272,13 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
         let source = |name: &str| {
             sources
                 .iter()
-                .find(|source| source.device_name.eq_ignore_ascii_case(name))
+                .find(|source| source.identity.device.eq_ignore_ascii_case(name))
                 .unwrap_or_else(|| {
                     panic!(
                         "missing EKV26 noise source {name}; got {:?}",
                         sources
                             .iter()
-                            .map(|source| source.device_name.as_str())
+                            .map(|source| source.identity.device.as_str())
                             .collect::<Vec<_>>()
                     )
                 })
@@ -3413,7 +3418,7 @@ Q1 C B E 0 N1 M=3
         let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
         let flicker = sources
             .iter()
-            .find(|source| source.device_name.ends_with(":flicker"))
+            .find(|source| source.identity.device.ends_with(":flicker"))
             .expect("VBIC KFN card must produce a flicker source");
 
         let m: f64 = 3.0;

@@ -1899,6 +1899,7 @@ mod tests {
             frequency,
             output_noise_density: 4.0,
             input_referred_density: 9.0,
+            input_gain_squared: 4.0 / 9.0,
             contributions: Vec::new(),
             node_names: vec!["out".to_string()],
             branch_names: vec!["V1".to_string()],
