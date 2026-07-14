@@ -270,7 +270,19 @@ impl SimulationController {
             }
         };
 
-        let queued = match self.build_queue_from_plan(state, &plan) {
+        // Seal all external model bytes exactly once for this run. Reference
+        // and corner materialization below share this immutable snapshot, so
+        // no worker or engine can reopen a model path after verification.
+        let sealed_model_sources = match state.model_library_manager.seal_execution_sources() {
+            Ok(sources) => sources,
+            Err(error) => {
+                state.push_sim_message(ConsoleMessage::error(error));
+                state.simulation.status = "Model binding error".to_owned();
+                return;
+            }
+        };
+
+        let queued = match self.build_queue_from_plan(state, &plan, &sealed_model_sources) {
             Ok(queue) => queue,
             Err(errors) => {
                 for err in errors {
@@ -339,18 +351,17 @@ impl SimulationController {
             result.netlist
         };
 
-        let model_directives = match state
-            .model_library_manager
-            .reference_process_directives(state.sim_setup.reference_pvt.process)
+        let model_cards = match sealed_model_sources
+            .reference_process_model_cards(state.sim_setup.reference_pvt.process)
         {
-            Ok(directives) => directives,
+            Ok(model_cards) => model_cards,
             Err(error) => {
                 state.push_sim_message(ConsoleMessage::error(error));
                 state.simulation.status = "Model binding error".to_owned();
                 return;
             }
         };
-        netlist = Self::apply_reference_model_bindings_to_netlist(&netlist, &model_directives);
+        netlist = Self::apply_reference_model_bindings_to_netlist(&netlist, &model_cards);
         netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
 
         log::info!(

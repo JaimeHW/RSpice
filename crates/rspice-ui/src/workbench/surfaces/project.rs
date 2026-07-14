@@ -177,25 +177,35 @@ fn status_card(
         .corner_radius(t.radius)
         .inner_margin(egui::Margin::same(12))
         .show(ui, |ui| {
-            ui.set_min_width(230.0);
-            ui.label(
-                egui::RichText::new(label.to_uppercase())
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text_dim),
-            );
-            ui.label(
-                egui::RichText::new(value)
-                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
-                    .color(if ok { t.color.ok } else { t.color.warn }),
-            );
-            ui.label(
-                egui::RichText::new(detail)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
+            ui.vertical(|ui| {
+                ui.set_min_width(230.0);
+                ui.label(
+                    egui::RichText::new(label.to_uppercase())
+                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                        .color(t.color.text_dim),
+                );
+                ui.label(
+                    egui::RichText::new(value)
+                        .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                        .color(if ok { t.color.ok } else { t.color.warn }),
+                );
+                ui.label(
+                    egui::RichText::new(detail)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
+            });
         })
         .response
         .interact(egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            format!("Open {label}: {value}. {detail}"),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, response.rect);
     if response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()

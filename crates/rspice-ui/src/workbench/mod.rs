@@ -14,7 +14,9 @@ mod chrome;
 mod docks;
 mod layout;
 pub(crate) mod menu;
+mod preflight;
 mod project_launcher;
+mod recovery;
 mod session;
 mod surfaces;
 
@@ -38,28 +40,35 @@ use state::Workspace;
 
 /// Render one complete workbench frame.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
-    handle_workbench_shortcuts(ctx, app);
-    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
-        app.state.workbench.full_screen,
-    ));
+    reconcile_platform_full_screen(app);
+    if !app.state.workbench.application_modal_open() {
+        handle_workbench_shortcuts(ctx, app);
+    }
+    app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
-    let layout = LayoutSpec::resolve(viewport.x, viewport.y, &app.state.workbench);
-    app.state
-        .workbench
-        .reconcile_drawer_mode(layout.width_class);
+    let layout = LayoutSpec::resolve_with_pointer(
+        viewport.x,
+        viewport.y,
+        app.state.workbench.coarse_pointer,
+        &app.state.workbench,
+    );
+    app.state.workbench.reconcile_drawer_mode(
+        layout.navigator_uses_drawer,
+        layout.inspector_uses_drawer,
+        layout.workspaces_uses_drawer,
+    );
 
-    // Outer bars first, then activity/docks, then the owner surface.
-    chrome::status_bar::show(ctx, app, layout);
+    // Global chrome is allocated first. Workbench columns are then allocated
+    // before the document strip and console so both rows remain confined to
+    // the center stack exactly as in the mockup grid.
+    if layout.show_status_bar {
+        chrome::status_bar::show(ctx, app, layout);
+    }
     if layout.show_phone_navigation {
-        chrome::phone_navigation::show(ctx, app);
+        chrome::phone_navigation::show(ctx, app, layout);
     }
     chrome::title_bar::show(ctx, app, layout);
     chrome::toolbar::show(ctx, app, layout);
-    chrome::document_bar::show(ctx, app);
-
-    if layout.show_console_body {
-        docks::show_console(ctx, app, layout);
-    }
     if layout.show_activity_rail {
         chrome::activity_rail::show(ctx, app);
     }
@@ -69,6 +78,8 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     if layout.show_inspector_dock {
         docks::show_inspector(ctx, app, layout);
     }
+    chrome::document_bar::show(ctx, app, layout);
+    docks::show_console(ctx, app, layout);
 
     let t = Tokens::get(ctx);
     CentralPanel::default()
@@ -78,11 +89,12 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
             surfaces::show(ui, app);
         });
 
-    if layout.width_class.uses_drawers() {
+    if layout.has_overlay_drawer {
         docks::show_drawers(ctx, app, layout);
     }
 
     project_launcher::show(ctx, app);
+    preflight::show(ctx, app);
 
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
@@ -98,12 +110,103 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         app.state.ui.canvas_view_center = None;
     }
     app.state.ui.toasts.show(ctx);
+    apply_platform_full_screen_request(ctx, app);
+}
+
+fn pointer_is_coarse(ctx: &Context, retained_touch_capability: bool) -> bool {
+    let touch_event = ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Touch { .. }))
+    });
+    retained_touch_capability || touch_event || platform_pointer_is_coarse()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn platform_pointer_is_coarse() -> bool {
+    cfg!(any(target_os = "android", target_os = "ios"))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn platform_pointer_is_coarse() -> bool {
+    use wasm_bindgen::{JsCast as _, JsValue};
+
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(callable) = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("matchMedia"))
+    else {
+        return false;
+    };
+    let Ok(match_media) = callable.dyn_into::<js_sys::Function>() else {
+        return false;
+    };
+    let Ok(result) = match_media.call1(window.as_ref(), &JsValue::from_str("(pointer: coarse)"))
+    else {
+        return false;
+    };
+    js_sys::Reflect::get(&result, &JsValue::from_str("matches"))
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn reconcile_platform_full_screen(_app: &mut RSpiceApp) {}
+
+#[cfg(target_arch = "wasm32")]
+fn reconcile_platform_full_screen(app: &mut RSpiceApp) {
+    // Browser chrome (notably Escape) may leave fullscreen without routing a
+    // command through egui. Reflect the platform truth back into retained UI
+    // state so the menu checkmark and next toggle remain accurate.
+    if app.state.ui.full_screen_request.is_none()
+        && let Some(document) = web_sys::window().and_then(|window| window.document())
+    {
+        app.state.workbench.full_screen = document.fullscreen_element().is_some();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_platform_full_screen_request(ctx: &Context, app: &mut RSpiceApp) {
+    if let Some(enabled) = app.state.ui.take_full_screen_request() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(enabled));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
+    let Some(enabled) = app.state.ui.take_full_screen_request() else {
+        return;
+    };
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        app.state.workbench.full_screen = false;
+        log::error!("Fullscreen request failed: browser document is unavailable");
+        return;
+    };
+
+    if enabled {
+        let Some(root) = document.document_element() else {
+            app.state.workbench.full_screen = false;
+            log::error!("Fullscreen request failed: document root is unavailable");
+            return;
+        };
+        if let Err(error) = root.request_fullscreen() {
+            app.state.workbench.full_screen = false;
+            log::warn!("Browser rejected fullscreen request: {error:?}");
+        }
+    } else {
+        document.exit_fullscreen();
+    }
 }
 
 fn handle_workbench_shortcuts(ctx: &Context, app: &mut RSpiceApp) {
     let command = ctx.input(|input| {
         if input.key_pressed(egui::Key::Escape) && app.state.workbench.drawer.is_some() {
             return Some(None);
+        }
+        if input.key_pressed(egui::Key::F11) {
+            return Some(Some(Command::ToggleFullScreen));
         }
         if !input.modifiers.alt || input.modifiers.command || input.modifiers.shift {
             return None;

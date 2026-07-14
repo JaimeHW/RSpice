@@ -128,31 +128,25 @@ pub(crate) fn autosave_checkpoint_path(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Whether a newer autosave checkpoint shadows this file (native only —
-/// the web build has no checkpoint files).
-#[cfg(not(target_arch = "wasm32"))]
-fn newer_checkpoint(path: &Path) -> Option<PathBuf> {
-    let checkpoint = autosave_checkpoint_path(path);
-    let checkpoint_modified = std::fs::metadata(&checkpoint)
-        .and_then(|meta| meta.modified())
-        .ok()?;
-    let file_modified = std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()?;
-    (checkpoint_modified > file_modified).then_some(checkpoint)
-}
-
+/// Open a schematic, first offering any checkpoint that is eligible under its
+/// exact saved-source binding (native only; the web build has no checkpoint
+/// files).
 pub(crate) fn load_schematic_from_path_with_io(
     state: &mut AppState,
     path: &Path,
     io: &(impl FileWorkflowIo + ?Sized),
 ) -> bool {
-    // A newer checkpoint means the last session ended without a save —
-    // ask before silently opening the older file (volta-app-dialogs §02).
+    // A bound checkpoint from an interrupted session is reviewed before the
+    // saved source. Legacy or changed-source checkpoints only interrupt this
+    // open when they are strictly newer; stale evidence remains in Recovery.
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(checkpoint) = newer_checkpoint(path) {
-        state.dialogs.pending_autosave_restore = Some((path.to_path_buf(), checkpoint));
-        return true;
+    match super::recovery_checkpoint::autosave_restore_candidate(path) {
+        Ok(Some(candidate)) => {
+            state.dialogs.pending_autosave_restore = Some(candidate);
+            return true;
+        }
+        Ok(None) => {}
+        Err(error) => state.push_user_message(ConsoleMessage::warning(error)),
     }
     load_schematic_bypassing_autosave(state, path, io)
 }
@@ -348,11 +342,14 @@ pub(crate) fn save_schematic_to_path_with_io(
             if saved_path_is_reopenable {
                 state.browser_schematic_save_name = None;
                 state.schematic.is_dirty = false;
-                // A clean save is the truth again — a leftover checkpoint
-                // would only shadow it with something older next open.
+                // Retire only the checkpoint whose writer lease and committed
+                // identity prove this process owns these exact bytes. Foreign,
+                // legacy, or replaced recovery evidence is retained.
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let _ = std::fs::remove_file(autosave_checkpoint_path(path));
+                    if let Err(error) = super::recovery_checkpoint::cleanup_checkpoint(path) {
+                        log::warn!("Saved source but autosave checkpoint cleanup failed: {error}");
+                    }
                 }
             }
             state.sync_active_schematic_to_workspace();

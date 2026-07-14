@@ -16,7 +16,10 @@ mod model;
 mod types;
 
 pub use corner::ProcessCorner;
-pub use library::ModelLibrary;
-pub use manager::ModelLibraryManager;
+pub use library::{ModelLibrary, ModelSourceEdge, ModelSourcePin};
+pub(crate) use library::{
+    first_unreachable_source, is_foreign_platform_absolute_path, is_portable_absolute_path,
+};
+pub use manager::{ModelLibraryManager, SealedModelExecutionSources};
 pub use model::DeviceModel;
 pub use types::{ModelLevel, ModelType};

@@ -40,6 +40,7 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 thiserror.workspace = true
+sha2 = "0.10"
 
 # Logging
 log = "0.4"
@@ -100,6 +101,9 @@ eframe = { version = "0.34.3", default-features = false, features = ["wgpu", "pe
 rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga-native"] }
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds assets/brand/rspice.ico as the Windows .exe icon resource so

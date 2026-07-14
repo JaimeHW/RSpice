@@ -3,7 +3,8 @@ use super::{SpConfig, SpPortConfig, SpSweepType};
 use crate::simulation::dialog::options::parse_si_value;
 
 /// Dialog state with string buffers for SI-prefix input
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SpPortDialogState {
     /// Positive node name.
     pub node_pos: String,
@@ -54,7 +55,8 @@ impl SpPortDialogState {
 }
 
 /// Dialog state with string buffers for SI-prefix input
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SpDialogState {
     /// Start frequency buffer
     pub start_freq: String,
@@ -75,6 +77,7 @@ pub struct SpDialogState {
     /// Touchstone format version (1 or 2).
     pub touchstone_version: u32,
     /// Initialized flag
+    #[serde(skip)]
     pub initialized: bool,
 }
 

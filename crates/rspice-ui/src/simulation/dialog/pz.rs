@@ -147,7 +147,8 @@ impl PzConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PzDialogState {
     pub input_pos: String,
     pub input_neg: String,
@@ -156,6 +157,7 @@ pub struct PzDialogState {
     pub transfer_idx: usize,
     pub analysis_idx: usize,
     pub tolerance: String,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

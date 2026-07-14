@@ -5,7 +5,7 @@
 //! a `to_config()` parse/validate step. The Simulate view edits these
 //! structs and the controller consumes the very same structs when it
 //! builds the run plan, so what you see is what runs. `enabled` is the run
-//! set; run order is ascending analysis index.
+//! set and `analysis_order` is its stable execution order.
 
 use std::collections::HashSet;
 
@@ -14,7 +14,8 @@ use std::collections::HashSet;
 /// This is execution state, not display state: temperature is copied into the
 /// effective solver options and process is used when resolving model-library
 /// sections for a run.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReferencePvtPoint {
     pub process: crate::simulation::dialog::corner::ProcessCorner,
     pub temperature_celsius: f64,
@@ -31,7 +32,8 @@ impl Default for ReferencePvtPoint {
 
 /// `.tran` draft. SI suffixes allowed; "auto" max step defers to the
 /// engine's LTE control.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TranSetup {
     /// Stop time.
     pub stop: String,
@@ -58,7 +60,8 @@ impl Default for TranSetup {
 }
 
 /// `.ac` draft — DISTO rides on the same sweep.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AcSetup {
     /// Start frequency.
     pub fstart: String,
@@ -82,7 +85,8 @@ impl Default for AcSetup {
 }
 
 /// `.dc` draft with the optional nested secondary sweep.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DcSetup {
     /// Swept source name.
     pub source: String,
@@ -121,7 +125,8 @@ impl Default for DcSetup {
 }
 
 /// `.noise` draft.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NoiseSetup {
     /// Output node.
     pub output: String,
@@ -148,12 +153,22 @@ impl Default for NoiseSetup {
 }
 
 /// All analysis configuration plus the engine options, in one place.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimSetupState {
     /// Authoritative reference PVT point used by nominal analyses.
     pub reference_pvt: ReferencePvtPoint,
-    /// Enabled analysis indices; run order is ascending index.
+    /// Enabled analysis indices.
+    #[serde(
+        serialize_with = "serialize_analysis_set",
+        deserialize_with = "deserialize_analysis_set"
+    )]
     pub enabled: HashSet<usize>,
+    /// Stable execution order. Enabled analyses absent from this vector are
+    /// appended deterministically; disabled entries are ignored and removed
+    /// from the persisted normalized plan.
+    #[serde(default)]
+    pub analysis_order: Vec<usize>,
     /// Transient sweep.
     pub tran: TranSetup,
     /// AC sweep.
@@ -207,19 +222,29 @@ pub struct SimSetupState {
     /// Effective engine options (validated).
     pub options: crate::simulation::dialog::SimulationOptions,
     /// Draft buffers for the options dialog.
+    #[serde(skip)]
     pub options_draft: crate::simulation::dialog::OptionsDialogState,
     /// Parse/validation errors from the last options apply.
+    #[serde(skip)]
     pub options_errors: Vec<String>,
     /// Options dialog open.
+    #[serde(skip)]
     pub options_open: bool,
     /// Analyses listed in the run-set card beyond the always-listed core —
     /// exotics stay listed (dimmed) when unticked, until removed.
+    #[serde(
+        serialize_with = "serialize_analysis_set",
+        deserialize_with = "deserialize_analysis_set"
+    )]
     pub listed: HashSet<usize>,
     /// Add-analysis palette open (anchored to the card action).
+    #[serde(skip)]
     pub palette_open: bool,
     /// Palette filter query.
+    #[serde(skip)]
     pub palette_query: String,
     /// Keyboard-active row in the palette's filtered list.
+    #[serde(skip)]
     pub palette_active: usize,
 }
 
@@ -236,6 +261,71 @@ impl SimSetupState {
             .enabled
             .insert(crate::common::simulation_analysis_tabs::TAB_TRANSIENT);
         setup
+            .analysis_order
+            .push(crate::common::simulation_analysis_tabs::TAB_TRANSIENT);
+        setup
+    }
+
+    /// Return the exact deterministic execution order for the current run
+    /// set. Persisted order wins; newly enabled analyses are appended in
+    /// numeric order so legacy and direct-toggle callers remain deterministic.
+    pub fn ordered_enabled_indices(&self) -> Vec<usize> {
+        let mut ordered = Vec::with_capacity(self.enabled.len());
+        let mut seen = HashSet::with_capacity(self.enabled.len());
+        for index in &self.analysis_order {
+            if *index < crate::common::simulation_analysis_tabs::ANALYSIS_COUNT
+                && self.enabled.contains(index)
+                && seen.insert(*index)
+            {
+                ordered.push(*index);
+            }
+        }
+        let mut missing: Vec<_> = self
+            .enabled
+            .iter()
+            .copied()
+            .filter(|index| !seen.contains(index))
+            .collect();
+        missing.sort_unstable();
+        ordered.extend(missing);
+        ordered
+    }
+
+    /// Normalize execution-order storage to the enabled supported analyses.
+    pub fn normalize_analysis_order(&mut self) {
+        self.analysis_order = self.ordered_enabled_indices();
+    }
+
+    /// Rebuild transient editing state after a persisted plan is restored.
+    pub(crate) fn prepare_after_restore(&mut self) {
+        self.op.initialized = true;
+        self.pz.initialized = true;
+        self.sens.initialized = true;
+        self.mc.initialized = true;
+        self.pss.initialized = true;
+        self.stb.initialized = true;
+        self.temp.initialized = true;
+        self.hb.initialized = true;
+        self.sp.initialized = true;
+        self.pac.initialized = true;
+        self.pnoise.initialized = true;
+        self.pxf.initialized = true;
+        self.pstb.initialized = true;
+        self.xf.initialized = true;
+        self.corner.initialized = true;
+        self.envelope.initialized = true;
+        self.fourier.initialized = true;
+        self.reliability.initialized = true;
+        self.optimization.initialized = true;
+        self.soa.initialized = true;
+        self.options_draft =
+            crate::simulation::dialog::OptionsDialogState::from_options(&self.options);
+        self.options_errors.clear();
+        self.options_open = false;
+        self.palette_open = false;
+        self.palette_query.clear();
+        self.palette_active = 0;
+        self.normalize_analysis_order();
     }
 
     /// Select the nominal/reference PVT point consumed by subsequent runs.
@@ -802,6 +892,31 @@ fn format_temperature(value: f64) -> String {
             .trim_end_matches('.')
             .to_owned()
     }
+}
+
+fn serialize_analysis_set<S>(indices: &HashSet<usize>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut sorted: Vec<_> = indices.iter().copied().collect();
+    sorted.sort_unstable();
+    serde::Serialize::serialize(&sorted, serializer)
+}
+
+fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<HashSet<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let indices = <Vec<usize> as serde::Deserialize>::deserialize(deserializer)?;
+    let mut unique = HashSet::with_capacity(indices.len());
+    for index in indices {
+        if !unique.insert(index) {
+            return Err(serde::de::Error::custom(format!(
+                "duplicate analysis index {index}"
+            )));
+        }
+    }
+    Ok(unique)
 }
 
 #[cfg(test)]

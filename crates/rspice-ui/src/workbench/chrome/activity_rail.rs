@@ -18,7 +18,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         .show_separator_line(true)
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            ui.add_space(4.0);
+            ui.add_space(5.0);
             for workspace in Workspace::ALL {
                 let active = app.state.workbench.workspace == workspace;
                 if icon_button(
@@ -26,7 +26,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                     workspace_icon(workspace),
                     &format!("{} ({})", workspace.label(), workspace.shortcut()),
                     active,
-                    Vec2::new(ACTIVITY_RAIL_W, 46.0),
+                    Vec2::new(50.0, 45.0),
                 )
                 .clicked()
                 {

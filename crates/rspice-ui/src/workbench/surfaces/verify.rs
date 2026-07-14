@@ -4,6 +4,7 @@ use egui::{ScrollArea, Ui};
 
 use crate::common::RSpiceApp;
 use crate::state::SpecEntry;
+use crate::ui::theme;
 use crate::ui::tokens::Tokens;
 
 use super::super::commands::Command;
@@ -158,8 +159,9 @@ fn specifications(ui: &mut Ui, app: &mut RSpiceApp) {
         let mut remove = None;
         for (index, spec) in app.state.workspace.specs.iter_mut().enumerate() {
             let t = Tokens::get(ui.ctx());
-            egui::Frame::new()
-                .fill(if app.state.workbench.selected_spec == Some(index) {
+            let selected = app.state.workbench.selected_spec == Some(index);
+            let response = egui::Frame::new()
+                .fill(if selected {
                     t.color.accent_dim
                 } else {
                     t.color.bg_inset
@@ -167,16 +169,6 @@ fn specifications(ui: &mut Ui, app: &mut RSpiceApp) {
                 .stroke(egui::Stroke::new(1.0, t.color.border))
                 .inner_margin(egui::Margin::same(10))
                 .show(ui, |ui| {
-                    if ui
-                        .interact(
-                            ui.max_rect(),
-                            ui.id().with(("spec", index)),
-                            egui::Sense::click(),
-                        )
-                        .clicked()
-                    {
-                        app.state.workbench.selected_spec = Some(index);
-                    }
                     ui.horizontal(|ui| {
                         ui.label(format!("Spec {}", index + 1));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -196,7 +188,21 @@ fn specifications(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.label("Unit");
                         ui.add(egui::TextEdit::singleline(&mut spec.unit).desired_width(70.0));
                     });
-                });
+                })
+                .response
+                .interact(egui::Sense::click());
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    selected,
+                    format!("Select specification {}: {}", index + 1, spec.measurement),
+                )
+            });
+            theme::paint_focus_ring(ui, &response, response.rect);
+            if response.clicked() {
+                app.state.workbench.selected_spec = Some(index);
+            }
             ui.add_space(6.0);
         }
         if let Some(index) = remove {

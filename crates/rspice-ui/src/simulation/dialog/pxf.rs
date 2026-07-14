@@ -226,7 +226,8 @@ impl PxfConfig {
 // =============================================================================
 
 /// Dialog state with string buffers
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PxfDialogState {
     pub start_freq: String,
     pub stop_freq: String,
@@ -237,6 +238,7 @@ pub struct PxfDialogState {
     pub output_sideband: String,
     pub input_source: String,
     pub max_sideband: String,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

@@ -1,7 +1,10 @@
-use crate::common::app::{AppState, ConfirmationAction, ConsoleMessage};
+use crate::common::app::{AppState, ConsoleMessage};
 use crate::common::examples::{EXAMPLES, load_example_into_app};
 
-pub(crate) fn request_load_named_example(state: &mut AppState, name: &str) -> bool {
+#[cfg(test)]
+fn request_load_named_example(state: &mut AppState, name: &str) -> bool {
+    use crate::common::app::ConfirmationAction;
+
     let Some(example) = EXAMPLES.iter().find(|example| example.name == name) else {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Example '{}' is not registered",
@@ -41,6 +44,7 @@ pub(crate) fn load_named_example(state: &mut AppState, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::app::ConfirmationAction;
     use crate::state::{Component, ComponentType, Point, SimulationRun};
     use std::path::PathBuf;
 

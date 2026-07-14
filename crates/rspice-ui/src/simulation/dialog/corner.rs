@@ -23,7 +23,9 @@ use super::options::parse_si_value;
 // =============================================================================
 
 /// Standard process corner types
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ProcessCorner {
     /// Typical-Typical (nominal)
     #[default]
@@ -291,7 +293,8 @@ impl CornerConfig {
 // =============================================================================
 
 /// Dialog state with UI buffers
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CornerDialogState {
     /// Selected process corners (as bit flags or indices)
     pub process_tt: bool,
@@ -314,6 +317,7 @@ pub struct CornerDialogState {
     /// Base analysis type index
     pub base_analysis_idx: usize,
     /// Initialized flag
+    #[serde(skip)]
     pub initialized: bool,
 }
 

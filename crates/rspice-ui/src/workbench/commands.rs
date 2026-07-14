@@ -82,7 +82,6 @@ pub enum Command {
     AutomationConsole,
     CommandPalette,
     KeyboardShortcuts,
-    Documentation(&'static str, &'static str),
     License,
     About,
 }
@@ -294,7 +293,6 @@ impl Command {
                 "Navigate",
             ),
             Self::KeyboardShortcuts => spec("help.shortcuts", "Keyboard shortcuts", "F1", "Help"),
-            Self::Documentation(_, _) => spec("help.documentation", "Documentation", "", "Help"),
             Self::License => spec("help.license", "License and activation…", "", "Help"),
             Self::About => spec("help.about", "About RSpice", "", "Help"),
         }
@@ -542,7 +540,9 @@ impl Command {
             }
             Self::CycleGrid => app.state.ui.grid = app.state.ui.grid.cycled(),
             Self::ToggleFullScreen => {
-                app.state.workbench.full_screen = !app.state.workbench.full_screen
+                let enabled = !app.state.workbench.full_screen;
+                app.state.workbench.full_screen = enabled;
+                app.state.ui.request_full_screen(enabled);
             }
             Self::ResetActiveView => reset_active_view(app),
             Self::ToggleNavigator => {
@@ -618,26 +618,7 @@ impl Command {
                 activate_workspace(app, Workspace::Simulate);
             }
             Self::StopSimulation => app.state.simulation.trigger_abort = true,
-            Self::PreflightChecks => {
-                crate::common::menu_bar::run_design_rule_check(&mut app.state);
-                match app.state.simulation_run_preflight_block_reason() {
-                    Some(reason) => {
-                        app.state.push_user_message(
-                            crate::common::app::ConsoleMessage::warning(format!(
-                                "Simulation preflight blocked: {reason}"
-                            )),
-                        );
-                        app.state.workbench.console_visible = true;
-                        app.state.workbench.console_page = super::state::ConsolePage::Problems;
-                    }
-                    None => app.state.push_user_message(
-                        crate::common::app::ConsoleMessage::info(
-                            "Simulation preflight passed: design, analyses, and run prerequisites are ready",
-                        ),
-                    ),
-                }
-                activate_workspace(app, Workspace::Simulate);
-            }
+            Self::PreflightChecks => super::preflight::run(app),
             Self::SimulationOptions => {
                 crate::common::menu_bar::open_simulation_options(&mut app.state)
             }
@@ -681,9 +662,6 @@ impl Command {
             }
             Self::CommandPalette => app.state.dialogs.command_palette.open(),
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
-            Self::Documentation(title, path) => {
-                crate::common::menu_bar::open_documentation_reference(&mut app.state, title, path)
-            }
             Self::License => app.open_license_dialog(),
             Self::About => app.state.dialogs.about = true,
         }

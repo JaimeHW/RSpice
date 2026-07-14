@@ -1,6 +1,6 @@
 use super::{AnalysisWorkspaceState, AppState, DialogState};
 
-pub(super) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
+pub(crate) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
     manager.load_builtin_models();
     manager

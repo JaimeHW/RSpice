@@ -277,7 +277,8 @@ impl PacConfig {
 // =============================================================================
 
 /// Dialog state with string buffers
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PacDialogState {
     /// Start frequency buffer
     pub start_freq: String,
@@ -300,6 +301,7 @@ pub struct PacDialogState {
     /// Include DC
     pub include_dc: bool,
     /// Initialized flag
+    #[serde(skip)]
     pub initialized: bool,
 }
 

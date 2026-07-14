@@ -129,7 +129,8 @@ impl PssConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PssDialogState {
     pub fund_freq: String,
     pub num_harmonics: String,
@@ -138,6 +139,7 @@ pub struct PssDialogState {
     pub osc_mode: bool,
     pub osc_node: String,
     pub save_harmonics: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 
@@ -164,7 +166,10 @@ impl PssDialogState {
             .num_harmonics
             .parse()
             .map_err(|_| "Invalid harmonics")?;
-        let iter: u32 = self.max_iter.parse().unwrap_or(50);
+        let iter: u32 = self
+            .max_iter
+            .parse()
+            .map_err(|_| "Invalid maximum iteration count")?;
         let method = match self.method_idx {
             0 => PssSolverMethod::Shooting,
             _ => PssSolverMethod::HarmonicBalance,

@@ -234,7 +234,8 @@ impl OptimizationConfig {
 }
 
 /// UI state for optimization dialog tab.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OptimizationDialogState {
     /// Variables encoded as `name:min:max[:initial]`, separated by newline/comma.
     pub variables_text: String,
@@ -259,6 +260,7 @@ pub struct OptimizationDialogState {
     /// Minimum step.
     pub min_step: String,
     /// Lazy default initialization.
+    #[serde(skip)]
     pub initialized: bool,
 }
 

@@ -18,7 +18,7 @@
 //! .endl FF
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -238,12 +238,24 @@ impl ParsedSubcircuit {
 pub struct LibParser {
     /// Base directory for resolving .include paths
     base_dir: PathBuf,
+    /// Top-level library directory used after the including file directory,
+    /// matching the executable include processor's fallback order.
+    root_dir: PathBuf,
     /// Current file being parsed
     current_file: Option<PathBuf>,
     /// Include depth (to prevent infinite recursion)
     include_depth: usize,
     /// Maximum include depth
     max_include_depth: usize,
+    /// Canonical source stack used for deterministic cycle detection.
+    include_stack: Vec<PathBuf>,
+    /// Exact UTF-8 contents read during this parse, keyed by canonical path.
+    resolved_sources: Vec<ResolvedLibSource>,
+    resolved_source_paths: HashSet<PathBuf>,
+    /// Canonical include-resolution decisions captured while filesystem
+    /// semantics (symlinks, case rules, and search precedence) are available.
+    resolved_dependencies: Vec<ResolvedLibDependency>,
+    resolved_dependency_targets: HashMap<(PathBuf, String), PathBuf>,
     /// Collected sections
     sections: Vec<LibSection>,
     /// Models outside any section (top-level)
@@ -280,11 +292,18 @@ impl std::fmt::Display for ParseError {
 impl LibParser {
     /// Create a new parser with the given base directory
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+        let base_dir = base_dir.into();
         Self {
-            base_dir: base_dir.into(),
+            root_dir: base_dir.clone(),
+            base_dir,
             current_file: None,
             include_depth: 0,
-            max_include_depth: 10,
+            max_include_depth: crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH,
+            include_stack: Vec::new(),
+            resolved_sources: Vec::new(),
+            resolved_source_paths: HashSet::new(),
+            resolved_dependencies: Vec::new(),
+            resolved_dependency_targets: HashMap::new(),
             sections: Vec::new(),
             top_level_models: Vec::new(),
             top_level_subcircuits: Vec::new(),
@@ -294,21 +313,87 @@ impl LibParser {
 
     /// Parse a .lib file and return the result
     pub fn parse_file(&mut self, path: impl AsRef<Path>) -> io::Result<LibParseResult> {
-        let path = path.as_ref();
-        let content = std::fs::read_to_string(path)?;
+        self.reset_parse_state();
+        let path = std::fs::canonicalize(path.as_ref())?;
+        let bytes = std::fs::read(&path)?;
+        let content = crate::netlist::decode_source_bytes(&bytes)?;
 
-        self.current_file = Some(path.to_path_buf());
+        self.current_file = Some(path.clone());
         self.base_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        self.root_dir = self.base_dir.clone();
+        // The root library occupies the first include frame when it is
+        // materialized from a generated deck. Starting at one keeps closure
+        // discovery's exact boundary aligned with IncludeProcessor.
+        self.include_depth = 1;
+        self.include_stack.push(path.clone());
+        self.record_resolved_source(path, &bytes, &content);
 
         self.parse_content(&content);
+        self.include_stack.pop();
 
         Ok(self.build_result())
     }
 
     /// Parse library content from a string
     pub fn parse_string(&mut self, content: &str) -> LibParseResult {
+        self.reset_parse_state();
         self.parse_content(content);
         self.build_result()
+    }
+
+    fn reset_parse_state(&mut self) {
+        self.current_file = None;
+        self.include_depth = 0;
+        self.include_stack.clear();
+        self.resolved_sources.clear();
+        self.resolved_source_paths.clear();
+        self.resolved_dependencies.clear();
+        self.resolved_dependency_targets.clear();
+        self.sections.clear();
+        self.top_level_models.clear();
+        self.top_level_subcircuits.clear();
+        self.errors.clear();
+    }
+
+    fn record_resolved_source(&mut self, path: PathBuf, bytes: &[u8], content: &str) {
+        if self.resolved_source_paths.insert(path.clone()) {
+            self.resolved_sources.push(ResolvedLibSource {
+                path,
+                bytes: Arc::from(bytes),
+                content: Arc::from(content),
+            });
+        }
+    }
+
+    fn record_resolved_dependency(
+        &mut self,
+        owner: PathBuf,
+        requested_path: &str,
+        target: PathBuf,
+    ) -> Result<(), String> {
+        let requested_path = crate::netlist::normalize_source_path_literal(requested_path)
+            .map_err(|error| error.to_string())?;
+        let key = (owner.clone(), requested_path.clone());
+        if let Some(existing) = self.resolved_dependency_targets.get(&key) {
+            if existing != &target {
+                return Err(format!(
+                    "Conflicting dependency resolution for normalized path '{}' in '{}': '{}' and '{}'",
+                    requested_path,
+                    owner.display(),
+                    existing.display(),
+                    target.display()
+                ));
+            }
+            return Ok(());
+        }
+
+        self.resolved_dependency_targets.insert(key, target.clone());
+        self.resolved_dependencies.push(ResolvedLibDependency {
+            owner,
+            requested_path,
+            target,
+        });
+        Ok(())
     }
 
     /// Internal parsing implementation
@@ -337,8 +422,18 @@ impl LibParser {
 
             let upper = line.to_uppercase();
 
-            // Handle .lib section start
-            if upper.starts_with(".LIB") && !upper.contains("INCLUDE") {
+            // A two-argument `.lib <file> <section>` is an external library
+            // dependency; a one-argument `.lib <section>` opens an inline
+            // section. Use the netlist parser's established tokenization so
+            // quoted paths and directive boundaries stay consistent.
+            if let Some((name_or_path, external_section)) =
+                crate::netlist::parse_lib_directive(line)
+            {
+                if external_section.is_some() {
+                    self.process_include(&name_or_path, line_number);
+                    last_comment.clear();
+                    continue;
+                }
                 if let Some(section) = current_section.take() {
                     self.errors.push(ParseError {
                         message: format!(
@@ -351,10 +446,8 @@ impl LibParser {
                     });
                     self.sections.push(section);
                 }
-                if let Some(name) = self.parse_lib_directive(line) {
-                    current_section = Some(LibSection::new(name));
-                    current_section_start_line = Some(line_number);
-                }
+                current_section = Some(LibSection::new(name_or_path));
+                current_section_start_line = Some(line_number);
                 last_comment.clear();
                 continue;
             }
@@ -369,10 +462,8 @@ impl LibParser {
             }
 
             // Handle .include
-            if upper.starts_with(".INCLUDE") || upper.starts_with(".INC") {
-                if let Some(include_path) = self.parse_include_directive(line) {
-                    self.process_include(&include_path);
-                }
+            if let Some(include_path) = crate::netlist::parse_include_directive(line) {
+                self.process_include(&include_path, line_number);
                 continue;
             }
 
@@ -485,59 +576,8 @@ impl LibParser {
         result
     }
 
-    /// Parse .lib directive to extract section name
-    fn parse_lib_directive(&self, line: &str) -> Option<String> {
-        // Format: .lib section_name or .lib "section_name"
-        let rest = line
-            .trim()
-            .strip_prefix(".lib")
-            .or_else(|| line.trim().strip_prefix(".LIB"))
-            .or_else(|| line.trim().strip_prefix(".Lib"))?
-            .trim();
-
-        if rest.is_empty() {
-            return None;
-        }
-
-        // Handle quoted section names
-        if rest.starts_with('"') {
-            rest.strip_prefix('"')?
-                .split('"')
-                .next()
-                .map(|s| s.to_string())
-        } else {
-            rest.split_whitespace().next().map(|s| s.to_string())
-        }
-    }
-
-    /// Parse .include directive
-    fn parse_include_directive(&self, line: &str) -> Option<PathBuf> {
-        let rest = line.trim().to_lowercase();
-
-        let rest = if rest.starts_with(".include") {
-            &line.trim()[8..]
-        } else if rest.starts_with(".inc") {
-            &line.trim()[4..]
-        } else {
-            return None;
-        };
-
-        let rest = rest.trim();
-
-        // Handle quoted paths
-        let path_str = if rest.starts_with('"') {
-            rest.strip_prefix('"')?.split('"').next()?
-        } else if rest.starts_with('\'') {
-            rest.strip_prefix('\'')?.split('\'').next()?
-        } else {
-            rest.split_whitespace().next()?
-        };
-
-        Some(PathBuf::from(path_str))
-    }
-
     /// Process an include directive
-    fn process_include(&mut self, include_path: &Path) {
+    fn process_include(&mut self, include_literal: &str, directive_line: usize) {
         if self.include_depth >= self.max_include_depth {
             self.errors.push(ParseError {
                 message: format!(
@@ -545,46 +585,123 @@ impl LibParser {
                     self.max_include_depth
                 ),
                 file: self.current_file.clone(),
-                line: None,
+                line: Some(directive_line),
             });
             return;
         }
 
-        let full_path = if include_path.is_absolute() {
-            include_path.to_path_buf()
+        let include_path = crate::netlist::source_path_literal_to_host_path(include_literal);
+        let candidates = if include_path.is_absolute() {
+            vec![include_path.clone()]
         } else {
-            self.base_dir.join(include_path)
+            let mut candidates = vec![
+                self.base_dir.join(&include_path),
+                self.root_dir.join(&include_path),
+            ];
+            for common in ["lib", "models", "../lib", "../models"] {
+                candidates.push(self.base_dir.join(common).join(&include_path));
+            }
+            candidates
         };
+        let mut last_error = None;
+        let mut attempted_path = None;
+        let canonical_path = candidates.into_iter().find_map(|candidate| {
+            attempted_path.get_or_insert_with(|| candidate.clone());
+            match std::fs::canonicalize(&candidate) {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    last_error = Some(error);
+                    None
+                }
+            }
+        });
+        let canonical_path = match canonical_path {
+            Some(path) => path,
+            None => {
+                let full_path = attempted_path.unwrap_or_else(|| include_path.clone());
+                self.errors.push(ParseError {
+                    message: format!(
+                        "Include file not found: '{}' ({})",
+                        full_path.display(),
+                        last_error
+                            .map(|error| error.to_string())
+                            .unwrap_or_else(|| "no candidate path was produced".to_owned())
+                    ),
+                    file: self.current_file.clone(),
+                    line: Some(directive_line),
+                });
+                return;
+            }
+        };
+        if let Some(owner) = self.current_file.clone() {
+            if let Err(message) =
+                self.record_resolved_dependency(owner, include_literal, canonical_path.clone())
+            {
+                self.errors.push(ParseError {
+                    message,
+                    file: self.current_file.clone(),
+                    line: Some(directive_line),
+                });
+                return;
+            }
+        }
 
-        if !full_path.exists() {
+        if self.include_stack.contains(&canonical_path) {
+            let mut cycle = self
+                .include_stack
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>();
+            cycle.push(canonical_path.display().to_string());
             self.errors.push(ParseError {
-                message: format!("Include file not found: {}", full_path.display()),
+                message: format!("Cyclic include dependency: {}", cycle.join(" -> ")),
                 file: self.current_file.clone(),
-                line: None,
+                line: Some(directive_line),
             });
             return;
         }
 
-        match std::fs::read_to_string(&full_path) {
-            Ok(content) => {
-                let saved_file = self.current_file.take();
-                let saved_dir = self.base_dir.clone();
+        match std::fs::read(&canonical_path) {
+            Ok(bytes) => match crate::netlist::decode_source_bytes(&bytes) {
+                Ok(content) => {
+                    let saved_file = self.current_file.take();
+                    let saved_dir = self.base_dir.clone();
 
-                self.current_file = Some(full_path.clone());
-                self.base_dir = full_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-                self.include_depth += 1;
+                    self.current_file = Some(canonical_path.clone());
+                    self.base_dir = canonical_path
+                        .parent()
+                        .unwrap_or(Path::new("."))
+                        .to_path_buf();
+                    self.include_depth += 1;
+                    self.include_stack.push(canonical_path.clone());
+                    self.record_resolved_source(canonical_path.clone(), &bytes, &content);
 
-                self.parse_content(&content);
+                    self.parse_content(&content);
 
-                self.include_depth -= 1;
-                self.current_file = saved_file;
-                self.base_dir = saved_dir;
-            }
+                    self.include_stack.pop();
+                    self.include_depth -= 1;
+                    self.current_file = saved_file;
+                    self.base_dir = saved_dir;
+                }
+                Err(error) => {
+                    self.errors.push(ParseError {
+                        message: format!(
+                            "Failed to decode include file '{}': {error}",
+                            canonical_path.display()
+                        ),
+                        file: self.current_file.clone(),
+                        line: Some(directive_line),
+                    });
+                }
+            },
             Err(e) => {
                 self.errors.push(ParseError {
-                    message: format!("Failed to read include file: {}", e),
-                    file: Some(full_path),
-                    line: None,
+                    message: format!(
+                        "Failed to read include file '{}': {e}",
+                        canonical_path.display()
+                    ),
+                    file: self.current_file.clone(),
+                    line: Some(directive_line),
                 });
             }
         }
@@ -759,6 +876,8 @@ impl LibParser {
             top_level_models: self.top_level_models.clone(),
             top_level_subcircuits: self.top_level_subcircuits.clone(),
             errors: self.errors.clone(),
+            resolved_sources: self.resolved_sources.clone(),
+            resolved_dependencies: self.resolved_dependencies.clone(),
         }
     }
 }
@@ -800,6 +919,40 @@ pub struct LibParseResult {
     pub top_level_subcircuits: Vec<ParsedSubcircuit>,
     /// Errors encountered during parsing
     pub errors: Vec<ParseError>,
+    /// Canonical paths and exact contents read for the root file and every
+    /// transitive include. Entries are unique by canonical path.
+    pub resolved_sources: Vec<ResolvedLibSource>,
+    /// Authenticated canonical resolution edges for every include/library path
+    /// literal encountered while capturing the closure.
+    pub resolved_dependencies: Vec<ResolvedLibDependency>,
+}
+
+/// One exact source captured while resolving a library dependency closure.
+#[derive(Clone)]
+pub struct ResolvedLibSource {
+    pub path: PathBuf,
+    /// Exact bytes read from the source, before BOM/encoding decoding.
+    pub bytes: Arc<[u8]>,
+    /// Decoded text consumed by the parser.
+    pub content: Arc<str>,
+}
+
+impl std::fmt::Debug for ResolvedLibSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ResolvedLibSource")
+            .field("path", &self.path)
+            .field("byte_len", &self.bytes.len())
+            .finish()
+    }
+}
+
+/// One canonical dependency edge captured during library import.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ResolvedLibDependency {
+    pub owner: PathBuf,
+    pub requested_path: String,
+    pub target: PathBuf,
 }
 
 impl LibParseResult {
@@ -883,6 +1036,17 @@ impl LibParseResult {
 mod tests {
     use super::*;
 
+    fn unique_lib_parser_temp_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rspice-lib-parser-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ))
+    }
+
     #[test]
     fn parser_rejects_unclosed_lib_section() {
         let mut parser = LibParser::new(".");
@@ -921,5 +1085,109 @@ mod tests {
             "errors should name the unterminated subcircuit: {:?}",
             result.errors
         );
+    }
+
+    fn write_depth_fixture(directory: &Path, source_count: usize) -> PathBuf {
+        std::fs::create_dir_all(directory).expect("create depth fixture");
+        for index in 0..source_count {
+            let content = if index + 1 < source_count {
+                format!(".incl \"{}.inc\"\n", index + 1)
+            } else {
+                ".model depth_n NMOS (LEVEL=1)\n".to_owned()
+            };
+            std::fs::write(directory.join(format!("{index}.inc")), content)
+                .expect("write depth source");
+        }
+        directory.join("0.inc")
+    }
+
+    #[test]
+    fn dependency_capture_matches_the_64_frame_execution_boundary() {
+        let accepted_dir = unique_lib_parser_temp_dir("depth-accepted");
+        let accepted_root =
+            write_depth_fixture(&accepted_dir, crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH);
+        let mut accepted_parser = LibParser::new(&accepted_dir);
+        let accepted = accepted_parser
+            .parse_file(&accepted_root)
+            .expect("accepted depth fixture reads");
+        assert!(accepted.is_ok(), "{:?}", accepted.errors);
+        assert_eq!(
+            accepted.resolved_sources.len(),
+            crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH
+        );
+        assert_eq!(
+            accepted.resolved_dependencies.len(),
+            crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH - 1
+        );
+
+        let rejected_dir = unique_lib_parser_temp_dir("depth-rejected");
+        let rejected_root =
+            write_depth_fixture(&rejected_dir, crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH + 1);
+        let mut rejected_parser = LibParser::new(&rejected_dir);
+        let rejected = rejected_parser
+            .parse_file(&rejected_root)
+            .expect("rejected depth fixture still reads its root");
+        assert!(!rejected.is_ok());
+        assert!(rejected.errors.iter().any(|error| {
+            error
+                .message
+                .contains("Maximum include depth (64) exceeded")
+                && error.line == Some(1)
+        }));
+
+        let _ = std::fs::remove_dir_all(accepted_dir);
+        let _ = std::fs::remove_dir_all(rejected_dir);
+    }
+
+    #[test]
+    fn discovery_treats_both_spice_separator_styles_consistently() {
+        let directory = unique_lib_parser_temp_dir("mixed-separators");
+        let subdirectory = directory.join("sub");
+        std::fs::create_dir_all(&subdirectory).expect("create nested source directory");
+        let dependency = subdirectory.join("device.inc");
+        std::fs::write(&dependency, ".model nested_n NMOS (LEVEL=1)\n")
+            .expect("write nested dependency");
+        let root = directory.join("root.lib");
+        std::fs::write(&root, ".include \"sub\\device.inc\"\n").expect("write backslash include");
+
+        let mut parser = LibParser::new(&directory);
+        let result = parser.parse_file(&root).expect("root source reads");
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        assert_eq!(result.resolved_dependencies.len(), 1);
+        assert_eq!(
+            result.resolved_dependencies[0].requested_path,
+            "sub/device.inc"
+        );
+        assert_eq!(
+            result.resolved_dependencies[0].target,
+            std::fs::canonicalize(&dependency).expect("canonical dependency")
+        );
+        assert!(result.find_model("nested_n").is_some());
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn conflicting_targets_for_one_normalized_edge_are_rejected() {
+        let mut parser = LibParser::new(".");
+        let owner = PathBuf::from("owner.lib");
+        let first = PathBuf::from("first.inc");
+        let second = PathBuf::from("second.inc");
+        parser
+            .record_resolved_dependency(owner.clone(), r"sub\device.inc", first.clone())
+            .expect("first resolution is captured");
+
+        let error = parser
+            .record_resolved_dependency(owner, "sub/device.inc", second)
+            .expect_err("normalized edge identity cannot silently change target");
+
+        assert!(
+            error.contains("Conflicting dependency resolution"),
+            "{error}"
+        );
+        assert!(error.contains("sub/device.inc"), "{error}");
+        assert_eq!(parser.resolved_dependencies.len(), 1);
+        assert_eq!(parser.resolved_dependencies[0].target, first);
     }
 }

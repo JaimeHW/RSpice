@@ -366,9 +366,20 @@ mod browser {
     }
 
     fn create_worker() -> Option<web_sys::Worker> {
+        let worker_url = global_worker_url()?;
         let options = web_sys::WorkerOptions::new();
         options.set_type(web_sys::WorkerType::Module);
-        web_sys::Worker::new_with_options("./simulation-worker.js", &options).ok()
+        web_sys::Worker::new_with_options(&worker_url, &options).ok()
+    }
+
+    fn global_worker_url() -> Option<String> {
+        Reflect::get(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER_URL"),
+        )
+        .ok()
+        .and_then(|value| value.as_string())
+        .filter(|url| !url.trim().is_empty())
     }
 
     fn worker_message(request: &WorkerRequest) -> Result<JsValue, SimulationError> {

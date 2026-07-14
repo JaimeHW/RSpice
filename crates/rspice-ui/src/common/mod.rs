@@ -30,6 +30,8 @@ pub mod logging;
 pub mod menu_bar;
 pub(crate) mod netlist_workflow;
 pub(crate) mod project_workflow;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod recovery_checkpoint;
 pub mod simulation_analysis_tabs;
 pub mod time_compat;
 

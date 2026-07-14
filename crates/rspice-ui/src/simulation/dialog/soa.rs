@@ -100,7 +100,8 @@ fn yes_no(v: bool) -> &'static str {
 }
 
 /// UI state for SOA tab.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SoaDialogState {
     /// Stop time input.
     pub stop_time: String,
@@ -123,6 +124,7 @@ pub struct SoaDialogState {
     /// Max Vce input.
     pub max_vce: String,
     /// Lazy default init.
+    #[serde(skip)]
     pub initialized: bool,
 }
 

@@ -112,7 +112,8 @@ impl FourierConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FourierDialogState {
     pub fundamental: String,
     pub harmonics: String,
@@ -121,6 +122,7 @@ pub struct FourierDialogState {
     pub stop_time: String,
     pub compute_thd: bool,
     pub normalize: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

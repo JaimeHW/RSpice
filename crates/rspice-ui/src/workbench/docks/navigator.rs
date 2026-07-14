@@ -511,11 +511,19 @@ fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.id().with("add-result-expression"),
         egui::Sense::click(),
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            "Open waveform calculator",
+        )
+    });
     if response.hovered() {
         ui.painter()
             .rect_filled(add_rect, t.radius, t.color.bg_hover);
     }
     WorkbenchIcon::Add.paint(ui.painter(), add_rect.shrink(7.0), t.color.text_dim);
+    theme::paint_focus_ring(ui, &response, add_rect);
     if response.on_hover_text("Open calculator").clicked() {
         super::super::commands::Command::WaveformCalculator.execute(app);
     }
@@ -531,6 +539,14 @@ fn signal_row(
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            visible,
+            format!("{name} trace visibility"),
+        )
+    });
     if visible || response.hovered() {
         ui.painter().rect_filled(
             rect,
@@ -571,6 +587,7 @@ fn signal_row(
             t.color.text_faint,
         );
     }
+    theme::paint_focus_ring(ui, &response, rect);
     response
         .on_hover_text(if visible { "Hide trace" } else { "Show trace" })
         .clicked()
@@ -688,6 +705,14 @@ pub(super) fn nav_row(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click(),
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
     if selected || response.hovered() {
         ui.painter().rect_filled(
             rect,
@@ -755,6 +780,7 @@ pub(super) fn nav_row(
             t.color.text_faint,
         );
     }
+    theme::paint_focus_ring(ui, &response, rect);
     response.clicked()
 }
 

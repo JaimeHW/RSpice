@@ -7,7 +7,6 @@ use crate::ui::tokens::Tokens;
 
 use super::super::chrome::activity_rail::workspace_icon;
 use super::super::commands::Command;
-use super::super::design_system::{PHONE_NAV_H, STATUS_BAR_H, TITLE_BAR_H, TOOL_BAR_H};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
 
@@ -16,21 +15,30 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         return;
     };
     let screen = ctx.content_rect();
-    let top = TITLE_BAR_H + TOOL_BAR_H;
-    let bottom = STATUS_BAR_H
+    let top = layout.title_bar_height + layout.toolbar_height;
+    let bottom = layout.status_bar_height
         + if layout.show_phone_navigation {
-            PHONE_NAV_H
+            layout.phone_navigation_height
         } else {
             0.0
         };
     let available_height = (screen.height() - top - bottom).max(180.0);
+    let workbench_rect = egui::Rect::from_min_max(
+        egui::pos2(screen.left(), screen.top() + top),
+        egui::pos2(screen.right(), screen.bottom() - bottom),
+    );
     let t = Tokens::get(ctx);
 
     let scrim = Area::new(Id::new("workbench.drawer.scrim"))
         .order(Order::Foreground)
-        .fixed_pos(screen.min)
+        .fixed_pos(workbench_rect.min)
         .show(ctx, |ui| {
-            let (rect, response) = ui.allocate_exact_size(screen.size(), Sense::click());
+            // accessibility-pointer-shim: the drawer scrim dismisses on a
+            // pointer press but is deliberately absent from keyboard/AT order.
+            let (rect, response) = ui.allocate_exact_size(
+                workbench_rect.size(),
+                Sense::click().difference(Sense::focusable_noninteractive()),
+            );
             ui.painter()
                 .rect_filled(rect, 0.0, egui::Color32::from_black_alpha(112));
             response
@@ -43,19 +51,26 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 
     match drawer {
         Drawer::Navigator => {
+            let width = if layout.compact_shell {
+                340.0_f32.min((screen.width() - 42.0).max(220.0))
+            } else {
+                360.0_f32.min((screen.width() - 54.0).max(220.0))
+            };
             Area::new(Id::new("workbench.drawer.navigator"))
                 .order(Order::Tooltip)
                 .fixed_pos(egui::pos2(screen.left(), screen.top() + top))
                 .show(ctx, |ui| {
                     Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
-                        ui.set_width(screen.width().min(360.0));
+                        ui.set_width(width);
                         ui.set_height(available_height);
                         super::navigator::show(ui, app);
                     });
                 });
         }
         Drawer::Inspector => {
-            let width = screen.width().min(380.0);
+            let maximum: f32 = if layout.compact_shell { 340.0 } else { 330.0 };
+            let gutter: f32 = if layout.compact_shell { 42.0 } else { 54.0 };
+            let width = maximum.min((screen.width() - gutter).max(220.0));
             Area::new(Id::new("workbench.drawer.inspector"))
                 .order(Order::Tooltip)
                 .fixed_pos(egui::pos2(screen.right() - width, screen.top() + top))
@@ -85,12 +100,13 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 [Workspace::Project, Workspace::Models, Workspace::Netlist]
                             {
                                 let selected = app.state.workbench.workspace == workspace;
-                                if super::super::design_system::labeled_icon_button(
+                                if super::super::design_system::labeled_icon_button_sized(
                                     ui,
                                     workspace_icon(workspace),
                                     workspace.label(),
                                     selected,
                                     ui.available_width(),
+                                    44.0,
                                 )
                                 .clicked()
                                 {

@@ -53,27 +53,26 @@ pub enum CornerProcess {
 
 /// One explicit foundry/library model binding for a process point.
 ///
-/// `section = Some(..)` represents `.lib <path> <section>`; `None`
-/// represents a process-independent `.include <path>`. Paths remain data and
-/// are validated before being rendered into a SPICE directive.
+/// Model cards are fully materialized from an authenticated in-memory source
+/// snapshot before a worker request is created. Workers never receive a model
+/// path that could be reopened after verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CornerModelBinding {
     pub process: CornerProcess,
-    pub library_path: String,
+    pub source_label: String,
     pub section: Option<String>,
+    pub materialized_model_cards: String,
 }
 
 impl CornerModelBinding {
     pub(crate) fn validate(&self) -> Result<(), String> {
-        let path = self.library_path.trim();
-        if path.is_empty() {
-            return Err("Corner model binding requires a library path".to_owned());
+        let label = self.source_label.trim();
+        if label.is_empty() {
+            return Err("Corner model binding requires a source label".to_owned());
         }
-        if path.chars().any(|character| {
-            character == '"' || character == '\0' || character == '\r' || character == '\n'
-        }) {
+        if label.chars().any(char::is_control) {
             return Err(format!(
-                "Corner model library path contains a character that cannot be represented safely: {path}"
+                "Corner model source label contains a control character and cannot be represented safely: {label:?}"
             ));
         }
         if let Some(section) = self.section.as_deref() {
@@ -92,14 +91,26 @@ impl CornerModelBinding {
                 ));
             }
         }
-        Ok(())
-    }
-
-    pub(crate) fn spice_directive(&self) -> String {
-        match self.section.as_deref() {
-            Some(section) => format!(".lib \"{}\" {section}", self.library_path.trim()),
-            None => format!(".include \"{}\"", self.library_path.trim()),
+        if self.materialized_model_cards.trim().is_empty() {
+            return Err(format!(
+                "Corner model binding '{label}' contains no materialized model cards"
+            ));
         }
+        for line in self.materialized_model_cards.lines() {
+            if line.trim().eq_ignore_ascii_case(".end") {
+                return Err(format!(
+                    "Corner model binding '{label}' contains a terminal .end card"
+                ));
+            }
+            if rspice_core::netlist::parse_include_directive(line).is_some()
+                || rspice_core::netlist::parse_lib_directive(line).is_some()
+            {
+                return Err(format!(
+                    "Corner model binding '{label}' contains an unresolved include/library directive"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -420,13 +431,22 @@ mod tests {
     }
 
     #[test]
-    fn binding_rejects_directive_injection_characters() {
+    fn binding_rejects_unsafe_labels_and_unresolved_directives() {
         let binding = CornerModelBinding {
             process: CornerProcess::FF,
-            library_path: "models.lib\n.end".to_owned(),
+            source_label: "models.lib\n.end".to_owned(),
             section: Some("ff".to_owned()),
+            materialized_model_cards: ".model fast D (IS=1e-12)".to_owned(),
         };
 
         assert!(binding.validate().is_err());
+
+        let unresolved = CornerModelBinding {
+            process: CornerProcess::FF,
+            source_label: "models.lib [ff]".to_owned(),
+            section: Some("ff".to_owned()),
+            materialized_model_cards: ".include \"late.inc\"".to_owned(),
+        };
+        assert!(unresolved.validate().is_err());
     }
 }

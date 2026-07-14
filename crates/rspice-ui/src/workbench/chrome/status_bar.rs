@@ -7,13 +7,12 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::super::commands::Command;
-use super::super::design_system::STATUS_BAR_H;
 use super::super::layout::LayoutSpec;
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
     TopBottomPanel::bottom("workbench.status_bar")
-        .exact_height(STATUS_BAR_H)
+        .exact_height(layout.status_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
         .show(ctx, |ui| {
@@ -23,12 +22,12 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                 }
 
                 if !layout.width_class.is_phone() {
-                    separator(ui);
+                    separator(ui, layout.status_bar_height);
                     if let Some((x, y)) = app.state.ui.canvas_hover {
                         segment(ui, &format!("x {x:.2} · y {y:.2}"));
                     }
                     if let Some(selection) = selection_summary(app) {
-                        separator(ui);
+                        separator(ui, layout.status_bar_height);
                         segment(ui, &selection);
                     }
                 }
@@ -38,7 +37,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         ui,
                         &format!("{}%", (app.state.schematic.zoom * 100.0).round()),
                     );
-                    separator(ui);
+                    separator(ui, layout.status_bar_height);
                     let engine = if app.state.simulation.is_running {
                         format!(
                             "Engine running · {}%",
@@ -57,9 +56,9 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         },
                     );
                     if !layout.width_class.is_phone() {
-                        separator(ui);
+                        separator(ui, layout.status_bar_height);
                         segment(ui, platform_label());
-                        separator(ui);
+                        separator(ui, layout.status_bar_height);
                         segment(ui, app.state.workbench.workspace.owner_label());
                     }
                 });
@@ -150,9 +149,9 @@ fn status(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
     });
 }
 
-fn separator(ui: &mut egui::Ui) {
+fn separator(ui: &mut egui::Ui, height: f32) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, STATUS_BAR_H), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, height), egui::Sense::hover());
     ui.painter().vline(
         rect.center().x,
         egui::Rangef::new(rect.top() + 6.0, rect.bottom() - 6.0),

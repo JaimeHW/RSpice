@@ -76,6 +76,9 @@ fn symbol_shortcut_command_allowed(
 impl RSpiceApp {
     /// Handle keyboard shortcuts
     pub(super) fn handle_shortcuts(&mut self, ctx: &Context) {
+        if self.state.workbench.application_modal_open() {
+            return;
+        }
         let has_focus = ctx.memory(|memory| memory.focused().is_some());
         let snapshot = ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, has_focus));
         for command in collect_shortcut_commands(&snapshot) {

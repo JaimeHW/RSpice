@@ -1,5 +1,11 @@
 use super::*;
 
+fn is_terminal_end_card(line: &str) -> bool {
+    line.split_whitespace()
+        .next()
+        .is_some_and(|directive| directive.eq_ignore_ascii_case(".end"))
+}
+
 impl SimulationController {
     pub(super) fn analysis_spec_to_spice_line(
         &self,
@@ -267,7 +273,7 @@ impl SimulationController {
         let mut lines: Vec<String> = netlist.lines().map(|line| line.to_string()).collect();
         let insertion_idx = lines
             .iter()
-            .position(|line| line.trim_start().to_ascii_lowercase().starts_with(".end"))
+            .position(|line| is_terminal_end_card(line))
             .unwrap_or(lines.len());
         let injected_lines = option_lines
             .iter()
@@ -287,20 +293,28 @@ impl SimulationController {
     /// per process without retaining or double-applying the reference models.
     pub(super) fn apply_reference_model_bindings_to_netlist(
         netlist: &str,
-        directives: &[String],
+        model_cards: &[String],
     ) -> String {
-        if directives.is_empty() {
+        if model_cards.is_empty() {
             return netlist.to_owned();
         }
 
         let mut lines: Vec<String> = netlist.lines().map(str::to_owned).collect();
         let insertion_idx = lines
             .iter()
-            .position(|line| line.trim_start().to_ascii_lowercase().starts_with(".end"))
+            .position(|line| is_terminal_end_card(line))
             .unwrap_or(lines.len());
-        let mut block = Vec::with_capacity(directives.len() + 2);
-        block.push(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_BEGIN.to_owned());
-        block.extend(directives.iter().cloned());
+        let payload = model_cards
+            .iter()
+            .flat_map(|cards| cards.lines().map(str::to_owned))
+            .collect::<Vec<_>>();
+        let mut block = Vec::with_capacity(payload.len() + 2);
+        block.push(format!(
+            "{} {}",
+            crate::services::simulation_runner::REFERENCE_MODEL_BINDING_BEGIN,
+            payload.len()
+        ));
+        block.extend(payload);
         block.push(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_END.to_owned());
         lines.splice(insertion_idx..insertion_idx, block);
 
@@ -309,5 +323,59 @@ impl SimulationController {
             merged.push('\n');
         }
         merged
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_binding_is_inserted_after_hierarchical_subcircuits() {
+        let deck = "hierarchical\n.subckt child in out\nR1 in out 1k\n.ends child\nX1 in out child\n.op\n.end\n";
+        let bound = SimulationController::apply_reference_model_bindings_to_netlist(
+            deck,
+            &[".model sealed D (IS=1e-12)".to_owned()],
+        );
+
+        let subckt_end = bound.find(".ends child").expect("subcircuit end remains");
+        let binding = bound
+            .find(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_BEGIN)
+            .expect("binding marker inserted");
+        let terminal_end = bound.rfind("\n.end\n").expect("terminal end remains");
+        assert!(subckt_end < binding, "{bound}");
+        assert!(binding < terminal_end, "{bound}");
+    }
+
+    #[test]
+    fn terminal_end_matching_accepts_annotations_but_not_longer_directives() {
+        assert!(!is_terminal_end_card(".ends child"));
+        assert!(!is_terminal_end_card(".endc"));
+        assert!(!is_terminal_end_card(".endl TT"));
+        assert!(is_terminal_end_card("  .END  "));
+        assert!(is_terminal_end_card(".end ; terminal comment"));
+        assert!(is_terminal_end_card(".END $ terminal comment"));
+    }
+
+    #[test]
+    fn options_and_reference_models_precede_annotated_terminal_end_cards() {
+        for terminal in [".end ; terminal comment", ".END $ terminal comment"] {
+            let deck = format!("annotated terminal\nR1 1 0 1k\n{terminal}\n");
+            let with_options = SimulationController::apply_simulation_options_to_netlist(
+                &deck,
+                &crate::simulation::dialog::SimulationOptions::fast(),
+            );
+            let option = with_options.find(".OPTIONS").expect("options inserted");
+            let end = with_options.find(terminal).expect("terminal retained");
+            assert!(option < end, "{with_options}");
+
+            let with_models = SimulationController::apply_reference_model_bindings_to_netlist(
+                &deck,
+                &[".model sealed D (IS=1e-12)".to_owned()],
+            );
+            let model = with_models.find(".model sealed").expect("model inserted");
+            let end = with_models.find(terminal).expect("terminal retained");
+            assert!(model < end, "{with_models}");
+        }
     }
 }

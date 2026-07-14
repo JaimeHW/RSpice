@@ -417,6 +417,11 @@ pub struct UiSessionState {
     /// screenshot + save dialog; the web build offers the browser's own
     /// capture instead).
     pub export_png_requested: bool,
+    /// One-shot request to change platform fullscreen state. Keeping this
+    /// transient prevents the web backend from receiving the same viewport
+    /// command every frame and preserves the user's persisted preference in
+    /// [`super::WorkbenchState`].
+    pub(crate) full_screen_request: Option<bool>,
     /// Results workspace state (viewer, cursors, plot caches).
     pub results: super::result_document::ResultsState,
     /// Netlist editor state (diagnostics, diff pips, tuner mode).
@@ -435,6 +440,14 @@ impl UiSessionState {
             autosave_minutes: 5,
             ..Self::default()
         }
+    }
+
+    pub(crate) fn request_full_screen(&mut self, enabled: bool) {
+        self.full_screen_request = Some(enabled);
+    }
+
+    pub(crate) fn take_full_screen_request(&mut self) -> Option<bool> {
+        self.full_screen_request.take()
     }
 }
 
@@ -537,5 +550,28 @@ mod symbol_selection_tests {
         let point = rotate_point_cw_about(Point::new(20, 10), origin);
 
         assert_eq!(point, Point::new(10, 20));
+    }
+}
+
+#[cfg(test)]
+mod platform_request_tests {
+    use super::UiSessionState;
+
+    #[test]
+    fn full_screen_request_is_consumed_exactly_once() {
+        let mut session = UiSessionState::new();
+        session.request_full_screen(true);
+
+        assert_eq!(session.take_full_screen_request(), Some(true));
+        assert_eq!(session.take_full_screen_request(), None);
+    }
+
+    #[test]
+    fn newest_full_screen_request_supersedes_an_unapplied_request() {
+        let mut session = UiSessionState::new();
+        session.request_full_screen(true);
+        session.request_full_screen(false);
+
+        assert_eq!(session.take_full_screen_request(), Some(false));
     }
 }

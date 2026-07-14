@@ -97,7 +97,8 @@ impl StbConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StbDialogState {
     pub probe_source: String,
     pub start_freq: String,
@@ -106,6 +107,7 @@ pub struct StbDialogState {
     pub gain_margin: bool,
     pub phase_margin: bool,
     pub crossover_freq: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

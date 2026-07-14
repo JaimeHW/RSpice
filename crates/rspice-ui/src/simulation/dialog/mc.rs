@@ -147,7 +147,8 @@ impl McConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct McDialogState {
     pub num_runs: String,
     pub seed: String,
@@ -157,6 +158,7 @@ pub struct McDialogState {
     pub process_variations: bool,
     pub mismatch_variations: bool,
     pub save_all_runs: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 
@@ -186,7 +188,7 @@ impl McDialogState {
 
     pub fn to_config(&self) -> Result<McConfig, String> {
         let runs: u32 = self.num_runs.parse().map_err(|_| "Invalid runs")?;
-        let seed: u32 = self.seed.parse().unwrap_or(0);
+        let seed: u32 = self.seed.parse().map_err(|_| "Invalid seed")?;
         let pct: f64 = self
             .variation_pct
             .parse()

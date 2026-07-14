@@ -1,10 +1,12 @@
-//! Autosave checkpoints — crash recovery that never touches your file
+//! Autosave checkpoints — interrupted-session recovery that never touches your file
 //! using the standard confirmation dialog.
 //!
 //! While the schematic is dirty and has a path, a timer writes the same
 //! serialization the real save uses to a `.autosave` sibling. A clean save
-//! deletes the checkpoint (the file is the truth again). Opening a file
-//! shadowed by a newer checkpoint asks before loading either.
+//! retires only a checkpoint demonstrably owned by this process. Opening a
+//! file offers an eligible bound checkpoint before loading either snapshot.
+
+#![cfg(not(target_arch = "wasm32"))]
 
 use egui::Context;
 
@@ -47,12 +49,8 @@ impl RSpiceApp {
             return;
         }
 
-        let checkpoint = file_workflow::autosave_checkpoint_path(&path);
-        match self
-            .file_workflow_io
-            .save_schematic(&self.state.schematic, &checkpoint)
-        {
-            Ok(()) => {
+        match crate::common::recovery_checkpoint::write_checkpoint(&path, &self.state.schematic) {
+            Ok(checkpoint) => {
                 self.state.log_buffer.log(
                     crate::panels::LogSeverity::Debug,
                     crate::panels::LogSource::System,
@@ -71,28 +69,35 @@ impl RSpiceApp {
     /// The restore decision an open deferred: Restore loads the checkpoint
     /// as unsaved changes over the file's identity; Discard deletes it and
     /// opens the file; Esc opens the file and keeps the checkpoint.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn process_autosave_restore_dialog(&mut self, ctx: &Context) {
-        let Some((path, checkpoint)) = self.state.dialogs.pending_autosave_restore.clone() else {
+        let Some(candidate) = self.state.dialogs.pending_autosave_restore.clone() else {
             return;
         };
-
+        let path = candidate.source.clone();
+        let checkpoint = candidate.checkpoint.clone();
         let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| path.display().to_string());
         let age = checkpoint_age(&checkpoint);
+        let can_discard = candidate.can_discard();
 
         let choice = Dialog::new("File", "Restore autosave?", "Restore")
             .size(DialogSize::Sm)
-            .ghost("Discard")
+            .ghost(if can_discard {
+                "Discard"
+            } else {
+                "Keep checkpoint"
+            })
             .hint("Esc opens the file and keeps the checkpoint")
             .show(ctx, |ui| {
                 let c = Tokens::get(ui.ctx()).color;
                 ui.label(
                     egui::RichText::new(format!(
-                        "An autosave of '{file_name}' from {age} is newer than the \
-                         saved file. Restore the autosaved changes, or discard them \
-                         and open the file."
+                        "An interrupted autosave of '{file_name}' from {age} is available. \
+                         Restore its exact reviewed bytes, or open the saved file and keep \
+                         the checkpoint."
                     ))
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(c.text_dim),
@@ -103,28 +108,65 @@ impl RSpiceApp {
         match choice {
             DialogChoice::None => {}
             DialogChoice::Primary => {
-                // The checkpoint's content, the file's identity: restoring
-                // leaves the schematic dirty so an explicit save commits it.
-                if file_workflow::load_schematic_bypassing_autosave(
-                    &mut self.state,
+                let restored = crate::common::recovery_checkpoint::read_bound_checkpoint(
+                    &path,
                     &checkpoint,
-                    io,
-                ) {
-                    self.state.schematic.current_file = Some(path.clone());
-                    self.state.schematic.is_dirty = true;
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Restored autosave from {age} — save to keep it"
-                    )));
+                    &candidate.binding,
+                )
+                .and_then(|bytes| {
+                    let text = std::str::from_utf8(&bytes)
+                        .map_err(|error| format!("checkpoint is not UTF-8 JSON: {error}"))?;
+                    crate::io::schematic_io::load_schematic_text(text, Some(&path))
+                        .map_err(|error| error.to_string())
+                });
+                match restored {
+                    Ok(mut schematic) => {
+                        schematic.current_file = Some(path.clone());
+                        schematic.is_dirty = true;
+                        file_workflow::apply_loaded_schematic(
+                            &mut self.state,
+                            schematic,
+                            file_workflow::SchematicLoadOrigin::PersistentPath(&path),
+                        );
+                        self.state.push_user_message(ConsoleMessage::info(format!(
+                            "Restored exact autosave bytes from {age}; save to keep them"
+                        )));
+                        self.state.dialogs.pending_autosave_restore = None;
+                    }
+                    Err(error) => self.state.push_user_message(ConsoleMessage::warning(format!(
+                        "Autosave restore was blocked because the checkpoint changed or could not be verified: {error}"
+                    ))),
                 }
-                self.state.dialogs.pending_autosave_restore = None;
             }
             DialogChoice::Ghost => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let _ = std::fs::remove_file(&checkpoint);
+                if can_discard {
+                    match crate::common::recovery_checkpoint::discard_bound_checkpoint(
+                        &path,
+                        &checkpoint,
+                        &candidate.binding,
+                    ) {
+                        Ok(()) => {
+                            file_workflow::load_schematic_bypassing_autosave(
+                                &mut self.state,
+                                &path,
+                                io,
+                            );
+                            self.state.dialogs.pending_autosave_restore = None;
+                        }
+                        Err(error) => self.state.push_user_message(ConsoleMessage::warning(
+                            format!(
+                                "Autosave discard was blocked; no checkpoint bytes were deleted: {error}"
+                            ),
+                        )),
+                    }
+                } else {
+                    file_workflow::load_schematic_bypassing_autosave(&mut self.state, &path, io);
+                    self.state.push_user_message(ConsoleMessage::info(format!(
+                        "Legacy autosave kept for non-destructive Recovery review: {}",
+                        checkpoint.display()
+                    )));
+                    self.state.dialogs.pending_autosave_restore = None;
                 }
-                file_workflow::load_schematic_bypassing_autosave(&mut self.state, &path, io);
-                self.state.dialogs.pending_autosave_restore = None;
             }
             DialogChoice::Cancelled => {
                 file_workflow::load_schematic_bypassing_autosave(&mut self.state, &path, io);
@@ -140,6 +182,7 @@ impl RSpiceApp {
 }
 
 /// Coarse human age of a checkpoint file ("3 min ago"), from its mtime.
+#[cfg(not(target_arch = "wasm32"))]
 fn checkpoint_age(checkpoint: &std::path::Path) -> String {
     let elapsed = std::fs::metadata(checkpoint)
         .and_then(|meta| meta.modified())

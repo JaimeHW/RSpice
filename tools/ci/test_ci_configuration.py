@@ -372,7 +372,7 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-ui/src/common/app/app_preferences_dialog.rs"
         )
         self.assertIn(
-            "options.screen_reader = self.state.shell.browser_spoken_feedback",
+            "options.screen_reader = self.state.ui.browser_spoken_feedback",
             app,
         )
         self.assertIn("Speak control changes (browser)", preferences)
@@ -423,9 +423,9 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-ui/src/common/browser_file_import.rs",
             "crates/rspice-ui/src/common/logging.rs",
             "crates/rspice-ui/src/common/netlist_workflow.rs",
-            "crates/rspice-ui/src/shell/views/netlist/baseline.rs",
-            "crates/rspice-ui/src/shell/views/netlist/diagnostics.rs",
-            "crates/rspice-ui/src/shell/views/netlist/summary.rs",
+            "crates/rspice-ui/src/workbench/netlist_document/baseline.rs",
+            "crates/rspice-ui/src/workbench/netlist_document/diagnostics.rs",
+            "crates/rspice-ui/src/workbench/netlist_document/summary.rs",
             "crates/rspice-ui/src/simulation/controller/manual_deck.rs",
             "crates/rspice-ui/src/simulation/runner/wasm_worker.rs",
             "crates/rspice-ui/src/simulation/runner/worker_contract.rs",

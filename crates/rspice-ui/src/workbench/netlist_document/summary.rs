@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use crate::common::AppState;
-use crate::state::{
-    AcBodeMetrics, AcBodeSummary, SimulationRun, SpecEntry, ac_bode_summary_for_run,
-};
+#[cfg(test)]
+use crate::state::SpecEntry;
+use crate::state::{AcBodeMetrics, AcBodeSummary, SimulationRun, ac_bode_summary_for_run};
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct MeasurementDelta {
     pub name: String,
@@ -13,6 +14,7 @@ pub(super) struct MeasurementDelta {
     pub improved: Option<bool>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct BodeDelta {
     pub name: &'static str,
@@ -33,6 +35,7 @@ pub(super) fn active_run_summary(state: &AppState) -> Option<NetlistRunSummary> 
     state.simulation.active_run().map(run_summary)
 }
 
+#[cfg(test)]
 pub(super) fn measurement_deltas(state: &AppState, max_items: usize) -> Vec<MeasurementDelta> {
     if max_items == 0 {
         return Vec::new();
@@ -72,6 +75,7 @@ pub(super) fn measurement_deltas(state: &AppState, max_items: usize) -> Vec<Meas
     out
 }
 
+#[cfg(test)]
 pub(super) fn bode_deltas(state: &AppState, max_items: usize) -> Vec<BodeDelta> {
     if max_items == 0 {
         return Vec::new();
@@ -101,6 +105,7 @@ pub(super) fn bode_deltas(state: &AppState, max_items: usize) -> Vec<BodeDelta> 
     .collect()
 }
 
+#[cfg(test)]
 fn latest_two_runs(runs: &[SimulationRun]) -> Option<(&SimulationRun, &SimulationRun)> {
     let mut by_id: Vec<&SimulationRun> = runs.iter().collect();
     by_id.sort_by(|a, b| b.id.cmp(&a.id));
@@ -135,6 +140,7 @@ fn run_measurements(run: &SimulationRun) -> HashMap<String, (String, f64)> {
     out
 }
 
+#[cfg(test)]
 fn delta_verdict(specs: &[SpecEntry], name: &str, old: f64, new: f64) -> Option<bool> {
     let spec = specs
         .iter()
@@ -146,6 +152,7 @@ fn delta_verdict(specs: &[SpecEntry], name: &str, old: f64, new: f64) -> Option<
     Some(new_v < old_v)
 }
 
+#[cfg(test)]
 fn metric_delta(
     name: &'static str,
     unit: &'static str,
@@ -167,6 +174,7 @@ fn metric_delta(
     })
 }
 
+#[cfg(test)]
 fn meaningfully_changed(old: f64, new: f64) -> bool {
     let scale = old.abs().max(new.abs()).max(1.0);
     (old - new).abs() > scale * 1.0e-9

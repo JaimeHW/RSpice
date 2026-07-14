@@ -9,14 +9,14 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::super::commands::Command;
-use super::super::design_system::{TOOL_BAR_H, WorkbenchIcon, icon_button, labeled_icon_button};
+use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, ModelsPage, VerificationPage, Workspace};
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
     TopBottomPanel::top("workbench.context_toolbar")
-        .exact_height(TOOL_BAR_H)
+        .exact_height(layout.toolbar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {
@@ -28,13 +28,13 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             );
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 3.0;
-                if layout.width_class.uses_drawers() {
+                if layout.navigator_uses_drawer {
                     if icon_button(
                         ui,
                         WorkbenchIcon::Navigator,
                         "Open navigator",
                         app.state.workbench.drawer == Some(Drawer::Navigator),
-                        Vec2::splat(36.0),
+                        Vec2::splat(layout.toolbar_control_height),
                     )
                     .clicked()
                     {
@@ -58,13 +58,13 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                     });
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if layout.width_class.uses_drawers()
+                    if layout.inspector_uses_drawer
                         && icon_button(
                             ui,
                             WorkbenchIcon::Inspector,
                             "Open inspector",
                             app.state.workbench.drawer == Some(Drawer::Inspector),
-                            Vec2::splat(36.0),
+                            Vec2::splat(layout.toolbar_control_height),
                         )
                         .clicked()
                     {
@@ -96,8 +96,8 @@ fn trailing_controls_width(layout: LayoutSpec) -> f32 {
         width += 96.0;
         controls += 1;
     }
-    if layout.width_class.uses_drawers() {
-        width += 36.0;
+    if layout.inspector_uses_drawer {
+        width += layout.toolbar_control_height;
         controls += 1;
     }
     // One gap separates the flexible context lane from the trailing lane;
@@ -106,6 +106,9 @@ fn trailing_controls_width(layout: LayoutSpec) -> f32 {
 }
 
 fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    ui.data_mut(|data| {
+        data.insert_temp(projected_tool_count_id(), 0_usize);
+    });
     match app.state.workbench.workspace {
         Workspace::Project => project_tools(ui, app, layout),
         Workspace::Design => design_tools(ui, app, layout),
@@ -120,7 +123,7 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 fn project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_command(ui, app, Command::OpenProject, WorkbenchIcon::Folder, layout);
     toolbar_command(ui, app, Command::Save, WorkbenchIcon::Save, layout);
-    separator(ui);
+    context_separator(ui, layout);
     toolbar_command(
         ui,
         app,
@@ -132,14 +135,15 @@ fn project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let select = app.state.schematic.tool == Tool::Select;
-    if icon_button(
-        ui,
-        WorkbenchIcon::Select,
-        "Select (Esc)",
-        select,
-        Vec2::splat(36.0),
-    )
-    .clicked()
+    if take_projected_tool_slot(ui, layout)
+        && icon_button(
+            ui,
+            WorkbenchIcon::Select,
+            "Select (Esc)",
+            select,
+            Vec2::splat(layout.toolbar_control_height),
+        )
+        .clicked()
     {
         app.state.schematic.tool = Tool::Select;
     }
@@ -147,7 +151,7 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_command(ui, app, Command::PlaceLabel, WorkbenchIcon::Label, layout);
     toolbar_command(ui, app, Command::PlaceProbe, WorkbenchIcon::Probe, layout);
     toolbar_command(ui, app, Command::PlaceInstance, WorkbenchIcon::Add, layout);
-    separator(ui);
+    context_separator(ui, layout);
     toolbar_command(
         ui,
         app,
@@ -162,11 +166,11 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Mirror,
         layout,
     );
-    separator(ui);
+    context_separator(ui, layout);
     toolbar_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
     toolbar_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
     if !layout.width_class.is_phone() {
-        separator(ui);
+        context_separator(ui, layout);
         toolbar_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
         toolbar_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
         toolbar_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
@@ -305,17 +309,56 @@ fn toolbar_command(
     icon: WorkbenchIcon,
     layout: LayoutSpec,
 ) {
+    if !take_projected_tool_slot(ui, layout) {
+        return;
+    }
     let spec = command.spec();
     let enabled = command.is_enabled(app);
     let response = ui.add_enabled_ui(enabled, |ui| {
         if layout.toolbar_labels {
-            labeled_icon_button(ui, icon, spec.label, false, label_width(spec.label))
+            labeled_icon_button_sized(
+                ui,
+                icon,
+                spec.label,
+                false,
+                label_width(spec.label),
+                layout.toolbar_control_height,
+            )
         } else {
-            icon_button(ui, icon, spec.label, false, Vec2::splat(36.0))
+            icon_button(
+                ui,
+                icon,
+                spec.label,
+                false,
+                Vec2::splat(layout.toolbar_control_height),
+            )
         }
     });
     if response.inner.clicked() {
         command.execute(app);
+    }
+}
+
+fn projected_tool_count_id() -> egui::Id {
+    egui::Id::new("workbench.context_toolbar.projected_tool_count")
+}
+
+fn take_projected_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec) -> bool {
+    let Some(limit) = layout.toolbar_tool_limit else {
+        return true;
+    };
+    let id = projected_tool_count_id();
+    let count = ui.data(|data| data.get_temp::<usize>(id).unwrap_or_default());
+    if count >= limit {
+        return false;
+    }
+    ui.data_mut(|data| data.insert_temp(id, count + 1));
+    true
+}
+
+fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
+    if layout.toolbar_tool_limit.is_none() {
+        separator(ui);
     }
 }
 
@@ -344,8 +387,18 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     } else {
         132.0
     };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 34.0), egui::Sense::click());
     let enabled = command.is_enabled(app);
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(width, layout.run_control_height),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label)
+    });
     ui.painter().rect_filled(
         rect,
         t.radius,
@@ -378,6 +431,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             t.color.text_faint
         },
     );
+    theme::paint_focus_ring(ui, &response, rect);
     if response.clicked() && enabled {
         command.execute(app);
     }
@@ -470,14 +524,14 @@ mod tests {
     fn responsive_toolbar_reserves_fixed_trailing_controls() {
         let tablet = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchState::default());
         let available_after_navigator = 780.0;
-        assert_eq!(trailing_controls_width(tablet), 273.0);
+        assert_eq!(trailing_controls_width(tablet), 266.0);
         assert_eq!(
             context_tools_width(available_after_navigator, tablet),
-            507.0
+            514.0
         );
 
         let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
-        assert_eq!(trailing_controls_width(phone), 142.0);
+        assert_eq!(trailing_controls_width(phone), 140.0);
         assert!(context_tools_width(336.0, phone) > 0.0);
     }
 }

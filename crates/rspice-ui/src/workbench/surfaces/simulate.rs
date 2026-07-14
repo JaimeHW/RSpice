@@ -219,8 +219,10 @@ fn preflight_row(ui: &mut Ui, pass: bool, name: &str, detail: &str) {
 }
 
 fn ordered_enabled(app: &RSpiceApp) -> Vec<&'static str> {
-    (0..25)
-        .filter(|index| app.state.sim_setup.enabled.contains(index))
+    app.state
+        .sim_setup
+        .ordered_enabled_indices()
+        .into_iter()
         .map(analysis_name)
         .collect()
 }
@@ -232,11 +234,11 @@ fn run_order(app: &RSpiceApp, index: usize) -> String {
     let position = app
         .state
         .sim_setup
-        .enabled
+        .ordered_enabled_indices()
         .iter()
-        .filter(|candidate| **candidate <= index)
-        .count();
-    position.to_string()
+        .position(|candidate| *candidate == index)
+        .expect("enabled analyses are present in the authoritative execution order");
+    (position + 1).to_string()
 }
 
 fn analysis_name(index: usize) -> &'static str {

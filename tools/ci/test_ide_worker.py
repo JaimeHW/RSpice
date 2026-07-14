@@ -65,19 +65,27 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 worker_path = ide / "simulation-worker.js"
 
                 self.assertTrue(worker_path.exists(), "missing IDE simulation worker")
+                self.assertIn(
+                    'const workerUrl = executableAsset("simulation-worker.js")',
+                    index,
+                )
+                self.assertIn(
+                    "window.__RSPICE_SIM_WORKER_URL = workerUrl.href", index
+                )
                 self.assertRegex(
                     index,
-                    re.compile(
-                        r"new\s+Worker\s*\(\s*new\s+URL\("
-                        r"\"\.\/simulation-worker\.js\",\s*import\.meta\.url\)",
-                        re.S,
-                    ),
+                    re.compile(r"new\s+Worker\(\s*workerUrl\s*,", re.S),
                 )
                 self.assertIn('type: "module"', index)
                 self.assertIn("__RSPICE_SIM_WORKER", index)
 
                 worker = worker_path.read_text(encoding="utf-8")
-                self.assertIn('from "./pkg/rspice-ui.js"', worker)
+                self.assertIn(
+                    'import(executableAsset("rspice-ui.js").href)', worker
+                )
+                self.assertIn(
+                    'executableAsset("rspice-ui_bg.wasm")', worker
+                )
                 self.assertIn("runRspiceUiWorkerRequest", worker)
                 self.assertRegex(
                     worker, re.compile(r'postMessage\(\{\s*type: "ready"', re.S)
@@ -128,12 +136,57 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                     re.compile(
                         r"async\s+function\s+ensureReady\s*\(\)\s*\{"
                         r".*if\s*\(!initPromise\)\s*\{"
-                        r".*initPromise\s*=\s*init\(\)"
+                        r".*initPromise\s*=\s*initializeWorkerModule\(\)"
                         r".*\}"
                         r".*await\s+initPromise",
                         re.S,
                     ),
                     "requests arriving before ready must share the eager init() promise",
+                )
+
+    def test_browser_executable_assets_share_one_version_identity(self) -> None:
+        assembler = (ROOT / "tools" / "deploy" / "build_site.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'ASSET_ROOT_PLACEHOLDER = "__RSPICE_ASSET_ROOT__"',
+            assembler,
+        )
+        self.assertIn("def executable_asset_identity(asset_root):", assembler)
+        self.assertIn("def package_ide_executable_assets(ide):", assembler)
+        self.assertIn("require_clean_client_checkout(root)", assembler)
+        self.assertIn(
+            'ide_asset_identity = package_ide_executable_assets(out / "ide")',
+            assembler,
+        )
+
+        for ide in IDE_DIRS:
+            with self.subTest(ide=ide.relative_to(ROOT)):
+                index = (ide / "index.html").read_text(encoding="utf-8")
+                worker = (ide / "simulation-worker.js").read_text(encoding="utf-8")
+                self.assertIn(
+                    'const RELEASE_ASSET_ROOT = "__RSPICE_ASSET_ROOT__"',
+                    index,
+                )
+                for asset in (
+                    "simulation-worker.js",
+                    "rspice-ui.js",
+                    "rspice-ui_bg.wasm",
+                ):
+                    self.assertIn(f'executableAsset("{asset}")', index)
+                self.assertIn(
+                    "window.__RSPICE_SIM_WORKER_URL = workerUrl.href", index
+                )
+                self.assertIn(
+                    r"/\/assets\/[0-9a-f]{64}\/simulation-worker\.js$/",
+                    worker,
+                )
+                self.assertIn('searchParams.get("v")', worker)
+                self.assertIn(
+                    'import(executableAsset("rspice-ui.js").href)', worker
+                )
+                self.assertIn(
+                    'executableAsset("rspice-ui_bg.wasm")', worker
                 )
 
         main = MAIN.read_text(encoding="utf-8")
@@ -145,6 +198,27 @@ class IdeWorkerRoutingTests(unittest.TestCase):
             ),
             "loading the wasm package inside the simulation worker must not run app startup",
         )
+
+    def test_worker_recreation_uses_only_the_exact_page_bound_url(self) -> None:
+        wasm_worker = WASM_WORKER.read_text(encoding="utf-8")
+        self.assertRegex(
+            wasm_worker,
+            re.compile(
+                r"fn\s+create_worker\(\).*?"
+                r"let\s+worker_url\s*=\s*global_worker_url\(\)\?;.*?"
+                r"new_with_options\(&worker_url,\s*&options\)",
+                re.S,
+            ),
+            "worker recreation must reuse the URL retained by this exact page",
+        )
+        self.assertIn(
+            'JsValue::from_str("__RSPICE_SIM_WORKER_URL")', wasm_worker
+        )
+        self.assertNotRegex(
+            wasm_worker,
+            re.compile(r'new_with_options\(\s*"\.?/simulation-worker\.js"'),
+        )
+        self.assertNotIn('Worker::new("./simulation-worker.js")', wasm_worker)
 
     def test_wasm_runner_no_longer_solves_inline(self) -> None:
         runner = RUNNER.read_text(encoding="utf-8")

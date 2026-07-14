@@ -130,6 +130,26 @@
   })();
 </script>
 <script type="module">
+  // Release assembly replaces this token with a content-addressed directory
+  // containing the worker, wasm-bindgen module, and Wasm binary. Development
+  // serving keeps the source-tree layout and uses one fresh page identity.
+  const RELEASE_ASSET_ROOT = "__RSPICE_ASSET_ROOT__";
+  const IS_RELEASE = !RELEASE_ASSET_ROOT.startsWith("__RSPICE_");
+  const DEVELOPMENT_ASSET_VERSION = `dev-${Date.now()}`;
+
+  function executableAsset(name) {
+    const path = IS_RELEASE
+      ? `${RELEASE_ASSET_ROOT}/${name}`
+      : name === "simulation-worker.js"
+        ? "./simulation-worker.js"
+        : `./pkg/${name}`;
+    const url = new URL(path, import.meta.url);
+    if (!IS_RELEASE) {
+      url.searchParams.set("v", DEVELOPMENT_ASSET_VERSION);
+    }
+    return url;
+  }
+
   function showStartupError(message) {
     const el = document.getElementById("rspice_loading");
     if (!el) {
@@ -165,8 +185,12 @@
 
   function installSimulationWorker() {
     try {
+      const workerUrl = executableAsset("simulation-worker.js");
+      // Retain the exact page-bound URL even after an abort/error terminates
+      // the eager worker. Rust recreates only this immutable worker version.
+      window.__RSPICE_SIM_WORKER_URL = workerUrl.href;
       const worker = new Worker(
-        new URL("./simulation-worker.js", import.meta.url),
+        workerUrl,
         { type: "module" },
       );
       worker.addEventListener("error", (event) => {
@@ -198,11 +222,13 @@
 
   installSimulationWorker();
 
-  import init from "./pkg/rspice-ui.js";
-  init().catch((e) => {
-    showStartupError(`Failed to load the RSpice module: ${errorMessage(e)}`);
-    console.error(e);
-  });
+  const wasmModule = executableAsset("rspice-ui_bg.wasm");
+  import(executableAsset("rspice-ui.js").href)
+    .then(({ default: init }) => init({ module_or_path: wasmModule }))
+    .catch((e) => {
+      showStartupError(`Failed to load the RSpice module: ${errorMessage(e)}`);
+      console.error(e);
+    });
 </script>
 </body>
 </html>

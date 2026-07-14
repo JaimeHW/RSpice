@@ -1,6 +1,21 @@
-import init, { runRspiceUiWorkerRequest } from "./pkg/rspice-ui.js";
+const workerUrl = new URL(import.meta.url);
+const immutableReleaseAsset = /\/assets\/[0-9a-f]{64}\/simulation-worker\.js$/.test(
+  workerUrl.pathname,
+);
+const developmentAssetVersion =
+  workerUrl.searchParams.get("v") || `worker-${Date.now()}`;
+
+function executableAsset(name) {
+  const path = immutableReleaseAsset ? `./${name}` : `./pkg/${name}`;
+  const url = new URL(path, import.meta.url);
+  if (!immutableReleaseAsset) {
+    url.searchParams.set("v", developmentAssetVersion);
+  }
+  return url;
+}
 
 let initPromise = null;
+let runWorkerRequest = null;
 
 function asErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -20,10 +35,21 @@ function responseTransferList(response) {
   return Array.from(transferBuffers);
 }
 
+async function initializeWorkerModule() {
+  const module = await import(executableAsset("rspice-ui.js").href);
+  const wasmModule = executableAsset("rspice-ui_bg.wasm");
+  await module.default({ module_or_path: wasmModule });
+  if (typeof module.runRspiceUiWorkerRequest !== "function") {
+    throw new Error("RSpice worker package is missing its request executor.");
+  }
+  runWorkerRequest = module.runRspiceUiWorkerRequest;
+}
+
 async function ensureReady() {
   if (!initPromise) {
-    initPromise = init().catch((error) => {
+    initPromise = initializeWorkerModule().catch((error) => {
       initPromise = null;
+      runWorkerRequest = null;
       throw error;
     });
   }
@@ -39,7 +65,7 @@ self.addEventListener("message", (event) => {
   void (async () => {
     try {
       await ensureReady();
-      const response = runRspiceUiWorkerRequest(message.request);
+      const response = runWorkerRequest(message.request);
       postMessage(
         { type: "result", id: message.id, response },
         responseTransferList(response),

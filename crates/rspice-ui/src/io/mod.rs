@@ -12,8 +12,11 @@
 
 pub mod binary_io;
 mod cadence_psf;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod durable_file;
 pub mod lib_parser;
 pub mod netlist_export;
+mod project_execution;
 pub mod project_io;
 pub mod schematic_io;
 
@@ -27,6 +30,9 @@ pub use lib_parser::{
     SubcircuitDef,
 };
 pub use netlist_export::{ExportOptions, NetlistExporter, NetlistFormat};
+pub use project_execution::{
+    PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext, ProjectModelLibrary,
+};
 pub use project_io::{
     ProjectFile, ProjectIoError, ProjectSimulationResults, ProjectVersion, load_project_file,
     save_project_file, show_open_project_dialog, show_save_project_dialog,

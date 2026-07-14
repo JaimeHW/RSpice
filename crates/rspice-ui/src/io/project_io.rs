@@ -1,13 +1,12 @@
 //! Project file I/O.
 //!
 //! `.rspiceproj` stores the product-level workspace: project identity,
-//! libraries/cells/views, open documents, and schematic buffers. Individual
+//! libraries/cells/views, open documents, schematic buffers, authoritative
+//! simulation inputs, model-section bindings, and retained results. Individual
 //! schematic export remains available through `.rsch`; project files are the
 //! native professional workflow container.
 
 use std::collections::HashSet;
-#[cfg(not(target_arch = "wasm32"))]
-use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read};
 #[cfg(not(target_arch = "wasm32"))]
@@ -16,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::io::project_execution::ProjectExecutionContext;
 use crate::product::{DatasetId, RunId};
 use crate::state::{
     AnalysisResult, AnalysisType, CellViewRef, DcOpResult, LibraryManager, NoiseContributorRow,
@@ -63,6 +63,10 @@ pub struct ProjectFile {
     pub libraries: LibraryManager,
     #[serde(default, skip_serializing_if = "ProjectSimulationResults::is_empty")]
     pub simulation_results: ProjectSimulationResults,
+    /// Authoritative execution inputs. Absent only in projects written before
+    /// project-owned simulation plans were introduced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_context: Option<ProjectExecutionContext>,
     #[serde(skip)]
     pub simulation_results_warning: Option<String>,
 }
@@ -74,6 +78,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results: ProjectSimulationResults::default(),
+            execution_context: None,
             simulation_results_warning: None,
         }
     }
@@ -88,6 +93,23 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results,
+            execution_context: None,
+            simulation_results_warning: None,
+        }
+    }
+
+    pub fn new_with_execution_context(
+        workspace: ProjectWorkspace,
+        libraries: LibraryManager,
+        simulation_results: ProjectSimulationResults,
+        execution_context: ProjectExecutionContext,
+    ) -> Self {
+        Self {
+            version: ProjectVersion::current(),
+            workspace,
+            libraries,
+            simulation_results,
+            execution_context: Some(execution_context),
             simulation_results_warning: None,
         }
     }
@@ -105,6 +127,11 @@ impl ProjectFile {
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
         self.validate_library_tree_keys()?;
         self.validate_workspace_references()?;
+        if let Some(context) = &self.execution_context {
+            context.validate().map_err(|error| {
+                ProjectIoError::InvalidData(format!("execution context is invalid: {error}"))
+            })?;
+        }
         Ok(())
     }
 
@@ -1424,23 +1451,18 @@ pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), Proje
     {
         if path.exists() {
             let backup = path.with_extension("rspiceproj.bak");
-            if let Err(error) = fs::copy(path, backup) {
+            if let Err(error) = crate::io::durable_file::atomic_copy(path, &backup) {
                 log::warn!("Failed to create project backup: {}", error);
             }
         }
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let temp_path = path.with_extension("rspiceproj.tmp");
-        let file = File::create(&temp_path)?;
-        let mut writer = BufWriter::new(file);
-
-        serde_json::to_writer_pretty(&mut writer, project)
-            .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
-        writer.flush()?;
-        fs::rename(temp_path, path)?;
+        crate::io::durable_file::atomic_write_with::<ProjectIoError>(path, |temp| {
+            let mut writer = BufWriter::new(temp);
+            serde_json::to_writer_pretty(&mut writer, project)
+                .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
+            writer.flush()?;
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -1476,6 +1498,11 @@ pub(crate) fn load_project_text(
 ) -> Result<ProjectFile, ProjectIoError> {
     let mut project: ProjectFile =
         serde_json::from_str(contents).map_err(|e| ProjectIoError::ParseError(e.to_string()))?;
+    if let Some(context) = &mut project.execution_context {
+        context.migrate_to_current().map_err(|error| {
+            ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))
+        })?;
+    }
     project.validate()?;
     let simulation_results_error = project
         .simulation_results
@@ -1515,6 +1542,88 @@ mod tests {
         SimulationRun, SimulationState, WaveformData,
     };
 
+    fn project_with_execution_context() -> ProjectFile {
+        use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
+        use crate::simulation::dialog::{DampingStrategy, IntegrationMethod, MatrixSolver};
+        use crate::state::model_library::{
+            DeviceModel, ModelLibrary, ModelLibraryManager, ModelType,
+        };
+
+        let mut design_libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut design_libraries);
+
+        let mut setup = crate::common::app::SimSetupState::new();
+        setup.enabled.extend([TAB_AC, TAB_NOISE]);
+        setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
+        setup.listed.extend([TAB_AC, TAB_NOISE]);
+        setup
+            .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::FF, -40.0)
+            .expect("fixture PVT is valid");
+        setup.tran.stop = "25u".to_owned();
+        setup.tran.step = "2n".to_owned();
+        setup.tran.start = "1u".to_owned();
+        setup.tran.max_step = "100n".to_owned();
+        setup.tran.uic = true;
+        setup.ac.fstart = "10".to_owned();
+        setup.ac.fstop = "8G".to_owned();
+        setup.ac.points = "77".to_owned();
+        setup.ac.sweep = 1;
+        setup.noise.output = "vout".to_owned();
+        setup.noise.reference = "vref".to_owned();
+        setup.noise.input = "VIN".to_owned();
+        setup.noise.fstart = "10".to_owned();
+        setup.noise.fstop = "5G".to_owned();
+        setup.disto_f2_over_f1 = "0.91".to_owned();
+        setup.options.reltol = 2e-4;
+        setup.options.residual_reltol = 3e-4;
+        setup.options.vntol = 4e-7;
+        setup.options.abstol = 5e-13;
+        setup.options.iabstol = 6e-13;
+        setup.options.chgtol = 7e-15;
+        setup.options.pivrel = 8e-4;
+        setup.options.pivtol = 9e-14;
+        setup.options.itl1 = 80;
+        setup.options.itl2 = 120;
+        setup.options.itl4 = 12;
+        setup.options.gmin_stepping = false;
+        setup.options.source_stepping = false;
+        setup.options.pseudo_transient = false;
+        setup.options.arc_length = true;
+        setup.options.gmin = 2e-12;
+        setup.options.damping = DampingStrategy::Combined;
+        setup.options.method = IntegrationMethod::Gear2Only;
+        setup.options.solver = MatrixSolver::SparseLu;
+        setup.options.bypass_enabled = true;
+        setup.options.bypass_reltol = 5e-4;
+        setup.options.bypass_abstol = 5e-7;
+        setup.options.min_timestep = 2e-15;
+        setup.options.max_timestep = 2e-3;
+        setup.options.timestep_factor = 10.0;
+        setup.options.tnom = 25.0;
+        setup.options.verbose = true;
+        setup.options.save_internals = true;
+
+        let mut model_manager = ModelLibraryManager::new();
+        let mut model_library = ModelLibrary::new("fixture_models");
+        model_library.pdk_name = "fixture_pdk".to_owned();
+        model_library.technology_node = "90nm".to_owned();
+        model_library.version = "2.1".to_owned();
+        let mut model = DeviceModel::new("nch_fixture", ModelType::Nmos);
+        model.add_parameter("kp", 1.25e-3);
+        model_library.add_model(model);
+        model_manager.add_library(model_library);
+
+        let execution_context =
+            crate::io::ProjectExecutionContext::from_state(&setup, &model_manager)
+                .expect("execution fixture validates");
+        ProjectFile::new_with_execution_context(
+            workspace,
+            design_libraries,
+            ProjectSimulationResults::default(),
+            execution_context,
+        )
+    }
+
     #[test]
     fn suggested_project_save_path_defaults_and_enforces_extension() {
         assert_eq!(
@@ -1543,6 +1652,195 @@ mod tests {
         assert!(json.contains("\"workspace\""));
         assert!(json.contains("\"libraries\""));
         assert!(json.ends_with('\n'));
+    }
+
+    #[test]
+    fn project_execution_context_round_trips_every_persisted_input() {
+        let project = project_with_execution_context();
+        let expected = serde_json::to_value(
+            project
+                .execution_context
+                .as_ref()
+                .expect("fixture has execution context"),
+        )
+        .expect("context serializes");
+
+        let json = serialize_project_file(&project).expect("project serializes");
+        let loaded = load_project_text(&json, None).expect("project reloads");
+        let actual = serde_json::to_value(
+            loaded
+                .execution_context
+                .as_ref()
+                .expect("execution context restored"),
+        )
+        .expect("restored context serializes");
+
+        assert_eq!(actual, expected);
+        let plan = &actual["simulation_plan"];
+        assert_eq!(plan["analysis_order"], serde_json::json!([4, 1, 2]));
+        assert!(plan.get("options_draft").is_none());
+        assert!(plan.get("options_open").is_none());
+        assert!(plan["op"].get("initialized").is_none());
+        assert_eq!(actual["model_libraries"][0]["name"], "fixture_models");
+        assert!(actual["model_libraries"][0].get("expanded").is_none());
+    }
+
+    #[test]
+    fn legacy_project_without_execution_context_remains_compatible() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new(workspace, libraries);
+        let json = serialize_project_file(&project).expect("legacy-compatible project serializes");
+
+        let loaded = load_project_text(&json, None).expect("legacy project opens");
+
+        assert!(loaded.execution_context.is_none());
+    }
+
+    #[test]
+    fn unversioned_execution_context_migrates_to_sorted_legacy_order() {
+        let project = project_with_execution_context();
+        let json = serialize_project_file(&project).expect("project serializes");
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let context = value["execution_context"]
+            .as_object_mut()
+            .expect("execution object");
+        context.remove("schema_version");
+        context["simulation_plan"]
+            .as_object_mut()
+            .expect("simulation plan")
+            .remove("analysis_order");
+
+        let loaded = load_project_text(
+            &serde_json::to_string(&value).expect("fixture serializes"),
+            None,
+        )
+        .expect("legacy context migrates");
+        let context = loaded.execution_context.expect("context retained");
+
+        assert_eq!(
+            context.schema_version,
+            crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+        );
+        assert_eq!(context.simulation_plan.analysis_order, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn malformed_execution_context_is_never_silently_defaulted() {
+        let project = project_with_execution_context();
+        let json = serialize_project_file(&project).expect("project serializes");
+        let valid: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+        let mut future = valid.clone();
+        future["execution_context"]["schema_version"] = serde_json::json!(999);
+        let error = load_project_text(&future.to_string(), None)
+            .expect_err("future schema must fail")
+            .to_string();
+        assert!(error.contains("unsupported execution-context schema version 999"));
+
+        let mut duplicate_order = valid.clone();
+        duplicate_order["execution_context"]["simulation_plan"]["analysis_order"] =
+            serde_json::json!([4, 1, 1, 2]);
+        let error = load_project_text(&duplicate_order.to_string(), None)
+            .expect_err("duplicate order must fail")
+            .to_string();
+        assert!(error.contains("duplicate analysis index 1"));
+
+        let mut duplicate_enabled = valid.clone();
+        duplicate_enabled["execution_context"]["simulation_plan"]["enabled"] =
+            serde_json::json!([1, 1, 2, 4]);
+        let error = load_project_text(&duplicate_enabled.to_string(), None)
+            .expect_err("duplicate membership must fail")
+            .to_string();
+        assert!(error.contains("duplicate analysis index 1"));
+
+        let mut unsupported = valid.clone();
+        unsupported["execution_context"]["simulation_plan"]["enabled"] =
+            serde_json::json!([1, 2, 4, 99]);
+        unsupported["execution_context"]["simulation_plan"]["analysis_order"] =
+            serde_json::json!([4, 1, 2, 99]);
+        let error = load_project_text(&unsupported.to_string(), None)
+            .expect_err("unsupported analysis must fail")
+            .to_string();
+        assert!(error.contains("unsupported analysis index 99"));
+
+        let mut mismatched_pvt = valid.clone();
+        mismatched_pvt["execution_context"]["simulation_plan"]["options"]["temp"] =
+            serde_json::json!(125.0);
+        let error = load_project_text(&mismatched_pvt.to_string(), None)
+            .expect_err("conflicting execution temperatures must fail")
+            .to_string();
+        assert!(error.contains("disagrees with solver option temp"));
+
+        let mut unknown_input = valid.clone();
+        unknown_input["execution_context"]["simulation_plan"]["tran"]["future_mode"] =
+            serde_json::json!(true);
+        let error = load_project_text(&unknown_input.to_string(), None)
+            .expect_err("unknown execution input must not be ignored")
+            .to_string();
+        assert!(error.contains("unknown field `future_mode`"));
+
+        let mut invalid_model = valid;
+        invalid_model["execution_context"]["model_libraries"][0]["selected_corner"] =
+            serde_json::json!("missing");
+        let error = load_project_text(&invalid_model.to_string(), None)
+            .expect_err("invalid model binding must fail")
+            .to_string();
+        assert!(error.contains("selected_corner 'missing' does not exist"));
+
+        let mut invalid_digest =
+            serde_json::from_str::<serde_json::Value>(&json).expect("valid JSON");
+        let absolute_source = std::env::temp_dir().join("rspice-digest-shape.lib");
+        invalid_digest["execution_context"]["model_libraries"][0]["root_path"] =
+            serde_json::to_value(&absolute_source).expect("path serializes");
+        invalid_digest["execution_context"]["model_libraries"][0]["source_closure"] = serde_json::json!([{
+            "path": absolute_source,
+            "digest": "not-a-sha-256-digest"
+        }]);
+        let error = load_project_text(&invalid_digest.to_string(), None)
+            .expect_err("malformed digest must fail")
+            .to_string();
+        assert!(error.contains("SHA-256 digest must contain 64 hexadecimal characters"));
+
+        let mut digest_without_source =
+            serde_json::from_str::<serde_json::Value>(&json).expect("valid JSON");
+        digest_without_source["execution_context"]["model_libraries"][0]["source_closure"] = serde_json::json!([{
+            "path": std::env::temp_dir().join("rspice-orphan-pin.lib"),
+            "digest": "00".repeat(32)
+        }]);
+        let error = load_project_text(&digest_without_source.to_string(), None)
+            .expect_err("digest without source path must fail")
+            .to_string();
+        assert!(error.contains("source_closure cannot exist without an external root_path"));
+    }
+
+    #[test]
+    fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
+        let project = project_with_execution_context();
+        let json = serialize_project_file(&project).expect("project serializes");
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        value["execution_context"]["simulation_plan"]["tran"]["stop"] =
+            serde_json::json!("unfinished(");
+        value["execution_context"]["simulation_plan"]["mc"]["seed"] =
+            serde_json::json!("not-an-integer-yet");
+
+        let loaded = load_project_text(&value.to_string(), None)
+            .expect("draft syntax is validated by run preflight, not project loading");
+        let plan = &loaded
+            .execution_context
+            .expect("context retained")
+            .simulation_plan;
+
+        assert_eq!(plan.tran.stop, "unfinished(");
+        assert_eq!(plan.mc.seed, "not-an-integer-yet");
+        assert!(
+            plan.validation_error(crate::common::simulation_analysis_tabs::TAB_TRANSIENT)
+                .is_some()
+        );
+        assert!(
+            plan.validation_error(crate::common::simulation_analysis_tabs::TAB_MONTE_CARLO)
+                .is_some()
+        );
     }
 
     #[test]

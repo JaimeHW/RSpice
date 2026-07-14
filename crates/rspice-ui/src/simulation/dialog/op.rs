@@ -74,13 +74,15 @@ impl OpConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OpDialogState {
     pub save_all: bool,
     pub save_op_info: bool,
     pub temperature: String,
     pub source_stepping: bool,
     pub gmin_steps: String,
+    #[serde(skip)]
     pub initialized: bool,
 }
 
@@ -101,7 +103,10 @@ impl OpDialogState {
             .temperature
             .parse()
             .map_err(|_| "Invalid temperature")?;
-        let gmin: u32 = self.gmin_steps.parse().unwrap_or(0);
+        let gmin: u32 = self
+            .gmin_steps
+            .parse()
+            .map_err(|_| "Invalid GMIN step count")?;
         let config = OpConfig {
             save_all: self.save_all,
             save_op_info: self.save_op_info,

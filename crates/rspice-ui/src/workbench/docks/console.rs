@@ -9,10 +9,14 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::super::design_system::{WorkbenchIcon, icon_button};
+use super::super::layout::LayoutSpec;
 use super::super::state::ConsolePage;
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    header(ui, app);
+pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    header(ui, app, layout);
+    if !layout.show_console_body {
+        return;
+    }
     match app.state.workbench.console_page {
         ConsolePage::Console => console(ui, app),
         ConsolePage::Problems => problems(ui, app),
@@ -21,7 +25,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn header(ui: &mut Ui, app: &mut RSpiceApp) {
+fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
     let problems = app
         .state
@@ -54,36 +58,54 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let control_size = if layout.coarse_pointer { 44.0 } else { 28.0 };
             if icon_button(
                 ui,
-                WorkbenchIcon::Close,
-                "Hide console",
+                if layout.show_console_body {
+                    WorkbenchIcon::Close
+                } else {
+                    WorkbenchIcon::Console
+                },
+                if layout.show_console_body {
+                    "Collapse console"
+                } else {
+                    "Expand console"
+                },
                 false,
-                egui::vec2(28.0, 28.0),
+                egui::vec2(control_size, control_size),
             )
             .clicked()
             {
-                app.state.workbench.console_visible = false;
+                if layout.show_console_body {
+                    app.state.workbench.console_visible = false;
+                    app.state.workbench.console_maximized = false;
+                } else if !app.state.workbench.focus_mode {
+                    app.state.workbench.console_visible = true;
+                }
             }
-            if icon_button(
-                ui,
-                WorkbenchIcon::Focus,
-                if app.state.workbench.console_maximized {
-                    "Restore console"
-                } else {
-                    "Maximize console"
-                },
-                app.state.workbench.console_maximized,
-                egui::vec2(28.0, 28.0),
-            )
-            .clicked()
+            if !layout.compact_shell
+                && !layout.coarse_pointer
+                && icon_button(
+                    ui,
+                    WorkbenchIcon::Focus,
+                    if app.state.workbench.console_maximized {
+                        "Restore console"
+                    } else {
+                        "Maximize console"
+                    },
+                    app.state.workbench.console_maximized,
+                    egui::vec2(control_size, control_size),
+                )
+                .clicked()
             {
                 app.state.workbench.console_maximized = !app.state.workbench.console_maximized;
+                app.state.workbench.console_visible = true;
             }
             // Problems, Measurements, and Task log are projections of owned
             // engineering records. A generic console action must never erase
             // DRC evidence, immutable measurement data, or run history.
-            if page_owns_clear_action(app.state.workbench.console_page)
+            if !layout.compact_shell
+                && page_owns_clear_action(app.state.workbench.console_page)
                 && ui
                     .add(
                         egui::Button::new(egui::RichText::new("Clear").color(t.color.text_dim))
@@ -272,7 +294,14 @@ fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
 fn issue_row(ui: &mut Ui, level: &str, message: &str, context: &str, tone: SemanticTone) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            format!("{level}: {message}. {context}"),
+        )
+    });
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }

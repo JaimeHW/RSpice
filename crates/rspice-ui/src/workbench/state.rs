@@ -106,11 +106,11 @@ pub enum WidthClass {
 
 impl WidthClass {
     pub const fn for_width(width: f32) -> Self {
-        if width < 600.0 {
+        if width <= 560.0 {
             Self::Phone
-        } else if width < 960.0 {
+        } else if width <= 820.0 {
             Self::Tablet
-        } else if width < 1440.0 {
+        } else if width <= 1260.0 {
             Self::Desktop
         } else {
             Self::Wide
@@ -121,8 +121,16 @@ impl WidthClass {
         matches!(self, Self::Phone)
     }
 
-    pub const fn uses_drawers(self) -> bool {
+    pub const fn uses_bottom_navigation(self) -> bool {
         matches!(self, Self::Phone | Self::Tablet)
+    }
+
+    pub const fn navigator_uses_drawer(self) -> bool {
+        self.uses_bottom_navigation()
+    }
+
+    pub const fn inspector_uses_drawer(self) -> bool {
+        !matches!(self, Self::Wide)
     }
 }
 
@@ -167,6 +175,76 @@ impl ProjectLauncherSort {
             Self::LastOpened => "Last opened",
             Self::Name => "Name",
         }
+    }
+}
+
+/// Startup pages that have complete local executors in the desktop product.
+/// Legal, identity, licensing, cloud, template, and extension-host pages are
+/// intentionally absent until their governed services exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectLauncherPage {
+    #[default]
+    Projects,
+    Recovery,
+    SafeMode,
+}
+
+impl ProjectLauncherPage {
+    pub const ALL: [Self; 3] = [Self::Projects, Self::Recovery, Self::SafeMode];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Projects => "Projects",
+            Self::Recovery => "Recovery",
+            Self::SafeMode => "Safe mode",
+        }
+    }
+}
+
+/// Safe-mode controls that can be enforced locally without an extension,
+/// account, renderer-restart, or platform service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalSafeModeOptions {
+    pub isolate_prior_documents: bool,
+    pub reset_layout: bool,
+}
+
+impl Default for LocalSafeModeOptions {
+    fn default() -> Self {
+        Self {
+            isolate_prior_documents: true,
+            reset_layout: false,
+        }
+    }
+}
+
+impl LocalSafeModeOptions {
+    pub const fn has_effect(self) -> bool {
+        self.isolate_prior_documents || self.reset_layout
+    }
+}
+
+/// Current-launch safe-mode state. The serialized pre-safe-mode session is
+/// retained only so application persistence can keep it byte-for-byte
+/// equivalent for the next normal launch.
+#[derive(Debug, Clone, Default)]
+pub struct LocalSafeModeState {
+    pub active: bool,
+    pub draft: LocalSafeModeOptions,
+    pub applied: LocalSafeModeOptions,
+    preserved_session: Option<String>,
+}
+
+impl LocalSafeModeState {
+    pub(crate) fn activate(&mut self, options: LocalSafeModeOptions, session: String) {
+        self.active = true;
+        self.draft = options;
+        self.applied = options;
+        self.preserved_session = Some(session);
+    }
+
+    pub(crate) fn preserved_session(&self) -> Option<&str> {
+        self.preserved_session.as_deref()
     }
 }
 
@@ -279,6 +357,61 @@ impl ModelsPage {
     }
 }
 
+/// Destination that can resolve a blocking simulation-preflight finding.
+/// The dialog stores semantic destinations instead of callbacks so a report
+/// remains deterministic for the exact project revision that produced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreflightRemediation {
+    DesignChecks,
+    SimulationPlan,
+    ModelBindings,
+}
+
+/// One ordered, actionable finding in a simulation-preflight report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreflightIssue {
+    pub check: String,
+    pub observed: String,
+    pub required: String,
+    pub remediation: PreflightRemediation,
+}
+
+/// Immutable snapshot rendered by the mockup-specified preflight workflow.
+/// It is intentionally runtime-only: a saved project persists the simulation
+/// plan, while validation evidence must be regenerated for the live revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreflightReport {
+    pub project_revision: u64,
+    pub topology_revision: u64,
+    pub blockers: Vec<PreflightIssue>,
+    pub advisories: Vec<String>,
+    pub analysis_count: usize,
+    pub task_count: usize,
+    pub reference_pvt: String,
+    pub target: String,
+}
+
+impl PreflightReport {
+    pub fn is_runnable(&self) -> bool {
+        self.blockers.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreflightToast {
+    pub message: String,
+    pub warning: bool,
+}
+
+/// Transient state for the simulation-preflight dialog and its one-frame
+/// notification. Reports never survive a project or application reload.
+#[derive(Debug, Clone, Default)]
+pub struct PreflightDialogState {
+    pub open: bool,
+    pub report: Option<PreflightReport>,
+    pub pending_toast: Option<PreflightToast>,
+}
+
 /// New workbench session state.  Durable layout preferences are serialized;
 /// one-frame requests and open drawers are intentionally transient.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,7 +422,7 @@ pub struct WorkbenchState {
     pub navigator_visible: bool,
     #[serde(default = "default_true")]
     pub inspector_visible: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub console_visible: bool,
     #[serde(default)]
     pub console_maximized: bool,
@@ -300,6 +433,11 @@ pub struct WorkbenchState {
     /// honored and must never restore a stale platform window state.
     #[serde(skip)]
     pub full_screen: bool,
+    /// Capability-derived touch composition. Once a native touch event is
+    /// observed it remains enabled for this process; browsers also refresh it
+    /// from the exact `(pointer: coarse)` media query every frame.
+    #[serde(skip)]
+    pub coarse_pointer: bool,
     /// The Project Launcher is an application-level modal, not a workspace.
     #[serde(skip)]
     pub project_launcher_open: bool,
@@ -308,6 +446,16 @@ pub struct WorkbenchState {
     pub project_launcher_query: String,
     #[serde(skip)]
     pub project_launcher_sort: ProjectLauncherSort,
+    /// Selected startup page and scanned native checkpoint catalog are
+    /// application-modal runtime state, never project or user preferences.
+    #[serde(skip)]
+    pub project_launcher_page: ProjectLauncherPage,
+    #[serde(skip)]
+    pub(crate) project_launcher_recovery: super::recovery::RecoveryCatalog,
+    /// Safe mode applies only to this process. The prior session remains the
+    /// persisted source of truth for the next ordinary launch.
+    #[serde(skip)]
+    pub safe_mode: LocalSafeModeState,
     /// Focus is requested only on the frame in which the launcher opens.
     #[serde(skip)]
     pub focus_project_launcher_search: bool,
@@ -363,6 +511,10 @@ pub struct WorkbenchState {
     /// One-frame request to focus the component chooser filter.
     #[serde(skip)]
     pub focus_placement_search: bool,
+    /// Mockup-specified simulation-preflight workflow. Validation reports are
+    /// revision-bound runtime evidence and therefore never serialized.
+    #[serde(skip)]
+    pub preflight: PreflightDialogState,
 }
 
 const fn default_true() -> bool {
@@ -370,15 +522,15 @@ const fn default_true() -> bool {
 }
 
 const fn default_navigator_width() -> f32 {
-    306.0
+    256.0
 }
 
 const fn default_inspector_width() -> f32 {
-    326.0
+    312.0
 }
 
 const fn default_console_height() -> f32 {
-    174.0
+    145.0
 }
 
 const fn default_analysis_index() -> usize {
@@ -391,13 +543,17 @@ impl Default for WorkbenchState {
             workspace: Workspace::Design,
             navigator_visible: true,
             inspector_visible: true,
-            console_visible: true,
+            console_visible: false,
             console_maximized: false,
             focus_mode: false,
             full_screen: false,
+            coarse_pointer: false,
             project_launcher_open: false,
             project_launcher_query: String::new(),
             project_launcher_sort: ProjectLauncherSort::LastOpened,
+            project_launcher_page: ProjectLauncherPage::Projects,
+            project_launcher_recovery: super::recovery::RecoveryCatalog::default(),
+            safe_mode: LocalSafeModeState::default(),
             focus_project_launcher_search: false,
             navigator_width: default_navigator_width(),
             inspector_width: default_inspector_width(),
@@ -420,13 +576,23 @@ impl Default for WorkbenchState {
             focus_navigator_search: false,
             placement_query: String::new(),
             focus_placement_search: false,
+            preflight: PreflightDialogState::default(),
         }
     }
 }
 
 impl WorkbenchState {
+    /// Whether a workbench-owned application modal has exclusive keyboard and
+    /// pointer intent. Global shortcuts must not mutate the document behind
+    /// these surfaces.
+    pub fn application_modal_open(&self) -> bool {
+        self.project_launcher_open || self.preflight.open
+    }
+
     pub fn open_project_launcher(&mut self) {
         self.project_launcher_open = true;
+        self.project_launcher_page = ProjectLauncherPage::Projects;
+        self.project_launcher_recovery.request_refresh();
         self.focus_project_launcher_search = true;
     }
 
@@ -487,11 +653,22 @@ impl WorkbenchState {
         }
     }
 
-    /// Drawers are a compact-width navigation mechanism. Clear a transient
-    /// drawer as soon as the shell returns to a docked composition so a later
-    /// resize cannot resurrect an already-dismissed overlay.
-    pub fn reconcile_drawer_mode(&mut self, width_class: WidthClass) {
-        if !width_class.uses_drawers() {
+    /// Clear a transient drawer as soon as the current responsive composition
+    /// cannot present it. Navigator and inspector intentionally have distinct
+    /// 821-1260 px behavior in the mockup.
+    pub fn reconcile_drawer_mode(
+        &mut self,
+        navigator_uses_drawer: bool,
+        inspector_uses_drawer: bool,
+        workspaces_uses_drawer: bool,
+    ) {
+        let supported = match self.drawer {
+            Some(Drawer::Navigator) => navigator_uses_drawer,
+            Some(Drawer::Inspector) => inspector_uses_drawer,
+            Some(Drawer::Workspaces) => workspaces_uses_drawer,
+            None => true,
+        };
+        if !supported {
             self.close_drawer();
         }
     }
@@ -499,7 +676,7 @@ impl WorkbenchState {
     pub fn reset_layout(&mut self) {
         self.navigator_visible = true;
         self.inspector_visible = true;
-        self.console_visible = true;
+        self.console_visible = false;
         self.console_maximized = false;
         self.focus_mode = false;
         self.navigator_width = default_navigator_width();
@@ -522,11 +699,13 @@ mod tests {
     }
 
     #[test]
-    fn responsive_width_classes_preserve_phone_and_desktop_boundaries() {
-        assert_eq!(WidthClass::for_width(390.0), WidthClass::Phone);
-        assert_eq!(WidthClass::for_width(834.0), WidthClass::Tablet);
-        assert_eq!(WidthClass::for_width(1280.0), WidthClass::Desktop);
-        assert_eq!(WidthClass::for_width(1728.0), WidthClass::Wide);
+    fn responsive_width_classes_match_every_mockup_boundary() {
+        assert_eq!(WidthClass::for_width(560.0), WidthClass::Phone);
+        assert_eq!(WidthClass::for_width(561.0), WidthClass::Tablet);
+        assert_eq!(WidthClass::for_width(820.0), WidthClass::Tablet);
+        assert_eq!(WidthClass::for_width(821.0), WidthClass::Desktop);
+        assert_eq!(WidthClass::for_width(1260.0), WidthClass::Desktop);
+        assert_eq!(WidthClass::for_width(1261.0), WidthClass::Wide);
     }
 
     #[test]
@@ -571,12 +750,30 @@ mod tests {
     }
 
     #[test]
-    fn docked_composition_clears_transient_drawer_state() {
+    fn mixed_dock_composition_keeps_only_the_supported_drawer() {
         let mut state = WorkbenchState::default();
         state.toggle_drawer(Drawer::Navigator);
-
-        state.reconcile_drawer_mode(WidthClass::Desktop);
-
+        state.reconcile_drawer_mode(false, true, false);
         assert_eq!(state.drawer, None);
+
+        state.toggle_drawer(Drawer::Inspector);
+        state.reconcile_drawer_mode(false, true, false);
+        assert_eq!(state.drawer, Some(Drawer::Inspector));
+
+        state.toggle_drawer(Drawer::Workspaces);
+        state.reconcile_drawer_mode(false, true, false);
+        assert_eq!(state.drawer, None);
+    }
+
+    #[test]
+    fn application_modals_own_global_input_exclusively() {
+        let mut state = WorkbenchState::default();
+        assert!(!state.application_modal_open());
+
+        state.project_launcher_open = true;
+        assert!(state.application_modal_open());
+        state.project_launcher_open = false;
+        state.preflight.open = true;
+        assert!(state.application_modal_open());
     }
 }

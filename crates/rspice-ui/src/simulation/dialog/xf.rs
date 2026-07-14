@@ -183,7 +183,8 @@ impl XfConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct XfDialogState {
     pub start_freq: String,
     pub stop_freq: String,
@@ -195,6 +196,7 @@ pub struct XfDialogState {
     pub group_delay: bool,
     pub input_impedance: bool,
     pub output_impedance: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

@@ -128,13 +128,15 @@ impl TempConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TempDialogState {
     pub temp_start: String,
     pub temp_stop: String,
     pub temp_step: String,
     pub base_idx: usize,
     pub corner_temps: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

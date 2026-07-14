@@ -105,13 +105,15 @@ impl SensConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SensDialogState {
     pub output_expr: String,
     pub sens_type_idx: usize,
     pub ac_freq: String,
     pub include_params: bool,
     pub include_devices: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

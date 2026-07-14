@@ -17,8 +17,6 @@
 //! - **Version Migration**: Handles older file format versions gracefully
 //! - **Native Dialogs**: Uses rfd for platform-native file pickers
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read};
 #[cfg(not(target_arch = "wasm32"))]
@@ -339,32 +337,24 @@ pub fn save_schematic_file(file: &SchematicFile, path: &Path) -> Result<(), Sche
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // Create backup if file exists
+        // Publish the predecessor backup transactionally as well. A failed
+        // backup never truncates an earlier backup or the primary file.
         if path.exists() {
             let backup_path = path.with_extension("rsch.bak");
-            if let Err(e) = fs::copy(path, &backup_path) {
+            if let Err(e) = crate::io::durable_file::atomic_copy(path, &backup_path) {
                 log::warn!("Failed to create backup: {}", e);
-                // Continue anyway - backup failure shouldn't block save
+                // The primary remains the authoritative predecessor until the
+                // atomic publication below succeeds.
             }
         }
 
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Write to temporary file first
-        let temp_path = path.with_extension("rsch.tmp");
-        let temp_file = File::create(&temp_path)?;
-        let mut writer = BufWriter::new(temp_file);
-
-        serde_json::to_writer_pretty(&mut writer, file)
-            .map_err(|e| SchematicIoError::SerializeError(e.to_string()))?;
-
-        writer.flush()?;
-
-        // Atomic rename
-        fs::rename(&temp_path, path)?;
+        crate::io::durable_file::atomic_write_with::<SchematicIoError>(path, |temp| {
+            let mut writer = BufWriter::new(temp);
+            serde_json::to_writer_pretty(&mut writer, file)
+                .map_err(|e| SchematicIoError::SerializeError(e.to_string()))?;
+            writer.flush()?;
+            Ok(())
+        })?;
 
         log::info!("Saved schematic to: {}", path.display());
         Ok(())
@@ -401,7 +391,6 @@ pub fn load_schematic(path: &Path) -> Result<SchematicState, SchematicIoError> {
     Ok(schematic)
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) fn load_schematic_text(
     contents: &str,
     source_path: Option<&Path>,

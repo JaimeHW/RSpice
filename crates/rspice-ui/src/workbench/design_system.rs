@@ -9,12 +9,12 @@ use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-pub const TITLE_BAR_H: f32 = 34.0;
-pub const TOOL_BAR_H: f32 = 46.0;
-pub const DOCUMENT_BAR_H: f32 = 36.0;
-pub const STATUS_BAR_H: f32 = 26.0;
-pub const ACTIVITY_RAIL_W: f32 = 50.0;
-pub const PHONE_NAV_H: f32 = 66.0;
+pub const TITLE_BAR_H: f32 = 35.0;
+pub const TOOL_BAR_H: f32 = 45.0;
+pub const DOCUMENT_BAR_H: f32 = 34.0;
+pub const STATUS_BAR_H: f32 = 25.0;
+pub const ACTIVITY_RAIL_W: f32 = 51.0;
+pub const PHONE_NAV_H: f32 = 54.0;
 pub const TOUCH_TARGET: f32 = 44.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -376,8 +376,19 @@ pub fn labeled_icon_button(
     selected: bool,
     width: f32,
 ) -> Response {
+    let height = Tokens::get(ui.ctx()).metrics.ctl_h.max(28.0);
+    labeled_icon_button_sized(ui, icon, label, selected, width, height)
+}
+
+pub fn labeled_icon_button_sized(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    width: f32,
+    height: f32,
+) -> Response {
     let t = Tokens::get(ui.ctx());
-    let height = t.metrics.ctl_h.max(28.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
@@ -485,13 +496,19 @@ pub fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
         .corner_radius(t.radius_lg)
         .inner_margin(egui::Margin::same(14))
         .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(title)
-                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
-                    .color(t.color.text),
-            );
-            ui.add_space(8.0);
-            body(ui);
+            // A card is always a top-down content surface, even when its
+            // parent lays several cards out in a horizontal/wrapping row.
+            // Inheriting the parent's layout causes headings, values, and
+            // controls to paint over one another at desktop and tablet widths.
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(title)
+                        .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                        .color(t.color.text),
+                );
+                ui.add_space(8.0);
+                body(ui);
+            });
         });
 }
 
@@ -556,4 +573,30 @@ pub fn empty_state(ui: &mut Ui, icon: WorkbenchIcon, title: &str, description: &
                 .color(t.color.text_dim),
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_content_remains_vertical_inside_a_horizontal_parent() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut first = egui::Rect::NOTHING;
+        let mut second = egui::Rect::NOTHING;
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    card(ui, "Status", |ui| {
+                        first = ui.label("first").rect;
+                        second = ui.label("second").rect;
+                    });
+                });
+            });
+        });
+
+        assert!(second.top() >= first.bottom());
+    }
 }

@@ -6,7 +6,8 @@ use super::{
 ///
 /// These options control all aspects of simulation accuracy, convergence,
 /// and performance. Default values match industry-standard SPICE defaults.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimulationOptions {
     pub reltol: f64,
     pub residual_reltol: f64,

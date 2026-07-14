@@ -16,13 +16,6 @@ pub(super) fn action_file_save_with_io(
     crate::common::file_workflow::save_schematic_with_io(state, io)
 }
 
-pub(super) fn action_file_save_as_with_io(
-    state: &mut AppState,
-    io: &(impl FileWorkflowIo + ?Sized),
-) -> bool {
-    crate::common::file_workflow::save_schematic_as_with_io(state, io)
-}
-
 pub(crate) fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> bool {
     path.extension()
         .and_then(std::ffi::OsStr::to_str)

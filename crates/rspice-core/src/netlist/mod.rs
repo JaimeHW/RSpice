@@ -33,7 +33,11 @@ pub use flattener::{
     flatten_netlist, flatten_netlist_with_models,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
-pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive};
+pub(crate) use include::source_path_literal_to_host_path;
+pub use include::{
+    DEFAULT_MAX_INCLUDE_DEPTH, IncludeProcessor, SealedSourceBundle, SealedSourceEdge,
+    normalize_source_path_literal, parse_include_directive, parse_lib_directive,
+};
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
@@ -1198,6 +1202,13 @@ fn read_file_with_encoding(path: &std::path::Path) -> Result<String, std::io::Er
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
 
+    decode_source_bytes(&bytes)
+}
+
+/// Decode exact source bytes using RSpice's supported netlist/model encoding
+/// policy. Callers that authenticate raw bytes can decode those same bytes
+/// without reopening the source file.
+pub fn decode_source_bytes(bytes: &[u8]) -> Result<String, std::io::Error> {
     // Check for BOM and decode accordingly
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         // UTF-8 with BOM - skip BOM bytes
@@ -1211,7 +1222,7 @@ fn read_file_with_encoding(path: &std::path::Path) -> Result<String, std::io::Er
         decode_utf16_be(&bytes[2..])
     } else {
         // Try UTF-8 first, fall back to Latin-1
-        match String::from_utf8(bytes.clone()) {
+        match String::from_utf8(bytes.to_vec()) {
             Ok(s) => Ok(s),
             Err(_) => {
                 // Latin-1 fallback (each byte is a valid codepoint)

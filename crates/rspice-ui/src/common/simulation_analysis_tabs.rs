@@ -23,6 +23,7 @@ pub const TAB_RELIABILITY: usize = 21;
 pub const TAB_OPTIMIZATION: usize = 22;
 pub const TAB_SOA: usize = 23;
 pub const TAB_DISTO: usize = 24;
+pub const ANALYSIS_COUNT: usize = TAB_DISTO + 1;
 
 pub type AnalysisCategory = (&'static str, &'static [(usize, &'static str)]);
 

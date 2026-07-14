@@ -4005,6 +4005,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "sha2",
  "svgtypes",
  "thiserror 2.0.18",
  "tokio",
@@ -4014,6 +4015,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "windows-sys 0.61.2",
  "winit",
  "winresource",
 ]

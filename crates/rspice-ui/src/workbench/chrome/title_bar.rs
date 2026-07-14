@@ -7,14 +7,19 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::super::commands::Command;
-use super::super::design_system::{TITLE_BAR_H, WorkbenchIcon};
+use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{ModelsPage, VerificationPage, Workspace};
 
+const DESCEND_MENU_LABEL: &str = "Descend into selected instance…";
+const COMMAND_REFERENCE_MENU_LABEL: &str = "Command reference";
+
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
+    let viewport_width = ctx.content_rect().width();
+    let menu_projection = MenuProjection::for_layout(viewport_width, layout.compact_shell);
     TopBottomPanel::top("workbench.title_bar")
-        .exact_height(TITLE_BAR_H)
+        .exact_height(layout.title_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {
@@ -26,34 +31,190 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             );
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                brand(ui, app);
-                if layout.show_title_menus {
-                    menus(ui, app);
-                } else {
-                    compact_menu(ui, app);
-                }
+                brand(
+                    ui,
+                    app,
+                    menu_projection.shows_title_context(),
+                    layout.title_bar_height,
+                );
+                menus(ui, app, menu_projection);
+                let context_left = ui.available_rect_before_wrap().left();
+                let mut context_right = ui.max_rect().right();
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(6.0);
-                    if icon_action(ui, WorkbenchIcon::Settings, "Open preferences") {
+                    if viewport_width > 560.0
+                        && icon_action(ui, WorkbenchIcon::Settings, "Open preferences")
+                    {
                         Command::Preferences.execute(app);
                     }
-                    if search_button(ui, layout, app) {
+                    if search_button(ui, viewport_width, app) {
                         Command::CommandPalette.execute(app);
                     }
-                    if ui.available_width() > 190.0 {
-                        active_project(ui, app);
-                    }
+                    context_right = ui.available_rect_before_wrap().right();
                 });
+                paint_title_context(
+                    ui,
+                    app,
+                    egui::Rect::from_x_y_ranges(
+                        context_left..=context_right,
+                        ui.max_rect().y_range(),
+                    ),
+                    !menu_projection.shows_title_context(),
+                );
             });
         });
 }
 
-fn brand(ui: &mut Ui, app: &mut RSpiceApp) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplicationMenu {
+    File,
+    Edit,
+    View,
+    Design,
+    Simulate,
+    Results,
+    Verify,
+    Models,
+    Automation,
+    Window,
+    Help,
+}
+
+impl ApplicationMenu {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::File => "File",
+            Self::Edit => "Edit",
+            Self::View => "View",
+            Self::Design => "Design",
+            Self::Simulate => "Simulate",
+            Self::Results => "Results",
+            Self::Verify => "Verify",
+            Self::Models => "Models",
+            Self::Automation => "Automation",
+            Self::Window => "Window",
+            Self::Help => "Help",
+        }
+    }
+
+    fn show(self, ui: &mut Ui, app: &mut RSpiceApp) {
+        match self {
+            Self::File => file_menu(ui, app),
+            Self::Edit => edit_menu(ui, app),
+            Self::View => view_menu(ui, app),
+            Self::Design => design_menu(ui, app),
+            Self::Simulate => simulate_menu(ui, app),
+            Self::Results => results_menu(ui, app),
+            Self::Verify => verify_menu(ui, app),
+            Self::Models => models_menu(ui, app),
+            Self::Automation => automation_menu(ui, app),
+            Self::Window => window_menu(ui, app),
+            Self::Help => help_menu(ui, app),
+        }
+    }
+}
+
+const ALL_MENUS: [ApplicationMenu; 11] = [
+    ApplicationMenu::File,
+    ApplicationMenu::Edit,
+    ApplicationMenu::View,
+    ApplicationMenu::Design,
+    ApplicationMenu::Simulate,
+    ApplicationMenu::Results,
+    ApplicationMenu::Verify,
+    ApplicationMenu::Models,
+    ApplicationMenu::Automation,
+    ApplicationMenu::Window,
+    ApplicationMenu::Help,
+];
+
+const THROUGH_MODELS_MENUS: [ApplicationMenu; 8] = [
+    ApplicationMenu::File,
+    ApplicationMenu::Edit,
+    ApplicationMenu::View,
+    ApplicationMenu::Design,
+    ApplicationMenu::Simulate,
+    ApplicationMenu::Results,
+    ApplicationMenu::Verify,
+    ApplicationMenu::Models,
+];
+
+const THROUGH_SIMULATE_MENUS: [ApplicationMenu; 5] = [
+    ApplicationMenu::File,
+    ApplicationMenu::Edit,
+    ApplicationMenu::View,
+    ApplicationMenu::Design,
+    ApplicationMenu::Simulate,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuProjection {
+    Hidden,
+    ThroughSimulate,
+    ThroughModels,
+    All,
+}
+
+impl MenuProjection {
+    const fn for_layout(viewport_width: f32, compact_shell: bool) -> Self {
+        if compact_shell {
+            Self::Hidden
+        } else {
+            Self::for_width(viewport_width)
+        }
+    }
+
+    const fn for_width(viewport_width: f32) -> Self {
+        if viewport_width <= 820.0 {
+            Self::Hidden
+        } else if viewport_width <= 1020.0 {
+            Self::ThroughSimulate
+        } else if viewport_width <= 1360.0 {
+            Self::ThroughModels
+        } else {
+            Self::All
+        }
+    }
+
+    const fn visible_menus(self) -> &'static [ApplicationMenu] {
+        match self {
+            Self::Hidden => &[],
+            Self::ThroughSimulate => &THROUGH_SIMULATE_MENUS,
+            Self::ThroughModels => &THROUGH_MODELS_MENUS,
+            Self::All => &ALL_MENUS,
+        }
+    }
+
+    const fn has_overflow(self) -> bool {
+        matches!(self, Self::ThroughSimulate | Self::ThroughModels)
+    }
+
+    const fn overflow_trigger_label(self) -> &'static str {
+        match self {
+            // The mockup adds a text label only in its 1021-1360 px range.
+            Self::ThroughModels => "⋯  More",
+            Self::ThroughSimulate => "⋯",
+            Self::Hidden | Self::All => "",
+        }
+    }
+
+    const fn shows_title_context(self) -> bool {
+        !matches!(self, Self::Hidden)
+    }
+}
+
+fn brand(ui: &mut Ui, app: &mut RSpiceApp, show_wordmark: bool, height: f32) {
     let t = Tokens::get(ui.ctx());
-    let show_wordmark = ui.available_width() > 520.0;
     let width = if show_wordmark { 86.0 } else { 38.0 };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, TITLE_BAR_H), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            "Open Project launcher",
+        )
+    });
     WorkbenchIcon::Brand.paint(
         ui.painter(),
         egui::Rect::from_center_size(
@@ -74,37 +235,17 @@ fn brand(ui: &mut Ui, app: &mut RSpiceApp) {
     if response.clicked() {
         Command::ProjectLauncher.execute(app);
     }
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text("Open Project launcher");
 }
 
-fn menus(ui: &mut Ui, app: &mut RSpiceApp) {
-    top_menu(ui, "File", |ui| file_menu(ui, app));
-    top_menu(ui, "Edit", |ui| edit_menu(ui, app));
-    top_menu(ui, "View", |ui| view_menu(ui, app));
-    top_menu(ui, "Design", |ui| design_menu(ui, app));
-    top_menu(ui, "Simulate", |ui| simulate_menu(ui, app));
-    top_menu(ui, "Results", |ui| results_menu(ui, app));
-    top_menu(ui, "Verify", |ui| verify_menu(ui, app));
-    top_menu(ui, "Models", |ui| models_menu(ui, app));
-    top_menu(ui, "Automation", |ui| automation_menu(ui, app));
-    top_menu(ui, "Window", |ui| window_menu(ui, app));
-    top_menu(ui, "Help", |ui| help_menu(ui, app));
-}
-
-fn compact_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    top_menu(ui, "Menu", |ui| {
-        submenu(ui, "File", |ui| file_menu(ui, app));
-        submenu(ui, "Edit", |ui| edit_menu(ui, app));
-        submenu(ui, "View", |ui| view_menu(ui, app));
-        submenu(ui, "Design", |ui| design_menu(ui, app));
-        submenu(ui, "Simulate", |ui| simulate_menu(ui, app));
-        submenu(ui, "Results", |ui| results_menu(ui, app));
-        submenu(ui, "Verify", |ui| verify_menu(ui, app));
-        submenu(ui, "Models", |ui| models_menu(ui, app));
-        submenu(ui, "Automation", |ui| automation_menu(ui, app));
-        submenu(ui, "Window", |ui| window_menu(ui, app));
-        submenu(ui, "Help", |ui| help_menu(ui, app));
-    });
+fn menus(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
+    for menu in projection.visible_menus() {
+        top_menu(ui, menu.label(), |ui| menu.show(ui, app));
+    }
+    if projection.has_overflow() {
+        overflow_menu_button(ui, app, projection);
+    }
 }
 
 fn top_menu(ui: &mut Ui, label: &str, contents: impl FnOnce(&mut Ui)) {
@@ -117,21 +258,32 @@ fn top_menu(ui: &mut Ui, label: &str, contents: impl FnOnce(&mut Ui)) {
     );
 }
 
-fn submenu(ui: &mut Ui, label: &str, contents: impl FnOnce(&mut Ui)) {
-    ui.menu_button(label, |ui| {
-        ui.set_min_width(286.0);
-        contents(ui);
-    });
+fn overflow_menu_button(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
+    let response = ui.menu_button(
+        egui::RichText::new(projection.overflow_trigger_label())
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular)),
+        |ui| {
+            ui.set_min_width(286.0);
+            overflow_menu(ui, app);
+        },
+    );
+    response.response.on_hover_text("More application menus");
 }
 
 fn command_item(ui: &mut Ui, app: &mut RSpiceApp, command: Command) {
     let spec = command.spec();
-    command_item_as(ui, app, command, spec.label);
+    command_item_as(ui, app, command, spec.label, None);
 }
 
-fn command_item_as(ui: &mut Ui, app: &mut RSpiceApp, command: Command, label: &str) {
+fn command_item_as(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    command: Command,
+    label: &str,
+    shortcut_override: Option<&str>,
+) {
     let enabled = command.is_enabled(app);
-    let shortcut = command.spec().shortcut;
+    let shortcut = shortcut_for_occurrence(command, shortcut_override);
     let text = if shortcut.is_empty() {
         label.to_owned()
     } else {
@@ -144,6 +296,10 @@ fn command_item_as(ui: &mut Ui, app: &mut RSpiceApp, command: Command, label: &s
         command.execute(app);
         ui.close();
     }
+}
+
+fn shortcut_for_occurrence<'a>(command: Command, shortcut_override: Option<&'a str>) -> &'a str {
+    shortcut_override.unwrap_or(command.spec().shortcut)
 }
 
 fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -200,6 +356,7 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         } else {
             "Enter full screen"
         },
+        None,
     );
     command_item(ui, app, Command::ResetActiveView);
 }
@@ -210,9 +367,10 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::OpenWorkspace(Workspace::Design),
         "Open active schematic",
+        None,
     );
     command_item(ui, app, Command::AscendHierarchy);
-    command_item(ui, app, Command::DescendHierarchy);
+    command_item_as(ui, app, Command::DescendHierarchy, DESCEND_MENU_LABEL, None);
     ui.separator();
     for command in [
         Command::PlaceInstance,
@@ -236,6 +394,7 @@ fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::OpenWorkspace(Workspace::Simulate),
         "Simulation Studio",
+        None,
     );
     command_item(ui, app, Command::SimulationOptions);
 }
@@ -246,9 +405,10 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::OpenWorkspace(Workspace::Results),
         "Open results workspace",
+        None,
     );
     ui.separator();
-    command_item_as(ui, app, Command::WaveformCalculator, "Calculator…");
+    command_item_as(ui, app, Command::WaveformCalculator, "Calculator…", None);
 }
 
 fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -257,6 +417,7 @@ fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::OpenWorkspace(Workspace::Verify),
         "Verification cockpit",
+        None,
     );
     ui.separator();
     command_item_as(
@@ -264,6 +425,7 @@ fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::VerificationPage(VerificationPage::Specifications),
         "Specification matrix",
+        None,
     );
 }
 
@@ -273,13 +435,38 @@ fn models_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::ModelsPage(ModelsPage::Catalog),
         "Model & library catalog",
+        None,
     );
     ui.separator();
-    command_item_as(ui, app, Command::CompileVerilogA, "Verilog-A/AMS compiler");
+    command_item_as(
+        ui,
+        app,
+        Command::CompileVerilogA,
+        "Verilog-A/AMS compiler",
+        None,
+    );
 }
 
 fn automation_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(ui, app, Command::AutomationConsole, "Automation workspace");
+    command_item_as(
+        ui,
+        app,
+        Command::AutomationConsole,
+        "Automation workspace",
+        None,
+    );
+}
+
+fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp) {
+    // The mockup's overflow taxonomy contains several future product
+    // workflows. Project only the exact equivalent that has a real executor.
+    command_item_as(
+        ui,
+        app,
+        Command::AutomationConsole,
+        "Automation workspace",
+        Some(""),
+    );
 }
 
 fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -292,42 +479,99 @@ fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(ui, app, Command::KeyboardShortcuts, "Command reference");
+    // F1 belongs to the mockup's RSpice Help command. Until that distinct
+    // command exists, the command-reference occurrence must not claim it.
+    command_item_as(
+        ui,
+        app,
+        Command::KeyboardShortcuts,
+        COMMAND_REFERENCE_MENU_LABEL,
+        Some(""),
+    );
     ui.separator();
     command_item(ui, app, Command::About);
 }
 
-fn active_project(ui: &mut Ui, app: &RSpiceApp) {
+fn paint_title_context(ui: &mut Ui, app: &RSpiceApp, bounds: egui::Rect, compact: bool) {
+    if bounds.width() < 40.0 {
+        return;
+    }
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-        ui.painter().circle_filled(
-            dot.center(),
-            3.0,
-            if app.state.schematic.is_dirty || app.state.workspace.any_dirty() {
-                t.color.warn
-            } else {
-                t.color.ok
-            },
-        );
-        ui.label(
-            egui::RichText::new(app.state.workspace.project.display_name())
-                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.text),
-        );
-    });
+    let dirty = app.state.schematic.is_dirty || app.state.workspace.any_dirty();
+    let cell = active_title_cell(app);
+    let full = if compact {
+        cell
+    } else {
+        format!(
+            "{}  /  {}",
+            app.state.workspace.project.display_name(),
+            cell
+        )
+    };
+    let available_text_width = (bounds.width() - 26.0).max(12.0);
+    let maximum_characters = (available_text_width / 6.3).floor().max(1.0) as usize;
+    let text = ellipsize(&full, maximum_characters);
+    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let painter = ui
+        .painter()
+        .with_clip_rect(bounds.shrink2(egui::vec2(5.0, 0.0)));
+    let galley = painter.layout_no_wrap(text, font, t.color.text);
+    let total_width = 13.0 + galley.size().x;
+    let left = (bounds.center().x - total_width * 0.5).max(bounds.left() + 5.0);
+    painter.circle_filled(
+        egui::pos2(left + 3.0, bounds.center().y),
+        3.0,
+        if dirty { t.color.warn } else { t.color.ok },
+    );
+    painter.galley(
+        egui::pos2(left + 13.0, bounds.center().y - galley.size().y * 0.5),
+        galley,
+        t.color.text,
+    );
 }
 
-fn search_button(ui: &mut Ui, layout: LayoutSpec, app: &RSpiceApp) -> bool {
+fn active_title_cell(app: &RSpiceApp) -> String {
+    match app.state.workbench.workspace {
+        Workspace::Project => "Project overview".to_owned(),
+        Workspace::Design => format!(
+            "{} · {}",
+            app.state.workspace.active_view.cell, app.state.workspace.active_view.view
+        ),
+        Workspace::Simulate => "Simulation plan".to_owned(),
+        Workspace::Results => "Results".to_owned(),
+        Workspace::Verify => "Verification".to_owned(),
+        Workspace::Models => "Model & Library Manager".to_owned(),
+        Workspace::Netlist => "top.sp · generated".to_owned(),
+    }
+}
+
+fn ellipsize(value: &str, maximum_characters: usize) -> String {
+    let count = value.chars().count();
+    if count <= maximum_characters {
+        return value.to_owned();
+    }
+    if maximum_characters <= 1 {
+        return "…".to_owned();
+    }
+    let mut shortened = value
+        .chars()
+        .take(maximum_characters - 1)
+        .collect::<String>();
+    shortened.push('…');
+    shortened
+}
+
+fn search_button(ui: &mut Ui, viewport_width: f32, app: &RSpiceApp) -> bool {
     let t = Tokens::get(ui.ctx());
-    let width = if matches!(layout.width_class, super::super::state::WidthClass::Wide) {
-        246.0
-    } else if layout.show_title_menus {
-        170.0
-    } else {
-        38.0
-    };
+    let width = search_button_width(viewport_width);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 26.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            "Search and run a command",
+        )
+    });
     ui.painter().rect_filled(rect, t.radius, t.color.bg_inset);
     ui.painter().rect_stroke(
         rect,
@@ -360,24 +604,132 @@ fn search_button(ui: &mut Ui, layout: LayoutSpec, app: &RSpiceApp) -> bool {
         );
     }
     let _ = app;
+    theme::paint_focus_ring(ui, &response, rect);
     response
         .on_hover_text("Search and run a command (Ctrl+K)")
         .clicked()
 }
 
+fn search_button_width(viewport_width: f32) -> f32 {
+    if viewport_width <= 1020.0 {
+        31.0
+    } else {
+        (viewport_width * 0.18).min(230.0)
+    }
+}
+
 fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
     if response.hovered() {
         ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
     }
     icon.paint(ui.painter(), rect.shrink(6.0), t.color.text_dim);
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(label).clicked()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn labels(projection: MenuProjection) -> Vec<&'static str> {
+        projection
+            .visible_menus()
+            .iter()
+            .map(|menu| menu.label())
+            .collect()
+    }
+
+    #[test]
+    fn menu_projection_matches_mockup_breakpoints() {
+        assert_eq!(MenuProjection::for_width(820.0), MenuProjection::Hidden);
+        assert_eq!(
+            MenuProjection::for_width(821.0),
+            MenuProjection::ThroughSimulate
+        );
+        assert_eq!(
+            MenuProjection::for_width(1020.0),
+            MenuProjection::ThroughSimulate
+        );
+        assert_eq!(
+            MenuProjection::for_width(1021.0),
+            MenuProjection::ThroughModels
+        );
+        assert_eq!(
+            MenuProjection::for_width(1360.0),
+            MenuProjection::ThroughModels
+        );
+        assert_eq!(MenuProjection::for_width(1361.0), MenuProjection::All);
+        assert_eq!(
+            MenuProjection::for_layout(844.0, true),
+            MenuProjection::Hidden
+        );
+    }
+
+    #[test]
+    fn each_projection_exposes_only_the_mockup_menu_prefix() {
+        assert!(labels(MenuProjection::Hidden).is_empty());
+        assert_eq!(
+            labels(MenuProjection::ThroughSimulate),
+            ["File", "Edit", "View", "Design", "Simulate"]
+        );
+        assert_eq!(
+            labels(MenuProjection::ThroughModels),
+            [
+                "File", "Edit", "View", "Design", "Simulate", "Results", "Verify", "Models"
+            ]
+        );
+        assert_eq!(
+            labels(MenuProjection::All),
+            [
+                "File",
+                "Edit",
+                "View",
+                "Design",
+                "Simulate",
+                "Results",
+                "Verify",
+                "Models",
+                "Automation",
+                "Window",
+                "Help"
+            ]
+        );
+    }
+
+    #[test]
+    fn overflow_and_compact_title_labels_match_the_mockup() {
+        assert_eq!(
+            MenuProjection::ThroughModels.overflow_trigger_label(),
+            "⋯  More"
+        );
+        assert_eq!(
+            MenuProjection::ThroughSimulate.overflow_trigger_label(),
+            "⋯"
+        );
+        assert!(!MenuProjection::Hidden.has_overflow());
+        assert!(!MenuProjection::Hidden.shows_title_context());
+        assert_eq!(search_button_width(1020.0), 31.0);
+        assert!(search_button_width(1021.0) > 31.0);
+    }
+
+    #[test]
+    fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
+        assert_eq!(
+            shortcut_for_occurrence(Command::KeyboardShortcuts, Some("")),
+            ""
+        );
+        assert_eq!(
+            shortcut_for_occurrence(Command::KeyboardShortcuts, Some("Ctrl+Alt+R")),
+            "Ctrl+Alt+R"
+        );
+        assert_eq!(DESCEND_MENU_LABEL, "Descend into selected instance…");
+        assert_eq!(COMMAND_REFERENCE_MENU_LABEL, "Command reference");
+    }
 
     #[test]
     fn core_menu_commands_are_all_real_dispatch_commands() {

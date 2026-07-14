@@ -9,21 +9,14 @@
 mod examples_menu;
 mod export_actions;
 mod file_menu;
-mod help_menu;
 mod netlist_compat;
 mod simulate_menu;
 mod tools_menu;
-mod veriloga_cache;
 mod waveform_export;
 
-pub(crate) use examples_menu::{load_named_example, request_load_named_example};
+pub(crate) use examples_menu::load_named_example;
 pub(crate) use export_actions::{action_export_netlist_with_io, action_view_netlist};
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
-pub(crate) use help_menu::{DOC_REFERENCES, open_documentation_reference};
 pub(crate) use simulate_menu::open_simulation_options;
 pub(crate) use tools_menu::run_design_rule_check;
-pub(crate) use veriloga_cache::{
-    action_veriloga_cache_clear, action_veriloga_cache_list_entries, action_veriloga_cache_prune,
-    action_veriloga_cache_status, action_veriloga_recompile_library,
-};
 pub(crate) use waveform_export::action_export_csv_with_io;

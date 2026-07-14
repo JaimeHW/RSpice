@@ -11,10 +11,207 @@
 //! - Library section extraction
 //! - Case-insensitive matching for Windows compatibility
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::{ParseError, read_file_with_encoding};
+
+/// Production include-depth limit shared by library discovery and executable
+/// netlist expansion. Foundry PDKs commonly have substantially deeper include
+/// trees than small hand-written decks.
+pub const DEFAULT_MAX_INCLUDE_DEPTH: usize = 64;
+
+/// An immutable, in-memory set of canonical source files.
+///
+/// A sealed bundle is deliberately content-only: resolving an include checks
+/// this map and never consults the filesystem. Callers are responsible for
+/// reading and authenticating every source before constructing the bundle.
+#[derive(Clone, Default)]
+pub struct SealedSourceBundle {
+    sources: BTreeMap<PathBuf, Arc<str>>,
+    edges: BTreeMap<(PathBuf, String), PathBuf>,
+    #[cfg(windows)]
+    windows_identities: BTreeMap<String, PathBuf>,
+}
+
+impl std::fmt::Debug for SealedSourceBundle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sources = self
+            .sources
+            .iter()
+            .map(|(path, content)| (path, content.len()))
+            .collect::<Vec<_>>();
+        formatter
+            .debug_struct("SealedSourceBundle")
+            .field("sources", &sources)
+            .field("edges", &self.edges)
+            .finish()
+    }
+}
+
+/// One authenticated include-resolution decision captured while the source
+/// closure was imported. Runtime sealed resolution follows these edges instead
+/// of reconstructing host filesystem semantics.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SealedSourceEdge {
+    pub owner: PathBuf,
+    pub requested_path: String,
+    pub target: PathBuf,
+}
+
+impl SealedSourceBundle {
+    /// Construct a bundle from canonical absolute paths and their exact UTF-8
+    /// contents. Duplicate canonical identities are rejected instead of being
+    /// silently replaced.
+    pub fn try_new(
+        sources: impl IntoIterator<Item = (PathBuf, String)>,
+    ) -> Result<Self, ParseError> {
+        Self::try_new_with_edges(sources, std::iter::empty())
+    }
+
+    /// Construct a bundle with authenticated include-resolution edges.
+    pub fn try_new_with_edges(
+        sources: impl IntoIterator<Item = (PathBuf, String)>,
+        edges: impl IntoIterator<Item = SealedSourceEdge>,
+    ) -> Result<Self, ParseError> {
+        let mut bundle = Self::default();
+        for (path, content) in sources {
+            if !path.is_absolute() {
+                return Err(ParseError::Syntax {
+                    line: 0,
+                    message: format!(
+                        "Sealed source path must be an absolute canonical path: {}",
+                        path.display()
+                    ),
+                });
+            }
+            let path = lexically_normalize_path(&path);
+            if bundle.sources.contains_key(&path) {
+                return Err(ParseError::Syntax {
+                    line: 0,
+                    message: format!("Duplicate sealed source path: {}", path.display()),
+                });
+            }
+
+            #[cfg(windows)]
+            {
+                let identity = windows_path_identity(&path);
+                if let Some(existing) = bundle.windows_identities.get(&identity) {
+                    return Err(ParseError::Syntax {
+                        line: 0,
+                        message: format!(
+                            "Duplicate sealed source identity: {} and {}",
+                            existing.display(),
+                            path.display()
+                        ),
+                    });
+                }
+                bundle.windows_identities.insert(identity, path.clone());
+            }
+
+            bundle.sources.insert(path, Arc::from(content));
+        }
+
+        for edge in edges {
+            let owner = bundle
+                .canonical_member(&edge.owner)
+                .ok_or_else(|| ParseError::Syntax {
+                    line: 0,
+                    message: format!(
+                        "Sealed dependency edge owner is not a bundle member: {}",
+                        edge.owner.display()
+                    ),
+                })?;
+            let target =
+                bundle
+                    .canonical_member(&edge.target)
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: 0,
+                        message: format!(
+                            "Sealed dependency edge target is not a bundle member: {}",
+                            edge.target.display()
+                        ),
+                    })?;
+            let requested_path = normalize_source_path_literal(&edge.requested_path)?;
+            let key = (owner.clone(), requested_path.clone());
+            if let Some(existing) = bundle.edges.get(&key) {
+                if existing != &target {
+                    return Err(ParseError::Syntax {
+                        line: 0,
+                        message: format!(
+                            "Conflicting sealed dependency edges for '{}' in '{}': '{}' and '{}'",
+                            requested_path,
+                            owner.display(),
+                            existing.display(),
+                            target.display()
+                        ),
+                    });
+                }
+                continue;
+            }
+            bundle.edges.insert(key, target);
+        }
+        Ok(bundle)
+    }
+
+    /// Number of authenticated source members in this bundle.
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    /// Whether the bundle contains no source members.
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+
+    fn canonical_member(&self, candidate: &Path) -> Option<PathBuf> {
+        let candidate = lexically_normalize_path(candidate);
+        if let Some((path, _)) = self.sources.get_key_value(&candidate) {
+            return Some(path.clone());
+        }
+
+        #[cfg(windows)]
+        {
+            return self
+                .windows_identities
+                .get(&windows_path_identity(&candidate))
+                .cloned();
+        }
+
+        #[cfg(not(windows))]
+        None
+    }
+
+    fn content(&self, path: &Path) -> Option<Arc<str>> {
+        let canonical = self.canonical_member(path)?;
+        self.sources.get(&canonical).cloned()
+    }
+
+    fn resolve_edge(&self, owner: &Path, requested_path: &str) -> Result<PathBuf, ParseError> {
+        let owner = self
+            .canonical_member(owner)
+            .ok_or_else(|| ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Include owner is not present in the verified sealed source bundle: {}",
+                    owner.display()
+                ),
+            })?;
+        let requested_path = normalize_source_path_literal(requested_path)?;
+        self.edges
+            .get(&(owner.clone(), requested_path.clone()))
+            .cloned()
+            .ok_or_else(|| ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Dependency '{}' referenced by '{}' is not present in the authenticated sealed resolution graph",
+                    requested_path,
+                    owner.display()
+                ),
+            })
+    }
+}
 
 //=============================================================================
 // Include Processor
@@ -34,6 +231,9 @@ pub struct IncludeProcessor {
     active_includes: HashSet<IncludeKey>,
     /// Additional library search paths
     lib_paths: Vec<PathBuf>,
+    /// Optional authenticated in-memory resolver. When present, every source
+    /// lookup is confined to this bundle and filesystem fallback is forbidden.
+    sealed_sources: Option<SealedSourceBundle>,
     /// Maximum include depth to prevent stack overflow
     max_depth: usize,
     /// Current include depth
@@ -100,9 +300,19 @@ impl IncludeProcessor {
             execution_dir,
             active_includes: HashSet::new(),
             lib_paths: Vec::new(),
-            max_depth: 64, // Foundry PDK trees nest .include/.lib deeply
+            sealed_sources: None,
+            max_depth: DEFAULT_MAX_INCLUDE_DEPTH,
             current_depth: 0,
         }
+    }
+
+    /// Create a processor that can resolve sources only from an authenticated
+    /// in-memory bundle. No path lookup or source read performed by this
+    /// processor accesses the filesystem.
+    pub fn new_sealed(base_path: &Path, sources: SealedSourceBundle) -> Self {
+        let mut processor = Self::new(base_path);
+        processor.sealed_sources = Some(sources);
+        processor
     }
 
     /// Add a library search path
@@ -122,8 +332,8 @@ impl IncludeProcessor {
     /// # Returns
     /// The file contents, or an error if the file cannot be read
     pub fn process_include(&mut self, filename: &str) -> Result<String, ParseError> {
-        let base_dir = self.base_dir.clone();
-        self.process_include_from(&base_dir, filename)
+        let owner = self.base_dir.join("__rspice_include_owner__");
+        self.process_include_from(&owner, filename)
     }
 
     /// Process a .LIB directive
@@ -142,8 +352,58 @@ impl IncludeProcessor {
         filename: &str,
         section: Option<&str>,
     ) -> Result<String, ParseError> {
-        let base_dir = self.base_dir.clone();
-        self.process_lib_from(&base_dir, filename, section)
+        let owner = self.base_dir.join("__rspice_include_owner__");
+        self.process_lib_from(&owner, filename, section)
+    }
+
+    /// Materialize one listed root source, optionally selecting an inline
+    /// `.lib` section, using only the sealed bundle.
+    pub fn process_sealed_root(
+        &mut self,
+        root_path: &Path,
+        section: Option<&str>,
+    ) -> Result<String, ParseError> {
+        let sources = self
+            .sealed_sources
+            .as_ref()
+            .ok_or_else(|| ParseError::Syntax {
+                line: 0,
+                message: "process_sealed_root requires a sealed source bundle".to_owned(),
+            })?;
+        let canonical = sources
+            .canonical_member(root_path)
+            .ok_or_else(|| ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Model root is not present in the verified source bundle: {}",
+                    root_path.display()
+                ),
+            })?;
+        let key = IncludeKey::new(canonical.clone(), section);
+        self.enter_include(&key)?;
+
+        let result = (|| {
+            let content = self.read_source(&canonical, &canonical.display().to_string())?;
+            let content = strip_terminal_end_cards(&content);
+            let expanded =
+                self.expand_content_from(&content, &canonical, section, section.is_some())?;
+            for (line_index, line) in expanded.lines().enumerate() {
+                if parse_include_directive(line).is_some() || parse_lib_directive(line).is_some() {
+                    return Err(ParseError::Syntax {
+                        line: line_index + 1,
+                        message: format!(
+                            "{}: sealed model materialization left an unresolved include/library directive: {}",
+                            canonical.display(),
+                            line.trim()
+                        ),
+                    });
+                }
+            }
+            Ok(expanded)
+        })();
+
+        self.leave_include(&key);
+        result
     }
 
     /// Recursively expand `.INCLUDE` and `.LIB` directives in raw content.
@@ -152,15 +412,20 @@ impl IncludeProcessor {
         content: &str,
         current_path: &Path,
     ) -> Result<String, ParseError> {
-        let current_dir = current_path.parent().unwrap_or(Path::new("."));
-        self.expand_content_from(content, current_dir, None)
+        self.expand_content_from(content, current_path, None, false)
     }
 
     /// Resolve a filename to an absolute path
-    fn resolve_path_from(&self, base_dir: &Path, filename: &str) -> Result<PathBuf, ParseError> {
+    fn resolve_path_from(&self, owner_path: &Path, filename: &str) -> Result<PathBuf, ParseError> {
         // Remove quotes if present
         let clean_name = filename.trim_matches('"').trim_matches('\'');
         let path = Path::new(clean_name);
+
+        if let Some(sources) = &self.sealed_sources {
+            return sources.resolve_edge(owner_path, clean_name);
+        }
+
+        let base_dir = owner_path.parent().unwrap_or(Path::new("."));
 
         if let Some(relative_to_execution_dir) = windows_drive_relative_suffix(clean_name) {
             let relative = spice_relative_path(relative_to_execution_dir);
@@ -236,34 +501,52 @@ impl IncludeProcessor {
         })
     }
 
+    fn read_source(&self, path: &Path, requested_name: &str) -> Result<Arc<str>, ParseError> {
+        if let Some(sources) = &self.sealed_sources {
+            return sources.content(path).ok_or_else(|| ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Dependency is not present in the verified sealed source bundle: '{}'",
+                    path.display()
+                ),
+            });
+        }
+
+        read_file_with_encoding(path)
+            .map(Arc::from)
+            .map_err(|error| ParseError::Syntax {
+                line: 0,
+                message: format!("Failed to include '{}': {error}", requested_name),
+            })
+    }
+
     fn process_include_from(
         &mut self,
-        base_dir: &Path,
+        owner_path: &Path,
         filename: &str,
     ) -> Result<String, ParseError> {
-        self.process_include_from_with_selection(base_dir, filename, None)
+        self.process_include_from_with_selection(owner_path, filename, None)
     }
 
     fn process_include_from_with_selection(
         &mut self,
-        base_dir: &Path,
+        owner_path: &Path,
         filename: &str,
         selected_section: Option<&str>,
     ) -> Result<String, ParseError> {
-        let path = self.resolve_path_from(base_dir, filename)?;
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let path = self.resolve_path_from(owner_path, filename)?;
+        let canonical = if self.sealed_sources.is_some() {
+            path.clone()
+        } else {
+            path.canonicalize().unwrap_or_else(|_| path.clone())
+        };
         let key = IncludeKey::new(canonical, None);
         self.enter_include(&key)?;
 
         let result = (|| {
-            let content = read_file_with_encoding(&path).map_err(|e| ParseError::Syntax {
-                line: 0,
-                message: format!("Failed to include '{}': {}", filename, e),
-            })?;
-
+            let content = self.read_source(&path, filename)?;
             let content = strip_terminal_end_cards(&content);
-            let include_dir = path.parent().unwrap_or(Path::new("."));
-            self.expand_content_from(&content, include_dir, selected_section)
+            self.expand_content_from(&content, &path, selected_section, false)
         })();
 
         self.leave_include(&key);
@@ -272,23 +555,23 @@ impl IncludeProcessor {
 
     fn process_lib_from(
         &mut self,
-        base_dir: &Path,
+        owner_path: &Path,
         filename: &str,
         section: Option<&str>,
     ) -> Result<String, ParseError> {
-        let path = self.resolve_path_from(base_dir, filename)?;
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let path = self.resolve_path_from(owner_path, filename)?;
+        let canonical = if self.sealed_sources.is_some() {
+            path.clone()
+        } else {
+            path.canonicalize().unwrap_or_else(|_| path.clone())
+        };
         let key = IncludeKey::new(canonical, section);
         self.enter_include(&key)?;
 
         let result = (|| {
-            let content = read_file_with_encoding(&path).map_err(|e| ParseError::Syntax {
-                line: 0,
-                message: format!("Failed to include '{}': {}", filename, e),
-            })?;
+            let content = self.read_source(&path, filename)?;
             let content = strip_terminal_end_cards(&content);
-            let library_dir = path.parent().unwrap_or(Path::new("."));
-            self.expand_content_from(&content, library_dir, section)
+            self.expand_content_from(&content, &path, section, section.is_some())
         })();
 
         self.leave_include(&key);
@@ -298,21 +581,31 @@ impl IncludeProcessor {
     fn expand_content_from(
         &mut self,
         content: &str,
-        base_dir: &Path,
+        current_path: &Path,
         selected_section: Option<&str>,
+        require_selected_section: bool,
     ) -> Result<String, ParseError> {
         let mut result = String::new();
         let mut inline_sections: Vec<InlineLibFrame> = Vec::new();
+        let mut selected_section_found = selected_section.is_none();
 
         for (line_index, line) in content.lines().enumerate() {
             let line_number = line_index + 1;
             let trimmed = line.trim();
-            let upper = trimmed.to_ascii_uppercase();
 
-            if upper.starts_with(".LIB")
-                && !upper.starts_with(".LIBS")
-                && let Some((filename, section)) = parse_lib_directive(trimmed)
+            if split_directive(trimmed)
+                .is_some_and(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
             {
+                let Some((filename, section)) = parse_lib_directive(trimmed) else {
+                    return Err(ParseError::Syntax {
+                        line: line_number,
+                        message: format!(
+                            "{}:{}: malformed .lib directive",
+                            current_path.display(),
+                            line_number
+                        ),
+                    });
+                };
                 if section.is_none() {
                     let parent_selected = inline_sections
                         .last()
@@ -321,6 +614,7 @@ impl IncludeProcessor {
                     let selected = parent_selected
                         && selected_section
                             .is_some_and(|wanted| filename.eq_ignore_ascii_case(wanted));
+                    selected_section_found |= selected;
                     inline_sections.push(InlineLibFrame {
                         name: filename,
                         opened_at_line: line_number,
@@ -332,7 +626,9 @@ impl IncludeProcessor {
                     continue;
                 }
 
-                let included = self.process_lib_from(base_dir, &filename, section.as_deref())?;
+                let included = self
+                    .process_lib_from(current_path, &filename, section.as_deref())
+                    .map_err(|error| include_error_at(error, current_path, line_number, ".lib"))?;
                 result.push_str(&included);
                 if !included.ends_with('\n') {
                     result.push('\n');
@@ -366,21 +662,44 @@ impl IncludeProcessor {
                 continue;
             }
 
-            if let Some(filename) = parse_include_directive(trimmed) {
+            if split_directive(trimmed).is_some_and(|(directive, _)| {
+                matches_ignore_ascii_case(directive, &[".include", ".inc", ".incl"])
+            }) {
+                let Some(filename) = parse_include_directive(trimmed) else {
+                    return Err(ParseError::Syntax {
+                        line: line_number,
+                        message: format!(
+                            "{}:{}: malformed include directive",
+                            current_path.display(),
+                            line_number
+                        ),
+                    });
+                };
                 // SPEF files are parasitic data, not SPICE text: route to
                 // the back-annotation pass (`.spef_include`) with the path
                 // resolved here, where include search rules apply.
                 if filename.to_ascii_lowercase().ends_with(".spef") {
-                    let path = self.resolve_path_from(base_dir, &filename)?;
+                    if self.sealed_sources.is_some() {
+                        return Err(ParseError::Syntax {
+                            line: line_number,
+                            message: format!(
+                                "{}:{}: sealed model materialization cannot defer SPEF dependency '{}'; filesystem-backed parasitic reads are forbidden",
+                                current_path.display(),
+                                line_number,
+                                filename
+                            ),
+                        });
+                    }
+                    let path = self.resolve_path_from(current_path, &filename)?;
                     let normalized = path.display().to_string().replace('\\', "/");
                     result.push_str(&format!(".spef_include \"{normalized}\"\n"));
                     continue;
                 }
-                let included = self.process_include_from_with_selection(
-                    base_dir,
-                    &filename,
-                    selected_section,
-                )?;
+                let included = self
+                    .process_include_from_with_selection(current_path, &filename, selected_section)
+                    .map_err(|error| {
+                        include_error_at(error, current_path, line_number, ".include")
+                    })?;
                 result.push_str(&included);
                 if !included.ends_with('\n') {
                     result.push('\n');
@@ -396,6 +715,17 @@ impl IncludeProcessor {
             return Err(ParseError::Syntax {
                 line: frame.opened_at_line,
                 message: format!("Library section '{}' missing .ENDL", frame.name),
+            });
+        }
+
+        if require_selected_section && !selected_section_found {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "{}: library section '{}' was not found",
+                    current_path.display(),
+                    selected_section.unwrap_or_default()
+                ),
             });
         }
 
@@ -539,6 +869,105 @@ fn strip_terminal_end_cards(content: &str) -> String {
     out
 }
 
+/// Stable identity for a path literal as written in an include or external
+/// library directive. The exact verified source text is reused at runtime, so
+/// separator normalization is sufficient while preserving case-sensitive host
+/// semantics captured by the authenticated edge.
+pub fn normalize_source_path_literal(literal: &str) -> Result<String, ParseError> {
+    let literal = literal.trim().trim_matches('"').trim_matches('\'');
+    if literal.is_empty() {
+        return Err(ParseError::Syntax {
+            line: 0,
+            message: "Include/library path cannot be empty".to_owned(),
+        });
+    }
+    if literal.chars().any(char::is_control) {
+        return Err(ParseError::Syntax {
+            line: 0,
+            message: "Include/library path contains a control character".to_owned(),
+        });
+    }
+    let mut normalized = String::with_capacity(literal.len());
+    let mut previous_separator = false;
+    for character in literal.chars() {
+        let separator = matches!(character, '/' | '\\');
+        if separator {
+            if !previous_separator || normalized.len() < 2 {
+                normalized.push('/');
+            }
+        } else {
+            normalized.push(character);
+        }
+        previous_separator = separator;
+    }
+    Ok(normalized)
+}
+
+fn include_error_at(
+    error: ParseError,
+    source_path: &Path,
+    source_line: usize,
+    directive: &str,
+) -> ParseError {
+    let detail = match error {
+        ParseError::Syntax { line, message } if line > 0 => {
+            format!("{message} (nested source line {line})")
+        }
+        ParseError::Syntax { message, .. } => message,
+        other => other.to_string(),
+    };
+    ParseError::Syntax {
+        line: source_line,
+        message: format!(
+            "{}:{}: {directive} resolution failed: {detail}",
+            source_path.display(),
+            source_line
+        ),
+    }
+}
+
+fn lexically_normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let can_pop = normalized
+                    .components()
+                    .next_back()
+                    .is_some_and(|last| matches!(last, Component::Normal(_)));
+                if can_pop {
+                    normalized.pop();
+                } else if !path.is_absolute() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
+}
+
+#[cfg(windows)]
+fn windows_path_identity(path: &Path) -> String {
+    let mut identity = lexically_normalize_path(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    if let Some(unprefixed) = identity.strip_prefix("//?/") {
+        identity = if let Some(unc) = unprefixed.strip_prefix("UNC/") {
+            format!("//{unc}")
+        } else {
+            unprefixed.to_owned()
+        };
+    }
+    identity.make_ascii_lowercase();
+    identity
+}
+
 //=============================================================================
 // Helper Functions
 //=============================================================================
@@ -561,10 +990,13 @@ pub fn parse_include_directive(line: &str) -> Option<String> {
         if let Some(end) = quoted.find('"') {
             return Some(quoted[..end].to_string());
         }
+        return None;
     } else if let Some(quoted) = rest.strip_prefix('\'')
         && let Some(end) = quoted.find('\'')
     {
         return Some(quoted[..end].to_string());
+    } else if rest.starts_with('\'') {
+        return None;
     }
 
     // Unquoted - take first word
@@ -603,6 +1035,19 @@ fn windows_drive_relative_suffix(path: &str) -> Option<&str> {
     Some(&path[2..])
 }
 
+/// Convert a SPICE source-path literal to the current host's path syntax.
+/// Both slash styles are directive separators regardless of the host that is
+/// doing discovery; native absolute paths retain their prefix/root semantics.
+pub(crate) fn source_path_literal_to_host_path(path: &str) -> PathBuf {
+    let path = path.trim().trim_matches('"').trim_matches('\'');
+    let native = Path::new(path);
+    if native.is_absolute() {
+        native.to_path_buf()
+    } else {
+        spice_relative_path(path)
+    }
+}
+
 fn spice_relative_path(path: &str) -> PathBuf {
     path.split(['/', '\\'])
         .filter(|component| !component.is_empty() && *component != ".")
@@ -622,42 +1067,30 @@ pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
         return None;
     }
     let rest = rest.trim();
-    let parts: Vec<&str> = rest.split_whitespace().collect();
-
-    if parts.is_empty() {
+    if rest.is_empty() {
         return None;
     }
 
-    // Handle quoted filename
-    let filename;
-    let section_idx;
-
-    if parts[0].starts_with('"') {
-        // Find closing quote
-        let combined = rest.to_string();
-        if let Some(end) = combined[1..].find('"') {
-            filename = combined[1..end + 1].to_string();
-            // Section is after the quoted filename
-            let after_quote = &combined[end + 2..].trim();
-            if after_quote.is_empty() {
-                return Some((filename, None));
-            }
-            return Some((
-                filename,
-                Some(after_quote.split_whitespace().next()?.to_string()),
-            ));
-        }
-        return None;
+    let (filename, remainder) = if let Some(quote) = rest
+        .chars()
+        .next()
+        .filter(|character| matches!(character, '"' | '\''))
+    {
+        let quoted = &rest[quote.len_utf8()..];
+        let end = quoted.find(quote)?;
+        (
+            quoted[..end].to_owned(),
+            quoted[end + quote.len_utf8()..].trim(),
+        )
     } else {
-        filename = parts[0].to_string();
-        section_idx = 1;
-    }
-
-    let section = if parts.len() > section_idx {
-        Some(parts[section_idx].to_string())
-    } else {
-        None
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        (rest[..end].to_owned(), rest[end..].trim())
     };
+    if filename.is_empty() {
+        return None;
+    }
+
+    let section = remainder.split_whitespace().next().map(str::to_owned);
 
     Some((filename, section))
 }
@@ -922,6 +1355,219 @@ R1 1 0 {selected}
         assert_eq!(
             parse_lib_directive(".LIB \"model cards.lib\" nominal"),
             Some(("model cards.lib".to_string(), Some("nominal".to_string())))
+        );
+    }
+
+    fn sealed_test_path(name: &str) -> PathBuf {
+        #[cfg(windows)]
+        {
+            PathBuf::from(r"C:\rspice-sealed-tests").join(name)
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from("/rspice-sealed-tests").join(name)
+        }
+    }
+
+    fn sealed_bundle(
+        sources: Vec<(PathBuf, String)>,
+        edges: Vec<SealedSourceEdge>,
+    ) -> SealedSourceBundle {
+        SealedSourceBundle::try_new_with_edges(sources, edges)
+            .expect("sealed fixture is internally consistent")
+    }
+
+    #[test]
+    fn sealed_materialization_uses_authenticated_edges_for_aliases_and_nested_sections() {
+        let root = sealed_test_path("root.lib");
+        let aliased = sealed_test_path("vendor/device.inc");
+        let absolute = sealed_test_path("absolute.inc");
+        let child = sealed_test_path("actual/child.lib");
+        let absolute_literal = absolute.to_string_lossy().into_owned();
+        let root_content = format!(
+            ".lib TT\n.include \"alias path/device.inc\"\n.inc '{absolute_literal}'\n.lib 'search-name/child.lib' FAST\n.endl TT\n.lib SS\n.include missing-but-inactive.inc\n.endl SS\n"
+        );
+        let bundle = sealed_bundle(
+            vec![
+                (root.clone(), root_content),
+                (
+                    aliased.clone(),
+                    ".model alias_n NMOS (LEVEL=1 KP=1e-3)\n".to_owned(),
+                ),
+                (
+                    absolute.clone(),
+                    ".model absolute_n NMOS (LEVEL=1 KP=2e-3)\n".to_owned(),
+                ),
+                (
+                    child.clone(),
+                    ".lib SLOW\n.model slow_n NMOS (LEVEL=1 KP=3e-3)\n.endl SLOW\n.lib FAST\n.model fast_n NMOS (LEVEL=1 KP=4e-3)\n.endl FAST\n"
+                        .to_owned(),
+                ),
+            ],
+            vec![
+                SealedSourceEdge {
+                    owner: root.clone(),
+                    requested_path: "alias path/device.inc".to_owned(),
+                    target: aliased,
+                },
+                SealedSourceEdge {
+                    owner: root.clone(),
+                    requested_path: absolute_literal,
+                    target: absolute,
+                },
+                SealedSourceEdge {
+                    owner: root.clone(),
+                    requested_path: "search-name/child.lib".to_owned(),
+                    target: child,
+                },
+            ],
+        );
+
+        let expanded = IncludeProcessor::new_sealed(&root, bundle)
+            .process_sealed_root(&root, Some("tt"))
+            .expect("selected section materializes only from authenticated edges");
+
+        assert!(expanded.contains("alias_n"), "{expanded}");
+        assert!(expanded.contains("absolute_n"), "{expanded}");
+        assert!(expanded.contains("fast_n"), "{expanded}");
+        assert!(!expanded.contains("slow_n"), "{expanded}");
+        assert!(!expanded.contains("missing-but-inactive"), "{expanded}");
+        assert!(expanded.lines().all(|line| {
+            parse_include_directive(line).is_none() && parse_lib_directive(line).is_none()
+        }));
+    }
+
+    #[test]
+    fn sealed_materialization_rejects_unlisted_edges_even_when_source_is_listed() {
+        let root = sealed_test_path("unlisted-root.lib");
+        let tempting = sealed_test_path("tempting.inc");
+        let bundle = sealed_bundle(
+            vec![
+                (root.clone(), ".include tempting.inc\n".to_owned()),
+                (tempting, "Rtempt 1 0 1k\n".to_owned()),
+            ],
+            Vec::new(),
+        );
+
+        let error = IncludeProcessor::new_sealed(&root, bundle)
+            .process_sealed_root(&root, None)
+            .expect_err("a listed source without an authenticated edge must not resolve");
+        let message = error.to_string();
+        assert!(
+            message.contains("authenticated sealed resolution graph"),
+            "{message}"
+        );
+        assert!(message.contains("unlisted-root.lib:1"), "{message}");
+    }
+
+    #[test]
+    fn sealed_materialization_rejects_missing_sections_cycles_and_spef_escape() {
+        let section_root = sealed_test_path("section-root.lib");
+        let section_bundle = sealed_bundle(
+            vec![(
+                section_root.clone(),
+                ".lib TT\n.model only_tt D\n.endl TT\n".to_owned(),
+            )],
+            Vec::new(),
+        );
+        let missing = IncludeProcessor::new_sealed(&section_root, section_bundle)
+            .process_sealed_root(&section_root, Some("FF"))
+            .expect_err("missing external section must fail");
+        assert!(missing.to_string().contains("section 'FF' was not found"));
+
+        let cycle_root = sealed_test_path("cycle-root.lib");
+        let cycle_child = sealed_test_path("cycle-child.inc");
+        let cycle_bundle = sealed_bundle(
+            vec![
+                (cycle_root.clone(), ".include cycle-child.inc\n".to_owned()),
+                (cycle_child.clone(), ".include cycle-root.lib\n".to_owned()),
+            ],
+            vec![
+                SealedSourceEdge {
+                    owner: cycle_root.clone(),
+                    requested_path: "cycle-child.inc".to_owned(),
+                    target: cycle_child.clone(),
+                },
+                SealedSourceEdge {
+                    owner: cycle_child,
+                    requested_path: "cycle-root.lib".to_owned(),
+                    target: cycle_root.clone(),
+                },
+            ],
+        );
+        let cycle = IncludeProcessor::new_sealed(&cycle_root, cycle_bundle)
+            .process_sealed_root(&cycle_root, None)
+            .expect_err("sealed include cycle must fail");
+        assert!(cycle.to_string().contains("Circular include/lib"));
+
+        let spef_root = sealed_test_path("spef-root.lib");
+        let spef = sealed_test_path("parasitics.spef");
+        let spef_bundle = sealed_bundle(
+            vec![
+                (spef_root.clone(), ".include parasitics.spef\n".to_owned()),
+                (spef.clone(), "*SPEF \"IEEE 1481-1998\"\n".to_owned()),
+            ],
+            vec![SealedSourceEdge {
+                owner: spef_root.clone(),
+                requested_path: "parasitics.spef".to_owned(),
+                target: spef,
+            }],
+        );
+        let spef_error = IncludeProcessor::new_sealed(&spef_root, spef_bundle)
+            .process_sealed_root(&spef_root, None)
+            .expect_err("SPEF must not escape sealed source handling");
+        assert!(
+            spef_error
+                .to_string()
+                .contains("filesystem-backed parasitic reads are forbidden")
+        );
+    }
+
+    fn sealed_depth_bundle(source_count: usize) -> (PathBuf, SealedSourceBundle) {
+        let paths = (0..source_count)
+            .map(|index| sealed_test_path(&format!("depth/{index}.inc")))
+            .collect::<Vec<_>>();
+        let sources = paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| {
+                let content = if index + 1 < paths.len() {
+                    format!(".include {}.inc\n", index + 1)
+                } else {
+                    "Rlast 1 0 1k\n".to_owned()
+                };
+                (path.clone(), content)
+            })
+            .collect::<Vec<_>>();
+        let edges = paths
+            .windows(2)
+            .enumerate()
+            .map(|(index, pair)| SealedSourceEdge {
+                owner: pair[0].clone(),
+                requested_path: format!("{}.inc", index + 1),
+                target: pair[1].clone(),
+            })
+            .collect::<Vec<_>>();
+        let root = paths[0].clone();
+        (root, sealed_bundle(sources, edges))
+    }
+
+    #[test]
+    fn sealed_include_depth_accepts_64_frames_and_rejects_65() {
+        let (accepted_root, accepted_bundle) = sealed_depth_bundle(DEFAULT_MAX_INCLUDE_DEPTH);
+        let accepted = IncludeProcessor::new_sealed(&accepted_root, accepted_bundle)
+            .process_sealed_root(&accepted_root, None)
+            .expect("the production include-depth boundary is accepted");
+        assert!(accepted.contains("Rlast"));
+
+        let (rejected_root, rejected_bundle) = sealed_depth_bundle(DEFAULT_MAX_INCLUDE_DEPTH + 1);
+        let rejected = IncludeProcessor::new_sealed(&rejected_root, rejected_bundle)
+            .process_sealed_root(&rejected_root, None)
+            .expect_err("one frame beyond the production boundary must fail");
+        assert!(
+            rejected
+                .to_string()
+                .contains("Include depth exceeded maximum of 64")
         );
     }
 

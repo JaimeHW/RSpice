@@ -104,6 +104,7 @@ mod app_veriloga_workflow;
 mod app_pdk_workflow;
 
 mod app_state_init;
+pub(crate) use app_state_init::default_model_library_manager;
 
 /// Analysis viewer state grouped behind a dedicated workspace surface.
 #[derive(Clone, Default)]
@@ -156,11 +157,13 @@ pub(crate) struct RecentFile {
 }
 
 impl RecentFile {
+    #[cfg(test)]
     pub(crate) fn is_shared_project(&self) -> bool {
         self.kind == RecentKind::Project && path_is_shared(&self.path)
     }
 }
 
+#[cfg(test)]
 fn path_is_shared(path: &std::path::Path) -> bool {
     let text = path.as_os_str().to_string_lossy();
     text.starts_with(r"\\") || text.starts_with("//")
@@ -275,7 +278,7 @@ impl AppState {
         }
         if let Err(error) = self
             .model_library_manager
-            .reference_process_directives(self.sim_setup.reference_pvt.process)
+            .reference_process_model_cards(self.sim_setup.reference_pvt.process)
         {
             return Some(error);
         }
@@ -397,6 +400,7 @@ impl AppState {
     }
 
     /// Change a project pin without changing its recency or file identity.
+    #[cfg(test)]
     pub(crate) fn set_recent_project_pinned(
         &mut self,
         path: &std::path::Path,
@@ -530,6 +534,10 @@ impl RSpiceApp {
     }
 
     fn prepare_frame(&mut self, ctx: &Context) {
+        // Direct checkbox callers update the membership set. Reconcile once
+        // per frame so disabling removes an entry and a later re-enable
+        // appends it, while every run path still consumes the same order.
+        self.state.sim_setup.normalize_analysis_order();
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
         if self.first_frame || self.applied_theme != Some(self.state.ui.theme) {
@@ -620,6 +628,7 @@ impl RSpiceApp {
         self.process_new_view_dialog(ctx);
         self.process_copy_cell_dialog(ctx);
         self.process_rename_cell_dialog(ctx);
+        #[cfg(not(target_arch = "wasm32"))]
         self.process_autosave_restore_dialog(ctx);
         self.process_pending_library_deletions();
         self.process_exit_request(ctx);

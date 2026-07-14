@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::common::app::{AppState, ConsoleMessage};
-use crate::io::{ProjectFile, ProjectIoError, ProjectSimulationResults};
+use crate::io::{ProjectExecutionContext, ProjectFile, ProjectIoError, ProjectSimulationResults};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ProjectLoadOrigin<'a> {
@@ -49,6 +49,8 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.workspace = workspace;
     state.schematic = schematic;
     state.clear_design_execution_context();
+    state.sim_setup = crate::common::app::SimSetupState::new();
+    state.model_library_manager = crate::common::app::default_model_library_manager();
     state.push_user_message(ConsoleMessage::info("Created new project"));
 }
 
@@ -68,10 +70,22 @@ pub(crate) fn save_project_to_path(state: &mut AppState, path: &Path) -> bool {
         ));
     }
 
-    let file = ProjectFile::new_with_simulation_results(
+    let execution_context =
+        match ProjectExecutionContext::from_state(&state.sim_setup, &state.model_library_manager) {
+            Ok(context) => context,
+            Err(error) => {
+                state.push_user_message(ConsoleMessage::error(format!(
+                    "Project save failed: execution inputs are invalid: {error}"
+                )));
+                return false;
+            }
+        };
+
+    let file = ProjectFile::new_with_execution_context(
         workspace.clone(),
         state.library_manager.clone(),
         simulation_results,
+        execution_context,
     );
     match crate::io::save_project_file(&file, path) {
         Ok(()) => {
@@ -182,6 +196,26 @@ pub(crate) fn apply_loaded_project(
     mut project: ProjectFile,
     origin: ProjectLoadOrigin<'_>,
 ) -> bool {
+    let (simulation_plan, model_library_manager, execution_warnings) =
+        match project.execution_context.take() {
+            Some(context) => match context.into_state() {
+                Ok(restored) => restored,
+                Err(error) => {
+                    state.push_user_message(ConsoleMessage::error(format!(
+                        "Project open failed: persisted execution context is invalid: {error}"
+                    )));
+                    return false;
+                }
+            },
+            None => (
+                crate::common::app::SimSetupState::new(),
+                crate::common::app::default_model_library_manager(),
+                vec![
+                    "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
+                        .to_owned(),
+                ],
+            ),
+        };
     project
         .workspace
         .ensure_library_model(&mut project.libraries);
@@ -200,6 +234,8 @@ pub(crate) fn apply_loaded_project(
     state.clear_design_execution_context();
     state.library_manager = project.libraries;
     state.workspace = project.workspace;
+    state.sim_setup = simulation_plan;
+    state.model_library_manager = model_library_manager;
     state.restore_active_schematic_from_workspace();
     state.simulation = crate::state::SimulationState::default();
     if let Err(error) = simulation_results.apply_to_state(&mut state.simulation)
@@ -218,6 +254,9 @@ pub(crate) fn apply_loaded_project(
         origin.display_label()
     )));
     if let Some(warning) = simulation_results_warning {
+        state.push_user_message(ConsoleMessage::warning(warning));
+    }
+    for warning in execution_warnings {
         state.push_user_message(ConsoleMessage::warning(warning));
     }
     true
@@ -552,6 +591,132 @@ mod tests {
     }
 
     #[test]
+    fn create_new_project_resets_project_owned_plan_and_model_context() {
+        use crate::common::simulation_analysis_tabs::{TAB_NOISE, TAB_TRANSIENT};
+        use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
+
+        let mut state = AppState::default();
+        state.sim_setup.enabled.clear();
+        state.sim_setup.enabled.insert(TAB_NOISE);
+        state.sim_setup.analysis_order = vec![TAB_NOISE];
+        let mut stale_models = ModelLibraryManager::new();
+        stale_models.add_library(ModelLibrary::new("stale_project_models"));
+        state.model_library_manager = stale_models;
+
+        create_new_project(&mut state);
+
+        assert_eq!(state.sim_setup.enabled.len(), 1);
+        assert!(state.sim_setup.enabled.contains(&TAB_TRANSIENT));
+        assert_eq!(state.sim_setup.analysis_order, vec![TAB_TRANSIENT]);
+        assert!(
+            state
+                .model_library_manager
+                .get_library("stale_project_models")
+                .is_none()
+        );
+        assert!(state.model_library_manager.library_count() > 0);
+    }
+
+    #[test]
+    fn project_import_restores_plan_order_solver_options_and_model_catalog() {
+        use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
+        use crate::simulation::dialog::{IntegrationMethod, MatrixSolver};
+        use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
+
+        let mut source = AppState::default();
+        source.sim_setup.enabled.extend([TAB_AC, TAB_NOISE]);
+        source.sim_setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
+        source.sim_setup.listed.insert(TAB_NOISE);
+        source.sim_setup.options.reltol = 2e-4;
+        source.sim_setup.options.method = IntegrationMethod::Gear2Only;
+        source.sim_setup.options.solver = MatrixSolver::SparseLu;
+        source.sim_setup.options.verbose = true;
+        let mut project_models = ModelLibraryManager::new();
+        project_models.add_library(ModelLibrary::new("project_exact_models"));
+        source.model_library_manager = project_models;
+
+        let context =
+            ProjectExecutionContext::from_state(&source.sim_setup, &source.model_library_manager)
+                .expect("source context validates");
+        let expected_plan =
+            serde_json::to_value(&context.simulation_plan).expect("expected plan serializes");
+        let mut design_libraries = crate::state::LibraryManager::with_primitives();
+        let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut design_libraries);
+        workspace
+            .project
+            .set_path(std::path::PathBuf::from("context.rspiceproj"));
+        let project = ProjectFile::new_with_execution_context(
+            workspace,
+            design_libraries,
+            ProjectSimulationResults::default(),
+            context,
+        );
+
+        let mut target = AppState::default();
+        target.sim_setup.enabled.clear();
+        target.model_library_manager.clear();
+        let imported = apply_loaded_project(
+            &mut target,
+            project,
+            ProjectLoadOrigin::BrowserImport("context.rspiceproj"),
+        );
+
+        assert!(imported);
+        assert_eq!(
+            serde_json::to_value(&target.sim_setup).expect("restored plan serializes"),
+            expected_plan
+        );
+        assert_eq!(
+            target.sim_setup.options_draft.reltol,
+            crate::simulation::dialog::options::format_si_value(2e-4)
+        );
+        assert!(!target.sim_setup.options_open);
+        assert!(target.sim_setup.options_errors.is_empty());
+        assert_eq!(target.model_library_manager.library_count(), 1);
+        assert!(
+            target
+                .model_library_manager
+                .get_library("project_exact_models")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn invalid_execution_context_does_not_partially_replace_open_project() {
+        let mut project = project_named("invalid-context.rspiceproj");
+        let mut context = ProjectExecutionContext::from_state(
+            &crate::common::app::SimSetupState::new(),
+            &crate::state::model_library::ModelLibraryManager::new(),
+        )
+        .expect("baseline context validates");
+        context.simulation_plan.enabled.insert(99);
+        context.simulation_plan.analysis_order.push(99);
+        project.execution_context = Some(context);
+
+        let mut state = AppState::default();
+        let original_project_name = state.workspace.project.display_name().to_owned();
+        let original_active_view = state.workspace.active_view.clone();
+
+        let imported = apply_loaded_project(
+            &mut state,
+            project,
+            ProjectLoadOrigin::BrowserImport("invalid-context.rspiceproj"),
+        );
+
+        assert!(!imported);
+        assert_eq!(
+            state.workspace.project.display_name(),
+            original_project_name
+        );
+        assert_eq!(state.workspace.active_view, original_active_view);
+        assert!(state.log_buffer.entries().any(|entry| {
+            entry.message.contains(
+                "persisted execution context is invalid: simulation_plan.enabled contains unsupported analysis index 99",
+            )
+        }));
+    }
+
+    #[test]
     fn browser_import_restores_project_simulation_results_and_skips_recents() {
         let mut state = AppState::default();
         state.simulation.start_run();
@@ -687,6 +852,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         assert!(saved);
+        assert!(loaded.execution_context.is_some());
         assert_eq!(loaded.simulation_results.runs.len(), 1);
         assert_eq!(
             loaded.simulation_results.runs[0].analyses[0].waveforms[0].name,

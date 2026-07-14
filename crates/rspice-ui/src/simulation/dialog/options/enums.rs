@@ -1,5 +1,5 @@
 /// Integration method for transient analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum IntegrationMethod {
     /// Trapezoidal rule (A-stable, 2nd order).
     Trap,
@@ -64,7 +64,7 @@ impl IntegrationMethod {
 }
 
 /// Damping strategy for Newton-Raphson convergence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DampingStrategy {
     /// No damping (full Newton step).
     None,
@@ -102,7 +102,7 @@ impl DampingStrategy {
 }
 
 /// Matrix solver algorithm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum MatrixSolver {
     /// LU decomposition with partial pivoting.
     #[default]

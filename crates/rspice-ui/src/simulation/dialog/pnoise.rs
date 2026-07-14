@@ -331,7 +331,8 @@ impl PnoiseConfig {
 // =============================================================================
 
 /// Dialog state with string buffers
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PnoiseDialogState {
     /// Start frequency buffer
     pub start_freq: String,
@@ -358,6 +359,7 @@ pub struct PnoiseDialogState {
     /// Noise summary enabled
     pub noise_summary: bool,
     /// Initialized flag
+    #[serde(skip)]
     pub initialized: bool,
 }
 

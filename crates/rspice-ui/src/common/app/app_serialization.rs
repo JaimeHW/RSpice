@@ -1,11 +1,24 @@
 use super::{AppState, ConsoleMessage};
-use crate::io::ProjectSimulationResults;
+use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 
 impl serde::Serialize for AppState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
+        // Safe mode may intentionally replace the visible project/session for
+        // this process. Persist the exact pre-safe-mode payload so an
+        // isolation launch can never erase document restoration state,
+        // working buffers, recent files, or the prior workspace layout.
+        if let Some(preserved) = self.state_safe_mode_session_snapshot() {
+            let snapshot: serde_json::Value = serde_json::from_str(preserved).map_err(|error| {
+                <S::Error as serde::ser::Error>::custom(format!(
+                    "safe-mode session snapshot is invalid: {error}"
+                ))
+            })?;
+            return serde::Serialize::serialize(&snapshot, serializer);
+        }
+
         // Serialize durable state needed for session recovery. Runtime runner
         // flags stay out of the session; only user-visible result history is
         // persisted through the project-file DTO.
@@ -14,7 +27,14 @@ impl serde::Serialize for AppState {
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }
-        let field_count = if simulation_results.is_empty() { 6 } else { 7 };
+        let execution_context =
+            ProjectExecutionContext::from_state(&self.sim_setup, &self.model_library_manager)
+                .map_err(|error| {
+                    <S::Error as serde::ser::Error>::custom(format!(
+                        "session execution context is structurally invalid: {error}"
+                    ))
+                })?;
+        let field_count = if simulation_results.is_empty() { 7 } else { 8 };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
@@ -25,10 +45,17 @@ impl serde::Serialize for AppState {
         state.serialize_field("workbench", &self.workbench)?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
+        state.serialize_field("execution_context", &execution_context)?;
         if !simulation_results.is_empty() {
             state.serialize_field("simulation_results", &simulation_results)?;
         }
         state.end()
+    }
+}
+
+impl AppState {
+    fn state_safe_mode_session_snapshot(&self) -> Option<&str> {
+        self.workbench.safe_mode.preserved_session()
     }
 }
 
@@ -57,6 +84,11 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license_key: Option<String>,
             #[serde(default)]
             simulation_results: ProjectSimulationResults,
+            // Keep this as raw JSON so a corrupt/future execution context can
+            // be rejected independently without discarding document recovery,
+            // recent files, or the rest of the session.
+            #[serde(default)]
+            execution_context: Option<serde_json::Value>,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
@@ -84,6 +116,27 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license,
             ..Default::default()
         };
+        let execution_warnings = match de.execution_context {
+            Some(value) => {
+                let restored = serde_json::from_value::<ProjectExecutionContext>(value)
+                    .map_err(|error| error.to_string())
+                    .and_then(ProjectExecutionContext::into_state);
+                match restored {
+                    Ok((simulation_plan, model_library_manager, warnings)) => {
+                        state.sim_setup = simulation_plan;
+                        state.model_library_manager = model_library_manager;
+                        warnings
+                    }
+                    Err(error) => vec![format!(
+                        "Simulation plan and model libraries were not restored because their persisted session data is invalid: {error}; documented defaults were loaded instead"
+                    )],
+                }
+            }
+            None => vec![
+                "This legacy session predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
+                    .to_owned(),
+            ],
+        };
         let simulation_results_warning = de
             .simulation_results
             .apply_to_state(&mut state.simulation)
@@ -94,6 +147,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 )
             });
         if let Some(warning) = simulation_results_warning {
+            state.push_user_message(ConsoleMessage::warning(warning));
+        }
+        for warning in execution_warnings {
             state.push_user_message(ConsoleMessage::warning(warning));
         }
         state.workspace.save_active_schematic(&state.schematic);
@@ -157,6 +213,49 @@ mod tests {
         assert!(restored.simulation.waveforms.is_empty());
         assert!(!restored.simulation.is_running);
         assert!(!restored.ui.browser_spoken_feedback);
+        assert!(restored.log_buffer.entries().any(|entry| {
+            entry
+                .message
+                .contains("legacy session predates durable simulation plans")
+        }));
+    }
+
+    #[test]
+    fn session_round_trip_preserves_unsaved_plan_drafts_and_model_catalog() {
+        use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_TRANSIENT};
+        use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+
+        let mut state = AppState::default();
+        state.sim_setup.ensure_initialized();
+        state.sim_setup.enabled.insert(TAB_AC);
+        state.sim_setup.analysis_order = vec![TAB_AC, TAB_TRANSIENT];
+        state.sim_setup.tran.stop = "unfinished(".to_owned();
+        state.sim_setup.ac.points = "also unfinished".to_owned();
+        state.model_library_manager.clear();
+        let mut library = ModelLibrary::new("unsaved_session_models");
+        let mut model = DeviceModel::new("nch_session", ModelType::Nmos);
+        model.add_parameter("kp", 1.25e-3);
+        library.add_model(model);
+        state.model_library_manager.add_library(library);
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert_eq!(
+            restored.sim_setup.analysis_order,
+            vec![TAB_AC, TAB_TRANSIENT]
+        );
+        assert_eq!(restored.sim_setup.tran.stop, "unfinished(");
+        assert_eq!(restored.sim_setup.ac.points, "also unfinished");
+        assert!(restored.sim_setup.validation_error(TAB_TRANSIENT).is_some());
+        assert!(restored.sim_setup.validation_error(TAB_AC).is_some());
+        assert!(
+            restored
+                .model_library_manager
+                .get_library("unsaved_session_models")
+                .and_then(|library| library.get_model("nch_session"))
+                .is_some()
+        );
     }
 
     #[test]
@@ -176,6 +275,34 @@ mod tests {
 
         assert!(json.contains("\"ui_session\""));
         assert!(!json.contains("\"shell\""));
+    }
+
+    #[test]
+    fn safe_mode_persists_the_exact_pre_isolation_session() {
+        let mut state = AppState::default();
+        state
+            .workspace
+            .project
+            .rename("Session before safe mode")
+            .expect("valid project name");
+        let before = serde_json::to_string(&state).expect("baseline session serializes");
+
+        state.workspace.project.rename("Isolated session").unwrap();
+        state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions::default(),
+            before.clone(),
+        );
+        let persisted = serde_json::to_string(&state).expect("safe-mode session serializes");
+        let restored: AppState = serde_json::from_str(&persisted).expect("snapshot restores");
+
+        assert_eq!(
+            restored.workspace.project.name(),
+            "Session before safe mode"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&persisted).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&before).unwrap()
+        );
     }
 
     #[test]
@@ -311,9 +438,9 @@ mod tests {
         state.simulation.next_run_id = 3;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
-        let json = serde_json::to_string(&state)
-            .expect("session serializes")
-            .replace("\"schema_version\":2", "\"schema_version\":999");
+        let mut value = serde_json::to_value(&state).expect("session serializes");
+        value["simulation_results"]["schema_version"] = serde_json::Value::from(999);
+        let json = serde_json::to_string(&value).expect("mutated session serializes");
 
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 

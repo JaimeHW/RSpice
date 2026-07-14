@@ -1,6 +1,8 @@
 import importlib.util
 import contextlib
 import io
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +27,23 @@ class BuildSiteGateTests(unittest.TestCase):
         (path / "assets").mkdir(parents=True)
         (path / "index.html").write_text("index", encoding="utf-8")
         (path / "404.html").write_text("missing", encoding="utf-8")
+
+    @staticmethod
+    def make_ide_build_outputs(ide: Path) -> None:
+        pkg = ide / "pkg"
+        pkg.mkdir(parents=True)
+        shutil.copy2(
+            ROOT / "crates" / "rspice-ui" / "web" / "index.html",
+            ide / "index.html",
+        )
+        shutil.copy2(
+            ROOT / "crates" / "rspice-ui" / "web" / "simulation-worker.js",
+            ide / "simulation-worker.js",
+        )
+        (pkg / "rspice-ui.js").write_text(
+            "export { initSync, __wbg_init as default };\n", encoding="utf-8"
+        )
+        (pkg / "rspice-ui_bg.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
 
     def test_site_source_boundary_rejects_client_runtime_routes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -178,6 +197,133 @@ class BuildSiteGateTests(unittest.TestCase):
             )
 
             assert_gate_fails(self, build_site.gate_ide_worker, out)
+
+    def test_executable_asset_identity_changes_with_any_payload_byte(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            asset_root = Path(tmp)
+            (asset_root / "simulation-worker.js").write_text("worker", encoding="utf-8")
+            (asset_root / "rspice-ui.js").write_text("module", encoding="utf-8")
+            wasm = asset_root / "rspice-ui_bg.wasm"
+            wasm.write_bytes(b"\x00asm\x01\x00\x00\x00")
+
+            first = build_site.executable_asset_identity(asset_root)
+            self.assertEqual(first, build_site.executable_asset_identity(asset_root))
+            wasm.write_bytes(wasm.read_bytes() + b"\x01")
+            second = build_site.executable_asset_identity(asset_root)
+
+            self.assertRegex(first, r"^[0-9a-f]{64}$")
+            self.assertNotEqual(first, second)
+
+    def test_packaging_removes_mutable_outputs_and_gate_accepts_exact_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            ide = out / "ide"
+            self.make_ide_build_outputs(ide)
+
+            identity = build_site.package_ide_executable_assets(ide)
+
+            self.assertEqual(build_site.gate_ide_worker(out), identity)
+            self.assertTrue((ide / "assets" / identity).is_dir())
+            self.assertFalse((ide / "simulation-worker.js").exists())
+            self.assertFalse((ide / "pkg").exists())
+            self.assertIn(
+                './assets/%s' % identity,
+                (ide / "index.html").read_text(encoding="utf-8"),
+            )
+
+    def test_ide_gate_rejects_absent_and_mismatched_digest_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            ide = out / "ide"
+            self.make_ide_build_outputs(ide)
+            identity = build_site.package_ide_executable_assets(ide)
+            asset_root = ide / "assets" / identity
+            absent_name = "0" * 64
+            index = ide / "index.html"
+            source = index.read_text(encoding="utf-8")
+            index.write_text(source.replace(identity, absent_name), encoding="utf-8")
+
+            assert_gate_fails(self, build_site.gate_ide_worker, out)
+
+            asset_root.rename(ide / "assets" / absent_name)
+            assert_gate_fails(
+                self,
+                build_site.gate_ide_worker,
+                out,
+            )
+
+    def test_ide_gate_rejects_tampered_content_and_every_mutable_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            ide = out / "ide"
+            self.make_ide_build_outputs(ide)
+            identity = build_site.package_ide_executable_assets(ide)
+            worker = ide / "assets" / identity / "simulation-worker.js"
+            worker.write_text(worker.read_text(encoding="utf-8") + "\n// tampered\n")
+            assert_gate_fails(self, build_site.gate_ide_worker, out)
+
+        for alias in (
+            "simulation-worker.js",
+            "rspice-ui.js",
+            "rspice-ui_bg.wasm",
+            "pkg",
+        ):
+            with self.subTest(alias=alias), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp)
+                ide = out / "ide"
+                self.make_ide_build_outputs(ide)
+                build_site.package_ide_executable_assets(ide)
+                mutable = ide / alias
+                if alias == "pkg":
+                    mutable.mkdir()
+                else:
+                    mutable.write_bytes(b"mutable alias")
+                assert_gate_fails(self, build_site.gate_ide_worker, out)
+
+    def test_packaging_rejects_unexpected_wasm_bindgen_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ide = Path(tmp) / "ide"
+            self.make_ide_build_outputs(ide)
+            (ide / "pkg" / "rspice-ui.d.ts").write_text(
+                "unexpected", encoding="utf-8"
+            )
+
+            assert_gate_fails(
+                self,
+                build_site.package_ide_executable_assets,
+                ide,
+            )
+
+    def test_release_identity_gate_requires_a_clean_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            checkout = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            tracked = checkout / "tracked.txt"
+            tracked.write_text("accepted", encoding="utf-8")
+            subprocess.run(["git", "-C", str(checkout), "add", "tracked.txt"], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=RSpice Test",
+                    "-c",
+                    "user.email=rspice-test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                check=True,
+            )
+
+            build_site.require_clean_client_checkout(checkout)
+            tracked.write_text("dirty", encoding="utf-8")
+            assert_gate_fails(
+                self,
+                build_site.require_clean_client_checkout,
+                checkout,
+            )
 
     def test_playground_gate_requires_ac_worker_route(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

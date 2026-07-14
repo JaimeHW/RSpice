@@ -4,9 +4,7 @@ impl SimulationController {
     pub(super) fn enabled_analysis_indices(state: &AppState) -> Vec<usize> {
         // The run set is the single source of truth: no silent fallback to
         // the selected row — start_simulation refuses an empty set instead.
-        let mut indices: Vec<usize> = state.sim_setup.enabled.iter().copied().collect();
-        indices.sort_unstable();
-        indices
+        state.sim_setup.ordered_enabled_indices()
     }
 
     pub(super) fn analysis_label_for_index(idx: usize) -> &'static str {
@@ -66,6 +64,7 @@ impl SimulationController {
         &self,
         state: &AppState,
         plan: &AnalysisPlan,
+        sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
         let mut queue = Vec::with_capacity(plan.analyses.len());
         let mut errors = Vec::new();
@@ -78,13 +77,14 @@ impl SimulationController {
                     continue;
                 }
             };
-            let spec_options = match self.analysis_spec_execution_options(state, spec) {
-                Ok(opts) => opts,
-                Err(e) => {
-                    errors.push(format!("{}: {}", spec.run_type().display_name(), e));
-                    continue;
-                }
-            };
+            let spec_options =
+                match self.analysis_spec_execution_options(state, spec, sealed_model_sources) {
+                    Ok(opts) => opts,
+                    Err(e) => {
+                        errors.push(format!("{}: {}", spec.run_type().display_name(), e));
+                        continue;
+                    }
+                };
 
             if Self::executes_via_spec(spec) {
                 queue.push(QueuedAnalysis {
@@ -152,6 +152,7 @@ impl SimulationController {
         &self,
         state: &AppState,
         spec: &AnalysisSpec,
+        sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<SpecExecutionOptions, String> {
         match spec {
             AnalysisSpec::Parametric => {
@@ -178,7 +179,11 @@ impl SimulationController {
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     temp: None,
-                    corner: Some(Self::corner_run_config_from_dialog(state, &corner_cfg)?),
+                    corner: Some(Self::corner_run_config_from_dialog(
+                        state,
+                        &corner_cfg,
+                        sealed_model_sources,
+                    )?),
                     pac: None,
                     pxf: None,
                     tf: None,
@@ -241,5 +246,41 @@ impl SimulationController {
                 pstb: None,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
+
+    #[test]
+    fn controller_consumes_authoritative_analysis_order() {
+        let mut state = AppState::default();
+        state.sim_setup.enabled.extend([TAB_AC, TAB_NOISE]);
+        state.sim_setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
+
+        assert_eq!(
+            SimulationController::enabled_analysis_indices(&state),
+            vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC]
+        );
+    }
+
+    #[test]
+    fn normalization_removes_disabled_and_appends_newly_enabled_analyses() {
+        let mut state = AppState::default();
+        state.sim_setup.enabled.extend([TAB_AC, TAB_NOISE]);
+        state.sim_setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
+
+        state.sim_setup.enabled.remove(&TAB_NOISE);
+        state.sim_setup.normalize_analysis_order();
+        assert_eq!(state.sim_setup.analysis_order, vec![TAB_TRANSIENT, TAB_AC]);
+
+        state.sim_setup.enabled.insert(TAB_NOISE);
+        state.sim_setup.normalize_analysis_order();
+        assert_eq!(
+            state.sim_setup.analysis_order,
+            vec![TAB_TRANSIENT, TAB_AC, TAB_NOISE]
+        );
     }
 }

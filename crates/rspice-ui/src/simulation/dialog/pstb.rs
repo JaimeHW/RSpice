@@ -126,7 +126,8 @@ impl PstbConfig {
 // =============================================================================
 
 /// Dialog state with string buffers
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PstbDialogState {
     pub probe: String,
     pub max_harmonics: String,
@@ -134,6 +135,7 @@ pub struct PstbDialogState {
     pub annotate: bool,
     pub phase_margin: bool,
     pub gain_margin: bool,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

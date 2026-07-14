@@ -294,6 +294,7 @@ impl SimulationController {
     pub(super) fn corner_run_config_from_dialog(
         state: &AppState,
         corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
+        sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<crate::services::simulation_runner::CornerRunConfig, String> {
         use crate::services::simulation_runner::{
             CornerBaseMode, CornerFrequencySweep, CornerProcess, CornerRunConfig,
@@ -311,9 +312,7 @@ impl SimulationController {
                 ProcessCorner::FS => CornerProcess::FS,
             })
             .collect();
-        let model_bindings = state
-            .model_library_manager
-            .corner_model_bindings(&process_corners)?;
+        let model_bindings = sealed_model_sources.corner_model_bindings(&process_corners)?;
 
         let nominal_voltage = match corner_cfg.voltages.len() {
             0 => None,

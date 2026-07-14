@@ -33,12 +33,31 @@ impl AppState {
     }
 
     /// Open Rename Cell pre-filled with the current name.
+    #[cfg(test)]
     pub(crate) fn open_rename_cell_dialog(&mut self, library: &str, cell: &str) {
         self.dialogs.rename_cell_dialog = true;
         self.dialogs.rename_cell_library = library.to_owned();
         self.dialogs.rename_cell_current = cell.to_owned();
         self.dialogs.rename_cell_name = cell.to_owned();
         self.dialogs.rename_cell_error = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_cell_dialog_starts_with_the_exact_active_cell_identity() {
+        let mut state = AppState::default();
+
+        state.open_rename_cell_dialog("work", "amplifier");
+
+        assert!(state.dialogs.rename_cell_dialog);
+        assert_eq!(state.dialogs.rename_cell_library, "work");
+        assert_eq!(state.dialogs.rename_cell_current, "amplifier");
+        assert_eq!(state.dialogs.rename_cell_name, "amplifier");
+        assert!(state.dialogs.rename_cell_error.is_none());
     }
 }
 

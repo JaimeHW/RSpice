@@ -3,7 +3,8 @@ use super::{HbConfig, HbSolverType, HbToneConfig};
 use crate::simulation::dialog::options::parse_si_value;
 
 /// Dialog state with string buffers for SI-prefix input
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HbToneDialogState {
     /// Tone frequency buffer.
     pub frequency: String,
@@ -27,7 +28,8 @@ impl HbToneDialogState {
 }
 
 /// Dialog state with string buffers for SI-prefix input
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HbDialogState {
     /// Fundamental frequency buffer
     pub fundamental: String,
@@ -54,6 +56,7 @@ pub struct HbDialogState {
     /// Additional tone rows.
     pub additional_tones: Vec<HbToneDialogState>,
     /// Initialized flag
+    #[serde(skip)]
     pub initialized: bool,
 }
 

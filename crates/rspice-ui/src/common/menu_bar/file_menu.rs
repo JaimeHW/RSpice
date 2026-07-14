@@ -15,7 +15,6 @@ pub(crate) enum FileMenuAction {
     New,
     Open,
     Save,
-    SaveAs,
     ImportNetlist,
     ExportSvg,
     ExportCsvWaveforms,
@@ -66,16 +65,6 @@ pub(crate) fn dispatch_file_menu_action(
             } else {
                 let _ =
                     crate::common::file_actions::action_file_save_with_io(state, file_workflow_io);
-            }
-        }
-        FileMenuAction::SaveAs => {
-            if state.should_save_project_for_active_document() {
-                let _ = crate::common::project_workflow::save_project_as(state);
-            } else {
-                let _ = crate::common::file_actions::action_file_save_as_with_io(
-                    state,
-                    file_workflow_io,
-                );
             }
         }
         FileMenuAction::ImportNetlist => {

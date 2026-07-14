@@ -123,12 +123,14 @@ impl EnvelopeConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnvelopeDialogState {
     pub fundamental: String,
     pub stop_time: String,
     pub harmonics: String,
     pub modulation_idx: usize,
+    #[serde(skip)]
     pub initialized: bool,
 }
 

@@ -1083,13 +1083,15 @@ mod tests {
             model_bindings: vec![
                 crate::services::simulation_runner::CornerModelBinding {
                     process: crate::services::simulation_runner::CornerProcess::SS,
-                    library_path: "C:/pdk/models.lib".to_owned(),
+                    source_label: "C:/pdk/models.lib [ss]".to_owned(),
                     section: Some("ss".to_owned()),
+                    materialized_model_cards: ".model slow D (IS=1e-13)".to_owned(),
                 },
                 crate::services::simulation_runner::CornerModelBinding {
                     process: crate::services::simulation_runner::CornerProcess::FF,
-                    library_path: "C:/pdk/models.lib".to_owned(),
+                    source_label: "C:/pdk/models.lib [ff]".to_owned(),
                     section: Some("ff".to_owned()),
+                    materialized_model_cards: ".model fast D (IS=1e-11)".to_owned(),
                 },
             ],
         };
@@ -1966,16 +1968,18 @@ pub(crate) struct WorkerCornerRunConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct WorkerCornerModelBinding {
     pub process: WorkerCornerProcess,
-    pub library_path: String,
+    pub source_label: String,
     pub section: Option<String>,
+    pub materialized_model_cards: String,
 }
 
 impl From<&crate::services::simulation_runner::CornerModelBinding> for WorkerCornerModelBinding {
     fn from(value: &crate::services::simulation_runner::CornerModelBinding) -> Self {
         Self {
             process: WorkerCornerProcess::from(value.process),
-            library_path: value.library_path.clone(),
+            source_label: value.source_label.clone(),
             section: value.section.clone(),
+            materialized_model_cards: value.materialized_model_cards.clone(),
         }
     }
 }
@@ -1984,8 +1988,9 @@ impl From<WorkerCornerModelBinding> for crate::services::simulation_runner::Corn
     fn from(value: WorkerCornerModelBinding) -> Self {
         Self {
             process: crate::services::simulation_runner::CornerProcess::from(value.process),
-            library_path: value.library_path,
+            source_label: value.source_label,
             section: value.section,
+            materialized_model_cards: value.materialized_model_cards,
         }
     }
 }

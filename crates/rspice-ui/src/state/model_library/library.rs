@@ -1,8 +1,101 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use super::{DeviceModel, ModelType, ProcessCorner};
+
+/// One canonical member of an explicitly accepted external model-source
+/// closure. Paths are absolute, symlink-resolved identities captured by the
+/// library parser; digests identify the exact bytes parsed at refresh time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSourcePin {
+    pub path: PathBuf,
+    pub digest: crate::product::ContentDigest,
+}
+
+/// One authenticated dependency-resolution edge captured at explicit import
+/// or refresh. Retaining the owning source and written path literal preserves
+/// symlink, filesystem case, and search-precedence behavior without consulting
+/// the filesystem during a run.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSourceEdge {
+    pub owner: PathBuf,
+    pub requested_path: String,
+    pub target: PathBuf,
+}
+
+/// Whether a persisted source identity is absolute on either the current host
+/// or one of the other desktop platforms supported by RSpice.
+///
+/// Projects are portable metadata. A Windows path restored on Unix (or a Unix
+/// path restored on Windows) must remain a valid, repairable binding even
+/// though it cannot be opened on the current host.
+pub(crate) fn is_portable_absolute_path(path: &Path) -> bool {
+    if path.is_absolute() {
+        return true;
+    }
+
+    let literal = path.to_string_lossy();
+    if literal.starts_with('/') {
+        return true;
+    }
+
+    let normalized = literal.replace('\\', "/");
+    let candidate = normalized
+        .strip_prefix("//?/")
+        .or_else(|| normalized.strip_prefix("//./"))
+        .unwrap_or(&normalized);
+    let candidate = candidate
+        .strip_prefix("UNC/")
+        .or_else(|| candidate.strip_prefix("unc/"))
+        .unwrap_or(candidate);
+
+    let bytes = candidate.as_bytes();
+    (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/')
+        || (normalized.starts_with("//")
+            && candidate
+                .split('/')
+                .filter(|component| !component.is_empty())
+                .take(2)
+                .count()
+                == 2)
+}
+
+/// Whether an otherwise-valid absolute identity belongs to another host path
+/// syntax and therefore must never be probed by this process.
+pub(crate) fn is_foreign_platform_absolute_path(path: &Path) -> bool {
+    is_portable_absolute_path(path) && !path.is_absolute()
+}
+
+/// Find the first pinned source that cannot be reached by following captured
+/// dependency edges from this library's root.
+pub(crate) fn first_unreachable_source<'a>(
+    root: &Path,
+    sources: &'a [ModelSourcePin],
+    edges: &[ModelSourceEdge],
+) -> Option<&'a Path> {
+    let mut reachable = HashSet::<PathBuf>::with_capacity(sources.len());
+    reachable.insert(root.to_path_buf());
+
+    loop {
+        let before = reachable.len();
+        for edge in edges {
+            if reachable.contains(&edge.owner) {
+                reachable.insert(edge.target.clone());
+            }
+        }
+        if reachable.len() == before {
+            break;
+        }
+    }
+
+    sources
+        .iter()
+        .map(|source| source.path.as_path())
+        .find(|source| !reachable.contains(*source))
+}
 
 /// A PDK model library
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -15,6 +108,15 @@ pub struct ModelLibrary {
     pub technology_node: String,
     /// Root path on disk
     pub root_path: Option<PathBuf>,
+    /// Canonical, deterministic root-plus-transitive-include closure accepted
+    /// by the last successful load or refresh. An empty closure is valid only
+    /// for an in-memory library or a legacy external binding that has not yet
+    /// been explicitly refreshed; unpinned external bindings are never runnable.
+    #[serde(default)]
+    pub source_closure: Vec<ModelSourcePin>,
+    /// Authenticated resolution graph for the accepted source closure.
+    #[serde(default)]
+    pub source_edges: Vec<ModelSourceEdge>,
     /// Device models
     pub models: HashMap<String, DeviceModel>,
     /// Process corners

@@ -85,7 +85,8 @@ impl ReliabilityConfig {
 }
 
 /// UI state for reliability dialog tab.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReliabilityDialogState {
     /// Comma-separated lifetime points (years).
     pub years_csv: String,
@@ -98,6 +99,7 @@ pub struct ReliabilityDialogState {
     /// Minimum stress threshold.
     pub min_stress_voltage: String,
     /// Deferred defaults initialization.
+    #[serde(skip)]
     pub initialized: bool,
 }
 
