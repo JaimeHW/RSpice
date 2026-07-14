@@ -18168,9 +18168,15 @@ impl XyceTestRunner {
 
     fn xyce_engine_config(&self, locked_time_grid: Option<Vec<Value>>) -> SimulationConfig {
         let defaults = SimulationConfig::default();
+        let mut convergence_config = ConvergenceConfig::robust();
+        // Xyce 7.10 DeviceOptions uses an independent RELTOL=1e-4 for
+        // device-current/voltage convergence.  Its nonlinear-solver residual
+        // status test remains at 1e-3, so do not replace the whole convergence
+        // tolerance set with the device default.
+        convergence_config.voltage_reltol = 1.0e-4;
         SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
-            convergence_config: ConvergenceConfig::robust(),
+            convergence_config,
             spice_dialect: SpiceDialect::Xyce,
             // Xyce and ngspice regression decks use 27 C unless overridden.
             temperature: 300.15,
@@ -39863,6 +39869,8 @@ R2 2 0 1
             engine.config().resolved_jfet_level2_model(),
             crate::engine::JfetLevel2Model::XyceModifiedShockley
         );
+        assert_eq!(engine.config().convergence_config.voltage_reltol, 1.0e-4);
+        assert_eq!(engine.config().convergence_config.residual_reltol, 1.0e-3);
     }
 
     #[test]
