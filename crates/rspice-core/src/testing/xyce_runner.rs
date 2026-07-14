@@ -424,10 +424,17 @@ struct XyceStaticAcPlan {
     contract: XyceStaticAcContract,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum XyceMeasurementReferenceValue {
     Failed,
-    Numeric(Value),
+    Numeric {
+        value: Value,
+        /// Smallest decimal unit represented by the checked-in artifact.
+        /// Xyce measurement files normally print seven significant digits,
+        /// so the parsed binary value alone does not retain the oracle's
+        /// rounding uncertainty.
+        quantization: Option<Value>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27538,7 +27545,10 @@ impl XyceTestRunner {
                         line_index + 1
                     ));
                 }
-                XyceMeasurementReferenceValue::Numeric(value)
+                XyceMeasurementReferenceValue::Numeric {
+                    value,
+                    quantization: Self::measurement_literal_quantization(raw_value),
+                }
             };
             references.push(XyceMeasurementReference {
                 name: name.to_string(),
@@ -27588,7 +27598,10 @@ impl XyceTestRunner {
                         result.value.expect("matched nonempty measurement result")
                     ));
                 }
-                XyceMeasurementReferenceValue::Numeric(expected_value) => {
+                XyceMeasurementReferenceValue::Numeric {
+                    value: expected_value,
+                    quantization,
+                } => {
                     let Some(actual_value) = result.value else {
                         return Err(format!(
                             "measurement '{}' was expected to evaluate to {} but FAILED: {}",
@@ -27598,17 +27611,17 @@ impl XyceTestRunner {
                         ));
                     };
                     let absolute_error = (expected_value - actual_value).abs();
-                    let both_zero = expected_value.abs() <= tolerance.zero
-                        && actual_value.abs() <= tolerance.zero;
                     let relative_error = if expected_value == 0.0 {
                         f64::INFINITY
                     } else {
                         absolute_error / expected_value.abs()
                     };
-                    let matches = expected_value == actual_value
-                        || both_zero
-                        || (absolute_error < tolerance.absolute
-                            && relative_error < tolerance.relative);
+                    let matches = Self::measurement_value_matches(
+                        expected_value,
+                        actual_value,
+                        quantization,
+                        tolerance,
+                    );
                     if !matches {
                         mismatches.push(XyceValueMismatch {
                             row,
@@ -27622,6 +27635,53 @@ impl XyceTestRunner {
             }
         }
         Ok(mismatches)
+    }
+
+    fn measurement_value_matches(
+        expected: Value,
+        actual: Value,
+        quantization: Option<Value>,
+        tolerance: XyceFileCompareTolerance,
+    ) -> bool {
+        if !expected.is_finite() || !actual.is_finite() {
+            return false;
+        }
+        let absolute_error = (expected - actual).abs();
+        let both_zero = expected.abs() <= tolerance.zero && actual.abs() <= tolerance.zero;
+        let relative_error = if expected == 0.0 {
+            f64::INFINITY
+        } else {
+            absolute_error / expected.abs()
+        };
+        let within_printed_quantization =
+            quantization.is_some_and(|unit| absolute_error <= unit * 0.5);
+        expected == actual
+            || both_zero
+            || within_printed_quantization
+            || (absolute_error < tolerance.absolute && relative_error < tolerance.relative)
+    }
+
+    fn measurement_literal_quantization(raw: &str) -> Option<Value> {
+        let raw = raw.trim();
+        let exponent_index = raw.find(['e', 'E']);
+        let (mantissa, exponent) = if let Some(index) = exponent_index {
+            let exponent = raw.get(index + 1..)?.parse::<i32>().ok()?;
+            (raw.get(..index)?, exponent)
+        } else {
+            (raw, 0)
+        };
+        let unsigned = mantissa.strip_prefix(['+', '-']).unwrap_or(mantissa);
+        let (integer, fraction) = unsigned.split_once('.')?;
+        if integer.is_empty()
+            || !integer.bytes().all(|byte| byte.is_ascii_digit())
+            || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return None;
+        }
+        let fractional_digits = i32::try_from(fraction.len()).ok()?;
+        let decimal_exponent = exponent.checked_sub(fractional_digits)?;
+        let quantization = 10.0_f64.powi(decimal_exponent);
+        (quantization.is_finite() && quantization > 0.0).then_some(quantization)
     }
 
     fn parse_prn_file(path: &Path) -> Result<XycePrnTable, String> {
@@ -30336,6 +30396,40 @@ impl XyceTestRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measurement_comparison_accounts_for_printed_decimal_quantization() {
+        let quantization = XyceTestRunner::measurement_literal_quantization("1.179157e+02")
+            .expect("scientific measurement literal has decimal precision");
+        assert!((quantization - 1.0e-4).abs() <= f64::EPSILON);
+
+        let tolerance = XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT;
+        assert!(XyceTestRunner::measurement_value_matches(
+            117.9157,
+            117.915749,
+            Some(quantization),
+            tolerance,
+        ));
+        assert!(!XyceTestRunner::measurement_value_matches(
+            117.9157,
+            117.915751,
+            Some(quantization),
+            tolerance,
+        ));
+    }
+
+    #[test]
+    fn measurement_literal_quantization_rejects_unqualified_or_invalid_values() {
+        assert_eq!(XyceTestRunner::measurement_literal_quantization("42"), None);
+        assert_eq!(
+            XyceTestRunner::measurement_literal_quantization("1.2.3e+4"),
+            None
+        );
+        assert_eq!(
+            XyceTestRunner::measurement_literal_quantization("FAILED"),
+            None
+        );
+    }
 
     #[test]
     fn prn_parser_accepts_preamble_and_repeated_page_headers() {

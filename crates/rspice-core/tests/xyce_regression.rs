@@ -5489,6 +5489,36 @@ fn test_xyce_nested_dc_find_when_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_ac_trigger_target_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_AC/TrigTargTestAC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass typed AC trigger/target event artifacts, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_stepped_ac_trigger_target_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_AC/STEP/TrigTargTestAC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should retain AC trigger/target artifacts for every expanded step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_dc_trigger_target_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
