@@ -853,6 +853,31 @@ fn log_function_follows_expression_dialect() {
 }
 
 #[test]
+fn xyce_expression_boundary_normalizes_non_finite_results() {
+    let mut ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "log(0)"), Value::NEG_INFINITY);
+
+    ctx.set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+    assert_eq!(eval_with(&ctx, "log(0)"), -1.0e50);
+    assert_eq!(eval_with(&ctx, "-log(0)"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "exp(1000)"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "log(0)-log(0)").abs(), 1.0e50);
+
+    ctx.set("not_a_number", Value::NAN);
+    assert_eq!(eval_with(&ctx, "not_a_number"), 1.0e50);
+
+    ctx.set_complex(
+        "non_finite_complex",
+        ComplexValue::new(Value::NEG_INFINITY, Value::INFINITY),
+    );
+    assert_eq!(
+        eval_expression_complex("non_finite_complex", &ctx)
+            .expect("Xyce complex expression evaluates"),
+        ComplexValue::new(-1.0e50, 1.0e50)
+    );
+}
+
+#[test]
 fn xyce_hyperbolic_functions_follow_expression_dialect() {
     let mut ctx = ParamContext::new();
     assert!(eval_with(&ctx, "atanh(1)").is_infinite());

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
+const XYCE_NONFINITE_REPLACEMENT: Value = 1.0e50;
 const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
 /// Evaluate an expression with the given context
@@ -12,7 +13,27 @@ pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
 
 /// Evaluate an expression with the given context, preserving complex values.
 pub fn evaluate_complex(expr: &Expr, ctx: &ParamContext) -> Result<ComplexValue, ExprError> {
-    ExpressionEvaluator::new(ctx).evaluate(expr)
+    let value = ExpressionEvaluator::new(ctx).evaluate(expr)?;
+    Ok(if ctx.expression_dialect() == ExpressionDialect::Xyce {
+        normalize_xyce_expression_result(value)
+    } else {
+        value
+    })
+}
+
+/// Match Xyce's public expression-evaluation boundary, which replaces each
+/// non-finite result component with a signed finite sentinel before consumers
+/// compare, print, or reuse the value.
+fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexValue {
+    fn normalize_component(component: Value) -> Value {
+        if component.is_finite() {
+            component
+        } else {
+            XYCE_NONFINITE_REPLACEMENT.copysign(component)
+        }
+    }
+
+    ComplexValue::new(normalize_component(value.re), normalize_component(value.im))
 }
 
 #[derive(Debug, Clone)]
