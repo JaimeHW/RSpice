@@ -653,6 +653,9 @@ endmodule
             .expect("noise ABI file")
             .contents
             .as_str();
+        assert!(noise.starts_with(
+            "#![allow(dead_code, non_snake_case, unused_assignments, unused_parens, unused_variables)]"
+        ));
         assert!(
             noise.contains("pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 2]"),
             "{noise}"

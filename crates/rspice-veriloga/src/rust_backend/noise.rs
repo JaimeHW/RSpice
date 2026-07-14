@@ -99,7 +99,12 @@ pub(super) fn generate_noise_file(
     let guarded_replay_safety = guarded_assignment_replay_safety(artifact);
     let mut liveness = NoiseLivenessIndex::new(artifact);
     let mut out = String::new();
-    out.push_str("#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n");
+    // Noise schedules conservatively initialize every replayed Verilog-A variable before
+    // source-specific control flow. Some source paths provably overwrite those values before
+    // reading them, but retaining the initialization is required for the other paths.
+    out.push_str(
+        "#![allow(dead_code, non_snake_case, unused_assignments, unused_parens, unused_variables)]\n\n",
+    );
     out.push_str("use super::state::Instance;\n");
     writeln!(
         out,
