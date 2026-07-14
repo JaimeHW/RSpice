@@ -79,7 +79,7 @@ impl RSpiceApp {
                     std::env::consts::ARCH,
                 );
                 ctx.copy_text(diagnostics);
-                self.state.shell.toasts.info(ctx, "Diagnostics copied");
+                self.state.ui.toasts.info(ctx, "Diagnostics copied");
             }
             _ => self.state.dialogs.about = false,
         }
@@ -129,18 +129,20 @@ impl RSpiceApp {
             return;
         }
         let analysis = self.state.simulation.active_analysis_idx.unwrap_or(0);
-        let traces = self.state.shell.results.exprs.entry(analysis).or_default();
+        let traces = self.state.ui.results.exprs.entry(analysis).or_default();
         if !traces.iter().any(|t| t.text == expression) {
-            traces.push(crate::shell::results::ExprTrace {
+            traces.push(crate::workbench::result_document::ExprTrace {
                 text: expression.clone(),
                 visible: true,
             });
         }
-        self.state.shell.results.viewer = crate::shell::results::ResultViewer::Waves;
-        self.state.shell.view = crate::shell::WorkspaceView::Results;
+        self.state.ui.results.viewer = crate::workbench::result_document::ResultViewer::Waves;
+        self.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Results);
         self.state.dialogs.waveform_calculator_dialog = false;
         self.state
-            .shell
+            .ui
             .toasts
             .info(ctx, format!("Plotted {expression}"));
     }

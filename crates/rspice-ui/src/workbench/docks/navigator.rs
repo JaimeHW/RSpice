@@ -1,5 +1,7 @@
 //! Workspace-aware navigation tree.
 
+mod design;
+
 use egui::{Align, Layout, ScrollArea, Ui};
 
 use crate::common::RSpiceApp;
@@ -13,13 +15,19 @@ use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     header(ui, app);
     match app.state.workbench.workspace {
-        Workspace::Project => project(ui, app),
-        Workspace::Design => design(ui, app),
-        Workspace::Simulate => simulate(ui, app),
-        Workspace::Results => results(ui, app),
-        Workspace::Verify => verify(ui, app),
-        Workspace::Models => models(ui, app),
-        Workspace::Netlist => netlist(ui, app),
+        Workspace::Design => design::show(ui, app),
+        workspace => {
+            workspace_search(ui, app, workspace);
+            match workspace {
+                Workspace::Project => project(ui, app),
+                Workspace::Simulate => simulate(ui, app),
+                Workspace::Results => results(ui, app),
+                Workspace::Verify => verify(ui, app),
+                Workspace::Models => models(ui, app),
+                Workspace::Netlist => netlist(ui, app),
+                Workspace::Design => unreachable!("handled above"),
+            }
+        }
     }
 }
 
@@ -46,15 +54,31 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         });
     });
+}
+
+fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) {
+    let placeholder = match workspace {
+        Workspace::Project => "Filter libraries, cells, views…",
+        Workspace::Design => "Find instance, net or port…",
+        Workspace::Simulate => "Filter setup…",
+        Workspace::Results => "Find signal, expression or run…",
+        Workspace::Verify => "Filter flows, specs or samples…",
+        Workspace::Models => "Search model, device or library…",
+        Workspace::Netlist => "Find symbol or line…",
+    };
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
-        ui.add_sized(
+        let response = ui.add_sized(
             [ui.available_width() - 16.0, 28.0],
             egui::TextEdit::singleline(&mut app.state.workbench.navigator_query)
-                .hint_text("Filter this workspace")
+                .id_salt("workbench.navigator.filter")
+                .hint_text(placeholder)
                 .margin(egui::Margin::symmetric(8, 5)),
         );
+        if std::mem::take(&mut app.state.workbench.focus_navigator_search) {
+            response.request_focus();
+        }
     });
     ui.add_space(6.0);
 }
@@ -82,25 +106,11 @@ fn project(ui: &mut Ui, app: &mut RSpiceApp) {
             "Design roots",
             Some(&app.state.library_manager.library_count().to_string()),
         );
-        design_tree(ui, app, false);
+        library_tree(ui, app, false);
     });
 }
 
-fn design(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(
-        ui,
-        "Library / Cell / View",
-        Some(&format!(
-            "{} views",
-            app.state.library_manager.total_view_count()
-        )),
-    );
-    ScrollArea::vertical()
-        .id_salt("workbench.design.navigator")
-        .show(ui, |ui| design_tree(ui, app, true));
-}
-
-fn design_tree(ui: &mut Ui, app: &mut RSpiceApp, open_documents: bool) {
+fn library_tree(ui: &mut Ui, app: &mut RSpiceApp, open_documents: bool) {
     let query = app.state.workbench.navigator_query.trim().to_lowercase();
     let libraries: Vec<_> = app
         .state
@@ -401,7 +411,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn nav_row(
+pub(super) fn nav_row(
     ui: &mut Ui,
     icon: WorkbenchIcon,
     label: &str,

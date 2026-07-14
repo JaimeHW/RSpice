@@ -66,7 +66,7 @@ pub enum Command {
     GenerateNetlist,
     ClearResults,
     WaveformCalculator,
-    ResultViewer(crate::shell::ResultViewer),
+    ResultViewer(crate::workbench::ResultViewer),
     EditSpecifications,
     VerificationPage(VerificationPage),
     ProjectPage(ProjectPage),
@@ -372,14 +372,15 @@ impl Command {
             Self::FindInDesign => {
                 activate_workspace(app, Workspace::Design);
                 app.state.workbench.navigator_visible = true;
-                app.state.shell.focus_nav_search = true;
+                app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
+                app.state.workbench.focus_navigator_search = true;
             }
             Self::Preferences => app.state.dialogs.preferences_open = true,
             Self::ZoomIn => app.state.schematic.zoom = (app.state.schematic.zoom * 1.25).min(8.0),
             Self::ZoomOut => app.state.schematic.zoom = (app.state.schematic.zoom / 1.25).max(0.1),
             Self::ZoomFit => app.state.schematic.needs_fit = true,
             Self::ZoomOneToOne => app.state.schematic.zoom = 1.0,
-            Self::CycleGrid => app.state.shell.grid = app.state.shell.grid.cycled(),
+            Self::CycleGrid => app.state.ui.grid = app.state.ui.grid.cycled(),
             Self::ToggleNavigator => {
                 app.state.workbench.navigator_visible = !app.state.workbench.navigator_visible
             }
@@ -397,7 +398,10 @@ impl Command {
             Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
             Self::PlaceInstance => {
                 activate_workspace(app, Workspace::Design);
-                app.state.shell.focus_cell_search = true;
+                app.state.workbench.navigator_visible = true;
+                app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
+                app.state.workbench.design_panel = super::state::DesignPanel::ComponentShelf;
+                app.state.workbench.focus_placement_search = true;
             }
             Self::PlaceWire => set_tool(app, Tool::Wire),
             Self::PlaceLabel => set_tool(app, Tool::Label),
@@ -432,11 +436,11 @@ impl Command {
             Self::ClearResults => app.state.clear_simulation_results(),
             Self::WaveformCalculator => app.state.dialogs.waveform_calculator_dialog = true,
             Self::ResultViewer(viewer) => {
-                app.state.shell.results.viewer = viewer;
+                app.state.ui.results.viewer = viewer;
                 activate_workspace(app, Workspace::Results);
             }
             Self::EditSpecifications => {
-                app.state.shell.results.viewer = crate::shell::ResultViewer::Specs;
+                app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
                 activate_workspace(app, Workspace::Verify);
                 app.state.workbench.verification_page = VerificationPage::Specifications;
             }
@@ -490,9 +494,6 @@ const fn spec(
 
 fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
     app.state.workbench.activate(workspace);
-    if let Some(view) = workspace.legacy_view() {
-        app.state.shell.view = view;
-    }
 }
 
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {

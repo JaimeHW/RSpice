@@ -269,20 +269,23 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::OpenWorkspace(Workspace::Results));
     ui.separator();
     for (label, viewer) in [
-        ("Waveforms", crate::shell::ResultViewer::Waves),
-        ("Bode and stability", crate::shell::ResultViewer::Bode),
-        ("Spectrum / FFT", crate::shell::ResultViewer::Fft),
-        ("Eye diagram", crate::shell::ResultViewer::Eye),
-        ("Histogram", crate::shell::ResultViewer::Hist),
-        ("Operating point", crate::shell::ResultViewer::Op),
+        ("Waveforms", crate::workbench::ResultViewer::Waves),
+        ("Bode and stability", crate::workbench::ResultViewer::Bode),
+        ("Spectrum / FFT", crate::workbench::ResultViewer::Fft),
+        ("Eye diagram", crate::workbench::ResultViewer::Eye),
+        ("Histogram", crate::workbench::ResultViewer::Hist),
+        ("Operating point", crate::workbench::ResultViewer::Op),
         (
             "Noise contributors",
-            crate::shell::ResultViewer::NoiseContrib,
+            crate::workbench::ResultViewer::NoiseContrib,
         ),
-        ("Specification matrix", crate::shell::ResultViewer::Specs),
-        ("Nyquist", crate::shell::ResultViewer::Nyquist),
-        ("Smith chart", crate::shell::ResultViewer::Smith),
-        ("Pole-zero", crate::shell::ResultViewer::PoleZero),
+        (
+            "Specification matrix",
+            crate::workbench::ResultViewer::Specs,
+        ),
+        ("Nyquist", crate::workbench::ResultViewer::Nyquist),
+        ("Smith chart", crate::workbench::ResultViewer::Smith),
+        ("Pole-zero", crate::workbench::ResultViewer::PoleZero),
     ] {
         command_item_as(ui, app, Command::ResultViewer(viewer), label);
     }

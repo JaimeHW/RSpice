@@ -1,5 +1,5 @@
 //! Automation console state — the command history and executor behind the
-//! shell console's Automation tab (`crate::shell::console`).
+//! workbench console dock's Automation page.
 
 use crate::simulation::automation::{CommandOutput, ScriptExecutor};
 

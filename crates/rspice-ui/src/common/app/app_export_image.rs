@@ -16,7 +16,7 @@ use super::RSpiceApp;
 impl RSpiceApp {
     /// Pump the export request and any screenshot that arrived this frame.
     pub(super) fn handle_image_export(&mut self, ctx: &Context) {
-        if std::mem::take(&mut self.state.shell.export_png_requested) {
+        if std::mem::take(&mut self.state.ui.export_png_requested) {
             #[cfg(not(target_arch = "wasm32"))]
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             #[cfg(target_arch = "wasm32")]
@@ -43,7 +43,7 @@ impl RSpiceApp {
         // the viewer, not the chrome around it. Falls back to the full
         // window when no well rect was recorded.
         let pixels_per_point = ctx.pixels_per_point();
-        let cropped = self.state.shell.results.well_rect.and_then(|well| {
+        let cropped = self.state.ui.results.well_rect.and_then(|well| {
             let image_rect = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(
@@ -57,7 +57,7 @@ impl RSpiceApp {
         });
         let image = cropped.as_ref().unwrap_or(image);
 
-        let viewer = self.state.shell.results.viewer.label().to_lowercase();
+        let viewer = self.state.ui.results.viewer.label().to_lowercase();
         let Some(path) = rfd::FileDialog::new()
             .add_filter("PNG image", &["png"])
             .set_file_name(format!("rspice-{viewer}.png"))
@@ -70,12 +70,12 @@ impl RSpiceApp {
         match result {
             Ok(()) => {
                 let message = format!("Exported window image: {}", path.display());
-                self.state.shell.toasts.info(ctx, &message);
+                self.state.ui.toasts.info(ctx, &message);
                 self.state.push_user_message(ConsoleMessage::info(message));
             }
             Err(error) => {
                 let message = format!("PNG export failed: {error}");
-                self.state.shell.toasts.error(ctx, &message);
+                self.state.ui.toasts.error(ctx, &message);
                 self.state.push_user_message(ConsoleMessage::error(message));
             }
         }
@@ -83,22 +83,21 @@ impl RSpiceApp {
 
     #[cfg(target_arch = "wasm32")]
     fn save_browser_canvas_png(&mut self, ctx: &Context) {
-        let viewer = self.state.shell.results.viewer.label().to_lowercase();
+        let viewer = self.state.ui.results.viewer.label().to_lowercase();
         let filename = format!("rspice-{viewer}.png");
-        let result =
-            download_browser_canvas_png(ctx, &filename, self.state.shell.results.well_rect);
+        let result = download_browser_canvas_png(ctx, &filename, self.state.ui.results.well_rect);
         match result {
             Ok(()) => {
                 let message = format!(
                     "Viewer image download started: {filename} (confirm the browser accepted the download)"
                 );
-                self.state.shell.toasts.info(ctx, &message);
+                self.state.ui.toasts.info(ctx, &message);
                 self.state
                     .push_user_message(super::ConsoleMessage::info(message));
             }
             Err(error) => {
                 let message = format!("PNG export failed: {error}");
-                self.state.shell.toasts.error(ctx, &message);
+                self.state.ui.toasts.error(ctx, &message);
                 self.state
                     .push_user_message(super::ConsoleMessage::error(message));
             }

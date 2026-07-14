@@ -148,7 +148,7 @@ fn main() {
         let Some(canvas_element) = document.get_element_by_id("rspice_canvas") else {
             report_web_startup_error(
                 Some(&document),
-                "RSpice failed to start: the web shell did not provide #rspice_canvas.",
+                "RSpice failed to start: the host page did not provide #rspice_canvas.",
             );
             return;
         };

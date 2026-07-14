@@ -1,7 +1,7 @@
 //! Common UI Components Module
 //!
 //! Shared UI components used across the application.
-//! Contains the main application shell and reusable UI elements.
+//! Contains application workflows and reusable UI services.
 //!
 //! - `app` - Main RSpiceApp application struct (egui::App implementation)
 //! - `menu_bar` - Application menu bar

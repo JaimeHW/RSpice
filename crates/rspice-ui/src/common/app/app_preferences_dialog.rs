@@ -37,16 +37,16 @@ impl RSpiceApp {
                     state.schematic.is_dirty = true;
                 }
 
-                let grid_labels: Vec<&str> = crate::shell::GridStyle::ALL
+                let grid_labels: Vec<&str> = crate::workbench::GridStyle::ALL
                     .iter()
                     .map(|style| style.label())
                     .collect();
-                let mut grid_index = crate::shell::GridStyle::ALL
+                let mut grid_index = crate::workbench::GridStyle::ALL
                     .iter()
-                    .position(|style| *style == state.shell.grid)
+                    .position(|style| *style == state.ui.grid)
                     .unwrap_or(0);
                 if choice_row(ui, "Grid", &grid_labels, &mut grid_index) {
-                    state.shell.grid = crate::shell::GridStyle::ALL[grid_index];
+                    state.ui.grid = crate::workbench::GridStyle::ALL[grid_index];
                 }
 
                 ui.add_space(tokens::SP_3);
@@ -56,33 +56,33 @@ impl RSpiceApp {
                     Direction::ALL.iter().map(|d| d.label()).collect();
                 let mut direction_index = Direction::ALL
                     .iter()
-                    .position(|d| *d == state.shell.theme.direction)
+                    .position(|d| *d == state.ui.theme.direction)
                     .unwrap_or(0);
                 if choice_row(ui, "Direction", &direction_labels, &mut direction_index) {
-                    state.shell.theme.direction = Direction::ALL[direction_index];
+                    state.ui.theme.direction = Direction::ALL[direction_index];
                 }
 
                 let mode_labels: Vec<&str> = Mode::ALL.iter().map(|m| m.label()).collect();
                 let mut mode_index = Mode::ALL
                     .iter()
-                    .position(|m| *m == state.shell.theme.mode)
+                    .position(|m| *m == state.ui.theme.mode)
                     .unwrap_or(0);
                 if choice_row(ui, "Mode", &mode_labels, &mut mode_index) {
-                    state.shell.theme.mode = Mode::ALL[mode_index];
+                    state.ui.theme.mode = Mode::ALL[mode_index];
                 }
 
                 let density_labels: Vec<&str> = Density::ALL.iter().map(|d| d.label()).collect();
                 let mut density_index = Density::ALL
                     .iter()
-                    .position(|d| *d == state.shell.theme.density)
+                    .position(|d| *d == state.ui.theme.density)
                     .unwrap_or(0);
                 if choice_row(ui, "Density", &density_labels, &mut density_index) {
-                    state.shell.theme.density = Density::ALL[density_index];
+                    state.ui.theme.density = Density::ALL[density_index];
                 }
                 check_row(
                     ui,
                     "Colorblind-safe trace colors",
-                    &mut state.shell.theme.colorblind_traces,
+                    &mut state.ui.theme.colorblind_traces,
                 );
 
                 ui.add_space(tokens::SP_3);
@@ -92,10 +92,10 @@ impl RSpiceApp {
                     if check_row(
                         ui,
                         "Speak control changes (browser)",
-                        &mut state.shell.browser_spoken_feedback,
+                        &mut state.ui.browser_spoken_feedback,
                     ) {
                         crate::common::browser_accessibility::set_spoken_feedback(
-                            state.shell.browser_spoken_feedback,
+                            state.ui.browser_spoken_feedback,
                         );
                     }
                 }
@@ -111,10 +111,10 @@ impl RSpiceApp {
                 let autosave_values: [u8; 4] = [0, 1, 5, 15];
                 let mut autosave_index = autosave_values
                     .iter()
-                    .position(|m| *m == state.shell.autosave_minutes)
+                    .position(|m| *m == state.ui.autosave_minutes)
                     .unwrap_or(2);
                 if choice_row(ui, "Autosave", &autosave_options, &mut autosave_index) {
-                    state.shell.autosave_minutes = autosave_values[autosave_index];
+                    state.ui.autosave_minutes = autosave_values[autosave_index];
                 }
 
                 let count = state.recent_files.len();

@@ -184,7 +184,7 @@ impl RSpiceApp {
         );
         self.state.license = Some(info);
         self.state.dialogs.license_dialog.open = false;
-        self.state.shell.toasts.info(ctx, &message);
+        self.state.ui.toasts.info(ctx, &message);
         self.state.push_user_message(ConsoleMessage::info(message));
     }
 

@@ -1,5 +1,7 @@
 //! Ordered simulation-plan editor and preflight.
 
+mod analysis_form;
+
 use egui::{ScrollArea, Ui};
 
 use crate::common::RSpiceApp;
@@ -118,7 +120,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         });
         ui.separator();
-        let note = crate::shell::panels::simulate_forms::form(ui, &mut app.state.sim_setup, index);
+        let note = analysis_form::form(ui, &mut app.state.sim_setup, index);
         ui.add_space(8.0);
         ui.label(
             egui::RichText::new(note)

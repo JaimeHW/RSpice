@@ -54,7 +54,7 @@ pub(super) fn default_app_state() -> AppState {
         license_key: None,
         license: None,
         analysis,
-        shell: crate::shell::ShellState::new(),
+        ui: crate::workbench::UiSessionState::new(),
         workbench: crate::workbench::WorkbenchState::default(),
     }
 }

@@ -434,6 +434,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         "Run history",
         &app.state.simulation.runs.len().to_string(),
     );
+    super::super::netlist_document::show_parameter_inspector(ui, &mut app.state);
 }
 
 fn field_label(ui: &mut Ui, label: &str) {

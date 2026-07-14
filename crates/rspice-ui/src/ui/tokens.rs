@@ -48,7 +48,7 @@ pub const FS_4: f32 = 16.0;
 // Direction / Mode / Density
 // ============================================================================
 
-/// Design direction: one coherent visual identity for the whole shell.
+/// Design direction: one coherent visual identity for the whole application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Direction {
     /// "Instrument" — bench-instrument heritage: cool neutral grays, a single

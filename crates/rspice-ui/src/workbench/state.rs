@@ -92,17 +92,6 @@ impl Workspace {
             Self::Netlist => "Source inspector",
         }
     }
-
-    pub const fn legacy_view(self) -> Option<crate::shell::WorkspaceView> {
-        match self {
-            Self::Project | Self::Verify => None,
-            Self::Design => Some(crate::shell::WorkspaceView::Schematic),
-            Self::Simulate => Some(crate::shell::WorkspaceView::Simulate),
-            Self::Results => Some(crate::shell::WorkspaceView::Results),
-            Self::Models => Some(crate::shell::WorkspaceView::Library),
-            Self::Netlist => Some(crate::shell::WorkspaceView::Netlist),
-        }
-    }
 }
 
 /// Width class used by layout composition.  Breakpoints are based on task
@@ -151,6 +140,14 @@ pub enum ConsolePage {
     Problems,
     Measurements,
     TaskLog,
+}
+
+/// The two Design navigator tabs specified by the workbench mockup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DesignPanel {
+    #[default]
+    Navigator,
+    ComponentShelf,
 }
 
 impl ConsolePage {
@@ -283,6 +280,8 @@ pub struct WorkbenchState {
     #[serde(default)]
     pub console_page: ConsolePage,
     #[serde(default)]
+    pub design_panel: DesignPanel,
+    #[serde(default)]
     pub project_page: ProjectPage,
     #[serde(default)]
     pub verification_page: VerificationPage,
@@ -318,6 +317,15 @@ pub struct WorkbenchState {
     pub drawer: Option<Drawer>,
     #[serde(skip)]
     pub workspace_history: Vec<Workspace>,
+    /// One-frame request to focus the workspace navigator filter.
+    #[serde(skip)]
+    pub focus_navigator_search: bool,
+    /// Filter text in the component chooser.
+    #[serde(skip)]
+    pub placement_query: String,
+    /// One-frame request to focus the component chooser filter.
+    #[serde(skip)]
+    pub focus_placement_search: bool,
 }
 
 const fn default_true() -> bool {
@@ -357,6 +365,7 @@ impl Default for WorkbenchState {
             inspector_width: default_inspector_width(),
             console_height: default_console_height(),
             console_page: ConsolePage::Console,
+            design_panel: DesignPanel::Navigator,
             project_page: ProjectPage::Overview,
             verification_page: VerificationPage::Cockpit,
             models_page: ModelsPage::Catalog,
@@ -371,6 +380,9 @@ impl Default for WorkbenchState {
             project_name_error: None,
             drawer: None,
             workspace_history: vec![Workspace::Design],
+            focus_navigator_search: false,
+            placement_query: String::new(),
+            focus_placement_search: false,
         }
     }
 }

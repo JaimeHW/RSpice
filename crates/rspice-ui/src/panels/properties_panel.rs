@@ -1,8 +1,8 @@
 //! Property dialog host.
 //!
 //! The floating tabbed property dialog (schema-driven editing via the
-//! `PropertyRegistry`). Inline inspection lives in the shell's right panel
-//! (`crate::shell::panels::schematic`).
+//! `PropertyRegistry`). Inline inspection lives in the workbench inspector
+//! (`crate::workbench::panels::schematic`).
 
 use crate::common::app::AppState;
 use crate::properties::{TabbedDialogResult, render_tabbed_property_dialog};

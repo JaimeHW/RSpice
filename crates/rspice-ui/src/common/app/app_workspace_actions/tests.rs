@@ -3,7 +3,7 @@
 use crate::common::app::AppState;
 use crate::panels::{LogAnchor, LogSource};
 use crate::services::drc::{DrcLocation, DrcViolationType};
-use crate::shell::WorkspaceView;
+use crate::workbench::state::Workspace;
 use crate::state::{
     Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
     PortDirection, PortSpec, ResolvedSymbolSource, Rotation, SYMBOL_DOCUMENT_METADATA_KEY,
@@ -772,15 +772,15 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
     });
 
     assert_eq!(state.workspace.active_view, reference);
-    assert_eq!(state.shell.symbol.selected_pin.as_deref(), Some("IN"));
-    assert_eq!(state.shell.view, WorkspaceView::Schematic);
+    assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
+    assert_eq!(state.workbench.workspace, Workspace::Design);
 }
 
 #[test]
 fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
     let mut state = state_with_amp_symbol_pin("IN", None);
     state.run_active_symbol_pin_checks();
-    state.shell.symbol.clear_selection();
+    state.ui.symbol.clear_selection();
 
     crate::schematic::view::violations::cycle_violation(&mut state, 1);
 
@@ -788,7 +788,7 @@ fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
         state.workspace.active_view,
         CellViewRef::new("work", "amp", "symbol")
     );
-    assert_eq!(state.shell.symbol.selected_pin.as_deref(), Some("IN"));
+    assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
 }
 
 #[test]

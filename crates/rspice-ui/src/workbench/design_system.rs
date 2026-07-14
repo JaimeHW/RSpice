@@ -1,7 +1,7 @@
 //! Workbench-specific visual primitives.
 //!
 //! These controls are intentionally small and stateless.  They render from
-//! the shared palette and typography assets, but none of the retired shell's
+//! the shared palette and typography assets, but none of the retired layout's
 //! layout or widget implementations are reused.
 
 use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};

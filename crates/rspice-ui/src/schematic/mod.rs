@@ -1,4 +1,4 @@
-﻿//! Schematic Editor Module
+//! Schematic Editor Module
 //!
 //! Commercial-grade schematic capture editor components.
 //! Provides the core schematic viewing, editing, and export functionality.
@@ -18,6 +18,7 @@ mod component_palette;
 pub use component_palette::{ComponentPaletteEntry, ComponentPaletteSection, component_palette};
 pub mod export;
 mod source_labels;
+pub(crate) mod symbol_editor;
 pub mod symbols;
 pub mod view;
 

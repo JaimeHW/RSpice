@@ -152,8 +152,8 @@ impl SimulationController {
             self.current_config = None;
             self.current_spec = None;
             self.current_run_id = None;
-            state.shell.netlist.pending_manual_run_id = None;
-            state.shell.netlist.pending_run_buffer = None;
+            state.ui.netlist.pending_manual_run_id = None;
+            state.ui.netlist.pending_run_buffer = None;
             state.simulation.status = "Aborted".to_string();
             state.push_sim_message(crate::common::app::ConsoleMessage::warning(
                 "Simulation aborted by user",
@@ -418,8 +418,8 @@ impl SimulationController {
 
         let run_id = state.simulation.start_run().id;
         self.current_run_id = Some(run_id);
-        state.shell.netlist.pending_manual_run_id = Some(run_id);
-        state.shell.netlist.pending_run_buffer = Some(pending_manual_source);
+        state.ui.netlist.pending_manual_run_id = Some(run_id);
+        state.ui.netlist.pending_run_buffer = Some(pending_manual_source);
         state.simulation.reliability_results.clear();
         state.simulation.soa_violations.clear();
         log::info!("Created new simulation run");
@@ -589,22 +589,22 @@ impl SimulationController {
         run_success: bool,
         completed_run_id: Option<u64>,
     ) {
-        let pending_matches = state.shell.netlist.pending_manual_run_id.is_some()
-            && state.shell.netlist.pending_manual_run_id == completed_run_id;
+        let pending_matches = state.ui.netlist.pending_manual_run_id.is_some()
+            && state.ui.netlist.pending_manual_run_id == completed_run_id;
         if !pending_matches {
             return;
         }
 
-        let pending_buffer = state.shell.netlist.pending_run_buffer.take();
-        state.shell.netlist.pending_manual_run_id = None;
+        let pending_buffer = state.ui.netlist.pending_run_buffer.take();
+        state.ui.netlist.pending_manual_run_id = None;
 
         if run_success && let Some(buffer) = pending_buffer {
             let current_buffer = state.simulation.netlist_content.clone();
             let param_values = Self::manual_deck_param_values(&buffer);
-            state.shell.netlist.last_run_buffer = Some(buffer);
-            state.shell.netlist.last_run_params = param_values;
-            if let Some(baseline) = state.shell.netlist.last_run_buffer.as_deref() {
-                state.shell.netlist.edited_lines =
+            state.ui.netlist.last_run_buffer = Some(buffer);
+            state.ui.netlist.last_run_params = param_values;
+            if let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() {
+                state.ui.netlist.edited_lines =
                     Self::changed_lines_against_baseline(&current_buffer, baseline);
             }
         }
@@ -947,8 +947,8 @@ impl SimulationController {
                     self.current_config = None;
                     self.current_spec = None;
                     self.current_run_id = None;
-                    state.shell.netlist.pending_manual_run_id = None;
-                    state.shell.netlist.pending_run_buffer = None;
+                    state.ui.netlist.pending_manual_run_id = None;
+                    state.ui.netlist.pending_run_buffer = None;
                     state.simulation.status = "Aborted".to_string();
                 }
                 Err(e) => {
@@ -1678,44 +1678,44 @@ mod tests {
         state.simulation.netlist_content =
             "deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string();
         let run_id = state.simulation.start_run().id;
-        state.shell.netlist.pending_manual_run_id = Some(run_id);
-        state.shell.netlist.pending_run_buffer =
+        state.ui.netlist.pending_manual_run_id = Some(run_id);
+        state.ui.netlist.pending_run_buffer =
             Some("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string());
-        state.shell.netlist.edited_lines.insert(0);
+        state.ui.netlist.edited_lines.insert(0);
 
         controller.finish_simulation_batch(&mut state);
 
         assert_eq!(
-            state.shell.netlist.last_run_buffer.as_deref(),
+            state.ui.netlist.last_run_buffer.as_deref(),
             Some("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n")
         );
-        assert!((state.shell.netlist.last_run_params["r"] - 1e3).abs() < 1e-9);
-        assert!((state.shell.netlist.last_run_params["cl"] - 2e-12).abs() < 1e-21);
-        assert!(!state.shell.netlist.last_run_params.contains_key("expr"));
-        assert!(state.shell.netlist.pending_manual_run_id.is_none());
-        assert!(state.shell.netlist.pending_run_buffer.is_none());
-        assert!(state.shell.netlist.edited_lines.is_empty());
+        assert!((state.ui.netlist.last_run_params["r"] - 1e3).abs() < 1e-9);
+        assert!((state.ui.netlist.last_run_params["cl"] - 2e-12).abs() < 1e-21);
+        assert!(!state.ui.netlist.last_run_params.contains_key("expr"));
+        assert!(state.ui.netlist.pending_manual_run_id.is_none());
+        assert!(state.ui.netlist.pending_run_buffer.is_none());
+        assert!(state.ui.netlist.edited_lines.is_empty());
     }
 
     #[test]
     fn failed_manual_deck_run_keeps_previous_baseline() {
         let mut state = AppState::default();
         let mut controller = SimulationController::new();
-        state.shell.netlist.last_run_buffer = Some("old\n.op\n.end\n".to_string());
+        state.ui.netlist.last_run_buffer = Some("old\n.op\n.end\n".to_string());
         let run = state.simulation.start_run();
         let run_id = run.id;
         run.success = false;
-        state.shell.netlist.pending_manual_run_id = Some(run_id);
-        state.shell.netlist.pending_run_buffer = Some("new\n.op\n.end\n".to_string());
+        state.ui.netlist.pending_manual_run_id = Some(run_id);
+        state.ui.netlist.pending_run_buffer = Some("new\n.op\n.end\n".to_string());
 
         controller.finish_simulation_batch(&mut state);
 
         assert_eq!(
-            state.shell.netlist.last_run_buffer.as_deref(),
+            state.ui.netlist.last_run_buffer.as_deref(),
             Some("old\n.op\n.end\n")
         );
-        assert!(state.shell.netlist.pending_manual_run_id.is_none());
-        assert!(state.shell.netlist.pending_run_buffer.is_none());
+        assert!(state.ui.netlist.pending_manual_run_id.is_none());
+        assert!(state.ui.netlist.pending_run_buffer.is_none());
     }
 
     #[test]
@@ -1724,17 +1724,17 @@ mod tests {
         let mut controller = SimulationController::new();
         state.simulation.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
         let run_id = state.simulation.start_run().id;
-        state.shell.netlist.pending_manual_run_id = Some(run_id);
-        state.shell.netlist.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".to_string());
+        state.ui.netlist.pending_manual_run_id = Some(run_id);
+        state.ui.netlist.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".to_string());
 
         controller.finish_simulation_batch(&mut state);
 
         assert_eq!(
-            state.shell.netlist.last_run_buffer.as_deref(),
+            state.ui.netlist.last_run_buffer.as_deref(),
             Some("deck\n.op\nR1 out 0 1k\n.end\n")
         );
-        assert!(state.shell.netlist.edited_lines.contains(&2));
-        assert_eq!(state.shell.netlist.edited_lines.len(), 1);
+        assert!(state.ui.netlist.edited_lines.contains(&2));
+        assert_eq!(state.ui.netlist.edited_lines.len(), 1);
     }
 
     #[test]

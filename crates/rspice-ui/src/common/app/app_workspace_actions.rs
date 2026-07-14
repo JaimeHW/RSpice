@@ -1,11 +1,11 @@
 use crate::common::app::{AppState, ConsoleMessage, RSpiceApp};
 use crate::panels::{LogAnchor, LogSeverity, LogSource};
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::shell::SymbolDocumentSnapshot;
 use crate::state::{
     CellViewRef, Component, ComponentType, OpenCellView, PinFindingKind, Point, PortDirection,
     PortSpec, SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, View, ViewType,
 };
+use crate::workbench::SymbolDocumentSnapshot;
 use std::collections::HashMap;
 
 const MAX_FINDING_ROWS: usize = 50;
@@ -408,21 +408,16 @@ impl AppState {
         snapshot: SymbolDocumentSnapshot,
         max_len: usize,
     ) {
-        let undo_stack = self
-            .shell
-            .symbol
-            .undo_stacks
-            .entry(key.clone())
-            .or_default();
+        let undo_stack = self.ui.symbol.undo_stacks.entry(key.clone()).or_default();
         undo_stack.push(snapshot);
         if undo_stack.len() > max_len {
             undo_stack.remove(0);
         }
-        self.shell.symbol.redo_stacks.remove(&key);
+        self.ui.symbol.redo_stacks.remove(&key);
     }
 
     pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
-        self.shell
+        self.ui
             .symbol
             .undo_stacks
             .get(&self.workspace.active_key())
@@ -430,7 +425,7 @@ impl AppState {
     }
 
     pub(crate) fn can_redo_active_symbol_document(&self) -> bool {
-        self.shell
+        self.ui
             .symbol
             .redo_stacks
             .get(&self.workspace.active_key())
@@ -442,18 +437,12 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let key = self.workspace.active_key();
-        let Some(previous) = self
-            .shell
-            .symbol
-            .undo_stacks
-            .get_mut(&key)
-            .and_then(Vec::pop)
-        else {
+        let Some(previous) = self.ui.symbol.undo_stacks.get_mut(&key).and_then(Vec::pop) else {
             return Ok(false);
         };
         let current = self.load_active_symbol_document()?;
         let current_snapshot = self.active_symbol_metadata_snapshot(&current);
-        self.shell
+        self.ui
             .symbol
             .redo_stacks
             .entry(key)
@@ -468,18 +457,12 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let key = self.workspace.active_key();
-        let Some(next) = self
-            .shell
-            .symbol
-            .redo_stacks
-            .get_mut(&key)
-            .and_then(Vec::pop)
-        else {
+        let Some(next) = self.ui.symbol.redo_stacks.get_mut(&key).and_then(Vec::pop) else {
             return Ok(false);
         };
         let current = self.load_active_symbol_document()?;
         let current_snapshot = self.active_symbol_metadata_snapshot(&current);
-        self.shell
+        self.ui
             .symbol
             .undo_stacks
             .entry(key)
@@ -566,7 +549,8 @@ impl AppState {
                 component,
                 wire,
             } => {
-                self.shell.view = crate::shell::WorkspaceView::Schematic;
+                self.workbench
+                    .activate(crate::workbench::state::Workspace::Design);
                 self.schematic.center_request = Some(Point::new(x, y));
                 self.schematic.net_highlight.clear();
                 self.schematic.selection.clear();
@@ -583,13 +567,14 @@ impl AppState {
                 point,
             } => {
                 self.open_workspace_view(reference);
-                self.shell.view = crate::shell::WorkspaceView::Schematic;
-                self.shell.symbol.select_pin(pin_name);
+                self.workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                self.ui.symbol.select_pin(pin_name);
                 if let Some(point) = point {
-                    let zoom = self.shell.symbol.zoom.max(1.0);
-                    self.shell.symbol.pan = (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
+                    let zoom = self.ui.symbol.zoom.max(1.0);
+                    self.ui.symbol.pan = (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
                 }
-                self.shell.symbol.needs_fit = false;
+                self.ui.symbol.needs_fit = false;
             }
         }
     }
@@ -764,8 +749,8 @@ impl AppState {
         if self.workspace.active_view == reference {
             return;
         }
-        self.shell.canvas_hover = None;
-        self.shell.canvas_view_center = None;
+        self.ui.canvas_hover = None;
+        self.ui.canvas_view_center = None;
         let view_type = view_type_for_reference(self, &reference);
         self.workspace.open_as_root(reference.clone(), view_type);
         self.library_manager
@@ -1251,12 +1236,12 @@ mod tests {
     use crate::common::app::AppState;
     use crate::panels::{LogAnchor, LogSource};
     use crate::services::drc::{DrcLocation, DrcViolationType};
-    use crate::shell::WorkspaceView;
     use crate::state::{
         Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
         PortDirection, PortSpec, ResolvedSymbolSource, Rotation, SYMBOL_DOCUMENT_METADATA_KEY,
         SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View, ViewType, Wire,
     };
+    use crate::workbench::state::Workspace;
 
     fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
         SymbolDocument {
@@ -2108,15 +2093,15 @@ mod tests {
         });
 
         assert_eq!(state.workspace.active_view, reference);
-        assert_eq!(state.shell.symbol.selected_pin.as_deref(), Some("IN"));
-        assert_eq!(state.shell.view, WorkspaceView::Schematic);
+        assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
+        assert_eq!(state.workbench.workspace, Workspace::Design);
     }
 
     #[test]
     fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
         let mut state = state_with_amp_symbol_pin("IN", None);
         state.run_active_symbol_pin_checks();
-        state.shell.symbol.clear_selection();
+        state.ui.symbol.clear_selection();
 
         crate::schematic::view::violations::cycle_violation(&mut state, 1);
 
@@ -2124,7 +2109,7 @@ mod tests {
             state.workspace.active_view,
             CellViewRef::new("work", "amp", "symbol")
         );
-        assert_eq!(state.shell.symbol.selected_pin.as_deref(), Some("IN"));
+        assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
     }
 
     #[test]

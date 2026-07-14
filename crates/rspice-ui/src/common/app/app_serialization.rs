@@ -18,7 +18,10 @@ impl serde::Serialize for AppState {
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
-        state.serialize_field("shell", &crate::shell::ShellStateSer::from(&self.shell))?;
+        state.serialize_field(
+            "ui_session",
+            &crate::workbench::UiSessionStateSer::from(&self.ui),
+        )?;
         state.serialize_field("workbench", &self.workbench)?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
@@ -42,8 +45,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
             project_workspace: crate::state::ProjectWorkspace,
             #[serde(default = "default_library_manager")]
             library_manager: crate::state::LibraryManager,
-            #[serde(default)]
-            shell: crate::shell::ShellStateSer,
+            // `shell` is a read-only alias for sessions written before the
+            // clean-room workbench migration.
+            #[serde(default, rename = "ui_session", alias = "shell")]
+            ui: crate::workbench::UiSessionStateSer,
             #[serde(default)]
             workbench: crate::workbench::WorkbenchState,
             #[serde(default)]
@@ -72,7 +77,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             schematic,
             workspace: project_workspace,
             library_manager,
-            shell: de.shell.into(),
+            ui: de.ui.into(),
             workbench: de.workbench,
             recent_files: de.recent_files,
             license_key: de.license_key,
@@ -151,18 +156,26 @@ mod tests {
         assert_eq!(restored.simulation.run_count(), 0);
         assert!(restored.simulation.waveforms.is_empty());
         assert!(!restored.simulation.is_running);
-        assert!(!restored.shell.browser_spoken_feedback);
+        assert!(!restored.ui.browser_spoken_feedback);
     }
 
     #[test]
     fn browser_spoken_feedback_preference_round_trips() {
         let mut state = AppState::default();
-        state.shell.browser_spoken_feedback = true;
+        state.ui.browser_spoken_feedback = true;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert!(restored.shell.browser_spoken_feedback);
+        assert!(restored.ui.browser_spoken_feedback);
+    }
+
+    #[test]
+    fn current_sessions_write_ui_session_and_keep_shell_read_only() {
+        let json = serde_json::to_string(&AppState::default()).expect("session serializes");
+
+        assert!(json.contains("\"ui_session\""));
+        assert!(!json.contains("\"shell\""));
     }
 
     #[test]
@@ -248,9 +261,9 @@ mod tests {
     #[test]
     fn app_state_session_does_not_persist_waves_expr_traces() {
         let mut state = AppState::default();
-        state.shell.results.exprs.insert(
+        state.ui.results.exprs.insert(
             0,
-            vec![crate::shell::results::ExprTrace {
+            vec![crate::workbench::result_document::ExprTrace {
                 text: "V(out)/V(in)".to_string(),
                 visible: true,
             }],
@@ -260,7 +273,7 @@ mod tests {
 
         assert!(
             !json.contains("expr_traces"),
-            "project-scoped Waves expressions must not be stored in shell session JSON: {json}"
+            "project-scoped Waves expressions must not be stored in UI session JSON: {json}"
         );
         assert!(
             !json.contains("V(out)/V(in)"),
@@ -280,7 +293,7 @@ mod tests {
         let restored: AppState = serde_json::from_str(json).expect("legacy session loads");
 
         assert!(
-            restored.shell.results.exprs.is_empty(),
+            restored.ui.results.exprs.is_empty(),
             "legacy project-scoped Waves traces must not be restored into a new session"
         );
     }

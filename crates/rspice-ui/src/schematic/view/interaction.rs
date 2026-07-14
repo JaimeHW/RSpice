@@ -230,11 +230,9 @@ fn select_drag_can_start(shift_pressed: bool) -> bool {
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
     if component_type == ComponentType::CellInstance {
         if let Some(library_cell) = state.schematic.pending_library_cell.clone() {
-            let recent = format!("cell:{}/{}", library_cell.library, library_cell.cell);
             state
                 .schematic
                 .add_library_cell_component(grid_pos, library_cell);
-            state.shell.note_placement(recent);
             log::info!("Placed library cell instance at {:?}", grid_pos);
         } else {
             state.push_user_message(ConsoleMessage::warning(
@@ -244,9 +242,6 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
         }
     } else {
         state.schematic.add_component(component_type, grid_pos);
-        if let Some(recent) = crate::shell::panels::schematic::palette_ref(component_type) {
-            state.shell.note_placement(recent);
-        }
         log::info!("Placed {:?} at {:?}", component_type, grid_pos);
     }
 }
@@ -324,11 +319,11 @@ fn toggle_probe_with_feedback(ui: &Ui, state: &mut AppState, name: &str, display
         } else {
             format!("{display} removed from plot")
         };
-        state.shell.toasts.info(ui.ctx(), &message);
+        state.ui.toasts.info(ui.ctx(), &message);
         state.push_user_message(ConsoleMessage::info(message));
     } else {
         let message = format!("No waveform for {display} — run the simulation first");
-        state.shell.toasts.warn(ui.ctx(), &message);
+        state.ui.toasts.warn(ui.ctx(), &message);
         state.push_user_message(ConsoleMessage::warning(message));
     }
 }
@@ -345,7 +340,7 @@ fn handle_probe_click(
             log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
             if net_name == "0" {
-                state.shell.toasts.info(ui.ctx(), "Ground — 0 V reference");
+                state.ui.toasts.info(ui.ctx(), "Ground — 0 V reference");
                 state.push_user_message(ConsoleMessage::info(
                     "Ground node: 0V reference".to_string(),
                 ));
@@ -364,7 +359,7 @@ fn handle_probe_click(
                 "Probe: wire at {:?} not in netlist (regenerate netlist?)",
                 grid_pos
             );
-            state.shell.toasts.warn(
+            state.ui.toasts.warn(
                 ui.ctx(),
                 "Wire not in the netlist — run the simulation to update",
             );

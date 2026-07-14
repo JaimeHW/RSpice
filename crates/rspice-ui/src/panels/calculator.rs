@@ -323,7 +323,9 @@ impl CalculatorPanel {
                             })
                             .map(|(index, w)| SignalRow {
                                 unit: signal_unit(&w.name),
-                                color: crate::shell::results::waveform_color(w, index, &t),
+                                color: crate::workbench::result_document::waveform_color(
+                                    w, index, &t,
+                                ),
                                 name: w.name.clone(),
                             })
                             .collect();

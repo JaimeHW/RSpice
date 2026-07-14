@@ -20,8 +20,10 @@ pub(crate) fn apply_imported_netlist(
     state.workspace.netlist_source_path = source_path;
     state.workspace.set_netlist_source_dirty(true);
     state.simulation.netlist_content = source;
-    state.shell.netlist.revision = state.shell.netlist.revision.wrapping_add(1);
-    state.shell.view = crate::shell::WorkspaceView::Netlist;
+    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Netlist);
     state.push_user_message(ConsoleMessage::info(format!(
         "Imported SPICE deck: {display_name}"
     )));
@@ -152,7 +154,10 @@ mod tests {
         );
 
         assert!(imported);
-        assert_eq!(state.shell.view, crate::shell::WorkspaceView::Netlist);
+        assert_eq!(
+            state.workbench.workspace,
+            crate::workbench::state::Workspace::Netlist
+        );
         assert_eq!(
             state.workspace.netlist_source.as_deref(),
             Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n")

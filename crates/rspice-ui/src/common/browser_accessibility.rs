@@ -2,7 +2,7 @@
 
 const SPOKEN_FEEDBACK_ATTRIBUTE: &str = "data-rspice-spoken-feedback";
 
-/// Read the DOM-owned spoken-feedback preference, if the browser shell has
+/// Read the DOM-owned spoken-feedback preference, if the host page has
 /// published it. The semantic DOM bootstrap control owns this attribute so a
 /// screen-reader user can enable feedback before entering egui's canvas.
 pub(crate) fn spoken_feedback_override() -> Option<bool> {

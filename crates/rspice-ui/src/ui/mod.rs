@@ -2,8 +2,8 @@
 //!
 //! A self-contained visual foundation for the application: design tokens,
 //! color palettes, embedded fonts, vector icons, and the widget library.
-//! Nothing in this module depends on application state — the shell
-//! (`crate::shell`) composes these primitives into the IDE.
+//! Nothing in this module depends on application state — the workbench
+//! (`crate::workbench`) composes these primitives into the IDE.
 //!
 //! # Structure
 //!

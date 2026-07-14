@@ -32,7 +32,7 @@ const TOAST_LIFETIME: f64 = 3.2;
 /// Fade-out duration after the lifetime elapses.
 const TOAST_FADE: f64 = 0.35;
 
-/// The application toast queue. Hold one instance in shell state and call
+/// The application toast queue. Hold one instance in UI session state and call
 /// [`Toasts::show`] once per frame.
 #[derive(Debug, Clone, Default)]
 pub struct Toasts {

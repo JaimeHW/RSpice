@@ -195,7 +195,7 @@ fn anchor(state: &AppState, violation: &DrcViolation) -> Option<Point> {
 /// The cursor in screen space, derived from the grid-unit hover the canvas
 /// reports each frame.
 fn cursor_screen_pos(state: &AppState, viewport: &Viewport) -> Option<Pos2> {
-    let (gx, gy) = state.shell.canvas_hover?;
+    let (gx, gy) = state.ui.canvas_hover?;
     let grid = state.schematic.grid_size.max(1) as f32;
     Some(pos2(
         viewport.bounds.min.x + viewport.offset.x + (gx as f32) * grid * viewport.zoom,

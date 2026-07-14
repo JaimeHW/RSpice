@@ -10,10 +10,10 @@
 use egui::{Response, Ui};
 
 use crate::common::app::{AppState, ConsoleMessage, ContextTarget};
-use crate::shell::menubar::{item, item_disabled, separator};
 use crate::state::{ComponentType, NetGraph, Point};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::menu::{item, item_disabled, separator};
 
 use super::SchematicSymbolContext;
 use super::coordinates::screen_to_grid;

@@ -154,11 +154,13 @@ mod tests {
 
     #[test]
     fn clearing_design_execution_context_clears_project_scoped_results_state() {
-        use crate::shell::results::{ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer};
+        use crate::workbench::result_document::{
+            ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer,
+        };
 
         let mut state = AppState::default();
-        state.shell.results_seen_version = 99;
-        let results = &mut state.shell.results;
+        state.ui.results_seen_version = 99;
+        let results = &mut state.ui.results;
         results.viewer = ResultViewer::Fft;
         results.phase_continuous = true;
         results.cursors.place(1.0);
@@ -200,9 +202,9 @@ mod tests {
         results.spec_drafts = Some(Vec::new());
 
         state.clear_design_execution_context();
-        let results = &state.shell.results;
+        let results = &state.ui.results;
 
-        assert_eq!(state.shell.results_seen_version, 0);
+        assert_eq!(state.ui.results_seen_version, 0);
         assert_eq!(results.viewer, ResultViewer::Fft);
         assert!(results.phase_continuous);
         assert!(!results.cursors.any());
@@ -231,9 +233,9 @@ impl AppState {
         self.workspace.netlist_source = None;
         self.workspace.netlist_source_path = None;
         self.simulation = crate::state::SimulationState::default();
-        self.shell.netlist = Default::default();
-        self.shell.results_seen_version = 0;
-        self.shell.results.clear_project_scoped_state();
+        self.ui.netlist = Default::default();
+        self.ui.results_seen_version = 0;
+        self.ui.results.clear_project_scoped_state();
         self.dialogs.drc_results = None;
         self.dialogs.drc_cycle = None;
         self.log_buffer.clear_source(crate::panels::LogSource::Drc);

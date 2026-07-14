@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use egui::{Color32, Mesh, Painter, Rect, Shape, pos2, vec2};
 
 use crate::common::app::AppState;
-use crate::shell::GridStyle;
+use crate::workbench::GridStyle;
 
 /// Minimum on-screen pitch before stepping up to a coarser grid.
 const MIN_PITCH: f32 = 9.0;
@@ -41,9 +41,9 @@ thread_local! {
     static GRID_MESH: RefCell<Option<CachedGrid>> = const { RefCell::new(None) };
 }
 
-/// Draw the schematic grid in the shell's active style.
+/// Draw the schematic grid in the workbench's active style.
 pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
-    let style = state.shell.grid;
+    let style = state.ui.grid;
     if !style.visible() {
         return;
     }

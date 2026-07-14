@@ -134,7 +134,9 @@ impl RSpiceApp {
                 if let Some(name) = example
                     && crate::common::menu_bar::load_named_example(&mut self.state, &name)
                 {
-                    self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+                    self.state
+                        .workbench
+                        .activate(crate::workbench::state::Workspace::Design);
                 }
             }
             ConfirmationAction::ImportNetlist => {
@@ -200,7 +202,9 @@ impl RSpiceApp {
         };
 
         if opened {
-            self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+            self.state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Design);
         }
     }
 

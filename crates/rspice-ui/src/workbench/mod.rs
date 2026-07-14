@@ -6,13 +6,24 @@
 
 pub mod commands;
 pub mod design_system;
+pub mod netlist_document;
+pub mod result_document;
 pub mod state;
 
 mod chrome;
 mod docks;
 mod layout;
+pub(crate) mod menu;
+mod session;
 mod surfaces;
 
+pub use result_document::{ResultViewer, ResultsState};
+pub use session::{
+    GridStyle, InspectorEdit, SymbolClipboard, SymbolDocumentSnapshot, SymbolSelection, SymbolTool,
+    SymbolUiState, UiSessionState, UiSessionStateSer, mirror_point_h_about, mirror_point_v_about,
+    mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
+    symbol_shape_bounds,
+};
 pub use state::WorkbenchState;
 
 use egui::{CentralPanel, Context, Frame};
@@ -65,7 +76,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
-    if std::mem::take(&mut app.state.shell.export_csv_requested) {
+    if std::mem::take(&mut app.state.ui.export_csv_requested) {
         crate::common::menu_bar::action_export_csv_with_io(
             &mut app.state,
             app.export_workflow_io.as_ref(),
@@ -73,10 +84,10 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     }
 
     if app.state.workbench.workspace != Workspace::Design {
-        app.state.shell.canvas_hover = None;
-        app.state.shell.canvas_view_center = None;
+        app.state.ui.canvas_hover = None;
+        app.state.ui.canvas_view_center = None;
     }
-    app.state.shell.toasts.show(ctx);
+    app.state.ui.toasts.show(ctx);
 }
 
 fn handle_workbench_shortcuts(ctx: &Context, app: &mut RSpiceApp) {

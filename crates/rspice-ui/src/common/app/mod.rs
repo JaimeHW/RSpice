@@ -4,9 +4,9 @@
 //!
 //! 1. [`RSpiceApp::prepare_frame`] applies the active theme (on change),
 //!    resolves keyboard shortcuts, and pumps the simulation controller.
-//! 2. [`crate::shell::show`] renders the IDE chrome — menu bar, toolbar,
+//! 2. [`crate::workbench::show`] renders the IDE chrome — menu bar, toolbar,
 //!    workspace tabs, contextual side panels, the active center view,
-//!    console, status bar, and toasts (see `crate::shell` for the layout).
+//!    console, status bar, and toasts (see `crate::workbench` for the layout).
 //! 3. [`RSpiceApp::render_frame_dialogs`] renders modal dialogs.
 //!
 //! # State Management
@@ -14,7 +14,8 @@
 //! Application state is managed in a centralized `AppState` struct:
 //! - SchematicState: circuit topology, components, wires
 //! - SimulationState: simulation results, waveforms, run history
-//! - ShellState: workspace view, theme selection, console, toasts
+//! - WorkbenchState: canonical workspace navigation and responsive layout
+//! - UiSessionState: theme and document-engine interaction state
 //!
 //! This follows the commercial EDA pattern where state is:
 //! 1. Centralized for consistency
@@ -39,8 +40,10 @@ thread_local! {
 mod active_viewer;
 pub use active_viewer::ActiveViewer;
 
-mod app_shell_state;
-pub use app_shell_state::{ConfirmationAction, ConfirmationDialogState, ConfirmationResponse};
+mod app_confirmation_state;
+pub use app_confirmation_state::{
+    ConfirmationAction, ConfirmationDialogState, ConfirmationResponse,
+};
 
 mod app_dialog_state;
 pub use app_dialog_state::{DialogState, LibraryDeleteTarget, LicenseDialogState, LicensePhase};
@@ -190,8 +193,9 @@ pub struct AppState {
     pub(crate) license: Option<crate::services::license::LicenseInfo>,
     /// Specialized analysis viewer state grouped by analysis workspace.
     pub(crate) analysis: AnalysisWorkspaceState,
-    /// Retained editor/viewer state during the clean-room shell migration.
-    pub(crate) shell: crate::shell::ShellState,
+    /// Document-engine and interaction session state (theme, canvas, result
+    /// viewers, symbol editor, and netlist editor).
+    pub(crate) ui: crate::workbench::UiSessionState,
     /// Canonical workbench navigation and responsive layout state.
     pub(crate) workbench: crate::workbench::WorkbenchState,
 }
@@ -258,7 +262,7 @@ impl AppState {
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
         self.simulation.run_intent = crate::state::SimulationRunIntent::ManualDeck;
         if self.simulation.is_running {
-            self.shell.netlist.rerun_queued = true;
+            self.ui.netlist.rerun_queued = true;
         } else {
             self.simulation.request_manual_deck_run();
         }
@@ -279,7 +283,7 @@ impl AppState {
 
     /// Request a run from the Simulate workspace run set.
     pub fn request_run_set_simulation(&mut self) {
-        self.shell.netlist.rerun_queued = false;
+        self.ui.netlist.rerun_queued = false;
         self.simulation.request_simulate_run_set();
     }
 
@@ -337,9 +341,9 @@ impl AppState {
     pub(crate) fn schematic_paste_anchor(&self) -> crate::state::Point {
         let grid = self.schematic.grid_size.max(1);
         let (x, y) = self
-            .shell
+            .ui
             .canvas_hover
-            .or(self.shell.canvas_view_center)
+            .or(self.ui.canvas_view_center)
             .unwrap_or((20.0, 20.0));
         crate::state::Point::new((x.round() as i32) * grid, (y.round() as i32) * grid)
     }
@@ -361,7 +365,7 @@ pub struct RSpiceApp {
     #[cfg(not(target_arch = "wasm32"))]
     autosave_last: Option<std::time::Instant>,
     /// Theme last applied to the egui context (re-applied when the user
-    /// changes the shell theme).
+    /// changes the workbench theme).
     applied_theme: Option<crate::ui::Theme>,
     /// Window title last pushed to the OS (avoids a viewport command per frame).
     last_window_title: String,
@@ -387,7 +391,7 @@ impl RSpiceApp {
 
         // Apply the design-system theme (canvas painters read the active
         // palette directly).
-        state.shell.theme.apply(&cc.egui_ctx);
+        state.ui.theme.apply(&cc.egui_ctx);
 
         // Persisted sessions may still carry the legacy seeded
         // "primitives" library (and tabs pointing into it); migrate any
@@ -450,9 +454,9 @@ impl RSpiceApp {
     fn prepare_frame(&mut self, ctx: &Context) {
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
-        if self.first_frame || self.applied_theme != Some(self.state.shell.theme) {
-            self.state.shell.theme.apply(ctx);
-            self.applied_theme = Some(self.state.shell.theme);
+        if self.first_frame || self.applied_theme != Some(self.state.ui.theme) {
+            self.state.ui.theme.apply(ctx);
+            self.applied_theme = Some(self.state.ui.theme);
             self.first_frame = false;
         }
 
@@ -552,10 +556,10 @@ impl eframe::App for RSpiceApp {
         {
             if let Some(enabled) = crate::common::browser_accessibility::spoken_feedback_override()
             {
-                self.state.shell.browser_spoken_feedback = enabled;
+                self.state.ui.browser_spoken_feedback = enabled;
             }
             ctx.options_mut(|options| {
-                options.screen_reader = self.state.shell.browser_spoken_feedback;
+                options.screen_reader = self.state.ui.browser_spoken_feedback;
             });
         }
         self.prepare_frame(&ctx);
@@ -600,7 +604,7 @@ impl RSpiceApp {
 
     /// Toggle the console panel between expanded and collapsed.
     pub fn toggle_console(&mut self) {
-        self.state.shell.console.collapsed = !self.state.shell.console.collapsed;
+        self.state.workbench.console_visible = !self.state.workbench.console_visible;
     }
 }
 
@@ -740,14 +744,14 @@ mod tests {
             crate::state::SimulationRunIntent::ManualDeck
         );
         assert!(!state.simulation.trigger_simulation);
-        assert!(state.shell.netlist.rerun_queued);
+        assert!(state.ui.netlist.rerun_queued);
 
         state.simulation.is_running = false;
-        state.shell.netlist.rerun_queued = false;
+        state.ui.netlist.rerun_queued = false;
         state.request_netlist_manual_deck_run();
 
         assert!(state.simulation.trigger_simulation);
-        assert!(!state.shell.netlist.rerun_queued);
+        assert!(!state.ui.netlist.rerun_queued);
     }
 
     #[test]

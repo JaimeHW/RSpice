@@ -14,7 +14,7 @@
 //! # Architecture
 //!
 //! These modules hold analysis *data and state* (`data.rs`, `state.rs`,
-//! compute pipelines). Rendering lives in `crate::shell::results`, built on
+//! compute pipelines). Rendering lives in `crate::workbench::result_document`, built on
 //! the `crate::ui::plot` engine.
 
 pub mod bode;

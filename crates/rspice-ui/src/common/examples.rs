@@ -794,7 +794,8 @@ fn build_hierarchical_rc_project(app: &mut crate::common::app::AppState) {
         HIERARCHICAL_RC_TOP_CELL,
         DEFAULT_SCHEMATIC_VIEW,
     );
-    app.shell.view = crate::shell::WorkspaceView::Schematic;
+    app.workbench
+        .activate(crate::workbench::state::Workspace::Design);
 }
 
 fn replace_example_cell(library: &mut Library, name: &str, description: &str, views: Vec<View>) {

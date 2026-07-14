@@ -537,11 +537,11 @@ mod tests {
             .runs
             .push(crate::state::SimulationRun::new(1));
         state.simulation.active_run_idx = Some(0);
-        state.shell.netlist.last_run_buffer = Some("last manual run\n.end\n".to_owned());
-        state.shell.netlist.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
-        state.shell.netlist.pending_manual_run_id = Some(1);
-        state.shell.netlist.rerun_queued = true;
-        state.shell.netlist.edited_lines.insert(3);
+        state.ui.netlist.last_run_buffer = Some("last manual run\n.end\n".to_owned());
+        state.ui.netlist.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
+        state.ui.netlist.pending_manual_run_id = Some(1);
+        state.ui.netlist.rerun_queued = true;
+        state.ui.netlist.edited_lines.insert(3);
         let histogram = HistogramBuilder::new()
             .name("old monte carlo")
             .bin_count(4)
@@ -553,11 +553,11 @@ mod tests {
         assert!(state.workspace.netlist_source.is_none());
         assert!(state.simulation.netlist_content.is_empty());
         assert!(!state.simulation.has_results());
-        assert!(state.shell.netlist.last_run_buffer.is_none());
-        assert!(state.shell.netlist.pending_run_buffer.is_none());
-        assert!(state.shell.netlist.pending_manual_run_id.is_none());
-        assert!(!state.shell.netlist.rerun_queued);
-        assert!(state.shell.netlist.edited_lines.is_empty());
+        assert!(state.ui.netlist.last_run_buffer.is_none());
+        assert!(state.ui.netlist.pending_run_buffer.is_none());
+        assert!(state.ui.netlist.pending_manual_run_id.is_none());
+        assert!(!state.ui.netlist.rerun_queued);
+        assert!(state.ui.netlist.edited_lines.is_empty());
         assert!(state.analysis.histogram_state.is_empty());
     }
 

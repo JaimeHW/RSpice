@@ -19,7 +19,7 @@ impl RSpiceApp {
     /// path-bearing schematic. Called once per frame; cheap when idle.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn autosave_tick(&mut self, ctx: &Context) {
-        let minutes = self.state.shell.autosave_minutes;
+        let minutes = self.state.ui.autosave_minutes;
         if minutes == 0 || !self.state.schematic.is_dirty || self.state.schematic.read_only {
             self.autosave_last = None;
             return;

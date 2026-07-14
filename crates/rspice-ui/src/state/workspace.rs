@@ -3,7 +3,7 @@
 //! This module is the product-level design spine for RSpice Studio. It keeps
 //! project identity, open Library/Cell/View documents, active hierarchy
 //! breadcrumbs, and per-view schematic buffers together instead of letting the
-//! shell, library browser, and single schematic buffer drift apart.
+//! workbench, library browser, and single schematic buffer drift apart.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -24,7 +24,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 
                 if !layout.width_class.is_phone() {
                     separator(ui);
-                    if let Some((x, y)) = app.state.shell.canvas_hover {
+                    if let Some((x, y)) = app.state.ui.canvas_hover {
                         segment(ui, &format!("x {x:.2} · y {y:.2}"));
                     }
                     if let Some(selection) = selection_summary(app) {

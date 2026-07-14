@@ -1,11 +1,11 @@
 use egui::Context;
 
 use crate::schematic::view::SchematicSymbolContext;
-use crate::shell::{
+use crate::state::{Point, SymbolDocument, SymbolShape};
+use crate::workbench::{
     SymbolClipboard, SymbolSelection, mirror_point_h_about, mirror_point_v_about,
     mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
 };
-use crate::state::{Point, SymbolDocument, SymbolShape};
 
 use super::{
     ConsoleMessage, RSpiceApp,
@@ -181,10 +181,11 @@ impl RSpiceApp {
             ShortcutCommand::EscapeCancel => {
                 if self.state.tabbed_property_dialog.open {
                     self.state.tabbed_property_dialog.close();
-                } else if self.state.shell.view == crate::shell::WorkspaceView::Results
-                    && self.state.shell.results.cursors.any()
+                } else if self.state.workbench.workspace
+                    == crate::workbench::state::Workspace::Results
+                    && self.state.ui.results.cursors.any()
                 {
-                    self.state.shell.results.clear_cursors();
+                    self.state.ui.results.clear_cursors();
                 } else {
                     self.state.schematic.tool = Tool::Select;
                     self.state.schematic.cancel_wire();
@@ -193,13 +194,15 @@ impl RSpiceApp {
                 }
             }
             ShortcutCommand::RunSimulation => {
-                if self.state.shell.view == crate::shell::WorkspaceView::Netlist {
+                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
                     if self.state.manual_deck_run_block_reason().is_none() {
                         self.state.request_netlist_manual_deck_run();
                     }
                 } else if self.state.can_run_simulation() {
                     self.state.request_run_set_simulation();
-                    self.state.shell.view = crate::shell::WorkspaceView::Simulate;
+                    self.state
+                        .workbench
+                        .activate(crate::workbench::state::Workspace::Simulate);
                 }
             }
             ShortcutCommand::StopSimulation => {
@@ -211,15 +214,19 @@ impl RSpiceApp {
                 crate::common::menu_bar::run_design_rule_check(&mut self.state);
             }
             ShortcutCommand::NextViolation => {
-                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+                self.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Design);
                 crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
             }
             ShortcutCommand::PrevViolation => {
-                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+                self.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Design);
                 crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
             }
             ShortcutCommand::NextWorkspaceTab => {
-                self.state.shell.cycle_view();
+                self.state.workbench.cycle_workspace(false);
             }
             ShortcutCommand::ZoomIn => {
                 self.state.schematic.zoom = (self.state.schematic.zoom * 1.25).min(4.0);
@@ -237,8 +244,14 @@ impl RSpiceApp {
                 self.state.schematic.tool = Tool::Label;
             }
             ShortcutCommand::FocusCellSearch => {
-                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
-                self.state.shell.focus_cell_search = true;
+                self.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                self.state.workbench.navigator_visible = true;
+                self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+                self.state.workbench.design_panel =
+                    crate::workbench::state::DesignPanel::ComponentShelf;
+                self.state.workbench.focus_placement_search = true;
             }
             ShortcutCommand::DescendIntoSelected => {
                 self.state.open_selected_instance_master();
@@ -247,9 +260,11 @@ impl RSpiceApp {
                 self.state.ascend_workspace_level();
             }
             ShortcutCommand::FocusDesignSearch => {
-                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
-                self.state.shell.rail_tab = crate::shell::RailTab::Navigator;
-                self.state.shell.focus_nav_search = true;
+                self.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                self.state.workbench.navigator_visible = true;
+                self.state.workbench.focus_navigator_search = true;
             }
             ShortcutCommand::OpenPreferences => {
                 self.state.dialogs.preferences_open = true;
@@ -261,7 +276,7 @@ impl RSpiceApp {
     }
 
     fn execute_symbol_shortcut_command(&mut self, command: ShortcutCommand) -> bool {
-        use crate::shell::SymbolTool;
+        use crate::workbench::SymbolTool;
 
         match command {
             ShortcutCommand::EditUndo => {
@@ -309,30 +324,30 @@ impl RSpiceApp {
                 true
             }
             ShortcutCommand::ToolSelect => {
-                self.state.shell.symbol.tool = SymbolTool::Select;
+                self.state.ui.symbol.tool = SymbolTool::Select;
                 true
             }
             ShortcutCommand::ToolProbe => {
-                self.state.shell.symbol.tool = SymbolTool::PlacePin;
-                self.state.shell.symbol.clear_selection();
+                self.state.ui.symbol.tool = SymbolTool::PlacePin;
+                self.state.ui.symbol.clear_selection();
                 true
             }
             ShortcutCommand::ToolWire => {
-                self.state.shell.symbol.tool = SymbolTool::Polyline;
-                self.state.shell.symbol.pending_polyline.clear();
+                self.state.ui.symbol.tool = SymbolTool::Polyline;
+                self.state.ui.symbol.pending_polyline.clear();
                 true
             }
             ShortcutCommand::PlaceCapacitor => {
-                self.state.shell.symbol.tool = SymbolTool::Circle;
-                self.state.shell.symbol.shape_start = None;
+                self.state.ui.symbol.tool = SymbolTool::Circle;
+                self.state.ui.symbol.shape_start = None;
                 true
             }
             ShortcutCommand::PlaceDiode => {
-                self.state.shell.symbol.tool = SymbolTool::Arrow;
+                self.state.ui.symbol.tool = SymbolTool::Arrow;
                 true
             }
             ShortcutCommand::PlaceGround => {
-                self.state.shell.symbol.tool = SymbolTool::Dot;
+                self.state.ui.symbol.tool = SymbolTool::Dot;
                 true
             }
             ShortcutCommand::RotateSelectionOrPreview => {
@@ -349,28 +364,28 @@ impl RSpiceApp {
             }
             ShortcutCommand::EscapeCancel => {
                 self.finish_pending_symbol_polyline_from_shortcut();
-                self.state.shell.symbol.tool = SymbolTool::Select;
-                self.state.shell.symbol.clear_drag_state();
-                self.state.shell.symbol.shape_start = None;
-                self.state.shell.symbol.marquee_start = None;
-                self.state.shell.symbol.marquee_current = None;
+                self.state.ui.symbol.tool = SymbolTool::Select;
+                self.state.ui.symbol.clear_drag_state();
+                self.state.ui.symbol.shape_start = None;
+                self.state.ui.symbol.marquee_start = None;
+                self.state.ui.symbol.marquee_current = None;
                 true
             }
             ShortcutCommand::ZoomIn => {
-                self.state.shell.symbol.zoom = (self.state.shell.symbol.zoom * 1.25).min(18.0);
+                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom * 1.25).min(18.0);
                 true
             }
             ShortcutCommand::ZoomOut => {
-                self.state.shell.symbol.zoom = (self.state.shell.symbol.zoom / 1.25).max(1.0);
+                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom / 1.25).max(1.0);
                 true
             }
             ShortcutCommand::ZoomFit => {
-                self.state.shell.symbol.needs_fit = true;
+                self.state.ui.symbol.needs_fit = true;
                 true
             }
             ShortcutCommand::Zoom100 => {
-                self.state.shell.symbol.zoom = 4.0;
-                self.state.shell.symbol.pan = (0.0, 0.0);
+                self.state.ui.symbol.zoom = 4.0;
+                self.state.ui.symbol.pan = (0.0, 0.0);
                 true
             }
             ShortcutCommand::RunChecks => {
@@ -431,7 +446,7 @@ impl RSpiceApp {
             }
         };
         self.state
-            .shell
+            .ui
             .symbol
             .set_selection(SymbolSelection::all_in(&document));
     }
@@ -444,9 +459,9 @@ impl RSpiceApp {
                 return;
             }
         };
-        let selection = self.state.shell.symbol.effective_selection();
+        let selection = self.state.ui.symbol.effective_selection();
         let ports = self.state.active_symbol_ports();
-        self.state.shell.symbol.clipboard =
+        self.state.ui.symbol.clipboard =
             symbol_clipboard_from_selection(&document, &selection, &ports);
     }
 
@@ -454,7 +469,7 @@ impl RSpiceApp {
         if self.state.deny_read_only_edit() {
             return;
         }
-        let clipboard = self.state.shell.symbol.clipboard.clone();
+        let clipboard = self.state.ui.symbol.clipboard.clone();
         if clipboard.is_empty() {
             return;
         }
@@ -488,14 +503,14 @@ impl RSpiceApp {
             selection.pins.insert(pin.name.clone());
             document.pins.push(pin);
         }
-        self.state.shell.symbol.set_selection(selection);
+        self.state.ui.symbol.set_selection(selection);
         if let Err(error) = self.state.store_active_symbol_document(&document) {
             self.state.push_user_message(ConsoleMessage::warning(error));
         }
     }
 
     fn delete_selected_symbol_item(&mut self, cut: bool) {
-        let selection = self.state.shell.symbol.effective_selection();
+        let selection = self.state.ui.symbol.effective_selection();
         if selection.is_empty() {
             return;
         }
@@ -547,11 +562,11 @@ impl RSpiceApp {
 
         if cut {
             clipboard.shapes.reverse();
-            self.state.shell.symbol.clipboard = clipboard;
+            self.state.ui.symbol.clipboard = clipboard;
         }
         if changed {
             self.state.record_symbol_edit(&before);
-            self.state.shell.symbol.clear_selection();
+            self.state.ui.symbol.clear_selection();
             if let Err(error) = self.state.store_active_symbol_document(&document) {
                 self.state.push_user_message(ConsoleMessage::warning(error));
             }
@@ -563,7 +578,7 @@ impl RSpiceApp {
         pin_transform: impl Fn(Point, Point) -> Point,
         shape_transform: impl Fn(&mut SymbolShape, Point),
     ) {
-        let selection = self.state.shell.symbol.effective_selection();
+        let selection = self.state.ui.symbol.effective_selection();
         if selection.is_empty() {
             return;
         }
@@ -604,20 +619,20 @@ impl RSpiceApp {
 
     fn symbol_paste_target(&self) -> Point {
         self.state
-            .shell
+            .ui
             .canvas_hover
-            .or(self.state.shell.canvas_view_center)
+            .or(self.state.ui.canvas_view_center)
             .map(|(x, y)| Point::new(x.round() as i32, y.round() as i32))
             .unwrap_or_else(|| Point::new(10, 10))
     }
 
     fn finish_pending_symbol_polyline_from_shortcut(&mut self) {
-        if self.state.shell.symbol.pending_polyline.len() < 2 {
-            self.state.shell.symbol.pending_polyline.clear();
+        if self.state.ui.symbol.pending_polyline.len() < 2 {
+            self.state.ui.symbol.pending_polyline.clear();
             return;
         }
         if self.state.deny_read_only_edit() {
-            self.state.shell.symbol.pending_polyline.clear();
+            self.state.ui.symbol.pending_polyline.clear();
             return;
         }
         let mut document = match self.state.load_active_symbol_document() {
@@ -628,14 +643,14 @@ impl RSpiceApp {
             }
         };
         let before = document.clone();
-        let points = std::mem::take(&mut self.state.shell.symbol.pending_polyline);
+        let points = std::mem::take(&mut self.state.ui.symbol.pending_polyline);
         document.body.push(SymbolShape::Polyline {
             points,
             closed: false,
         });
         self.state.record_symbol_edit(&before);
         if let Some(index) = document.body.len().checked_sub(1) {
-            self.state.shell.symbol.select_shape(index);
+            self.state.ui.symbol.select_shape(index);
         }
         if let Err(error) = self.state.store_active_symbol_document(&document) {
             self.state.push_user_message(ConsoleMessage::warning(error));
@@ -705,12 +720,12 @@ impl RSpiceApp {
 
     pub(super) fn toggle_panel_browser(&mut self) {
         // Toggle the contextual side panels (focus mode).
-        self.state.shell.panels_hidden = !self.state.shell.panels_hidden;
+        self.state.workbench.focus_mode = !self.state.workbench.focus_mode;
     }
 
     pub(super) fn toggle_panel_log(&mut self) {
         // Toggle the console between expanded and collapsed.
-        self.state.shell.console.collapsed = !self.state.shell.console.collapsed;
+        self.state.workbench.console_visible = !self.state.workbench.console_visible;
     }
 }
 

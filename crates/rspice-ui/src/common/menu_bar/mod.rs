@@ -3,7 +3,7 @@
 //! These modules implement the *behavior* behind the application menus —
 //! file/project workflows with dirty-state confirmation, exports, simulation
 //! control, design checks, Verilog-A cache management, examples and help.
-//! Rendering lives in [`crate::shell::menubar`], which dispatches into the
+//! Rendering lives in [`crate::workbench::menubar`], which dispatches into the
 //! functions re-exported here.
 
 mod examples_menu;

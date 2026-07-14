@@ -22,7 +22,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 app.symbol_library.as_ref(),
             );
         }
-        ViewType::Symbol => crate::shell::views::symbol::show(ui, &mut app.state),
+        ViewType::Symbol => crate::schematic::symbol_editor::show(ui, &mut app.state),
         ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => source_document(ui, app),
         view_type => unsupported_document(ui, app, view_type),
     }
