@@ -6233,6 +6233,21 @@ fn test_xyce_resistor_device_noise_contribution_waveform_oracle() {
 }
 
 #[test]
+fn test_xyce_level2_mos_device_noise_contribution_waveform_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/NOISE/gain-stage2.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should match canonical MOS RD/RS/ID/FN DNO/DNI contributions and the complete NOISE waveform oracle, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_bjt_differential_pair_linear_ac_waveform_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
