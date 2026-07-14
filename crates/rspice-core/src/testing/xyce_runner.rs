@@ -424,6 +424,20 @@ struct XyceStaticAcPlan {
     contract: XyceStaticAcContract,
 }
 
+#[derive(Debug, Clone)]
+struct XyceStaticNoisePlan {
+    deck_path: PathBuf,
+    source: String,
+    print: Option<XycePrintRequest>,
+    reference_path: Option<PathBuf>,
+    measurement_reference_paths: Vec<PathBuf>,
+    measurement_tolerance: XyceFileCompareTolerance,
+    output_node: String,
+    reference_node: Option<String>,
+    input_source: String,
+    frequencies: Vec<Value>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum XyceMeasurementReferenceValue {
     Failed,
@@ -2003,27 +2017,32 @@ impl XyceTestRunner {
             Ok(plan) => self.run_static_prn_hb_plan(deck, plan, start),
             Err(hb_reason) => match self.execution_plan(deck) {
                 Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
-                Err(dc_reason) => match self.static_ac_plan_for_deck(deck) {
-                    Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
-                    Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
-                        Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
-                        Err(tran_reason) => {
-                            let reason = if self.deck_has_print_analysis(deck, "HB") {
-                                hb_reason
-                            } else if self.deck_has_print_analysis(deck, "AC") {
-                                ac_reason
-                            } else if self.deck_has_print_analysis(deck, "TRAN") {
-                                tran_reason
-                            } else {
-                                dc_reason
-                            };
-                            return self.expected_unsupported_result(
-                                deck,
-                                start,
-                                "unsupported_xyce_contract",
-                                &reason,
-                            );
-                        }
+                Err(dc_reason) => match self.static_noise_plan_for_deck(deck) {
+                    Ok(plan) => self.run_static_noise_plan(deck, plan, start),
+                    Err(noise_reason) => match self.static_ac_plan_for_deck(deck) {
+                        Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
+                        Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
+                            Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
+                            Err(tran_reason) => {
+                                let reason = if self.deck_has_print_analysis(deck, "HB") {
+                                    hb_reason
+                                } else if self.deck_has_print_analysis(deck, "NOISE") {
+                                    noise_reason
+                                } else if self.deck_has_print_analysis(deck, "AC") {
+                                    ac_reason
+                                } else if self.deck_has_print_analysis(deck, "TRAN") {
+                                    tran_reason
+                                } else {
+                                    dc_reason
+                                };
+                                return self.expected_unsupported_result(
+                                    deck,
+                                    start,
+                                    "unsupported_xyce_contract",
+                                    &reason,
+                                );
+                            }
+                        },
                     },
                 },
             },
@@ -3269,6 +3288,114 @@ impl XyceTestRunner {
             frequency_bound,
             steps,
             contract,
+        })
+    }
+
+    fn static_noise_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticNoisePlan, String> {
+        let source =
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        if Self::contains_control_block(&source) {
+            return Err(
+                "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
+                    .to_string(),
+            );
+        }
+        Self::reject_unsupported_source_directives(&source)?;
+        let print_output = Self::canonical_print_output_request(&source, "NOISE", false)?;
+        let print = print_output.as_ref().map(|request| XycePrintRequest {
+            probes: request.probes.clone(),
+        });
+        if print_output
+            .as_ref()
+            .and_then(|request| request.format.as_deref())
+            .is_some_and(|format| !format.eq_ignore_ascii_case("STD"))
+        {
+            return Err("native NOISE oracle currently requires FORMAT=STD".to_string());
+        }
+
+        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let analyses = netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Noise {
+                    output_node,
+                    reference_node,
+                    input_source,
+                    variation,
+                    points,
+                    start_freq,
+                    stop_freq,
+                } => Some((
+                    output_node.clone(),
+                    reference_node.clone(),
+                    input_source.clone(),
+                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let (output_node, reference_node, input_source, frequencies) = match analyses.as_slice() {
+            [analysis] => analysis.clone(),
+            [] => return Err("deck has no .NOISE analysis".to_string()),
+            _ => {
+                return Err(
+                    "deck has multiple .NOISE analyses; multi-analysis comparison is not implemented"
+                        .to_string(),
+                );
+            }
+        };
+        if frequencies.is_empty() {
+            return Err(".NOISE analysis produced no frequency points".to_string());
+        }
+        if !Self::step_commands(&netlist)?.is_empty() {
+            return Err(".STEP NOISE comparison is not implemented yet".to_string());
+        }
+
+        let measurement_reference_paths = if netlist
+            .measurements
+            .iter()
+            .any(|measurement| measurement.analysis.eq_ignore_ascii_case("NOISE"))
+        {
+            self.measurement_reference_paths(&deck.path, "ma")?
+        } else {
+            Vec::new()
+        };
+        let measurement_tolerance = if netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("NOISE")
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Integ { .. }
+                )
+        }) {
+            XyceFileCompareTolerance::MEASURE_COMMON_AC_INTEGRATION
+        } else {
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT
+        };
+        let reference_path = self
+            .static_output_reference_path(&deck.path, "NOISE.prn")
+            .filter(|path| path.is_file());
+        if reference_path.is_none() && measurement_reference_paths.is_empty() {
+            return Err("deck has no checked-in NOISE waveform or measurement oracle".to_string());
+        }
+        if reference_path.is_some() && print.is_none() {
+            return Err(
+                "NOISE waveform oracle requires a primary .PRINT NOISE request".to_string(),
+            );
+        }
+
+        Ok(XyceStaticNoisePlan {
+            deck_path: deck.path.clone(),
+            source,
+            print,
+            reference_path,
+            measurement_reference_paths,
+            measurement_tolerance,
+            output_node,
+            reference_node,
+            input_source,
+            frequencies,
         })
     }
 
@@ -6006,6 +6133,162 @@ impl XyceTestRunner {
                 start,
                 contract,
                 format!("{} Xyce AC reference mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn run_static_noise_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticNoisePlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = if plan.reference_path.is_some() {
+            "static_prn_noise"
+        } else {
+            "wrapper_scalar_measure_noise"
+        };
+        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
+            Ok(netlist) => netlist,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("parse failed after NOISE contract validation: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let temperature = netlist.options.temp.unwrap_or(27.0) + 273.15;
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("NOISE temperature must be positive Kelvin, got {temperature}"),
+                Vec::new(),
+            );
+        }
+        let engine = self.create_xyce_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let results = match engine.run_noise_named_with_input_source_and_abort(
+            &netlist,
+            &plan.output_node,
+            plan.reference_node.as_deref(),
+            &plan.input_source,
+            &plan.frequencies,
+            temperature,
+            &abort,
+        ) {
+            Ok(results) => results,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this NOISE deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("NOISE simulation error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let mut mismatches = Vec::new();
+        if let Some(reference_path) = plan.reference_path.as_ref() {
+            let Some(print) = plan.print.as_ref() else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    "NOISE reference has no print request".to_string(),
+                    Vec::new(),
+                );
+            };
+            let reference = match Self::parse_prn_file(reference_path) {
+                Ok(reference) => reference,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("failed to parse Xyce NOISE oracle: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            match self.compare_noise_prn_reference(
+                &reference,
+                print,
+                &netlist,
+                &plan.source,
+                &results,
+            ) {
+                Ok(waveform_mismatches) => mismatches.extend(waveform_mismatches),
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("NOISE waveform reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+        if mismatches.is_empty() && !plan.measurement_reference_paths.is_empty() {
+            let measurements =
+                crate::analysis::advanced::evaluate_noise_measurements(&netlist, &results);
+            match self.compare_measurement_references(
+                &plan.measurement_reference_paths,
+                &measurements,
+                plan.measurement_tolerance,
+                netlist.options.measure_fail_output,
+                netlist.options.measure_default_value,
+                "NOISE",
+                &netlist.measurements,
+            ) {
+                Ok(measurement_mismatches) => mismatches.extend(measurement_mismatches),
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("NOISE measurement reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+        mismatches.truncate(self.config.max_mismatches);
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("{} Xyce NOISE mismatch(es)", mismatches.len()),
                 mismatches,
             )
         }
@@ -17996,6 +18279,148 @@ impl XyceTestRunner {
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         self.compare_ac_prn_reference_with_step(reference, print, netlist, source, results, None)
+    }
+
+    fn compare_noise_prn_reference(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        results: &[crate::analysis::NoiseResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if reference.columns.is_empty() {
+            return Err("reference table has no columns".to_string());
+        }
+        let mut data_column_offset = 0usize;
+        let index_column = reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .then_some(0usize);
+        if index_column.is_some() {
+            data_column_offset += 1;
+        }
+        let frequency_column = reference
+            .columns
+            .get(data_column_offset)
+            .filter(|column| Self::is_ac_frequency_reference_column(column))
+            .map(|_| data_column_offset)
+            .ok_or_else(|| {
+                format!(
+                    "expected Xyce NOISE frequency column at position {}, got '{}'",
+                    data_column_offset,
+                    reference
+                        .columns
+                        .get(data_column_offset)
+                        .map(String::as_str)
+                        .unwrap_or("<missing>")
+                )
+            })?;
+        data_column_offset += 1;
+        if reference.rows.len() != results.len() {
+            return Err(format!(
+                "reference row count ({}) does not match NOISE simulation point count ({})",
+                reference.rows.len(),
+                results.len()
+            ));
+        }
+
+        let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
+        let series = crate::analysis::advanced::NoiseSweepSeries::from_sweep(results)
+            .ok_or_else(|| "NOISE simulation produced no points".to_string())?;
+        let signals = series.signal_map();
+        let equation_traces =
+            crate::analysis::advanced::evaluate_noise_equation_measurements(netlist, results)?;
+        let comp_columns = data_columns
+            .iter()
+            .map(|column| XyceReferenceColumn::Probe {
+                name: column.probe_name().to_string(),
+            })
+            .collect::<Vec<_>>();
+        let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
+        let frequency_tolerance = XyceComparisonTolerance::from_config(&self.config);
+
+        let mut mismatches = Vec::new();
+        for (row_index, (row, result)) in reference.rows.iter().zip(results).enumerate() {
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "row {} has {} values, expected {}",
+                    row_index,
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            if let Some(index_column) = index_column {
+                let expected = row[index_column];
+                let actual = row_index as Value;
+                if (expected - actual).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "Index".to_string(),
+                        expected,
+                        actual,
+                        relative_error: 1.0,
+                    });
+                }
+            }
+            let expected_frequency = row[frequency_column];
+            if let Some(relative_error) =
+                self.value_mismatch(expected_frequency, result.frequency, frequency_tolerance)
+            {
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: reference.columns[frequency_column].clone(),
+                    expected: expected_frequency,
+                    actual: result.frequency,
+                    relative_error,
+                });
+            }
+            for (column_index, column) in data_columns.iter().enumerate() {
+                let probe = column.probe_name();
+                let expected = row[column_index + data_column_offset];
+                let actual = if let Some(trace) = equation_traces
+                    .iter()
+                    .find(|trace| trace.name.eq_ignore_ascii_case(probe))
+                {
+                    *trace.values.get(row_index).ok_or_else(|| {
+                        format!(
+                            "NOISE equation measure '{}' has no value for row {}",
+                            trace.name, row_index
+                        )
+                    })?
+                } else {
+                    let waveform = signals
+                        .iter()
+                        .find_map(|(name, values)| {
+                            name.eq_ignore_ascii_case(probe).then_some(*values)
+                        })
+                        .ok_or_else(|| format!("NOISE probe '{probe}' is not available"))?;
+                    *waveform.get(row_index).ok_or_else(|| {
+                        format!("NOISE probe '{probe}' has no value for row {row_index}")
+                    })?
+                };
+                let normalized_probe = Self::normalize_probe(probe);
+                let tolerance = comp_tolerances
+                    .get(&normalized_probe)
+                    .copied()
+                    .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: reference.columns[column_index + data_column_offset].clone(),
+                        expected,
+                        actual,
+                        relative_error,
+                    });
+                }
+                if mismatches.len() >= self.config.max_mismatches {
+                    mismatches.truncate(self.config.max_mismatches);
+                    return Ok(mismatches);
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn compare_ac_data_prn_reference(

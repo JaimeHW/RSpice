@@ -2154,7 +2154,7 @@ impl Engine {
         Ok(ac_matrix)
     }
 
-    fn build_ac_excitation_rhs(circuit: &CircuitData) -> Vec<Complex64> {
+    pub(super) fn build_ac_excitation_rhs(circuit: &CircuitData) -> Vec<Complex64> {
         let size = circuit.matrix_size();
         let mut rhs = vec![Complex64::new(0.0, 0.0); size];
 

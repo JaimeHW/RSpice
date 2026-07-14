@@ -175,6 +175,24 @@ pub fn evaluate_ac_equation_measurements(
     evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, None)
 }
 
+/// Evaluate Xyce continuous equation measurements over a NOISE sweep.
+///
+/// NOISE uses the same complex probe projections as AC. Bare `V()` and `I()`
+/// accessors select the real component in equations, while the explicitly
+/// qualified accessors select magnitude, real, imaginary, phase, or decibels.
+/// `FREQ` and `HERTZ` both denote the current sweep frequency. As in Xyce,
+/// equations start at -1 unless a local or global `DEFAULT_VAL` overrides it.
+pub fn evaluate_noise_equation_measurements(
+    netlist: &Netlist,
+    sweep: &[crate::analysis::NoiseResult],
+) -> Result<Vec<EquationMeasureTrace>, String> {
+    let Some(series) = NoiseSweepSeries::from_sweep(sweep) else {
+        return Ok(Vec::new());
+    };
+    let signals = series.equation_signal_map();
+    evaluate_equation_measurements(netlist, "NOISE", series.axis(), &signals, -1.0, None)
+}
+
 fn dc_primary_sweep_is_ascending(netlist: &Netlist, axis: &[Value]) -> bool {
     netlist
         .analyses
@@ -548,6 +566,70 @@ impl DcSweepSeries {
     }
 }
 
+/// Owned derived real projections of named complex signals.
+///
+/// AC and NOISE share Xyce's projection names and scalar-accessor semantics,
+/// so the projections are materialized by one implementation. Keeping this
+/// storage owned also makes every slice in the borrowed measurement map stable
+/// for the duration of evaluation.
+#[derive(Default)]
+struct ComplexProjectionSeries {
+    storage: Vec<(String, Vec<Value>)>,
+}
+
+impl ComplexProjectionSeries {
+    fn push(&mut self, prefix: char, raw: &str, values: Vec<crate::Complex64>) {
+        let magnitude: Vec<Value> = values.iter().map(|c| c.norm()).collect();
+        let db: Vec<Value> = magnitude
+            .iter()
+            .map(|m| if *m > 1e-30 { 20.0 * m.log10() } else { -600.0 })
+            .collect();
+        let phase_deg: Vec<Value> = values.iter().map(|c| c.arg().to_degrees()).collect();
+        let real: Vec<Value> = values.iter().map(|c| c.re).collect();
+        let imag: Vec<Value> = values.iter().map(|c| c.im).collect();
+
+        self.storage
+            .push((format!("{prefix}({raw})"), magnitude.clone()));
+        self.storage.push((format!("{prefix}M({raw})"), magnitude));
+        self.storage.push((format!("{prefix}DB({raw})"), db));
+        self.storage.push((format!("{prefix}P({raw})"), phase_deg));
+        self.storage.push((format!("{prefix}R({raw})"), real));
+        self.storage.push((format!("{prefix}I({raw})"), imag));
+    }
+
+    fn insert_all<'a>(&'a self, signals: &mut HashMap<String, &'a [Value]>) {
+        for (key, series) in &self.storage {
+            insert_case_variants(signals, key, series.as_slice());
+        }
+    }
+
+    fn insert_scalar_aliases<'a>(&'a self, signals: &mut HashMap<String, &'a [Value]>) {
+        for (key, series) in &self.storage {
+            let upper = key.to_ascii_uppercase();
+            let unqualified = if upper.starts_with("VR(") {
+                Some(format!("V{}", &key[2..]))
+            } else if upper.starts_with("IR(") {
+                Some(format!("I{}", &key[2..]))
+            } else {
+                None
+            };
+            if let Some(unqualified) = unqualified {
+                insert_case_variants(signals, &unqualified, series.as_slice());
+            }
+        }
+    }
+}
+
+fn insert_frequency_axis_variants<'a>(
+    signals: &mut HashMap<String, &'a [Value]>,
+    axis: &'a [Value],
+) {
+    insert_case_variants(signals, "Time", axis);
+    insert_case_variants(signals, "Frequency", axis);
+    insert_case_variants(signals, "Freq", axis);
+    insert_case_variants(signals, "Hertz", axis);
+}
+
 /// Owned per-signal series derived from an AC sweep, from which a
 /// measurement signal table can be borrowed.
 ///
@@ -559,8 +641,7 @@ impl DcSweepSeries {
 /// `FREQUENCY`, and `FREQ`.
 pub struct AcSweepSeries {
     axis: Vec<Value>,
-    /// (full signal key, series)
-    storage: Vec<(String, Vec<Value>)>,
+    projections: ComplexProjectionSeries,
 }
 
 impl AcSweepSeries {
@@ -570,24 +651,7 @@ impl AcSweepSeries {
         let first = sweep.first()?;
         let axis: Vec<Value> = sweep.iter().map(|point| point.frequency).collect();
 
-        let mut storage: Vec<(String, Vec<Value>)> = Vec::new();
-        let mut push_complex_series = |prefix: char, raw: &str, values: Vec<crate::Complex64>| {
-            let magnitude: Vec<Value> = values.iter().map(|c| c.norm()).collect();
-            let db: Vec<Value> = magnitude
-                .iter()
-                .map(|m| if *m > 1e-30 { 20.0 * m.log10() } else { -600.0 })
-                .collect();
-            let phase_deg: Vec<Value> = values.iter().map(|c| c.arg().to_degrees()).collect();
-            let real: Vec<Value> = values.iter().map(|c| c.re).collect();
-            let imag: Vec<Value> = values.iter().map(|c| c.im).collect();
-
-            storage.push((format!("{prefix}({raw})"), magnitude.clone()));
-            storage.push((format!("{prefix}M({raw})"), magnitude));
-            storage.push((format!("{prefix}DB({raw})"), db));
-            storage.push((format!("{prefix}P({raw})"), phase_deg));
-            storage.push((format!("{prefix}R({raw})"), real));
-            storage.push((format!("{prefix}I({raw})"), imag));
-        };
+        let mut projections = ComplexProjectionSeries::default();
 
         for (index, name) in first.node_names.iter().enumerate() {
             let raw = if name.is_empty() {
@@ -599,7 +663,7 @@ impl AcSweepSeries {
                 .iter()
                 .map(|point| point.voltages.get(index).copied().unwrap_or_default())
                 .collect();
-            push_complex_series('V', &raw, values);
+            projections.push('V', &raw, values);
         }
         for (index, name) in first.branch_names.iter().enumerate() {
             if name.is_empty() {
@@ -609,10 +673,10 @@ impl AcSweepSeries {
                 .iter()
                 .map(|point| point.currents.get(index).copied().unwrap_or_default())
                 .collect();
-            push_complex_series('I', name, values);
+            projections.push('I', name, values);
         }
 
-        Some(Self { axis, storage })
+        Some(Self { axis, projections })
     }
 
     /// The sweep frequencies, used as the measurement abscissa.
@@ -623,12 +687,8 @@ impl AcSweepSeries {
     /// Borrowed signal table over the collected series.
     pub fn signal_map(&self) -> HashMap<String, &[Value]> {
         let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        insert_case_variants(&mut signals, "Time", self.axis.as_slice());
-        insert_case_variants(&mut signals, "Frequency", self.axis.as_slice());
-        insert_case_variants(&mut signals, "Freq", self.axis.as_slice());
-        for (key, series) in &self.storage {
-            insert_case_variants(&mut signals, key, series.as_slice());
-        }
+        insert_frequency_axis_variants(&mut signals, self.axis.as_slice());
+        self.projections.insert_all(&mut signals);
         signals
     }
 
@@ -639,20 +699,7 @@ impl AcSweepSeries {
     /// aliases without changing the explicit magnitude series in `VM()`/`IM()`.
     pub fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
         let mut signals = self.signal_map();
-        insert_case_variants(&mut signals, "Hertz", self.axis.as_slice());
-        for (key, series) in &self.storage {
-            let upper = key.to_ascii_uppercase();
-            let unqualified = if upper.starts_with("VR(") {
-                Some(format!("V{}", &key[2..]))
-            } else if upper.starts_with("IR(") {
-                Some(format!("I{}", &key[2..]))
-            } else {
-                None
-            };
-            if let Some(unqualified) = unqualified {
-                insert_case_variants(&mut signals, &unqualified, series.as_slice());
-            }
-        }
+        self.projections.insert_scalar_aliases(&mut signals);
         signals
     }
 }
@@ -665,14 +712,42 @@ pub struct NoiseSweepSeries {
     axis: Vec<Value>,
     onoise: Vec<Value>,
     inoise: Vec<Value>,
+    projections: ComplexProjectionSeries,
 }
 
 impl NoiseSweepSeries {
     /// Collect spectral-density series across the sweep. Returns `None`
     /// for an empty sweep.
     pub fn from_sweep(sweep: &[crate::analysis::NoiseResult]) -> Option<Self> {
-        if sweep.is_empty() {
-            return None;
+        let first = sweep.first()?;
+        let mut projections = ComplexProjectionSeries::default();
+        for (index, name) in first.node_names.iter().enumerate() {
+            let raw = if name.is_empty() {
+                (index + 1).to_string()
+            } else {
+                name.clone()
+            };
+            projections.push(
+                'V',
+                &raw,
+                sweep
+                    .iter()
+                    .map(|point| point.voltages.get(index).copied().unwrap_or_default())
+                    .collect(),
+            );
+        }
+        for (index, name) in first.branch_names.iter().enumerate() {
+            if name.is_empty() {
+                continue;
+            }
+            projections.push(
+                'I',
+                name,
+                sweep
+                    .iter()
+                    .map(|point| point.currents.get(index).copied().unwrap_or_default())
+                    .collect(),
+            );
         }
         Some(Self {
             axis: sweep.iter().map(|point| point.frequency).collect(),
@@ -681,6 +756,7 @@ impl NoiseSweepSeries {
                 .iter()
                 .map(|point| point.input_referred_rms())
                 .collect(),
+            projections,
         })
     }
 
@@ -692,15 +768,22 @@ impl NoiseSweepSeries {
     /// Borrowed signal table over the collected series.
     pub fn signal_map(&self) -> HashMap<String, &[Value]> {
         let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        insert_case_variants(&mut signals, "Time", self.axis.as_slice());
-        insert_case_variants(&mut signals, "Frequency", self.axis.as_slice());
-        insert_case_variants(&mut signals, "Freq", self.axis.as_slice());
+        insert_frequency_axis_variants(&mut signals, self.axis.as_slice());
+        self.projections.insert_all(&mut signals);
         for key in ["Onoise", "Onoise_Spectrum"] {
             insert_case_variants(&mut signals, key, self.onoise.as_slice());
         }
         for key in ["Inoise", "Inoise_Spectrum"] {
             insert_case_variants(&mut signals, key, self.inoise.as_slice());
         }
+        signals
+    }
+
+    /// Signal table used by continuous NOISE equation measures. Bare complex
+    /// probes are overlaid with their real-component projection.
+    pub fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
+        let mut signals = self.signal_map();
+        self.projections.insert_scalar_aliases(&mut signals);
         signals
     }
 }
@@ -723,8 +806,15 @@ pub fn evaluate_noise_measurements(
             .map(|m| MeasureResult::failed(&m.name, "noise sweep produced no points"))
             .collect();
     };
-    let signals = series.signal_map();
-    evaluate_statements(&statements, series.axis(), &signals, &netlist.params)
+    let signals = series.equation_signal_map();
+    let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
+    overlay_continuous_equation_results(
+        &statements,
+        &mut results,
+        evaluate_noise_equation_measurements(netlist, sweep),
+        "NOISE",
+    );
+    results
 }
 
 /// The netlist's measurement statements for one analysis kind
@@ -1534,6 +1624,120 @@ mod tests {
         assert_eq!(result("bounded").value, Some(2.0));
         assert_eq!(result("invalid").value, None);
         assert_eq!(result("expravg").value, Some(2.5));
+    }
+
+    fn noise_point(
+        frequency: Value,
+        voltage: crate::Complex64,
+        current: crate::Complex64,
+    ) -> crate::analysis::NoiseResult {
+        crate::analysis::NoiseResult {
+            frequency,
+            output_noise_density: 4.0,
+            input_referred_density: 9.0,
+            contributions: Vec::new(),
+            node_names: vec!["out".to_string()],
+            branch_names: vec!["V1".to_string()],
+            voltages: vec![voltage],
+            currents: vec![current],
+        }
+    }
+
+    #[test]
+    fn noise_series_exposes_complex_projections_and_noise_aliases() {
+        let sweep = vec![
+            noise_point(
+                10.0,
+                crate::Complex64::new(3.0, 4.0),
+                crate::Complex64::new(0.0, -2.0),
+            ),
+            noise_point(
+                20.0,
+                crate::Complex64::new(0.0, -2.0),
+                crate::Complex64::new(3.0, 4.0),
+            ),
+        ];
+
+        let series = NoiseSweepSeries::from_sweep(&sweep).expect("non-empty noise sweep");
+        let signals = series.signal_map();
+        assert_eq!(signals["VM(out)"], &[5.0, 2.0]);
+        assert_eq!(signals["VR(out)"], &[3.0, 0.0]);
+        assert_eq!(signals["VI(out)"], &[4.0, -2.0]);
+        assert_eq!(signals["VP(out)"][0], 4.0_f64.atan2(3.0).to_degrees());
+        assert_eq!(signals["VDB(out)"][0], 20.0 * 5.0_f64.log10());
+        assert_eq!(signals["IM(V1)"], &[2.0, 5.0]);
+        assert_eq!(signals["IR(V1)"], &[0.0, 3.0]);
+        assert_eq!(signals["II(V1)"], &[-2.0, 4.0]);
+        assert_eq!(signals["IP(V1)"], &[-90.0, 4.0_f64.atan2(3.0).to_degrees()]);
+        assert_eq!(
+            signals["IDB(V1)"],
+            &[20.0 * 2.0_f64.log10(), 20.0 * 5.0_f64.log10()]
+        );
+        assert_eq!(signals["ONOISE"], &[2.0, 2.0]);
+        assert_eq!(signals["ONOISE_SPECTRUM"], &[2.0, 2.0]);
+        assert_eq!(signals["INOISE"], &[3.0, 3.0]);
+        assert_eq!(signals["INOISE_SPECTRUM"], &[3.0, 3.0]);
+        assert_eq!(signals["HERTZ"], &[10.0, 20.0]);
+
+        let equation_signals = series.equation_signal_map();
+        assert_eq!(equation_signals["V(out)"], &[3.0, 0.0]);
+        assert_eq!(equation_signals["I(V1)"], &[0.0, 3.0]);
+    }
+
+    #[test]
+    fn noise_equations_use_frequency_accessors_defaults_and_statement_order() {
+        let netlist = Netlist::parse(
+            "* continuous NOISE equations\n\
+             .meas noise first EQN {VR(out)+FREQ}\n\
+             .meas noise follows EQN {first+HERTZ}\n\
+             .meas noise forward EQN {later+1}\n\
+             .meas noise later EQN {FREQ}\n\
+             .meas noise bounded EQN {VM(out)} FROM=20 TO=20\n\
+             .meas noise invalid EQN {VM(out)} FROM=30 TO=40 DEFAULT_VAL=-9\n\
+             .end\n",
+        )
+        .expect("NOISE equations parse");
+        let sweep = vec![
+            noise_point(
+                10.0,
+                crate::Complex64::new(3.0, 4.0),
+                crate::Complex64::new(0.0, -2.0),
+            ),
+            noise_point(
+                20.0,
+                crate::Complex64::new(0.0, -2.0),
+                crate::Complex64::new(3.0, 4.0),
+            ),
+        ];
+
+        let traces = evaluate_noise_equation_measurements(&netlist, &sweep)
+            .expect("NOISE equations evaluate");
+        let trace = |name: &str| {
+            traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+        };
+        assert_eq!(trace("first").values, vec![13.0, 20.0]);
+        assert_eq!(trace("follows").values, vec![23.0, 40.0]);
+        assert_eq!(trace("forward").values, vec![0.0, 11.0]);
+        assert_eq!(trace("later").values, vec![10.0, 20.0]);
+        assert_eq!(trace("bounded").values, vec![-1.0, 2.0]);
+        assert_eq!(trace("invalid").values, vec![-9.0, -9.0]);
+        assert!(!trace("invalid").initialized);
+
+        let results = evaluate_noise_measurements(&netlist, &sweep);
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named measurement result")
+        };
+        assert_eq!(result("follows").value, Some(40.0));
+        assert_eq!(result("forward").value, Some(11.0));
+        assert_eq!(result("bounded").value, Some(2.0));
+        assert!(!result("invalid").passed);
+        assert_eq!(result("invalid").value, None);
     }
 
     #[test]

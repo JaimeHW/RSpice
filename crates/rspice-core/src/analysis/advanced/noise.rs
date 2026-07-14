@@ -862,6 +862,14 @@ impl Default for NoiseAnalysis {
 pub struct NoiseResult {
     /// Frequency (Hz)
     pub frequency: Value,
+    /// Stable node names aligned with `voltages`.
+    pub node_names: Vec<String>,
+    /// Stable branch names aligned with `currents`.
+    pub branch_names: Vec<String>,
+    /// Ordinary complex small-signal node voltages at this frequency.
+    pub voltages: Vec<Complex64>,
+    /// Ordinary complex small-signal branch currents at this frequency.
+    pub currents: Vec<Complex64>,
     /// Total output voltage noise spectral density (V²/Hz)
     pub output_noise_density: Value,
     /// Input-referred noise spectral density (V²/Hz)
@@ -1141,6 +1149,10 @@ mod summary_tests {
     fn result_at(frequency: Value, r1: Value, d1: Value) -> NoiseResult {
         NoiseResult {
             frequency,
+            node_names: Vec::new(),
+            branch_names: Vec::new(),
+            voltages: Vec::new(),
+            currents: Vec::new(),
             output_noise_density: r1 + d1,
             input_referred_density: r1 + d1,
             contributions: vec![

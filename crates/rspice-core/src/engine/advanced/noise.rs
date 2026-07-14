@@ -1,5 +1,17 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(in crate::engine::advanced) enum NoiseOutputPort<'a> {
+    NodeIds {
+        positive: usize,
+        negative: Option<usize>,
+    },
+    NodeNames {
+        positive: &'a str,
+        negative: Option<&'a str>,
+    },
+}
+
 impl Engine {
     #[inline]
     pub(in crate::engine::advanced) fn noise_node_voltage(
@@ -1055,8 +1067,10 @@ impl Engine {
     ) -> Result<Vec<NoiseResult>, SimulationError> {
         self.run_noise_internal(
             netlist,
-            output_pos,
-            output_neg,
+            NoiseOutputPort::NodeIds {
+                positive: output_pos,
+                negative: output_neg,
+            },
             Some(input_source),
             frequencies,
             temperature,
@@ -1099,12 +1113,64 @@ impl Engine {
     ) -> Result<Vec<NoiseResult>, SimulationError> {
         self.run_noise_internal(
             netlist,
-            output_pos,
-            output_neg,
+            NoiseOutputPort::NodeIds {
+                positive: output_pos,
+                negative: output_neg,
+            },
             None,
             frequencies,
             temperature,
             abort,
+        )
+    }
+
+    /// Run input-referred noise analysis using case-insensitive SPICE node
+    /// names. Ground aliases resolve to node zero. The circuit is built only
+    /// once; name resolution and analysis use the same canonical topology.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_named_with_input_source_and_abort(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        frequencies: &[Value],
+        temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<NoiseResult>, SimulationError> {
+        self.run_noise_internal(
+            netlist,
+            NoiseOutputPort::NodeNames {
+                positive: output_pos,
+                negative: output_neg,
+            },
+            Some(input_source),
+            frequencies,
+            temperature,
+            abort,
+        )
+    }
+
+    /// Non-cancellable convenience wrapper for named-node input-referred
+    /// noise analysis.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_named_with_input_source(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        frequencies: &[Value],
+        temperature: Value,
+    ) -> Result<Vec<NoiseResult>, SimulationError> {
+        self.run_noise_named_with_input_source_and_abort(
+            netlist,
+            output_pos,
+            output_neg,
+            input_source,
+            frequencies,
+            temperature,
+            &NoAbort,
         )
     }
 
@@ -1487,8 +1553,7 @@ impl Engine {
     pub(in crate::engine::advanced) fn run_noise_internal(
         &self,
         netlist: &Netlist,
-        output_pos: usize,
-        output_neg: Option<usize>,
+        output_port: NoiseOutputPort<'_>,
         input_source: Option<&str>,
         frequencies: &[Value],
         temperature: Value,
@@ -1497,14 +1562,23 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        #[derive(Clone, Copy)]
-        enum InputExcitation {
-            VoltageSource { branch_matrix_index: usize },
-            CurrentSource { node_pos: usize, node_neg: usize },
-        }
-
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
+        let resolve_node = |name: &str| {
+            circuit.get_node_by_name(name.trim()).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Noise output node '{}' was not found",
+                    name.trim()
+                ))
+            })
+        };
+        let (output_pos, output_neg) = match output_port {
+            NoiseOutputPort::NodeIds { positive, negative } => (positive, negative),
+            NoiseOutputPort::NodeNames { positive, negative } => (
+                resolve_node(positive)?,
+                negative.map(resolve_node).transpose()?,
+            ),
+        };
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
             "Noise",
@@ -1532,6 +1606,8 @@ impl Engine {
         // Compute noise at each frequency
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
+        let node_names = circuit.node_names_sorted();
+        let branch_names = circuit.branch_names_sorted();
 
         if output_pos > num_nodes {
             return Err(SimulationError::Circuit(format!(
@@ -1562,30 +1638,23 @@ impl Engine {
             temperature,
         )?;
 
-        let input_excitation = match input_source {
-            None => None,
+        let has_input_source = match input_source {
+            None => false,
             Some(source_name) => {
-                if let Some(voltage_idx) = circuit
+                if circuit
                     .voltage_sources
                     .names
                     .iter()
-                    .position(|name| name.eq_ignore_ascii_case(source_name))
+                    .any(|name| name.eq_ignore_ascii_case(source_name))
                 {
-                    let branch_ordinal = circuit.voltage_sources.branch_indices[voltage_idx];
-                    let branch_matrix_index = circuit.get_branch_matrix_index(branch_ordinal) - 1;
-                    Some(InputExcitation::VoltageSource {
-                        branch_matrix_index,
-                    })
-                } else if let Some(current_idx) = circuit
+                    true
+                } else if circuit
                     .current_sources
                     .names
                     .iter()
-                    .position(|name| name.eq_ignore_ascii_case(source_name))
+                    .any(|name| name.eq_ignore_ascii_case(source_name))
                 {
-                    Some(InputExcitation::CurrentSource {
-                        node_pos: circuit.current_sources.node_pos[current_idx],
-                        node_neg: circuit.current_sources.node_neg[current_idx],
-                    })
+                    true
                 } else {
                     return Err(SimulationError::Circuit(format!(
                         "Noise input source '{}' not found (expected independent V/I source)",
@@ -1595,8 +1664,12 @@ impl Engine {
             }
         };
 
-        // One excitation vector reused across every source and frequency:
-        // each use zeroes it and sets one or two entries.
+        // Xyce NOISE retains the ordinary AC solution and uses its selected
+        // output phasor for input-referred gain. This is the full deck AC
+        // excitation: all independent sources, magnitudes, and phases.
+        let ac_excitation_rhs = Self::build_ac_excitation_rhs(&circuit);
+
+        // One workspace reused across every noise-source transfer solve.
         let mut rhs = vec![Complex64::new(0.0, 0.0); size];
         let results: Result<Vec<NoiseResult>, SimulationError> = frequencies
             .iter()
@@ -1608,43 +1681,30 @@ impl Engine {
                 let mut ac_matrix =
                     Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
 
-                let input_gain_sq = if let Some(excitation) = input_excitation {
-                    rhs.fill(Complex64::new(0.0, 0.0));
-                    match excitation {
-                        InputExcitation::VoltageSource {
-                            branch_matrix_index,
-                        } => {
-                            if branch_matrix_index < rhs.len() {
-                                rhs[branch_matrix_index] = Complex64::new(1.0, 0.0);
-                            }
-                        }
-                        InputExcitation::CurrentSource { node_pos, node_neg } => {
-                            if node_pos > 0 && node_pos <= num_nodes {
-                                rhs[node_pos - 1] -= Complex64::new(1.0, 0.0);
-                            }
-                            if node_neg > 0 && node_neg <= num_nodes {
-                                rhs[node_neg - 1] += Complex64::new(1.0, 0.0);
-                            }
-                        }
-                    }
-
-                    let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                let ac_solution = ac_matrix
+                    .solve(&ac_excitation_rhs)
+                    .map_err(SimulationError::Solver)?;
+                let input_gain_sq = if has_input_source {
                     let gain = Self::differential_noise_output(
-                        &solution, output_pos, output_neg, num_nodes,
+                        &ac_solution,
+                        output_pos,
+                        output_neg,
+                        num_nodes,
                     );
-                    gain * gain
+                    let gain_sq = gain * gain;
+                    if !gain_sq.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Input-referred noise gain is non-finite for source '{}' at {} Hz",
+                            input_source.unwrap_or("<unknown>"),
+                            freq
+                        )));
+                    }
+                    // Xyce N_ANP_NOISE.C uses N_MINGAIN=1e-20 to retain a
+                    // finite input-referred spectrum at transfer nulls.
+                    gain_sq.max(1.0e-20)
                 } else {
                     1.0
                 };
-
-                if input_excitation.is_some() && (!input_gain_sq.is_finite() || input_gain_sq <= 1e-30)
-                {
-                    return Err(SimulationError::Circuit(format!(
-                        "Input-referred noise is undefined for source '{}' at {} Hz because the small-signal transfer to the selected output is zero or non-finite",
-                        input_source.unwrap_or("<unknown>"),
-                        freq
-                    )));
-                }
 
                 let mut total_noise_v2_hz = 0.0;
                 let mut contributions = Vec::new();
@@ -1752,8 +1812,12 @@ impl Engine {
 
                 Ok(NoiseResult {
                     frequency: freq,
+                    node_names: node_names.clone(),
+                    branch_names: branch_names.clone(),
+                    voltages: ac_solution[..num_nodes].to_vec(),
+                    currents: ac_solution[num_nodes..].to_vec(),
                     output_noise_density: total_noise_v2_hz,
-                    input_referred_density: if input_excitation.is_some() {
+                    input_referred_density: if has_input_source {
                         total_noise_v2_hz / input_gain_sq
                     } else {
                         total_noise_v2_hz
@@ -1771,6 +1835,84 @@ impl Engine {
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+
+    #[test]
+    fn noise_retains_the_canonical_multi_source_ac_solution() {
+        let netlist = Netlist::parse(
+            "Noise AC-observable parity\n\
+             VIN in 0 0 AC 2 30\n\
+             ITRIM out 0 0 AC 750u -40\n\
+             R1 in out 1k\n\
+             R2 out 0 2k\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let frequencies = [17.0, 2.5e6];
+        let engine = Engine::default();
+        let ac = engine
+            .run_ac(&netlist, &frequencies)
+            .expect("AC analysis runs");
+        let noise = engine
+            .run_noise_named_with_input_source(
+                &netlist,
+                "OUT",
+                Some("0"),
+                "vin",
+                &frequencies,
+                300.15,
+            )
+            .expect("named noise analysis runs");
+
+        assert_eq!(noise.len(), ac.len());
+        for (noise_point, ac_point) in noise.iter().zip(&ac) {
+            assert_eq!(noise_point.frequency, ac_point.frequency);
+            assert_eq!(noise_point.node_names, ac_point.node_names);
+            assert_eq!(noise_point.branch_names, ac_point.branch_names);
+            assert_eq!(noise_point.voltages.len(), ac_point.voltages.len());
+            assert_eq!(noise_point.currents.len(), ac_point.currents.len());
+            for (actual, expected) in noise_point.voltages.iter().zip(&ac_point.voltages) {
+                assert!(
+                    (*actual - *expected).norm() <= 1e-13 * expected.norm().max(1.0),
+                    "retained voltage {actual:?} differs from AC {expected:?}"
+                );
+            }
+            for (actual, expected) in noise_point.currents.iter().zip(&ac_point.currents) {
+                assert!(
+                    (*actual - *expected).norm() <= 1e-13 * expected.norm().max(1.0),
+                    "retained current {actual:?} differs from AC {expected:?}"
+                );
+            }
+
+            let output_index = noise_point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .expect("output name retained");
+            let gain_sq = noise_point.voltages[output_index].norm_sqr();
+            assert!(gain_sq > 0.0);
+            let expected_input_density = noise_point.output_noise_density / gain_sq;
+            assert!(
+                (noise_point.input_referred_density - expected_input_density).abs()
+                    <= 1e-13 * expected_input_density.max(f64::MIN_POSITIVE),
+                "input-referred density must use the full ordinary AC output phasor"
+            );
+        }
+    }
+
+    #[test]
+    fn named_noise_api_reports_an_unknown_output_node() {
+        let netlist = Netlist::parse(
+            "Unknown noise output\n\
+             V1 in 0 0 AC 1\n\
+             R1 in 0 1k\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let error = Engine::default()
+            .run_noise_named_with_input_source(&netlist, "missing", None, "V1", &[1.0e3], 300.15)
+            .expect_err("unknown output must fail");
+        assert!(error.to_string().contains("missing"));
+    }
 
     #[test]
     fn port_noise_correlation_is_hermitian_and_matches_a_series_resistor() {
