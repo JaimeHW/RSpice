@@ -12,10 +12,10 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalMetadata, CanonicalNoiseSourceKind, CompilerPhase,
     DerivativeLane, DerivativeLaneKind, DiagnosticSeverity, HirAnalogOperator, HirContributionKind,
-    HirExprKind, HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic,
-    MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptBinaryOp, OptDerivative,
-    OptEvalInputs, OptModel, OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType,
-    SourceSpanRef, StableDigest,
+    HirExprKind, HirExprRef, HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass,
+    IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptBinaryOp,
+    OptDerivative, OptEvalInputs, OptModel, OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind,
+    OptValueType, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -82,6 +82,8 @@ endmodule
     assert_eq!(sources[2].mechanism, "WHITE_BI_E_RCX_THERMAL_NOISE");
     assert_eq!(sources[0].kind, CanonicalNoiseSourceKind::White);
     assert_eq!(sources[1].kind, CanonicalNoiseSourceKind::Flicker);
+    assert!(sources[0].activation.is_none());
+    assert!(sources[1].activation.is_some());
     assert!(sources[1].exponent.is_some());
     assert_eq!(sources[3].kind, CanonicalNoiseSourceKind::Table);
     assert_eq!(sources[3].table.as_ref().unwrap().operands.len(), 4);
@@ -126,8 +128,143 @@ endmodule
             right,
         } if op == "Mul" && left == right
     ));
+    let guarded_amplitude = match guarded_square.kind {
+        HirExprKind::Binary { left, .. } => &artifact.hir.expressions[usize::from(left)],
+        _ => unreachable!("guarded square shape was asserted above"),
+    };
+    assert!(matches!(
+        guarded_amplitude.kind,
+        HirExprKind::Number { value, .. } if value == 1.0
+    ));
     assert_eq!(artifact.hir.expressions, artifact.mir.expressions);
     assert!(artifact.validate().is_ok());
+}
+
+#[test]
+fn canonical_noise_plan_retains_distinct_nested_then_else_activations() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module canonical_nested_noise_activation(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer outer = 1;
+    parameter integer inner = 0;
+    analog begin
+        I(p, n) <+ outer
+            ? (inner
+                ? white_noise(1.0, "then")
+                : white_noise(2.0, "inner else"))
+            : white_noise(3.0, "outer else");
+    end
+endmodule
+"#,
+        )
+        .expect("canonical nested noise activation plan");
+
+    let sources = &artifact.noise_sources.sources;
+    assert_eq!(sources.len(), 3);
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.label.as_deref().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["then", "inner else", "outer else"]
+    );
+
+    let expression = |source_index: usize| {
+        let activation = sources[source_index]
+            .activation
+            .as_ref()
+            .expect("guarded source has activation");
+        &artifact.hir.expressions[usize::from(activation.id)].kind
+    };
+    assert!(matches!(
+        expression(0),
+        HirExprKind::Binary { op, .. } if op == "And"
+    ));
+    assert!(matches!(
+        expression(1),
+        HirExprKind::Binary { op, right, .. }
+            if op == "And"
+                && matches!(
+                    artifact.hir.expressions[usize::from(*right)].kind,
+                    HirExprKind::Unary { ref op, .. } if op == "Not"
+                )
+    ));
+    assert!(matches!(
+        expression(2),
+        HirExprKind::Unary { op, .. } if op == "Not"
+    ));
+
+    for source in sources {
+        let psd = &artifact.hir.expressions[usize::from(source.psd.id)];
+        let HirExprKind::Binary { left, .. } = psd.kind else {
+            panic!("expected PSD multiply, got {:?}", psd.kind);
+        };
+        let square = &artifact.hir.expressions[usize::from(left)];
+        let HirExprKind::Binary {
+            ref op,
+            left,
+            right,
+        } = square.kind
+        else {
+            panic!("expected amplitude square, got {:?}", square.kind);
+        };
+        assert_eq!(op, "Mul");
+        assert_eq!(left, right);
+        assert!(matches!(
+            artifact.hir.expressions[usize::from(left)].kind,
+            HirExprKind::Number { value, .. } if value == 1.0
+        ));
+    }
+
+    assert_eq!(artifact.hir.expressions, artifact.mir.expressions);
+    assert!(artifact.validate().is_ok());
+}
+
+#[test]
+fn canonical_noise_plan_validation_rejects_missing_and_noisy_activations() {
+    let mut artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module canonical_noise_activation_validation(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enabled = 1;
+    analog I(p, n) <+ enabled ? white_noise(1.0, "guarded") : 0.0;
+endmodule
+"#,
+        )
+        .expect("canonical guarded noise plan");
+
+    let original_activation = artifact.noise_sources.sources[0]
+        .activation
+        .clone()
+        .expect("fixture has activation");
+    artifact.noise_sources.sources[0].activation = Some(HirExprRef {
+        id: ExprId::from(artifact.hir.expressions.len()),
+        ..original_activation.clone()
+    });
+    let diagnostics = artifact
+        .validate()
+        .expect_err("missing activation expression must fail validation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("activation references missing expression")
+    }));
+
+    artifact.noise_sources.sources[0].activation =
+        Some(artifact.mir.equations[0].expression.clone());
+    let diagnostics = artifact
+        .validate()
+        .expect_err("noisy activation expression must fail validation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("activation contains a noise function")
+    }));
 }
 
 #[test]

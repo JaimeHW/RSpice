@@ -38,6 +38,14 @@ pub struct CanonicalNoiseSource {
     pub branch_ordinal: Option<BranchUnknownId>,
     pub pos: CanonicalNoiseEndpoint,
     pub neg: CanonicalNoiseEndpoint,
+    /// Condition under which this source contributes during noise analysis.
+    ///
+    /// Semantic lowering flattens statement control flow into conditional
+    /// contribution expressions. Retaining that condition separately keeps
+    /// disabled source operands unevaluated instead of merely multiplying
+    /// their result by a numeric zero gate.
+    #[serde(default)]
+    pub activation: Option<HirExprRef>,
     pub psd: HirExprRef,
     pub exponent: Option<HirExprRef>,
     pub table: Option<CanonicalNoiseTable>,
@@ -155,6 +163,19 @@ impl CanonicalNoiseSourcePlan {
                 }
                 _ => {}
             }
+            if let Some(activation) = &source.activation {
+                if usize::from(activation.id) >= hir.expressions.len() {
+                    diagnostics.push(plan_error(format!(
+                        "canonical noise source {} activation references missing expression {}",
+                        source.id, activation.id
+                    )));
+                } else if contains_noise(hir, activation.id) {
+                    diagnostics.push(plan_error(format!(
+                        "canonical noise source {} activation contains a noise function",
+                        source.id
+                    )));
+                }
+            }
             let mut refs = vec![&source.psd];
             refs.extend(source.exponent.iter());
             if let Some(table) = &source.table {
@@ -199,6 +220,7 @@ fn extract_equation(
         hir,
         equation.expression.id,
         amplitude,
+        None,
         equation,
         is_current,
         branch_ordinal,
@@ -229,6 +251,7 @@ fn extract_expression(
     hir: &mut HirModel,
     expr: ExprId,
     amplitude: HirExprRef,
+    activation: Option<HirExprRef>,
     equation: &MirEquation,
     is_current: bool,
     branch_ordinal: Option<BranchUnknownId>,
@@ -261,6 +284,7 @@ fn extract_expression(
             branch_ordinal,
             pos: pos.clone(),
             neg: neg.clone(),
+            activation: activation.clone(),
             psd,
             exponent,
             table,
@@ -380,6 +404,7 @@ fn extract_expression(
                 hir,
                 *left,
                 amplitude.clone(),
+                activation.clone(),
                 equation,
                 is_current,
                 branch_ordinal,
@@ -391,6 +416,7 @@ fn extract_expression(
                 hir,
                 *right,
                 amplitude,
+                activation,
                 equation,
                 is_current,
                 branch_ordinal,
@@ -408,6 +434,7 @@ fn extract_expression(
                         hir,
                         *left,
                         scaled,
+                        activation,
                         equation,
                         is_current,
                         branch_ordinal,
@@ -422,6 +449,7 @@ fn extract_expression(
                         hir,
                         *right,
                         scaled,
+                        activation,
                         equation,
                         is_current,
                         branch_ordinal,
@@ -442,6 +470,7 @@ fn extract_expression(
                 hir,
                 *left,
                 scaled,
+                activation,
                 equation,
                 is_current,
                 branch_ordinal,
@@ -455,6 +484,7 @@ fn extract_expression(
                 hir,
                 *operand,
                 amplitude,
+                activation,
                 equation,
                 is_current,
                 branch_ordinal,
@@ -472,14 +502,13 @@ fn extract_expression(
                 return Err(unsupported("condition"));
             }
             if contains_noise(hir, *then_expr) {
-                let one = append_number(hir, 1.0, expression.span);
-                let zero = append_number(hir, 0.0, expression.span);
-                let gate = conditional(hir, *condition, one.id, zero.id, expression.span);
-                let scaled = multiply(hir, amplitude.id, gate.id, expression.span);
+                let branch_activation =
+                    combine_activation(hir, activation.clone(), *condition, false, expression.span);
                 extract_expression(
                     hir,
                     *then_expr,
-                    scaled,
+                    amplitude.clone(),
+                    Some(branch_activation),
                     equation,
                     is_current,
                     branch_ordinal,
@@ -489,14 +518,13 @@ fn extract_expression(
                 )?;
             }
             if contains_noise(hir, *else_expr) {
-                let zero = append_number(hir, 0.0, expression.span);
-                let one = append_number(hir, 1.0, expression.span);
-                let gate = conditional(hir, *condition, zero.id, one.id, expression.span);
-                let scaled = multiply(hir, amplitude.id, gate.id, expression.span);
+                let branch_activation =
+                    combine_activation(hir, activation, *condition, true, expression.span);
                 extract_expression(
                     hir,
                     *else_expr,
-                    scaled,
+                    amplitude,
+                    Some(branch_activation),
                     equation,
                     is_current,
                     branch_ordinal,
@@ -508,6 +536,24 @@ fn extract_expression(
             Ok(())
         }
         _ => Err(unsupported("nonlinear or dynamic position")),
+    }
+}
+
+fn combine_activation(
+    hir: &mut HirModel,
+    parent: Option<HirExprRef>,
+    condition: ExprId,
+    negate: bool,
+    span: SourceSpanRef,
+) -> HirExprRef {
+    let condition = if negate {
+        unary(hir, "Not", condition, span)
+    } else {
+        expr_ref(hir, condition)
+    };
+    match parent {
+        Some(parent) => binary(hir, "And", parent.id, condition.id, span),
+        None => condition,
     }
 }
 
@@ -534,21 +580,14 @@ fn binary(
     )
 }
 
-fn conditional(
-    hir: &mut HirModel,
-    condition: ExprId,
-    then_expr: ExprId,
-    else_expr: ExprId,
-    span: SourceSpanRef,
-) -> HirExprRef {
+fn unary(hir: &mut HirModel, op: &str, operand: ExprId, span: SourceSpanRef) -> HirExprRef {
     append_expression(
         hir,
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
+        HirExprKind::Unary {
+            op: op.into(),
+            operand,
         },
-        "conditional",
+        "unary",
         span,
     )
 }
@@ -617,7 +656,13 @@ fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
         if !visited.insert(expr) {
             continue;
         }
-        match &hir.expressions[usize::from(expr)].kind {
+        let Some(expression) = hir.expressions.get(usize::from(expr)) else {
+            // Arena integrity is diagnosed by HIR validation. Keep plan
+            // validation total so a malformed child reference cannot panic
+            // while gathering the complete artifact diagnostic set.
+            continue;
+        };
+        match &expression.kind {
             HirExprKind::NoiseSource { .. } => return true,
             HirExprKind::Call { name, .. } | HirExprKind::SystemFunction { name, .. }
                 if is_noise_call(name) =>
