@@ -55,18 +55,143 @@ impl Engine {
     }
 
     #[inline]
-    fn stamp_unit_noise_current_rhs(
-        rhs: &mut [Complex64],
-        node_pos: usize,
-        node_neg: usize,
-        num_nodes: usize,
-    ) {
-        if node_pos > 0 && node_pos <= num_nodes {
+    fn stamp_unit_noise_current_rhs(rhs: &mut [Complex64], node_pos: usize, node_neg: usize) {
+        // Noise current sources use one-based unified MNA unknown IDs. Ordinary
+        // current noise references node-voltage IDs; generated potential noise
+        // references its concrete branch-equation ID in the same namespace.
+        if node_pos > 0 && node_pos <= rhs.len() {
             rhs[node_pos - 1] += Complex64::new(1.0, 0.0);
         }
-        if node_neg > 0 && node_neg <= num_nodes {
+        if node_neg > 0 && node_neg <= rhs.len() {
             rhs[node_neg - 1] -= Complex64::new(1.0, 0.0);
         }
+    }
+
+    #[cfg(feature = "veriloga-builtins")]
+    fn generated_noise_source(
+        circuit: &CircuitData,
+        instance_name: &str,
+        source: crate::device::veriloga_generated::BuiltinEvaluatedNoiseSource,
+    ) -> Result<NoiseSource, SimulationError> {
+        use crate::device::veriloga_generated::{GeneratedNoiseInjection, GeneratedNoiseKind};
+
+        let descriptor = source.mapped.descriptor;
+        let evaluation = source.evaluation;
+        let invalid = |detail: String| {
+            SimulationError::Circuit(format!(
+                "Generated Verilog-A device '{instance_name}' noise mechanism '{}' is invalid: {detail}",
+                descriptor.mechanism
+            ))
+        };
+        let (node_pos, node_neg) = match source.mapped.injection {
+            GeneratedNoiseInjection::Current { node_pos, node_neg } => {
+                if node_pos > circuit.num_nodes() || node_neg > circuit.num_nodes() {
+                    return Err(invalid(format!(
+                        "mapped current endpoints ({node_pos}, {node_neg}) exceed the {} circuit nodes",
+                        circuit.num_nodes()
+                    )));
+                }
+                (node_pos, node_neg)
+            }
+            GeneratedNoiseInjection::Potential { branch } => {
+                if branch == 0 || branch > circuit.num_branches() {
+                    return Err(invalid(format!(
+                        "mapped potential branch {branch} is outside the {} circuit branches",
+                        circuit.num_branches()
+                    )));
+                }
+                (circuit.get_branch_matrix_index(branch), 0)
+            }
+        };
+        let display_name = format!(
+            "{instance_name}:{}",
+            descriptor.label.unwrap_or(descriptor.mechanism)
+        );
+
+        let noise = match descriptor.kind {
+            GeneratedNoiseKind::White => {
+                if descriptor.table_len != 0
+                    || evaluation.exponent.is_some()
+                    || !evaluation.table_operands.is_empty()
+                {
+                    return Err(invalid(
+                        "white noise carried flicker or table metadata".to_string(),
+                    ));
+                }
+                NoiseSource::white(display_name, node_pos, node_neg, evaluation.psd)
+            }
+            GeneratedNoiseKind::Flicker => {
+                if descriptor.table_len != 0 || !evaluation.table_operands.is_empty() {
+                    return Err(invalid("flicker noise carried table metadata".to_string()));
+                }
+                let exponent = if evaluation.active {
+                    evaluation.exponent.ok_or_else(|| {
+                        invalid("active flicker noise has no frequency exponent".to_string())
+                    })?
+                } else {
+                    evaluation.exponent.unwrap_or(1.0)
+                };
+                NoiseSource::flicker_psd(display_name, node_pos, node_neg, evaluation.psd, exponent)
+            }
+            GeneratedNoiseKind::Table => {
+                if evaluation.exponent.is_some() {
+                    return Err(invalid(
+                        "table noise carried a flicker exponent".to_string(),
+                    ));
+                }
+                let points = if evaluation.active {
+                    if descriptor.table_len == 0
+                        || !descriptor.table_len.is_multiple_of(2)
+                        || evaluation.table_operands.len() != descriptor.table_len
+                    {
+                        return Err(invalid(format!(
+                            "active table metadata declares {} operands and evaluated {}",
+                            descriptor.table_len,
+                            evaluation.table_operands.len()
+                        )));
+                    }
+                    let mut points = Vec::with_capacity(descriptor.table_len / 2);
+                    for pair in evaluation.table_operands.chunks_exact(2) {
+                        let frequency = pair[0];
+                        let power = pair[1];
+                        let valid = if descriptor.table_log_interp {
+                            frequency > 0.0 && power > 0.0
+                        } else {
+                            frequency >= 0.0 && power >= 0.0
+                        };
+                        if !valid {
+                            return Err(invalid(format!(
+                                "table point ({frequency}, {power}) violates {} interpolation requirements",
+                                if descriptor.table_log_interp {
+                                    "positive log-log"
+                                } else {
+                                    "nonnegative linear"
+                                }
+                            )));
+                        }
+                        points.push((frequency, power));
+                    }
+                    points.sort_by(|left, right| left.0.total_cmp(&right.0));
+                    points
+                } else {
+                    Vec::new()
+                };
+                NoiseSource::tabulated(
+                    display_name,
+                    node_pos,
+                    node_neg,
+                    evaluation.psd,
+                    points,
+                    descriptor.table_log_interp,
+                )
+            }
+        };
+        Ok(
+            noise.with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                instance_name,
+                descriptor.mechanism,
+            )),
+        )
     }
 
     #[inline]
@@ -725,6 +850,29 @@ impl Engine {
                         ef,
                     ),
                 });
+            }
+        }
+
+        #[cfg(feature = "veriloga-builtins")]
+        for device in circuit.generated_veriloga_devices().iter() {
+            let evaluated = device
+                .evaluate_noise_sources(
+                    dc_solution,
+                    circuit.num_nodes(),
+                    circuit.generated_simulation_parameters,
+                )
+                .map_err(|err| {
+                    SimulationError::Circuit(format!(
+                        "Generated Verilog-A device '{}' noise evaluation failed: {err}",
+                        device.instance_name
+                    ))
+                })?;
+            for source in evaluated {
+                noise_sources.push(Self::generated_noise_source(
+                    circuit,
+                    &device.instance_name,
+                    source,
+                )?);
             }
         }
 
@@ -1406,7 +1554,6 @@ impl Engine {
             branch_matrix_indices.push(matrix_index - 1);
         }
 
-        let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
         let num_ports = branch_matrix_indices.len();
         let zero = Complex64::new(0.0, 0.0);
@@ -1427,7 +1574,7 @@ impl Engine {
                                       node_neg: usize|
              -> Result<Vec<Complex64>, SimulationError> {
                 rhs.fill(zero);
-                Self::stamp_unit_noise_current_rhs(&mut rhs, node_pos, node_neg, num_nodes);
+                Self::stamp_unit_noise_current_rhs(&mut rhs, node_pos, node_neg);
                 let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
                 branch_matrix_indices
                     .iter()
@@ -1877,7 +2024,6 @@ impl Engine {
                             &mut rhs,
                             source.node_pos,
                             source.node_neg,
-                            num_nodes,
                         );
 
                         let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
@@ -1920,7 +2066,6 @@ impl Engine {
                         &mut rhs,
                         source.first.node_pos,
                         source.first.node_neg,
-                        num_nodes,
                     );
                     let first_solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
                     let first_gain = Self::differential_noise_output_complex(
@@ -1935,7 +2080,6 @@ impl Engine {
                         &mut rhs,
                         source.second.node_pos,
                         source.second.node_neg,
-                        num_nodes,
                     );
                     let second_solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
                     let second_gain = Self::differential_noise_output_complex(
@@ -1998,6 +2142,194 @@ impl Engine {
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+
+    #[test]
+    fn unit_noise_rhs_accepts_unified_branch_equation_ids() {
+        let mut rhs = vec![num_complex::Complex64::new(0.0, 0.0); 7];
+        Engine::stamp_unit_noise_current_rhs(&mut rhs, 7, 0);
+
+        assert_eq!(rhs[6], num_complex::Complex64::new(1.0, 0.0));
+        assert!(rhs[..6].iter().all(|value| *value == 0.0.into()));
+    }
+
+    #[cfg(feature = "veriloga-builtins")]
+    #[test]
+    fn generated_noise_translation_preserves_identity_table_and_potential_axis() {
+        use crate::analysis::{NoiseSourceIdentity, NoiseSourceType};
+        use crate::device::veriloga_generated::{
+            BuiltinEvaluatedNoiseSource, GeneratedMappedNoiseDescriptor, GeneratedNoiseDescriptor,
+            GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseInjection,
+            GeneratedNoiseKind,
+        };
+
+        let mut circuit = crate::CircuitData::new();
+        let positive = circuit.get_or_create_node("p");
+        let branch = circuit.allocate_branch();
+        let endpoint = GeneratedNoiseEndpoint {
+            local_node: Some(0),
+            name: "p",
+            is_internal: false,
+        };
+        let ground = GeneratedNoiseEndpoint {
+            local_node: None,
+            name: "GND",
+            is_internal: false,
+        };
+        let table_descriptor = GeneratedNoiseDescriptor {
+            mechanism: "TABLE_P_GND_CANONICAL",
+            label: Some("display label"),
+            kind: GeneratedNoiseKind::Table,
+            equation: 0,
+            is_current: true,
+            branch_ordinal: None,
+            pos: endpoint,
+            neg: ground,
+            table_len: 4,
+            table_log_interp: false,
+        };
+        let table = Engine::generated_noise_source(
+            &circuit,
+            "R1",
+            BuiltinEvaluatedNoiseSource {
+                mapped: GeneratedMappedNoiseDescriptor {
+                    descriptor: table_descriptor,
+                    injection: GeneratedNoiseInjection::Current {
+                        node_pos: positive,
+                        node_neg: 0,
+                    },
+                },
+                evaluation: GeneratedNoiseEvaluation {
+                    active: true,
+                    psd: 2.0,
+                    exponent: None,
+                    table_operands: vec![10.0, 4.0, 1.0, 2.0],
+                },
+            },
+        )
+        .expect("translate generated table noise");
+        assert_eq!(
+            table.identity,
+            NoiseSourceIdentity::mechanism("R1", "TABLE_P_GND_CANONICAL")
+        );
+        assert_eq!(table.noise_type, NoiseSourceType::Table);
+        assert_eq!(table.node_pos, positive);
+        assert_eq!(table.node_neg, 0);
+        assert_eq!(table.spectral_density(1.0, 300.15), 4.0);
+        assert_eq!(table.spectral_density(10.0, 300.15), 8.0);
+        let malformed = Engine::generated_noise_source(
+            &circuit,
+            "R1",
+            BuiltinEvaluatedNoiseSource {
+                mapped: GeneratedMappedNoiseDescriptor {
+                    descriptor: table_descriptor,
+                    injection: GeneratedNoiseInjection::Current {
+                        node_pos: positive,
+                        node_neg: 0,
+                    },
+                },
+                evaluation: GeneratedNoiseEvaluation {
+                    active: true,
+                    psd: 1.0,
+                    exponent: None,
+                    table_operands: vec![1.0, 2.0],
+                },
+            },
+        )
+        .expect_err("active generated tables must match their canonical operand count");
+        assert!(malformed.to_string().contains("declares 4 operands"));
+
+        let potential_descriptor = GeneratedNoiseDescriptor {
+            mechanism: "WHITE_P_GND_POTENTIAL",
+            label: None,
+            kind: GeneratedNoiseKind::White,
+            equation: 1,
+            is_current: false,
+            branch_ordinal: Some(0),
+            pos: endpoint,
+            neg: ground,
+            table_len: 0,
+            table_log_interp: false,
+        };
+        let potential = Engine::generated_noise_source(
+            &circuit,
+            "VNOISE",
+            BuiltinEvaluatedNoiseSource {
+                mapped: GeneratedMappedNoiseDescriptor {
+                    descriptor: potential_descriptor,
+                    injection: GeneratedNoiseInjection::Potential { branch },
+                },
+                evaluation: GeneratedNoiseEvaluation {
+                    active: true,
+                    psd: 3.0,
+                    exponent: None,
+                    table_operands: Vec::new(),
+                },
+            },
+        )
+        .expect("translate generated potential noise");
+        assert_eq!(
+            potential.node_pos,
+            circuit.num_nodes() + branch,
+            "potential noise uses the unified one-based branch equation ID"
+        );
+        let mut rhs = vec![num_complex::Complex64::new(0.0, 0.0); circuit.matrix_size()];
+        Engine::stamp_unit_noise_current_rhs(&mut rhs, potential.node_pos, potential.node_neg);
+        assert_eq!(
+            rhs[circuit.num_nodes() + branch - 1],
+            num_complex::Complex64::new(1.0, 0.0)
+        );
+    }
+
+    #[cfg(feature = "veriloga-builtins")]
+    #[test]
+    fn generated_r2_noise_catalog_retains_canonical_mechanisms() {
+        let netlist = Netlist::parse(
+            r#"
+v1 a 0 dc 1
+r1 a 0 rmod
+.model rmod r2_cmc r=1000 isnoisy=1
+.op
+.end
+"#,
+        )
+        .expect("R2 noise fixture parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("R2 circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("R2 matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("R2 operating point converges");
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(&solution);
+        }
+
+        let (sources, correlated) = Engine::collect_noise_sources(&circuit, &solution);
+        assert!(correlated.is_empty());
+        let r2_sources = sources
+            .iter()
+            .filter(|source| source.identity.device.eq_ignore_ascii_case("r1"))
+            .collect::<Vec<_>>();
+        assert_eq!(r2_sources.len(), 2, "R2 exports two canonical mechanisms");
+        let mechanisms = r2_sources
+            .iter()
+            .filter_map(|source| source.identity.mechanism.as_deref())
+            .collect::<std::collections::HashSet<_>>();
+        assert!(mechanisms.contains("WHITE_N1_N2_THERMAL"));
+        assert!(mechanisms.contains("FLICKER_N1_N2_FLICKER"));
+        assert!(r2_sources.iter().all(|source| source.node_neg == 0));
+        assert!(r2_sources.iter().all(|source| source.node_pos > 0));
+        assert!(
+            r2_sources
+                .iter()
+                .find(|source| {
+                    source.identity.mechanism.as_deref() == Some("WHITE_N1_N2_THERMAL")
+                })
+                .expect("thermal mechanism")
+                .parameter
+                > 0.0
+        );
+    }
 
     #[test]
     fn noise_retains_the_canonical_multi_source_ac_solution() {

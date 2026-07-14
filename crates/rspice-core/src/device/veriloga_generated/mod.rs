@@ -313,6 +313,62 @@ pub struct BuiltinVerilogAInstance {
 }
 
 #[cfg(feature = "veriloga-builtins")]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BuiltinEvaluatedNoiseSource {
+    pub mapped: GeneratedMappedNoiseDescriptor,
+    pub evaluation: GeneratedNoiseEvaluation,
+}
+
+#[cfg(feature = "veriloga-builtins")]
+#[derive(Debug)]
+pub(crate) enum BuiltinNoiseEvaluationError {
+    Topology {
+        index: usize,
+        mechanism: &'static str,
+        source: GeneratedNoiseTopologyError,
+    },
+    Evaluation {
+        index: usize,
+        mechanism: &'static str,
+        source: GeneratedNoiseEvaluationError,
+    },
+}
+
+#[cfg(feature = "veriloga-builtins")]
+impl std::fmt::Display for BuiltinNoiseEvaluationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Topology {
+                index,
+                mechanism,
+                source,
+            } => write!(
+                f,
+                "noise source {index} ('{mechanism}') has invalid topology: {source}"
+            ),
+            Self::Evaluation {
+                index,
+                mechanism,
+                source,
+            } => write!(
+                f,
+                "noise source {index} ('{mechanism}') evaluation failed: {source}"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "veriloga-builtins")]
+impl std::error::Error for BuiltinNoiseEvaluationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Topology { source, .. } => Some(source),
+            Self::Evaluation { source, .. } => Some(source),
+        }
+    }
+}
+
+#[cfg(feature = "veriloga-builtins")]
 impl std::fmt::Debug for BuiltinVerilogAInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BuiltinVerilogAInstance")
@@ -468,6 +524,47 @@ impl BuiltinVerilogAInstance {
     pub fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
         self.static_stamp_cache
             .link(matrix, &self.nodes, &self.branches, num_nodes);
+    }
+
+    pub(crate) fn evaluate_noise_sources(
+        &self,
+        voltages: &[Value],
+        num_nodes: usize,
+        simparams: GeneratedSimulationParameters,
+    ) -> Result<Vec<BuiltinEvaluatedNoiseSource>, BuiltinNoiseEvaluationError> {
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
+            voltages,
+            self.temperature,
+            num_nodes,
+            GeneratedAnalysisKind::Noise,
+            self.analysis_initial_step,
+            self.analysis_final_step,
+            simparams,
+        );
+        self.kind
+            .noise_descriptors()
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, descriptor)| {
+                let mapped = descriptor
+                    .map_topology(&self.nodes, &self.branches)
+                    .map_err(|source| BuiltinNoiseEvaluationError::Topology {
+                        index,
+                        mechanism: descriptor.mechanism,
+                        source,
+                    })?;
+                let evaluation =
+                    self.kind
+                        .evaluate_noise_source(index, &ctx)
+                        .map_err(|source| BuiltinNoiseEvaluationError::Evaluation {
+                            index,
+                            mechanism: descriptor.mechanism,
+                            source,
+                        })?;
+                Ok(BuiltinEvaluatedNoiseSource { mapped, evaluation })
+            })
+            .collect()
     }
 
     #[inline]
