@@ -3,7 +3,7 @@
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
     EquationId, ExprId, HirAnalogOperator, HirCrossDirection, HirExprKind, HirLaplaceKind,
-    HirZiKind, MirEquationKind, MirModel, NodeId,
+    HirLimiterArgument, HirZiKind, MirEquationKind, MirModel, NodeId,
 };
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
@@ -75,6 +75,8 @@ pub(crate) enum NativeOp {
     TableLookup(usize),
     TableDerivative(usize),
     LimitState(usize),
+    LimiterPrevious(usize),
+    LimiterStore(usize),
     LaplaceState(usize),
     ZiState(usize),
     TimerState(usize),
@@ -1037,7 +1039,8 @@ impl CanonicalStateOperator {
             | (Self::Cross, Instruction::LastCrossingState(slot)) => Some(*slot),
             (Self::Above, Instruction::AboveState(slot)) => Some(*slot),
             (Self::Timer, Instruction::TimerState(slot)) => Some(*slot),
-            (Self::Limit, Instruction::LimitState(slot)) => Some(*slot),
+            (Self::Limit, Instruction::LimitState(slot))
+            | (Self::Limit, Instruction::CanonicalLimitState(slot)) => Some(*slot),
             (Self::TableLookup, Instruction::TableLookup(slot)) => Some(*slot),
             _ => None,
         }
@@ -1065,6 +1068,7 @@ impl CanonicalStateOperator {
 
     fn matches_operator(self, op: &HirAnalogOperator) -> bool {
         match (self, op) {
+            (Self::Limit, HirAnalogOperator::Limit { .. }) => true,
             (Self::Ddt, HirAnalogOperator::Ddt { .. }) => true,
             (Self::Idt, HirAnalogOperator::Idt { .. }) => true,
             (Self::Idt, HirAnalogOperator::IdtMod { modulus: None, .. }) => true,
@@ -1464,6 +1468,19 @@ fn collect_canonical_state_operator_children(
     slots: &mut Vec<ExprId>,
 ) -> JitResult<()> {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => {
+            collect_canonical_state_exprs(model, mir, *proposed, operator, slots)?;
+            collect_canonical_state_exprs(model, mir, *candidate, operator, slots)?;
+            if let Some(type_metadata) = type_metadata {
+                collect_canonical_state_exprs(model, mir, *type_metadata, operator, slots)?;
+            }
+        }
+        HirAnalogOperator::LimiterArgument { .. } => {}
         HirAnalogOperator::Ddt { expr, abstol } => {
             collect_canonical_state_exprs(model, mir, *expr, operator, slots)?;
             if let Some(abstol) = abstol {
@@ -1842,6 +1859,12 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     ops.push(NativeOp::LimitState(*index));
+                }
+                Instruction::CanonicalLimitState(_) => {
+                    return Err(JitError::unsupported_native_coverage(
+                        model.clone(),
+                        "canonical-only named limiter metadata in a bytecode entry",
+                    ));
                 }
                 Instruction::LaplaceState(filter_id) => {
                     validate_index(
@@ -2632,6 +2655,14 @@ struct MirEquationLowerer<'a, 'limits> {
     max_stack_depth: usize,
     current_pair_dependencies: Vec<usize>,
     prior_current_dependencies: Vec<usize>,
+    limiter_context_stack: Vec<LimiterLoweringContext>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LimiterLoweringContext {
+    proposed: ExprId,
+    type_metadata: Option<ExprId>,
+    slot: usize,
 }
 
 impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
@@ -2653,6 +2684,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             max_stack_depth: 0,
             current_pair_dependencies: Vec::new(),
             prior_current_dependencies: Vec::new(),
+            limiter_context_stack: Vec::new(),
         }
     }
 
@@ -2761,6 +2793,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_analog_operator(&mut self, expr_id: ExprId, op: &HirAnalogOperator) -> JitResult<()> {
         match op {
+            HirAnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                selector,
+            } => self.lower_named_limit_operator(
+                expr_id,
+                *proposed,
+                *candidate,
+                *type_metadata,
+                selector,
+            ),
+            HirAnalogOperator::LimiterArgument { argument } => {
+                self.lower_limiter_argument(*argument)
+            }
             HirAnalogOperator::Ddt { expr, abstol } => {
                 self.lower_ddt_operator(expr_id, &[*expr], *abstol)
             }
@@ -2806,6 +2853,66 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirAnalogOperator::LastCrossing { expr, edge } => {
                 self.lower_last_crossing_operator(expr_id, *expr, *edge)
             }
+        }
+    }
+
+    fn lower_named_limit_operator(
+        &mut self,
+        expr_id: ExprId,
+        proposed: ExprId,
+        candidate: ExprId,
+        type_metadata: Option<ExprId>,
+        selector: &str,
+    ) -> JitResult<()> {
+        let Some(slot) = self.limits.canonical_limit_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "named limiter '{selector}' expression {expr_id} state slot"
+            )));
+        };
+
+        // Preserve the oriented proposal alongside the candidate so the
+        // runtime helper can both bypass limiting for probe/small-signal
+        // evaluation and report whether the limiter changed this Newton
+        // iterate.
+        self.lower_oriented_limiter_proposed(proposed, type_metadata)?;
+        self.limiter_context_stack.push(LimiterLoweringContext {
+            proposed,
+            type_metadata,
+            slot,
+        });
+        let candidate_result = self.lower(candidate);
+        self.limiter_context_stack.pop();
+        candidate_result?;
+        self.pop_binary("named limiter candidate publish")?;
+        self.ops.push(NativeOp::LimiterStore(slot));
+        Ok(())
+    }
+
+    fn lower_limiter_argument(&mut self, argument: HirLimiterArgument) -> JitResult<()> {
+        let Some(context) = self.limiter_context_stack.last().copied() else {
+            return Err(self.unsupported(format!(
+                "named limiter implicit {} argument escaped its limiter body",
+                limiter_argument_name(argument)
+            )));
+        };
+        self.lower_oriented_limiter_proposed(context.proposed, context.type_metadata)?;
+        if argument == HirLimiterArgument::Previous {
+            self.ops.push(NativeOp::LimiterPrevious(context.slot));
+        }
+        Ok(())
+    }
+
+    fn lower_oriented_limiter_proposed(
+        &mut self,
+        proposed: ExprId,
+        type_metadata: Option<ExprId>,
+    ) -> JitResult<()> {
+        if let Some(type_metadata) = type_metadata {
+            self.lower(type_metadata)?;
+            self.lower(proposed)?;
+            self.append_arithmetic("Mul")
+        } else {
+            self.lower(proposed)
         }
     }
 
@@ -3437,6 +3544,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<bool> {
         match op {
+            HirAnalogOperator::Limit {
+                proposed,
+                type_metadata: None,
+                ..
+            } => self.expr_derivative_is_zero(*proposed, wrt),
+            HirAnalogOperator::Limit {
+                type_metadata: Some(_),
+                ..
+            } => Ok(false),
+            HirAnalogOperator::LimiterArgument { argument } => Err(self.unsupported(format!(
+                "named limiter implicit {} derivative escaped its limiter body",
+                limiter_argument_name(*argument)
+            ))),
             HirAnalogOperator::Ddt { expr, .. }
             | HirAnalogOperator::Idt { expr, .. }
             | HirAnalogOperator::IdtMod { expr, .. }
@@ -3455,6 +3575,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         second: CanonicalDerivativeAxis,
     ) -> JitResult<bool> {
         match op {
+            HirAnalogOperator::Limit {
+                proposed,
+                type_metadata: None,
+                ..
+            } => self.expr_second_derivative_is_zero(*proposed, first, second),
+            HirAnalogOperator::Limit {
+                type_metadata: Some(_),
+                ..
+            } => Ok(false),
+            HirAnalogOperator::LimiterArgument { argument } => Err(self.unsupported(format!(
+                "named limiter implicit {} second derivative escaped its limiter body",
+                limiter_argument_name(*argument)
+            ))),
             HirAnalogOperator::Ddt { expr, .. }
             | HirAnalogOperator::Idt { expr, .. }
             | HirAnalogOperator::IdtMod { expr, .. }
@@ -5125,6 +5258,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         match op {
+            HirAnalogOperator::Limit {
+                proposed,
+                type_metadata,
+                ..
+            } => self.lower_oriented_limiter_proposed_derivative(*proposed, *type_metadata, wrt),
+            HirAnalogOperator::LimiterArgument { argument } => Err(self.unsupported(format!(
+                "named limiter implicit {} derivative escaped its limiter body",
+                limiter_argument_name(*argument)
+            ))),
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
                 self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))?;
@@ -5156,6 +5298,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         match op {
+            HirAnalogOperator::Limit {
+                proposed,
+                type_metadata,
+                ..
+            } => self.lower_oriented_limiter_proposed_second_derivative(
+                *proposed,
+                *type_metadata,
+                first,
+                second,
+            ),
+            HirAnalogOperator::LimiterArgument { argument } => Err(self.unsupported(format!(
+                "named limiter implicit {} second derivative escaped its limiter body",
+                limiter_argument_name(*argument)
+            ))),
             HirAnalogOperator::Limexp { expr } => self.lower_unary_function_second_derivative(
                 "limexp",
                 &[*expr],
@@ -5184,6 +5340,73 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 analog_operator_name(op)
             ))),
         }
+    }
+
+    fn lower_oriented_limiter_proposed_derivative(
+        &mut self,
+        proposed: ExprId,
+        type_metadata: Option<ExprId>,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let Some(type_metadata) = type_metadata else {
+            return self.lower_derivative(proposed, wrt);
+        };
+
+        let metadata_derivative_is_zero = self.expr_derivative_is_zero(type_metadata, wrt)?;
+        let proposed_derivative_is_zero = self.expr_derivative_is_zero(proposed, wrt)?;
+        match (metadata_derivative_is_zero, proposed_derivative_is_zero) {
+            (true, true) => self.push(NativeOp::Const(0.0)),
+            (true, false) => {
+                self.lower(type_metadata)?;
+                self.lower_derivative(proposed, wrt)?;
+                self.append_arithmetic("Mul")
+            }
+            (false, true) => {
+                self.lower_derivative(type_metadata, wrt)?;
+                self.lower(proposed)?;
+                self.append_arithmetic("Mul")
+            }
+            (false, false) => {
+                self.lower_derivative(type_metadata, wrt)?;
+                self.lower(proposed)?;
+                self.append_arithmetic("Mul")?;
+                self.lower(type_metadata)?;
+                self.lower_derivative(proposed, wrt)?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Add")
+            }
+        }
+    }
+
+    fn lower_oriented_limiter_proposed_second_derivative(
+        &mut self,
+        proposed: ExprId,
+        type_metadata: Option<ExprId>,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let Some(type_metadata) = type_metadata else {
+            return self.lower_second_derivative(proposed, first, second);
+        };
+
+        self.lower_second_derivative(type_metadata, first, second)?;
+        self.lower(proposed)?;
+        self.append_arithmetic("Mul")?;
+
+        self.lower_derivative(type_metadata, first)?;
+        self.lower_derivative(proposed, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_derivative(type_metadata, second)?;
+        self.lower_derivative(proposed, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower(type_metadata)?;
+        self.lower_second_derivative(proposed, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
     }
 
     fn lower_laplace_derivative(
@@ -7283,6 +7506,8 @@ fn expression_kind_name(kind: &HirExprKind) -> &'static str {
 
 fn analog_operator_name(op: &HirAnalogOperator) -> &'static str {
     match op {
+        HirAnalogOperator::Limit { .. } => "limit",
+        HirAnalogOperator::LimiterArgument { .. } => "limiter_argument",
         HirAnalogOperator::Ddt { .. } => "ddt",
         HirAnalogOperator::Idt { .. } => "idt",
         HirAnalogOperator::IdtMod { .. } => "idtmod",
@@ -7292,6 +7517,13 @@ fn analog_operator_name(op: &HirAnalogOperator) -> &'static str {
         HirAnalogOperator::Transition { .. } => "transition",
         HirAnalogOperator::Slew { .. } => "slew",
         HirAnalogOperator::LastCrossing { .. } => "last_crossing",
+    }
+}
+
+fn limiter_argument_name(argument: HirLimiterArgument) -> &'static str {
+    match argument {
+        HirLimiterArgument::Proposed => "proposed",
+        HirLimiterArgument::Previous => "previous",
     }
 }
 
@@ -7448,6 +7680,8 @@ fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::TableLookup(_) => "TableLookup",
         NativeOp::TableDerivative(_) => "TableDerivative",
         NativeOp::LimitState(_) => "LimitState",
+        NativeOp::LimiterPrevious(_) => "LimiterPrevious",
+        NativeOp::LimiterStore(_) => "LimiterStore",
         NativeOp::LaplaceState(_) => "LaplaceState",
         NativeOp::ZiState(_) => "ZiState",
         NativeOp::TimerState(_) => "TimerState",
@@ -8401,6 +8635,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::UnaryMath(_)
         | NativeOp::TableLookup(_)
         | NativeOp::TableDerivative(_)
+        | NativeOp::LimiterPrevious(_)
         | NativeOp::LaplaceState(_)
         | NativeOp::ZiState(_)
         | NativeOp::WhiteNoise
@@ -8417,6 +8652,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::Extremum(_)
         | NativeOp::BinaryMath(_)
         | NativeOp::IntegerBinary(_)
+        | NativeOp::LimiterStore(_)
         | NativeOp::LimitState(_)
         | NativeOp::AbsDelayState(_)
         | NativeOp::LastCrossingState(_)
@@ -8637,6 +8873,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::IdtJacobian => "IdtJacobian",
         Instruction::TableDerivative(_) => "TableDerivative",
         Instruction::LimitState(_) => "LimitState",
+        Instruction::CanonicalLimitState(_) => "CanonicalLimitState",
         Instruction::TableLookup(_) => "TableLookup",
         Instruction::AbsDelayState(_) => "AbsDelayState",
         Instruction::TransitionState(_) => "TransitionState",
@@ -9062,6 +9299,137 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_typed_named_limiter_with_previous_state_and_candidate_publish() {
+        let source = r#"
+module native_typed_limit(p, n);
+  inout p, n;
+  electrical p, n;
+  analog function real trunc_ev;
+    input proposed, previous, upper;
+    real proposed, previous, upper;
+    begin
+      if (proposed > previous + upper)
+        trunc_ev = previous + upper;
+      else
+        trunc_ev = proposed;
+    end
+  endfunction
+  analog I(p, n) <+ $limit(V(p, n), "trunc_ev", "typed", -1.0, 0.7);
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile named limiter canonical IR");
+        let equation = &artifact.mir.equations[0];
+        let limiter = artifact
+            .mir
+            .expressions
+            .iter()
+            .find(|expression| {
+                matches!(
+                    expression.kind,
+                    HirExprKind::AnalogOperator {
+                        op: HirAnalogOperator::Limit { .. }
+                    }
+                )
+            })
+            .expect("named limiter MIR expression");
+        let bytecode = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.7),
+                Instruction::LimitState(3),
+            ],
+        };
+        let slots = canonical_state_slots_for_expression(
+            "native_typed_limit".into(),
+            &artifact.mir,
+            equation.expression.id,
+            &bytecode,
+            CanonicalStateOperator::Limit,
+        )
+        .expect("map named limiter to compiled state slot");
+        assert_eq!(slots, vec![(limiter.id, 3)]);
+
+        let program = NativeProgram::from_mir_equation(
+            "native_typed_limit",
+            EntryKind::StampValue,
+            &artifact.mir,
+            equation.id,
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_limit_slots(&slots),
+        )
+        .expect("lower named limiter MIR to native ops");
+
+        assert!(
+            program.ops().contains(&NativeOp::LimiterPrevious(3)),
+            "candidate must read the previous Newton value: {:?}",
+            program.ops()
+        );
+        assert_eq!(
+            program.ops().last(),
+            Some(&NativeOp::LimiterStore(3)),
+            "candidate publication must be the final limiter operation"
+        );
+        assert!(
+            !program
+                .ops()
+                .iter()
+                .any(|op| matches!(op, NativeOp::LimitState(_))),
+            "a named limiter candidate is not a legacy step limit"
+        );
+    }
+
+    #[test]
+    fn named_limiter_jacobian_uses_oriented_proposed_expression() {
+        let source = r#"
+module native_affine_limit(p, n);
+  inout p, n;
+  electrical p, n;
+  analog function real force_value;
+    input proposed, previous, forced;
+    real proposed, previous, forced;
+    begin
+      force_value = forced;
+    end
+  endfunction
+  analog I(p, n) <+ $limit(V(p, n), "force_value", "typed", -1.0, 0.1);
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile affine named limiter canonical IR");
+        let equation = &artifact.mir.equations[0];
+
+        let positive = NativeProgram::from_mir_derivative(
+            "native_affine_limit",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            equation.id,
+            CanonicalDerivativeAxis::Node(NodeId::new(0)),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower positive-node limiter Jacobian");
+        let negative = NativeProgram::from_mir_derivative(
+            "native_affine_limit",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            equation.id,
+            CanonicalDerivativeAxis::Node(NodeId::new(1)),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower negative-node limiter Jacobian");
+
+        assert_eq!(positive.ops(), &[NativeOp::Const(-1.0)]);
+        assert_eq!(negative.ops(), &[NativeOp::Const(1.0)]);
+        assert!(
+            positive
+                .ops()
+                .iter()
+                .all(|op| !matches!(op, NativeOp::LimiterPrevious(_) | NativeOp::LimiterStore(_)))
+        );
     }
 
     #[test]

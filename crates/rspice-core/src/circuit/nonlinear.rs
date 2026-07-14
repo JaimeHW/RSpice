@@ -727,7 +727,15 @@ impl CircuitData {
         {
             let veriloga_devices = self.veriloga_devices_mut();
             veriloga_devices.update_all_voltages(voltages);
-            veriloga_devices.try_stamp_all(
+            let evaluation_mode = match diode_stamp_mode {
+                DiodeStampMode::LimitedNewton => {
+                    crate::device::veriloga::VerilogAEvaluationMode::NewtonLimited
+                }
+                DiodeStampMode::StaticProbe => {
+                    crate::device::veriloga::VerilogAEvaluationMode::StaticProbe
+                }
+            };
+            veriloga_devices.try_stamp_all_with_mode(
                 voltages,
                 |row, col, value| matrix.add(row, col, value),
                 |index, value| {
@@ -735,6 +743,7 @@ impl CircuitData {
                         *slot += value;
                     }
                 },
+                evaluation_mode,
             )?;
         }
         Ok(())
@@ -850,6 +859,10 @@ impl CircuitData {
         let generated_veriloga_converged = self.generated_veriloga_devices.all_converged();
         #[cfg(not(feature = "veriloga-builtins"))]
         let generated_veriloga_converged = true;
+        #[cfg(feature = "veriloga")]
+        let dynamic_veriloga_converged = self.veriloga_devices.all_converged();
+        #[cfg(not(feature = "veriloga"))]
+        let dynamic_veriloga_converged = true;
         self.diodes.all_converged(criteria)
             && self.bjts.all_converged(criteria)
             && self.mosfets.all_converged(criteria)
@@ -865,6 +878,7 @@ impl CircuitData {
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.xspice_converged(criteria.voltage_tolerance())
+            && dynamic_veriloga_converged
             && generated_veriloga_converged
     }
 

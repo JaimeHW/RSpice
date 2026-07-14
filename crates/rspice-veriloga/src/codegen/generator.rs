@@ -902,6 +902,13 @@ impl CodeGenerator {
                 let state_id = Self::allocate_slot(&self.limit_state_count);
                 program.instructions.push(Instruction::LimitState(state_id));
             }
+            IrExpr::CanonicalLimit(inner) => {
+                self.emit_expr(inner, emit_ctx, program)?;
+                let state_id = Self::allocate_slot(&self.limit_state_count);
+                program
+                    .instructions
+                    .push(Instruction::CanonicalLimitState(state_id));
+            }
             IrExpr::TableLookup {
                 input,
                 x_data,

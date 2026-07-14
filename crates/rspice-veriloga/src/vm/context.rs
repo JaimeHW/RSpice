@@ -112,6 +112,40 @@ impl Default for IntegrationCoefficients {
     }
 }
 
+/// Controls whether named Verilog-A limiter functions participate in an
+/// evaluation.
+///
+/// Newton assembly must use [`Self::NewtonLimited`]. Physical residual
+/// probes and small-signal analyses evaluate the unmodified proposal and do
+/// not read or update Newton limiter history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerilogAEvaluationMode {
+    NewtonLimited,
+    StaticProbe,
+    SmallSignal,
+}
+
+impl VerilogAEvaluationMode {
+    /// Select the production default for an analysis code
+    /// (0=dc, 1=ac, 2=tran, 3=noise, 4=ic).
+    pub const fn default_for_analysis(analysis_type: u8) -> Self {
+        match analysis_type {
+            1 | 3 => Self::SmallSignal,
+            _ => Self::NewtonLimited,
+        }
+    }
+
+    pub(crate) const fn limiting_enabled(self) -> bool {
+        matches!(self, Self::NewtonLimited)
+    }
+}
+
+impl Default for VerilogAEvaluationMode {
+    fn default() -> Self {
+        Self::NewtonLimited
+    }
+}
+
 /// Execution context providing runtime state to the VM.
 #[derive(Debug, Clone)]
 pub struct VmContext {
@@ -168,6 +202,11 @@ pub struct VmContext {
     pub cross_detectors: Vec<CrossDetector>,
     /// Current analysis type (0=dc, 1=ac, 2=tran, 3=noise)
     pub analysis_type: u8,
+    /// Limiter behavior for the current device evaluation.
+    pub evaluation_mode: VerilogAEvaluationMode,
+    /// Set when any named limiter changed its proposal during the latest
+    /// limited Newton evaluation.
+    pub(crate) limiter_active: u8,
     /// Whether the current evaluation is the first point of the analysis.
     pub analysis_initial_step: bool,
     /// Whether the current evaluation is the final point of the analysis.
@@ -211,6 +250,8 @@ impl Default for VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0, // DC by default
+            evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
+            limiter_active: 0,
             analysis_initial_step: false,
             analysis_final_step: false,
             laplace_filters: Vec::new(),
@@ -253,6 +294,8 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
+            limiter_active: 0,
             analysis_initial_step: false,
             analysis_final_step: false,
             laplace_filters: Vec::new(),
@@ -293,6 +336,8 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
+            limiter_active: 0,
             analysis_initial_step: false,
             analysis_final_step: false,
             laplace_filters: Vec::new(),
@@ -333,6 +378,8 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
+            limiter_active: 0,
             analysis_initial_step: false,
             analysis_final_step: false,
             laplace_filters: Vec::new(),
@@ -601,5 +648,37 @@ impl VmContext {
             self.variables.resize(index + 1, 0.0);
         }
         self.variables[index] = value;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VerilogAEvaluationMode;
+
+    #[test]
+    fn limiter_mode_defaults_are_analysis_safe() {
+        assert_eq!(
+            VerilogAEvaluationMode::default_for_analysis(0),
+            VerilogAEvaluationMode::NewtonLimited
+        );
+        assert_eq!(
+            VerilogAEvaluationMode::default_for_analysis(2),
+            VerilogAEvaluationMode::NewtonLimited
+        );
+        assert_eq!(
+            VerilogAEvaluationMode::default_for_analysis(4),
+            VerilogAEvaluationMode::NewtonLimited
+        );
+        assert_eq!(
+            VerilogAEvaluationMode::default_for_analysis(1),
+            VerilogAEvaluationMode::SmallSignal
+        );
+        assert_eq!(
+            VerilogAEvaluationMode::default_for_analysis(3),
+            VerilogAEvaluationMode::SmallSignal
+        );
+        assert!(VerilogAEvaluationMode::NewtonLimited.limiting_enabled());
+        assert!(!VerilogAEvaluationMode::StaticProbe.limiting_enabled());
+        assert!(!VerilogAEvaluationMode::SmallSignal.limiting_enabled());
     }
 }

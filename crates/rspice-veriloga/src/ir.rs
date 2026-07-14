@@ -263,6 +263,9 @@ pub enum IrExpr {
     /// Bounds the expression change per Newton iteration
     /// Args: (expression, step_limit)
     Limit(Box<IrExpr>, Option<Box<IrExpr>>),
+    /// Non-executable legacy-IR carrier used only to allocate and correlate a
+    /// named limiter's state slot for canonical native compilation.
+    CanonicalLimit(Box<IrExpr>),
     /// $table_model lookup table interpolation
     /// Args: (input_expr, table_data) where table_data is (x_values, y_values)
     TableLookup {
@@ -838,7 +841,8 @@ impl DeviceIR {
             | IrExpr::Ddt(e)
             | IrExpr::DdtCompanion(e)
             | IrExpr::IdtCompanion(e)
-            | IrExpr::Limit(e, _) => Self::contains_noise(e),
+            | IrExpr::Limit(e, _)
+            | IrExpr::CanonicalLimit(e) => Self::contains_noise(e),
             IrExpr::Idt(e, ic) => {
                 Self::contains_noise(e) || ic.as_deref().is_some_and(Self::contains_noise)
             }
@@ -1045,6 +1049,7 @@ impl DeviceIR {
                 IrExpr::Limit(inner, step) => {
                     contains_ddt(inner) || step.as_deref().is_some_and(contains_ddt)
                 }
+                IrExpr::CanonicalLimit(inner) => contains_ddt(inner),
                 IrExpr::Call(_, args) => args.iter().any(contains_ddt),
                 IrExpr::Conditional(c, t, e) => {
                     contains_ddt(c) || contains_ddt(t) || contains_ddt(e)
@@ -1689,7 +1694,7 @@ pub mod autodiff {
             IrExpr::Limexp(e) | IrExpr::Ddt(e) => recurse(e),
             IrExpr::Idt(e, _) => recurse(e),
             IrExpr::IdtMod { expr, .. } => recurse(expr),
-            IrExpr::Limit(e, _) => recurse(e),
+            IrExpr::Limit(e, _) | IrExpr::CanonicalLimit(e) => recurse(e),
             IrExpr::Call(func, args) => match func {
                 IrFunction::Floor | IrFunction::Ceil => 0,
                 _ => args.iter().map(recurse).fold(0, |acc, m| acc | m),
@@ -2365,6 +2370,7 @@ pub mod autodiff {
                 Box::new(map_expr(e, f)),
                 step.as_ref().map(|e| Box::new(map_expr(e, f))),
             ),
+            IrExpr::CanonicalLimit(e) => IrExpr::CanonicalLimit(Box::new(map_expr(e, f))),
             IrExpr::TableLookup {
                 input,
                 x_data,
@@ -2824,7 +2830,7 @@ pub mod autodiff {
             IrExpr::IdtMod { expr, .. } => IrExpr::IdtCompanion(Box::new(differentiate(expr))),
 
             // $limit passes its value through at convergence
-            IrExpr::Limit(inner, _) => differentiate(inner),
+            IrExpr::Limit(inner, _) | IrExpr::CanonicalLimit(inner) => differentiate(inner),
 
             // Table lookup: slope of the active segment times the inner
             // derivative

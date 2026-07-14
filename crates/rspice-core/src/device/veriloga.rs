@@ -41,7 +41,7 @@ pub use rspice_veriloga::{
     error::CompileError,
 
     // VM context for advanced usage
-    vm::VmContext,
+    vm::{VerilogAEvaluationMode, VmContext},
 };
 
 use crate::Value;
@@ -66,6 +66,15 @@ pub trait VerilogADeviceExt {
         rhs_add: impl FnMut(usize, Value),
     ) -> Result<(), String>;
 
+    /// Checked stamping with an explicit named-limiter evaluation policy.
+    fn try_stamp_into_matrix_with_mode(
+        &mut self,
+        circuit_voltages: &[Value],
+        matrix_add: impl FnMut(usize, usize, Value),
+        rhs_add: impl FnMut(usize, Value),
+        mode: VerilogAEvaluationMode,
+    ) -> Result<(), String>;
+
     /// Get the total number of nodes (terminals + internal)
     fn total_nodes(&self) -> usize;
 }
@@ -87,6 +96,17 @@ impl VerilogADeviceExt for VerilogADevice {
         rhs_add: impl FnMut(usize, Value),
     ) -> Result<(), String> {
         self.try_stamp(circuit_voltages, matrix_add, rhs_add)
+            .map_err(|err| format!("Verilog-A device '{}' stamping failed: {err}", self.name))
+    }
+
+    fn try_stamp_into_matrix_with_mode(
+        &mut self,
+        circuit_voltages: &[Value],
+        matrix_add: impl FnMut(usize, usize, Value),
+        rhs_add: impl FnMut(usize, Value),
+        mode: VerilogAEvaluationMode,
+    ) -> Result<(), String> {
+        self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
             .map_err(|err| format!("Verilog-A device '{}' stamping failed: {err}", self.name))
     }
 
@@ -178,17 +198,49 @@ impl VerilogADevices {
     pub fn try_stamp_all<M, R>(
         &mut self,
         circuit_voltages: &[Value],
+        matrix_add: M,
+        rhs_add: R,
+    ) -> Result<(), String>
+    where
+        M: FnMut(usize, usize, Value),
+        R: FnMut(usize, Value),
+    {
+        self.try_stamp_all_with_mode(
+            circuit_voltages,
+            matrix_add,
+            rhs_add,
+            VerilogAEvaluationMode::NewtonLimited,
+        )
+    }
+
+    /// Stamp every device with an explicit named-limiter evaluation policy.
+    pub fn try_stamp_all_with_mode<M, R>(
+        &mut self,
+        circuit_voltages: &[Value],
         mut matrix_add: M,
         mut rhs_add: R,
+        mode: VerilogAEvaluationMode,
     ) -> Result<(), String>
     where
         M: FnMut(usize, usize, Value),
         R: FnMut(usize, Value),
     {
         for device in &mut self.devices {
-            device.try_stamp_into_matrix(circuit_voltages, &mut matrix_add, &mut rhs_add)?;
+            device.try_stamp_into_matrix_with_mode(
+                circuit_voltages,
+                &mut matrix_add,
+                &mut rhs_add,
+                mode,
+            )?;
         }
         Ok(())
+    }
+
+    /// Whether every device's named limiters accepted their proposal during
+    /// the latest limited Newton stamp.
+    #[inline]
+    pub fn all_converged(&self) -> bool {
+        self.devices.iter().all(VerilogADevice::limiter_converged)
     }
 
     /// Get total number of internal nodes across all devices

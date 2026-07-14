@@ -6,15 +6,16 @@ use crate::native::abi::{
     rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native, rspice_exp,
     rspice_floor, rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native,
     rspice_idtmod_state_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
-    rspice_limexp, rspice_limited_exp, rspice_log, rspice_log10, rspice_mod,
-    rspice_native_current_probe_error, rspice_native_integer_shift_count_error,
-    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
-    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
-    rspice_native_loop_limit_error, rspice_native_param_given_error,
-    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
-    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_step_native,
+    rspice_limexp, rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native,
+    rspice_log, rspice_log10, rspice_mod, rspice_native_current_probe_error,
+    rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
+    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
+    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
+    rspice_native_param_given_error, rspice_native_port_connected_error,
+    rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
+    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
+    rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -381,6 +382,10 @@ impl FunctionCompiler {
                     self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
                 }
                 NativeOp::LimitState(index) => self.emit_limit_state(index)?,
+                NativeOp::LimiterPrevious(index) => {
+                    self.emit_limiter_state_helper(index, rspice_limiter_previous_native)?
+                }
+                NativeOp::LimiterStore(index) => self.emit_limiter_store(index)?,
                 NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
                 NativeOp::ZiState(filter_id) => self.emit_zi_state(filter_id)?,
                 NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
@@ -1751,6 +1756,43 @@ impl FunctionCompiler {
         self.emit_limit_state_error_return(rspice_native_limit_state_values_error);
 
         self.patch_rel32_to_current(done_after_initialized_store)?;
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_limiter_state_helper(
+        &mut self,
+        state_index: usize,
+        helper: ContextFilterHelper,
+    ) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "named limiter state helper requires stack depth 1, found 0".into(),
+            });
+        }
+        self.emit_context_filter_helper_call(XMM_STACK[self.depth - 1], state_index, helper)
+    }
+
+    fn emit_limiter_store(&mut self, state_index: usize) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "named limiter candidate publish requires stack depth 2, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+
+        let proposed = XMM_STACK[self.depth - 2];
+        self.emit_operand_context_filter_helper_call(
+            proposed,
+            2,
+            state_index,
+            rspice_limiter_store_native,
+        );
         self.depth -= 1;
         Ok(())
     }
@@ -3127,6 +3169,8 @@ fn native_op_uses_helper_call(op: &NativeOp) -> bool {
         NativeOp::BinaryMath(_)
             | NativeOp::TableLookup(_)
             | NativeOp::TableDerivative(_)
+            | NativeOp::LimiterPrevious(_)
+            | NativeOp::LimiterStore(_)
             | NativeOp::LaplaceState(_)
             | NativeOp::ZiState(_)
             | NativeOp::TimerState(_)
@@ -7399,6 +7443,89 @@ mod tests {
     }
 
     #[test]
+    fn generated_named_limiter_reads_previous_and_publishes_candidate() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(0),
+                NativeOp::LimiterPrevious(1),
+                NativeOp::Const(0.5),
+                NativeOp::Add,
+                NativeOp::LimiterStore(1),
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program).expect("compile named limiter value leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate named limiter value leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_initialized = [0_u8, 0_u8];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
+        let mut limiter_active = 0_u8;
+        ctx.limiter_active = &mut limiter_active;
+        ctx.limiting_enabled = 1;
+
+        let first_vars = [10.0_f64];
+        assert_eq!(f(&ctx, first_vars.as_ptr()).to_bits(), 10.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 10.5_f64.to_bits());
+        assert_eq!(state_initialized[1], 1);
+        assert_eq!(limiter_active, 1);
+
+        limiter_active = 0;
+        let second_vars = [20.0_f64];
+        assert_eq!(f(&ctx, second_vars.as_ptr()).to_bits(), 11.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 11.0_f64.to_bits());
+        assert_eq!(state_initialized[1], 1);
+        assert_eq!(limiter_active, 1);
+
+        limiter_active = 0;
+        ctx.limiting_enabled = 0;
+        let state_before_probe = state_values;
+        let probe_vars = [30.0_f64];
+        assert_eq!(f(&ctx, probe_vars.as_ptr()).to_bits(), 30.0_f64.to_bits());
+        assert_eq!(state_values, state_before_probe);
+        assert_eq!(state_initialized[1], 1);
+        assert_eq!(limiter_active, 0);
+        assert!(take_native_runtime_error().is_none());
+
+        let converged_program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(0),
+                NativeOp::LimiterStore(1),
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+        let converged_bytes =
+            compile_value_function(&converged_program).expect("compile converged limiter leaf");
+        let converged_memory =
+            ExecutableMemory::allocate(&converged_bytes).expect("allocate converged limiter leaf");
+        let converged_entry = converged_memory.ptr_at(0).expect("converged limiter entry");
+        let converged: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(converged_entry) };
+        ctx.limiting_enabled = 1;
+        limiter_active = 0;
+        let converged_vars = [4.0_f64];
+        assert_eq!(
+            converged(&ctx, converged_vars.as_ptr()).to_bits(),
+            4.0_f64.to_bits()
+        );
+        assert_eq!(state_values[1].to_bits(), 4.0_f64.to_bits());
+        assert_eq!(limiter_active, 0);
+    }
+
+    #[test]
     fn generated_value_leaf_computes_sqrt_in_place() {
         let program = native_program(
             EntryKind::StampValue,
@@ -11169,6 +11296,8 @@ mod tests {
             integration_older_value_scale: 0.0,
             integration_previous_derivative_scale: 0.0,
             integration_active: 0,
+            limiter_active: std::ptr::null_mut(),
+            limiting_enabled: 0,
         }
     }
 

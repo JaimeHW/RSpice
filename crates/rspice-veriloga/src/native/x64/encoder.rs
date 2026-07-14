@@ -1255,6 +1255,8 @@ mod tests {
             integration_older_value_scale: 0.0,
             integration_previous_derivative_scale: 0.0,
             integration_active: 0,
+            limiter_active: std::ptr::null_mut(),
+            limiting_enabled: 0,
         };
 
         let mut encoder = X64Encoder::new();

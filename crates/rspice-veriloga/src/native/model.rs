@@ -129,7 +129,7 @@ impl NativeRequiredStorage {
                     Instruction::DdtState(index)
                     | Instruction::IdtState(index)
                     | Instruction::IdtModState(index) => update_max(&mut max_state, *index),
-                    Instruction::LimitState(index) => {
+                    Instruction::LimitState(index) | Instruction::CanonicalLimitState(index) => {
                         update_max(&mut max_state, *index);
                         update_max(&mut max_limit_state, *index);
                     }
@@ -1600,6 +1600,8 @@ mod tests {
             integration_older_value_scale: 0.0,
             integration_previous_derivative_scale: 0.0,
             integration_active: 0,
+            limiter_active: std::ptr::null_mut(),
+            limiting_enabled: 0,
         }
     }
 }

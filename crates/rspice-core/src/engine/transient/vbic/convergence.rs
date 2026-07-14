@@ -156,6 +156,10 @@ impl Engine {
         let generated_veriloga_converged = circuit.generated_veriloga_devices.all_converged();
         #[cfg(not(feature = "veriloga-builtins"))]
         let generated_veriloga_converged = true;
+        #[cfg(feature = "veriloga")]
+        let dynamic_veriloga_converged = circuit.veriloga_devices.all_converged();
+        #[cfg(not(feature = "veriloga"))]
+        let dynamic_veriloga_converged = true;
 
         circuit.diodes.all_converged(criteria)
             && circuit.mosfets.all_converged(criteria)
@@ -164,6 +168,7 @@ impl Engine {
             && circuit.iswitches.iter().all(|sw| sw.is_converged(criteria))
             && circuit.xspice_converged(criteria.voltage_tolerance())
             && circuit.bjts.all_converged(criteria)
+            && dynamic_veriloga_converged
             && generated_veriloga_converged
     }
 

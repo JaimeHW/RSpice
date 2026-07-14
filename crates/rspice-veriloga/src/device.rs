@@ -400,7 +400,8 @@ impl VerilogADevice {
                     Instruction::DdtState(idx)
                     | Instruction::IdtState(idx)
                     | Instruction::IdtModState(idx)
-                    | Instruction::LimitState(idx) => update_max(&mut max_state, *idx),
+                    | Instruction::LimitState(idx)
+                    | Instruction::CanonicalLimitState(idx) => update_max(&mut max_state, *idx),
                     Instruction::AbsDelayState(idx) => update_max(&mut max_delay_buffer, *idx),
                     Instruction::TransitionState(idx) => {
                         update_max(&mut max_transition_filter, *idx)
@@ -1176,12 +1177,15 @@ impl VerilogADevice {
                 "analysis type must be one of 0=dc, 1=ac, 2=tran, 3=noise, or 4=ic, got {analysis}"
             )));
         }
+        let evaluation_mode = crate::vm::VerilogAEvaluationMode::default_for_analysis(analysis);
         if self.context.analysis_type == analysis {
+            self.context.evaluation_mode = evaluation_mode;
             return Ok(());
         }
 
         let previous = self.context.clone();
         self.context.analysis_type = analysis;
+        self.context.evaluation_mode = evaluation_mode;
         if let Err(error) = self.try_refresh_static_conditions() {
             self.context = previous;
             return Err(error);
@@ -1686,6 +1690,10 @@ impl VerilogADevice {
         M: FnMut(usize, usize, f64),
     {
         self.try_update_all_voltages(circuit_voltages)?;
+        // Reactive stamping is a small-signal surface. It must never advance
+        // Newton limiter history or replace the convergence result produced
+        // by the nonlinear value pass.
+        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
 
         let context = &mut self.context;
         let model = &self.model;
@@ -1843,6 +1851,18 @@ impl VerilogADevice {
     /// Checked evaluation path for callers that can surface runtime model
     /// errors as diagnostics instead of panicking.
     pub fn try_evaluate(&mut self) -> Result<Vec<f64>, VmError> {
+        let mode =
+            crate::vm::VerilogAEvaluationMode::default_for_analysis(self.context.analysis_type);
+        self.try_evaluate_with_mode(mode)
+    }
+
+    /// Evaluate with an explicit limiter policy. Static probes and
+    /// small-signal analyses bypass named limiter history.
+    pub fn try_evaluate_with_mode(
+        &mut self,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<Vec<f64>, VmError> {
+        self.begin_evaluation(mode);
         self.context.clear_currents();
         self.context.clear_timer_event_bound();
         // Pre-reserve so the currents pointer stays stable while native
@@ -1892,6 +1912,21 @@ impl VerilogADevice {
         }
 
         Ok(currents)
+    }
+
+    /// Whether no named limiter changed its proposal during the latest
+    /// limited Newton evaluation.
+    #[inline]
+    pub fn limiter_converged(&self) -> bool {
+        self.context.limiter_active == 0
+    }
+
+    #[inline]
+    fn begin_evaluation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
+        self.context.evaluation_mode = mode;
+        if mode.limiting_enabled() {
+            self.context.limiter_active = 0;
+        }
     }
 
     /// Build a native evaluation-context snapshot over the VM context.
@@ -1994,6 +2029,8 @@ impl VerilogADevice {
             integration_older_value_scale: context.integration.older_value_scale,
             integration_previous_derivative_scale: context.integration.previous_derivative_scale,
             integration_active: u8::from(context.integration.active),
+            limiter_active: &mut context.limiter_active,
+            limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
         }
     }
 
@@ -2538,6 +2575,12 @@ impl VerilogADevice {
     /// Checked Jacobian evaluation path for callers that can surface
     /// runtime model errors as diagnostics instead of panicking.
     pub fn try_compute_jacobian(&mut self) -> Result<Vec<JacobianEntry>, VmError> {
+        // A standalone Jacobian query belongs to the current nonlinear
+        // evaluation and must not erase the convergence result established by
+        // its value pass or advance limiter history a second time. Canonical
+        // limiter Jacobians use the oriented proposal directly, so bypassing
+        // candidate publication here preserves that contract.
+        self.context.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticProbe;
         let context = &mut self.context;
         let model = &self.model;
         #[cfg(feature = "native")]
@@ -2632,8 +2675,25 @@ impl VerilogADevice {
     pub fn try_stamp<M, R>(
         &mut self,
         circuit_voltages: &[f64],
+        matrix_add: M,
+        rhs_add: R,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        let mode =
+            crate::vm::VerilogAEvaluationMode::default_for_analysis(self.context.analysis_type);
+        self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
+    }
+
+    /// Checked stamping with an explicit named-limiter evaluation policy.
+    pub fn try_stamp_with_mode<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
         mut matrix_add: M,
         mut rhs_add: R,
+        mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<(), VmError>
     where
         M: FnMut(usize, usize, f64),
@@ -2642,6 +2702,7 @@ impl VerilogADevice {
         // Update context with the full solution (terminals, internal
         // nodes, and branch-current unknowns)
         self.try_update_all_voltages(circuit_voltages)?;
+        self.begin_evaluation(mode);
 
         // Extract disjoint fields to satisfy borrow checker
         let context = &mut self.context;
@@ -2856,6 +2917,7 @@ impl VerilogADevice {
         circuit_voltages: &[f64],
     ) -> Result<Vec<EvaluatedNoiseSource>, VmError> {
         self.try_update_all_voltages(circuit_voltages)?;
+        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
 
         let context = &mut self.context;
         let model = &self.model;
@@ -2949,6 +3011,7 @@ impl VerilogADevice {
         circuit_voltages: &[f64],
     ) -> Result<Vec<EvaluatedNoiseSource>, VmError> {
         self.try_update_all_voltages(circuit_voltages)?;
+        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
 
         let context = &mut self.context;
         let model = &self.model;
@@ -3440,6 +3503,137 @@ endmodule
                 .expect("canonical builder device evaluates"),
             vec![2.0]
         );
+    }
+
+    #[test]
+    fn named_limiter_device_modes_preserve_history_and_report_convergence() {
+        let source = r#"
+`include "disciplines.vams"
+module limiter_device_modes(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real force_value;
+        input proposed, previous, forced;
+        real proposed, previous, forced;
+        begin
+            force_value = forced;
+        end
+    endfunction
+    analog I(p, n) <+ $limit(V(p, n), "force_value", 0.1);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile limiter device model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile limiter device canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("LIMITMODES1", model, &artifact, &[1, 0])
+                .expect("build native limiter device");
+
+        device
+            .try_stamp_with_mode(
+                &[0.5],
+                |_, _, _| {},
+                |_, _| {},
+                crate::vm::VerilogAEvaluationMode::NewtonLimited,
+            )
+            .expect("limited Newton stamp");
+        assert_eq!(device.context.currents, vec![0.1]);
+        assert!(!device.limiter_converged());
+        let limited_history = device.context.state_values.clone();
+        let limited_initialized = device.context.state_initialized.clone();
+        assert!(limited_initialized.iter().any(|initialized| *initialized));
+
+        device
+            .try_compute_jacobian()
+            .expect("standalone Jacobian query after limited value pass");
+        assert_eq!(device.context.state_values, limited_history);
+        assert_eq!(device.context.state_initialized, limited_initialized);
+        assert!(
+            !device.limiter_converged(),
+            "standalone Jacobian evaluation must preserve the value-pass convergence result"
+        );
+
+        device
+            .try_stamp_with_mode(
+                &[0.8],
+                |_, _, _| {},
+                |_, _| {},
+                crate::vm::VerilogAEvaluationMode::StaticProbe,
+            )
+            .expect("static probe stamp");
+        assert_eq!(device.context.currents, vec![0.8]);
+        assert_eq!(device.context.state_values, limited_history);
+        assert_eq!(device.context.state_initialized, limited_initialized);
+        assert!(
+            !device.limiter_converged(),
+            "static probe must not rewrite the preceding Newton convergence result"
+        );
+
+        device
+            .try_stamp_with_mode(
+                &[0.9],
+                |_, _, _| {},
+                |_, _| {},
+                crate::vm::VerilogAEvaluationMode::SmallSignal,
+            )
+            .expect("small-signal stamp");
+        assert_eq!(device.context.currents, vec![0.9]);
+        assert_eq!(device.context.state_values, limited_history);
+        assert_eq!(device.context.state_initialized, limited_initialized);
+        assert!(!device.limiter_converged());
+
+        device
+            .try_stamp_with_mode(
+                &[0.1],
+                |_, _, _| {},
+                |_, _| {},
+                crate::vm::VerilogAEvaluationMode::NewtonLimited,
+            )
+            .expect("converged limited Newton stamp");
+        assert_eq!(device.context.currents, vec![0.1]);
+        assert!(
+            device.limiter_converged(),
+            "a new limited stamp must clear active once before its value and Jacobian passes"
+        );
+    }
+
+    #[cfg(feature = "native-bytecode-contract-tests")]
+    #[test]
+    fn named_limiter_bytecode_contract_construction_fails_closed() {
+        let source = r#"
+`include "disciplines.vams"
+module named_limiter_requires_canonical(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real force_value;
+        input proposed, previous, forced;
+        real proposed, previous, forced;
+        begin
+            force_value = forced;
+        end
+    endfunction
+    analog I(p, n) <+ $limit(V(p, n), "force_value", 0.1);
+endmodule
+"#;
+        let model = compile(source);
+        assert!(
+            model.stamp_programs.iter().any(|program| {
+                program
+                    .value_program
+                    .instructions
+                    .iter()
+                    .any(|instruction| matches!(instruction, Instruction::CanonicalLimitState(_)))
+            }),
+            "named limiter must carry an explicit non-executable canonical state marker"
+        );
+
+        let err = VerilogADevice::try_new("LIMITBYTECODE1", model, &[1, 0])
+            .expect_err("named limiter bytecode construction must fail closed");
+        assert_native_hard_fail(err, "canonical-only named limiter metadata");
     }
 
     #[cfg(feature = "native-bytecode-contract-tests")]

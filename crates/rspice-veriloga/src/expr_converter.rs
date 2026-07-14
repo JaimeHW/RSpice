@@ -1419,6 +1419,19 @@ impl<'a> ExprConverter<'a> {
     /// Convert an analog operator
     fn convert_analog_operator(&self, op: &AnalogOperator) -> CompileResult<IrExpr> {
         match op {
+            #[cfg(feature = "native")]
+            AnalogOperator::Limit { proposed, .. } => {
+                // The native runtime still consumes CompiledModel for
+                // topology and state-slot metadata, while the executable
+                // expression comes exclusively from canonical MIR. Emit a
+                // pass-through legacy limit solely to allocate the matching
+                // state slot; native construction requires every executable
+                // entry point to compile from canonical IR, so this bytecode
+                // is never a semantic fallback.
+                let proposed = self.convert(proposed)?;
+                Ok(IrExpr::CanonicalLimit(Box::new(proposed)))
+            }
+            #[cfg(not(feature = "native"))]
             AnalogOperator::Limit { selector, .. } => Err(CodeGenError::new(
                 CodeGenErrorKind::UnsupportedFeature(format!(
                     "stateful named $limit selector '{selector}' requires the canonical backend"

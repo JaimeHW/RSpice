@@ -722,6 +722,15 @@ fn canonical_analog_operator_contains_ddt(
     op: &HirAnalogOperator,
 ) -> JitResult<bool> {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => Ok(canonical_expr_contains_ddt(model, mir, *proposed)?
+            || canonical_expr_contains_ddt(model, mir, *candidate)?
+            || canonical_optional_expr_contains_ddt(model, mir, *type_metadata)?),
+        HirAnalogOperator::LimiterArgument { .. } => Ok(false),
         HirAnalogOperator::Ddt { .. } => Ok(true),
         HirAnalogOperator::Idt {
             expr,
@@ -1529,6 +1538,15 @@ fn canonical_analog_operator_contains_noise(
     op: &HirAnalogOperator,
 ) -> JitResult<bool> {
     match op {
+        HirAnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        } => Ok(canonical_expr_contains_noise(model, mir, *proposed)?
+            || canonical_expr_contains_noise(model, mir, *candidate)?
+            || canonical_optional_expr_contains_noise(model, mir, *type_metadata)?),
+        HirAnalogOperator::LimiterArgument { .. } => Ok(false),
         HirAnalogOperator::Ddt { expr, abstol } => {
             Ok(canonical_expr_contains_noise(model, mir, *expr)?
                 || canonical_optional_expr_contains_noise(model, mir, *abstol)?)
@@ -7756,7 +7774,8 @@ endmodule
                     Instruction::DdtState(idx)
                     | Instruction::IdtState(idx)
                     | Instruction::IdtModState(idx)
-                    | Instruction::LimitState(idx) => {
+                    | Instruction::LimitState(idx)
+                    | Instruction::CanonicalLimitState(idx) => {
                         update_max_slot(&mut max_state, *idx);
                     }
                     Instruction::AbsDelayState(idx) => {
@@ -7936,6 +7955,8 @@ endmodule
             integration_older_value_scale: context.integration.older_value_scale,
             integration_previous_derivative_scale: context.integration.previous_derivative_scale,
             integration_active: u8::from(context.integration.active),
+            limiter_active: &mut context.limiter_active,
+            limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
         }
     }
 
@@ -8257,6 +8278,8 @@ endmodule
             integration_older_value_scale: 0.0,
             integration_previous_derivative_scale: 0.0,
             integration_active: 0,
+            limiter_active: std::ptr::null_mut(),
+            limiting_enabled: 0,
         }
     }
 }

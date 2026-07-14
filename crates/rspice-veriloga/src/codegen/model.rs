@@ -392,6 +392,9 @@ pub enum Instruction {
     /// $limit function: bounds value change per iteration for convergence
     /// Uses state index to track previous value
     LimitState(usize),
+    /// Named-limiter state-slot metadata for canonical native compilation.
+    /// This instruction is deliberately non-executable.
+    CanonicalLimitState(usize),
     /// Lookup table interpolation: uses table_id to reference stored table
     /// Pops input value from stack, pushes interpolated result
     TableLookup(usize),

@@ -725,7 +725,8 @@ fn preallocate_context(context: &mut VmContext, model: &CompiledModel) {
                 Instruction::DdtState(idx)
                 | Instruction::IdtState(idx)
                 | Instruction::IdtModState(idx)
-                | Instruction::LimitState(idx) => update_max_slot(&mut max_state, *idx),
+                | Instruction::LimitState(idx)
+                | Instruction::CanonicalLimitState(idx) => update_max_slot(&mut max_state, *idx),
                 Instruction::AbsDelayState(idx) => update_max_slot(&mut max_delay_buffer, *idx),
                 Instruction::TransitionState(idx) => {
                     update_max_slot(&mut max_transition_filter, *idx);
@@ -901,6 +902,8 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         integration_older_value_scale: context.integration.older_value_scale,
         integration_previous_derivative_scale: context.integration.previous_derivative_scale,
         integration_active: u8::from(context.integration.active),
+        limiter_active: &mut context.limiter_active,
+        limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
     }
 }
 

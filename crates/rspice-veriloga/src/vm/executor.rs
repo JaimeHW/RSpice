@@ -453,6 +453,12 @@ impl<'a> Vm<'a> {
                 self.stack.push(limited_value);
             }
 
+            Instruction::CanonicalLimitState(_) => {
+                return Err(VmError::InvalidInstruction(
+                    "canonical-only named limiter metadata is non-executable; no interpreter fallback",
+                ));
+            }
+
             // TableLookup: linear interpolation in lookup table
             // Stack: [input_value] -> [interpolated_value]
             // Uses context.lookup_tables for table storage

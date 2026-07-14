@@ -108,6 +108,12 @@ pub struct EvalContext {
     pub integration_previous_derivative_scale: f64,
     /// Nonzero when transient integration is active.
     pub integration_active: u8,
+    /// Per-evaluation convergence flag set when a named limiter changes its
+    /// oriented proposal. Required when `limiting_enabled` is nonzero.
+    pub limiter_active: *mut u8,
+    /// Nonzero only for limited Newton assembly. Probe and small-signal
+    /// evaluation bypass limiter history entirely.
+    pub limiting_enabled: u8,
 }
 
 thread_local! {
@@ -171,6 +177,119 @@ pub extern "C" fn rspice_native_limit_state_bounds_error() {
     set_native_runtime_error(
         "native limit state index outside initialization flag storage; no interpreter fallback",
     );
+}
+
+unsafe fn native_limiter_storage(
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> Option<(*mut f64, *mut u8)> {
+    if ctx.is_null() {
+        rspice_native_limit_state_values_error();
+        return None;
+    }
+    let ctx = unsafe { &*ctx };
+    if ctx.state_values.is_null() {
+        rspice_native_limit_state_values_error();
+        return None;
+    }
+    if state_id >= ctx.state_values_len {
+        rspice_native_limit_state_values_bounds_error();
+        return None;
+    }
+    if ctx.state_initialized.is_null() {
+        rspice_native_limit_state_initialized_error();
+        return None;
+    }
+    if state_id >= ctx.state_initialized_len {
+        rspice_native_limit_state_bounds_error();
+        return None;
+    }
+    Some((unsafe { ctx.state_values.add(state_id) }, unsafe {
+        ctx.state_initialized.add(state_id)
+    }))
+}
+
+/// Read the previous Newton value for a named limiter, or use the oriented
+/// proposed value before that limiter has produced its first candidate.
+///
+/// # Safety
+/// `ctx` must either be null (which records a native runtime error) or point to
+/// a live [`EvalContext`] whose limiter state buffers remain valid for the
+/// duration of this call.
+#[unsafe(export_name = "rspice_limiter_previous_native")]
+pub unsafe extern "C" fn rspice_limiter_previous_native(
+    proposed: f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    if ctx.is_null() {
+        rspice_native_limit_state_values_error();
+        return 0.0;
+    }
+    if unsafe { (*ctx).limiting_enabled } == 0 {
+        return proposed;
+    }
+
+    let Some((state_value, initialized)) = (unsafe { native_limiter_storage(ctx, state_id) })
+    else {
+        return 0.0;
+    };
+    if unsafe { *initialized } == 0 {
+        proposed
+    } else {
+        unsafe { *state_value }
+    }
+}
+
+/// Publish a named limiter candidate as the previous value for the next
+/// Newton evaluation and mark whether it differs from its oriented proposal.
+/// Probe and small-signal evaluations return the proposal without reading or
+/// mutating limiter state.
+///
+/// # Safety
+/// `ctx` must either be null (which records a native runtime error) or point to
+/// a live [`EvalContext`] whose limiter state buffers remain valid for the
+/// duration of this call.
+#[unsafe(export_name = "rspice_limiter_store_native")]
+pub unsafe extern "C" fn rspice_limiter_store_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_runtime_error(
+            "native named limiter candidate publish missing operands; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    if ctx.is_null() {
+        rspice_native_limit_state_values_error();
+        return 0.0;
+    }
+
+    let proposed = unsafe { *operands };
+    if unsafe { (*ctx).limiting_enabled } == 0 {
+        return proposed;
+    }
+
+    let limiter_active = unsafe { (*ctx).limiter_active };
+    if limiter_active.is_null() {
+        set_native_runtime_error(
+            "native named limiter missing convergence storage; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let Some((state_value, initialized)) = (unsafe { native_limiter_storage(ctx, state_id) })
+    else {
+        return 0.0;
+    };
+    let candidate = unsafe { *operands.add(1) };
+    unsafe {
+        *limiter_active |= u8::from(candidate != proposed);
+        *state_value = candidate;
+        *initialized = 1;
+    }
+    candidate
 }
 
 #[unsafe(export_name = "rspice_native_state_values_error")]
@@ -1476,9 +1595,10 @@ mod tests {
         rspice_absdelay_state_native, rspice_cross_state_native, rspice_current_lookup,
         rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native,
         rspice_laplace_step, rspice_laplace_step_native, rspice_last_crossing_state_native,
-        rspice_limit, rspice_slew_state_native, rspice_table_derivative_native,
-        rspice_table_lookup, rspice_table_lookup_native, rspice_timer_state_native,
-        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
+        rspice_limit, rspice_limiter_previous_native, rspice_limiter_store_native,
+        rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup,
+        rspice_table_lookup_native, rspice_timer_state_native, rspice_transition_state_native,
+        rspice_zi_step_native, take_native_runtime_error,
     };
     use crate::codegen::LookupTable;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -1541,8 +1661,67 @@ mod tests {
             368
         );
         assert_eq!(offset_of!(EvalContext, integration_active), 376);
-        assert_eq!(size_of::<EvalContext>(), 384);
+        assert_eq!(offset_of!(EvalContext, limiter_active), 384);
+        assert_eq!(offset_of!(EvalContext, limiting_enabled), 392);
+        assert_eq!(size_of::<EvalContext>(), 400);
         assert_eq!(align_of::<EvalContext>(), 8);
+    }
+
+    #[test]
+    fn named_limiter_helpers_bypass_state_outside_limited_newton() {
+        let mut ctx = empty_eval_context();
+        ctx.limiting_enabled = 0;
+        clear_native_runtime_error();
+
+        assert_eq!(
+            unsafe { rspice_limiter_previous_native(3.5, &ctx, usize::MAX) }.to_bits(),
+            3.5_f64.to_bits()
+        );
+        let operands = [3.5, 9.0];
+        assert_eq!(
+            unsafe { rspice_limiter_store_native(operands.as_ptr(), &ctx, usize::MAX) }.to_bits(),
+            3.5_f64.to_bits()
+        );
+        assert!(
+            take_native_runtime_error().is_none(),
+            "probe and small-signal limiter bypass must not require state storage"
+        );
+    }
+
+    #[test]
+    fn named_limiter_helpers_publish_state_and_convergence() {
+        let mut state_values = [0.0_f64];
+        let mut state_initialized = [0_u8];
+        let mut limiter_active = 0_u8;
+        let mut ctx = empty_eval_context();
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
+        ctx.limiter_active = &mut limiter_active;
+        ctx.limiting_enabled = 1;
+
+        assert_eq!(
+            unsafe { rspice_limiter_previous_native(3.5, &ctx, 0) }.to_bits(),
+            3.5_f64.to_bits()
+        );
+        let changed = [3.5, 4.0];
+        assert_eq!(
+            unsafe { rspice_limiter_store_native(changed.as_ptr(), &ctx, 0) }.to_bits(),
+            4.0_f64.to_bits()
+        );
+        assert_eq!(state_values[0].to_bits(), 4.0_f64.to_bits());
+        assert_eq!(state_initialized[0], 1);
+        assert_eq!(limiter_active, 1);
+
+        limiter_active = 0;
+        let unchanged = [4.0, 4.0];
+        assert_eq!(
+            unsafe { rspice_limiter_store_native(unchanged.as_ptr(), &ctx, 0) }.to_bits(),
+            4.0_f64.to_bits()
+        );
+        assert_eq!(limiter_active, 0);
+        assert!(take_native_runtime_error().is_none());
     }
 
     #[test]
@@ -1734,6 +1913,8 @@ mod tests {
             integration_older_value_scale: 0.0,
             integration_previous_derivative_scale: 0.0,
             integration_active: 0,
+            limiter_active: std::ptr::null_mut(),
+            limiting_enabled: 0,
         };
 
         assert_eq!(
@@ -2446,6 +2627,8 @@ mod tests {
             integration_older_value_scale: 0.0,
             integration_previous_derivative_scale: 0.0,
             integration_active: 0,
+            limiter_active: std::ptr::null_mut(),
+            limiting_enabled: 0,
         }
     }
 }

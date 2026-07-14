@@ -10,8 +10,8 @@ mod executor;
 mod filters;
 
 pub use context::{
-    CURRENT_PAIR_GROUND, IntegrationCoefficients, VmContext, terminal_pair_current_endpoints,
-    terminal_pair_current_index,
+    CURRENT_PAIR_GROUND, IntegrationCoefficients, VerilogAEvaluationMode, VmContext,
+    terminal_pair_current_endpoints, terminal_pair_current_index,
 };
 pub use error::VmError;
 pub use executor::Vm;
