@@ -401,6 +401,20 @@ impl ParamContext {
         self.functions.get(&name.to_uppercase())
     }
 
+    /// Return the numeric parameter bindings in deterministic name order.
+    ///
+    /// This is used by analyses whose parameter context can vary at every
+    /// accepted point, such as Xyce `.DC DATA` table rows.
+    pub fn numeric_parameters(&self) -> Vec<(String, Value)> {
+        let mut values = self
+            .params
+            .iter()
+            .map(|(name, value)| (name.clone(), *value))
+            .collect::<Vec<_>>();
+        values.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        values
+    }
+
     /// Number of user-defined functions in this scope. Behavioral lowering
     /// uses this to enable eager constant folding for large function graphs,
     /// preventing repeated argument substitution from multiplying static ASTs.

@@ -5684,6 +5684,21 @@ fn test_xyce_dc_data_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_stepped_dc_data_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_DC/STEP/DotData.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should evaluate and reset the one-based DC DATA row axis for every outer step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_stepped_dc_error_function_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

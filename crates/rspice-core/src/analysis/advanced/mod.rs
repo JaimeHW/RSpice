@@ -45,9 +45,9 @@ pub use measure::{
 pub use measure_signals::{
     AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,
     evaluate_ac_equation_measurements, evaluate_ac_measurements, evaluate_dc_equation_measurements,
-    evaluate_dc_measurements, evaluate_noise_measurements, evaluate_tran_equation_measurements,
-    evaluate_tran_measurements, measurements_for_analysis, transient_signal_map,
-    unevaluated_measurements,
+    evaluate_dc_measurements, evaluate_dc_measurements_with_parameter_contexts,
+    evaluate_noise_measurements, evaluate_tran_equation_measurements, evaluate_tran_measurements,
+    measurements_for_analysis, transient_signal_map, unevaluated_measurements,
 };
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,

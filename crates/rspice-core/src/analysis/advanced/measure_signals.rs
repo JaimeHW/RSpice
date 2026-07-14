@@ -1123,6 +1123,17 @@ pub fn evaluate_dc_measurements(
     netlist: &Netlist,
     sweep: &[(Value, SimulationResult)],
 ) -> Vec<MeasureResult> {
+    evaluate_dc_measurements_with_parameter_contexts(netlist, sweep, &[])
+}
+
+/// Evaluate DC measurements with an optional parameter context for every
+/// accepted point. This preserves `.DC DATA` semantics when table columns
+/// change parameters (and dependent parameters) from row to row.
+pub fn evaluate_dc_measurements_with_parameter_contexts(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+    point_params: &[crate::netlist::ParamContext],
+) -> Vec<MeasureResult> {
     let statements = measurements_for_analysis(netlist, "DC");
     if statements.is_empty() {
         return Vec::new();
@@ -1140,6 +1151,24 @@ pub fn evaluate_dc_measurements(
             .collect();
     };
     let mut signals = series.signal_map();
+    let parameter_series = if point_params.is_empty() {
+        Vec::new()
+    } else if point_params.len() != series.axis().len() {
+        return statements
+            .iter()
+            .map(|statement| {
+                MeasureResult::failed(
+                    &statement.name,
+                    "DC point-parameter context count does not match sweep length",
+                )
+            })
+            .collect();
+    } else {
+        dc_parameter_context_series(point_params)
+    };
+    for (name, waveform) in &parameter_series {
+        insert_case_variants(&mut signals, name, waveform);
+    }
     let differential_signals =
         materialize_differential_voltage_signals(&statements, series.axis().len(), &signals);
     for (name, waveform) in &differential_signals {
@@ -1147,7 +1176,14 @@ pub fn evaluate_dc_measurements(
     }
     // Continuous equation measures are live waveforms, not merely final
     // scalars. Their visibility at each statement depends on netlist order.
-    let equation_traces = evaluate_dc_equation_measurements(netlist, sweep);
+    let equation_traces = evaluate_equation_measurements(
+        netlist,
+        "DC",
+        series.axis(),
+        &signals,
+        0.0,
+        Some(dc_primary_sweep_is_ascending(netlist, series.axis())),
+    );
     let segment_starts = dc_primary_segment_starts(netlist, series.axis().len());
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_dc_statements_with_equation_traces(
@@ -1169,6 +1205,30 @@ pub fn evaluate_dc_measurements(
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "DC");
     results
+}
+
+fn dc_parameter_context_series(
+    point_params: &[crate::netlist::ParamContext],
+) -> Vec<(String, Vec<Value>)> {
+    let mut names = std::collections::BTreeSet::new();
+    for context in point_params {
+        names.extend(
+            context
+                .numeric_parameters()
+                .into_iter()
+                .map(|(name, _)| name),
+        );
+    }
+    names
+        .into_iter()
+        .filter_map(|name| {
+            point_params
+                .iter()
+                .map(|context| context.get(&name))
+                .collect::<Option<Vec<_>>>()
+                .map(|values| (name, values))
+        })
+        .collect()
 }
 
 fn dc_primary_segment_starts(netlist: &Netlist, point_count: usize) -> Vec<usize> {
@@ -1494,6 +1554,41 @@ mod tests {
         let results = evaluate_dc_measurements(&netlist, &[(0.0, point)]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].value, Some(1.0));
+        assert!(results[0].passed);
+    }
+
+    #[test]
+    fn dc_measurements_observe_point_local_parameter_contexts() {
+        let netlist = Netlist::parse(
+            "row-local parameters\n\
+             .param P=0\n\
+             V1 out 0 0\n\
+             .dc V1 1 2 1\n\
+             .measure dc average AVG {P}\n\
+             .end\n",
+        )
+        .expect("parameter measurement deck parses");
+        let sweep = [1.0, 2.0]
+            .into_iter()
+            .map(|axis| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, 0.0];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis, point)
+            })
+            .collect::<Vec<_>>();
+        let contexts = [1.0, 2.0]
+            .into_iter()
+            .map(|value| {
+                let mut params = netlist.params.clone();
+                params.set("P", value);
+                params
+            })
+            .collect::<Vec<_>>();
+
+        let results = evaluate_dc_measurements_with_parameter_contexts(&netlist, &sweep, &contexts);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, Some(1.5));
         assert!(results[0].passed);
     }
 

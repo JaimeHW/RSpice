@@ -3339,12 +3339,6 @@ impl XyceTestRunner {
             None => Self::single_dc_sweep(&netlist)?,
         };
         let steps = Self::step_commands(&netlist)?;
-        if dc_data.is_some() && !steps.is_empty() {
-            return Err(
-                ".STEP combined with .DC DATA is not covered by the native static DC adapter yet"
-                    .to_string(),
-            );
-        }
         if let Some(dc_data) = &dc_data {
             Self::validate_static_dc_data_contract(&netlist, dc_data, &print)?;
         } else {
@@ -7107,10 +7101,16 @@ impl XyceTestRunner {
                     .iter()
                     .map(|row| (row.point.sweep_value, row.point.result.clone()))
                     .collect::<Vec<_>>();
-                let measurements = crate::analysis::advanced::evaluate_dc_measurements(
-                    &netlist,
-                    &measurement_sweep,
-                );
+                let point_params = results
+                    .iter()
+                    .map(|row| row.netlist.params.clone())
+                    .collect::<Vec<_>>();
+                let measurements =
+                    crate::analysis::advanced::evaluate_dc_measurements_with_parameter_contexts(
+                        &netlist,
+                        &measurement_sweep,
+                        &point_params,
+                    );
                 match self.compare_measurement_references(
                     &plan.measurement_reference_paths,
                     &measurements,
@@ -8733,61 +8733,119 @@ impl XyceTestRunner {
             .zip(&plan.measurement_reference_paths)
             .enumerate()
         {
-            let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
-                &run.netlist,
-                &plan.dc.source,
-                &plan.dc.primary_spec(),
-                plan.dc.sweep2.as_ref(),
-                &abort,
-            ) {
-                Ok(results) => results,
-                Err(SimulationError::Aborted) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!(
-                            "simulation exceeded timeout ({}ms)",
-                            self.config.max_time_per_test_ms
-                        ),
-                        Vec::new(),
-                    );
+            let (measurement_sweep, point_params) = if let Some(dc_data) = &plan.dc_data {
+                match self.run_static_dc_data_results(&run.netlist, dc_data, start) {
+                    Ok(results) => (
+                        results
+                            .iter()
+                            .map(|row| (row.point.sweep_value, row.point.result.clone()))
+                            .collect::<Vec<_>>(),
+                        results
+                            .iter()
+                            .map(|row| row.netlist.params.clone())
+                            .collect::<Vec<_>>(),
+                    ),
+                    Err(SimulationError::Aborted) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "simulation exceeded timeout ({}ms)",
+                                self.config.max_time_per_test_ms
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                    Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                        return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            "unsupported_xyce_runtime",
+                            &format!(
+                                "RSpice runtime does not yet support DC DATA step {}: {err}",
+                                step_index + 1
+                            ),
+                        );
+                    }
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("simulation error in DC DATA step {}: {err}", step_index + 1),
+                            Vec::new(),
+                        );
+                    }
                 }
-                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_runtime",
-                        &format!(
-                            "RSpice runtime does not yet support DC step {}: {err}",
-                            step_index + 1
-                        ),
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("simulation error in DC step {}: {err}", step_index + 1),
+            } else {
+                match engine.run_dc_sweep2_spec_with_report_and_abort(
+                    &run.netlist,
+                    &plan.dc.source,
+                    &plan.dc.primary_spec(),
+                    plan.dc.sweep2.as_ref(),
+                    &abort,
+                ) {
+                    Ok(results) => (
+                        results
+                            .iter()
+                            .map(|point| (point.sweep_value, point.result.clone()))
+                            .collect::<Vec<_>>(),
                         Vec::new(),
-                    );
+                    ),
+                    Err(SimulationError::Aborted) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "simulation exceeded timeout ({}ms)",
+                                self.config.max_time_per_test_ms
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                    Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                        return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            "unsupported_xyce_runtime",
+                            &format!(
+                                "RSpice runtime does not yet support DC step {}: {err}",
+                                step_index + 1
+                            ),
+                        );
+                    }
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("simulation error in DC step {}: {err}", step_index + 1),
+                            Vec::new(),
+                        );
+                    }
                 }
             };
-            let measurement_sweep = results
-                .iter()
-                .map(|point| (point.sweep_value, point.result.clone()))
-                .collect::<Vec<_>>();
-            let measurements = if run
-                .netlist
-                .analyses
-                .iter()
-                .any(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            let measurements = if plan.dc_data.is_some()
+                || run
+                    .netlist
+                    .analyses
+                    .iter()
+                    .any(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
             {
-                crate::analysis::advanced::evaluate_dc_measurements(
-                    &run.netlist,
-                    &measurement_sweep,
-                )
+                if point_params.is_empty() {
+                    crate::analysis::advanced::evaluate_dc_measurements(
+                        &run.netlist,
+                        &measurement_sweep,
+                    )
+                } else {
+                    crate::analysis::advanced::evaluate_dc_measurements_with_parameter_contexts(
+                        &run.netlist,
+                        &measurement_sweep,
+                        &point_params,
+                    )
+                }
             } else {
                 crate::analysis::advanced::unevaluated_measurements(
                     &run.netlist,
