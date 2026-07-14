@@ -783,11 +783,11 @@ impl MeasureEngine {
                     );
                 }
             };
-        if signal.len() != comparison.len() {
+        if signal.len() < comparison.len() {
             return MeasureResult::failed(
                 name,
                 &format!(
-                    "ERROR comparison has {} rows but the simulation produced {} accepted points",
+                    "ERROR comparison has {} rows but the simulation produced only {} accepted points",
                     comparison.len(),
                     signal.len()
                 ),

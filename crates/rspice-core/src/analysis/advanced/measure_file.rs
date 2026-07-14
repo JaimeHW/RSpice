@@ -87,7 +87,7 @@ fn parse_prn_or_csv_column(content: &str, column: usize) -> Result<Vec<Value>, S
 }
 
 fn header_shape(line: &str) -> Option<(Delimiter, usize)> {
-    let delimiter = if line.contains(',') {
+    let delimiter = if has_top_level_comma(line).ok()? {
         Delimiter::Comma
     } else {
         Delimiter::Whitespace
@@ -100,36 +100,116 @@ fn header_shape(line: &str) -> Option<(Delimiter, usize)> {
 }
 
 fn split_fields(line: &str, delimiter: Delimiter) -> Result<Vec<String>, String> {
-    match delimiter {
-        Delimiter::Whitespace => Ok(line.split_whitespace().map(str::to_string).collect()),
-        Delimiter::Comma => split_csv_record(line),
-    }
+    split_spice_record(line, delimiter)
 }
 
-fn split_csv_record(line: &str) -> Result<Vec<String>, String> {
-    let mut fields = Vec::new();
-    let mut field = String::new();
-    let mut quoted = false;
+fn has_top_level_comma(line: &str) -> Result<bool, String> {
+    let mut quote = None;
+    let mut nesting = Vec::new();
     let mut chars = line.chars().peekable();
     while let Some(character) = chars.next() {
-        match character {
-            '"' if quoted && chars.peek() == Some(&'"') => {
-                field.push('"');
-                chars.next();
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                if active_quote == '"' && chars.peek() == Some(&'"') {
+                    chars.next();
+                } else {
+                    quote = None;
+                }
             }
-            '"' => quoted = !quoted,
-            ',' if !quoted => {
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '(' | '[' | '{' => nesting.push(character),
+            ')' | ']' | '}' => close_nesting(&mut nesting, character)?,
+            ',' if nesting.is_empty() => return Ok(true),
+            _ => {}
+        }
+    }
+    if quote.is_some() {
+        return Err("unterminated quoted field".to_string());
+    }
+    if !nesting.is_empty() {
+        return Err("unterminated nested probe in table record".to_string());
+    }
+    Ok(false)
+}
+
+fn split_spice_record(line: &str, delimiter: Delimiter) -> Result<Vec<String>, String> {
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut quote = None;
+    let mut nesting = Vec::new();
+    let mut chars = line.chars().peekable();
+    while let Some(character) = chars.next() {
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                if active_quote == '"' && chars.peek() == Some(&'"') {
+                    field.push('"');
+                    chars.next();
+                } else {
+                    quote = None;
+                }
+            } else {
+                field.push(character);
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '(' | '[' | '{' => {
+                nesting.push(character);
+                field.push(character);
+            }
+            ')' | ']' | '}' => {
+                close_nesting(&mut nesting, character)?;
+                field.push(character);
+            }
+            ',' if delimiter == Delimiter::Comma && nesting.is_empty() => {
                 fields.push(field.trim().to_string());
                 field.clear();
+            }
+            character
+                if delimiter == Delimiter::Whitespace
+                    && nesting.is_empty()
+                    && character.is_whitespace() =>
+            {
+                if !field.is_empty() {
+                    fields.push(field.trim().to_string());
+                    field.clear();
+                }
             }
             _ => field.push(character),
         }
     }
-    if quoted {
-        return Err("unterminated quoted CSV field".to_string());
+    if quote.is_some() {
+        return Err("unterminated quoted field".to_string());
     }
-    fields.push(field.trim().to_string());
+    if !nesting.is_empty() {
+        return Err("unterminated nested probe in table record".to_string());
+    }
+    if delimiter == Delimiter::Comma || !field.is_empty() {
+        fields.push(field.trim().to_string());
+    }
     Ok(fields)
+}
+
+fn close_nesting(nesting: &mut Vec<char>, closing: char) -> Result<(), String> {
+    let expected = match closing {
+        ')' => '(',
+        ']' => '[',
+        '}' => '{',
+        _ => unreachable!(),
+    };
+    match nesting.pop() {
+        Some(opening) if opening == expected => Ok(()),
+        Some(opening) => Err(format!(
+            "mismatched nested delimiters '{opening}' and '{closing}' in table record"
+        )),
+        None => Err(format!(
+            "unmatched closing delimiter '{closing}' in table record"
+        )),
+    }
 }
 
 fn parse_csd_column(content: &str, column: usize) -> Result<Vec<Value>, String> {
@@ -371,5 +451,14 @@ mod tests {
         assert!(parse_prn_or_csv_column("Index A\n0 NaN\n", 1).is_err());
         assert!(parse_prn_or_csv_column("Index A\n0\n", 1).is_err());
         assert!(parse_csd_column("#H\n#N\n'A'\n#C 0 1\n1:2\n#;\n", 1).is_err());
+    }
+
+    #[test]
+    fn top_level_delimiters_preserve_differential_probe_commas() {
+        let whitespace = "Index V(1,2) V(3)\n0 4 5\nEnd of Xyce(TM) Parameter Sweep\n";
+        assert_eq!(parse_prn_or_csv_column(whitespace, 1).unwrap(), vec![4.0]);
+
+        let comma = "Index,V(1,2),V(3)\n0,4,5\nEnd of Xyce(TM) Simulation\n";
+        assert_eq!(parse_prn_or_csv_column(comma, 1).unwrap(), vec![4.0]);
     }
 }
