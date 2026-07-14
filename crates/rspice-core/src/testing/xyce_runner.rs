@@ -208,6 +208,7 @@ struct XyceExecutionPlan {
     execution_dir: Option<PathBuf>,
     reference_path: PathBuf,
     measurement_reference_paths: Vec<PathBuf>,
+    continuous_measurement_reference_paths: Vec<PathBuf>,
     measurement_tolerance: XyceFileCompareTolerance,
     source: String,
     expression_dialect: ExpressionDialect,
@@ -412,6 +413,7 @@ struct XyceStaticAcPlan {
     deck_path: PathBuf,
     reference_path: Option<PathBuf>,
     measurement_reference_paths: Vec<PathBuf>,
+    continuous_measurement_reference_paths: Vec<PathBuf>,
     measurement_tolerance: XyceFileCompareTolerance,
     source: String,
     print: Option<XycePrintRequest>,
@@ -2377,6 +2379,24 @@ impl XyceTestRunner {
                 execution_dir.as_deref(),
             )?
         };
+        let parsed_netlist = Self::parse_netlist_with_expression_dialect_and_execution_dir(
+            &static_plan.source,
+            &static_plan.deck_path,
+            expression_dialect,
+            static_plan.execution_dir.as_deref(),
+        )
+        .map_err(|err| format!("netlist parser failed after static DC validation: {err}"))?;
+        let continuous_measurement_reference_paths =
+            if parsed_netlist.options.measure_use_cont_files() {
+                self.continuous_measurement_reference_paths(
+                    &deck.path,
+                    &parsed_netlist,
+                    "DC_CONT",
+                    "ms",
+                )?
+            } else {
+                Vec::new()
+            };
         let contract = if let Some(contract) = wrapper_contract {
             self.validate_native_static_prn_wrapper_contract(contract, &static_plan)?;
             contract
@@ -2394,6 +2414,7 @@ impl XyceTestRunner {
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
         if !reference_path.is_file()
             && measurement_reference_paths.is_empty()
+            && continuous_measurement_reference_paths.is_empty()
             && !matches!(
                 contract,
                 XyceStaticDcContract::WrapperFilePrn | XyceStaticDcContract::WrapperNoOutput
@@ -2411,6 +2432,7 @@ impl XyceTestRunner {
             execution_dir: static_plan.execution_dir,
             reference_path,
             measurement_reference_paths,
+            continuous_measurement_reference_paths,
             measurement_tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
             source: static_plan.source,
             expression_dialect,
@@ -3245,6 +3267,11 @@ impl XyceTestRunner {
         } else {
             Vec::new()
         };
+        let continuous_measurement_reference_paths = if netlist.options.measure_use_cont_files() {
+            self.continuous_measurement_reference_paths(&deck.path, &netlist, "AC_CONT", "ma")?
+        } else {
+            Vec::new()
+        };
         let measurement_tolerance = if netlist.measurements.iter().any(|measurement| {
             measurement.analysis.eq_ignore_ascii_case("AC")
                 && matches!(
@@ -3270,7 +3297,10 @@ impl XyceTestRunner {
                 let reference_path = self
                     .static_output_reference_path(&deck.path, contract.reference_extension())
                     .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-                if !reference_path.is_file() && measurement_reference_paths.is_empty() {
+                if !reference_path.is_file()
+                    && measurement_reference_paths.is_empty()
+                    && continuous_measurement_reference_paths.is_empty()
+                {
                     return Err(format!(
                         "no checked-in static .{} or AC measurement oracle at {}",
                         contract.reference_extension(),
@@ -3317,6 +3347,7 @@ impl XyceTestRunner {
             deck_path: deck.path.clone(),
             reference_path,
             measurement_reference_paths,
+            continuous_measurement_reference_paths,
             measurement_tolerance,
             source,
             print,
@@ -3394,7 +3425,7 @@ impl XyceTestRunner {
             Vec::new()
         };
         let continuous_measurement_reference_paths = if use_continuous_files {
-            self.continuous_measurement_reference_paths(&deck.path, &netlist, "NOISE_CONT")?
+            self.continuous_measurement_reference_paths(&deck.path, &netlist, "NOISE_CONT", "ma")?
         } else {
             Vec::new()
         };
@@ -4271,15 +4302,16 @@ impl XyceTestRunner {
             }
             if command.eq_ignore_ascii_case(".measure") || command.eq_ignore_ascii_case(".meas") {
                 let fields = Self::split_print_fields(&trimmed)?;
-                if !fields
-                    .get(1)
-                    .is_some_and(|field| field.eq_ignore_ascii_case("DC"))
+                let analysis = fields.get(1).map(String::as_str).unwrap_or_default();
+                if !analysis.eq_ignore_ascii_case("DC") && !analysis.eq_ignore_ascii_case("DC_CONT")
                 {
                     return Err(format!(
                         "scalar DC measurement artifact contract does not cover directive '{trimmed}'"
                     ));
                 }
-                dc_measurement_count += 1;
+                if analysis.eq_ignore_ascii_case("DC") {
+                    dc_measurement_count += 1;
+                }
                 continue;
             }
             // Xyce parses .FFT in every deck but activates it only for
@@ -5891,12 +5923,14 @@ impl XyceTestRunner {
         plan: XyceStaticAcPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract =
-            if plan.reference_path.is_none() && !plan.measurement_reference_paths.is_empty() {
-                "wrapper_scalar_measure_ac"
-            } else {
-                plan.contract.result_contract(!plan.steps.is_empty())
-            };
+        let contract = if plan.reference_path.is_none()
+            && (!plan.measurement_reference_paths.is_empty()
+                || !plan.continuous_measurement_reference_paths.is_empty())
+        {
+            "wrapper_scalar_measure_ac"
+        } else {
+            plan.contract.result_contract(!plan.steps.is_empty())
+        };
         let frequencies = plan.ac.frequencies();
         if frequencies.is_empty() {
             return self.failure_result(
@@ -5970,14 +6004,20 @@ impl XyceTestRunner {
             };
             let measurements =
                 crate::analysis::advanced::evaluate_ac_measurements(&netlist, &results);
-            let mismatches = match self.compare_measurement_references(
+            let continuous =
+                crate::analysis::advanced::evaluate_ac_continuous_measurements(&netlist, &results);
+            let mismatches = match self.compare_analysis_measurement_outputs(
                 &plan.measurement_reference_paths,
+                &plan.continuous_measurement_reference_paths,
                 &measurements,
+                &continuous,
                 plan.measurement_tolerance,
                 netlist.options.measure_fail_output,
                 netlist.options.measure_default_value,
-                "AC",
+                netlist.options.measure_use_cont_files(),
                 &netlist.measurements,
+                "AC",
+                "AC_CONT",
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -6336,42 +6376,25 @@ impl XyceTestRunner {
             }
         }
         if mismatches.is_empty()
-            && !plan.measurement_reference_paths.is_empty()
-            && !netlist.options.measure_use_cont_files()
+            && (!plan.measurement_reference_paths.is_empty()
+                || !plan.continuous_measurement_reference_paths.is_empty())
         {
             let scalar = crate::analysis::advanced::evaluate_noise_measurements(&netlist, &results);
             let continuous = crate::analysis::advanced::evaluate_noise_continuous_measurements(
                 &netlist, &results,
             );
-            match self.compare_mixed_measurement_references(
+            match self.compare_analysis_measurement_outputs(
                 &plan.measurement_reference_paths,
+                &plan.continuous_measurement_reference_paths,
                 &scalar,
                 &continuous,
                 plan.measurement_tolerance,
-                &netlist.measurements,
-            ) {
-                Ok(measurement_mismatches) => mismatches.extend(measurement_mismatches),
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("mixed NOISE measurement reference comparison error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            }
-        } else if mismatches.is_empty() && !plan.measurement_reference_paths.is_empty() {
-            let measurements =
-                crate::analysis::advanced::evaluate_noise_measurements(&netlist, &results);
-            match self.compare_measurement_references(
-                &plan.measurement_reference_paths,
-                &measurements,
-                plan.measurement_tolerance,
                 netlist.options.measure_fail_output,
                 netlist.options.measure_default_value,
-                "NOISE",
+                netlist.options.measure_use_cont_files(),
                 &netlist.measurements,
+                "NOISE",
+                "NOISE_CONT",
             ) {
                 Ok(measurement_mismatches) => mismatches.extend(measurement_mismatches),
                 Err(err) => {
@@ -6380,27 +6403,6 @@ impl XyceTestRunner {
                         start,
                         contract,
                         format!("NOISE measurement reference comparison error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            }
-        }
-        if mismatches.is_empty() && !plan.continuous_measurement_reference_paths.is_empty() {
-            let measurements = crate::analysis::advanced::evaluate_noise_continuous_measurements(
-                &netlist, &results,
-            );
-            match self.compare_continuous_measurement_references(
-                &plan.continuous_measurement_reference_paths,
-                &measurements,
-                plan.measurement_tolerance,
-            ) {
-                Ok(measurement_mismatches) => mismatches.extend(measurement_mismatches),
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("continuous NOISE measurement reference comparison error: {err}"),
                         Vec::new(),
                     );
                 }
@@ -6580,6 +6582,8 @@ impl XyceTestRunner {
                     &continuous,
                     plan.measurement_tolerance,
                     &run.netlist.measurements,
+                    "NOISE",
+                    "NOISE_CONT",
                 )
             };
             let mut mismatches = match comparison {
@@ -7617,12 +7621,14 @@ impl XyceTestRunner {
         plan: XyceExecutionPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract =
-            if !plan.reference_path.is_file() && !plan.measurement_reference_paths.is_empty() {
-                "wrapper_scalar_measure_dc"
-            } else {
-                plan.contract.result_contract(false)
-            };
+        let contract = if !plan.reference_path.is_file()
+            && (!plan.measurement_reference_paths.is_empty()
+                || !plan.continuous_measurement_reference_paths.is_empty())
+        {
+            "wrapper_scalar_measure_dc"
+        } else {
+            plan.contract.result_contract(false)
+        };
         let netlist = match Self::parse_netlist_with_expression_dialect_and_execution_dir(
             &plan.source,
             &plan.deck_path,
@@ -7857,7 +7863,10 @@ impl XyceTestRunner {
             Vec::new()
         };
 
-        if mismatches.is_empty() && !plan.measurement_reference_paths.is_empty() {
+        if mismatches.is_empty()
+            && (!plan.measurement_reference_paths.is_empty()
+                || !plan.continuous_measurement_reference_paths.is_empty())
+        {
             let measurement_sweep = results
                 .iter()
                 .map(|point| (point.sweep_value, point.result.clone()))
@@ -7875,14 +7884,22 @@ impl XyceTestRunner {
                     "DC measurement requires an explicit .DC analysis",
                 )
             };
-            let measurement_mismatches = match self.compare_measurement_references(
+            let continuous = crate::analysis::advanced::evaluate_dc_continuous_measurements(
+                &netlist,
+                &measurement_sweep,
+            );
+            let measurement_mismatches = match self.compare_analysis_measurement_outputs(
                 &plan.measurement_reference_paths,
+                &plan.continuous_measurement_reference_paths,
                 &measurements,
+                &continuous,
                 plan.measurement_tolerance,
                 netlist.options.measure_fail_output,
                 netlist.options.measure_default_value,
-                "DC",
+                netlist.options.measure_use_cont_files(),
                 &netlist.measurements,
+                "DC",
+                "DC_CONT",
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -21603,7 +21620,9 @@ impl XyceTestRunner {
         }
 
         for measurement in &netlist.measurements {
-            if !measurement.analysis.eq_ignore_ascii_case("AC") {
+            if !measurement.analysis.eq_ignore_ascii_case("AC")
+                && !measurement.analysis.eq_ignore_ascii_case("AC_CONT")
+            {
                 return Err(format!(
                     "native static AC comparison does not cover .MEASURE {} '{}'",
                     measurement.analysis, measurement.name
@@ -29105,6 +29124,81 @@ impl XyceTestRunner {
         Ok(mismatches)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn compare_analysis_measurement_outputs(
+        &self,
+        scalar_paths: &[PathBuf],
+        continuous_paths: &[PathBuf],
+        scalar: &[crate::analysis::MeasureResult],
+        continuous: &[crate::analysis::ContinuousMeasureResult],
+        tolerance: XyceFileCompareTolerance,
+        measure_fail_output: Option<bool>,
+        measure_default_value: Option<Value>,
+        use_continuous_files: bool,
+        declarations: &[crate::analysis::MeasureStatement],
+        base_analysis: &str,
+        continuous_analysis: &str,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if !use_continuous_files {
+            return self.compare_mixed_measurement_references(
+                scalar_paths,
+                scalar,
+                continuous,
+                tolerance,
+                declarations,
+                base_analysis,
+                continuous_analysis,
+            );
+        }
+
+        let mut mismatches = if scalar_paths.is_empty() {
+            Vec::new()
+        } else {
+            self.compare_measurement_references(
+                scalar_paths,
+                scalar,
+                tolerance,
+                measure_fail_output,
+                measure_default_value,
+                base_analysis,
+                declarations,
+            )?
+        };
+        let continuous_declarations = declarations
+            .iter()
+            .filter(|declaration| {
+                declaration
+                    .analysis
+                    .eq_ignore_ascii_case(continuous_analysis)
+            })
+            .collect::<Vec<_>>();
+        if continuous_declarations.len() != continuous.len() {
+            return Err(format!(
+                "{continuous_analysis} evaluator returned {} result(s) for {} declaration(s)",
+                continuous.len(),
+                continuous_declarations.len()
+            ));
+        }
+        let mut visible_continuous = Vec::new();
+        for (declaration, result) in continuous_declarations.into_iter().zip(continuous) {
+            if !declaration.name.eq_ignore_ascii_case(&result.name) {
+                return Err(format!(
+                    "{continuous_analysis} evaluator returned '{}' for declaration '{}'",
+                    result.name, declaration.name
+                ));
+            }
+            if declaration.print_policy == crate::analysis::MeasurePrintPolicy::All {
+                visible_continuous.push(result.clone());
+            }
+        }
+        mismatches.extend(self.compare_continuous_measurement_references(
+            continuous_paths,
+            &visible_continuous,
+            tolerance,
+        )?);
+        Ok(mismatches)
+    }
+
     fn compare_mixed_measurement_references(
         &self,
         paths: &[PathBuf],
@@ -29112,6 +29206,8 @@ impl XyceTestRunner {
         continuous: &[crate::analysis::ContinuousMeasureResult],
         tolerance: XyceFileCompareTolerance,
         declarations: &[crate::analysis::MeasureStatement],
+        base_analysis: &str,
+        continuous_analysis: &str,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         if paths.len() != 1 {
             return Err(format!(
@@ -29124,20 +29220,22 @@ impl XyceTestRunner {
         let mut scalar_index = 0usize;
         let mut continuous_index = 0usize;
         for declaration in declarations.iter().filter(|declaration| {
-            declaration.analysis.eq_ignore_ascii_case("NOISE")
-                || declaration.analysis.eq_ignore_ascii_case("NOISE_CONT")
+            declaration.analysis.eq_ignore_ascii_case(base_analysis)
+                || declaration
+                    .analysis
+                    .eq_ignore_ascii_case(continuous_analysis)
         }) {
-            if declaration.analysis.eq_ignore_ascii_case("NOISE") {
+            if declaration.analysis.eq_ignore_ascii_case(base_analysis) {
                 let result = scalar.get(scalar_index).ok_or_else(|| {
                     format!(
-                        "scalar NOISE evaluator omitted declaration {} ('{}')",
+                        "scalar {base_analysis} evaluator omitted declaration {} ('{}')",
                         scalar_index, declaration.name
                     )
                 })?;
                 scalar_index += 1;
                 if !result.name.eq_ignore_ascii_case(&declaration.name) {
                     return Err(format!(
-                        "scalar NOISE evaluator returned '{}' for declaration '{}'",
+                        "scalar {base_analysis} evaluator returned '{}' for declaration '{}'",
                         result.name, declaration.name
                     ));
                 }
@@ -29158,14 +29256,14 @@ impl XyceTestRunner {
             } else {
                 let result = continuous.get(continuous_index).ok_or_else(|| {
                     format!(
-                        "continuous NOISE evaluator omitted declaration {} ('{}')",
+                        "continuous {continuous_analysis} evaluator omitted declaration {} ('{}')",
                         continuous_index, declaration.name
                     )
                 })?;
                 continuous_index += 1;
                 if !result.name.eq_ignore_ascii_case(&declaration.name) {
                     return Err(format!(
-                        "continuous NOISE evaluator returned '{}' for declaration '{}'",
+                        "continuous {continuous_analysis} evaluator returned '{}' for declaration '{}'",
                         result.name, declaration.name
                     ));
                 }
@@ -30803,6 +30901,7 @@ impl XyceTestRunner {
         deck_path: &Path,
         netlist: &Netlist,
         analysis: &str,
+        artifact_prefix: &str,
     ) -> Result<Vec<PathBuf>, String> {
         let declarations = netlist
             .measurements
@@ -30817,7 +30916,7 @@ impl XyceTestRunner {
         }
 
         let output_directory = self
-            .static_output_reference_path(deck_path, "ma0")
+            .static_output_reference_path(deck_path, &format!("{artifact_prefix}0"))
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
         let deck_name = deck_path
@@ -30825,6 +30924,7 @@ impl XyceTestRunner {
             .and_then(|name| name.to_str())
             .ok_or_else(|| "deck filename is not valid UTF-8".to_string())?;
         let prefix = format!("{deck_name}_");
+        let suffix = format!(".{artifact_prefix}0");
         let mut available = BTreeMap::<String, PathBuf>::new();
         if output_directory.is_dir() {
             for entry in fs::read_dir(&output_directory)
@@ -30838,7 +30938,7 @@ impl XyceTestRunner {
                 };
                 let Some(raw_measurement) = file_name
                     .strip_prefix(&prefix)
-                    .and_then(|name| name.strip_suffix(".ma0"))
+                    .and_then(|name| name.strip_suffix(&suffix))
                 else {
                     continue;
                 };
@@ -32626,6 +32726,8 @@ mod tests {
                 &continuous,
                 XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
                 &netlist.measurements,
+                "NOISE",
+                "NOISE_CONT",
             )
             .expect("compare declaration-ordered mixed stream");
 
@@ -32664,6 +32766,65 @@ mod tests {
                 if (value - 63.75267).abs() <= f64::EPSILON
         ));
         fs::remove_file(path).expect("remove failed mixed measurement reference");
+    }
+
+    #[test]
+    fn generic_continuous_sidecar_comparison_honors_print_policy() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-ac-cont-visible-{}-{}.ma0",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        fs::write(&path, "VISIBLE = 2.000000e+00\n").expect("write AC_CONT sidecar");
+        let netlist = crate::netlist::parse_netlist(
+            "continuous AC print fixture\n\
+             V1 out 0 AC 1\n\
+             .AC LIN 2 1 2\n\
+             .MEASURE AC_CONT visible WHEN VM(out)=0.5\n\
+             .MEASURE AC_CONT hidden WHEN VM(out)=0.5 PRINT=STDOUT\n\
+             .END\n",
+        )
+        .expect("parse AC_CONT print fixture");
+        let continuous = [
+            crate::analysis::ContinuousMeasureResult {
+                name: "visible".to_string(),
+                records: vec![crate::analysis::ContinuousMeasureRecord {
+                    value: 2.0,
+                    event_axis: Some(2.0),
+                    trigger_axis: None,
+                    target_axis: None,
+                }],
+                failure: None,
+            },
+            crate::analysis::ContinuousMeasureResult {
+                name: "hidden".to_string(),
+                records: Vec::new(),
+                failure: Some("event not found".to_string()),
+            },
+        ];
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+        let mismatches = runner
+            .compare_analysis_measurement_outputs(
+                &[],
+                std::slice::from_ref(&path),
+                &[],
+                &continuous,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                None,
+                None,
+                true,
+                &netlist.measurements,
+                "AC",
+                "AC_CONT",
+            )
+            .expect("compare visible AC_CONT sidecar only");
+
+        assert!(mismatches.is_empty());
+        fs::remove_file(path).expect("remove AC_CONT sidecar");
     }
 
     #[test]
