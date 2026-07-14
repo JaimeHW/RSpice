@@ -816,13 +816,24 @@ pub fn evaluate_noise_measurements(
             .collect();
     };
     let signals = series.equation_signal_map();
-    let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
-    overlay_continuous_equation_results(
-        &statements,
-        &mut results,
-        evaluate_noise_equation_measurements(netlist, sweep),
-        "NOISE",
-    );
+    // NOISE equations participate in the accepted-point stream just like AC
+    // equations. A later WHEN/FIND-WHEN statement must see the equation's
+    // current value as a waveform, rather than only its final scalar result.
+    let equation_traces = evaluate_noise_equation_measurements(netlist, sweep);
+    let mut results = match &equation_traces {
+        Ok(traces) => evaluate_statements_with_equation_traces(
+            &statements,
+            series.axis(),
+            &signals,
+            &netlist.params,
+            &[],
+            traces,
+            netlist.options.measure_default_value,
+            -1.0,
+        ),
+        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params),
+    };
+    overlay_continuous_equation_results(&statements, &mut results, equation_traces, "NOISE");
     results
 }
 
@@ -1752,6 +1763,8 @@ mod tests {
              .meas noise follows EQN {first+HERTZ}\n\
              .meas noise forward EQN {later+1}\n\
              .meas noise later EQN {FREQ}\n\
+             .meas noise when_first WHEN first=16.5\n\
+             .meas noise find_first FIND VM(out) WHEN first=16.5\n\
              .meas noise bounded EQN {VM(out)} FROM=20 TO=20\n\
              .meas noise invalid EQN {VM(out)} FROM=30 TO=40 DEFAULT_VAL=-9\n\
              .end\n",
@@ -1795,6 +1808,8 @@ mod tests {
         };
         assert_eq!(result("follows").value, Some(40.0));
         assert_eq!(result("forward").value, Some(11.0));
+        assert_eq!(result("when_first").value, Some(15.0));
+        assert_eq!(result("find_first").value, Some(3.5));
         assert_eq!(result("bounded").value, Some(2.0));
         assert!(!result("invalid").passed);
         assert_eq!(result("invalid").value, None);

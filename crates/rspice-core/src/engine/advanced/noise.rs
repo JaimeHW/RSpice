@@ -1418,7 +1418,7 @@ impl Engine {
 
         fn reject(detail: impl std::fmt::Display) -> SimulationError {
             SimulationError::Circuit(format!(
-                "EKV3 LEVEL=301 native VANOISE slice is validated only for the Xyce NMOS150 VANOISE fixture; {detail}"
+                "unsupported EKV3 LEVEL=301 NOISE contract: the native VANOISE slice is validated only for the Xyce NMOS150 VANOISE fixture; {detail}"
             ))
         }
 

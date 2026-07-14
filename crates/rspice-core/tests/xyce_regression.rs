@@ -5924,6 +5924,52 @@ fn test_xyce_noise_derivative_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_noise_complex_components_and_measure_consumers() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/LEAD_CURRENTS/lead_ind_noise.cir",
+        "Netlists/MEASURE_NOISE/FindWhenTestNoise.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy the native NOISE component/measurement oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn test_xyce_unimplemented_noise_surfaces_fail_closed() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, reason) in [
+        ("Netlists/MEASURE_CONT/DerivTestNoise.cir", "NOISE_CONT"),
+        ("Netlists/NOISE/commonEmitterBjt.cir", "DNO/DNI"),
+        ("Netlists/VANOISE/commonEmitterBjt_vbic13.cir", "DNO/DNI"),
+        ("Netlists/VANOISE/ekv_150nm_nmos_noise.cir", "DNO/DNI"),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} must remain a named unsupported contract, got {result:?}"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains(reason)),
+            "{relative} should name the unsupported boundary '{reason}', got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_ac_error_function_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

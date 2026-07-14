@@ -476,6 +476,16 @@ impl XyceFileCompareTolerance {
         relative: 1.0e-3,
         zero: 1.0e-10,
     };
+
+    // A DERIV result is a difference quotient of two independently solved
+    // points. Compound expressions can therefore accumulate roughly twice
+    // the base absolute solver error while remaining well inside the relative
+    // contract. Keep this narrow tolerance separate from scalar measures.
+    const MEASURE_COMMON_DERIVATIVE: Self = Self {
+        absolute: 2.0e-5,
+        relative: 1.0e-3,
+        zero: 1.0e-10,
+    };
 }
 
 #[derive(Debug, Clone)]
@@ -1215,6 +1225,12 @@ impl XyceAcReferenceColumn {
     fn probe_name(&self) -> &str {
         match self {
             Self::Probe { name, .. } => name,
+        }
+    }
+
+    fn component(&self) -> XyceAcProbeComponent {
+        match self {
+            Self::Probe { component, .. } => *component,
         }
     }
 }
@@ -3294,6 +3310,16 @@ impl XyceTestRunner {
     fn static_noise_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticNoisePlan, String> {
         let source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        // The static-contract probes run in sequence for every corpus deck.
+        // Fail closed before parsing an unrelated deck: some upstream stress
+        // fixtures intentionally describe enormous circuits and must only be
+        // materialized by the contract that actually owns them.
+        if !Self::source_has_analysis(&source, "NOISE") {
+            return Err("deck has no .NOISE analysis".to_string());
+        }
+        if Self::source_has_continuous_measure_for_analysis(&source, "NOISE") {
+            return Err("continuous .MEASURE NOISE_CONT waveforms are not implemented".to_string());
+        }
         if Self::contains_control_block(&source) {
             return Err(
                 "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
@@ -3305,6 +3331,9 @@ impl XyceTestRunner {
         let print = print_output.as_ref().map(|request| XycePrintRequest {
             probes: request.probes.clone(),
         });
+        if let Some(print) = &print {
+            Self::reject_unsupported_noise_print_probes(print)?;
+        }
         if print_output
             .as_ref()
             .and_then(|request| request.format.as_deref())
@@ -3370,6 +3399,14 @@ impl XyceTestRunner {
                 )
         }) {
             XyceFileCompareTolerance::MEASURE_COMMON_AC_INTEGRATION
+        } else if netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("NOISE")
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Derivative { .. }
+                )
+        }) {
+            XyceFileCompareTolerance::MEASURE_COMMON_DERIVATIVE
         } else {
             XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT
         };
@@ -3397,6 +3434,19 @@ impl XyceTestRunner {
             input_source,
             frequencies,
         })
+    }
+
+    fn reject_unsupported_noise_print_probes(print: &XycePrintRequest) -> Result<(), String> {
+        if print.probes.iter().any(|probe| {
+            let normalized = Self::normalize_probe(probe);
+            normalized.contains("dno(") || normalized.contains("dni(")
+        }) {
+            return Err(
+                "native NOISE .PRINT DNO/DNI device-mechanism contributions are not implemented"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     fn static_dc_plan_for_path(
@@ -18281,6 +18331,29 @@ impl XyceTestRunner {
         self.compare_ac_prn_reference_with_step(reference, print, netlist, source, results, None)
     }
 
+    fn noise_reference_signal_probe(column: &XyceAcReferenceColumn) -> Result<String, String> {
+        let probe = column.probe_name();
+        let component_prefix = match column.component() {
+            XyceAcProbeComponent::Scalar => return Ok(probe.to_string()),
+            XyceAcProbeComponent::Real => 'R',
+            XyceAcProbeComponent::Imaginary => 'I',
+        };
+        let normalized = Self::normalize_probe(probe);
+        let Some(quantity) = normalized.chars().next() else {
+            return Err("empty complex NOISE reference probe".to_string());
+        };
+        if !matches!(quantity, 'v' | 'i') || !normalized[quantity.len_utf8()..].starts_with('(') {
+            return Err(format!(
+                "complex NOISE reference probe '{probe}' is not a node voltage or branch current"
+            ));
+        }
+        Ok(format!(
+            "{}{component_prefix}{}",
+            quantity.to_ascii_uppercase(),
+            &normalized[quantity.len_utf8()..]
+        ))
+    }
+
     fn compare_noise_prn_reference(
         &self,
         reference: &XycePrnTable,
@@ -18378,10 +18451,12 @@ impl XyceTestRunner {
             }
             for (column_index, column) in data_columns.iter().enumerate() {
                 let probe = column.probe_name();
+                let signal_probe = Self::noise_reference_signal_probe(column)?;
                 let expected = row[column_index + data_column_offset];
-                let actual = if let Some(trace) = equation_traces
-                    .iter()
-                    .find(|trace| trace.name.eq_ignore_ascii_case(probe))
+                let actual = if column.component() == XyceAcProbeComponent::Scalar
+                    && let Some(trace) = equation_traces
+                        .iter()
+                        .find(|trace| trace.name.eq_ignore_ascii_case(probe))
                 {
                     *trace.values.get(row_index).ok_or_else(|| {
                         format!(
@@ -18389,16 +18464,50 @@ impl XyceTestRunner {
                             trace.name, row_index
                         )
                     })?
-                } else {
-                    let waveform = signals
-                        .iter()
-                        .find_map(|(name, values)| {
-                            name.eq_ignore_ascii_case(probe).then_some(*values)
-                        })
-                        .ok_or_else(|| format!("NOISE probe '{probe}' is not available"))?;
+                } else if let Some(waveform) = signals.iter().find_map(|(name, values)| {
+                    name.eq_ignore_ascii_case(&signal_probe).then_some(*values)
+                }) {
                     *waveform.get(row_index).ok_or_else(|| {
                         format!("NOISE probe '{probe}' has no value for row {row_index}")
                     })?
+                } else if column.component() == XyceAcProbeComponent::Scalar
+                    && let Some(expression) = Self::print_expression_inner(probe)
+                {
+                    let mut context = netlist.params.clone();
+                    context.set("FREQ", result.frequency);
+                    context.set("FREQUENCY", result.frequency);
+                    context.set("HERTZ", result.frequency);
+                    for (name, values) in &signals {
+                        if let Some(value) = values.get(row_index) {
+                            context.set(name, *value);
+                        }
+                    }
+                    let mut call_value = |call: &str| {
+                        let normalized = Self::normalize_probe(call);
+                        signals
+                            .iter()
+                            .find_map(|(name, values)| {
+                                Self::normalize_probe(name)
+                                    .eq_ignore_ascii_case(&normalized)
+                                    .then_some(*values)
+                            })
+                            .and_then(|values| values.get(row_index).copied())
+                            .ok_or_else(|| {
+                                format!(
+                                    "NOISE expression probe '{call}' is unavailable at row {row_index}"
+                                )
+                            })
+                    };
+                    Self::evaluate_print_expression_with_probe_calls(
+                        expression,
+                        context,
+                        &mut call_value,
+                    )
+                    .map_err(|err| {
+                        format!("NOISE print expression '{probe}' failed at row {row_index}: {err}")
+                    })?
+                } else {
+                    return Err(format!("NOISE probe '{probe}' is not available"));
                 };
                 let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
@@ -30705,13 +30814,33 @@ impl XyceTestRunner {
         })
     }
 
-    fn source_has_op_analysis(source: &str) -> bool {
+    fn source_has_analysis(source: &str, analysis: &str) -> bool {
+        let expected = format!(".{analysis}");
         Self::logical_netlist_lines(source).iter().any(|line| {
             let Some(command) = Self::strip_netlist_comment(line).split_whitespace().next() else {
                 return false;
             };
-            command.eq_ignore_ascii_case(".op")
+            command.eq_ignore_ascii_case(&expected)
         })
+    }
+
+    fn source_has_continuous_measure_for_analysis(source: &str, analysis: &str) -> bool {
+        let expected = format!("{analysis}_CONT");
+        Self::logical_netlist_lines(source).iter().any(|line| {
+            let uncommented = Self::strip_netlist_comment(line);
+            let mut tokens = uncommented.split_whitespace();
+            let Some(command) = tokens.next() else {
+                return false;
+            };
+            matches!(command.to_ascii_lowercase().as_str(), ".measure" | ".meas")
+                && tokens
+                    .next()
+                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&expected))
+        })
+    }
+
+    fn source_has_op_analysis(source: &str) -> bool {
+        Self::source_has_analysis(source, "OP")
     }
 
     fn logical_netlist_lines(source: &str) -> Vec<String> {
@@ -30974,6 +31103,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn static_noise_probe_rejects_unrelated_decks_before_parsing() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-non-noise-preflight-{}-{}.cir",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            "unrelated malformed stress fixture\n.this-would-not-parse\n.end\n",
+        )
+        .expect("write unrelated deck");
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: "Netlists/unrelated.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+        let error = runner
+            .static_noise_plan_for_deck(&deck)
+            .expect_err("a deck without .NOISE must fail during textual preflight");
+
+        assert_eq!(error, "deck has no .NOISE analysis");
+        std::fs::remove_file(path).expect("remove unrelated deck");
+    }
+
+    #[test]
+    fn noise_preflight_names_unsupported_continuous_and_contribution_surfaces() {
+        let continuous = "continuous noise measure\n\
+            .noise V(out) V1 dec 10 1 10\n\
+            .measure noise_cont trace EQN {V(out)}\n\
+            .end\n";
+        assert!(XyceTestRunner::source_has_continuous_measure_for_analysis(
+            continuous, "NOISE"
+        ));
+
+        let print = XycePrintRequest {
+            probes: vec!["{sqrt(abs(DNO(M1,fn)))}".to_string()],
+        };
+        let error = XyceTestRunner::reject_unsupported_noise_print_probes(&print)
+            .expect_err("DNO mechanism probes must remain explicitly unsupported");
+        assert!(error.contains("DNO/DNI"));
+    }
+
+    #[test]
+    fn noise_complex_reference_columns_preserve_real_and_imaginary_components() {
+        let real = XyceAcReferenceColumn::Probe {
+            name: "i(llp1)".to_string(),
+            component: XyceAcProbeComponent::Real,
+        };
+        let imaginary = XyceAcReferenceColumn::Probe {
+            name: "i(llp1)".to_string(),
+            component: XyceAcProbeComponent::Imaginary,
+        };
+
+        assert_eq!(
+            XyceTestRunner::noise_reference_signal_probe(&real).as_deref(),
+            Ok("IR(llp1)")
+        );
+        assert_eq!(
+            XyceTestRunner::noise_reference_signal_probe(&imaginary).as_deref(),
+            Ok("II(llp1)")
+        );
+    }
+
+    #[test]
     fn measurement_comparison_accounts_for_printed_decimal_quantization() {
         let quantization = XyceTestRunner::measurement_literal_quantization("1.179157e+02")
             .expect("scientific measurement literal has decimal precision");
@@ -30991,6 +31189,24 @@ mod tests {
             117.915751,
             Some(quantization),
             tolerance,
+        ));
+    }
+
+    #[test]
+    fn noise_derivative_tolerance_accounts_for_compound_secant_error() {
+        let expected = -2.186783;
+        let actual = -2.18677159;
+        assert!(!XyceTestRunner::measurement_value_matches(
+            expected,
+            actual,
+            None,
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+        ));
+        assert!(XyceTestRunner::measurement_value_matches(
+            expected,
+            actual,
+            None,
+            XyceFileCompareTolerance::MEASURE_COMMON_DERIVATIVE,
         ));
     }
 
