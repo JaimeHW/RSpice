@@ -160,6 +160,31 @@ R2 out 0 1k
             report.assert_passed()
         assert "vmax" in str(exc_info.value).lower()
 
+    def test_measfail_output_policy_does_not_mask_typed_failure(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* OP-only deck with a DC measurement fallback
+V1 out 0 1
+R1 out 0 1k
+.op
+.options measure measfail=0 default_val=-10
+.measure dc average AVG V(out)
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+        measurement = report.measurement("average")
+
+        assert measurement is not None
+        assert measurement.value is None
+        assert not measurement.passed
+        assert "dc" in measurement.error.lower()
+        assert [failure.name.lower() for failure in report.failures] == ["average"]
+        with pytest.raises(ValueError):
+            float(measurement)
+        with pytest.raises(rspice.MeasurementError):
+            report.assert_passed()
+
     def test_goal_failure_with_value_fails_report(self, engine):
         # The measurement evaluates to 5 V, but the declared spec is 4 V +/- 0.1 V.
         # A numeric value must not be mistaken for a passed verification.

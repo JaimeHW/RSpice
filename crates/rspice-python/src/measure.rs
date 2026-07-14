@@ -68,8 +68,8 @@ pub(crate) fn unevaluated_measurements(
     analysis: &str,
     reason: &str,
 ) -> Vec<PyMeasurement> {
-    measure_signals::measurements_for_analysis(netlist, analysis)
+    measure_signals::unevaluated_measurements(netlist, analysis, reason)
         .iter()
-        .map(|m| PyMeasurement::unevaluated(&m.name, analysis, reason))
+        .map(|result| PyMeasurement::from_core(result, analysis))
         .collect()
 }

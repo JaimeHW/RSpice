@@ -5519,6 +5519,36 @@ fn test_xyce_stepped_ac_trigger_target_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_ac_file_error_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_AC/ErrorTestAC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should interpolate AC waveforms onto PRN, CSV, and comma-PRN reference frequencies, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_stepped_ac_file_error_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_AC/STEP/ErrorTestAC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should reset AC file-error interpolation for every expanded step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_dc_trigger_target_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
@@ -5589,6 +5619,36 @@ fn test_xyce_dc_file_error_measurement_artifact_oracle() {
     assert!(
         result.passed && !result.expected_unsupported,
         "{relative} should preserve exact PRN, CSV, comma-PRN, and CSDF file-error norms, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_op_only_dc_measurements_fail_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_DC/DotOpOnly.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should report every DC measurement as FAILED when no .DC analysis is declared, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_measfail_zero_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_DC/MeasfailOptionZero.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should emit numeric zero while preserving failed measurement status, got {result:?}"
     );
     assert!(result.mismatches.is_empty());
 }

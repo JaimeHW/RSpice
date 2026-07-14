@@ -841,6 +841,12 @@ pub(super) fn parse_options_command(
         match (option_package.as_deref(), key_upper.as_str()) {
             (Some("MEASURE"), "MEASFAIL") => {
                 let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("MEASURE.MEASFAIL must be finite, found {value}"),
+                    });
+                }
                 let integer_value = value.trunc();
                 options.measure_fail_output = Some(match integer_value {
                     0.0 => false,
@@ -2495,7 +2501,7 @@ fn parse_measure_file_path(
 
     let mut path = String::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if measure_file_option_assignment_ahead(stream) {
+        if measure_file_option_ahead(stream) {
             break;
         }
         match stream.peek().kind {
@@ -2515,15 +2521,14 @@ fn parse_measure_file_path(
     }
 }
 
-fn measure_file_option_assignment_ahead(stream: &TokenStream) -> bool {
+fn measure_file_option_ahead(stream: &TokenStream) -> bool {
     let TokenKind::Ident(keyword) = &stream.peek().kind else {
         return false;
     };
-    matches!(stream.peek_n(1).kind, TokenKind::Equals)
-        && matches!(
-            keyword.to_ascii_uppercase().as_str(),
-            "FILE" | "COMP_FUNCTION" | "INDEPVARCOL" | "DEPVARCOL" | "GOAL" | "TOL" | "DEFAULT_VAL"
-        )
+    matches!(
+        keyword.to_ascii_uppercase().as_str(),
+        "FILE" | "COMP_FUNCTION" | "INDEPVARCOL" | "DEPVARCOL" | "GOAL" | "TOL" | "DEFAULT_VAL"
+    )
 }
 
 fn parse_measure_when_event_options(
@@ -4032,6 +4037,15 @@ mod tests {
         .expect("global Xyce measurement default parses");
         assert_eq!(global_default.options.measure_fail_output, Some(false));
         assert_eq!(global_default.options.measure_default_value, Some(-10.0));
+
+        for options in [
+            ".options measure measfail=1e309",
+            ".options measure default_val=1e309",
+        ] {
+            let error = Netlist::parse(&deck_with_options(options))
+                .expect_err("non-finite MEASURE option must fail parsing");
+            assert!(error.to_string().contains("finite"));
+        }
     }
 
     #[test]

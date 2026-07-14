@@ -1594,7 +1594,7 @@ mod tests {
             "typed file error\n\
              V1 one 0 0\n\
              .dc V1 0 1 1\n\
-             .measure dc fit ERROR V(one) FILE=Reference.MixedCase.prn COMP_FUNCTION=INFNORM INDEPVARCOL=-1 DEPVARCOL=2\n\
+             .measure dc fit ERROR V(one) FILE=Reference.MixedCase.prn COMP_FUNCTION INFNORM INDEPVARCOL -1 DEPVARCOL 2\n\
              .end\n",
             &deck_path,
         )

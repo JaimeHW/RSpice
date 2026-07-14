@@ -410,6 +410,108 @@ fn lookup_signal<'a>(signals: &HashMap<String, &'a [Value]>, name: &str) -> Opti
         .find_map(|(key, signal)| key.eq_ignore_ascii_case(name).then_some(*signal))
 }
 
+fn strictly_monotonic_direction(axis: &[Value]) -> Result<bool, String> {
+    if axis.is_empty() {
+        return Err("non-DC ERROR simulation axis is empty".to_string());
+    }
+    if axis.len() == 1 {
+        return Ok(true);
+    }
+    let ascending = axis[1] > axis[0];
+    if axis[1] == axis[0]
+        || axis.windows(2).any(|window| {
+            if ascending {
+                window[1] <= window[0]
+            } else {
+                window[1] >= window[0]
+            }
+        })
+    {
+        return Err("non-DC ERROR simulation axis must be strictly monotonic".to_string());
+    }
+    Ok(ascending)
+}
+
+struct AkimaInterpolator {
+    axis: Vec<Value>,
+    signal: Vec<Value>,
+    p1: Vec<Value>,
+    p2: Vec<Value>,
+    p3: Vec<Value>,
+}
+
+impl AkimaInterpolator {
+    fn new(axis: &[Value], signal: &[Value]) -> Result<Self, String> {
+        let ascending = strictly_monotonic_direction(axis)?;
+        let mut axis = axis.to_vec();
+        let mut signal = signal.to_vec();
+        if !ascending {
+            axis.reverse();
+            signal.reverse();
+        }
+        let size = axis.len();
+        let mut slopes = vec![0.0; size + 3];
+        for index in 0..size.saturating_sub(1) {
+            slopes[index + 2] =
+                (signal[index + 1] - signal[index]) / (axis[index + 1] - axis[index]);
+        }
+        slopes[0] = 3.0 * slopes[2] - 2.0 * slopes[3];
+        slopes[1] = 2.0 * slopes[2] - slopes[3];
+        slopes[size + 1] = 2.0 * slopes[size] - slopes[size - 1];
+        slopes[size + 2] = 3.0 * slopes[size] - 2.0 * slopes[size - 1];
+
+        let derivatives = (0..size)
+            .map(|index| {
+                let upper_weight = (slopes[index + 3] - slopes[index + 2]).abs();
+                let lower_weight = (slopes[index + 1] - slopes[index]).abs();
+                if upper_weight + lower_weight == 0.0 {
+                    0.5 * (slopes[index + 1] + slopes[index + 2])
+                } else {
+                    (upper_weight * slopes[index + 1] + lower_weight * slopes[index + 2])
+                        / (upper_weight + lower_weight)
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut p1 = vec![0.0; size];
+        let mut p2 = vec![0.0; size];
+        let mut p3 = vec![0.0; size];
+        for index in 0..size.saturating_sub(1) {
+            let dx = axis[index + 1] - axis[index];
+            p1[index] = derivatives[index];
+            p2[index] =
+                (3.0 * slopes[index + 2] - 2.0 * derivatives[index] - derivatives[index + 1]) / dx;
+            p3[index] =
+                (derivatives[index] + derivatives[index + 1] - 2.0 * slopes[index + 2]) / (dx * dx);
+        }
+        Ok(Self {
+            axis,
+            signal,
+            p1,
+            p2,
+            p3,
+        })
+    }
+
+    fn evaluate(&self, target: Value) -> Value {
+        if self.axis.len() == 1 {
+            return self.signal[0];
+        }
+        let mut lower = 0usize;
+        let mut upper = self.axis.len() - 1;
+        while upper > lower + 1 {
+            let middle = (upper + lower) >> 1;
+            if self.axis[middle] > target {
+                upper = middle;
+            } else {
+                lower = middle;
+            }
+        }
+        let delta = target - self.axis[lower];
+        self.signal[lower]
+            + delta * (self.p1[lower] + delta * (self.p2[lower] + self.p3[lower] * delta))
+    }
+}
+
 /// Engine for processing .MEAS statements on simulation results
 pub struct MeasureEngine {
     /// Registered measurements
@@ -634,15 +736,17 @@ impl MeasureEngine {
                 signal,
                 file,
                 norm,
+                independent_column,
                 dependent_column,
-                ..
             } => self.eval_file_error(
                 &measurement.name,
                 &measurement.analysis,
                 signal,
                 file,
                 *norm,
+                *independent_column,
                 *dependent_column,
+                time,
                 signals,
             ),
             MeasureType::Min {
@@ -763,21 +867,70 @@ impl MeasureEngine {
         signal_name: &str,
         file: &str,
         norm: FileErrorNorm,
+        independent_column: Option<isize>,
         dependent_column: usize,
+        axis: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        if !analysis.eq_ignore_ascii_case("DC") {
+        if !matches!(
+            analysis.to_ascii_uppercase().as_str(),
+            "DC" | "TRAN" | "AC" | "NOISE"
+        ) {
             return MeasureResult::failed(
                 name,
-                "file-backed ERROR currently requires DC accepted-point semantics",
+                "file-backed ERROR is supported only for DC, TRAN, AC, and NOISE analyses",
             );
         }
         let Some(signal) = lookup_signal(signals, signal_name) else {
             return MeasureResult::failed(name, &format!("Signal '{signal_name}' not found"));
         };
-        let comparison =
-            match super::measure_file::read_error_comparison_column(file, dependent_column) {
-                Ok(values) => values,
+        let pairs = if analysis.eq_ignore_ascii_case("DC") {
+            let comparison =
+                match super::measure_file::read_error_comparison_column(file, dependent_column) {
+                    Ok(values) => values,
+                    Err(error) => {
+                        return MeasureResult::failed(
+                            name,
+                            &format!("could not load ERROR comparison file '{file}': {error}"),
+                        );
+                    }
+                };
+            if signal.len() < comparison.len() {
+                return MeasureResult::failed(
+                    name,
+                    &format!(
+                        "ERROR comparison has {} rows but the simulation produced only {} accepted points",
+                        comparison.len(),
+                        signal.len()
+                    ),
+                );
+            }
+            signal.iter().copied().zip(comparison).collect::<Vec<_>>()
+        } else {
+            let Some(independent_column) = independent_column else {
+                return MeasureResult::failed(
+                    name,
+                    "non-DC ERROR requires a non-negative INDEPVARCOL",
+                );
+            };
+            let Ok(independent_column) = usize::try_from(independent_column) else {
+                return MeasureResult::failed(
+                    name,
+                    "non-DC ERROR requires a non-negative INDEPVARCOL",
+                );
+            };
+            if independent_column == dependent_column {
+                return MeasureResult::failed(
+                    name,
+                    "non-DC ERROR requires different INDEPVARCOL and DEPVARCOL values",
+                );
+            }
+            let comparison = match super::measure_file::read_error_comparison_columns(
+                file,
+                Some(independent_column),
+                dependent_column,
+            ) {
+                Ok(columns) => columns,
                 Err(error) => {
                     return MeasureResult::failed(
                         name,
@@ -785,22 +938,37 @@ impl MeasureEngine {
                     );
                 }
             };
-        if signal.len() < comparison.len() {
-            return MeasureResult::failed(
-                name,
-                &format!(
-                    "ERROR comparison has {} rows but the simulation produced only {} accepted points",
-                    comparison.len(),
-                    signal.len()
-                ),
-            );
-        }
+            let reference_axis = comparison
+                .independent
+                .expect("requested ERROR independent column must be returned");
+            if reference_axis.first().is_some_and(|value| *value < 0.0)
+                || reference_axis
+                    .windows(2)
+                    .any(|window| window[1] < window[0])
+            {
+                return MeasureResult::failed(
+                    name,
+                    "non-DC ERROR comparison axis must be monotonically increasing and non-negative",
+                );
+            }
+            let interpolator = match AkimaInterpolator::new(axis, signal) {
+                Ok(interpolator) => interpolator,
+                Err(error) => return MeasureResult::failed(name, &error),
+            };
+            reference_axis
+                .into_iter()
+                .zip(comparison.dependent)
+                .map(|(reference_axis_value, reference)| {
+                    (interpolator.evaluate(reference_axis_value), reference)
+                })
+                .collect()
+        };
 
         let mut l1 = 0.0;
         let mut l1_compensation = 0.0;
         let mut l2: Value = 0.0;
         let mut infinity: Value = 0.0;
-        for (simulated, reference) in signal.iter().zip(comparison.iter()) {
+        for (simulated, reference) in pairs {
             let difference = simulated - reference;
             if !difference.is_finite() {
                 return MeasureResult::failed(name, "ERROR difference vector is non-finite");

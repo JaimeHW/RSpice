@@ -9,23 +9,48 @@ enum Delimiter {
     Comma,
 }
 
+pub(super) struct ErrorComparisonColumns {
+    pub independent: Option<Vec<Value>>,
+    pub dependent: Vec<Value>,
+}
+
 pub(super) fn read_error_comparison_column(
     file: &str,
     dependent_column: usize,
 ) -> Result<Vec<Value>, String> {
+    Ok(read_error_comparison_columns(file, None, dependent_column)?.dependent)
+}
+
+pub(super) fn read_error_comparison_columns(
+    file: &str,
+    independent_column: Option<usize>,
+    dependent_column: usize,
+) -> Result<ErrorComparisonColumns, String> {
     let extension = Path::new(file)
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "comparison filename has no UTF-8 extension".to_string())?;
     let contents = crate::xspice::read_data_file_to_string(file)?;
-    match extension.as_str() {
-        "prn" | "csv" => parse_prn_or_csv_column(&contents, dependent_column),
-        "csd" => parse_csd_column(&contents, dependent_column),
+    let parse_column = |column| match extension.as_str() {
+        "prn" | "csv" => parse_prn_or_csv_column(&contents, column),
+        "csd" => parse_csd_column(&contents, column),
         _ => Err(format!(
             "unsupported comparison format '.{extension}'; expected PRN, CSV, or CSD"
         )),
+    };
+    let independent = independent_column.map(parse_column).transpose()?;
+    let dependent = parse_column(dependent_column)?;
+    if independent
+        .as_ref()
+        .is_some_and(|values| values.len() != dependent.len())
+    {
+        return Err("comparison table columns have inconsistent row counts".to_string());
     }
+    Ok(ErrorComparisonColumns {
+        independent,
+        dependent,
+    })
 }
 
 fn parse_prn_or_csv_column(content: &str, column: usize) -> Result<Vec<Value>, String> {
@@ -39,16 +64,24 @@ fn parse_prn_or_csv_column(content: &str, column: usize) -> Result<Vec<Value>, S
         return Err("comparison table is empty".to_string());
     }
 
-    let (header_index, header_line, delimiter, column_count) = lines
+    let (header_index, header_line, delimiter, header_fields) = lines
         .iter()
         .enumerate()
         .find_map(|(index, (line_number, line))| {
-            header_shape(line).map(|(delimiter, count)| (index, *line_number, delimiter, count))
+            let (delimiter, _) = header_shape(line)?;
+            let fields = split_fields(line, delimiter).ok()?;
+            header_candidate_has_data(&lines, index + 1, delimiter, &fields).then_some((
+                index,
+                *line_number,
+                delimiter,
+                fields,
+            ))
         })
         .ok_or_else(|| "comparison table has no recognizable header".to_string())?;
+    let column_count = header_fields.len();
     if column >= column_count {
         return Err(format!(
-            "dependent column {column} does not exist; table has {column_count} columns"
+            "column {column} does not exist; table has {column_count} columns"
         ));
     }
 
@@ -60,8 +93,13 @@ fn parse_prn_or_csv_column(content: &str, column: usize) -> Result<Vec<Value>, S
         if is_separator(line) {
             continue;
         }
-        if let Some((repeated_delimiter, repeated_count)) = header_shape(line) {
-            if repeated_delimiter == delimiter && repeated_count == column_count {
+        if let Some((repeated_delimiter, _)) = header_shape(line) {
+            let repeated_fields = split_fields(line, repeated_delimiter).map_err(|error| {
+                format!("invalid comparison header at line {line_number}: {error}")
+            })?;
+            if repeated_delimiter == delimiter
+                && same_header_fields(&repeated_fields, &header_fields)
+            {
                 continue;
             }
             return Err(format!(
@@ -84,6 +122,49 @@ fn parse_prn_or_csv_column(content: &str, column: usize) -> Result<Vec<Value>, S
         ));
     }
     Ok(values)
+}
+
+fn header_candidate_has_data(
+    lines: &[(usize, &str)],
+    start: usize,
+    delimiter: Delimiter,
+    header_fields: &[String],
+) -> bool {
+    for (_, line) in lines.iter().skip(start).copied() {
+        if line.to_ascii_lowercase().starts_with("end of xyce") || is_footer(line) {
+            return false;
+        }
+        if is_separator(line) {
+            continue;
+        }
+        let Ok(fields) = split_fields(line, delimiter) else {
+            return false;
+        };
+        if fields.len() == header_fields.len()
+            && fields.iter().all(|field| parse_numeric(field).is_ok())
+        {
+            return true;
+        }
+        let Some((candidate_delimiter, _)) = header_shape(line) else {
+            return false;
+        };
+        let Ok(candidate_fields) = split_fields(line, candidate_delimiter) else {
+            return false;
+        };
+        if candidate_delimiter != delimiter || !same_header_fields(&candidate_fields, header_fields)
+        {
+            return false;
+        }
+    }
+    false
+}
+
+fn same_header_fields(left: &[String], right: &[String]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
 fn header_shape(line: &str) -> Option<(Delimiter, usize)> {
@@ -246,7 +327,7 @@ fn parse_csd_column(content: &str, column: usize) -> Result<Vec<Value>, String> 
             index += 1;
         }
         if complex_values {
-            return Err("complex-valued CSDF comparison tables are not valid for DC ERROR".into());
+            return Err("complex-valued CSDF comparison tables are not valid for ERROR".into());
         }
         if index >= lines.len() {
             return Err("CSDF section has no #N column block".to_string());
@@ -262,7 +343,7 @@ fn parse_csd_column(content: &str, column: usize) -> Result<Vec<Value>, String> 
             .ok_or_else(|| "CSDF column count overflows usize".to_string())?;
         if column >= logical_column_count {
             return Err(format!(
-                "dependent column {column} does not exist; CSDF rows expose {logical_column_count} columns including the sweep variable"
+                "column {column} does not exist; CSDF rows expose {logical_column_count} columns including the sweep variable"
             ));
         }
         index += 1;
@@ -460,5 +541,17 @@ mod tests {
 
         let comma = "Index,V(1,2),V(3)\n0,4,5\nEnd of Xyce(TM) Simulation\n";
         assert_eq!(parse_prn_or_csv_column(comma, 1).unwrap(), vec![4.0]);
+    }
+
+    #[test]
+    fn prn_metadata_is_not_mistaken_for_the_table_header() {
+        let prn = "Circuit: metadata line\nDate: today\nIndex A\n-----\n0 1\nIndex A\n1 2\nEnd of Xyce(TM) Simulation\n";
+        assert_eq!(parse_prn_or_csv_column(prn, 1).unwrap(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn nonnumeric_rows_cannot_masquerade_as_repeated_headers() {
+        let prn = "Index A\n0 1\ngarbage row\n1 2\nEnd of Xyce(TM) Simulation\n";
+        assert!(parse_prn_or_csv_column(prn, 1).is_err());
     }
 }

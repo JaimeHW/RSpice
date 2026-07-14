@@ -1414,6 +1414,47 @@ mod tests {
     }
 
     #[test]
+    fn ac_file_error_uses_akima_interpolation_and_extrapolation() {
+        let file = "virtual://measure/ac-file-error.prn";
+        let _ = crate::xspice::unregister_data_file(file);
+        crate::xspice::register_data_file(
+            file,
+            "Index FREQ REF\n0 5 0.5\n1 15 1.5\n2 55 5.5\nEnd of Xyce(TM) Simulation\n",
+        )
+        .expect("register AC ERROR comparison table");
+        let netlist = Netlist::parse(&format!(
+            "AC file error interpolation\n\
+             V1 out 0 AC 1\n\
+             .ac lin 5 10 50\n\
+             .measure ac fit ERROR VM(out) FILE=\"{file}\" INDEPVARCOL=1 DEPVARCOL=2\n\
+             .end\n"
+        ))
+        .expect("AC ERROR deck parses");
+        let point = |frequency, magnitude| AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(magnitude, 0.0)],
+            currents: Vec::new(),
+        };
+        let results = evaluate_ac_measurements(
+            &netlist,
+            &[
+                point(10.0, 1.0),
+                point(20.0, 2.0),
+                point(30.0, 3.0),
+                point(40.0, 4.0),
+                point(50.0, 5.0),
+            ],
+        );
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].value.is_some_and(|value| value.abs() < 1.0e-14));
+        assert!(results[0].passed);
+        crate::xspice::unregister_data_file(file).expect("unregister AC ERROR table");
+    }
+
+    #[test]
     fn ac_equations_use_xyce_accessors_frequency_aliases_and_windows() {
         let netlist = Netlist::parse(
             "* continuous AC equations\n\
