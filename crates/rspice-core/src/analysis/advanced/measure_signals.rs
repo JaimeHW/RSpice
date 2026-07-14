@@ -861,21 +861,26 @@ pub fn evaluate_noise_continuous_measurements(
             .collect();
     };
     let signals = series.equation_signal_map();
-    let derived = materialize_measure_expression_signals(
-        &statements,
-        series.axis(),
-        &signals,
-        &netlist.params,
-    );
+    evaluate_continuous_statements(&statements, series.axis(), signals, &netlist.params, &[])
+}
+
+fn evaluate_continuous_statements(
+    statements: &[&MeasureStatement],
+    axis: &[Value],
+    signals: HashMap<String, &[Value]>,
+    params: &crate::netlist::ParamContext,
+    segment_starts: &[usize],
+) -> Vec<ContinuousMeasureResult> {
+    let derived = materialize_measure_expression_signals(statements, axis, &signals, params);
     let mut augmented_signals = signals;
     for (name, waveform) in &derived {
         augmented_signals.insert(name.clone(), waveform.as_slice());
     }
     let mut engine = MeasureEngine::new();
     for statement in statements {
-        engine.add(statement.clone());
+        engine.add((*statement).clone());
     }
-    engine.evaluate_continuous(series.axis(), &augmented_signals, &[])
+    engine.evaluate_continuous(axis, &augmented_signals, segment_starts)
 }
 
 /// The netlist's measurement statements for one analysis kind
@@ -1267,6 +1272,83 @@ pub fn evaluate_tran_measurements(
     results
 }
 
+/// Evaluate vector-valued `.MEASURE DC_CONT` point-event statements.
+///
+/// The sweep value is the event abscissa. Nested DC sweeps are divided at
+/// primary-sweep restarts so no event is interpolated across the synthetic
+/// jump between secondary-sweep cycles.
+pub fn evaluate_dc_continuous_measurements(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+) -> Vec<ContinuousMeasureResult> {
+    evaluate_dc_continuous_measurements_with_parameter_contexts(netlist, sweep, &[])
+}
+
+/// Evaluate vector-valued `.MEASURE DC_CONT` statements with an optional
+/// parameter context for every accepted sweep point.
+///
+/// Point-local contexts preserve `.DC DATA` semantics for expressions that
+/// reference table-driven parameters or their dependent parameters.
+pub fn evaluate_dc_continuous_measurements_with_parameter_contexts(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+    point_params: &[crate::netlist::ParamContext],
+) -> Vec<ContinuousMeasureResult> {
+    let statements = measurements_for_analysis(netlist, "DC_CONT");
+    if statements.is_empty() {
+        return Vec::new();
+    }
+    let normalized_statements = statements
+        .into_iter()
+        .cloned()
+        .map(normalize_dc_measurement_window)
+        .collect::<Vec<_>>();
+    let statements = normalized_statements.iter().collect::<Vec<_>>();
+    let Some(series) = DcSweepSeries::from_sweep(sweep) else {
+        return statements
+            .iter()
+            .map(|statement| ContinuousMeasureResult {
+                name: statement.name.clone(),
+                records: Vec::new(),
+                failure: Some("DC sweep produced no points".to_string()),
+            })
+            .collect();
+    };
+    let mut signals = series.signal_map();
+    let parameter_series = if point_params.is_empty() {
+        Vec::new()
+    } else if point_params.len() != series.axis().len() {
+        return statements
+            .iter()
+            .map(|statement| ContinuousMeasureResult {
+                name: statement.name.clone(),
+                records: Vec::new(),
+                failure: Some(
+                    "DC point-parameter context count does not match sweep length".to_string(),
+                ),
+            })
+            .collect();
+    } else {
+        dc_parameter_context_series(point_params)
+    };
+    for (name, waveform) in &parameter_series {
+        insert_case_variants(&mut signals, name, waveform);
+    }
+    let differential_signals =
+        materialize_differential_voltage_signals(&statements, series.axis().len(), &signals);
+    for (name, waveform) in &differential_signals {
+        insert_case_variants(&mut signals, name, waveform);
+    }
+    let segment_starts = dc_primary_segment_starts(netlist, series.axis().len());
+    evaluate_continuous_statements(
+        &statements,
+        series.axis(),
+        signals,
+        &netlist.params,
+        &segment_starts,
+    )
+}
+
 /// Evaluate the netlist's DC .MEAS statements against a sweep.
 ///
 /// Returns an empty vector when the netlist has no DC measurements; an empty
@@ -1449,6 +1531,39 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
     statement
 }
 
+/// Evaluate vector-valued `.MEASURE AC_CONT` point-event statements.
+///
+/// Complex probes use the same canonical projections as scalar AC measures:
+/// bare `V()`/`I()` select the real component, with the explicit `VM`/`IM`,
+/// `VR`/`IR`, `VI`/`II`, `VP`/`IP`, and `VDB`/`IDB` accessors available for
+/// magnitude, real, imaginary, phase, and decibel projections.
+pub fn evaluate_ac_continuous_measurements(
+    netlist: &Netlist,
+    sweep: &[AcResult],
+) -> Vec<ContinuousMeasureResult> {
+    let statements = measurements_for_analysis(netlist, "AC_CONT");
+    if statements.is_empty() {
+        return Vec::new();
+    }
+    let Some(series) = AcSweepSeries::from_sweep(sweep) else {
+        return statements
+            .iter()
+            .map(|statement| ContinuousMeasureResult {
+                name: statement.name.clone(),
+                records: Vec::new(),
+                failure: Some("AC sweep produced no points".to_string()),
+            })
+            .collect();
+    };
+    evaluate_continuous_statements(
+        &statements,
+        series.axis(),
+        series.equation_signal_map(),
+        &netlist.params,
+        &[],
+    )
+}
+
 /// Evaluate the netlist's AC .MEAS statements against a sweep.
 ///
 /// Returns an empty vector when the netlist has no AC measurements; an
@@ -1575,6 +1690,43 @@ mod tests {
         assert_eq!(signals["VI(out)"], &[0.0, -1.0][..], "imaginary part");
         assert_eq!(signals["VP(out)"][1], -90.0, "phase in degrees");
         assert!(signals.contains_key("FREQUENCY"));
+    }
+
+    #[test]
+    fn ac_continuous_measurements_use_canonical_complex_projections() {
+        let netlist = Netlist::parse(
+            "AC continuous projections\n\
+             V1 out 0 AC 1\n\
+             .ac lin 3 1 3\n\
+             .meas ac_cont samples FIND VR(out) WHEN VI(out)=0 CROSS=1\n\
+             .end\n",
+        )
+        .expect("AC_CONT deck parses");
+        let point = |frequency, real, imaginary| AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(real, imaginary)],
+            currents: Vec::new(),
+        };
+        let sweep = vec![
+            point(1.0, 0.0, -1.0),
+            point(2.0, 10.0, 1.0),
+            point(3.0, 40.0, -1.0),
+        ];
+
+        let results = evaluate_ac_continuous_measurements(&netlist, &sweep);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].failure, None);
+        assert_eq!(
+            results[0]
+                .records
+                .iter()
+                .map(|record| (record.event_axis, record.value))
+                .collect::<Vec<_>>(),
+            vec![(Some(1.5), 5.0), (Some(2.5), 25.0)]
+        );
     }
 
     #[test]
@@ -1951,6 +2103,95 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].value, Some(1.5));
         assert!(results[0].passed);
+    }
+
+    #[test]
+    fn dc_continuous_measurements_observe_point_local_parameter_contexts() {
+        let netlist = Netlist::parse(
+            "DC continuous row-local parameters\n\
+             .param P=0\n\
+             V1 out 0 0\n\
+             .dc V1 0 2 1\n\
+             .meas dc_cont sampled FIND {P*2} WHEN V(out)=0 CROSS=1\n\
+             .end\n",
+        )
+        .expect("DC_CONT parameter deck parses");
+        let voltages = [-1.0, 1.0, -1.0];
+        let sweep = voltages
+            .into_iter()
+            .enumerate()
+            .map(|(axis, voltage)| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, voltage];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis as Value, point)
+            })
+            .collect::<Vec<_>>();
+        let contexts = [1.0, 3.0, 5.0]
+            .into_iter()
+            .map(|value| {
+                let mut params = netlist.params.clone();
+                params.set("P", value);
+                params
+            })
+            .collect::<Vec<_>>();
+
+        let results = evaluate_dc_continuous_measurements_with_parameter_contexts(
+            &netlist, &sweep, &contexts,
+        );
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].failure, None);
+        assert_eq!(
+            results[0]
+                .records
+                .iter()
+                .map(|record| (record.event_axis, record.value))
+                .collect::<Vec<_>>(),
+            vec![(Some(0.5), 4.0), (Some(1.5), 8.0)]
+        );
+    }
+
+    #[test]
+    fn dc_continuous_measurements_do_not_interpolate_across_nested_sweep_restarts() {
+        let netlist = Netlist::parse(
+            "nested DC continuous events\n\
+             V1 out 0 0\n\
+             V2 bias 0 0\n\
+             .dc V1 0 2 1 V2 0 1 1\n\
+             .meas dc_cont crossings WHEN V(out)=0 CROSS=1\n\
+             .end\n",
+        )
+        .expect("nested DC_CONT deck parses");
+        let sweep = [
+            (0.0, -1.0),
+            (1.0, 1.0),
+            (2.0, 1.0),
+            (0.0, -1.0),
+            (1.0, 1.0),
+            (2.0, 1.0),
+        ]
+        .into_iter()
+        .map(|(axis, voltage)| {
+            let mut point = SimulationResult::new(1, 0);
+            point.node_voltages = vec![0.0, voltage];
+            point.node_names = vec!["0".to_string(), "out".to_string()];
+            (axis, point)
+        })
+        .collect::<Vec<_>>();
+
+        let results = evaluate_dc_continuous_measurements(&netlist, &sweep);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].failure, None);
+        assert_eq!(
+            results[0]
+                .records
+                .iter()
+                .map(|record| record.value)
+                .collect::<Vec<_>>(),
+            vec![0.5, 0.5]
+        );
     }
 
     #[test]

@@ -44,7 +44,9 @@ pub use measure::{
 };
 pub use measure_signals::{
     AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,
-    evaluate_ac_equation_measurements, evaluate_ac_measurements, evaluate_dc_equation_measurements,
+    evaluate_ac_continuous_measurements, evaluate_ac_equation_measurements,
+    evaluate_ac_measurements, evaluate_dc_continuous_measurements,
+    evaluate_dc_continuous_measurements_with_parameter_contexts, evaluate_dc_equation_measurements,
     evaluate_dc_measurements, evaluate_dc_measurements_with_parameter_contexts,
     evaluate_noise_continuous_measurements, evaluate_noise_equation_measurements,
     evaluate_noise_measurements, evaluate_tran_equation_measurements, evaluate_tran_measurements,
