@@ -69,7 +69,7 @@ pub use advanced::{
     PortNoiseCorrelationResult, PzMatrix, SMatrix, SParameterAnalyzer, SParameterConfig,
     SParameterResult, Sensitivity, SensitivityAnalyzer, SensitivityResult, StepSpec, StepTarget,
     StepType, Tolerance, TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult,
-    TrigSpec, VariableStatistics, VariationSet, WhenCondition,
+    TrigSpec, TriggerEvent, VariableStatistics, VariationSet, WhenCondition,
 };
 
 // Re-export PSS types

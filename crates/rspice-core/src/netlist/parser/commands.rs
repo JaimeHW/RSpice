@@ -2107,7 +2107,7 @@ fn parse_point_measure_options(
                         "CROSS" => crate::analysis::EdgeType::Cross,
                         _ => unreachable!(),
                     },
-                    number: parse_measure_occurrence(stream, line_num, params, &keyword)?,
+                    number: parse_measure_event_occurrence(stream, line_num, params, &keyword)?,
                 };
                 options.occurrence_given = true;
             }
@@ -2205,7 +2205,7 @@ fn parse_measure_when_event_options(
                         "CROSS" => crate::analysis::EdgeType::Cross,
                         _ => unreachable!(),
                     },
-                    number: parse_measure_occurrence(stream, line_num, params, &keyword)?,
+                    number: parse_measure_event_occurrence(stream, line_num, params, &keyword)?,
                 };
                 occurrence_given = true;
             }
@@ -2332,13 +2332,39 @@ pub(super) fn parse_meas_delay_spec(
     section_name: &str,
     stop_at_targ: bool,
 ) -> Result<crate::analysis::TrigSpec, ParseError> {
-    use crate::analysis::{EdgeType, TrigSpec};
+    use crate::analysis::{EdgeType, EventOccurrence, TrigSpec, TriggerEvent, WhenCondition};
 
-    let signal = parse_meas_signal(stream, line_num)?;
-    let mut value = None;
-    let mut edge = EdgeType::Rise;
-    let mut number = 1usize;
-    let mut td = 0.0;
+    let event = if matches!(&stream.peek().kind, TokenKind::Ident(value) if value.eq_ignore_ascii_case("AT"))
+        && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        stream.advance();
+        stream.advance();
+        TriggerEvent::At(expect_value(stream, line_num, params)?)
+    } else {
+        let left = parse_meas_signal(stream, line_num)?;
+        let right = if stream.consume(&TokenKind::Equals) {
+            parse_measure_when_operand(stream, line_num, params)?
+        } else {
+            let keyword = expect_ident(stream, line_num)?;
+            if !keyword.eq_ignore_ascii_case("VAL") || !stream.consume(&TokenKind::Equals) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Expected '=' or VAL= after signal in .MEAS {section_name} specification"
+                    ),
+                });
+            }
+            parse_measure_when_operand(stream, line_num, params)?
+        };
+        TriggerEvent::When(WhenCondition {
+            left,
+            right,
+            occurrence: EventOccurrence::default(),
+        })
+    };
+    let mut spec = TrigSpec { event, td: None };
+    let mut occurrence_given = false;
+    let mut td_given = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
@@ -2354,19 +2380,20 @@ pub(super) fn parse_meas_delay_spec(
                 break;
             }
             TokenKind::Ident(s) if s.eq_ignore_ascii_case("VAL") => {
-                stream.advance();
-                if !stream.consume(&TokenKind::Equals) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Duplicate VAL option in .MEAS {section_name} specification"),
+                });
+            }
+            TokenKind::Ident(s) if s.eq_ignore_ascii_case("TD") => {
+                if td_given {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: format!(
-                            "Expected '=' after VAL in .MEAS {} specification",
-                            section_name
+                            "Duplicate TD option in .MEAS {section_name} specification"
                         ),
                     });
                 }
-                value = Some(expect_value(stream, line_num, params)?);
-            }
-            TokenKind::Ident(s) if s.eq_ignore_ascii_case("TD") => {
                 stream.advance();
                 if !stream.consume(&TokenKind::Equals) {
                     return Err(ParseError::Syntax {
@@ -2377,13 +2404,30 @@ pub(super) fn parse_meas_delay_spec(
                         ),
                     });
                 }
-                td = expect_value(stream, line_num, params)?;
+                spec.td = Some(expect_value(stream, line_num, params)?);
+                td_given = true;
             }
             TokenKind::Ident(s)
                 if s.eq_ignore_ascii_case("RISE")
                     || s.eq_ignore_ascii_case("FALL")
                     || s.eq_ignore_ascii_case("CROSS") =>
             {
+                let TriggerEvent::When(condition) = &mut spec.event else {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "RISE, FALL, and CROSS are invalid with AT in .MEAS {section_name} specification"
+                        ),
+                    });
+                };
+                if occurrence_given {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Only one RISE, FALL, or CROSS qualifier is allowed in .MEAS {section_name} specification"
+                        ),
+                    });
+                }
                 let keyword = s.to_ascii_uppercase();
                 stream.advance();
                 if !stream.consume(&TokenKind::Equals) {
@@ -2395,13 +2439,16 @@ pub(super) fn parse_meas_delay_spec(
                         ),
                     });
                 }
-                number = parse_measure_occurrence(stream, line_num, params, &keyword)?;
-                edge = match keyword.as_str() {
-                    "RISE" => EdgeType::Rise,
-                    "FALL" => EdgeType::Fall,
-                    "CROSS" => EdgeType::Cross,
-                    _ => unreachable!(),
+                condition.occurrence = EventOccurrence {
+                    edge: match keyword.as_str() {
+                        "RISE" => EdgeType::Rise,
+                        "FALL" => EdgeType::Fall,
+                        "CROSS" => EdgeType::Cross,
+                        _ => unreachable!(),
+                    },
+                    number: parse_measure_event_occurrence(stream, line_num, params, &keyword)?,
                 };
+                occurrence_given = true;
             }
             _ => {
                 return Err(ParseError::Syntax {
@@ -2416,36 +2463,37 @@ pub(super) fn parse_meas_delay_spec(
         }
     }
 
-    let value = value.ok_or_else(|| ParseError::Syntax {
-        line: line_num,
-        message: format!("Expected VAL=... in .MEAS {} specification", section_name),
-    })?;
-
-    let mut spec = TrigSpec::new(&signal, value)
-        .with_edge(edge)
-        .with_number(number);
-    spec.td = td;
     Ok(spec)
 }
 
-pub(super) fn parse_measure_occurrence(
+fn parse_measure_event_occurrence(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
     keyword: &str,
-) -> Result<usize, ParseError> {
+) -> Result<isize, ParseError> {
+    if let TokenKind::Ident(value) = &stream.peek().kind
+        && value.eq_ignore_ascii_case("LAST")
+    {
+        stream.advance();
+        return Ok(-1);
+    }
     let value = expect_value(stream, line_num, params)?;
     let rounded = value.round();
-    if !value.is_finite() || value < 1.0 || (value - rounded).abs() > 1e-12 {
+    if !value.is_finite()
+        || value == 0.0
+        || (value - rounded).abs() > 1e-12
+        || rounded < isize::MIN as crate::Value
+        || rounded > isize::MAX as crate::Value
+    {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Expected positive integer occurrence for {} in .MEAS, found {}",
-                keyword, value
+                "Expected a non-zero integer occurrence or LAST for {keyword} in .MEAS, found {value}"
             ),
         });
     }
-    Ok(rounded as usize)
+    Ok(rounded as isize)
 }
 
 pub(super) fn parse_measure_range_options(

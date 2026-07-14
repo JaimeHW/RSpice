@@ -12,7 +12,9 @@
 
 use std::collections::HashMap;
 
-use super::measure::{MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType};
+use super::measure::{
+    MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType, TriggerEvent,
+};
 use crate::Value;
 use crate::analysis::AcResult;
 use crate::engine::TransientResult;
@@ -917,8 +919,14 @@ fn materialize_measure_expression_signals(
     for statement in statements {
         match &statement.measure_type {
             MeasureType::Delay { trig, targ } => {
-                add(&trig.signal);
-                add(&targ.signal);
+                for clause in [trig, targ] {
+                    if let TriggerEvent::When(condition) = &clause.event {
+                        add(&condition.left);
+                        if let MeasureOperand::Waveform(right) = &condition.right {
+                            add(right);
+                        }
+                    }
+                }
             }
             MeasureType::Find { signal, when, .. }
             | MeasureType::Derivative { signal, when, .. } => {
@@ -987,8 +995,14 @@ fn materialize_differential_voltage_signals(
     for statement in statements {
         match &statement.measure_type {
             MeasureType::Delay { trig, targ } => {
-                add(&trig.signal);
-                add(&targ.signal);
+                for clause in [trig, targ] {
+                    if let TriggerEvent::When(condition) = &clause.event {
+                        add(&condition.left);
+                        if let MeasureOperand::Waveform(right) = &condition.right {
+                            add(right);
+                        }
+                    }
+                }
             }
             MeasureType::Find { signal, when, .. }
             | MeasureType::Derivative { signal, when, .. } => {

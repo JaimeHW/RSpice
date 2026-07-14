@@ -1487,6 +1487,40 @@ mod tests {
     }
 
     #[test]
+    fn trigger_target_clauses_preserve_at_moving_rhs_last_and_td() {
+        let netlist = Netlist::parse(
+            "typed trigger target clauses\n\
+             V1 one 0 0\n\
+             V2 two 0 0\n\
+             .dc V1 0 4 1\n\
+             .measure dc delay TRIG AT=1.5 TD=2 TARG {V(one)}={V(two)+1} FALL=LAST\n\
+             .end\n",
+        )
+        .expect("typed trigger/target clauses parse");
+
+        let crate::analysis::MeasureType::Delay { trig, targ } =
+            &netlist.measurements[0].measure_type
+        else {
+            panic!("expected trigger/target delay measurement");
+        };
+        assert_eq!(trig.event, crate::analysis::TriggerEvent::At(1.5));
+        assert_eq!(trig.td, Some(2.0));
+        match &targ.event {
+            crate::analysis::TriggerEvent::When(condition) => {
+                assert_eq!(condition.left, "{V(one)}");
+                assert_eq!(
+                    condition.right,
+                    crate::analysis::MeasureOperand::Waveform("{V(two)+1}".to_string())
+                );
+                assert_eq!(condition.occurrence.edge, crate::analysis::EdgeType::Fall);
+                assert_eq!(condition.occurrence.number, -1);
+            }
+            other => panic!("expected conditional target, got {other:?}"),
+        }
+        assert_eq!(targ.td, None);
+    }
+
+    #[test]
     fn extrema_output_frequency_alias_selects_independent_axis() {
         let netlist = Netlist::parse(
             "extrema output frequency\n\

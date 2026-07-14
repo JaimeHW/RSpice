@@ -38,7 +38,7 @@ pub use harmonic_balance::{
 };
 pub use measure::{
     EdgeType, EventOccurrence, ExtremaOutput, MeasureEngine, MeasureOperand, MeasureResult,
-    MeasureStatement, MeasureType, TrigSpec, WhenCondition,
+    MeasureStatement, MeasureType, TrigSpec, TriggerEvent, WhenCondition,
 };
 pub use measure_signals::{
     AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,

@@ -60,7 +60,9 @@ pub enum MeasureOperand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventOccurrence {
     pub edge: EdgeType,
-    pub number: usize,
+    /// Positive values select from the start; negative values select from the
+    /// end (`-1` is Xyce's `LAST`). Zero is invalid and never matches.
+    pub number: isize,
 }
 
 impl Default for EventOccurrence {
@@ -80,39 +82,52 @@ pub struct WhenCondition {
     pub occurrence: EventOccurrence,
 }
 
-/// Trigger/Target specification for delay measurements
-#[derive(Debug, Clone)]
+/// Event form for one side of a trigger/target delay measurement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TriggerEvent {
+    /// Exact independent-axis location (`TRIG AT=...`).
+    At(Value),
+    /// Conditional waveform intersection (`TRIG lhs=rhs`).
+    When(WhenCondition),
+}
+
+/// Trigger/Target specification for delay measurements.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TrigSpec {
-    /// Signal name (e.g., "V(out)")
-    pub signal: String,
-    /// Threshold value
-    pub value: Value,
-    /// Edge type (rise/fall)
-    pub edge: EdgeType,
-    /// Which occurrence (1 = first, 2 = second, etc.)
-    pub number: usize,
-    /// Time delay offset (TD=)
-    pub td: Value,
+    pub event: TriggerEvent,
+    /// Optional numeric-axis lower bound. Xyce copies an explicitly supplied
+    /// TRIG TD to TARG when TARG omits TD.
+    pub td: Option<Value>,
 }
 
 impl TrigSpec {
     pub fn new(signal: &str, value: Value) -> Self {
         Self {
-            signal: signal.to_string(),
-            value,
-            edge: EdgeType::Rise,
-            number: 1,
-            td: 0.0,
+            event: TriggerEvent::When(WhenCondition {
+                left: signal.to_string(),
+                right: MeasureOperand::Constant(value),
+                occurrence: EventOccurrence {
+                    edge: EdgeType::Cross,
+                    number: 1,
+                },
+            }),
+            td: None,
         }
     }
 
     pub fn with_edge(mut self, edge: EdgeType) -> Self {
-        self.edge = edge;
+        if let TriggerEvent::When(condition) = &mut self.event {
+            condition.occurrence.edge = edge;
+        }
         self
     }
 
     pub fn with_number(mut self, n: usize) -> Self {
-        self.number = n;
+        if let TriggerEvent::When(condition) = &mut self.event {
+            // Preserve the infallible builder while failing closed for values
+            // that the signed Xyce occurrence domain cannot represent.
+            condition.occurrence.number = isize::try_from(n).unwrap_or(0);
+        }
         self
     }
 }
@@ -515,7 +530,7 @@ impl MeasureEngine {
     ) -> MeasureResult {
         match &measurement.measure_type {
             MeasureType::Delay { trig, targ } => {
-                self.eval_delay(&measurement.name, trig, targ, time, signals)
+                self.eval_delay(&measurement.name, trig, targ, time, signals, segment_starts)
             }
             MeasureType::Derivative {
                 signal,
@@ -711,42 +726,18 @@ impl MeasureEngine {
         targ: &TrigSpec,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
+        segment_starts: &[usize],
     ) -> MeasureResult {
-        let trig_sig = match lookup_signal(signals, &trig.signal) {
-            Some(s) => s,
-            None => {
-                return MeasureResult::failed(name, &format!("Signal '{}' not found", trig.signal));
-            }
+        let target_td = targ.td.or(trig.td);
+        let t_trig = match delay_clause_event(trig, trig.td, time, signals, segment_starts) {
+            Ok(Some(value)) => value,
+            Ok(None) => return MeasureResult::failed(name, "Trigger condition not found"),
+            Err(error) => return MeasureResult::failed(name, &error),
         };
-        let targ_sig = match lookup_signal(signals, &targ.signal) {
-            Some(s) => s,
-            None => {
-                return MeasureResult::failed(name, &format!("Signal '{}' not found", targ.signal));
-            }
-        };
-
-        let t_trig = match self.find_crossing(
-            time,
-            trig_sig,
-            trig.value,
-            trig.edge,
-            trig.number,
-            Some(trig.td),
-        ) {
-            Some(t) => t,
-            None => return MeasureResult::failed(name, "Trigger condition not found"),
-        };
-
-        let t_targ = match self.find_crossing(
-            time,
-            targ_sig,
-            targ.value,
-            targ.edge,
-            targ.number,
-            Some(targ.td),
-        ) {
-            Some(t) => t,
-            None => return MeasureResult::failed(name, "Target condition not found"),
+        let t_targ = match delay_clause_event(targ, target_td, time, signals, segment_starts) {
+            Ok(Some(value)) => value,
+            Ok(None) => return MeasureResult::failed(name, "Target condition not found"),
+            Err(error) => return MeasureResult::failed(name, &error),
         };
 
         MeasureResult::success(name, t_targ - t_trig)
@@ -1074,34 +1065,13 @@ impl MeasureEngine {
         let Some(condition) = when else {
             return MeasureResult::failed(name, "DERIV requires AT=time or WHEN signal=value");
         };
-        let left = match lookup_signal(signals, &condition.left) {
-            Some(signal) => signal,
-            None => {
-                return MeasureResult::failed(
-                    name,
-                    &format!("When signal '{}' not found", condition.left),
-                );
+        match first_measure_condition_event(condition, time, signals, lower, upper, segment_starts)
+        {
+            Ok(Some((segment, _, _))) => {
+                return measurement_segment_slope(name, time, signal, segment);
             }
-        };
-        let right = match resolve_measure_operand(&condition.right, signals) {
-            Ok(operand) => operand,
             Err(error) => return MeasureResult::failed(name, &error),
-        };
-        let mut matching = 0usize;
-        for (segment, fraction) in measurement_condition_crossings(
-            left,
-            right,
-            time.len(),
-            segment_starts,
-            condition.occurrence.edge,
-        ) {
-            let axis = time[segment] + fraction * (time[segment + 1] - time[segment]);
-            if Self::axis_in_measurement_window(axis, lower, upper) {
-                matching += 1;
-                if matching == condition.occurrence.number {
-                    return measurement_segment_slope(name, time, signal, segment);
-                }
-            }
+            Ok(None) => {}
         }
         MeasureResult::failed(name, "WHEN condition never met in the measurement window")
     }
@@ -1175,36 +1145,21 @@ impl MeasureEngine {
         }
 
         if let Some(condition) = when {
-            let left = match lookup_signal(signals, &condition.left) {
-                Some(s) => s,
-                None => {
-                    return MeasureResult::failed(
-                        name,
-                        &format!("When signal '{}' not found", condition.left),
-                    );
-                }
-            };
-            let right = match resolve_measure_operand(&condition.right, signals) {
-                Ok(operand) => operand,
-                Err(error) => return MeasureResult::failed(name, &error),
-            };
-            let mut matching = 0usize;
-            for (segment, fraction) in measurement_condition_crossings(
-                left,
-                right,
-                time.len(),
+            match first_measure_condition_event(
+                condition,
+                time,
+                signals,
+                lower,
+                upper,
                 segment_starts,
-                condition.occurrence.edge,
             ) {
-                let axis = time[segment] + fraction * (time[segment + 1] - time[segment]);
-                if Self::axis_in_measurement_window(axis, lower, upper) {
-                    matching += 1;
-                    if matching == condition.occurrence.number {
-                        let value =
-                            signal[segment] + fraction * (signal[segment + 1] - signal[segment]);
-                        return MeasureResult::success(name, value);
-                    }
+                Ok(Some((segment, fraction, _))) => {
+                    let value =
+                        signal[segment] + fraction * (signal[segment + 1] - signal[segment]);
+                    return MeasureResult::success(name, value);
                 }
+                Err(error) => return MeasureResult::failed(name, &error),
+                Ok(None) => {}
             }
             return MeasureResult::failed(
                 name,
@@ -1334,6 +1289,84 @@ fn resolve_measure_operand<'a>(
     }
 }
 
+fn delay_clause_event(
+    clause: &TrigSpec,
+    effective_td: Option<Value>,
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    segment_starts: &[usize],
+) -> Result<Option<Value>, String> {
+    match &clause.event {
+        TriggerEvent::At(target) => {
+            if !target.is_finite() {
+                return Ok(None);
+            }
+            Ok(delay_at_is_reached(axis, *target, segment_starts).then_some(*target))
+        }
+        TriggerEvent::When(condition) => {
+            // Xyce's TRIG/TARG contract recognizes only -1/LAST as a
+            // negative occurrence. Other negative values parse as a failed
+            // measure so the remaining measurements in the deck still run.
+            if condition.occurrence.number < -1 {
+                return Ok(None);
+            }
+            let left = lookup_signal(signals, &condition.left)
+                .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
+            let right = resolve_measure_operand(&condition.right, signals)?;
+            let events = measurement_condition_crossings(
+                left,
+                right,
+                axis.len(),
+                segment_starts,
+                condition.occurrence.edge,
+            )
+            .into_iter()
+            .filter_map(|(segment, fraction)| {
+                let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
+                delay_td_accepts_event(event_axis, effective_td).then_some(event_axis)
+            });
+            Ok(select_measure_occurrence(
+                events,
+                condition.occurrence.number,
+            ))
+        }
+    }
+}
+
+fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) -> bool {
+    const XYCE_DEFAULT_MINVAL: Value = 1.0e-12;
+    let Some((&minimum, &maximum)) = axis
+        .iter()
+        .min_by(|left, right| left.total_cmp(right))
+        .zip(axis.iter().max_by(|left, right| left.total_cmp(right)))
+    else {
+        return false;
+    };
+    if target < minimum - XYCE_DEFAULT_MINVAL || target > maximum + XYCE_DEFAULT_MINVAL {
+        return false;
+    }
+    let ascending = axis
+        .windows(2)
+        .enumerate()
+        .find_map(|(segment, pair)| {
+            (segment_starts.binary_search(&(segment + 1)).is_err() && pair[0] != pair[1])
+                .then_some(pair[1] > pair[0])
+        })
+        .unwrap_or(true);
+    axis.iter().any(|sample| {
+        if ascending {
+            sample - XYCE_DEFAULT_MINVAL >= target
+        } else {
+            sample - XYCE_DEFAULT_MINVAL <= target
+        }
+    })
+}
+
+fn delay_td_accepts_event(event_axis: Value, td: Option<Value>) -> bool {
+    const XYCE_TD_TOLERANCE: Value = 1.0e-12;
+    td.is_none_or(|td| event_axis > td * (1.0 - XYCE_TD_TOLERANCE))
+}
+
 fn first_measure_condition_event(
     condition: &WhenCondition,
     axis: &[Value],
@@ -1345,7 +1378,7 @@ fn first_measure_condition_event(
     let left = lookup_signal(signals, &condition.left)
         .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
     let right = resolve_measure_operand(&condition.right, signals)?;
-    Ok(measurement_condition_crossings(
+    let events = measurement_condition_crossings(
         left,
         right,
         axis.len(),
@@ -1357,8 +1390,25 @@ fn first_measure_condition_event(
         let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
         MeasureEngine::axis_in_measurement_window(event_axis, lower, upper)
             .then_some((segment, fraction, event_axis))
-    })
-    .nth(condition.occurrence.number.saturating_sub(1)))
+    });
+    Ok(select_measure_occurrence(
+        events,
+        condition.occurrence.number,
+    ))
+}
+
+fn select_measure_occurrence<T>(events: impl Iterator<Item = T>, number: isize) -> Option<T> {
+    if number > 0 {
+        events.into_iter().nth(number as usize - 1)
+    } else if number < 0 {
+        let events = events.collect::<Vec<_>>();
+        number
+            .checked_abs()
+            .and_then(|distance| events.len().checked_sub(distance as usize))
+            .and_then(|index| events.into_iter().nth(index))
+    } else {
+        None
+    }
 }
 
 /// Return every qualifying `WHEN left=right` crossing interval in traversal
@@ -2092,7 +2142,7 @@ mod tests {
         let mut signals = HashMap::new();
         signals.insert("ALT".to_string(), alternating.as_slice());
         let statement =
-            |name: &str, edge: EdgeType, number: usize, from: Option<Value>| -> MeasureStatement {
+            |name: &str, edge: EdgeType, number: isize, from: Option<Value>| -> MeasureStatement {
                 MeasureStatement {
                     name: name.to_string(),
                     measure_type: MeasureType::When {
@@ -2126,6 +2176,85 @@ mod tests {
         assert_eq!(results[1].value, Some(2.5));
         assert_eq!(results[2].value, Some(5.5));
         assert_eq!(results[3].value, Some(3.5));
+    }
+
+    #[test]
+    fn delay_events_support_at_td_inheritance_and_last_occurrences() {
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let alternating = [-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let mut signals = HashMap::new();
+        signals.insert("ALT".to_string(), alternating.as_slice());
+        let condition = |number| WhenCondition {
+            left: "ALT".to_string(),
+            right: MeasureOperand::Constant(0.0),
+            occurrence: EventOccurrence {
+                edge: EdgeType::Cross,
+                number,
+            },
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(MeasureStatement {
+            name: "inherited_td".to_string(),
+            measure_type: MeasureType::Delay {
+                trig: TrigSpec {
+                    event: TriggerEvent::At(4.0),
+                    td: Some(5.0),
+                },
+                targ: TrigSpec {
+                    event: TriggerEvent::When(condition(1)),
+                    td: None,
+                },
+            },
+            analysis: "DC".to_string(),
+            goal: None,
+            tolerance: None,
+        });
+        engine.add(MeasureStatement {
+            name: "last_is_signed".to_string(),
+            measure_type: MeasureType::Delay {
+                trig: TrigSpec {
+                    event: TriggerEvent::When(condition(-1)),
+                    td: None,
+                },
+                targ: TrigSpec {
+                    event: TriggerEvent::At(1.0),
+                    td: None,
+                },
+            },
+            analysis: "DC".to_string(),
+            goal: None,
+            tolerance: None,
+        });
+        engine.add(MeasureStatement {
+            name: "unsupported_negative_occurrence".to_string(),
+            measure_type: MeasureType::Delay {
+                trig: TrigSpec {
+                    event: TriggerEvent::When(condition(-2)),
+                    td: None,
+                },
+                targ: TrigSpec {
+                    event: TriggerEvent::At(1.0),
+                    td: None,
+                },
+            },
+            analysis: "DC".to_string(),
+            goal: None,
+            tolerance: None,
+        });
+
+        let results = engine.evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, Some(1.5));
+        assert_eq!(results[1].value, Some(-4.5));
+        assert!(!results[2].passed);
+    }
+
+    #[test]
+    fn trigger_target_at_requires_xyce_directional_accepted_point_reach() {
+        assert!(delay_at_is_reached(&[0.0, 1.0, 2.0], 1.0, &[]));
+        assert!(!delay_at_is_reached(&[0.0, 1.0, 2.0], 2.0, &[]));
+        assert!(delay_at_is_reached(&[2.0, 1.0, 0.0], 0.0, &[]));
+        assert!(!delay_at_is_reached(&[0.0, 1.0, 2.0], 3.0, &[]));
     }
 
     #[test]
