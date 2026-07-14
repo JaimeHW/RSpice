@@ -18883,20 +18883,31 @@ impl XyceTestRunner {
             {
                 continue;
             }
-            let crate::analysis::MeasureType::When { condition, .. } = &statement.measure_type
-            else {
-                continue;
-            };
-            let occurrence = condition.occurrence.number;
             let mut trace_netlist = netlist.clone();
             let trace_statement = &mut trace_netlist.measurements[statement_index];
             trace_statement.analysis = "NOISE_CONT".to_string();
-            if occurrence < 0
-                && let crate::analysis::MeasureType::When { condition, .. } =
-                    &mut trace_statement.measure_type
-            {
-                condition.occurrence.number = 1;
-            }
+            // A negative qualifier is a rolling "Nth event from the end" in
+            // Xyce's live output state.  Evaluate the complete event stream,
+            // then lag its values below; evaluating the final scalar result
+            // would discard the earlier states printed during the sweep.
+            let occurrence = match &mut trace_statement.measure_type {
+                crate::analysis::MeasureType::When { condition, .. }
+                | crate::analysis::MeasureType::Find {
+                    when: Some(condition),
+                    ..
+                }
+                | crate::analysis::MeasureType::Derivative {
+                    when: Some(condition),
+                    ..
+                } => {
+                    let number = condition.occurrence.number;
+                    if number < 0 {
+                        condition.occurrence.number = 1;
+                    }
+                    Some(number)
+                }
+                _ => None,
+            };
             let result_index = trace_netlist.measurements[..=statement_index]
                 .iter()
                 .filter(|candidate| candidate.analysis.eq_ignore_ascii_case("NOISE_CONT"))
@@ -18912,18 +18923,48 @@ impl XyceTestRunner {
                     statement.name
                 )
             })?;
+            if let Some(failure) = &measurement.failure {
+                // Failed Xyce measures remain printable and retain their
+                // initialized zero value throughout the analysis.
+                if measurement.records.is_empty() {
+                    traces.insert(normalized_name, Vec::new());
+                    continue;
+                }
+                return Err(format!(
+                    "NOISE measurement trace '{}' failed after producing records: {failure}",
+                    statement.name
+                ));
+            }
             let events = measurement
                 .records
                 .iter()
-                .filter_map(|record| record.event_axis.map(|axis| (axis, record.value)))
-                .collect::<Vec<_>>();
-            let trace = if occurrence < 0 {
-                let lag = occurrence
+                .map(|record| {
+                    let activation_axis = record.event_axis.or_else(|| {
+                        match (record.trigger_axis, record.target_axis) {
+                            (Some(trigger), Some(target)) => Some(trigger.max(target)),
+                            (None, Some(target)) => Some(target),
+                            (Some(trigger), None) => Some(trigger),
+                            (None, None) => None,
+                        }
+                    });
+                    activation_axis
+                        .map(|axis| (axis, record.value))
+                        .ok_or_else(|| {
+                            format!(
+                                "NOISE measurement trace '{}' has no activation-axis metadata",
+                                statement.name
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let trace = if occurrence.is_some_and(|number| number < 0) {
+                let number = occurrence.expect("negative occurrence was checked");
+                let lag = number
                     .checked_abs()
                     .and_then(|number| usize::try_from(number - 1).ok())
                     .ok_or_else(|| {
                         format!(
-                            "NOISE measurement '{}' has an unrepresentable occurrence {occurrence}",
+                            "NOISE measurement '{}' has an unrepresentable occurrence {number}",
                             statement.name
                         )
                     })?;
@@ -32347,6 +32388,51 @@ mod tests {
             XyceTestRunner::noise_reference_signal_probe(&imaginary).as_deref(),
             Ok("II(llp1)")
         );
+    }
+
+    #[test]
+    fn noise_measurement_output_traces_preserve_live_occurrence_state() {
+        let source = "live continuous measurement output\n\
+            .MEASURE NOISE_CONT suffix DERIV VM(d) WHEN VM(e)=0.5 CROSS=2 FROM=1.5\n\
+            .MEASURE NOISE_CONT last DERIV VM(d) WHEN VM(e)=0.5 CROSS=LAST\n\
+            .MEASURE NOISE rolling DERIV VM(d) WHEN VM(e)=0.5 CROSS=-2\n\
+            .END\n";
+        let netlist = XyceTestRunner::parse_xyce_netlist(
+            source,
+            Path::new("live-continuous-measurement.cir"),
+        )
+        .expect("parse live continuous-measurement fixture");
+        let d = [0.0, 10.0, 40.0, 90.0];
+        let e = [0.0, 1.0, 0.0, 1.0];
+        let results = (0..d.len())
+            .map(|index| crate::analysis::NoiseResult {
+                frequency: index as Value + 1.0,
+                node_names: vec!["d".to_string(), "e".to_string()],
+                branch_names: Vec::new(),
+                voltages: vec![
+                    num_complex::Complex64::new(d[index], 0.0),
+                    num_complex::Complex64::new(e[index], 0.0),
+                ],
+                currents: Vec::new(),
+                output_noise_density: 0.0,
+                input_referred_density: 0.0,
+                contributions: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let columns = ["suffix", "last", "rolling"]
+            .into_iter()
+            .map(|name| XyceAcReferenceColumn::Probe {
+                name: name.to_string(),
+                component: XyceAcProbeComponent::Scalar,
+            })
+            .collect::<Vec<_>>();
+
+        let traces = XyceTestRunner::noise_measurement_output_traces(&netlist, &results, &columns)
+            .expect("project live measurement state");
+
+        assert_eq!(traces["SUFFIX"], vec![(2.5, 30.0), (3.5, 50.0)]);
+        assert_eq!(traces["LAST"], vec![(1.5, 10.0), (2.5, 30.0), (3.5, 50.0)]);
+        assert_eq!(traces["ROLLING"], vec![(2.5, 10.0), (3.5, 30.0)]);
     }
 
     #[test]
