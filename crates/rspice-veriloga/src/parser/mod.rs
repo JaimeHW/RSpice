@@ -38,7 +38,9 @@ impl<'a> Parser<'a> {
 
             if self.check(TokenKind::Module) || self.check(TokenKind::Macromodule) {
                 let mut module = self.parse_module()?;
-                module.attributes = attributes;
+                let mut combined_attributes = attributes;
+                combined_attributes.append(&mut module.attributes);
+                module.attributes = combined_attributes;
                 items.push(Item::Module(module));
             } else if self.check(TokenKind::Discipline) {
                 items.push(Item::Discipline(self.parse_discipline()?));
@@ -73,6 +75,7 @@ impl<'a> Parser<'a> {
         if self.check(TokenKind::LParen) {
             self.parse_port_list(&mut module)?;
         }
+        module.attributes = self.parse_attributes()?;
         self.expect(TokenKind::Semicolon)?;
 
         // Module body
@@ -196,9 +199,16 @@ impl<'a> Parser<'a> {
                     span,
                 });
 
-                if !self.match_token(TokenKind::Comma) {
-                    break;
+                if self.match_token(TokenKind::Comma) {
+                    continue;
                 }
+                // Xyce's canonical compact-model sources also use the
+                // Verilog-AMS attribute form with whitespace-separated
+                // entries: `(* name=value other=value *)`.
+                if self.check(TokenKind::Identifier) {
+                    continue;
+                }
+                break;
             }
 
             self.expect(TokenKind::Star)?;
@@ -2315,6 +2325,22 @@ mod tests {
         assert_eq!(m.parameters[0].name.as_str(), "r");
         assert_eq!(m.parameters[0].description.as_deref(), Some("Resistance"));
         assert_eq!(m.parameters[0].units.as_deref(), Some("Ohm"));
+    }
+
+    #[test]
+    fn module_attributes_are_accepted_before_and_after_the_port_list() {
+        let m = parse_module(
+            r#"(* source="canonical" *)
+            module a(p, n) (* model_group="BJT" level=504 *);
+                inout p, n;
+                electrical p, n;
+            endmodule"#,
+        );
+
+        assert_eq!(m.attributes.len(), 3);
+        assert_eq!(m.attributes[0].name.as_str(), "source");
+        assert_eq!(m.attributes[1].name.as_str(), "model_group");
+        assert_eq!(m.attributes[2].name.as_str(), "level");
     }
 
     #[test]
