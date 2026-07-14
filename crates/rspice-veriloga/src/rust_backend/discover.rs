@@ -1,30 +1,47 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::RustBackendError;
-use crate::Preprocessor;
+use crate::{Preprocessor, preprocessor::MacroDef};
 
 pub const VERILOGA_DISCOVERY_SKIP_MARKER: &str = ".rspice-veriloga-skip";
+pub const VERILOGA_COMPILE_PROFILE_FILE_NAME: &str = ".rspice-veriloga-profile";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VerilogACompileProfile {
+    pub defines: Vec<(String, Option<String>)>,
+    pub undefines: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerilogASourceCandidate {
     pub path: PathBuf,
     pub modules: Vec<String>,
+    pub compile_profile: VerilogACompileProfile,
 }
 
 pub fn discover_veriloga_sources(
     root: impl AsRef<Path>,
 ) -> Result<Vec<VerilogASourceCandidate>, RustBackendError> {
-    let root = root.as_ref();
+    let root = root
+        .as_ref()
+        .canonicalize()
+        .unwrap_or_else(|_| root.as_ref().to_path_buf());
+    let root = root.as_path();
     let mut files = Vec::new();
     collect_va_files(root, &mut files)?;
     files.sort();
 
     let mut candidates = Vec::new();
     for path in files {
-        let modules = module_names_in_file(root, &path)?;
+        let compile_profile = compile_profile_for_source(root, &path)?;
+        let modules = module_names_in_file(root, &path, &compile_profile)?;
         if !modules.is_empty() {
-            candidates.push(VerilogASourceCandidate { path, modules });
+            candidates.push(VerilogASourceCandidate {
+                path,
+                modules,
+                compile_profile,
+            });
         }
     }
 
@@ -74,13 +91,146 @@ fn has_veriloga_extension(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("va"))
 }
 
-fn module_names_in_file(root: &Path, path: &Path) -> Result<Vec<String>, RustBackendError> {
+fn module_names_in_file(
+    root: &Path,
+    path: &Path,
+    profile: &VerilogACompileProfile,
+) -> Result<Vec<String>, RustBackendError> {
     let mut preprocessor = Preprocessor::new();
     preprocessor.add_include_path(root);
+    for name in &profile.undefines {
+        preprocessor.undefine(name);
+    }
+    for (name, value) in &profile.defines {
+        preprocessor.define(name, MacroDef::simple(value.as_deref().unwrap_or_default()));
+    }
     let preprocessed = preprocessor.preprocess_file(path).map_err(|error| {
         RustBackendError::internal(path.display().to_string(), "<scan>", error.to_string())
     })?;
     Ok(module_names_in_source(&preprocessed))
+}
+
+fn compile_profile_for_source(
+    root: &Path,
+    path: &Path,
+) -> Result<VerilogACompileProfile, RustBackendError> {
+    let mut directories = Vec::new();
+    let mut current = path.parent();
+    while let Some(directory) = current {
+        if !directory.starts_with(root) {
+            break;
+        }
+        directories.push(directory.to_path_buf());
+        if directory == root {
+            break;
+        }
+        current = directory.parent();
+    }
+    directories.reverse();
+
+    let mut defines = BTreeMap::<String, Option<String>>::new();
+    let mut undefines = BTreeSet::<String>::new();
+    for directory in directories {
+        let profile_path = directory.join(VERILOGA_COMPILE_PROFILE_FILE_NAME);
+        if !profile_path.is_file() {
+            continue;
+        }
+        let contents = std::fs::read_to_string(&profile_path).map_err(|error| {
+            RustBackendError::internal(
+                profile_path.display().to_string(),
+                "<profile>",
+                format!("failed to read compile profile: {error}"),
+            )
+        })?;
+        apply_compile_profile(&profile_path, &contents, &mut defines, &mut undefines)?;
+    }
+
+    Ok(VerilogACompileProfile {
+        defines: defines.into_iter().collect(),
+        undefines: undefines.into_iter().collect(),
+    })
+}
+
+fn apply_compile_profile(
+    path: &Path,
+    contents: &str,
+    defines: &mut BTreeMap<String, Option<String>>,
+    undefines: &mut BTreeSet<String>,
+) -> Result<(), RustBackendError> {
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line_number = index + 1;
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (directive, arguments) = line
+            .split_once(char::is_whitespace)
+            .map(|(directive, arguments)| (directive, arguments.trim()))
+            .unwrap_or((line, ""));
+        match directive {
+            "define" => {
+                let (name, value) = arguments
+                    .split_once('=')
+                    .map(|(name, value)| (name.trim(), Some(value.trim().to_string())))
+                    .unwrap_or((arguments, None));
+                validate_profile_macro(path, line_number, name)?;
+                if value.as_deref().is_some_and(str::is_empty) {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "macro value cannot be empty",
+                    ));
+                }
+                undefines.remove(name);
+                defines.insert(name.to_string(), value);
+            }
+            "undef" => {
+                if arguments.split_whitespace().count() != 1 {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "undef requires exactly one macro name",
+                    ));
+                }
+                validate_profile_macro(path, line_number, arguments)?;
+                defines.remove(arguments);
+                undefines.insert(arguments.to_string());
+            }
+            _ => {
+                return Err(profile_error(
+                    path,
+                    line_number,
+                    "expected `define NAME[=VALUE]` or `undef NAME`",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_profile_macro(
+    path: &Path,
+    line_number: usize,
+    name: &str,
+) -> Result<(), RustBackendError> {
+    let mut chars = name.chars();
+    let valid = chars
+        .next()
+        .is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|character| character == '_' || character.is_ascii_alphanumeric());
+    if valid {
+        Ok(())
+    } else {
+        Err(profile_error(path, line_number, "invalid macro name"))
+    }
+}
+
+fn profile_error(path: &Path, line_number: usize, message: &str) -> RustBackendError {
+    RustBackendError::internal(
+        path.display().to_string(),
+        "<profile>",
+        format!("line {line_number}: {message}"),
+    )
 }
 
 fn module_names_in_source(source: &str) -> Vec<String> {

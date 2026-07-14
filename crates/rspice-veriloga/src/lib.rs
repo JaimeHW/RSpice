@@ -181,6 +181,8 @@ pub struct CompilerOptions {
     pub include_paths: Vec<std::path::PathBuf>,
     /// Define macros for preprocessor
     pub defines: Vec<(String, Option<String>)>,
+    /// Remove standard preprocessor macros before applying `defines`.
+    pub undefines: Vec<String>,
     /// Enable strict LRM compliance (errors on extensions)
     pub strict_mode: bool,
     /// Target integration method compatibility
@@ -252,6 +254,10 @@ impl VerilogACompiler {
 
         for inc_path in &self.options.include_paths {
             pp.add_include_path(inc_path);
+        }
+
+        for name in &self.options.undefines {
+            pp.undefine(name);
         }
 
         for (name, value) in &self.options.defines {

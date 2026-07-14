@@ -22,7 +22,8 @@ pub use builtins::{
 };
 pub use device::render_runtime_support_module;
 pub use discover::{
-    VERILOGA_DISCOVERY_SKIP_MARKER, VerilogASourceCandidate, discover_veriloga_sources,
+    VERILOGA_COMPILE_PROFILE_FILE_NAME, VERILOGA_DISCOVERY_SKIP_MARKER, VerilogACompileProfile,
+    VerilogASourceCandidate, discover_veriloga_sources,
 };
 pub use error::RustBackendError;
 pub use files::{

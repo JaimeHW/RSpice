@@ -9,6 +9,36 @@ fn compile(source: &str) -> rspice_veriloga::CompiledModel {
 }
 
 #[test]
+fn compiler_options_can_remove_standard_preprocessor_macros() {
+    let mut options = CompilerOptions::default();
+    options
+        .undefines
+        .push("__VAMS_COMPACT_MODELING__".to_string());
+    options
+        .defines
+        .push(("EXTERNAL_PROFILE".to_string(), Some("1".to_string())));
+    let model = VerilogACompiler::new(options)
+        .compile(
+            r#"
+`ifdef __VAMS_COMPACT_MODELING__
+module wrong_profile(p, n); endmodule
+`else
+`ifdef EXTERNAL_PROFILE
+module selected_profile(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+`endif
+`endif
+"#,
+        )
+        .expect("configured preprocessor profile compiles");
+
+    assert_eq!(model.name.as_str(), "selected_profile");
+}
+
+#[test]
 fn resistor_with_standard_headers() {
     let model = compile(
         r#"

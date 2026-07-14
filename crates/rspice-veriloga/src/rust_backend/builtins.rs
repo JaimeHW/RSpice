@@ -12,7 +12,7 @@ use crate::{CompilerOptions, VerilogACompiler};
 
 use super::{
     GeneratedBuiltinManifest, GeneratedRustDevice, RustBackendSelection, RustTranspiler,
-    VERILOGA_DISCOVERY_SKIP_MARKER, VerilogASourceCandidate,
+    VERILOGA_DISCOVERY_SKIP_MARKER, VerilogACompileProfile, VerilogASourceCandidate,
     cleanup_stale_generated_device_folders, discover_veriloga_sources,
     parse_generated_builtin_manifest, render_generated_builtin_manifest,
     resolve_generated_registry_model_names, write_generated_device, write_text_file_if_changed,
@@ -542,15 +542,11 @@ fn generate_devices_sequential(
     progress: bool,
 ) -> BuiltinResult<Vec<GeneratedBuiltinModule>> {
     let total_modules = work_items.len();
-    let mut options = CompilerOptions::default();
-    options.include_paths.push(model_root.to_path_buf());
-    let compiler = VerilogACompiler::new(options);
     let transpiler = RustTranspiler::new_auto(Default::default());
     let mut generated = Vec::with_capacity(total_modules);
     for (index, item) in work_items.into_iter().enumerate() {
         generated.push(generate_device_work_item(
             model_root,
-            &compiler,
             &transpiler,
             item,
             index,
@@ -586,9 +582,6 @@ fn generate_devices_parallel(
             .name(format!("rspice-veriloga-builtin-generator-{worker}"))
             .stack_size(256 * 1024 * 1024)
             .spawn(move || -> Result<(), String> {
-                let mut options = CompilerOptions::default();
-                options.include_paths.push(model_root.clone());
-                let compiler = VerilogACompiler::new(options);
                 let transpiler = RustTranspiler::new_auto(Default::default());
 
                 loop {
@@ -608,7 +601,6 @@ fn generate_devices_parallel(
                     };
                     let result = generate_device_work_item(
                         &model_root,
-                        &compiler,
                         &transpiler,
                         item,
                         index,
@@ -659,7 +651,6 @@ fn generate_devices_parallel(
 
 fn generate_device_work_item(
     model_root: &Path,
-    compiler: &VerilogACompiler,
     transpiler: &RustTranspiler,
     item: BuiltinModuleWorkItem,
     index: usize,
@@ -684,6 +675,11 @@ fn generate_device_work_item(
         );
     }
     let started = Instant::now();
+    let mut options = CompilerOptions::default();
+    options.include_paths.push(model_root.to_path_buf());
+    options.defines = item.compile_profile.defines;
+    options.undefines = item.compile_profile.undefines;
+    let compiler = VerilogACompiler::new(options);
     let compiled =
         compiler.compile_file_canonical_ir_with_metadata(&item.path, Some(&item.module))?;
     if progress {
@@ -955,6 +951,7 @@ impl BuiltinSourceFilter {
 struct BuiltinModuleWorkItem {
     path: PathBuf,
     module: String,
+    compile_profile: VerilogACompileProfile,
 }
 
 fn builtin_module_work_items(
@@ -969,6 +966,7 @@ fn builtin_module_work_items(
                 work_items.push(BuiltinModuleWorkItem {
                     path: candidate.path.clone(),
                     module: module.clone(),
+                    compile_profile: candidate.compile_profile.clone(),
                 });
             }
         }
@@ -1029,6 +1027,7 @@ mod tests {
         let candidates = vec![VerilogASourceCandidate {
             path: PathBuf::from("models/cmc/hicum.va"),
             modules: vec!["hicuml2".to_string(), "hicuml0".to_string()],
+            compile_profile: VerilogACompileProfile::default(),
         }];
         let filter = BuiltinSourceFilter::new("hicuml2").expect("filter");
 
@@ -1039,6 +1038,7 @@ mod tests {
             vec![BuiltinModuleWorkItem {
                 path: PathBuf::from("models/cmc/hicum.va"),
                 module: "hicuml2".to_string(),
+                compile_profile: VerilogACompileProfile::default(),
             }]
         );
     }
@@ -1049,6 +1049,7 @@ mod tests {
         let candidates = vec![VerilogASourceCandidate {
             path: PathBuf::from("models/cmc/hicum.va"),
             modules: vec!["hicuml2".to_string(), "hicuml0".to_string()],
+            compile_profile: VerilogACompileProfile::default(),
         }];
         let filter = BuiltinSourceFilter::new("cmc/hicum").expect("filter");
 

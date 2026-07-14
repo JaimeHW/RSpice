@@ -2,10 +2,11 @@ use rspice_veriloga::canonical_ir::{InvalidationClass, OptOp, OptValueKind};
 use rspice_veriloga::rust_backend::{
     GeneratedBuiltinManifest, GeneratedRustDevice, GeneratedRustDeviceReport, GeneratedRustFile,
     RustBackendError, RustBackendSelection, RustDeviceNames, RustTranspileOptions, RustTranspiler,
-    VERILOGA_DISCOVERY_SKIP_MARKER, cleanup_stale_generated_device_folders,
-    discover_veriloga_sources, parse_generated_builtin_manifest, render_generated_builtin_manifest,
-    render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
-    write_text_file_if_changed,
+    VERILOGA_COMPILE_PROFILE_FILE_NAME, VERILOGA_DISCOVERY_SKIP_MARKER,
+    cleanup_stale_generated_device_folders, discover_veriloga_sources,
+    generate_generated_builtin_subset_with_progress, parse_generated_builtin_manifest,
+    render_generated_builtin_manifest, render_runtime_support_module,
+    resolve_generated_registry_model_names, write_generated_device, write_text_file_if_changed,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -715,6 +716,86 @@ endmodule
         .collect();
 
     assert_eq!(names, vec!["included_model".to_string()]);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn builtin_compile_profiles_are_inherited_and_applied_end_to_end() {
+    let dir = temp_dir("rspice-va-compile-profile");
+    let package = dir.join("package");
+    let generated = dir.join("generated");
+    std::fs::create_dir_all(&package).expect("create profiled package");
+    std::fs::write(
+        dir.join(VERILOGA_COMPILE_PROFILE_FILE_NAME),
+        "define ROOT_PROFILE=1\n",
+    )
+    .expect("write root compile profile");
+    std::fs::write(
+        package.join(VERILOGA_COMPILE_PROFILE_FILE_NAME),
+        "# Select the source package's documented simulator branch.\n\
+         undef __VAMS_COMPACT_MODELING__\n\
+         define __XYCE__=1\n",
+    )
+    .expect("write package compile profile");
+    std::fs::write(
+        package.join("profiled.va"),
+        r#"
+`ifdef ROOT_PROFILE
+`ifdef __XYCE__
+module profiled_model(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+`endif
+`endif
+"#,
+    )
+    .expect("write profiled source");
+
+    let found = discover_veriloga_sources(&dir).expect("discover profiled source");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].modules, vec!["profiled_model".to_string()]);
+    assert_eq!(
+        found[0].compile_profile.undefines,
+        vec!["__VAMS_COMPACT_MODELING__".to_string()]
+    );
+    assert_eq!(
+        found[0].compile_profile.defines,
+        vec![
+            ("ROOT_PROFILE".to_string(), Some("1".to_string())),
+            ("__XYCE__".to_string(), Some("1".to_string())),
+        ]
+    );
+
+    let report =
+        generate_generated_builtin_subset_with_progress(&dir, &generated, "profiled_model", false)
+            .expect("generate profiled builtin");
+    assert_eq!(report.device_count, 1);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn invalid_builtin_compile_profiles_fail_with_line_context() {
+    let dir = temp_dir("rspice-va-invalid-compile-profile");
+    std::fs::write(
+        dir.join(VERILOGA_COMPILE_PROFILE_FILE_NAME),
+        "enable __XYCE__\n",
+    )
+    .expect("write invalid compile profile");
+    std::fs::write(
+        dir.join("model.va"),
+        "module model(p, n); inout p, n; electrical p, n; endmodule\n",
+    )
+    .expect("write source beside invalid profile");
+
+    let error = discover_veriloga_sources(&dir).expect_err("invalid profile must fail discovery");
+    let message = error.to_string();
+    assert!(message.contains(VERILOGA_COMPILE_PROFILE_FILE_NAME));
+    assert!(message.contains("line 1"));
+    assert!(message.contains("define NAME[=VALUE]"));
 
     let _ = std::fs::remove_dir_all(dir);
 }
