@@ -402,7 +402,7 @@ impl Bjt {
     pub(super) fn refresh_operating_scaling_for(&mut self, temp: Value) {
         self.clear_thermal_variant_cache();
         let tnom = self.tnom.max(1.0);
-        let vt = Self::thermal_voltage_at(temp);
+        let vt = self.thermal_voltage_at(temp);
         let ratio = (temp / tnom).max(1e-12);
         let delta_t = temp - tnom;
         let is_temp =
@@ -598,6 +598,13 @@ impl Bjt {
             self.ambient_temperature = temp_k;
             self.refresh_operating_scaling();
         }
+    }
+
+    /// Select the thermal-voltage constants required by the Xyce device
+    /// compatibility dialect. A subsequent temperature refresh applies the
+    /// selection to all temperature-scaled model quantities.
+    pub(crate) fn set_xyce_thermal_voltage_constants(&mut self, enabled: bool) {
+        self.xyce_thermal_voltage_constants = enabled;
     }
 
     /// Set optional substrate node (0 for ground/unconnected).

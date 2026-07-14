@@ -4,7 +4,7 @@
 //! but advanced BJT families without native implementations must not be
 //! silently evaluated as VBIC or legacy GP.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{ElementKind, Netlist};
 
 const VBIC13_TEST_VBBE: f64 = 2.0;
@@ -126,8 +126,12 @@ fn run(deck: &str) -> Result<(), String> {
 }
 
 fn branch_current(deck: &str, branch: &str) -> f64 {
+    branch_current_with_config(deck, branch, SimulationConfig::default())
+}
+
+fn branch_current_with_config(deck: &str, branch: &str, config: SimulationConfig) -> f64 {
     let netlist = Netlist::parse(deck).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
+    let result = Engine::new(config)
         .run_dc_op(&netlist)
         .expect("op converges");
     result
@@ -391,6 +395,47 @@ fn level1_gummel_poon_bias_dependent_transit_time_parameters_stay_legacy() {
         "XTF/VTF/ITF should increase the level-1 GP input charge current: \
          ordinary={ordinary_input:?}, bias-dependent={bias_dependent_input:?}"
     );
+}
+
+#[test]
+fn xyce_dialect_uses_xyce710_bjt_thermal_voltage_constants() {
+    let deck = op_deck(".model qmod NPN (IS=1e-16 BF=100)").replace(
+        "* bjt level policy\n",
+        "* bjt level policy\n.options gmin=0\n",
+    );
+    let config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+    let base_source_current = branch_current_with_config(&deck, "vb", config);
+
+    // Xyce 7.10 N_DEV_Const.h defines k and q for native devices. At the
+    // fixed 0.7 V base bias this is the level-1 ideal base-junction current;
+    // the reverse B-C term is below the asserted relative precision.
+    let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
+    let expected = -(1.0e-16 / 100.0) * (0.7 / vt).exp_m1();
+    assert_rel_close(
+        "Xyce-dialect level-1 BJT I(VB)",
+        base_source_current,
+        expected,
+        1.0e-8,
+    );
+
+    // The compatibility selection is isolated: native best-available and
+    // explicit ngspice operation retain current SI/CODATA k and q.
+    let modern_vt: f64 = 300.15 * 1.380_649e-23 / 1.602_176_634e-19;
+    let modern_expected = -(1.0e-16 / 100.0) * (0.7 / modern_vt).exp_m1();
+    for (label, config) in [
+        ("best-available", SimulationConfig::default()),
+        (
+            "ngspice",
+            SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+        ),
+    ] {
+        assert_rel_close(
+            &format!("{label} level-1 BJT I(VB)"),
+            branch_current_with_config(&deck, "vb", config),
+            modern_expected,
+            1.0e-8,
+        );
+    }
 }
 
 #[test]

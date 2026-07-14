@@ -558,6 +558,8 @@ pub struct Bjt {
     ambient_temperature: Value,
     /// Active device temperature (K)
     pub temperature: Value,
+    /// Select Xyce's historical SPICE device constants for `kT/q`.
+    xyce_thermal_voltage_constants: bool,
     /// Saturation-current temperature exponent (XTI)
     pub xti: Value,
     /// Bandgap used for IS temperature scaling (EG, eV)
@@ -1019,6 +1021,7 @@ impl Bjt {
             tnom: crate::analysis::temperature::T_NOMINAL,
             ambient_temperature: crate::analysis::temperature::T_NOMINAL,
             temperature: crate::analysis::temperature::T_NOMINAL,
+            xyce_thermal_voltage_constants: false,
             xti: 3.0,
             eg: 1.11,
             vje: 0.75, // B-E built-in potential
@@ -1269,10 +1272,18 @@ impl Bjt {
     }
 
     #[inline]
-    fn thermal_voltage_at(temp_k: Value) -> Value {
-        const K_BOLTZMANN: Value = 1.380649e-23;
-        const Q_ELECTRON: Value = 1.602176634e-19;
-        K_BOLTZMANN * temp_k.max(1.0) / Q_ELECTRON
+    fn thermal_voltage_at(&self, temp_k: Value) -> Value {
+        // Xyce 7.10's native device package intentionally retains the SPICE
+        // constants from N_DEV_Const.h. Best-available and ngspice modes use
+        // current SI/CODATA constants; this small distinction is observable
+        // in exponential junction models and is therefore part of dialect
+        // compatibility rather than a unit-conversion approximation.
+        let (k_boltzmann, q_electron) = if self.xyce_thermal_voltage_constants {
+            (1.3806226e-23, 1.6021918e-19)
+        } else {
+            (1.380649e-23, 1.602176634e-19)
+        };
+        k_boltzmann * temp_k.max(1.0) / q_electron
     }
 
     #[inline]

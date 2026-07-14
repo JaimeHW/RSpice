@@ -3634,6 +3634,9 @@ impl Engine {
                     }
 
                     bjt = bjt.with_instance_params(instance_params);
+                    bjt.set_xyce_thermal_voltage_constants(
+                        self.config.spice_dialect == SpiceDialect::Xyce,
+                    );
                     bjt.set_temperature(self.config.temperature);
                     bjt.refresh_noise_temperature_offset(
                         self.config.temperature,
