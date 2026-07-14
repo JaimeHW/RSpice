@@ -230,6 +230,8 @@ impl<'a> OptEvaluator<'a> {
                 self.evaluate_ddx_projection(*value, *pos_node, *neg_node)?,
             )),
             OptValueKind::Ddt { .. } | OptValueKind::DdtScale => Ok(OptEvalValue::Real(0.0)),
+            OptValueKind::LimitPrevious { proposed, .. } => self.value_at(*proposed),
+            OptValueKind::Limit { candidate, .. } => self.value_at(*candidate),
             OptValueKind::NodePotential { node } => Ok(OptEvalValue::Real(input_at(
                 "node_potential",
                 &self.inputs.node_potentials,
@@ -506,6 +508,17 @@ impl<'a> OptEvaluator<'a> {
             }
             OptValueKind::Ddx { value, .. } | OptValueKind::Ddt { input: value, .. } => {
                 self.value_depends_on_loop_index(value, memo)
+            }
+            OptValueKind::LimitPrevious { proposed, .. } => {
+                self.value_depends_on_loop_index(proposed, memo)
+            }
+            OptValueKind::Limit {
+                proposed,
+                candidate,
+                ..
+            } => {
+                self.value_depends_on_loop_index(proposed, memo)
+                    || self.value_depends_on_loop_index(candidate, memo)
             }
             OptValueKind::RealConstant(_)
             | OptValueKind::BooleanConstant(_)

@@ -2342,6 +2342,7 @@ fn scalar_derivatives(
             DerivativeLaneKind::BranchUnknown => {
                 branches.push((derivative.lane.index, derivative.value));
             }
+            DerivativeLaneKind::LimiterCorrection => {}
         }
     }
     Ok(ScalarDerivatives { nodes, branches })
@@ -3415,6 +3416,9 @@ fn emit_value_expr(
             DdtEmitMode::ReactiveLinearized => "1.0".to_string(),
             DdtEmitMode::SharedGeneric => "(if REACTIVE { 1.0 } else { ddt_scale })".to_string(),
         },
+        OptValueKind::LimitPrevious { .. } | OptValueKind::Limit { .. } => {
+            return Err(unsupported(artifact, "stateful limiter scalar runtime"));
+        }
         OptValueKind::NodePotential { node } => {
             format!(
                 "ctx.node_voltage({}[{}])",
@@ -5025,6 +5029,15 @@ fn value_graph_contains_ddt(
         OptValueKind::Ddx { value: input, .. } | OptValueKind::Unary { input, .. } => {
             value_graph_contains_ddt(artifact, input, visited)
         }
+        OptValueKind::LimitPrevious { proposed, .. } => {
+            value_graph_contains_ddt(artifact, proposed, visited)
+        }
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => Ok(value_graph_contains_ddt(artifact, proposed, visited)?
+            || value_graph_contains_ddt(artifact, candidate, visited)?),
         OptValueKind::Binary { left, right, .. } => {
             Ok(value_graph_contains_ddt(artifact, left, visited)?
                 || value_graph_contains_ddt(artifact, right, visited)?)
@@ -5535,6 +5548,12 @@ fn scalar_value_dependencies(
             neg_node,
         } => projected_ddx_derivative_values(artifact, value, pos_node, neg_node)?,
         OptValueKind::Ddt { input, .. } => vec![input],
+        OptValueKind::LimitPrevious { proposed, .. } => vec![proposed],
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => vec![proposed, candidate],
         OptValueKind::SimParam { fallback, .. } => vec![fallback],
         OptValueKind::CountedSum { count, initial, .. } => vec![count, initial],
         OptValueKind::RuntimeLoopResult { loop_id, .. } => {
@@ -5900,6 +5919,12 @@ fn scalar_value_dependency_values(
             dependencies
         }
         OptValueKind::Ddt { input, .. } | OptValueKind::Unary { input, .. } => vec![input],
+        OptValueKind::LimitPrevious { proposed, .. } => vec![proposed],
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => vec![proposed, candidate],
         OptValueKind::Binary { left, right, .. } => vec![left, right],
         OptValueKind::Select {
             condition,
@@ -6210,6 +6235,7 @@ fn runtime_loop_derivative_name(loop_id: u32, slot: u32, lane: DerivativeLane) -
     match lane.kind {
         DerivativeLaneKind::Node => format!("r{loop_id}_{slot}n{}", lane.index),
         DerivativeLaneKind::BranchUnknown => format!("r{loop_id}_{slot}b{}", lane.index),
+        DerivativeLaneKind::LimiterCorrection => format!("r{loop_id}_{slot}l"),
     }
 }
 

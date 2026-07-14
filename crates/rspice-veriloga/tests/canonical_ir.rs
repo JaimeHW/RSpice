@@ -559,6 +559,92 @@ endmodule
     }
     assert!(arguments.contains(&HirLimiterArgument::Proposed));
     assert!(arguments.contains(&HirLimiterArgument::Previous));
+
+    let mir = MirModel::from_hir(&hir).expect("lower limiter MIR");
+    let opt = OptModel::from_hir_and_mir(&hir, &mir).expect("lower limiter OptIR");
+    opt.validate().expect("valid limiter OptIR");
+    let previous_values = opt
+        .values
+        .iter()
+        .filter(|value| matches!(value.kind, OptValueKind::LimitPrevious { .. }))
+        .count();
+    let limits: Vec<_> = opt
+        .values
+        .iter()
+        .filter(|value| matches!(value.kind, OptValueKind::Limit { .. }))
+        .collect();
+    assert_eq!(previous_values, 1);
+    assert_eq!(limits.len(), 1);
+
+    assert!(limits[0].derivatives.iter().any(|derivative| {
+        derivative.lane.kind == DerivativeLaneKind::LimiterCorrection && derivative.lane.index == 0
+    }));
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: Vec::new(),
+            node_potentials: vec![0.2, -0.1],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate first limiter iteration");
+    assert_eq!(
+        snapshot.derivative(limits[0].id, DerivativeLane::node(NodeId::new(0))),
+        Some(-1.0)
+    );
+    assert_eq!(
+        snapshot.derivative(limits[0].id, DerivativeLane::node(NodeId::new(1))),
+        Some(1.0)
+    );
+    assert_eq!(
+        snapshot.derivative(limits[0].id, DerivativeLane::limiter_correction()),
+        Some(0.0)
+    );
+}
+
+#[test]
+fn opt_custom_limit_preserves_probe_jacobian_and_affine_correction() {
+    let source = r#"
+module affine_limit(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real force_value;
+        input proposed, previous, forced;
+        real proposed, previous, forced;
+        begin
+            force_value = forced;
+        end
+    endfunction
+    analog I(p, n) <+ $limit(V(p, n), "force_value", 0.1);
+endmodule
+"#;
+    let (_, _, _, opt) = lower_fixture_parts(source, "affine_limit");
+    let limit = opt
+        .values
+        .iter()
+        .find(|value| matches!(value.kind, OptValueKind::Limit { .. }))
+        .expect("limit value");
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: Vec::new(),
+            node_potentials: vec![0.5, 0.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate affine limiter");
+
+    assert_eq!(snapshot.real(limit.id), Some(0.1));
+    assert_eq!(
+        snapshot.derivative(limit.id, DerivativeLane::node(NodeId::new(0))),
+        Some(1.0),
+        "limiter candidate body must not replace the proposed probe Jacobian"
+    );
+    assert_eq!(
+        snapshot.derivative(limit.id, DerivativeLane::node(NodeId::new(1))),
+        Some(-1.0)
+    );
+    assert_eq!(
+        snapshot.derivative(limit.id, DerivativeLane::limiter_correction()),
+        Some(-0.4),
+        "affine correction must anchor Newton linearization at the limited value"
+    );
 }
 
 fn lower_fixture_parts(

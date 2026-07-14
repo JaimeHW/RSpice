@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use super::{
     BranchId, BranchUnknownId, CanonicalValueType, CompilerPhase, EquationId, ExprId,
-    HirAnalogOperator, HirAssignment, HirExprKind, HirLoop, HirModel, HirParamRange, HirStatement,
-    IrDiagnostic, IrValidationResult, MirEquation, MirEquationKind, MirModel, NodeId, ParamId,
-    ScheduleId, ValueId, VariableId,
+    HirAnalogOperator, HirAssignment, HirExprKind, HirLimiterArgument, HirLoop, HirModel,
+    HirParamRange, HirStatement, IrDiagnostic, IrValidationResult, MirEquation, MirEquationKind,
+    MirModel, NodeId, ParamId, ScheduleId, ValueId, VariableId,
 };
 
 const MAX_SCALAR_LOOP_UNROLL_ITERATIONS: usize = 1024;
@@ -195,6 +195,10 @@ pub enum OptValueType {
 pub enum DerivativeLaneKind {
     Node,
     BranchUnknown,
+    /// Directional affine correction produced by stateful Newton limiting.
+    /// This is not a matrix topology lane and is consumed only when forming
+    /// the equivalent source at the limiter's linearization point.
+    LimiterCorrection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -215,6 +219,13 @@ impl DerivativeLane {
         Self {
             kind: DerivativeLaneKind::BranchUnknown,
             index: branch_unknown.index(),
+        }
+    }
+
+    pub const fn limiter_correction() -> Self {
+        Self {
+            kind: DerivativeLaneKind::LimiterCorrection,
+            index: 0,
         }
     }
 }
@@ -296,6 +307,15 @@ pub enum OptValueKind {
         input: ValueId,
     },
     DdtScale,
+    LimitPrevious {
+        operator: ExprId,
+        proposed: ValueId,
+    },
+    Limit {
+        operator: ExprId,
+        proposed: ValueId,
+        candidate: ValueId,
+    },
     NodePotential {
         node: NodeId,
     },
@@ -614,6 +634,8 @@ struct ScalarGraphBuilder<'a> {
     values: Vec<OptValue>,
     value_keys: HashMap<OptValueKey, ValueId>,
     expression_values: HashMap<ExprId, Option<ValueId>>,
+    limit_values: HashMap<ExprId, ValueId>,
+    limiter_context_stack: Vec<LimiterLoweringContext>,
     variable_ids_by_name: HashMap<SmolStr, VariableId>,
     parameter_ids_by_name: HashMap<SmolStr, ParamId>,
     expr_variable_reference_cache: HashMap<(ExprId, VariableId), bool>,
@@ -654,6 +676,12 @@ struct ScalarGraphBuilder<'a> {
     expanded_assignment_history_snapshots: bool,
     runtime_loops: Vec<OptRuntimeLoop>,
     next_loop_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LimiterLoweringContext {
+    proposed: ValueId,
+    previous: ValueId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -798,6 +826,15 @@ enum OptValueKey {
         input: ValueId,
     },
     DdtScale,
+    LimitPrevious {
+        operator: ExprId,
+        proposed: ValueId,
+    },
+    Limit {
+        operator: ExprId,
+        proposed: ValueId,
+        candidate: ValueId,
+    },
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
@@ -871,6 +908,19 @@ impl OptValueKey {
                 input: *input,
             },
             OptValueKind::DdtScale => Self::DdtScale,
+            OptValueKind::LimitPrevious { operator, proposed } => Self::LimitPrevious {
+                operator: *operator,
+                proposed: *proposed,
+            },
+            OptValueKind::Limit {
+                operator,
+                proposed,
+                candidate,
+            } => Self::Limit {
+                operator: *operator,
+                proposed: *proposed,
+                candidate: *candidate,
+            },
             OptValueKind::NodePotential { node } => Self::NodePotential(*node),
             OptValueKind::BranchFlow { branch } => Self::BranchFlow(*branch),
             OptValueKind::BranchUnknownFlow { branch_unknown } => {
@@ -984,6 +1034,8 @@ impl<'a> ScalarGraphBuilder<'a> {
             values: Vec::new(),
             value_keys: HashMap::new(),
             expression_values: HashMap::new(),
+            limit_values: HashMap::new(),
+            limiter_context_stack: Vec::new(),
             variable_ids_by_name,
             parameter_ids_by_name,
             expr_variable_reference_cache: HashMap::new(),
@@ -1204,6 +1256,12 @@ impl<'a> ScalarGraphBuilder<'a> {
             OptValueKind::Ddt { input, .. } | OptValueKind::Unary { input, .. } => {
                 stack.push(input);
             }
+            OptValueKind::LimitPrevious { proposed, .. } => stack.push(proposed),
+            OptValueKind::Limit {
+                proposed,
+                candidate,
+                ..
+            } => stack.extend([proposed, candidate]),
             OptValueKind::Binary { left, right, .. } => {
                 stack.extend([left, right]);
             }
@@ -3529,6 +3587,18 @@ impl<'a> ScalarGraphBuilder<'a> {
             HirExprKind::Call { name, args } => self.lower_call(expr_id, name, args),
             HirExprKind::NoiseSource { .. } => Some(self.zero_real()),
             HirExprKind::AnalogOperator {
+                op:
+                    HirAnalogOperator::Limit {
+                        proposed,
+                        candidate,
+                        type_metadata,
+                        ..
+                    },
+            } => self.lower_limit_expression(expr_id, *proposed, *candidate, *type_metadata),
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::LimiterArgument { argument },
+            } => self.lower_limiter_argument(*argument),
+            HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddt { expr, abstol: None },
             } => self.lower_ddt_expression(*expr, expr_id),
             HirExprKind::AnalogOperator {
@@ -3550,6 +3620,58 @@ impl<'a> ScalarGraphBuilder<'a> {
             } => self.lower_intrinsic_unary(OptUnaryOp::LimExp, *expr),
             _ => None,
         }
+    }
+
+    fn lower_limit_expression(
+        &mut self,
+        operator: ExprId,
+        proposed: ExprId,
+        candidate: ExprId,
+        type_metadata: Option<ExprId>,
+    ) -> Option<ValueId> {
+        if let Some(value) = self.limit_values.get(&operator).copied() {
+            return Some(value);
+        }
+
+        let raw_proposed = self.lower_expression(proposed)?;
+        let oriented_proposed = if let Some(type_metadata) = type_metadata {
+            let polarity = self.lower_expression(type_metadata)?;
+            self.push_binary_value(OptBinaryOp::Mul, polarity, raw_proposed)
+        } else {
+            raw_proposed
+        };
+        let previous = self.push_value(
+            OptValueType::Real,
+            OptValueKind::LimitPrevious {
+                operator,
+                proposed: oriented_proposed,
+            },
+        );
+        self.limiter_context_stack.push(LimiterLoweringContext {
+            proposed: oriented_proposed,
+            previous,
+        });
+        let candidate = self.lower_expression(candidate);
+        self.limiter_context_stack.pop();
+        let candidate = candidate?;
+        let limited = self.push_value(
+            OptValueType::Real,
+            OptValueKind::Limit {
+                operator,
+                proposed: oriented_proposed,
+                candidate,
+            },
+        );
+        self.limit_values.insert(operator, limited);
+        Some(limited)
+    }
+
+    fn lower_limiter_argument(&self, argument: HirLimiterArgument) -> Option<ValueId> {
+        let context = self.limiter_context_stack.last()?;
+        Some(match argument {
+            HirLimiterArgument::Proposed => context.proposed,
+            HirLimiterArgument::Previous => context.previous,
+        })
     }
 
     fn lower_equation_expression(&mut self, equation: &MirEquation) -> Option<ValueId> {
@@ -4003,6 +4125,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::Analysis { .. }
             | OptValueKind::Ddx { .. }
             | OptValueKind::DdtScale
+            | OptValueKind::LimitPrevious { .. }
             | OptValueKind::LoopIndex { .. }
             | OptValueKind::RuntimeLoopVariableDerivative { .. }
             | OptValueKind::RuntimeLoopResultDerivative { .. }
@@ -4071,6 +4194,23 @@ impl<'a> ScalarGraphBuilder<'a> {
                 term,
             } => self.lower_counted_sum_derivatives(loop_id, count, initial, term),
             OptValueKind::Ddt { input, .. } => self.lower_ddt_derivatives(input),
+            OptValueKind::Limit {
+                proposed,
+                candidate,
+                ..
+            } => {
+                let mut derivatives = self.derivative_map(proposed);
+                let displacement = self.push_binary_value(OptBinaryOp::Sub, candidate, proposed);
+                let correction_lane = DerivativeLane::limiter_correction();
+                let correction = if let Some(upstream) = derivatives.get(&correction_lane).copied()
+                {
+                    self.push_binary_value(OptBinaryOp::Add, upstream, displacement)
+                } else {
+                    displacement
+                };
+                derivatives.insert(correction_lane, correction);
+                derivatives
+            }
             OptValueKind::NodePotential { node } => {
                 let derivative =
                     self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
@@ -9289,6 +9429,19 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
             input: remap_value_id(*input, remap),
         },
         OptValueKind::DdtScale => OptValueKind::DdtScale,
+        OptValueKind::LimitPrevious { operator, proposed } => OptValueKind::LimitPrevious {
+            operator: *operator,
+            proposed: remap_value_id(*proposed, remap),
+        },
+        OptValueKind::Limit {
+            operator,
+            proposed,
+            candidate,
+        } => OptValueKind::Limit {
+            operator: *operator,
+            proposed: remap_value_id(*proposed, remap),
+            candidate: remap_value_id(*candidate, remap),
+        },
         OptValueKind::NodePotential { node } => OptValueKind::NodePotential { node: *node },
         OptValueKind::BranchFlow { branch } => OptValueKind::BranchFlow { branch: *branch },
         OptValueKind::BranchUnknownFlow { branch_unknown } => OptValueKind::BranchUnknownFlow {
@@ -9455,6 +9608,33 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
             );
         }
         OptValueKind::DdtScale => {}
+        OptValueKind::LimitPrevious { proposed, .. } => validate_value_operand(
+            diagnostics,
+            opt.values.len(),
+            value.id,
+            *proposed,
+            "limit proposed operand",
+        ),
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => {
+            validate_value_operand(
+                diagnostics,
+                opt.values.len(),
+                value.id,
+                *proposed,
+                "limit proposed operand",
+            );
+            validate_value_operand(
+                diagnostics,
+                opt.values.len(),
+                value.id,
+                *candidate,
+                "limit candidate operand",
+            );
+        }
         OptValueKind::NodePotential { node } => {
             if node.index() >= opt.node_count {
                 diagnostics.push(IrDiagnostic::global_error(
@@ -9813,6 +9993,7 @@ fn validate_derivative_lane(
     let limit = match lane.kind {
         DerivativeLaneKind::Node => opt.node_count,
         DerivativeLaneKind::BranchUnknown => opt.branch_unknown_count,
+        DerivativeLaneKind::LimiterCorrection => 1,
     };
 
     if lane.index >= limit {
@@ -9901,6 +10082,8 @@ fn value_invalidation(
         | OptValueKind::Ddx { .. }
         | OptValueKind::Ddt { .. }
         | OptValueKind::DdtScale
+        | OptValueKind::LimitPrevious { .. }
+        | OptValueKind::Limit { .. }
         | OptValueKind::RuntimeLoopVariable { .. }
         | OptValueKind::RuntimeLoopVariableDerivative { .. }
         | OptValueKind::RuntimeLoopResult { .. }
@@ -9992,6 +10175,8 @@ fn value_is_live_simparam_expression(
         | OptValueKind::Ddx { .. }
         | OptValueKind::Ddt { .. }
         | OptValueKind::DdtScale
+        | OptValueKind::LimitPrevious { .. }
+        | OptValueKind::Limit { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
@@ -10042,6 +10227,17 @@ fn value_depends_on_parameter(
         | OptValueKind::RuntimeLoopResult { .. }
         | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => false,
+        OptValueKind::LimitPrevious { proposed, .. } => {
+            value_depends_on_parameter(values, proposed, memo)
+        }
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => {
+            value_depends_on_parameter(values, proposed, memo)
+                || value_depends_on_parameter(values, candidate, memo)
+        }
         OptValueKind::Unary { input, .. } => value_depends_on_parameter(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
             value_depends_on_parameter(values, left, memo)
@@ -10106,6 +10302,17 @@ fn value_depends_on_temperature(
         | OptValueKind::RuntimeLoopResult { .. }
         | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => false,
+        OptValueKind::LimitPrevious { proposed, .. } => {
+            value_depends_on_temperature(values, proposed, memo)
+        }
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => {
+            value_depends_on_temperature(values, proposed, memo)
+                || value_depends_on_temperature(values, candidate, memo)
+        }
         OptValueKind::Unary { input, .. } => value_depends_on_temperature(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
             value_depends_on_temperature(values, left, memo)
@@ -10171,6 +10378,17 @@ fn value_depends_on_loop_index(
         | OptValueKind::RuntimeLoopResult { .. }
         | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => false,
+        OptValueKind::LimitPrevious { proposed, .. } => {
+            value_depends_on_loop_index(values, proposed, memo)
+        }
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => {
+            value_depends_on_loop_index(values, proposed, memo)
+                || value_depends_on_loop_index(values, candidate, memo)
+        }
         OptValueKind::Unary { input, .. } => value_depends_on_loop_index(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
             value_depends_on_loop_index(values, left, memo)
