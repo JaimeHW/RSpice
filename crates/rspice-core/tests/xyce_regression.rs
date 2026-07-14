@@ -5954,6 +5954,30 @@ fn test_xyce_noise_continuous_trigger_target_mixed_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_stepped_ac_dc_continuous_mixed_artifact_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relatives = [
+        "Netlists/MEASURE_CONT/STEP/DerivTest1DC.cir",
+        "Netlists/MEASURE_CONT/STEP/DerivTestAC.cir",
+        "Netlists/MEASURE_CONT/STEP/FindWhenTest1DC.cir",
+        "Netlists/MEASURE_CONT/STEP/FindWhenTestAC.cir",
+        "Netlists/MEASURE_CONT/STEP/TrigTargTest1DC.cir",
+        "Netlists/MEASURE_CONT/STEP/TrigTargTestAC.cir",
+    ];
+
+    for relative in relatives {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should compare every stepped scalar and continuous measurement row in declaration order, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_noise_continuous_derivative_mixed_waveform_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

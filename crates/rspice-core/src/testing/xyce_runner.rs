@@ -7135,14 +7135,22 @@ impl XyceTestRunner {
             };
             let measurements =
                 crate::analysis::advanced::evaluate_ac_measurements(&run.netlist, &results);
-            let mut mismatches = match self.compare_measurement_references(
+            let continuous = crate::analysis::advanced::evaluate_ac_continuous_measurements(
+                &run.netlist,
+                &results,
+            );
+            let mut mismatches = match self.compare_analysis_measurement_outputs(
                 std::slice::from_ref(reference_path),
+                &[],
                 &measurements,
+                &continuous,
                 plan.measurement_tolerance,
                 run.netlist.options.measure_fail_output,
                 run.netlist.options.measure_default_value,
-                "AC",
+                run.netlist.options.measure_use_cont_files(),
                 &run.netlist.measurements,
+                "AC",
+                "AC_CONT",
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -9517,14 +9525,30 @@ impl XyceTestRunner {
                     "DC measurement requires an explicit .DC analysis",
                 )
             };
-            let mut mismatches = match self.compare_measurement_references(
+            let continuous = if point_params.is_empty() {
+                crate::analysis::advanced::evaluate_dc_continuous_measurements(
+                    &run.netlist,
+                    &measurement_sweep,
+                )
+            } else {
+                crate::analysis::advanced::evaluate_dc_continuous_measurements_with_parameter_contexts(
+                    &run.netlist,
+                    &measurement_sweep,
+                    &point_params,
+                )
+            };
+            let mut mismatches = match self.compare_analysis_measurement_outputs(
                 std::slice::from_ref(reference_path),
+                &[],
                 &measurements,
+                &continuous,
                 plan.measurement_tolerance,
                 run.netlist.options.measure_fail_output,
                 run.netlist.options.measure_default_value,
-                "DC",
+                run.netlist.options.measure_use_cont_files(),
                 &run.netlist.measurements,
+                "DC",
+                "DC_CONT",
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
