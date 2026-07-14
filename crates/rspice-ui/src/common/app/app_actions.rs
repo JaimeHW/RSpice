@@ -437,7 +437,7 @@ impl RSpiceApp {
             .mirror_selection_v_resolved(|component| symbol_context.terminal_points(component));
     }
 
-    fn select_all_symbol_items(&mut self) {
+    pub(crate) fn select_all_symbol_items(&mut self) {
         let document = match self.state.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => {
@@ -451,7 +451,7 @@ impl RSpiceApp {
             .set_selection(SymbolSelection::all_in(&document));
     }
 
-    fn copy_selected_symbol_shape(&mut self) {
+    pub(crate) fn copy_selected_symbol_shape(&mut self) {
         let document = match self.state.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => {
@@ -465,7 +465,7 @@ impl RSpiceApp {
             symbol_clipboard_from_selection(&document, &selection, &ports);
     }
 
-    fn paste_symbol_shape(&mut self) {
+    pub(crate) fn paste_symbol_shape(&mut self) {
         if self.state.deny_read_only_edit() {
             return;
         }
@@ -509,7 +509,7 @@ impl RSpiceApp {
         }
     }
 
-    fn delete_selected_symbol_item(&mut self, cut: bool) {
+    pub(crate) fn delete_selected_symbol_item(&mut self, cut: bool) {
         let selection = self.state.ui.symbol.effective_selection();
         if selection.is_empty() {
             return;

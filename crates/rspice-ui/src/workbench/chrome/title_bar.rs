@@ -35,8 +35,6 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(6.0);
-                    account_button(ui);
-                    notification_button(ui);
                     if icon_action(ui, WorkbenchIcon::Settings, "Open preferences") {
                         Command::Preferences.execute(app);
                     }
@@ -76,7 +74,7 @@ fn brand(ui: &mut Ui, app: &mut RSpiceApp) {
     if response.clicked() {
         Command::ProjectLauncher.execute(app);
     }
-    response.on_hover_text("Open Project workspace");
+    response.on_hover_text("Open Project launcher");
 }
 
 fn menus(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -153,38 +151,10 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.separator();
     command_item(ui, app, Command::OpenProject);
     command_item(ui, app, Command::NewProject);
+    command_item(ui, app, Command::RecentProjects);
+    ui.separator();
     command_item(ui, app, Command::Save);
     command_item(ui, app, Command::SaveAs);
-    ui.separator();
-    command_item(ui, app, Command::NewCell);
-    command_item(ui, app, Command::OpenDocument);
-    submenu(ui, "Open example", |ui| {
-        for example in crate::common::examples::EXAMPLES {
-            if ui.button(example.name).clicked() {
-                if crate::common::menu_bar::request_load_named_example(&mut app.state, example.name)
-                    && !app.state.dialogs.confirmation_dialog.visible
-                {
-                    Command::OpenWorkspace(Workspace::Design).execute(app);
-                }
-                ui.close();
-            }
-        }
-    });
-    ui.separator();
-    command_item(ui, app, Command::ImportNetlist);
-    command_item(ui, app, Command::ImportVerilogA);
-    submenu(ui, "Export netlist", |ui| {
-        for (label, format) in [
-            ("SPICE…", crate::io::NetlistFormat::Spice),
-            ("Spectre…", crate::io::NetlistFormat::Spectre),
-            ("HSPICE…", crate::io::NetlistFormat::Hspice),
-            ("Xyce…", crate::io::NetlistFormat::Xyce),
-        ] {
-            command_item_as(ui, app, Command::ExportNetlist(format), label);
-        }
-    });
-    command_item(ui, app, Command::ExportSchematicSvg);
-    command_item(ui, app, Command::ExportWaveformsCsv);
     ui.separator();
     command_item(ui, app, Command::Exit);
 }
@@ -216,18 +186,31 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomFit,
-        Command::ZoomOneToOne,
         Command::CycleGrid,
     ] {
         command_item(ui, app, command);
     }
     ui.separator();
-    command_item(ui, app, Command::ToggleFocusMode);
-    command_item(ui, app, Command::ResetLayout);
+    command_item_as(
+        ui,
+        app,
+        Command::ToggleFullScreen,
+        if app.state.workbench.full_screen {
+            "Exit full screen"
+        } else {
+            "Enter full screen"
+        },
+    );
+    command_item(ui, app, Command::ResetActiveView);
 }
 
 fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::OpenWorkspace(Workspace::Design));
+    command_item_as(
+        ui,
+        app,
+        Command::OpenWorkspace(Workspace::Design),
+        "Open active schematic",
+    );
     command_item(ui, app, Command::AscendHierarchy);
     command_item(ui, app, Command::DescendHierarchy);
     ui.separator();
@@ -239,90 +222,64 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ] {
         command_item(ui, app, command);
     }
-    submenu(ui, "Place component", |ui| {
-        for section in crate::schematic::component_palette() {
-            submenu(ui, section.title, |ui| {
-                for entry in section.entries {
-                    command_item_as(ui, app, Command::Place(entry.kind), entry.label);
-                }
-            });
-        }
-    });
     ui.separator();
-    command_item(ui, app, Command::RotateSelection);
-    command_item(ui, app, Command::MirrorSelectionHorizontal);
-    ui.separator();
-    command_item(ui, app, Command::RunChecks);
-    command_item(ui, app, Command::ClearChecks);
+    command_item(ui, app, Command::CheckAndSave);
 }
 
 fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::RunSimulation);
     command_item(ui, app, Command::StopSimulation);
+    command_item(ui, app, Command::PreflightChecks);
     ui.separator();
-    command_item(ui, app, Command::OpenWorkspace(Workspace::Simulate));
+    command_item_as(
+        ui,
+        app,
+        Command::OpenWorkspace(Workspace::Simulate),
+        "Simulation Studio",
+    );
     command_item(ui, app, Command::SimulationOptions);
-    command_item(ui, app, Command::GenerateNetlist);
 }
 
 fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::OpenWorkspace(Workspace::Results));
+    command_item_as(
+        ui,
+        app,
+        Command::OpenWorkspace(Workspace::Results),
+        "Open results workspace",
+    );
     ui.separator();
-    for (label, viewer) in [
-        ("Waveforms", crate::workbench::ResultViewer::Waves),
-        ("Bode and stability", crate::workbench::ResultViewer::Bode),
-        ("Spectrum / FFT", crate::workbench::ResultViewer::Fft),
-        ("Eye diagram", crate::workbench::ResultViewer::Eye),
-        ("Histogram", crate::workbench::ResultViewer::Hist),
-        ("Operating point", crate::workbench::ResultViewer::Op),
-        (
-            "Noise contributors",
-            crate::workbench::ResultViewer::NoiseContrib,
-        ),
-        (
-            "Specification matrix",
-            crate::workbench::ResultViewer::Specs,
-        ),
-        ("Nyquist", crate::workbench::ResultViewer::Nyquist),
-        ("Smith chart", crate::workbench::ResultViewer::Smith),
-        ("Pole-zero", crate::workbench::ResultViewer::PoleZero),
-    ] {
-        command_item_as(ui, app, Command::ResultViewer(viewer), label);
-    }
-    ui.separator();
-    command_item(ui, app, Command::WaveformCalculator);
-    command_item(ui, app, Command::ExportWaveformsCsv);
-    command_item(ui, app, Command::ClearResults);
+    command_item_as(ui, app, Command::WaveformCalculator, "Calculator…");
 }
 
 fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::OpenWorkspace(Workspace::Verify));
+    command_item_as(
+        ui,
+        app,
+        Command::OpenWorkspace(Workspace::Verify),
+        "Verification cockpit",
+    );
     ui.separator();
-    for page in VerificationPage::ALL {
-        command_item_as(ui, app, Command::VerificationPage(page), page.label());
-    }
-    ui.separator();
-    command_item(ui, app, Command::RunChecks);
-    command_item(ui, app, Command::EditSpecifications);
+    command_item_as(
+        ui,
+        app,
+        Command::VerificationPage(VerificationPage::Specifications),
+        "Specification matrix",
+    );
 }
 
 fn models_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::OpenWorkspace(Workspace::Models));
+    command_item_as(
+        ui,
+        app,
+        Command::ModelsPage(ModelsPage::Catalog),
+        "Model & library catalog",
+    );
     ui.separator();
-    for page in ModelsPage::ALL {
-        command_item_as(ui, app, Command::ModelsPage(page), page.label());
-    }
-    ui.separator();
-    command_item(ui, app, Command::ModelBrowser);
-    command_item(ui, app, Command::PdkSettings);
-    command_item(ui, app, Command::CompileVerilogA);
+    command_item_as(ui, app, Command::CompileVerilogA, "Verilog-A/AMS compiler");
 }
 
 fn automation_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::OpenWorkspace(Workspace::Netlist));
-    command_item(ui, app, Command::AutomationConsole);
-    command_item(ui, app, Command::ImportNetlist);
-    command_item(ui, app, Command::GenerateNetlist);
+    command_item_as(ui, app, Command::AutomationConsole, "Automation workspace");
 }
 
 fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -331,20 +288,11 @@ fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::ToggleConsole);
     command_item(ui, app, Command::ToggleFocusMode);
     ui.separator();
-    command_item(ui, app, Command::PreviousWorkspace);
-    command_item(ui, app, Command::NextWorkspace);
-    ui.separator();
     command_item(ui, app, Command::ResetLayout);
 }
 
 fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    submenu(ui, "Documentation", |ui| {
-        for (title, path) in crate::common::menu_bar::DOC_REFERENCES {
-            command_item_as(ui, app, Command::Documentation(title, path), title);
-        }
-    });
-    command_item(ui, app, Command::KeyboardShortcuts);
-    command_item(ui, app, Command::License);
+    command_item_as(ui, app, Command::KeyboardShortcuts, "Command reference");
     ui.separator();
     command_item(ui, app, Command::About);
 }
@@ -425,43 +373,6 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str) -> bool {
     }
     icon.paint(ui.painter(), rect.shrink(6.0), t.color.text_dim);
     response.on_hover_text(label).clicked()
-}
-
-fn notification_button(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
-    WorkbenchIcon::Bell.paint(ui.painter(), rect.shrink(6.0), t.color.text_dim);
-    ui.painter().circle_filled(
-        rect.right_top() + egui::vec2(-5.0, 5.0),
-        5.0,
-        t.color.accent,
-    );
-    ui.painter().text(
-        rect.right_top() + egui::vec2(-5.0, 5.0),
-        egui::Align2::CENTER_CENTER,
-        "2",
-        theme::mono(8.0, FontWeight::SemiBold),
-        t.color.accent_ink,
-    );
-    response.on_hover_text("Notifications and activity · 2 unread");
-}
-
-fn account_button(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
-    ui.painter().circle_stroke(
-        rect.center(),
-        11.0,
-        egui::Stroke::new(1.0, t.color.border_strong),
-    );
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "JM",
-        theme::mono(8.5, FontWeight::SemiBold),
-        t.color.text_dim,
-    );
-    response.on_hover_text("Account and organization");
 }
 
 #[cfg(test)]

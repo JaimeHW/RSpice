@@ -14,6 +14,7 @@ use super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 pub enum Command {
     OpenWorkspace(Workspace),
     ProjectLauncher,
+    RecentProjects,
     NewProject,
     OpenProject,
     Save,
@@ -42,6 +43,8 @@ pub enum Command {
     ZoomFit,
     ZoomOneToOne,
     CycleGrid,
+    ToggleFullScreen,
+    ResetActiveView,
     ToggleNavigator,
     ToggleInspector,
     ToggleConsole,
@@ -59,9 +62,11 @@ pub enum Command {
     AscendHierarchy,
     DescendHierarchy,
     RunChecks,
+    CheckAndSave,
     ClearChecks,
     RunSimulation,
     StopSimulation,
+    PreflightChecks,
     SimulationOptions,
     GenerateNetlist,
     ClearResults,
@@ -141,10 +146,16 @@ impl Command {
                 "Ctrl+Shift+O",
                 "File",
             ),
+            Self::RecentProjects => spec("project.recent", "Recent projects…", "", "File"),
             Self::NewProject => spec("project.new", "New project…", "Ctrl+Shift+N", "File"),
             Self::OpenProject => spec("project.open", "Open project…", "Ctrl+O", "File"),
             Self::Save => spec("file.save", "Save", "Ctrl+S", "File"),
-            Self::SaveAs => spec("file.save_as", "Save as…", "Ctrl+Shift+S", "File"),
+            Self::SaveAs => spec(
+                "file.save_as",
+                "Save as project copy…",
+                "Ctrl+Shift+Alt+S",
+                "File",
+            ),
             Self::NewCell => spec("design.new_cell", "New cell…", "Ctrl+N", "File"),
             Self::OpenDocument => spec("design.open", "Open schematic…", "", "File"),
             Self::ImportNetlist => spec("netlist.import", "Import SPICE deck…", "", "File"),
@@ -164,7 +175,12 @@ impl Command {
             Self::Paste => spec("edit.paste", "Paste", "Ctrl+V", "Edit"),
             Self::Duplicate => spec("edit.duplicate", "Duplicate selection", "Ctrl+D", "Edit"),
             Self::Delete => spec("edit.delete", "Delete selection", "Delete", "Edit"),
-            Self::SelectAll => spec("edit.select_all", "Select all", "Ctrl+A", "Edit"),
+            Self::SelectAll => spec(
+                "edit.select_all",
+                "Select all in edit context",
+                "Ctrl+A",
+                "Edit",
+            ),
             Self::ObjectProperties => spec("edit.properties", "Object properties…", "Q", "Edit"),
             Self::FindInDesign => spec("design.find", "Find in design…", "Ctrl+F", "Edit"),
             Self::Preferences => spec("application.preferences", "Preferences…", "Ctrl+,", "Edit"),
@@ -172,7 +188,9 @@ impl Command {
             Self::ZoomOut => spec("view.zoom_out", "Zoom out", "−", "View"),
             Self::ZoomFit => spec("view.zoom_fit", "Zoom active canvas to fit", "F", "View"),
             Self::ZoomOneToOne => spec("view.zoom_100", "Zoom 100%", "Ctrl+0", "View"),
-            Self::CycleGrid => spec("view.grid", "Cycle grid and snap", "G", "View"),
+            Self::CycleGrid => spec("view.grid", "Canvas grid and snap", "G", "View"),
+            Self::ToggleFullScreen => spec("view.full_screen", "Enter full screen", "F11", "View"),
+            Self::ResetActiveView => spec("view.reset_active", "Reset active view", "", "View"),
             Self::ToggleNavigator => {
                 spec("window.navigator", "Toggle navigator", "Ctrl+B", "Window")
             }
@@ -218,14 +236,26 @@ impl Command {
                 "Design",
             ),
             Self::RunChecks => spec("design.check", "Run schematic checks", "Ctrl+E", "Design"),
+            Self::CheckAndSave => spec(
+                "design.check_and_save",
+                "Check and save",
+                "Ctrl+Shift+E",
+                "Design",
+            ),
             Self::ClearChecks => spec("design.clear_checks", "Clear check results", "", "Design"),
             Self::RunSimulation => spec("simulation.run", "Run active plan", "F5", "Simulate"),
             Self::StopSimulation => {
                 spec("simulation.stop", "Stop active run", "Shift+F5", "Simulate")
             }
+            Self::PreflightChecks => spec(
+                "simulation.preflight",
+                "Preflight checks",
+                "Ctrl+E",
+                "Simulate",
+            ),
             Self::SimulationOptions => spec(
                 "simulation.options",
-                "Global solver and convergence…",
+                "Global solver & convergence",
                 "",
                 "Simulate",
             ),
@@ -248,7 +278,9 @@ impl Command {
             Self::ModelsPage(_) => spec("models.page", "Open models page", "", "Models"),
             Self::ModelBrowser => spec("models.browser", "Model browser…", "", "Models"),
             Self::PdkSettings => spec("models.pdk", "PDK and model paths…", "", "Models"),
-            Self::CompileVerilogA => spec("models.veriloga", "Compile Verilog-A…", "", "Models"),
+            Self::CompileVerilogA => {
+                spec("models.veriloga", "Verilog-A/AMS compiler", "", "Models")
+            }
             Self::AutomationConsole => spec(
                 "automation.console",
                 "Automation console",
@@ -271,19 +303,78 @@ impl Command {
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
         match self {
-            Self::Undo => state.schematic.can_undo(),
-            Self::Redo => state.schematic.can_redo(),
-            Self::Cut
-            | Self::Copy
-            | Self::Duplicate
-            | Self::Delete
-            | Self::RotateSelection
-            | Self::MirrorSelectionHorizontal => {
-                !state.schematic.read_only && !state.schematic.selection.is_empty()
+            Self::Undo => {
+                if active_symbol_editor(app) {
+                    state.can_undo_active_symbol_document()
+                } else {
+                    active_schematic_editor(app) && state.schematic.can_undo()
+                }
             }
-            Self::ObjectProperties => state.schematic.selection.single_component().is_some(),
-            Self::AscendHierarchy => state.workspace.hierarchy_stack.len() > 1,
-            Self::DescendHierarchy => state.schematic.selection.single_component().is_some(),
+            Self::Redo => {
+                if active_symbol_editor(app) {
+                    state.can_redo_active_symbol_document()
+                } else {
+                    active_schematic_editor(app) && state.schematic.can_redo()
+                }
+            }
+            Self::Cut | Self::Duplicate | Self::Delete => {
+                if active_symbol_editor(app) {
+                    !state.active_view_read_only()
+                        && !state.ui.symbol.effective_selection().is_empty()
+                } else {
+                    active_schematic_editor(app)
+                        && !state.schematic.read_only
+                        && !state.schematic.selection.is_empty()
+                }
+            }
+            Self::Copy => {
+                if active_symbol_editor(app) {
+                    !state.ui.symbol.effective_selection().is_empty()
+                } else {
+                    active_schematic_editor(app) && !state.schematic.selection.is_empty()
+                }
+            }
+            Self::Paste => {
+                if active_symbol_editor(app) {
+                    !state.active_view_read_only() && !state.ui.symbol.clipboard.is_empty()
+                } else {
+                    active_schematic_editor(app)
+                        && !state.schematic.read_only
+                        && !state.schematic.clipboard.is_empty()
+                }
+            }
+            Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::RotateSelection | Self::MirrorSelectionHorizontal => {
+                active_schematic_editor(app)
+                    && !state.schematic.read_only
+                    && !state.schematic.selection.is_empty()
+            }
+            Self::ObjectProperties => {
+                if active_symbol_editor(app) {
+                    let selection = state.ui.symbol.effective_selection();
+                    selection.pins.len() + selection.shapes.len() == 1
+                } else {
+                    active_schematic_editor(app)
+                        && state.schematic.selection.single_component().is_some()
+                }
+            }
+            Self::ZoomIn | Self::ZoomOut | Self::ZoomFit | Self::ZoomOneToOne => {
+                active_symbol_editor(app) || active_schematic_editor(app)
+            }
+            Self::CycleGrid => active_schematic_editor(app),
+            Self::PlaceInstance
+            | Self::PlaceWire
+            | Self::PlaceLabel
+            | Self::PlaceProbe
+            | Self::Place(_) => active_schematic_editor(app) && !state.schematic.read_only,
+            Self::AscendHierarchy => {
+                active_schematic_editor(app) && state.workspace.hierarchy_stack.len() > 1
+            }
+            Self::DescendHierarchy => {
+                active_schematic_editor(app)
+                    && state.schematic.selection.single_component().is_some()
+            }
+            Self::RunChecks | Self::CheckAndSave => active_schematic_editor(app),
             Self::ClearChecks => state.dialogs.drc_results.is_some(),
             Self::RunSimulation => state.can_run_simulation(),
             Self::StopSimulation => state.simulation.is_running,
@@ -296,11 +387,13 @@ impl Command {
     pub fn execute(self, app: &mut RSpiceApp) {
         match self {
             Self::OpenWorkspace(workspace) => activate_workspace(app, workspace),
-            Self::ProjectLauncher => activate_workspace(app, Workspace::Project),
+            Self::ProjectLauncher | Self::RecentProjects => {
+                app.state.workbench.open_project_launcher()
+            }
             Self::NewProject => file_action(app, FileMenuAction::NewProject),
             Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
             Self::Save => file_action(app, FileMenuAction::Save),
-            Self::SaveAs => file_action(app, FileMenuAction::SaveAs),
+            Self::SaveAs => file_action(app, FileMenuAction::SaveProjectAs),
             Self::NewCell => file_action(app, FileMenuAction::New),
             Self::OpenDocument => file_action(app, FileMenuAction::Open),
             Self::ImportNetlist => {
@@ -317,55 +410,98 @@ impl Command {
             ),
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => {
-                app.state.schematic.undo();
+                if active_symbol_editor(app) {
+                    if let Err(error) = app.state.undo_active_symbol_document() {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(error));
+                    }
+                } else {
+                    app.state.schematic.undo();
+                }
             }
             Self::Redo => {
-                app.state.schematic.redo();
+                if active_symbol_editor(app) {
+                    if let Err(error) = app.state.redo_active_symbol_document() {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(error));
+                    }
+                } else {
+                    app.state.schematic.redo();
+                }
             }
             Self::Cut => {
-                app.state.schematic.copy_selection();
-                app.state.schematic.delete_selection();
+                if active_symbol_editor(app) {
+                    app.delete_selected_symbol_item(true);
+                } else {
+                    app.state.schematic.copy_selection();
+                    app.state.schematic.delete_selection();
+                }
             }
             Self::Copy => {
-                app.state.schematic.copy_selection();
+                if active_symbol_editor(app) {
+                    app.copy_selected_symbol_shape();
+                } else {
+                    app.state.schematic.copy_selection();
+                }
             }
             Self::Paste => {
-                let anchor = app.state.schematic_paste_anchor();
-                app.state.schematic.paste_at(anchor);
+                if active_symbol_editor(app) {
+                    app.paste_symbol_shape();
+                } else {
+                    let anchor = app.state.schematic_paste_anchor();
+                    app.state.schematic.paste_at(anchor);
+                }
             }
             Self::Duplicate => {
-                app.state.schematic.copy_selection();
-                let anchor = app.state.schematic_paste_anchor() + crate::state::Point::new(2, 2);
-                app.state.schematic.paste_at(anchor);
+                if active_symbol_editor(app) {
+                    app.copy_selected_symbol_shape();
+                    app.paste_symbol_shape();
+                } else {
+                    app.state.schematic.copy_selection();
+                    let anchor =
+                        app.state.schematic_paste_anchor() + crate::state::Point::new(2, 2);
+                    app.state.schematic.paste_at(anchor);
+                }
             }
             Self::Delete => {
-                app.state.schematic.delete_selection();
+                if active_symbol_editor(app) {
+                    app.delete_selected_symbol_item(false);
+                } else {
+                    app.state.schematic.delete_selection();
+                }
             }
             Self::SelectAll => {
-                let component_ids: Vec<u64> = app
-                    .state
-                    .schematic
-                    .components
-                    .iter()
-                    .map(|component| component.id)
-                    .collect();
-                let wire_ids: Vec<u64> = app
-                    .state
-                    .schematic
-                    .wires
-                    .iter()
-                    .map(|wire| wire.id)
-                    .collect();
-                app.state.schematic.selection.clear();
-                for id in component_ids {
-                    app.state.schematic.selection.select_component(id);
-                }
-                for id in wire_ids {
-                    app.state.schematic.selection.select_wire(id);
+                if active_symbol_editor(app) {
+                    app.select_all_symbol_items();
+                } else {
+                    let component_ids: Vec<u64> = app
+                        .state
+                        .schematic
+                        .components
+                        .iter()
+                        .map(|component| component.id)
+                        .collect();
+                    let wire_ids: Vec<u64> = app
+                        .state
+                        .schematic
+                        .wires
+                        .iter()
+                        .map(|wire| wire.id)
+                        .collect();
+                    app.state.schematic.selection.clear();
+                    for id in component_ids {
+                        app.state.schematic.selection.select_component(id);
+                    }
+                    for id in wire_ids {
+                        app.state.schematic.selection.select_wire(id);
+                    }
                 }
             }
             Self::ObjectProperties => {
-                if let Some(id) = app.state.schematic.selection.single_component() {
+                if active_symbol_editor(app) {
+                    app.state.workbench.inspector_visible = true;
+                    app.state.workbench.drawer = Some(super::state::Drawer::Inspector);
+                } else if let Some(id) = app.state.schematic.selection.single_component() {
                     crate::common::app::open_property_editor(&mut app.state, id);
                 }
             }
@@ -376,11 +512,39 @@ impl Command {
                 app.state.workbench.focus_navigator_search = true;
             }
             Self::Preferences => app.state.dialogs.preferences_open = true,
-            Self::ZoomIn => app.state.schematic.zoom = (app.state.schematic.zoom * 1.25).min(8.0),
-            Self::ZoomOut => app.state.schematic.zoom = (app.state.schematic.zoom / 1.25).max(0.1),
-            Self::ZoomFit => app.state.schematic.needs_fit = true,
-            Self::ZoomOneToOne => app.state.schematic.zoom = 1.0,
+            Self::ZoomIn => {
+                if active_symbol_editor(app) {
+                    app.state.ui.symbol.zoom = (app.state.ui.symbol.zoom * 1.25).min(16.0);
+                } else {
+                    app.state.schematic.zoom = (app.state.schematic.zoom * 1.25).min(8.0);
+                }
+            }
+            Self::ZoomOut => {
+                if active_symbol_editor(app) {
+                    app.state.ui.symbol.zoom = (app.state.ui.symbol.zoom / 1.25).max(0.1);
+                } else {
+                    app.state.schematic.zoom = (app.state.schematic.zoom / 1.25).max(0.1);
+                }
+            }
+            Self::ZoomFit => {
+                if active_symbol_editor(app) {
+                    app.state.ui.symbol.needs_fit = true;
+                } else {
+                    app.state.schematic.needs_fit = true;
+                }
+            }
+            Self::ZoomOneToOne => {
+                if active_symbol_editor(app) {
+                    app.state.ui.symbol.zoom = 1.0;
+                } else {
+                    app.state.schematic.zoom = 1.0;
+                }
+            }
             Self::CycleGrid => app.state.ui.grid = app.state.ui.grid.cycled(),
+            Self::ToggleFullScreen => {
+                app.state.workbench.full_screen = !app.state.workbench.full_screen
+            }
+            Self::ResetActiveView => reset_active_view(app),
             Self::ToggleNavigator => {
                 app.state.workbench.navigator_visible = !app.state.workbench.navigator_visible
             }
@@ -420,12 +584,49 @@ impl Command {
                 app.state.open_selected_instance_master();
             }
             Self::RunChecks => crate::common::menu_bar::run_design_rule_check(&mut app.state),
+            Self::CheckAndSave => {
+                crate::common::menu_bar::run_design_rule_check(&mut app.state);
+                let passed = app
+                    .state
+                    .dialogs
+                    .drc_results
+                    .as_ref()
+                    .is_some_and(crate::services::drc::DrcResult::passed);
+                if passed {
+                    file_action(app, FileMenuAction::SaveProject);
+                } else {
+                    activate_workspace(app, Workspace::Verify);
+                    app.state.workbench.verification_page = VerificationPage::Checks;
+                    app.state.workbench.console_visible = true;
+                    app.state.workbench.console_page = super::state::ConsolePage::Problems;
+                }
+            }
             Self::ClearChecks => app.state.dialogs.drc_results = None,
             Self::RunSimulation => {
                 app.state.request_run_set_simulation();
                 activate_workspace(app, Workspace::Simulate);
             }
             Self::StopSimulation => app.state.simulation.trigger_abort = true,
+            Self::PreflightChecks => {
+                crate::common::menu_bar::run_design_rule_check(&mut app.state);
+                match app.state.simulation_run_preflight_block_reason() {
+                    Some(reason) => {
+                        app.state.push_user_message(
+                            crate::common::app::ConsoleMessage::warning(format!(
+                                "Simulation preflight blocked: {reason}"
+                            )),
+                        );
+                        app.state.workbench.console_visible = true;
+                        app.state.workbench.console_page = super::state::ConsolePage::Problems;
+                    }
+                    None => app.state.push_user_message(
+                        crate::common::app::ConsoleMessage::info(
+                            "Simulation preflight passed: design, analyses, and run prerequisites are ready",
+                        ),
+                    ),
+                }
+                activate_workspace(app, Workspace::Simulate);
+            }
             Self::SimulationOptions => {
                 crate::common::menu_bar::open_simulation_options(&mut app.state)
             }
@@ -496,9 +697,66 @@ fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
     app.state.workbench.activate(workspace);
 }
 
+fn active_symbol_editor(app: &RSpiceApp) -> bool {
+    matches!(
+        app.state.workbench.workspace,
+        Workspace::Design | Workspace::Models
+    ) && app.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+}
+
+fn active_schematic_editor(app: &RSpiceApp) -> bool {
+    app.state.workbench.workspace == Workspace::Design
+        && matches!(
+            app.state.workspace.active_view_type(),
+            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+        )
+}
+
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     activate_workspace(app, Workspace::Design);
     app.state.schematic.tool = tool;
+}
+
+fn reset_active_view(app: &mut RSpiceApp) {
+    app.state.workbench.navigator_query.clear();
+    match app.state.workbench.workspace {
+        Workspace::Project => {}
+        Workspace::Design => {
+            if app.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                app.state.ui.symbol.needs_fit = true;
+            } else {
+                app.state.schematic.needs_fit = true;
+            }
+        }
+        Workspace::Simulate => {
+            app.state.workbench.analysis_query.clear();
+        }
+        Workspace::Results => {
+            let viewer = app.state.ui.results.viewer;
+            app.state
+                .ui
+                .results
+                .views
+                .retain(|(candidate, _), _| *candidate != viewer);
+            app.state.ui.results.clear_cursors();
+            app.state.ui.results.rf_pin.remove(&viewer);
+            if viewer == crate::workbench::ResultViewer::Waves {
+                app.state.ui.results.hidden_strips.clear();
+                app.state.ui.results.maximized_strip = None;
+            }
+        }
+        Workspace::Verify => {
+            app.state.workbench.selected_spec = None;
+        }
+        Workspace::Models => {
+            app.state.workbench.selected_model = None;
+        }
+        Workspace::Netlist => {
+            app.state.ui.netlist.cursor_line = 0;
+            app.state.ui.netlist.completion_open = false;
+            app.state.ui.netlist.completion_index = 0;
+        }
+    }
 }
 
 fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
@@ -514,6 +772,7 @@ fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
 /// dispatcher above.
 pub const COMMAND_CATALOG: &[Command] = &[
     Command::ProjectLauncher,
+    Command::RecentProjects,
     Command::OpenProject,
     Command::NewProject,
     Command::Save,
@@ -528,8 +787,10 @@ pub const COMMAND_CATALOG: &[Command] = &[
     Command::PlaceWire,
     Command::PlaceLabel,
     Command::RunChecks,
+    Command::CheckAndSave,
     Command::RunSimulation,
     Command::StopSimulation,
+    Command::PreflightChecks,
     Command::SimulationOptions,
     Command::GenerateNetlist,
     Command::WaveformCalculator,
@@ -538,6 +799,8 @@ pub const COMMAND_CATALOG: &[Command] = &[
     Command::PdkSettings,
     Command::CompileVerilogA,
     Command::AutomationConsole,
+    Command::ToggleFullScreen,
+    Command::ResetActiveView,
     Command::Preferences,
     Command::KeyboardShortcuts,
     Command::About,

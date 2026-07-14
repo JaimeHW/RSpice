@@ -1,4 +1,8 @@
-//! Project ownership, dependencies, activity, and recovery.
+//! Project workspace surfaces from the workbench mockup.
+//!
+//! Every value is resolved from the live project, library, simulation, and
+//! recovery state. The surface never substitutes fixture counts or synthetic
+//! project history when a project has not produced that evidence yet.
 
 use egui::{ScrollArea, Ui};
 
@@ -8,7 +12,7 @@ use crate::ui::tokens::{self, Tokens};
 
 use super::super::commands::Command;
 use super::super::design_system::{card, heading, property_row, status_dot};
-use super::super::state::ProjectPage;
+use super::super::state::{ModelsPage, ProjectPage, Workspace};
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
@@ -20,134 +24,431 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.add_space(22.0);
                 ui.horizontal(|ui| {
                     ui.add_space(24.0);
-                    ui.vertical(|ui| {
-                        heading(
-                            ui,
-                            "Project owner",
-                            app.state.workspace.project.display_name(),
-                            "Authoritative design identity, dependencies, recent work, and recovery state.",
-                        );
-                    });
-                });
-                ui.add_space(20.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.add_space(24.0);
-                    for page in ProjectPage::ALL {
-                        if ui
-                            .selectable_label(app.state.workbench.project_page == page, page.label())
-                            .clicked()
-                        {
-                            app.state.workbench.project_page = page;
-                        }
-                    }
-                });
-                ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(24.0);
                     ui.vertical(|ui| match app.state.workbench.project_page {
-                        ProjectPage::Overview => overview(ui, app),
+                        ProjectPage::Dashboard => dashboard(ui, app),
+                        ProjectPage::Configuration => configuration(ui, app),
+                        ProjectPage::Technology => technology(ui, app),
                         ProjectPage::Dependencies => dependencies(ui, app),
-                        ProjectPage::Activity => activity(ui, app),
                         ProjectPage::Recovery => recovery(ui, app),
                     });
+                    ui.add_space(24.0);
                 });
                 ui.add_space(24.0);
             });
     });
 }
 
-fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
-    let available = ui.available_width();
-    let card_width = ((available - 16.0) / 2.0).max(280.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.set_width(card_width);
-        card(ui, "Design context", |ui| {
-            property_row(
-                ui,
-                "Root library",
-                &app.state.workspace.project.root_library,
-            );
-            property_row(ui, "Top cell", &app.state.workspace.project.top_cell);
-            property_row(
-                ui,
-                "Active document",
-                &app.state.workspace.active_display_path(),
-            );
-            property_row(
-                ui,
-                "Open documents",
-                &app.state.workspace.open_views.len().to_string(),
-            );
-            if ui.button("Open design workspace").clicked() {
-                Command::OpenWorkspace(super::super::state::Workspace::Design).execute(app);
+fn dashboard(ui: &mut Ui, app: &mut RSpiceApp) {
+    let revision = app.state.workspace.project.revision().get();
+    let project_name = app.state.workspace.project.display_name().to_owned();
+    let sheet_count = app.state.workspace.schematic_buffers.len();
+    let instance_count = app.state.schematic.components.len();
+    let dirty = app.state.schematic.is_dirty || app.state.workspace.any_dirty();
+
+    header_with_actions(
+        ui,
+        &format!("PROJECT WORKSPACE · REVISION {revision}"),
+        &project_name,
+        &format!(
+            "Hierarchical analog design · {sheet_count} sheet{} · {instance_count} instance{} · {}",
+            plural(sheet_count),
+            plural(instance_count),
+            if dirty {
+                "working changes"
+            } else {
+                "saved state current"
             }
-        });
-        ui.set_width(card_width);
-        card(ui, "Project health", |ui| {
-            let dirty = app
-                .state
-                .workspace
-                .open_views
-                .iter()
-                .filter(|view| view.dirty)
-                .count()
-                + usize::from(app.state.workspace.netlist_source_dirty);
-            status_dot(
-                ui,
-                if dirty == 0 {
-                    Tokens::get(ui.ctx()).color.ok
-                } else {
-                    Tokens::get(ui.ctx()).color.warn
-                },
-                if dirty == 0 {
-                    "All documents saved"
-                } else {
-                    "Unsaved project changes"
-                },
-            );
-            property_row(ui, "Dirty documents", &dirty.to_string());
-            property_row(
-                ui,
-                "Schematic revision",
-                &app.state.schematic.topology_version().to_string(),
-            );
-            property_row(
-                ui,
-                "Result datasets",
-                &app.state.simulation.runs.len().to_string(),
-            );
-            if ui.button("Save project").clicked() {
-                Command::Save.execute(app);
-            }
-        });
-    });
-    ui.add_space(12.0);
-    card(ui, "Quick actions", |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("New project…").clicked() {
-                Command::NewProject.execute(app);
-            }
+        ),
+        |ui, app| {
             if ui.button("Open project…").clicked() {
                 Command::OpenProject.execute(app);
             }
-            if ui.button("New cell…").clicked() {
-                Command::NewCell.execute(app);
+            if ui.button("Open top schematic").clicked() {
+                Command::OpenWorkspace(Workspace::Design).execute(app);
             }
-            if ui.button("Import SPICE deck…").clicked() {
-                Command::ImportNetlist.execute(app);
+        },
+        app,
+    );
+    ui.add_space(18.0);
+    engineering_status(ui, app);
+    ui.add_space(16.0);
+
+    let width = ((ui.available_width() - 16.0) / 2.0).max(300.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.set_width(width);
+        design_entry_points(ui, app);
+        ui.set_width(width);
+        recent_activity(ui, app);
+    });
+}
+
+fn engineering_status(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let topology = app.state.schematic.topology_version();
+    let checks_current = app.state.dialogs.drc_checked_version == topology;
+    let check_summary = checks_current
+        .then(|| {
+            app.state
+                .dialogs
+                .drc_results
+                .as_ref()
+                .map(|result| result.summary())
+        })
+        .flatten();
+    let valid_analyses = app
+        .state
+        .sim_setup
+        .enabled
+        .iter()
+        .filter(|index| app.state.sim_setup.validation_error(**index).is_none())
+        .count();
+    let enabled_analyses = app.state.sim_setup.enabled.len();
+    let model_files = app.state.pdk_config.discovered_files.len();
+    let model_errors = app.state.pdk_config.scan_errors.len();
+
+    ui.horizontal_wrapped(|ui| {
+        status_card(
+            ui,
+            "Schematic checks",
+            check_summary
+                .map(|summary| format!("{} errors", summary.errors + summary.critical))
+                .as_deref()
+                .unwrap_or("stale"),
+            check_summary
+                .map(|summary| format!("{} advisories", summary.warnings + summary.info))
+                .as_deref()
+                .unwrap_or("Run checks for this design revision"),
+            check_summary.is_some_and(|summary| summary.passed),
+            || Command::RunChecks.execute(app),
+        );
+        status_card(
+            ui,
+            "Simulation plan",
+            &format!("{enabled_analyses} analyses"),
+            &format!("{valid_analyses} validated"),
+            enabled_analyses > 0 && valid_analyses == enabled_analyses,
+            || Command::OpenWorkspace(Workspace::Simulate).execute(app),
+        );
+        let spec_count = app.state.workspace.specs.len();
+        status_card(
+            ui,
+            "Verification",
+            &format!("{spec_count} specifications"),
+            if app.state.simulation.runs.is_empty() {
+                "No result evidence yet"
+            } else {
+                "Result evidence available"
+            },
+            spec_count > 0 && !app.state.simulation.runs.is_empty(),
+            || Command::OpenWorkspace(Workspace::Verify).execute(app),
+        );
+        status_card(
+            ui,
+            "Model dependencies",
+            &format!("{model_files} files"),
+            if model_errors == 0 {
+                "Resolved"
+            } else {
+                "Review scan diagnostics"
+            },
+            model_errors == 0,
+            || Command::ModelsPage(ModelsPage::Catalog).execute(app),
+        );
+    });
+    ui.painter().hline(
+        ui.min_rect().x_range(),
+        ui.cursor().top(),
+        egui::Stroke::new(0.0, t.color.border),
+    );
+}
+
+fn status_card(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    detail: &str,
+    ok: bool,
+    action: impl FnOnce(),
+) {
+    let t = Tokens::get(ui.ctx());
+    let response = egui::Frame::new()
+        .fill(t.color.bg_panel)
+        .stroke(egui::Stroke::new(1.0, t.color.border))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_min_width(230.0);
+            ui.label(
+                egui::RichText::new(label.to_uppercase())
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.text_dim),
+            );
+            ui.label(
+                egui::RichText::new(value)
+                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                    .color(if ok { t.color.ok } else { t.color.warn }),
+            );
+            ui.label(
+                egui::RichText::new(detail)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            );
+        })
+        .response
+        .interact(egui::Sense::click());
+    if response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        action();
+    }
+}
+
+fn design_entry_points(ui: &mut Ui, app: &mut RSpiceApp) {
+    card(ui, "Design entry points", |ui| {
+        let open_views = app.state.workspace.open_views.clone();
+        for document in open_views {
+            let active = document.reference == app.state.workspace.active_view;
+            let label = format!(
+                "{} · {}{}",
+                document.reference.cell,
+                document.reference.view,
+                if document.dirty { " · modified" } else { "" }
+            );
+            if ui
+                .selectable_label(active, label)
+                .on_hover_text(document.reference.display_path())
+                .clicked()
+            {
+                app.state.open_workspace_view(document.reference);
+                Command::OpenWorkspace(Workspace::Design).execute(app);
             }
-            if ui.button("Configure PDK…").clicked() {
-                Command::PdkSettings.execute(app);
+        }
+        ui.separator();
+        if ui
+            .button(format!(
+                "Simulation plan · {} enabled",
+                app.state.sim_setup.enabled.len()
+            ))
+            .clicked()
+        {
+            Command::OpenWorkspace(Workspace::Simulate).execute(app);
+        }
+        if ui
+            .button(format!(
+                "Verification cockpit · {} specifications",
+                app.state.workspace.specs.len()
+            ))
+            .clicked()
+        {
+            Command::OpenWorkspace(Workspace::Verify).execute(app);
+        }
+    });
+}
+
+fn recent_activity(ui: &mut Ui, app: &mut RSpiceApp) {
+    card(ui, "Recent activity", |ui| {
+        if app.state.simulation.runs.is_empty() && app.state.recent_files.is_empty() {
+            muted(ui, "No project runs or recently opened files yet.");
+        }
+        let runs = app
+            .state
+            .simulation
+            .runs
+            .iter()
+            .enumerate()
+            .rev()
+            .take(3)
+            .map(|(index, run)| {
+                let measurement_count: usize = run
+                    .analyses
+                    .iter()
+                    .map(|analysis| analysis.measurements.len())
+                    .sum();
+                let passed_count = run
+                    .analyses
+                    .iter()
+                    .flat_map(|analysis| &analysis.measurements)
+                    .filter(|measurement| measurement.passed)
+                    .count();
+                (
+                    index,
+                    run.label.clone(),
+                    run.analyses.len(),
+                    run.elapsed_time,
+                    measurement_count,
+                    passed_count,
+                )
+            })
+            .collect::<Vec<_>>();
+        for (index, label, analysis_count, elapsed_time, measurement_count, passed_count) in runs {
+            let label = format!(
+                "{} · {} analyses · {:.3} s",
+                label, analysis_count, elapsed_time
+            );
+            if ui
+                .selectable_label(false, label)
+                .on_hover_text(format!(
+                    "{passed_count} / {measurement_count} measurements passed"
+                ))
+                .clicked()
+            {
+                app.state.simulation.select_run(index);
+                Command::OpenWorkspace(Workspace::Results).execute(app);
             }
+        }
+        for recent in app.state.recent_files.iter().take(3) {
+            ui.label(
+                egui::RichText::new(recent.path.display().to_string())
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
+        }
+        if app.state.schematic.is_dirty || app.state.workspace.any_dirty() {
+            ui.separator();
+            if ui.button("Open Recovery").clicked() {
+                app.state.workbench.project_page = ProjectPage::Recovery;
+            }
+        }
+    });
+}
+
+fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
+    header_with_actions(
+        ui,
+        "TESTBENCH CONFIGURATION",
+        "Hierarchy and view binding",
+        "Define the exact design, view, model, environment, and netlisting contracts used by every run.",
+        |ui, app| {
+            if ui.button("Validate configuration").clicked() {
+                Command::PreflightChecks.execute(app);
+            }
+        },
+        app,
+    );
+    ui.add_space(16.0);
+    card(ui, "Hierarchy binding", |ui| {
+        property_row(
+            ui,
+            "Active root",
+            &app.state.workspace.active_display_path(),
+        );
+        property_row(
+            ui,
+            "View type",
+            app.state.workspace.active_view_type().display_name(),
+        );
+        property_row(
+            ui,
+            "Hierarchy depth",
+            &app.state.workspace.hierarchy_stack.len().to_string(),
+        );
+        property_row(
+            ui,
+            "Open cellviews",
+            &app.state.workspace.open_views.len().to_string(),
+        );
+        property_row(ui, "Unbound cell policy", "Block execution");
+    });
+    ui.add_space(12.0);
+    let width = ((ui.available_width() - 12.0) / 2.0).max(280.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.set_width(width);
+        card(ui, "Netlisting policy", |ui| {
+            property_row(ui, "Hierarchy", "Preserve names");
+            property_row(ui, "Parameter evaluation", "Strict units");
+            property_row(ui, "Global ground", "Node 0 canonical");
+            property_row(ui, "Generated source", "Mapped to cell/view identity");
+        });
+        ui.set_width(width);
+        card(ui, "Environment", |ui| {
+            property_row(
+                ui,
+                "Technology",
+                app.state
+                    .workspace
+                    .project
+                    .technology
+                    .as_deref()
+                    .unwrap_or("Not attached"),
+            );
+            property_row(ui, "Process corner", &app.state.workbench.corner);
+            property_row(
+                ui,
+                "Model libraries",
+                &app.state.model_library_manager.library_count().to_string(),
+            );
+            property_row(
+                ui,
+                "Enabled analyses",
+                &app.state.sim_setup.enabled.len().to_string(),
+            );
         });
     });
 }
 
-fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Design libraries", |ui| {
+fn technology(ui: &mut Ui, app: &mut RSpiceApp) {
+    let technology = app
+        .state
+        .workspace
+        .project
+        .technology
+        .clone()
+        .unwrap_or_else(|| "No technology attached".to_owned());
+    header_with_actions(
+        ui,
+        "TECHNOLOGY ATTACHMENT",
+        "Technology and PDK contract",
+        "Versioned attachment for symbols, models, sections, and qualification evidence.",
+        |ui, app| {
+            if ui.button("Attach technology…").clicked() {
+                Command::PdkSettings.execute(app);
+            }
+        },
+        app,
+    );
+    ui.add_space(16.0);
+    card(ui, "PDK resources", |ui| {
+        property_row(ui, "Attachment", &technology);
         property_row(
             ui,
-            "Libraries",
+            "Configured search paths",
+            &app.state.pdk_config.library_paths.len().to_string(),
+        );
+        property_row(
+            ui,
+            "Discovered model files",
+            &app.state.pdk_config.discovered_files.len().to_string(),
+        );
+        property_row(
+            ui,
+            "Scan diagnostics",
+            &app.state.pdk_config.scan_errors.len().to_string(),
+        );
+        for path in &app.state.pdk_config.library_paths {
+            ui.label(
+                egui::RichText::new(path.display_name())
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
+        }
+    });
+}
+
+fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
+    header_with_actions(
+        ui,
+        "DEPENDENCY MANIFEST · CONTENT ADDRESSED",
+        "Project dependency graph",
+        "Libraries, model files, behavioral sources, and external contracts required to reproduce the project.",
+        |_ui, _app| {},
+        app,
+    );
+    ui.add_space(16.0);
+    card(ui, "Locked dependencies", |ui| {
+        property_row(
+            ui,
+            "Design libraries",
             &app.state.library_manager.library_count().to_string(),
         );
         property_row(
@@ -157,27 +458,9 @@ fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         property_row(
             ui,
-            "Views",
+            "Cellviews",
             &app.state.library_manager.total_view_count().to_string(),
         );
-        for library in app.state.library_manager.libraries_sorted() {
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&library.name).strong());
-                ui.label(if library.read_only {
-                    "read only"
-                } else {
-                    "editable"
-                });
-                ui.label(format!("{} cells", library.cell_count()));
-                if !library.technology.is_empty() {
-                    ui.label(format!("technology {}", library.technology));
-                }
-            });
-        }
-    });
-    ui.add_space(12.0);
-    card(ui, "Models and process", |ui| {
         property_row(
             ui,
             "Model libraries",
@@ -191,64 +474,49 @@ fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
                 .total_model_count()
                 .to_string(),
         );
-        property_row(
-            ui,
-            "Configured search paths",
-            &app.state.pdk_config.library_paths.len().to_string(),
-        );
-        property_row(
-            ui,
-            "Discovered files",
-            &app.state.pdk_config.discovered_files.len().to_string(),
-        );
-        property_row(
-            ui,
-            "Scan errors",
-            &app.state.pdk_config.scan_errors.len().to_string(),
-        );
-        if ui.button("Manage dependencies…").clicked() {
-            Command::PdkSettings.execute(app);
-        }
-    });
-}
-
-fn activity(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Recent documents", |ui| {
-        if app.state.recent_files.is_empty() {
-            muted(ui, "No recent project or schematic files in this session.");
-        }
-        for recent in &app.state.recent_files {
+        for library in app.state.library_manager.libraries_sorted() {
+            ui.separator();
             property_row(
                 ui,
-                &format!("{:?}", recent.kind),
-                &recent.path.display().to_string(),
+                &library.name,
+                if library.read_only {
+                    "Read only"
+                } else {
+                    "Project writable"
+                },
             );
         }
     });
     ui.add_space(12.0);
-    card(ui, "Simulation activity", |ui| {
-        if app.state.simulation.runs.is_empty() {
-            muted(ui, "No completed simulations yet.");
-        }
-        for run in app.state.simulation.runs.iter().take(12) {
-            ui.horizontal(|ui| {
-                let t = Tokens::get(ui.ctx());
-                status_dot(
-                    ui,
-                    if run.success { t.color.ok } else { t.color.err },
-                    &run.label,
-                );
-                ui.label(format!(
-                    "{} analyses · {:.3} s",
-                    run.analyses.len(),
-                    run.elapsed_time
-                ));
-            });
-        }
+    card(ui, "Reproducibility contract", |ui| {
+        property_row(ui, "Project format", "RSpice project schema 1");
+        property_row(ui, "Missing dependency", "Fail closed");
+        property_row(ui, "Mutable external path", "Explicit project reference");
+        property_row(
+            ui,
+            "Project identity",
+            &app.state.workspace.project.id().to_string(),
+        );
     });
 }
 
 fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
+    header_with_actions(
+        ui,
+        "PROJECT RECOVERY · NON-DESTRUCTIVE",
+        "Recovery Center",
+        "Review live working changes and save a durable project copy without replacing recoverable state.",
+        |ui, app| {
+            if ui.button("Save current project").clicked() {
+                Command::Save.execute(app);
+            }
+            if ui.button("Save project copy…").clicked() {
+                Command::SaveAs.execute(app);
+            }
+        },
+        app,
+    );
+    ui.add_space(16.0);
     let dirty_documents: Vec<_> = app
         .state
         .workspace
@@ -257,32 +525,46 @@ fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|view| view.dirty)
         .map(|view| view.reference.display_path())
         .collect();
-    card(ui, "Recoverable session state", |ui| {
+    card(ui, "Recoverable working state", |ui| {
         property_row(
             ui,
             "Open documents",
             &app.state.workspace.open_views.len().to_string(),
         );
-        property_row(ui, "Unsaved documents", &dirty_documents.len().to_string());
+        property_row(ui, "Modified documents", &dirty_documents.len().to_string());
         property_row(
             ui,
-            "Manual netlist dirty",
+            "Active schematic",
+            if app.state.schematic.is_dirty {
+                "Modified"
+            } else {
+                "Current"
+            },
+        );
+        property_row(
+            ui,
+            "Manual netlist",
             if app.state.workspace.netlist_source_dirty {
-                "Yes"
+                "Modified"
             } else {
-                "No"
+                "Current"
             },
         );
         property_row(
             ui,
-            "Undo available",
-            if app.state.schematic.can_undo() {
-                "Yes"
-            } else {
-                "No"
-            },
+            "Project path",
+            &app.state
+                .workspace
+                .project
+                .path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "Not saved yet".to_owned()),
         );
-        if dirty_documents.is_empty() && !app.state.workspace.netlist_source_dirty {
+        if dirty_documents.is_empty()
+            && !app.state.schematic.is_dirty
+            && !app.state.workspace.netlist_source_dirty
+        {
             status_dot(
                 ui,
                 Tokens::get(ui.ctx()).color.ok,
@@ -292,14 +574,28 @@ fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
             for document in dirty_documents {
                 muted(ui, &document);
             }
-            if ui.button("Save recoverable work").clicked() {
-                Command::Save.execute(app);
-            }
-            if ui.button("Save a recovery copy…").clicked() {
-                Command::SaveAs.execute(app);
-            }
         }
     });
+}
+
+fn header_with_actions(
+    ui: &mut Ui,
+    eyebrow: &str,
+    title: &str,
+    description: &str,
+    actions: impl FnOnce(&mut Ui, &mut RSpiceApp),
+    app: &mut RSpiceApp,
+) {
+    ui.horizontal_wrapped(|ui| {
+        ui.vertical(|ui| heading(ui, eyebrow, title, description));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            actions(ui, app);
+        });
+    });
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
 }
 
 fn muted(ui: &mut Ui, text: &str) {

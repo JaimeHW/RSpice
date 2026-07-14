@@ -65,6 +65,10 @@ pub enum Icon {
     Check,
     /// Document / netlist file.
     File,
+    /// Project or directory browser.
+    Folder,
+    /// Add or create.
+    Add,
     /// Stop (square).
     Stop,
     /// Run (play triangle).
@@ -116,6 +120,8 @@ impl Icon {
             Self::Redo => "Redo",
             Self::Check => "Run checks",
             Self::File => "Document",
+            Self::Folder => "Browse",
+            Self::Add => "Add",
             Self::Stop => "Stop",
             Self::Run => "Run",
             Self::Library => "Library workspace",
@@ -227,6 +233,21 @@ impl Icon {
                 Line(&[[14.0, 4.0], [14.0, 8.0], [18.0, 8.0]]),
                 Line(&[[10.0, 13.0], [15.0, 13.0]]),
                 Line(&[[10.0, 16.0], [15.0, 16.0]]),
+            ],
+            Icon::Folder => &[
+                Poly(&[
+                    [3.0, 7.0],
+                    [10.0, 7.0],
+                    [12.0, 10.0],
+                    [21.0, 10.0],
+                    [19.0, 19.0],
+                    [3.0, 19.0],
+                ]),
+                Line(&[[3.0, 7.0], [3.0, 19.0]]),
+            ],
+            Icon::Add => &[
+                Line(&[[12.0, 5.0], [12.0, 19.0]]),
+                Line(&[[5.0, 12.0], [19.0, 12.0]]),
             ],
             // Transport glyphs are filled — a stroked square reads as a
             // missing-glyph box, not a stop control.
@@ -368,6 +389,8 @@ mod tests {
             Icon::Redo,
             Icon::Check,
             Icon::File,
+            Icon::Folder,
+            Icon::Add,
             Icon::Stop,
             Icon::Run,
             Icon::Library,

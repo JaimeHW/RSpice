@@ -150,6 +150,26 @@ pub enum DesignPanel {
     ComponentShelf,
 }
 
+/// Sort order offered by the project launcher. The recent-files store is
+/// already maintained newest-first, so `LastOpened` preserves that durable
+/// ordering without fabricating timestamps that the application does not
+/// persist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectLauncherSort {
+    #[default]
+    LastOpened,
+    Name,
+}
+
+impl ProjectLauncherSort {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LastOpened => "Last opened",
+            Self::Name => "Name",
+        }
+    }
+}
+
 impl ConsolePage {
     pub const ALL: [Self; 4] = [
         Self::Console,
@@ -170,27 +190,31 @@ impl ConsolePage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ProjectPage {
+    #[serde(alias = "Overview", alias = "Activity")]
     #[default]
-    Overview,
+    Dashboard,
+    Configuration,
+    Technology,
     Dependencies,
-    Activity,
     Recovery,
 }
 
 impl ProjectPage {
-    pub const ALL: [Self; 4] = [
-        Self::Overview,
+    pub const ALL: [Self; 5] = [
+        Self::Dashboard,
+        Self::Configuration,
+        Self::Technology,
         Self::Dependencies,
-        Self::Activity,
         Self::Recovery,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Overview => "Overview",
-            Self::Dependencies => "Dependencies",
-            Self::Activity => "Recent activity",
-            Self::Recovery => "Recovery",
+            Self::Dashboard => "Project overview",
+            Self::Configuration => "Testbench configuration",
+            Self::Technology => "Technology & PDK",
+            Self::Dependencies => "Dependency manifest",
+            Self::Recovery => "Recovery center",
         }
     }
 }
@@ -271,6 +295,22 @@ pub struct WorkbenchState {
     pub console_maximized: bool,
     #[serde(default)]
     pub focus_mode: bool,
+    /// Current viewport full-screen intent. Runtime-owned because the host
+    /// window, browser, or mobile shell decides whether the request can be
+    /// honored and must never restore a stale platform window state.
+    #[serde(skip)]
+    pub full_screen: bool,
+    /// The Project Launcher is an application-level modal, not a workspace.
+    #[serde(skip)]
+    pub project_launcher_open: bool,
+    /// Search text is transient and never becomes project state.
+    #[serde(skip)]
+    pub project_launcher_query: String,
+    #[serde(skip)]
+    pub project_launcher_sort: ProjectLauncherSort,
+    /// Focus is requested only on the frame in which the launcher opens.
+    #[serde(skip)]
+    pub focus_project_launcher_search: bool,
     #[serde(default = "default_navigator_width")]
     pub navigator_width: f32,
     #[serde(default = "default_inspector_width")]
@@ -361,12 +401,17 @@ impl Default for WorkbenchState {
             console_visible: true,
             console_maximized: false,
             focus_mode: false,
+            full_screen: false,
+            project_launcher_open: false,
+            project_launcher_query: String::new(),
+            project_launcher_sort: ProjectLauncherSort::LastOpened,
+            focus_project_launcher_search: false,
             navigator_width: default_navigator_width(),
             inspector_width: default_inspector_width(),
             console_height: default_console_height(),
             console_page: ConsolePage::Console,
             design_panel: DesignPanel::Navigator,
-            project_page: ProjectPage::Overview,
+            project_page: ProjectPage::Dashboard,
             verification_page: VerificationPage::Cockpit,
             models_page: ModelsPage::Catalog,
             active_analysis: default_analysis_index(),
@@ -388,6 +433,11 @@ impl Default for WorkbenchState {
 }
 
 impl WorkbenchState {
+    pub fn open_project_launcher(&mut self) {
+        self.project_launcher_open = true;
+        self.focus_project_launcher_search = true;
+    }
+
     pub fn activate(&mut self, workspace: Workspace) {
         if self.workspace == workspace {
             self.drawer = None;

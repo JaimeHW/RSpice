@@ -136,6 +136,32 @@ pub(crate) enum RecentKind {
 pub(crate) struct RecentFile {
     pub kind: RecentKind,
     pub path: std::path::PathBuf,
+    /// Milliseconds since the Unix epoch when this entry most recently
+    /// became active. Legacy sessions deserialize to zero and retain their
+    /// stored list order.
+    #[serde(default)]
+    pub opened_at_unix_ms: u64,
+    /// User pin state for Project Launcher filtering.
+    #[serde(default)]
+    pub pinned: bool,
+    /// Governed project owner. This is never guessed from the operating-
+    /// system account when project metadata does not provide it.
+    #[serde(default)]
+    pub owner: Option<String>,
+    /// Searchable project classifications retained by the launcher.
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+impl RecentFile {
+    pub(crate) fn is_shared_project(&self) -> bool {
+        self.kind == RecentKind::Project && path_is_shared(&self.path)
+    }
+}
+
+fn path_is_shared(path: &std::path::Path) -> bool {
+    let text = path.as_os_str().to_string_lossy();
+    text.starts_with(r"\\") || text.starts_with("//")
 }
 
 /// Main application state container
@@ -326,13 +352,42 @@ impl AppState {
     /// capped at 8 — the conventional depth for an EDA File menu).
     pub(crate) fn remember_recent_file(&mut self, kind: RecentKind, path: &std::path::Path) {
         const MAX_RECENT_FILES: usize = 8;
+        let previous = self
+            .recent_files
+            .iter()
+            .find(|recent| recent.path == path)
+            .cloned();
         let entry = RecentFile {
             kind,
             path: path.to_path_buf(),
+            opened_at_unix_ms: crate::common::time_compat::unix_epoch()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX),
+            pinned: previous.as_ref().is_some_and(|recent| recent.pinned),
+            owner: previous.as_ref().and_then(|recent| recent.owner.clone()),
+            tags: previous.map_or_else(Vec::new, |recent| recent.tags),
         };
-        self.recent_files.retain(|r| r.path != entry.path);
+        self.recent_files.retain(|recent| recent.path != entry.path);
         self.recent_files.insert(0, entry);
         self.recent_files.truncate(MAX_RECENT_FILES);
+    }
+
+    /// Change a project pin without changing its recency or file identity.
+    pub(crate) fn set_recent_project_pinned(
+        &mut self,
+        path: &std::path::Path,
+        pinned: bool,
+    ) -> bool {
+        let Some(recent) = self
+            .recent_files
+            .iter_mut()
+            .find(|recent| recent.kind == RecentKind::Project && recent.path == path)
+        else {
+            return false;
+        };
+        recent.pinned = pinned;
+        true
     }
 
     /// Where a paste should land, snapped to the schematic grid: under the
@@ -760,5 +815,55 @@ mod tests {
         assert!(should_warn_before_browser_unload(true, false));
         assert!(should_warn_before_browser_unload(false, true));
         assert!(should_warn_before_browser_unload(true, true));
+    }
+
+    #[test]
+    fn recent_project_refresh_preserves_launcher_metadata() {
+        let mut state = AppState::default();
+        let path = std::path::Path::new("C:/Engineering/afe.rspiceproj");
+        state.remember_recent_file(RecentKind::Project, path);
+        state.recent_files[0].pinned = true;
+        state.recent_files[0].owner = Some("Analog Design".to_owned());
+        state.recent_files[0].tags = vec!["afe".to_owned(), "release".to_owned()];
+        let first_timestamp = state.recent_files[0].opened_at_unix_ms;
+
+        state.remember_recent_file(RecentKind::Project, path);
+
+        let recent = &state.recent_files[0];
+        assert!(recent.pinned);
+        assert_eq!(recent.owner.as_deref(), Some("Analog Design"));
+        assert_eq!(recent.tags, ["afe", "release"]);
+        assert!(recent.opened_at_unix_ms >= first_timestamp);
+    }
+
+    #[test]
+    fn launcher_metadata_is_backward_compatible_and_shared_paths_are_detected() {
+        let legacy = r#"{"kind":"Project","path":"C:/Engineering/afe.rspiceproj"}"#;
+        let recent: RecentFile = serde_json::from_str(legacy).expect("legacy recent entry loads");
+        assert_eq!(recent.opened_at_unix_ms, 0);
+        assert!(!recent.pinned);
+        assert!(recent.owner.is_none());
+        assert!(recent.tags.is_empty());
+        assert!(!recent.is_shared_project());
+
+        let shared: RecentFile =
+            serde_json::from_str(r#"{"kind":"Project","path":"\\\\server\\share\\rf.rspiceproj"}"#)
+                .expect("UNC recent entry loads");
+        assert!(shared.is_shared_project());
+    }
+
+    #[test]
+    fn pinning_is_project_only_and_does_not_reorder_recents() {
+        let mut state = AppState::default();
+        let project = std::path::Path::new("C:/Engineering/afe.rspiceproj");
+        let schematic = std::path::Path::new("C:/Engineering/standalone.rsch");
+        state.remember_recent_file(RecentKind::Project, project);
+        state.remember_recent_file(RecentKind::Schematic, schematic);
+
+        assert!(state.set_recent_project_pinned(project, true));
+        assert!(!state.set_recent_project_pinned(schematic, true));
+        assert_eq!(state.recent_files[0].path, schematic);
+        assert_eq!(state.recent_files[1].path, project);
+        assert!(state.recent_files[1].pinned);
     }
 }

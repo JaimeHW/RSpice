@@ -86,14 +86,39 @@ fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) {
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
     section_header(
         ui,
-        "Project",
+        "Project library",
         Some(app.state.workspace.project.display_name()),
     );
     ScrollArea::vertical().show(ui, |ui| {
-        for page in ProjectPage::ALL {
+        ui.horizontal(|ui| {
+            for (page, label) in [
+                (ProjectPage::Dashboard, "Library"),
+                (ProjectPage::Configuration, "Configuration"),
+                (ProjectPage::Recovery, "Recovery"),
+            ] {
+                if ui
+                    .selectable_label(app.state.workbench.project_page == page, label)
+                    .clicked()
+                {
+                    app.state.workbench.project_page = page;
+                }
+            }
+        });
+        section_header(
+            ui,
+            "Design libraries",
+            Some(&app.state.library_manager.library_count().to_string()),
+        );
+        library_tree(ui, app, false);
+        section_header(ui, "Project contracts", None);
+        for page in [
+            ProjectPage::Configuration,
+            ProjectPage::Technology,
+            ProjectPage::Dependencies,
+        ] {
             if nav_row(
                 ui,
-                WorkbenchIcon::Project,
+                WorkbenchIcon::Sliders,
                 page.label(),
                 app.state.workbench.project_page == page,
                 None,
@@ -101,12 +126,6 @@ fn project(ui: &mut Ui, app: &mut RSpiceApp) {
                 app.state.workbench.project_page = page;
             }
         }
-        section_header(
-            ui,
-            "Design roots",
-            Some(&app.state.library_manager.library_count().to_string()),
-        );
-        library_tree(ui, app, false);
     });
 }
 
@@ -236,80 +255,319 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {
+    let query = app.state.workbench.navigator_query.trim().to_lowercase();
+    let active_run = app.state.simulation.active_run_idx;
+    let active_analysis = app.state.simulation.active_analysis_idx;
+    let runs = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .enumerate()
+        .filter_map(|(run_index, run)| {
+            let analyses = run
+                .analyses
+                .iter()
+                .enumerate()
+                .filter_map(|(analysis_index, analysis)| {
+                    let signals = analysis
+                        .waveforms
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, waveform)| {
+                            query.is_empty() || waveform.name.to_lowercase().contains(&query)
+                        })
+                        .map(|(waveform_index, waveform)| {
+                            let unit = if waveform.name.trim_start().starts_with("I(") {
+                                "A"
+                            } else {
+                                analysis.analysis_type.axis_info().3
+                            };
+                            ResultSignal {
+                                waveform_index,
+                                name: waveform.name.clone(),
+                                color: waveform.color.clone(),
+                                visible: waveform.visible,
+                                value: waveform
+                                    .y
+                                    .iter()
+                                    .rev()
+                                    .copied()
+                                    .find(|value| value.is_finite())
+                                    .map(|value| crate::ui::plot::fmt_si(value, unit, 3)),
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let matches_analysis = query.is_empty()
+                        || analysis.label.to_lowercase().contains(&query)
+                        || analysis
+                            .analysis_type
+                            .display_name()
+                            .to_lowercase()
+                            .contains(&query)
+                        || !signals.is_empty();
+                    matches_analysis.then(|| ResultAnalysis {
+                        analysis_index,
+                        label: analysis.label.clone(),
+                        short_label: analysis.analysis_type.short_label(),
+                        success: analysis.success,
+                        signals,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let matches_run = query.is_empty()
+                || run.label.to_lowercase().contains(&query)
+                || !analyses.is_empty();
+            matches_run.then(|| ResultRun {
+                run_index,
+                id: run.id,
+                label: run.label.clone(),
+                success: run.success,
+                analyses,
+            })
+        })
+        .collect::<Vec<_>>();
+
     section_header(
         ui,
         "Datasets",
         Some(&format!("{} runs", app.state.simulation.runs.len())),
     );
-    ScrollArea::vertical().show(ui, |ui| {
-        if app.state.simulation.runs.is_empty() {
-            muted(
-                ui,
-                "Run a simulation to create an immutable result dataset.",
-            );
-            return;
-        }
-        let runs: Vec<_> = app
-            .state
-            .simulation
-            .runs
-            .iter()
-            .enumerate()
-            .map(|(index, run)| {
-                (
-                    index,
-                    run.label.clone(),
-                    run.success,
-                    run.elapsed_time,
-                    run.analyses
-                        .iter()
-                        .enumerate()
-                        .map(|(analysis_index, analysis)| {
-                            (analysis_index, analysis.label.clone(), analysis.success)
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-        for (index, label, success, elapsed, analyses) in runs {
-            let active = app.state.simulation.active_run_idx == Some(index);
-            egui::CollapsingHeader::new(format!("{label}  ·  {elapsed:.3}s"))
-                .default_open(active)
-                .show(ui, |ui| {
-                    if nav_row(
-                        ui,
-                        if success {
-                            WorkbenchIcon::Success
-                        } else {
-                            WorkbenchIcon::Warning
-                        },
-                        "Run summary",
-                        active && app.state.simulation.active_analysis_idx.is_none(),
-                        None,
-                    ) {
-                        app.state.simulation.active_run_idx = Some(index);
-                        app.state.simulation.active_analysis_idx = None;
-                    }
-                    for (analysis_index, analysis, analysis_success) in analyses {
+    ScrollArea::vertical()
+        .id_salt("workbench.results.navigator")
+        .show(ui, |ui| {
+            if runs.is_empty() {
+                muted(
+                    ui,
+                    if app.state.simulation.runs.is_empty() {
+                        "Run a simulation to create an immutable result dataset."
+                    } else {
+                        "No dataset, analysis, or signal matches this filter."
+                    },
+                );
+                return;
+            }
+            for run in runs {
+                let run_active = active_run == Some(run.run_index);
+                egui::CollapsingHeader::new(format!("Run {} · {}", run.id, run.label))
+                    .default_open(run_active)
+                    .show(ui, |ui| {
                         if nav_row(
                             ui,
-                            if analysis_success {
-                                WorkbenchIcon::Results
+                            if run.success {
+                                WorkbenchIcon::Success
                             } else {
                                 WorkbenchIcon::Warning
                             },
-                            &analysis,
-                            active
-                                && app.state.simulation.active_analysis_idx == Some(analysis_index),
+                            "Run summary",
+                            run_active && active_analysis.is_none(),
                             None,
                         ) {
-                            app.state.simulation.active_run_idx = Some(index);
-                            app.state.simulation.active_analysis_idx = Some(analysis_index);
+                            app.state.simulation.select_run(run.run_index);
                         }
-                    }
-                });
-        }
-    });
+                        for analysis in run.analyses {
+                            let analysis_active =
+                                run_active && active_analysis == Some(analysis.analysis_index);
+                            if nav_row(
+                                ui,
+                                if analysis.success {
+                                    WorkbenchIcon::Results
+                                } else {
+                                    WorkbenchIcon::Warning
+                                },
+                                &analysis.label,
+                                analysis_active,
+                                Some(analysis.short_label),
+                            ) {
+                                if !run_active {
+                                    app.state.simulation.select_run(run.run_index);
+                                }
+                                app.state
+                                    .simulation
+                                    .select_analysis(analysis.analysis_index);
+                            }
+                            if analysis_active {
+                                for signal in analysis.signals {
+                                    let t = Tokens::get(ui.ctx());
+                                    let color = super::super::result_document::trace_color(
+                                        &signal.color,
+                                        t.color.traces
+                                            [signal.waveform_index % t.color.traces.len()],
+                                    );
+                                    if signal_row(
+                                        ui,
+                                        &signal.name,
+                                        signal.value.as_deref(),
+                                        color,
+                                        signal.visible,
+                                    ) {
+                                        super::super::result_document::toggle_visibility(
+                                            &mut app.state,
+                                            analysis.analysis_index,
+                                            signal.waveform_index,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    });
+            }
+
+            let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
+                return;
+            };
+            let expressions = app
+                .state
+                .ui
+                .results
+                .exprs
+                .get(&analysis_index)
+                .cloned()
+                .unwrap_or_default();
+            expression_header(ui, app);
+            let mut toggled_expression = None;
+            for (expression_index, expression) in expressions.iter().enumerate() {
+                if !query.is_empty() && !expression.text.to_lowercase().contains(&query) {
+                    continue;
+                }
+                let t = Tokens::get(ui.ctx());
+                if signal_row(
+                    ui,
+                    &expression.text,
+                    Some("expression"),
+                    t.color.traces[expression_index % t.color.traces.len()],
+                    expression.visible,
+                ) {
+                    toggled_expression = Some(expression_index);
+                }
+            }
+            if let Some(expression_index) = toggled_expression
+                && let Some(expression) = app
+                    .state
+                    .ui
+                    .results
+                    .exprs
+                    .get_mut(&analysis_index)
+                    .and_then(|expressions| expressions.get_mut(expression_index))
+            {
+                expression.visible = !expression.visible;
+            }
+        });
+}
+
+struct ResultRun {
+    run_index: usize,
+    id: u64,
+    label: String,
+    success: bool,
+    analyses: Vec<ResultAnalysis>,
+}
+
+struct ResultAnalysis {
+    analysis_index: usize,
+    label: String,
+    short_label: &'static str,
+    success: bool,
+    signals: Vec<ResultSignal>,
+}
+
+struct ResultSignal {
+    waveform_index: usize,
+    name: String,
+    color: String,
+    visible: bool,
+    value: Option<String>,
+}
+
+fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "EXPRESSIONS",
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
+    );
+    let add_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 16.0, rect.center().y),
+        egui::vec2(28.0, 28.0),
+    );
+    let response = ui.interact(
+        add_rect,
+        ui.id().with("add-result-expression"),
+        egui::Sense::click(),
+    );
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(add_rect, t.radius, t.color.bg_hover);
+    }
+    WorkbenchIcon::Add.paint(ui.painter(), add_rect.shrink(7.0), t.color.text_dim);
+    if response.on_hover_text("Open calculator").clicked() {
+        super::super::commands::Command::WaveformCalculator.execute(app);
+    }
+}
+
+fn signal_row(
+    ui: &mut Ui,
+    name: &str,
+    value: Option<&str>,
+    color: egui::Color32,
+    visible: bool,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::click());
+    if visible || response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            if visible {
+                t.color.accent_dim
+            } else {
+                t.color.bg_hover
+            },
+        );
+    }
+    let swatch = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 19.0, rect.center().y),
+        egui::vec2(12.0, 3.0),
+    );
+    ui.painter().rect_filled(
+        swatch,
+        1.0,
+        if visible { color } else { t.color.text_faint },
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 31.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        if visible {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    if let Some(value) = value {
+        ui.painter().text(
+            egui::pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            value,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        );
+    }
+    response
+        .on_hover_text(if visible { "Hide trace" } else { "Show trace" })
+        .clicked()
 }
 
 fn verify(ui: &mut Ui, app: &mut RSpiceApp) {

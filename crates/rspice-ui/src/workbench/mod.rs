@@ -14,6 +14,7 @@ mod chrome;
 mod docks;
 mod layout;
 pub(crate) mod menu;
+mod project_launcher;
 mod session;
 mod surfaces;
 
@@ -38,6 +39,9 @@ use state::Workspace;
 /// Render one complete workbench frame.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     handle_workbench_shortcuts(ctx, app);
+    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+        app.state.workbench.full_screen,
+    ));
     let layout = LayoutSpec::resolve(ctx.content_rect().width(), &app.state.workbench);
 
     // Outer bars first, then activity/docks, then the owner surface.
@@ -73,6 +77,8 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     if layout.width_class.uses_drawers() {
         docks::show_drawers(ctx, app, layout);
     }
+
+    project_launcher::show(ctx, app);
 
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
