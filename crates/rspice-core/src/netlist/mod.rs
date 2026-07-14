@@ -1434,6 +1434,32 @@ mod tests {
     }
 
     #[test]
+    fn find_at_accepts_xyce_optional_equals_separator() {
+        let netlist = Netlist::parse(
+            "Xyce FIND-AT separator forms\n\
+             V1 out 0 AC 1\n\
+             .ac dec 5 100 1e6\n\
+             .measure ac explicit FIND VI(out) AT=1e2\n\
+             .measure ac whitespace FIND VI(out) AT 1e4\n\
+             .measure ac expression FIND VI(out) AT {5e4}\n\
+             .end\n",
+        )
+        .expect("Xyce FIND-AT accepts both explicit and omitted equals separators");
+
+        let expected = [100.0, 10_000.0, 50_000.0];
+        assert_eq!(netlist.measurements.len(), expected.len());
+        for (statement, expected_at) in netlist.measurements.iter().zip(expected) {
+            let crate::analysis::MeasureType::Find { at, .. } = statement.measure_type else {
+                panic!(
+                    "expected FIND measurement, got {:?}",
+                    statement.measure_type
+                );
+            };
+            assert_eq!(at, Some(expected_at));
+        }
+    }
+
+    #[test]
     fn standalone_when_measurements_preserve_typed_operands_and_windows() {
         let netlist = Netlist::parse(
             "typed standalone WHEN conditions\n\

@@ -867,7 +867,7 @@ fn evaluate_statements_with_segment_starts(
     engine.evaluate_with_segment_starts(axis, &augmented_signals, segment_starts)
 }
 
-fn evaluate_dc_statements_with_equation_traces(
+fn evaluate_statements_with_equation_traces(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
@@ -1285,7 +1285,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
     );
     let segment_starts = dc_primary_segment_starts(netlist, series.axis().len());
     let mut results = match &equation_traces {
-        Ok(traces) => evaluate_dc_statements_with_equation_traces(
+        Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
             series.axis(),
             &signals,
@@ -1415,13 +1415,23 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
             .collect();
     };
     let signals = series.equation_signal_map();
-    let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
-    overlay_continuous_equation_results(
-        &statements,
-        &mut results,
-        evaluate_ac_equation_measurements(netlist, sweep),
-        "AC",
-    );
+    // Continuous equation measures participate in the accepted-point stream.
+    // A later WHEN/FIND-WHEN statement therefore observes the equation's
+    // current value as a waveform, not only its final scalar result.
+    let equation_traces = evaluate_ac_equation_measurements(netlist, sweep);
+    let mut results = match &equation_traces {
+        Ok(traces) => evaluate_statements_with_equation_traces(
+            &statements,
+            series.axis(),
+            &signals,
+            &netlist.params,
+            &[],
+            traces,
+            netlist.options.measure_default_value,
+        ),
+        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params),
+    };
+    overlay_continuous_equation_results(&statements, &mut results, equation_traces, "AC");
     results
 }
 
@@ -1633,6 +1643,40 @@ mod tests {
         assert_eq!(result("bounded").value, Some(2.0));
         assert_eq!(result("invalid").value, None);
         assert_eq!(result("expravg").value, Some(2.5));
+    }
+
+    #[test]
+    fn ac_point_events_observe_prior_continuous_equation_measures() {
+        let netlist = Netlist::parse(
+            "* prior AC equation references\n\
+             V1 out 0 AC 1\n\
+             .ac lin 3 1 3\n\
+             .measure ac level EQN {VM(out)}\n\
+             .measure ac crossing WHEN level=0.1\n\
+             .measure ac found FIND VM(out) WHEN level=0.1\n\
+             .end\n",
+        )
+        .expect("AC equation reference deck parses");
+        let point = |frequency, magnitude| AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(magnitude, 0.0)],
+            currents: Vec::new(),
+        };
+        let sweep = vec![point(1.0, 0.0), point(2.0, 0.05), point(3.0, 0.15)];
+
+        let results = evaluate_ac_measurements(&netlist, &sweep);
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named AC measurement")
+        };
+        assert_eq!(result("level").value, Some(0.15));
+        assert_eq!(result("crossing").value, Some(2.5));
+        assert_eq!(result("found").value, Some(0.1));
+        assert!(results.iter().all(|result| result.passed));
     }
 
     fn noise_point(

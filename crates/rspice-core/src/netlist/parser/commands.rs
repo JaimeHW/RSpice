@@ -1853,7 +1853,7 @@ pub(super) fn parse_meas_signal(
 /// Parse .MEAS/.MEASURE statement
 /// Syntax:
 ///   .MEAS TRAN name TYPE signal [FROM=x TO=y]
-///   .MEAS TRAN name FIND signal AT=time
+///   .MEAS TRAN name FIND signal AT[=]time
 ///   .MEAS TRAN name FIND signal WHEN ref_signal=value
 ///   .MEAS TRAN name TRIG signal VAL=x [RISE=n|FALL=n|CROSS=n] [TD=x]
 ///                     TARG signal VAL=x [RISE=n|FALL=n|CROSS=n] [TD=x]
@@ -1861,6 +1861,7 @@ pub(super) fn parse_meas_signal(
 ///   .MEAS TRAN vmax MAX V(out)
 ///   .MEAS TRAN vavg AVG V(out) FROM=0 TO=1m
 ///   .MEAS TRAN vout FIND V(out) AT=1u
+///   .MEAS AC vimag FIND VI(out) AT 10k
 ///   .MEAS TRAN delay TRIG V(in) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 RISE=1
 pub(super) fn parse_meas_command(
     stream: &mut TokenStream,
@@ -2127,7 +2128,13 @@ fn parse_point_measure_options(
         match keyword.as_str() {
             "AT" | "FROM" | "TO" => {
                 stream.advance();
-                if !stream.consume(&TokenKind::Equals) {
+                let has_equals = stream.consume(&TokenKind::Equals);
+                // Xyce's simple-keyword grammar permits the separator to be
+                // omitted (`AT value`) as well as written explicitly
+                // (`AT=value`).  FIND-AT decks in the Xyce regression suite
+                // use both spellings.  FROM and TO retain their established
+                // explicit-separator contract here.
+                if keyword != "AT" && !has_equals {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: format!("Expected '=' after {keyword} in .MEAS {measure_type}"),
