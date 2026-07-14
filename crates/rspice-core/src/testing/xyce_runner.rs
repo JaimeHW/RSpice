@@ -472,6 +472,14 @@ struct XyceContinuousMeasurementReference {
     records: Vec<XyceContinuousMeasurementReferenceRecord>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct XyceMixedMeasurementReferenceRow {
+    name: String,
+    value: XyceMeasurementReferenceValue,
+    trigger_axis: Option<XyceMeasurementReferenceValue>,
+    target_axis: Option<XyceMeasurementReferenceValue>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct XyceFileCompareTolerance {
     absolute: Value,
@@ -3374,17 +3382,22 @@ impl XyceTestRunner {
             );
         }
 
-        let measurement_reference_paths = if netlist
-            .measurements
-            .iter()
-            .any(|measurement| measurement.analysis.eq_ignore_ascii_case("NOISE"))
-        {
+        let use_continuous_files = netlist.options.measure_use_cont_files();
+        let measurement_reference_paths = if netlist.measurements.iter().any(|measurement| {
+            measurement.print_policy == crate::analysis::MeasurePrintPolicy::All
+                && (measurement.analysis.eq_ignore_ascii_case("NOISE")
+                    || (!use_continuous_files
+                        && measurement.analysis.eq_ignore_ascii_case("NOISE_CONT")))
+        }) {
             self.measurement_reference_paths(&deck.path, "ma")?
         } else {
             Vec::new()
         };
-        let continuous_measurement_reference_paths =
-            self.continuous_measurement_reference_paths(&deck.path, &netlist, "NOISE_CONT")?;
+        let continuous_measurement_reference_paths = if use_continuous_files {
+            self.continuous_measurement_reference_paths(&deck.path, &netlist, "NOISE_CONT")?
+        } else {
+            Vec::new()
+        };
         if !steps.is_empty() && !continuous_measurement_reference_paths.is_empty() {
             return Err(
                 ".STEP NOISE_CONT comparison requires a stepped continuous sidecar contract"
@@ -6322,7 +6335,33 @@ impl XyceTestRunner {
                 }
             }
         }
-        if mismatches.is_empty() && !plan.measurement_reference_paths.is_empty() {
+        if mismatches.is_empty()
+            && !plan.measurement_reference_paths.is_empty()
+            && !netlist.options.measure_use_cont_files()
+        {
+            let scalar = crate::analysis::advanced::evaluate_noise_measurements(&netlist, &results);
+            let continuous = crate::analysis::advanced::evaluate_noise_continuous_measurements(
+                &netlist, &results,
+            );
+            match self.compare_mixed_measurement_references(
+                &plan.measurement_reference_paths,
+                &scalar,
+                &continuous,
+                plan.measurement_tolerance,
+                &netlist.measurements,
+            ) {
+                Ok(measurement_mismatches) => mismatches.extend(measurement_mismatches),
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("mixed NOISE measurement reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            }
+        } else if mismatches.is_empty() && !plan.measurement_reference_paths.is_empty() {
             let measurements =
                 crate::analysis::advanced::evaluate_noise_measurements(&netlist, &results);
             match self.compare_measurement_references(
@@ -6520,15 +6559,30 @@ impl XyceTestRunner {
             };
             let measurements =
                 crate::analysis::advanced::evaluate_noise_measurements(&run.netlist, &results);
-            let mut mismatches = match self.compare_measurement_references(
-                std::slice::from_ref(reference_path),
-                &measurements,
-                plan.measurement_tolerance,
-                run.netlist.options.measure_fail_output,
-                run.netlist.options.measure_default_value,
-                "NOISE",
-                &run.netlist.measurements,
-            ) {
+            let comparison = if run.netlist.options.measure_use_cont_files() {
+                self.compare_measurement_references(
+                    std::slice::from_ref(reference_path),
+                    &measurements,
+                    plan.measurement_tolerance,
+                    run.netlist.options.measure_fail_output,
+                    run.netlist.options.measure_default_value,
+                    "NOISE",
+                    &run.netlist.measurements,
+                )
+            } else {
+                let continuous = crate::analysis::advanced::evaluate_noise_continuous_measurements(
+                    &run.netlist,
+                    &results,
+                );
+                self.compare_mixed_measurement_references(
+                    std::slice::from_ref(reference_path),
+                    &measurements,
+                    &continuous,
+                    plan.measurement_tolerance,
+                    &run.netlist.measurements,
+                )
+            };
+            let mut mismatches = match comparison {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
                     return self.failure_result(
@@ -18672,6 +18726,8 @@ impl XyceTestRunner {
         let signals = series.signal_map();
         let equation_traces =
             crate::analysis::advanced::evaluate_noise_equation_measurements(netlist, results)?;
+        let measurement_output_traces =
+            Self::noise_measurement_output_traces(netlist, results, &data_columns)?;
         let comp_columns = data_columns
             .iter()
             .map(|column| XyceReferenceColumn::Probe {
@@ -18731,6 +18787,15 @@ impl XyceTestRunner {
                             trace.name, row_index
                         )
                     })?
+                } else if column.component() == XyceAcProbeComponent::Scalar
+                    && let Some(trace) = measurement_output_traces.get(&probe.to_ascii_uppercase())
+                {
+                    trace
+                        .iter()
+                        .filter(|(activation_axis, _)| result.frequency >= *activation_axis)
+                        .map(|(_, value)| *value)
+                        .next_back()
+                        .unwrap_or(0.0)
                 } else if let Some(waveform) = signals.iter().find_map(|(name, values)| {
                     name.eq_ignore_ascii_case(&signal_probe).then_some(*values)
                 }) {
@@ -18797,6 +18862,85 @@ impl XyceTestRunner {
             }
         }
         Ok(mismatches)
+    }
+
+    fn noise_measurement_output_traces(
+        netlist: &Netlist,
+        results: &[crate::analysis::NoiseResult],
+        columns: &[XyceAcReferenceColumn],
+    ) -> Result<BTreeMap<String, Vec<(Value, Value)>>, String> {
+        let requested = columns
+            .iter()
+            .filter(|column| column.component() == XyceAcProbeComponent::Scalar)
+            .map(|column| column.probe_name().to_ascii_uppercase())
+            .collect::<BTreeSet<_>>();
+        let mut traces = BTreeMap::new();
+        for (statement_index, statement) in netlist.measurements.iter().enumerate() {
+            let normalized_name = statement.name.to_ascii_uppercase();
+            if !requested.contains(&normalized_name)
+                || !(statement.analysis.eq_ignore_ascii_case("NOISE")
+                    || statement.analysis.eq_ignore_ascii_case("NOISE_CONT"))
+            {
+                continue;
+            }
+            let crate::analysis::MeasureType::When { condition, .. } = &statement.measure_type
+            else {
+                continue;
+            };
+            let occurrence = condition.occurrence.number;
+            let mut trace_netlist = netlist.clone();
+            let trace_statement = &mut trace_netlist.measurements[statement_index];
+            trace_statement.analysis = "NOISE_CONT".to_string();
+            if occurrence < 0
+                && let crate::analysis::MeasureType::When { condition, .. } =
+                    &mut trace_statement.measure_type
+            {
+                condition.occurrence.number = 1;
+            }
+            let result_index = trace_netlist.measurements[..=statement_index]
+                .iter()
+                .filter(|candidate| candidate.analysis.eq_ignore_ascii_case("NOISE_CONT"))
+                .count()
+                - 1;
+            let evaluated = crate::analysis::advanced::evaluate_noise_continuous_measurements(
+                &trace_netlist,
+                results,
+            );
+            let measurement = evaluated.get(result_index).ok_or_else(|| {
+                format!(
+                    "NOISE measurement trace evaluator omitted declaration '{}'",
+                    statement.name
+                )
+            })?;
+            let events = measurement
+                .records
+                .iter()
+                .filter_map(|record| record.event_axis.map(|axis| (axis, record.value)))
+                .collect::<Vec<_>>();
+            let trace = if occurrence < 0 {
+                let lag = occurrence
+                    .checked_abs()
+                    .and_then(|number| usize::try_from(number - 1).ok())
+                    .ok_or_else(|| {
+                        format!(
+                            "NOISE measurement '{}' has an unrepresentable occurrence {occurrence}",
+                            statement.name
+                        )
+                    })?;
+                events
+                    .iter()
+                    .skip(lag)
+                    .zip(&events)
+                    .map(|((activation_axis, _), (_, value))| (*activation_axis, *value))
+                    .collect()
+            } else if statement.analysis.eq_ignore_ascii_case("NOISE") {
+                events.into_iter().take(1).collect()
+            } else {
+                events
+            };
+            traces.insert(normalized_name, trace);
+        }
+        Ok(traces)
     }
 
     fn compare_ac_data_prn_reference(
@@ -28634,6 +28778,108 @@ impl XyceTestRunner {
         })
     }
 
+    fn parse_mixed_measurement_reference_file(
+        path: &Path,
+    ) -> Result<Vec<XyceMixedMeasurementReferenceRow>, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        let mut rows = Vec::new();
+        for (line_index, raw_line) in content.lines().enumerate() {
+            let line_number = line_index + 1;
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('*') {
+                continue;
+            }
+            let (raw_name, raw_fields) = line.split_once('=').ok_or_else(|| {
+                format!(
+                    "{}:{line_number}: expected '<measurement> = <value|FAILED>'",
+                    path.display()
+                )
+            })?;
+            let name = raw_name.trim();
+            if name.is_empty() {
+                return Err(format!(
+                    "{}:{line_number}: measurement name is empty",
+                    path.display()
+                ));
+            }
+            let fields = raw_fields.split_whitespace().collect::<Vec<_>>();
+            if fields.is_empty() {
+                return Err(format!(
+                    "{}:{line_number}: measurement result is empty",
+                    path.display()
+                ));
+            }
+            let value = Self::parse_measurement_reference_token(path, line_number, fields[0])?;
+            let mut trigger_axis = None;
+            let mut target_axis = None;
+            let mut field_index = 1usize;
+            while field_index < fields.len() {
+                if field_index + 2 >= fields.len() || fields[field_index + 1] != "=" {
+                    return Err(format!(
+                        "{}:{line_number}: expected '<targ|trig> = <value|not found>' after measurement value",
+                        path.display()
+                    ));
+                }
+                let label = fields[field_index];
+                let (parsed, consumed) = if fields[field_index + 2].eq_ignore_ascii_case("not") {
+                    if fields
+                        .get(field_index + 3)
+                        .is_none_or(|field| !field.eq_ignore_ascii_case("found"))
+                    {
+                        return Err(format!(
+                            "{}:{line_number}: expected 'not found' after {label} =",
+                            path.display()
+                        ));
+                    }
+                    (XyceMeasurementReferenceValue::Failed, 4)
+                } else {
+                    (
+                        Self::parse_measurement_reference_token(
+                            path,
+                            line_number,
+                            fields[field_index + 2],
+                        )?,
+                        3,
+                    )
+                };
+                let slot = if label.eq_ignore_ascii_case("trig") {
+                    &mut trigger_axis
+                } else if label.eq_ignore_ascii_case("targ") {
+                    &mut target_axis
+                } else {
+                    return Err(format!(
+                        "{}:{line_number}: unknown mixed measurement metadata '{label}'",
+                        path.display()
+                    ));
+                };
+                if slot.replace(parsed).is_some() {
+                    return Err(format!(
+                        "{}:{line_number}: duplicate {label} metadata",
+                        path.display()
+                    ));
+                }
+                field_index += consumed;
+            }
+            if trigger_axis.is_some() != target_axis.is_some() {
+                return Err(format!(
+                    "{}:{line_number}: trigger/target metadata must be present as a pair",
+                    path.display()
+                ));
+            }
+            rows.push(XyceMixedMeasurementReferenceRow {
+                name: name.to_string(),
+                value,
+                trigger_axis,
+                target_axis,
+            });
+        }
+        if rows.is_empty() {
+            return Err(format!("{} has no measurement results", path.display()));
+        }
+        Ok(rows)
+    }
+
     fn compare_measurement_references(
         &self,
         paths: &[PathBuf],
@@ -28816,6 +29062,244 @@ impl XyceTestRunner {
             }
         }
         Ok(mismatches)
+    }
+
+    fn compare_mixed_measurement_references(
+        &self,
+        paths: &[PathBuf],
+        scalar: &[crate::analysis::MeasureResult],
+        continuous: &[crate::analysis::ContinuousMeasureResult],
+        tolerance: XyceFileCompareTolerance,
+        declarations: &[crate::analysis::MeasureStatement],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if paths.len() != 1 {
+            return Err(format!(
+                "one mixed measurement run requires exactly one aggregate artifact, found {}",
+                paths.len()
+            ));
+        }
+        let expected = Self::parse_mixed_measurement_reference_file(&paths[0])?;
+        let mut actual = Vec::new();
+        let mut scalar_index = 0usize;
+        let mut continuous_index = 0usize;
+        for declaration in declarations.iter().filter(|declaration| {
+            declaration.analysis.eq_ignore_ascii_case("NOISE")
+                || declaration.analysis.eq_ignore_ascii_case("NOISE_CONT")
+        }) {
+            if declaration.analysis.eq_ignore_ascii_case("NOISE") {
+                let result = scalar.get(scalar_index).ok_or_else(|| {
+                    format!(
+                        "scalar NOISE evaluator omitted declaration {} ('{}')",
+                        scalar_index, declaration.name
+                    )
+                })?;
+                scalar_index += 1;
+                if !result.name.eq_ignore_ascii_case(&declaration.name) {
+                    return Err(format!(
+                        "scalar NOISE evaluator returned '{}' for declaration '{}'",
+                        result.name, declaration.name
+                    ));
+                }
+                if declaration.print_policy == crate::analysis::MeasurePrintPolicy::All {
+                    actual.push(XyceMixedMeasurementReferenceRow {
+                        name: result.name.clone(),
+                        value: result.value.map_or(
+                            XyceMeasurementReferenceValue::Failed,
+                            |value| XyceMeasurementReferenceValue::Numeric {
+                                value,
+                                quantization: None,
+                            },
+                        ),
+                        trigger_axis: None,
+                        target_axis: None,
+                    });
+                }
+            } else {
+                let result = continuous.get(continuous_index).ok_or_else(|| {
+                    format!(
+                        "continuous NOISE evaluator omitted declaration {} ('{}')",
+                        continuous_index, declaration.name
+                    )
+                })?;
+                continuous_index += 1;
+                if !result.name.eq_ignore_ascii_case(&declaration.name) {
+                    return Err(format!(
+                        "continuous NOISE evaluator returned '{}' for declaration '{}'",
+                        result.name, declaration.name
+                    ));
+                }
+                if declaration.print_policy != crate::analysis::MeasurePrintPolicy::All {
+                    continue;
+                }
+                if result.failure.is_some() {
+                    actual.push(XyceMixedMeasurementReferenceRow {
+                        name: result.name.clone(),
+                        value: XyceMeasurementReferenceValue::Failed,
+                        trigger_axis: None,
+                        target_axis: None,
+                    });
+                } else {
+                    actual.extend(result.records.iter().map(|record| {
+                        XyceMixedMeasurementReferenceRow {
+                            name: result.name.clone(),
+                            value: XyceMeasurementReferenceValue::Numeric {
+                                value: record.value,
+                                quantization: None,
+                            },
+                            trigger_axis: record.trigger_axis.map(|value| {
+                                XyceMeasurementReferenceValue::Numeric {
+                                    value,
+                                    quantization: None,
+                                }
+                            }),
+                            target_axis: record.target_axis.map(|value| {
+                                XyceMeasurementReferenceValue::Numeric {
+                                    value,
+                                    quantization: None,
+                                }
+                            }),
+                        }
+                    }));
+                }
+            }
+        }
+        if scalar_index != scalar.len() || continuous_index != continuous.len() {
+            return Err(format!(
+                "measurement evaluators returned unclaimed results (scalar {scalar_index}/{}, continuous {continuous_index}/{})",
+                scalar.len(),
+                continuous.len()
+            ));
+        }
+        if expected.len() != actual.len() {
+            return Err(format!(
+                "mixed measurement artifact contains {} row(s) but evaluation emitted {} row(s)",
+                expected.len(),
+                actual.len()
+            ));
+        }
+
+        let mut mismatches = Vec::new();
+        for (row, (reference, result)) in expected.iter().zip(&actual).enumerate() {
+            if !reference.name.eq_ignore_ascii_case(&result.name) {
+                return Err(format!(
+                    "mixed measurement row {row} is '{}' in the artifact but '{}' in declaration-ordered evaluation",
+                    reference.name, result.name
+                ));
+            }
+            Self::compare_mixed_measurement_value(
+                &mut mismatches,
+                row,
+                &reference.name,
+                reference.value,
+                result.value,
+                tolerance,
+            )?;
+            // A FAILED TRIG/TARG row may include Xyce's partial diagnostic
+            // event locations. ContinuousMeasureResult intentionally models
+            // failure atomically, so the primary FAILED contract is compared
+            // while those non-result diagnostics are not synthesized.
+            if !matches!(reference.value, XyceMeasurementReferenceValue::Failed) {
+                Self::compare_mixed_measurement_metadata(
+                    &mut mismatches,
+                    row,
+                    &format!("{}:trig", reference.name),
+                    reference.trigger_axis,
+                    result.trigger_axis,
+                    tolerance,
+                )?;
+                Self::compare_mixed_measurement_metadata(
+                    &mut mismatches,
+                    row,
+                    &format!("{}:targ", reference.name),
+                    reference.target_axis,
+                    result.target_axis,
+                    tolerance,
+                )?;
+            }
+        }
+        Ok(mismatches)
+    }
+
+    fn compare_mixed_measurement_value(
+        mismatches: &mut Vec<XyceValueMismatch>,
+        row: usize,
+        probe: &str,
+        expected: XyceMeasurementReferenceValue,
+        actual: XyceMeasurementReferenceValue,
+        tolerance: XyceFileCompareTolerance,
+    ) -> Result<(), String> {
+        match (expected, actual) {
+            (XyceMeasurementReferenceValue::Failed, XyceMeasurementReferenceValue::Failed) => {
+                Ok(())
+            }
+            (
+                XyceMeasurementReferenceValue::Failed,
+                XyceMeasurementReferenceValue::Numeric { value, .. },
+            ) => Err(format!(
+                "mixed measurement '{probe}' row {row} was expected to be FAILED but evaluated to {value}"
+            )),
+            (
+                XyceMeasurementReferenceValue::Numeric { value, .. },
+                XyceMeasurementReferenceValue::Failed,
+            ) => Err(format!(
+                "mixed measurement '{probe}' row {row} was expected to evaluate to {value} but FAILED"
+            )),
+            (
+                XyceMeasurementReferenceValue::Numeric {
+                    value: expected,
+                    quantization,
+                },
+                XyceMeasurementReferenceValue::Numeric { value: actual, .. },
+            ) => {
+                if !Self::measurement_value_matches(expected, actual, quantization, tolerance) {
+                    let absolute_error = (expected - actual).abs();
+                    mismatches.push(XyceValueMismatch {
+                        row,
+                        probe: probe.to_string(),
+                        expected,
+                        actual,
+                        relative_error: if expected == 0.0 {
+                            f64::INFINITY
+                        } else {
+                            absolute_error / expected.abs()
+                        },
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn compare_mixed_measurement_metadata(
+        mismatches: &mut Vec<XyceValueMismatch>,
+        row: usize,
+        probe: &str,
+        expected: Option<XyceMeasurementReferenceValue>,
+        actual: Option<XyceMeasurementReferenceValue>,
+        tolerance: XyceFileCompareTolerance,
+    ) -> Result<(), String> {
+        match (expected, actual) {
+            (None, None) | (Some(XyceMeasurementReferenceValue::Failed), None) => Ok(()),
+            (None, Some(XyceMeasurementReferenceValue::Numeric { value, .. })) => Err(format!(
+                "mixed measurement artifact has no {probe} metadata at row {row}, but evaluation produced {value}"
+            )),
+            (
+                Some(XyceMeasurementReferenceValue::Failed),
+                Some(XyceMeasurementReferenceValue::Numeric { value, .. }),
+            ) => Err(format!(
+                "mixed measurement artifact marks {probe} not found at row {row}, but evaluation produced {value}"
+            )),
+            (
+                Some(XyceMeasurementReferenceValue::Numeric { value, .. }),
+                None | Some(XyceMeasurementReferenceValue::Failed),
+            ) => Err(format!(
+                "mixed measurement artifact expects {probe}={value} at row {row}, but evaluation omitted it"
+            )),
+            (Some(expected), Some(actual)) => Self::compare_mixed_measurement_value(
+                mismatches, row, probe, expected, actual, tolerance,
+            ),
+            (None, Some(XyceMeasurementReferenceValue::Failed)) => Ok(()),
+        }
     }
 
     fn compare_continuous_measurement_value(
@@ -30282,7 +30766,10 @@ impl XyceTestRunner {
         let declarations = netlist
             .measurements
             .iter()
-            .filter(|measurement| measurement.analysis.eq_ignore_ascii_case(analysis))
+            .filter(|measurement| {
+                measurement.analysis.eq_ignore_ascii_case(analysis)
+                    && measurement.print_policy == crate::analysis::MeasurePrintPolicy::All
+            })
             .collect::<Vec<_>>();
         if declarations.is_empty() {
             return Ok(Vec::new());
@@ -31993,6 +32480,104 @@ mod tests {
         assert_eq!(mismatches[0].probe, "delay:trig");
 
         fs::remove_file(path).expect("remove continuous comparison reference");
+    }
+
+    #[test]
+    fn mixed_measurement_comparison_preserves_duplicate_names_and_omits_non_file_policies() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-mixed-measure-comparison-{}-{}.ma0",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        fs::write(&path, "DUP = 1.0\ndup = 2.0\nDUP = 3.0\n")
+            .expect("write mixed measurement reference");
+        let mut netlist = Netlist::parse(
+            "mixed measurement fixture\n\
+             V1 1 0 AC 1\n\
+             .NOISE V(1) V1 LIN 2 1 2\n\
+             .MEASURE NOISE scalar_name WHEN V(1)=0.1\n\
+             .MEASURE NOISE_CONT dup WHEN V(1)=0.2\n\
+             .MEASURE NOISE_CONT hidden WHEN V(1)=0.3 PRINT=STDOUT\n\
+             .END\n",
+        )
+        .expect("parse mixed measurement fixture");
+        netlist.measurements[0].name = "DUP".to_string();
+        let scalar = [crate::analysis::MeasureResult::success("DUP", 1.0)];
+        let continuous = [
+            crate::analysis::ContinuousMeasureResult {
+                name: "dup".to_string(),
+                records: vec![
+                    crate::analysis::ContinuousMeasureRecord {
+                        value: 2.0,
+                        event_axis: Some(2.0),
+                        trigger_axis: None,
+                        target_axis: None,
+                    },
+                    crate::analysis::ContinuousMeasureRecord {
+                        value: 3.0,
+                        event_axis: Some(3.0),
+                        trigger_axis: None,
+                        target_axis: None,
+                    },
+                ],
+                failure: None,
+            },
+            crate::analysis::ContinuousMeasureResult {
+                name: "hidden".to_string(),
+                records: Vec::new(),
+                failure: Some("event not found".to_string()),
+            },
+        ];
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+        let mismatches = runner
+            .compare_mixed_measurement_references(
+                std::slice::from_ref(&path),
+                &scalar,
+                &continuous,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                &netlist.measurements,
+            )
+            .expect("compare declaration-ordered mixed stream");
+
+        assert!(mismatches.is_empty());
+        fs::remove_file(path).expect("remove mixed measurement reference");
+    }
+
+    #[test]
+    fn mixed_measurement_reference_accepts_failed_trig_targ_diagnostics() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-mixed-measure-failed-{}-{}.ma0",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        fs::write(
+            &path,
+            "MISSING = FAILED targ = not found trig = not found\n\
+             PARTIAL = FAILED targ = 6.375267e+01 trig = not found\n",
+        )
+        .expect("write failed mixed measurement reference");
+
+        let rows = XyceTestRunner::parse_mixed_measurement_reference_file(&path)
+            .expect("parse Xyce failed TRIG/TARG diagnostics");
+
+        assert_eq!(rows.len(), 2);
+        assert!(matches!(
+            rows[0].trigger_axis,
+            Some(XyceMeasurementReferenceValue::Failed)
+        ));
+        assert!(matches!(
+            rows[1].target_axis,
+            Some(XyceMeasurementReferenceValue::Numeric { value, .. })
+                if (value - 63.75267).abs() <= f64::EPSILON
+        ));
+        fs::remove_file(path).expect("remove failed mixed measurement reference");
     }
 
     #[test]
