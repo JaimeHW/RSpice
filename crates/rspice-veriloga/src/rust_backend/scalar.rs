@@ -387,7 +387,7 @@ pub fn generate_device(
             &extensions,
         )?
     };
-    let files = vec![
+    let mut files = vec![
         GeneratedRustFile {
             relative_path: "mod.rs".to_string(),
             contents: device::generate_mod_file(),
@@ -401,6 +401,7 @@ pub fn generate_device(
             contents: stamp,
         },
     ];
+    files.push(super::noise::generate_noise_file(artifact, options)?);
 
     Ok(GeneratedRustDevice {
         module_name: artifact.mir.module_name.to_string(),

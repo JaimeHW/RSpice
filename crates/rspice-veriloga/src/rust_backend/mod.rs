@@ -8,6 +8,7 @@ mod files;
 mod kernel_ir;
 mod manifest;
 mod names;
+mod noise;
 mod registry;
 mod scalar;
 
@@ -632,6 +633,268 @@ endmodule
             .expect("noise-only contributions should lower to scalar zero stamps");
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+        assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+        assert!(!stamp.contains("white_noise"), "{stamp}");
+        assert!(!stamp.contains("flicker_noise"), "{stamp}");
+
+        let noise = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "noise.rs")
+            .expect("noise ABI file")
+            .contents
+            .as_str();
+        assert!(
+            noise.contains("pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 2]"),
+            "{noise}"
+        );
+        assert!(noise.contains("WHITE_P_N_THERMAL"), "{noise}");
+        assert!(noise.contains("FLICKER_P_N_FLICKER"), "{noise}");
+        assert!(noise.contains("GeneratedNoiseKind::White"), "{noise}");
+        assert!(noise.contains("GeneratedNoiseKind::Flicker"), "{noise}");
+        assert!(
+            noise.contains("Result<GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError>"),
+            "{noise}"
+        );
+        assert!(noise.contains("let table_operands = vec![]"), "{noise}");
+        assert!(!noise.contains("evaluate_noise_table_operand"), "{noise}");
+        assert!(!noise.contains("pub struct GeneratedNoise"), "{noise}");
+        assert!(!noise.contains("pub enum GeneratedNoise"), "{noise}");
+    }
+
+    #[test]
+    fn noise_abi_replays_conditional_loop_dependencies_in_order() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module noisy_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real density = 2.0 from [0:inf);
+    parameter real enabled = 1.0;
+    real accumulated;
+    integer iteration;
+    analog begin
+        accumulated = 1.0;
+        iteration = 0;
+        while (iteration < 2) begin
+            accumulated = accumulated + density;
+            iteration = iteration + 1;
+        end
+        I(p, n) <+ white_noise(enabled ? accumulated : density, "looped");
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("conditional loop noise dependencies should lower");
+        let noise = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "noise.rs")
+            .expect("noise ABI file")
+            .contents
+            .as_str();
+
+        let initial = noise
+            .find("noise_variable_0 = 1.0")
+            .expect("accumulator initialization must be retained");
+        let loop_start = noise
+            .find("loop {")
+            .expect("dependency loop must be retained");
+        let update = noise[loop_start..]
+            .find("noise_variable_0 =")
+            .map(|update| loop_start + update)
+            .expect("loop-carried accumulator update must be retained");
+        assert!(initial < loop_start && loop_start < update, "{noise}");
+        assert!(noise.contains("noise_variable_1 = 0.0"), "{noise}");
+        assert!(noise.contains("noise_variable_1 ="), "{noise}");
+        assert!(noise.contains("WHITE_P_N_LOOPED"), "{noise}");
+    }
+
+    #[test]
+    fn noise_abi_loop_liveness_converges_for_two_variable_cycle() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module noisy_cycle(p, n);
+    inout p, n;
+    electrical p, n;
+    real left;
+    real right;
+    integer iteration;
+    analog begin
+        left = 1.0;
+        right = 2.0;
+        iteration = 0;
+        while (iteration < 2) begin
+            left = right;
+            right = left;
+            iteration = iteration + 1;
+        end
+        I(p, n) <+ white_noise(left, "cycle");
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let generated = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile(&artifact)
+            .expect("cyclic loop liveness must converge");
+        let noise = generated
+            .files
+            .iter()
+            .find(|file| file.relative_path == "noise.rs")
+            .expect("noise ABI file")
+            .contents
+            .as_str();
+        assert!(noise.contains("loop {"), "{noise}");
+        assert!(noise.matches("noise_variable_0 =").count() >= 3, "{noise}");
+        assert!(noise.matches("noise_variable_1 =").count() >= 3, "{noise}");
+    }
+
+    #[test]
+    fn noise_abi_resets_shared_loop_state_between_activation_and_metadata() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_loop_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    real accumulated;
+    integer iteration;
+    analog begin
+        accumulated = 0.0;
+        iteration = 0;
+        while (iteration < 2) begin
+            accumulated = accumulated + 1.0;
+            iteration = iteration + 1;
+        end
+        I(p, n) <+ (accumulated > 0.0)
+            ? white_noise(accumulated, "shared_loop")
+            : 0.0;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let generated = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile(&artifact)
+            .expect("shared activation/metadata loop should lower");
+        let noise = generated
+            .files
+            .iter()
+            .find(|file| file.relative_path == "noise.rs")
+            .expect("noise ABI file")
+            .contents
+            .as_str();
+        let first_loop = noise.find("loop {").expect("activation loop");
+        let reset = noise[first_loop..]
+            .find("noise_variable_0 = 0.0;")
+            .map(|position| first_loop + position)
+            .expect("metadata phase reset");
+        let second_loop = noise[reset..]
+            .find("loop {")
+            .map(|position| reset + position)
+            .expect("metadata loop");
+        assert!(first_loop < reset && reset < second_loop, "{noise}");
+    }
+
+    #[test]
+    fn noise_abi_rejects_dynamic_initial_step_dependency_without_persisted_state() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module dynamic_initial_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    real captured;
+    analog begin
+        @(initial_step) captured = V(p, n);
+        I(p, n) <+ white_noise(captured, "captured");
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let error = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile(&artifact)
+            .expect_err("dynamic initial-step state must not be recomputed at noise time");
+        assert!(
+            error
+                .to_string()
+                .contains("requires persisted generated state"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn noise_abi_short_circuits_inactive_dynamic_source_before_invalid_psd() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    real invalid_density;
+    real independent_density;
+    analog begin
+        invalid_density = -1.0;
+        independent_density = 2.0;
+        I(p, n) <+ (V(p, n) > 0.0)
+        ? white_noise(invalid_density, "invalid_when_inactive")
+        : 0.0;
+        I(p, n) <+ white_noise(independent_density, "independent");
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+        assert!(artifact.noise_sources.sources[0].activation.is_some());
+
+        let generated = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile(&artifact)
+            .expect("guarded noise should lower");
+        let noise = generated
+            .files
+            .iter()
+            .find(|file| file.relative_path == "noise.rs")
+            .expect("noise ABI file")
+            .contents
+            .as_str();
+        let inactive = noise
+            .find("active: false")
+            .expect("inactive evaluation return");
+        let invalid_assignment = noise[inactive..]
+            .find("noise_variable_0 =")
+            .map(|position| inactive + position)
+            .expect("invalid PSD dependency assignment");
+        assert!(inactive < invalid_assignment, "{noise}");
+        assert!(noise.contains("matches!(source_index, 0)"), "{noise}");
+        assert!(noise.contains("matches!(source_index, 1)"), "{noise}");
+        assert!(!noise.contains("matches!(source_index, 0 | 1)"), "{noise}");
+        assert!(noise.contains("ctx.node_voltage"), "{noise}");
+        assert!(
+            super::noise::noise_liveness_expression_walks(&artifact)
+                <= artifact.hir.expressions.len(),
+            "cached liveness must walk each expression root at most once"
+        );
     }
 
     #[test]

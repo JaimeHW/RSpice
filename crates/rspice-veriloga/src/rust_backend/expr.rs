@@ -161,6 +161,28 @@ pub(crate) fn lower_value_assignment_expr_with_branch_currents(
     )
 }
 
+pub(crate) fn lower_noise_value_expr(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    prefix: &str,
+    parameter_fields: &HashMap<String, String>,
+    variables: &HashMap<String, LoweredVariable>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+) -> Result<LoweredExpr, RustBackendError> {
+    lower_expr_with_variables(
+        artifact,
+        expr,
+        prefix,
+        parameter_fields,
+        variables,
+        &DdtSlots::default(),
+        &HashMap::new(),
+        branch_current_unknowns,
+        ExprMode::Transient,
+        DerivativeEmission::None,
+    )
+}
+
 pub(crate) fn lower_reactive_expr_with_branch_currents(
     artifact: &CanonicalIrArtifact,
     expr: ExprId,

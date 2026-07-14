@@ -584,6 +584,7 @@ fn generate_device_with_scalar_hybrid_plan(
             contents: stamp_files.stamp,
         },
     ];
+    files.push(super::noise::generate_noise_file(artifact, options)?);
     files.extend(stamp_files.helpers);
 
     Ok(GeneratedRustDevice {
@@ -15410,9 +15411,11 @@ fn is_noise_name(name: &str) -> bool {
 
 pub(super) fn generate_mod_file() -> String {
     [
+        "pub mod noise;",
         "pub mod state;",
         "mod stamp;",
         "",
+        "pub use noise::{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseKind, NOISE_SOURCES};",
         "pub use state::{Instance, Parameters};",
         "",
     ]

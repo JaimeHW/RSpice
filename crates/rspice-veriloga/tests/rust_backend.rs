@@ -13671,6 +13671,46 @@ pub mod runtime {{
         }}
     }}
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum GeneratedNoiseKind {{ White, Flicker, Table }}
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct GeneratedNoiseEndpoint {{
+        pub local_node: Option<usize>,
+        pub name: &'static str,
+        pub is_internal: bool,
+    }}
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct GeneratedNoiseDescriptor {{
+        pub mechanism: &'static str,
+        pub label: Option<&'static str>,
+        pub kind: GeneratedNoiseKind,
+        pub equation: usize,
+        pub is_current: bool,
+        pub branch_ordinal: Option<usize>,
+        pub pos: GeneratedNoiseEndpoint,
+        pub neg: GeneratedNoiseEndpoint,
+        pub table_len: usize,
+        pub table_log_interp: bool,
+    }}
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct GeneratedNoiseEvaluation {{
+        pub active: bool,
+        pub psd: f64,
+        pub exponent: Option<f64>,
+        pub table_operands: Vec<f64>,
+    }}
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum GeneratedNoiseEvaluationError {{
+        SourceIndexOutOfRange {{ index: usize, count: usize }},
+        NonFinite {{ index: usize, quantity: &'static str, value: f64 }},
+        NegativePower {{ index: usize, value: f64 }},
+        InvalidMultiplicity {{ value: f64 }},
+    }}
+
     pub struct GeneratedEvalContext<'a> {{
         voltages: &'a [f64],
         analysis: GeneratedAnalysisKind,
