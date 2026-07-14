@@ -436,6 +436,7 @@ struct XyceStaticNoisePlan {
     reference_node: Option<String>,
     input_source: String,
     frequencies: Vec<Value>,
+    steps: Vec<StepCommand>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3344,43 +3345,9 @@ impl XyceTestRunner {
 
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
-        let analyses = netlist
-            .analyses
-            .iter()
-            .filter_map(|analysis| match analysis {
-                AnalysisCommand::Noise {
-                    output_node,
-                    reference_node,
-                    input_source,
-                    variation,
-                    points,
-                    start_freq,
-                    stop_freq,
-                } => Some((
-                    output_node.clone(),
-                    reference_node.clone(),
-                    input_source.clone(),
-                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
-                )),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let (output_node, reference_node, input_source, frequencies) = match analyses.as_slice() {
-            [analysis] => analysis.clone(),
-            [] => return Err("deck has no .NOISE analysis".to_string()),
-            _ => {
-                return Err(
-                    "deck has multiple .NOISE analyses; multi-analysis comparison is not implemented"
-                        .to_string(),
-                );
-            }
-        };
-        if frequencies.is_empty() {
-            return Err(".NOISE analysis produced no frequency points".to_string());
-        }
-        if !Self::step_commands(&netlist)?.is_empty() {
-            return Err(".STEP NOISE comparison is not implemented yet".to_string());
-        }
+        let (output_node, reference_node, input_source, frequencies) =
+            Self::noise_analysis_for_netlist(&netlist)?;
+        let steps = Self::step_commands(&netlist)?;
 
         let measurement_reference_paths = if netlist
             .measurements
@@ -3421,6 +3388,12 @@ impl XyceTestRunner {
                 "NOISE waveform oracle requires a primary .PRINT NOISE request".to_string(),
             );
         }
+        if reference_path.is_some() && !steps.is_empty() {
+            return Err(
+                "native .STEP NOISE waveform comparison requires a stepped waveform artifact contract"
+                    .to_string(),
+            );
+        }
 
         Ok(XyceStaticNoisePlan {
             deck_path: deck.path.clone(),
@@ -3433,6 +3406,7 @@ impl XyceTestRunner {
             reference_node,
             input_source,
             frequencies,
+            steps,
         })
     }
 
@@ -6211,6 +6185,9 @@ impl XyceTestRunner {
                 );
             }
         };
+        if !plan.steps.is_empty() {
+            return self.run_static_step_noise_measurement_plan(deck, plan, netlist, start);
+        }
         let temperature = netlist.options.temp.unwrap_or(27.0) + 273.15;
         if !temperature.is_finite() || temperature <= 0.0 {
             return self.failure_result(
@@ -6342,6 +6319,229 @@ impl XyceTestRunner {
                 mismatches,
             )
         }
+    }
+
+    fn run_static_step_noise_measurement_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticNoisePlan,
+        netlist: Netlist,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = "wrapper_scalar_measure_step_noise";
+        if plan.measurement_reference_paths.is_empty() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                ".STEP NOISE comparison requires contiguous scalar measurement artifacts"
+                    .to_string(),
+                Vec::new(),
+            );
+        }
+
+        let expansion_engine = self.create_xyce_engine();
+        let step_runs =
+            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
+                Ok(runs) => runs,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support this .STEP NOISE deck: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(".STEP expansion error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        if step_runs.len() != plan.measurement_reference_paths.len() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    ".STEP expansion produced {} batches but {} contiguous measurement artifacts exist",
+                    step_runs.len(),
+                    plan.measurement_reference_paths.len()
+                ),
+                Vec::new(),
+            );
+        }
+
+        let engine = self.create_xyce_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let mut all_mismatches = Vec::new();
+        for (step_index, (run, reference_path)) in step_runs
+            .iter()
+            .zip(&plan.measurement_reference_paths)
+            .enumerate()
+        {
+            let temperature = run.netlist.options.temp.unwrap_or(27.0) + 273.15;
+            if !temperature.is_finite() || temperature <= 0.0 {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "NOISE temperature in step {} must be positive Kelvin, got {temperature}",
+                        step_index + 1
+                    ),
+                    Vec::new(),
+                );
+            }
+            let (output_node, reference_node, input_source, frequencies) =
+                match Self::noise_analysis_for_netlist(&run.netlist) {
+                    Ok(analysis) => analysis,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "NOISE analysis in step {} is invalid: {err}",
+                                step_index + 1
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            let results = match engine.run_noise_named_with_input_source_and_abort(
+                &run.netlist,
+                &output_node,
+                reference_node.as_deref(),
+                &input_source,
+                &frequencies,
+                temperature,
+                &abort,
+            ) {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation exceeded timeout ({}ms) in NOISE step {}",
+                            self.config.max_time_per_test_ms,
+                            step_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support this .STEP NOISE deck: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error in NOISE step {}: {err}", step_index + 1),
+                        Vec::new(),
+                    );
+                }
+            };
+            let measurements =
+                crate::analysis::advanced::evaluate_noise_measurements(&run.netlist, &results);
+            let mut mismatches = match self.compare_measurement_references(
+                std::slice::from_ref(reference_path),
+                &measurements,
+                plan.measurement_tolerance,
+                run.netlist.options.measure_fail_output,
+                run.netlist.options.measure_default_value,
+                "NOISE",
+                &run.netlist.measurements,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "NOISE step {} measurement comparison error: {err}",
+                            step_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("step {step_index}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if all_mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce stepped NOISE measurement mismatch(es)",
+                    all_mismatches.len()
+                ),
+                all_mismatches,
+            )
+        }
+    }
+
+    fn noise_analysis_for_netlist(
+        netlist: &Netlist,
+    ) -> Result<(String, Option<String>, String, Vec<Value>), String> {
+        let analyses = netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Noise {
+                    output_node,
+                    reference_node,
+                    input_source,
+                    variation,
+                    points,
+                    start_freq,
+                    stop_freq,
+                } => Some((
+                    output_node.clone(),
+                    reference_node.clone(),
+                    input_source.clone(),
+                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let analysis = match analyses.as_slice() {
+            [analysis] => analysis.clone(),
+            [] => return Err("deck has no .NOISE analysis".to_string()),
+            _ => return Err("deck has multiple .NOISE analyses".to_string()),
+        };
+        if analysis.3.is_empty() {
+            return Err(".NOISE analysis produced no frequency points".to_string());
+        }
+        Ok(analysis)
     }
 
     fn run_static_frequency_bound_ac_plan(
@@ -31101,6 +31301,102 @@ impl XyceTestRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stepped_noise_fixture_root(label: &str, artifact_count: usize) -> (PathBuf, XyceDeck) {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-step-noise-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        let relative = "Netlists/MEASURE_NOISE/STEP/fixture.cir";
+        let deck_path = root.join(relative);
+        fs::create_dir_all(deck_path.parent().expect("fixture deck parent"))
+            .expect("create stepped NOISE netlist directory");
+        fs::create_dir_all(root.join("OutputData/MEASURE_NOISE/STEP"))
+            .expect("create stepped NOISE output directory");
+        fs::write(
+            &deck_path,
+            "stepped noise fixture\n\
+             V1 in 0 AC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .NOISE V(out) V1 LIN 2 1 2\n\
+             .STEP R2 LIST 1k 2k\n\
+             .PRINT NOISE VM(out)\n\
+             .MEASURE NOISE peak MAX VM(out)\n\
+             .END\n",
+        )
+        .expect("write stepped NOISE fixture");
+        for index in 0..artifact_count {
+            fs::write(
+                root.join(format!(
+                    "OutputData/MEASURE_NOISE/STEP/fixture.cir.ma{index}"
+                )),
+                "PEAK = 0.0000000e+00\n",
+            )
+            .expect("write stepped NOISE measurement artifact");
+        }
+        let deck = XyceDeck {
+            path: deck_path,
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        (root, deck)
+    }
+
+    #[test]
+    fn stepped_noise_plan_pairs_contiguous_measurement_artifacts_by_member_index() {
+        let (root, deck) = stepped_noise_fixture_root("artifact-order", 2);
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+        let plan = runner
+            .static_noise_plan_for_deck(&deck)
+            .expect("stepped NOISE measurement plan is supported");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].name, "R2");
+        assert_eq!(plan.measurement_reference_paths.len(), 2);
+        assert_eq!(
+            plan.measurement_reference_paths[0]
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("fixture.cir.ma0")
+        );
+        assert_eq!(
+            plan.measurement_reference_paths[1]
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("fixture.cir.ma1")
+        );
+
+        fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+    }
+
+    #[test]
+    fn stepped_noise_execution_rejects_incomplete_measurement_artifact_sets() {
+        let (root, deck) = stepped_noise_fixture_root("artifact-count", 1);
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+        let result = runner.run_test(&deck.path);
+
+        assert!(
+            !result.passed,
+            "incomplete oracle must not pass: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert_eq!(result.contract, "wrapper_scalar_measure_step_noise");
+        assert!(
+            result.error.as_deref().is_some_and(|error| error.contains(
+                ".STEP expansion produced 2 batches but 1 contiguous measurement artifacts exist"
+            )),
+            "unexpected result: {result:?}"
+        );
+
+        fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+    }
 
     #[test]
     fn static_noise_probe_rejects_unrelated_decks_before_parsing() {
