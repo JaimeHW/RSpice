@@ -14,7 +14,7 @@ use crate::ui::tokens::Tokens;
 pub mod results;
 pub mod schematic;
 pub mod simulate;
-pub(in crate::shell) mod simulate_forms;
+pub(crate) mod simulate_forms;
 
 /// Left panel default width.
 const LEFT_WIDTH: f32 = 264.0;

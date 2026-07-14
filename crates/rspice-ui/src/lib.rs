@@ -70,8 +70,13 @@ pub mod common;
 /// The VOLTA design system - tokens, palettes, fonts, icons, widgets
 pub mod ui;
 
-/// The IDE shell - menubar, toolbar, workspace tabs, panels, console, status bar
-pub mod shell;
+/// The contract-driven application workbench. This is the only owner of
+/// application chrome, responsive composition, and top-level navigation.
+pub mod workbench;
+
+/// Transitional home for retained waveform/netlist internals while they move
+/// into the workbench and domain modules. Its renderer is no longer entered.
+pub(crate) mod shell;
 
 /// Canonical commercial product model, typed identities, command outcomes,
 /// and fail-closed object lifecycles. This layer is UI-framework independent.

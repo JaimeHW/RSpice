@@ -147,7 +147,9 @@ pub(super) fn fold_sideband_contributors(
     for point in translated_results {
         for contrib in &point.contributions {
             if contrib.output_contribution.is_finite() {
-                let entry = combined.entry(contrib.device_name.clone()).or_insert(0.0);
+                let entry = combined
+                    .entry(contrib.identity.device.clone())
+                    .or_insert(0.0);
                 *entry += contrib.output_contribution.max(0.0);
             }
         }

@@ -29,7 +29,7 @@ pub mod results;
 mod state;
 mod statusbar;
 mod toolbar;
-mod views;
+pub(crate) mod views;
 mod wtabs;
 
 pub use results::{ResultViewer, ResultsState};

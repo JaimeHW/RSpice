@@ -46,7 +46,7 @@ impl NoiseData {
             first
                 .contributions
                 .iter()
-                .map(|c| (c.device_name.clone(), c.percentage))
+                .map(|c| (c.identity.device.clone(), c.percentage))
                 .collect()
         } else {
             vec![]

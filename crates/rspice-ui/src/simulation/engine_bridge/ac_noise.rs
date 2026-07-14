@@ -137,7 +137,7 @@ impl EngineBridge {
 
             for contrib in &result.contributions {
                 contributors
-                    .entry(contrib.device_name.clone())
+                    .entry(contrib.identity.device.clone())
                     .or_insert_with(|| Vec::with_capacity(frequencies.len()))
                     .push(contrib.output_contribution);
             }

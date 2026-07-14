@@ -14,11 +14,12 @@ impl serde::Serialize for AppState {
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }
-        let field_count = if simulation_results.is_empty() { 5 } else { 6 };
+        let field_count = if simulation_results.is_empty() { 6 } else { 7 };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
         state.serialize_field("shell", &crate::shell::ShellStateSer::from(&self.shell))?;
+        state.serialize_field("workbench", &self.workbench)?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
         if !simulation_results.is_empty() {
@@ -43,6 +44,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             library_manager: crate::state::LibraryManager,
             #[serde(default)]
             shell: crate::shell::ShellStateSer,
+            #[serde(default)]
+            workbench: crate::workbench::WorkbenchState,
             #[serde(default)]
             recent_files: Vec<super::RecentFile>,
             #[serde(default)]
@@ -70,6 +73,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             workspace: project_workspace,
             library_manager,
             shell: de.shell.into(),
+            workbench: de.workbench,
             recent_files: de.recent_files,
             license_key: de.license_key,
             license,

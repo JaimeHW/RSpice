@@ -190,8 +190,10 @@ pub struct AppState {
     pub(crate) license: Option<crate::services::license::LicenseInfo>,
     /// Specialized analysis viewer state grouped by analysis workspace.
     pub(crate) analysis: AnalysisWorkspaceState,
-    /// IDE shell state (workspace view, theme, console, toasts).
+    /// Retained editor/viewer state during the clean-room shell migration.
     pub(crate) shell: crate::shell::ShellState,
+    /// Canonical workbench navigation and responsive layout state.
+    pub(crate) workbench: crate::workbench::WorkbenchState,
 }
 
 impl Default for AppState {
@@ -516,7 +518,7 @@ impl RSpiceApp {
     }
 
     fn render_frame_chrome(&mut self, ctx: &Context) {
-        crate::shell::show(ctx, self);
+        crate::workbench::show(ctx, self);
     }
 
     fn render_frame_dialogs(&mut self, ctx: &Context) {
