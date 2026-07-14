@@ -96,6 +96,100 @@ endmodule
 }
 
 #[test]
+fn scalar_backend_compiles_stateful_typed_limiter_with_affine_correction() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module typed_limiter(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    real limited;
+    analog function real trunc_ev;
+        input proposed, previous, lower, upper;
+        real proposed, previous, lower, upper;
+        begin
+            if ((proposed - previous) > upper)
+                trunc_ev = previous + upper;
+            else if ((proposed - previous) < lower)
+                trunc_ev = previous + lower;
+            else
+                trunc_ev = proposed;
+        end
+    endfunction
+    analog begin
+        limited = $limit(V(p, n), "trunc_ev", "typed", -1.0, -0.7, 0.7);
+        I(p, n) <+ limited;
+        I(p, n) <+ ddt(c * limited);
+    end
+endmodule
+"#,
+        )
+        .expect("canonical typed limiter IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile typed limiter");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        state.contains("scalar_limit_previous: Box<[f64; 1]>"),
+        "{state}"
+    );
+    assert!(
+        state.contains("scalar_limit_initialized: Box<[bool; 1]>"),
+        "{state}"
+    );
+    assert!(
+        state.contains("pub fn limiter_converged(&self) -> bool"),
+        "{state}"
+    );
+    assert_eq!(
+        state
+            .matches("scalar_limit_previous: self.scalar_limit_previous.clone()")
+            .count(),
+        1
+    );
+    assert_eq!(state.matches("scalar_limit_previous,\n").count(), 2);
+    assert!(stamp.contains("self.scalar_limit_active=false;"), "{stamp}");
+    assert!(
+        stamp.contains("self.scalar_limit_active|=candidate!=proposed"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("self.scalar_limit_previous[0]=candidate"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("self.scalar_limit_initialized[0]=true"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("-((1.0)*("), "{stamp}");
+    assert!(stamp.contains("-((ddt_scale)*("), "{stamp}");
+    let reactive = stamp
+        .split_once("pub fn stamp_reactive")
+        .expect("reactive stamp")
+        .1;
+    assert!(!reactive.contains("scalar_limit_previous"), "{reactive}");
+    assert!(!reactive.contains("scalar_limit_active"), "{reactive}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn generated_registry_names_disambiguate_duplicate_public_models() {
     let devices = vec![
         GeneratedRustDevice {

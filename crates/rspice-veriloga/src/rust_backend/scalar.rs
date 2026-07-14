@@ -325,6 +325,47 @@ struct ShareableRuntimeLoopValues {
 struct ScalarDerivatives {
     nodes: Vec<(u32, ValueId)>,
     branches: Vec<(u32, ValueId)>,
+    correction: Option<ValueId>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct ScalarLimitSlots {
+    slots: HashMap<ExprId, usize>,
+}
+
+impl ScalarLimitSlots {
+    pub(super) fn from_artifact(artifact: &CanonicalIrArtifact) -> Self {
+        let mut operators = artifact
+            .opt
+            .values
+            .iter()
+            .filter_map(|value| match value.kind {
+                OptValueKind::LimitPrevious { operator, .. }
+                | OptValueKind::Limit { operator, .. } => Some(operator),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        operators.sort_by_key(|operator| operator.index());
+        operators.dedup();
+        let slots = operators
+            .into_iter()
+            .enumerate()
+            .map(|(slot, operator)| (operator, slot))
+            .collect();
+        Self { slots }
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+
+    fn slot_for(&self, operator: ExprId) -> Option<usize> {
+        self.slots.get(&operator).copied()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -356,6 +397,7 @@ pub fn generate_device(
     let parameter_fields = parameter_field_names(artifact);
     let static_cache = ScalarStaticCache::from_artifact(artifact)?;
     let ddt_slots = device::collect_ddt_slots(artifact)?;
+    let limit_slots = ScalarLimitSlots::from_artifact(artifact);
     let potential_branch_count = artifact.mir.branch_unknowns.len();
     let stamp = generate_stamp_file(
         artifact,
@@ -363,30 +405,20 @@ pub fn generate_device(
         &parameter_fields,
         &static_cache,
         &ddt_slots,
+        &limit_slots,
     )?;
-    let state = if static_cache.is_empty() {
-        device::generate_state_file(
-            artifact,
-            options,
-            &parameter_fields,
-            ddt_slots.len(),
-            ddt_slots.idt_len(),
-            potential_branch_count,
-            device::StateScratchUsage::default(),
-        )?
-    } else {
-        let extensions = scalar_state_extensions(artifact, &parameter_fields, &static_cache)?;
-        device::generate_state_file_with_extensions(
-            artifact,
-            options,
-            &parameter_fields,
-            ddt_slots.len(),
-            ddt_slots.idt_len(),
-            potential_branch_count,
-            device::StateScratchUsage::default(),
-            &extensions,
-        )?
-    };
+    let extensions =
+        scalar_state_extensions(artifact, &parameter_fields, &static_cache, &limit_slots)?;
+    let state = device::generate_state_file_with_extensions(
+        artifact,
+        options,
+        &parameter_fields,
+        ddt_slots.len(),
+        ddt_slots.idt_len(),
+        potential_branch_count,
+        device::StateScratchUsage::default(),
+        &extensions,
+    )?;
     let mut files = vec![
         GeneratedRustFile {
             relative_path: "mod.rs".to_string(),
@@ -418,6 +450,7 @@ fn generate_stamp_file(
     parameter_fields: &HashMap<String, String>,
     static_cache: &ScalarStaticCache,
     ddt_slots: &DdtSlots,
+    limit_slots: &ScalarLimitSlots,
 ) -> Result<String, RustBackendError> {
     let roots = scalar_equation_roots(artifact)?;
     let stamp_live = collect_stamp_live_values(artifact, &roots, static_cache)?;
@@ -532,6 +565,9 @@ fn generate_stamp_file(
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
+    if !limit_slots.is_empty() {
+        out.push_str("        self.scalar_limit_active=false;\n");
+    }
     out.push_str("        let n=self.nodes;\n");
     out.push_str("        let nodes=n;\n");
     if stamp_needs_branches {
@@ -1590,6 +1626,7 @@ pub(super) fn scalar_state_extensions(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     static_cache: &ScalarStaticCache,
+    limit_slots: &ScalarLimitSlots,
 ) -> Result<device::StateFileExtensions, RustBackendError> {
     let mut extensions = device::StateFileExtensions {
         params_visibility: "pub(crate)",
@@ -1641,6 +1678,7 @@ pub(super) fn scalar_state_extensions(
     let mut methods = String::new();
 
     push_scalar_static_cache_state_fields(&mut extensions, static_cache);
+    push_scalar_limit_state_fields(&mut extensions, limit_slots, &mut methods);
 
     if !static_cache.instance_values.is_empty() {
         methods.push_str("\n    #[inline]\n");
@@ -1722,6 +1760,35 @@ pub(super) fn scalar_state_extensions(
 
     extensions.impl_methods = methods;
     Ok(extensions)
+}
+
+fn push_scalar_limit_state_fields(
+    extensions: &mut device::StateFileExtensions,
+    limit_slots: &ScalarLimitSlots,
+    methods: &mut String,
+) {
+    if limit_slots.is_empty() {
+        return;
+    }
+    let count = limit_slots.len();
+    extensions.instance_fields.push_str(&format!(
+        "    pub(crate) scalar_limit_previous: Box<[f64; {count}]>,\n    pub(crate) scalar_limit_initialized: Box<[bool; {count}]>,\n    pub(crate) scalar_limit_active: bool,\n"
+    ));
+    extensions.clone_fields.push_str(
+        "            scalar_limit_previous: self.scalar_limit_previous.clone(),\n            scalar_limit_initialized: self.scalar_limit_initialized.clone(),\n            scalar_limit_active: self.scalar_limit_active,\n",
+    );
+    extensions.new_initializers.push_str(&format!(
+        "            scalar_limit_previous: boxed_zero_f64_array::<{count}>(),\n            scalar_limit_initialized: boxed_zero_bool_array::<{count}>(),\n            scalar_limit_active: false,\n"
+    ));
+    extensions.restore_destructure_fields.push_str(
+        "            scalar_limit_previous,\n            scalar_limit_initialized,\n            scalar_limit_active,\n",
+    );
+    extensions.restore_initializers.push_str(
+        "            scalar_limit_previous,\n            scalar_limit_initialized,\n            scalar_limit_active,\n",
+    );
+    methods.push_str(
+        "\n    #[inline]\n    pub fn limiter_converged(&self) -> bool {\n        !self.scalar_limit_active\n    }\n",
+    );
 }
 
 fn cached_values_need_param_given(artifact: &CanonicalIrArtifact, values: &[ValueId]) -> bool {
@@ -2255,6 +2322,14 @@ pub(super) fn scalar_transient_current_lowered_variable(
             derivative_scale,
         )?;
     }
+    value = affine_corrected_root_expr(
+        artifact,
+        parameter_fields,
+        value,
+        derivatives.correction,
+        &context,
+        derivative_scale,
+    )?;
 
     Ok(LoweredVariable {
         value,
@@ -2336,16 +2411,45 @@ fn scalar_derivatives(
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
     let mut nodes = Vec::new();
     let mut branches = Vec::new();
+    let mut correction = None;
     for derivative in &root_value.derivatives {
         match derivative.lane.kind {
             DerivativeLaneKind::Node => nodes.push((derivative.lane.index, derivative.value)),
             DerivativeLaneKind::BranchUnknown => {
                 branches.push((derivative.lane.index, derivative.value));
             }
-            DerivativeLaneKind::LimiterCorrection => {}
+            DerivativeLaneKind::LimiterCorrection => {
+                if correction.replace(derivative.value).is_some() {
+                    return Err(internal(
+                        artifact,
+                        format!("scalar root {root} has duplicate limiter correction lanes"),
+                    ));
+                }
+            }
         }
     }
-    Ok(ScalarDerivatives { nodes, branches })
+    Ok(ScalarDerivatives {
+        nodes,
+        branches,
+        correction,
+    })
+}
+
+fn affine_corrected_root_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    root_expr: String,
+    correction: Option<ValueId>,
+    context: &ValueEmitContext<'_>,
+    derivative_scale: &str,
+) -> Result<String, RustBackendError> {
+    let Some(correction) = correction else {
+        return Ok(root_expr);
+    };
+    let correction = value_ref(artifact, parameter_fields, correction, context)?;
+    Ok(format!(
+        "(({root_expr})-(({derivative_scale})*({correction})))"
+    ))
 }
 
 fn emit_transient_operator_root(
@@ -2421,6 +2525,14 @@ fn emit_current_stamp(
         root_expr,
         ddt_slots,
         out,
+    )?;
+    let root_expr = affine_corrected_root_expr(
+        artifact,
+        parameter_fields,
+        root_expr,
+        derivatives.correction,
+        context,
+        derivative_scale.as_str(),
     )?;
     match (
         derivatives.nodes.as_slice(),
@@ -2683,6 +2795,14 @@ fn emit_potential_stamp(
         root_expr,
         ddt_slots,
         out,
+    )?;
+    let root_expr = affine_corrected_root_expr(
+        artifact,
+        parameter_fields,
+        root_expr,
+        derivatives.correction,
+        context,
+        derivative_scale.as_str(),
     )?;
     out.push_str("        stamper.stamp_potential_branch_local(\n");
     out.push_str(&format!("            {pos},\n"));
@@ -3416,8 +3536,58 @@ fn emit_value_expr(
             DdtEmitMode::ReactiveLinearized => "1.0".to_string(),
             DdtEmitMode::SharedGeneric => "(if REACTIVE { 1.0 } else { ddt_scale })".to_string(),
         },
-        OptValueKind::LimitPrevious { .. } | OptValueKind::Limit { .. } => {
-            return Err(unsupported(artifact, "stateful limiter scalar runtime"));
+        OptValueKind::LimitPrevious { operator, proposed } => {
+            let proposed = value_ref(artifact, parameter_fields, *proposed, context)?;
+            match context.ddt_mode {
+                DdtEmitMode::Transient => {
+                    let slots = ScalarLimitSlots::from_artifact(artifact);
+                    let slot = slots.slot_for(*operator).ok_or_else(|| {
+                        internal(
+                            artifact,
+                            format!("limiter expression {operator} has no generated state slot"),
+                        )
+                    })?;
+                    format!(
+                        "if self.scalar_limit_initialized[{slot}]{{self.scalar_limit_previous[{slot}]}}else{{{proposed}}}"
+                    )
+                }
+                DdtEmitMode::ReactiveLinearized => proposed,
+                DdtEmitMode::SharedGeneric => {
+                    return Err(internal(
+                        artifact,
+                        "stateful limiter escaped into the shared scalar stamp helper",
+                    ));
+                }
+            }
+        }
+        OptValueKind::Limit {
+            operator,
+            proposed,
+            candidate,
+        } => {
+            let proposed = value_ref(artifact, parameter_fields, *proposed, context)?;
+            match context.ddt_mode {
+                DdtEmitMode::Transient => {
+                    let candidate = value_ref(artifact, parameter_fields, *candidate, context)?;
+                    let slots = ScalarLimitSlots::from_artifact(artifact);
+                    let slot = slots.slot_for(*operator).ok_or_else(|| {
+                        internal(
+                            artifact,
+                            format!("limiter expression {operator} has no generated state slot"),
+                        )
+                    })?;
+                    format!(
+                        "{{let proposed={proposed};let candidate={candidate};self.scalar_limit_active|=candidate!=proposed;self.scalar_limit_previous[{slot}]=candidate;self.scalar_limit_initialized[{slot}]=true;candidate}}"
+                    )
+                }
+                DdtEmitMode::ReactiveLinearized => proposed,
+                DdtEmitMode::SharedGeneric => {
+                    return Err(internal(
+                        artifact,
+                        "stateful limiter escaped into the shared scalar stamp helper",
+                    ));
+                }
+            }
         }
         OptValueKind::NodePotential { node } => {
             format!(

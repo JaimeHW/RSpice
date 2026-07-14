@@ -502,6 +502,7 @@ fn generate_device_with_scalar_hybrid_plan(
     let parameter_fields = parameter_field_names(artifact);
     let variable_fields = variable_local_names(artifact);
     let ddt_slots = collect_ddt_slots(artifact)?;
+    let scalar_limit_slots = super::scalar::ScalarLimitSlots::from_artifact(artifact);
     let scalar_equations: HashSet<_> = scalar_hybrid_plan
         .map(ScalarHybridStampPlan::selected_equations)
         .unwrap_or_default();
@@ -542,12 +543,14 @@ fn generate_device_with_scalar_hybrid_plan(
         &derivative_activity,
     );
     let state_scratch_usage = StateScratchUsage::from_stamp_files(&stamp_files);
-    let state = if let Some(plan) = scalar_hybrid_plan.filter(|plan| !plan.static_cache.is_empty())
+    let state = if let Some(plan) = scalar_hybrid_plan
+        .filter(|plan| !plan.static_cache.is_empty() || !scalar_limit_slots.is_empty())
     {
         let extensions = super::scalar::scalar_state_extensions(
             artifact,
             &parameter_fields,
             &plan.static_cache,
+            &scalar_limit_slots,
         )?;
         generate_state_file_with_extensions(
             artifact,
@@ -31063,6 +31066,12 @@ fn emit_stamp_body(
 ) -> Result<(), RustBackendError> {
     if reactive && ddt_slots.len() == 0 {
         return Ok(());
+    }
+    if !reactive
+        && scalar_hybrid_plan.is_some()
+        && !super::scalar::ScalarLimitSlots::from_artifact(artifact).is_empty()
+    {
+        out.push_str("        self.scalar_limit_active=false;\n");
     }
 
     let operator_usage = if reactive {
