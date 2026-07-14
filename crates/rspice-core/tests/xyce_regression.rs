@@ -5534,6 +5534,21 @@ fn test_xyce_stepped_dc_trigger_target_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_dc_error_function_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_DC/ErrorFuncTest1DC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass ERR/ERR1/ERR2 norms, filters, expressions, currents, and windows, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_stepped_dc_average_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

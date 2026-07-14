@@ -470,11 +470,12 @@ impl DcSweepSeries {
                 .get(node)
                 .filter(|name| !name.is_empty())
                 .cloned()
-                .unwrap_or_else(|| fallback.clone());
-            storage.push((raw.clone(), 'V', series.clone()));
-            if raw != fallback {
-                storage.push((fallback, 'V', series));
-            }
+                .unwrap_or(fallback);
+            // A numeric node name is still a canonical SPICE name, not the
+            // solver's internal node index. Adding index aliases for named
+            // nodes can overwrite real V(1), V(2), ... waveforms when solver
+            // ordering differs from numeric-name ordering.
+            storage.push((raw, 'V', series));
         }
         for (branch, name) in first.branch_names.iter().enumerate() {
             if name.is_empty() {
@@ -944,6 +945,14 @@ fn materialize_measure_expression_signals(
                     add(right);
                 }
             }
+            MeasureType::ErrorFunction {
+                measured,
+                comparison,
+                ..
+            } => {
+                add(measured);
+                add(comparison);
+            }
             MeasureType::Min { signal, .. }
             | MeasureType::Max { signal, .. }
             | MeasureType::PeakToPeak { signal, .. }
@@ -1019,6 +1028,14 @@ fn materialize_differential_voltage_signals(
                 if let MeasureOperand::Waveform(right) = &condition.right {
                     add(right);
                 }
+            }
+            MeasureType::ErrorFunction {
+                measured,
+                comparison,
+                ..
+            } => {
+                add(measured);
+                add(comparison);
             }
             MeasureType::Min { signal, .. }
             | MeasureType::Max { signal, .. }
@@ -1199,7 +1216,8 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::Rms { from, to, .. }
         | MeasureType::Find { from, to, .. }
         | MeasureType::Derivative { from, to, .. }
-        | MeasureType::When { from, to, .. } => Some((from, to)),
+        | MeasureType::When { from, to, .. }
+        | MeasureType::ErrorFunction { from, to, .. } => Some((from, to)),
         MeasureType::Delay { .. }
         | MeasureType::Param { .. }
         | MeasureType::RiseTime { .. }
@@ -1812,5 +1830,37 @@ mod tests {
         assert_eq!(result.expected, Some(4.0));
         assert_eq!(result.tolerance, Some(0.1));
         assert!(!result.passed);
+    }
+
+    #[test]
+    fn dc_error_functions_filter_the_measured_operand_and_ignore_weight() {
+        let netlist = Netlist::parse(
+            "DC relative error functions\n\
+             V3 3 0 2.5\n\
+             R3 3 0 1\n\
+             V1 1 0 1\n\
+             R1 1 2 1\n\
+             R2 2 0 3\n\
+             .dc V1 -5 5 1\n\
+             .measure dc baseline ERR1 V(1) V(2) WEIGHT=9\n\
+             .measure dc filtered ERR1 V(1) V(3) YMIN=2.5\n\
+             .measure dc filtered_abs ERR2 V(1) V(3) IGNORE=2.5\n\
+             .end\n",
+        )
+        .expect("DC ERR deck parses");
+        let engine = crate::Engine::default();
+        let sweep = engine
+            .run_dc_sweep(&netlist, "V1", -5.0, 5.0, 1.0)
+            .expect("DC ERR sweep runs");
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+
+        assert!((results[0].value.expect("baseline ERR1") - 0.25).abs() < 1.0e-12);
+        assert!(
+            (results[1].value.expect("filtered ERR1") - 1.202091156338881).abs() < 1.0e-12,
+            "unexpected filtered ERR1 result: {:?}",
+            results[1]
+        );
+        assert!((results[2].value.expect("filtered ERR2") - 1.0).abs() < 1.0e-12);
     }
 }

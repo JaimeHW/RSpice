@@ -1521,6 +1521,49 @@ mod tests {
     }
 
     #[test]
+    fn error_function_measurements_preserve_operands_norms_and_filters() {
+        let netlist = Netlist::parse(
+            "typed error functions\n\
+             .global_param p1=2.5\n\
+             V1 one 0 0\n\
+             .dc V1 -5 5 1\n\
+             .measure dc rms_error ERR1 PAR('V(one)*V(one)') V(one) FROM=4 TO=0 MINVAL=1.5 YMIN=2.5 YMAX=3.5 WEIGHT=2\n\
+             .measure dc mean_error ERR2 V(one) {P1} IGNORE=2.5\n\
+             .end\n",
+        )
+        .expect("ERR-family measurements parse");
+
+        match &netlist.measurements[0].measure_type {
+            crate::analysis::MeasureType::ErrorFunction {
+                measured,
+                comparison,
+                norm,
+                from,
+                to,
+                minval,
+                ymin,
+                ymax,
+                weight,
+            } => {
+                assert_eq!(measured, "{V(one)*V(one)}");
+                assert_eq!(comparison, "V(ONE)");
+                assert_eq!(*norm, crate::analysis::ErrorFunctionNorm::RootMeanSquare);
+                assert_eq!((*from, *to), (Some(4.0), Some(0.0)));
+                assert_eq!((*minval, *ymin, *ymax), (1.5, 2.5, 3.5));
+                assert_eq!(*weight, Some(2.0));
+            }
+            other => panic!("expected ERR1 measurement, got {other:?}"),
+        }
+        match &netlist.measurements[1].measure_type {
+            crate::analysis::MeasureType::ErrorFunction { norm, ymin, .. } => {
+                assert_eq!(*norm, crate::analysis::ErrorFunctionNorm::MeanAbsolute);
+                assert_eq!(*ymin, 2.5);
+            }
+            other => panic!("expected ERR2 measurement, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn extrema_output_frequency_alias_selects_independent_axis() {
         let netlist = Netlist::parse(
             "extrema output frequency\n\

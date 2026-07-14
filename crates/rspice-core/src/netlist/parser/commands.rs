@@ -1894,6 +1894,26 @@ pub(super) fn parse_meas_command(
                 MeasureType::Param { expression }
             }
         }
+        "ERR" | "ERR1" | "ERR2" => {
+            let measured = parse_measure_error_operand(stream, line_num, params)?;
+            let comparison = parse_measure_error_operand(stream, line_num, params)?;
+            let options = parse_measure_error_function_options(stream, line_num, params)?;
+            MeasureType::ErrorFunction {
+                measured,
+                comparison,
+                norm: if measure_type_key == "ERR2" {
+                    crate::analysis::ErrorFunctionNorm::MeanAbsolute
+                } else {
+                    crate::analysis::ErrorFunctionNorm::RootMeanSquare
+                },
+                from: options.from,
+                to: options.to,
+                minval: options.minval,
+                ymin: options.ymin,
+                ymax: options.ymax,
+                weight: options.weight,
+            }
+        }
         _ => {
             // Parse signal name - handle V(node), V(pos,neg), or just node
             let signal = parse_meas_signal(stream, line_num)?;
@@ -2144,6 +2164,126 @@ fn parse_measure_when_operand(
             stream, line_num, params,
         )?)),
     }
+}
+
+fn parse_measure_error_operand(
+    stream: &mut TokenStream,
+    line_num: usize,
+    _params: &ParamContext,
+) -> Result<String, ParseError> {
+    if matches!(&stream.peek().kind, TokenKind::Ident(name) if name.eq_ignore_ascii_case("PAR"))
+        && matches!(stream.peek_n(1).kind, TokenKind::LParen)
+    {
+        stream.advance();
+        stream.advance();
+        let expression = match &stream.peek().kind {
+            TokenKind::StringLit(expression) | TokenKind::Expression(expression) => {
+                let expression = expression.clone();
+                stream.advance();
+                expression
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected quoted or braced expression inside PAR(...) in .MEAS ERR"
+                        .to_string(),
+                });
+            }
+        };
+        if !stream.consume(&TokenKind::RParen) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected ')' after PAR expression in .MEAS ERR".to_string(),
+            });
+        }
+        return Ok(format!("{{{expression}}}"));
+    }
+    parse_meas_signal(stream, line_num)
+}
+
+struct ErrorFunctionOptions {
+    from: Option<Value>,
+    to: Option<Value>,
+    minval: Value,
+    ymin: Value,
+    ymax: Value,
+    weight: Option<Value>,
+}
+
+fn parse_measure_error_function_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<ErrorFunctionOptions, ParseError> {
+    let mut options = ErrorFunctionOptions {
+        from: None,
+        to: None,
+        minval: 1.0e-12,
+        ymin: 1.0e-15,
+        ymax: 1.0e15,
+        weight: None,
+    };
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let TokenKind::Ident(keyword) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected token '{}' in .MEAS ERR", stream.peek().kind),
+            });
+        };
+        let keyword = keyword.to_ascii_uppercase();
+        if matches!(keyword.as_str(), "GOAL" | "TOL") {
+            break;
+        }
+        if !matches!(
+            keyword.as_str(),
+            "FROM" | "TO" | "MINVAL" | "YMIN" | "YMAX" | "IGNOR" | "IGNORE" | "WEIGHT"
+        ) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected option '{keyword}' in .MEAS ERR"),
+            });
+        }
+        stream.advance();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected '=' after {keyword} in .MEAS ERR"),
+            });
+        }
+        let value = expect_value(stream, line_num, params)?;
+        if !value.is_finite() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".MEAS ERR {keyword} must be finite, found {value}"),
+            });
+        }
+        match keyword.as_str() {
+            "FROM" => options.from = Some(value),
+            "TO" => options.to = Some(value),
+            "MINVAL" => options.minval = value,
+            "YMIN" | "IGNOR" | "IGNORE" => {
+                if value < 0.0 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(".MEAS ERR {keyword} must be non-negative"),
+                    });
+                }
+                options.ymin = value;
+            }
+            "YMAX" => {
+                if value <= 0.0 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: ".MEAS ERR YMAX must be positive".to_string(),
+                    });
+                }
+                options.ymax = value;
+            }
+            "WEIGHT" => options.weight = Some(value),
+            _ => unreachable!(),
+        }
+    }
+    Ok(options)
 }
 
 fn parse_measure_when_event_options(

@@ -45,6 +45,15 @@ pub enum ExtremaOutput {
     IndependentAxis,
 }
 
+/// Norm used by Xyce's waveform-relative error functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorFunctionNorm {
+    /// `ERR`/`ERR1`: root mean square relative error.
+    RootMeanSquare,
+    /// `ERR2`: mean absolute relative error.
+    MeanAbsolute,
+}
+
 /// Right-hand operand of a `WHEN left=right` measurement condition.
 ///
 /// Numeric values are retained as scalars. Signal references and braced
@@ -182,6 +191,20 @@ pub enum MeasureType {
         to: Option<Value>,
         td: Option<Value>,
         default_value: Option<Value>,
+    },
+
+    /// Pointwise relative error between two accepted-point waveforms.
+    ErrorFunction {
+        measured: String,
+        comparison: String,
+        norm: ErrorFunctionNorm,
+        from: Option<Value>,
+        to: Option<Value>,
+        minval: Value,
+        ymin: Value,
+        ymax: Value,
+        /// Xyce parses WEIGHT but intentionally does not apply it here.
+        weight: Option<Value>,
     },
 
     /// Minimum value over range
@@ -557,6 +580,30 @@ impl MeasureEngine {
                 &measurement.name,
                 "continuous equation measures evaluate on the analysis-point stream",
             ),
+            MeasureType::ErrorFunction {
+                measured,
+                comparison,
+                norm,
+                from,
+                to,
+                minval,
+                ymin,
+                ymax,
+                ..
+            } => self.eval_error_function(
+                &measurement.name,
+                &measurement.analysis,
+                measured,
+                comparison,
+                *norm,
+                *from,
+                *to,
+                *minval,
+                *ymin,
+                *ymax,
+                time,
+                signals,
+            ),
             MeasureType::Min {
                 signal,
                 from,
@@ -854,6 +901,79 @@ impl MeasureEngine {
         }
 
         MeasureResult::success(name, max_val - min_val)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn eval_error_function(
+        &self,
+        name: &str,
+        analysis: &str,
+        measured_name: &str,
+        comparison_name: &str,
+        norm: ErrorFunctionNorm,
+        from: Option<Value>,
+        to: Option<Value>,
+        minval: Value,
+        ymin: Value,
+        ymax: Value,
+        axis: &[Value],
+        signals: &HashMap<String, &[Value]>,
+    ) -> MeasureResult {
+        if !minval.is_finite() || !ymin.is_finite() || !ymax.is_finite() {
+            return MeasureResult::failed(name, "ERR limits must be finite");
+        }
+        let Some(measured) = lookup_signal(signals, measured_name) else {
+            return MeasureResult::failed(name, &format!("Signal '{measured_name}' not found"));
+        };
+        let Some(comparison) = lookup_signal(signals, comparison_name) else {
+            return MeasureResult::failed(name, &format!("Signal '{comparison_name}' not found"));
+        };
+        let (lower, upper) = if analysis.eq_ignore_ascii_case("DC") {
+            match (from, to) {
+                (Some(from), Some(to)) => (from.min(to), from.max(to)),
+                _ => Self::measurement_window_bounds(axis, from, to),
+            }
+        } else {
+            Self::measurement_window_bounds(axis, from, to)
+        };
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for ((&axis_value, &measured_value), &comparison_value) in
+            axis.iter().zip(measured).zip(comparison)
+        {
+            let magnitude = measured_value.abs();
+            let ymin_tolerance = ymin.abs() * 1.0e-12;
+            let ymax_tolerance = ymax.abs() * 1.0e-12;
+            if !axis_in_error_window(axis_value, lower, upper, minval)
+                || magnitude < ymin - ymin_tolerance
+                || magnitude > ymax + ymax_tolerance
+            {
+                continue;
+            }
+            let denominator = magnitude.max(minval);
+            if denominator <= 0.0 {
+                return MeasureResult::failed(name, "ERR relative-error denominator is zero");
+            }
+            let relative_error = (measured_value - comparison_value) / denominator;
+            sum += match norm {
+                ErrorFunctionNorm::RootMeanSquare => relative_error * relative_error,
+                ErrorFunctionNorm::MeanAbsolute => relative_error.abs(),
+            };
+            count += 1;
+        }
+        if count == 0 {
+            return MeasureResult::failed(name, "ERR window contains no qualifying points");
+        }
+        let mean = sum / count as Value;
+        let result = match norm {
+            ErrorFunctionNorm::RootMeanSquare => mean.sqrt(),
+            ErrorFunctionNorm::MeanAbsolute => mean,
+        };
+        if result.is_finite() {
+            MeasureResult::success(name, result)
+        } else {
+            MeasureResult::failed(name, "ERR result is non-finite")
+        }
     }
 
     fn eval_avg(
@@ -1365,6 +1485,20 @@ fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) 
 fn delay_td_accepts_event(event_axis: Value, td: Option<Value>) -> bool {
     const XYCE_TD_TOLERANCE: Value = 1.0e-12;
     td.is_none_or(|td| event_axis > td * (1.0 - XYCE_TD_TOLERANCE))
+}
+
+fn axis_in_error_window(axis: Value, lower: Value, upper: Value, minval: Value) -> bool {
+    let lower_tolerance = if lower.is_finite() {
+        (lower * minval).abs()
+    } else {
+        0.0
+    };
+    let upper_tolerance = if upper.is_finite() {
+        (upper * minval).abs()
+    } else {
+        0.0
+    };
+    axis >= lower - lower_tolerance && axis <= upper + upper_tolerance
 }
 
 fn first_measure_condition_event(
