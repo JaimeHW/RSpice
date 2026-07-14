@@ -6193,17 +6193,26 @@ impl XyceTestRunner {
             }
         };
         if mismatches.is_empty() {
-            if !plan.measurement_reference_paths.is_empty() {
+            if !plan.measurement_reference_paths.is_empty()
+                || !plan.continuous_measurement_reference_paths.is_empty()
+            {
                 let measurements =
                     crate::analysis::advanced::evaluate_ac_measurements(&netlist, &results);
-                let measurement_mismatches = match self.compare_measurement_references(
+                let continuous = crate::analysis::advanced::evaluate_ac_continuous_measurements(
+                    &netlist, &results,
+                );
+                let measurement_mismatches = match self.compare_analysis_measurement_outputs(
                     &plan.measurement_reference_paths,
+                    &plan.continuous_measurement_reference_paths,
                     &measurements,
+                    &continuous,
                     plan.measurement_tolerance,
                     netlist.options.measure_fail_output,
                     netlist.options.measure_default_value,
-                    "AC",
+                    netlist.options.measure_use_cont_files(),
                     &netlist.measurements,
+                    "AC",
+                    "AC_CONT",
                 ) {
                     Ok(mismatches) => mismatches,
                     Err(err) => {
@@ -18600,6 +18609,36 @@ impl XyceTestRunner {
                 &batch.netlist,
                 &equation_sweep,
             )?;
+            let accepted_axis = batch
+                .results
+                .iter()
+                .map(|point| point.sweep_value)
+                .collect::<Vec<_>>();
+            let segment_starts = secondary_points
+                .as_ref()
+                .map(|_| {
+                    (primary_points.len()..accepted_axis.len())
+                        .step_by(primary_points.len())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let measurement_output_traces = Self::measurement_output_traces(
+                &batch.netlist,
+                &accepted_axis,
+                data_columns.iter().filter_map(|column| match column {
+                    XyceReferenceColumn::Probe { name } => Some(name.as_str()),
+                    XyceReferenceColumn::PrimarySweep { .. } => None,
+                }),
+                "DC",
+                "DC_CONT",
+                &segment_starts,
+                |trace_netlist| {
+                    crate::analysis::advanced::evaluate_dc_continuous_measurements(
+                        trace_netlist,
+                        &equation_sweep,
+                    )
+                },
+            )?;
             for (local_row_index, point) in batch.results.iter().enumerate() {
                 let row = reference.rows.get(global_row_index).ok_or_else(|| {
                     format!("missing reference row for simulation row {global_row_index}")
@@ -18680,6 +18719,17 @@ impl XyceTestRunner {
                                         trace.name, local_row_index
                                     )
                                 })?
+                            } else if let Some(trace) =
+                                measurement_output_traces.get(&name.to_ascii_uppercase())
+                            {
+                                trace
+                                    .iter()
+                                    .filter(|(activation_index, _)| {
+                                        local_row_index >= *activation_index
+                                    })
+                                    .map(|(_, value)| *value)
+                                    .next_back()
+                                    .unwrap_or(0.0)
                             } else {
                                 Self::evaluate_dc_probe(
                                     name,
@@ -19060,6 +19110,182 @@ impl XyceTestRunner {
         Ok(traces)
     }
 
+    fn measurement_output_traces<'a, F>(
+        netlist: &Netlist,
+        accepted_axis: &[Value],
+        requested_names: impl IntoIterator<Item = &'a str>,
+        scalar_analysis: &str,
+        continuous_analysis: &str,
+        segment_starts: &[usize],
+        mut evaluate_continuous: F,
+    ) -> Result<BTreeMap<String, Vec<(usize, Value)>>, String>
+    where
+        F: FnMut(&Netlist) -> Vec<crate::analysis::ContinuousMeasureResult>,
+    {
+        let requested = requested_names
+            .into_iter()
+            .map(str::to_ascii_uppercase)
+            .collect::<BTreeSet<_>>();
+        let mut traces = BTreeMap::new();
+
+        for (statement_index, statement) in netlist.measurements.iter().enumerate() {
+            let normalized_name = statement.name.to_ascii_uppercase();
+            if !requested.contains(&normalized_name)
+                || !(statement.analysis.eq_ignore_ascii_case(scalar_analysis)
+                    || statement.analysis.eq_ignore_ascii_case(continuous_analysis))
+            {
+                continue;
+            }
+
+            let mut trace_netlist = netlist.clone();
+            let trace_statement = &mut trace_netlist.measurements[statement_index];
+            trace_statement.analysis = continuous_analysis.to_string();
+            // Xyce's live state for a negative occurrence is a rolling Nth
+            // event from the end of the events accepted so far.  Ask the
+            // continuous evaluator for the complete stream and apply that
+            // lag after mapping events to accepted-point traversal order.
+            let occurrence = match &mut trace_statement.measure_type {
+                crate::analysis::MeasureType::When { condition, .. }
+                | crate::analysis::MeasureType::Find {
+                    when: Some(condition),
+                    ..
+                }
+                | crate::analysis::MeasureType::Derivative {
+                    when: Some(condition),
+                    ..
+                } => {
+                    let number = condition.occurrence.number;
+                    if number < 0 {
+                        condition.occurrence.number = 1;
+                    }
+                    Some(number)
+                }
+                _ => None,
+            };
+            let result_index = trace_netlist.measurements[..=statement_index]
+                .iter()
+                .filter(|candidate| candidate.analysis.eq_ignore_ascii_case(continuous_analysis))
+                .count()
+                - 1;
+            let evaluated = evaluate_continuous(&trace_netlist);
+            let measurement = evaluated.get(result_index).ok_or_else(|| {
+                format!(
+                    "{scalar_analysis} measurement trace evaluator omitted declaration '{}'",
+                    statement.name
+                )
+            })?;
+            if let Some(failure) = &measurement.failure {
+                // A failed measure remains a valid printed column initialized
+                // to zero until and unless it produces an event.
+                if measurement.records.is_empty() {
+                    traces.insert(normalized_name, Vec::new());
+                    continue;
+                }
+                return Err(format!(
+                    "{scalar_analysis} measurement trace '{}' failed after producing records: {failure}",
+                    statement.name
+                ));
+            }
+
+            let mut minimum_index = 0usize;
+            let mut events = Vec::with_capacity(measurement.records.len());
+            for record in &measurement.records {
+                let activation_index = Self::continuous_record_activation_index(
+                    accepted_axis,
+                    segment_starts,
+                    record,
+                    minimum_index,
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "{scalar_analysis} measurement trace '{}' event metadata does not map to the accepted-point traversal",
+                        statement.name
+                    )
+                })?;
+                events.push((activation_index, record.value));
+                minimum_index = activation_index.saturating_add(1);
+            }
+
+            let trace = if occurrence.is_some_and(|number| number < 0) {
+                let number = occurrence.expect("negative occurrence was checked");
+                let lag = number
+                    .checked_abs()
+                    .and_then(|number| usize::try_from(number - 1).ok())
+                    .ok_or_else(|| {
+                        format!(
+                            "{scalar_analysis} measurement '{}' has an unrepresentable occurrence {number}",
+                            statement.name
+                        )
+                    })?;
+                events
+                    .iter()
+                    .skip(lag)
+                    .zip(&events)
+                    .map(|((activation_index, _), (_, value))| (*activation_index, *value))
+                    .collect()
+            } else if statement.analysis.eq_ignore_ascii_case(scalar_analysis) {
+                events.into_iter().take(1).collect()
+            } else {
+                events
+            };
+            traces.insert(normalized_name, trace);
+        }
+
+        Ok(traces)
+    }
+
+    fn continuous_record_activation_index(
+        accepted_axis: &[Value],
+        segment_starts: &[usize],
+        record: &crate::analysis::ContinuousMeasureRecord,
+        minimum_index: usize,
+    ) -> Option<usize> {
+        let locate = |event_axis| {
+            Self::accepted_point_activation_index(
+                accepted_axis,
+                segment_starts,
+                event_axis,
+                minimum_index,
+            )
+        };
+        if let Some(event_axis) = record.event_axis {
+            return locate(event_axis);
+        }
+        match (record.trigger_axis, record.target_axis) {
+            (Some(trigger), Some(target)) => Some(locate(trigger)?.max(locate(target)?)),
+            (Some(trigger), None) => locate(trigger),
+            (None, Some(target)) => locate(target),
+            (None, None) => None,
+        }
+    }
+
+    fn accepted_point_activation_index(
+        accepted_axis: &[Value],
+        segment_starts: &[usize],
+        event_axis: Value,
+        minimum_index: usize,
+    ) -> Option<usize> {
+        if !event_axis.is_finite() || minimum_index >= accepted_axis.len() {
+            return None;
+        }
+        let segment_starts = segment_starts.iter().copied().collect::<BTreeSet<_>>();
+        for index in minimum_index..accepted_axis.len() {
+            let axis = accepted_axis[index];
+            let scale = axis.abs().max(event_axis.abs()).max(1.0);
+            if (axis - event_axis).abs() <= 32.0 * f64::EPSILON * scale {
+                return Some(index);
+            }
+            if index == 0 || segment_starts.contains(&index) {
+                continue;
+            }
+            let previous = accepted_axis[index - 1];
+            if event_axis >= previous.min(axis) && event_axis <= previous.max(axis) {
+                return Some(index);
+            }
+        }
+        None
+    }
+
     fn compare_ac_data_prn_reference(
         &self,
         reference: &XycePrnTable,
@@ -19279,6 +19505,25 @@ impl XyceTestRunner {
         let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
         let equation_traces =
             crate::analysis::advanced::evaluate_ac_equation_measurements(netlist, results)?;
+        let measurement_output_traces = Self::measurement_output_traces(
+            netlist,
+            &results
+                .iter()
+                .map(|result| result.frequency)
+                .collect::<Vec<_>>(),
+            data_columns.iter().filter_map(|column| {
+                (column.component() == XyceAcProbeComponent::Scalar).then_some(column.probe_name())
+            }),
+            "AC",
+            "AC_CONT",
+            &[],
+            |trace_netlist| {
+                crate::analysis::advanced::evaluate_ac_continuous_measurements(
+                    trace_netlist,
+                    results,
+                )
+            },
+        )?;
         let phase_output_radians = Self::source_requests_ac_phase_output_radians(source);
         let comp_columns = data_columns
             .iter()
@@ -19360,6 +19605,16 @@ impl XyceTestRunner {
                             trace.name, row_index
                         )
                     })?
+                } else if column.component() == XyceAcProbeComponent::Scalar
+                    && let Some(trace) =
+                        measurement_output_traces.get(&column.probe_name().to_ascii_uppercase())
+                {
+                    trace
+                        .iter()
+                        .filter(|(activation_index, _)| row_index >= *activation_index)
+                        .map(|(_, value)| *value)
+                        .next_back()
+                        .unwrap_or(0.0)
                 } else {
                     Self::evaluate_ac_reference_column(
                         column,
@@ -22862,6 +23117,9 @@ impl XyceTestRunner {
     }
 
     fn validate_ac_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
+        if Self::probe_names_live_measurement(probe, netlist, "AC", "AC_CONT") {
+            return Ok(());
+        }
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
             if Self::braced_expression_is_atomic_ac_probe(&normalized_expression, netlist) {
@@ -23509,6 +23767,9 @@ impl XyceTestRunner {
     }
 
     fn validate_dc_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
+        if Self::probe_names_live_measurement(probe, netlist, "DC", "DC_CONT") {
+            return Ok(());
+        }
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
             if Self::braced_expression_is_atomic_real_probe(&normalized_expression, netlist) {
@@ -23526,6 +23787,30 @@ impl XyceTestRunner {
 
         let normalized = Self::normalize_probe(probe);
         Self::validate_atomic_dc_probe(&normalized, probe, netlist)
+    }
+
+    fn probe_names_live_measurement(
+        probe: &str,
+        netlist: &Netlist,
+        scalar_analysis: &str,
+        continuous_analysis: &str,
+    ) -> bool {
+        let candidate = Self::print_expression_inner(probe).unwrap_or(probe).trim();
+        netlist.measurements.iter().any(|measurement| {
+            measurement.name.eq_ignore_ascii_case(candidate)
+                && (measurement.analysis.eq_ignore_ascii_case(scalar_analysis)
+                    || measurement
+                        .analysis
+                        .eq_ignore_ascii_case(continuous_analysis))
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Equation { .. }
+                        | crate::analysis::MeasureType::Find { .. }
+                        | crate::analysis::MeasureType::Derivative { .. }
+                        | crate::analysis::MeasureType::When { .. }
+                        | crate::analysis::MeasureType::Delay { .. }
+                )
+        })
     }
 
     fn validate_atomic_dc_probe(
@@ -32592,6 +32877,97 @@ mod tests {
         assert_eq!(traces["SUFFIX"], vec![(2.5, 30.0), (3.5, 50.0)]);
         assert_eq!(traces["LAST"], vec![(1.5, 10.0), (2.5, 30.0), (3.5, 50.0)]);
         assert_eq!(traces["ROLLING"], vec![(2.5, 10.0), (3.5, 30.0)]);
+    }
+
+    #[test]
+    fn accepted_point_activation_follows_descending_nested_sweep_traversal() {
+        let axis = [3.0, 2.0, 1.0, 3.0, 2.0, 1.0];
+        let segment_starts = [3];
+        let first = crate::analysis::ContinuousMeasureRecord {
+            value: 1.5,
+            event_axis: Some(1.5),
+            trigger_axis: None,
+            target_axis: None,
+        };
+        let second = first;
+        let delay = crate::analysis::ContinuousMeasureRecord {
+            value: -1.0,
+            event_axis: None,
+            trigger_axis: Some(2.5),
+            target_axis: Some(1.5),
+        };
+
+        assert_eq!(
+            XyceTestRunner::continuous_record_activation_index(&axis, &segment_starts, &first, 0,),
+            Some(2)
+        );
+        assert_eq!(
+            XyceTestRunner::continuous_record_activation_index(&axis, &segment_starts, &second, 3,),
+            Some(5)
+        );
+        assert_eq!(
+            XyceTestRunner::continuous_record_activation_index(&axis, &segment_starts, &delay, 0,),
+            Some(2),
+            "trigger/target output activates at the later accepted traversal point"
+        );
+    }
+
+    #[test]
+    fn generic_live_measurement_projection_preserves_scalar_continuous_and_rolling_state() {
+        let source = "generic live measurement output\n\
+            .MEASURE AC scalar WHEN VM(e)=0.5 CROSS=1\n\
+            .MEASURE AC_CONT continuous WHEN VM(e)=0.5 CROSS=1\n\
+            .MEASURE AC rolling WHEN VM(e)=0.5 CROSS=-2\n\
+            .END\n";
+        let netlist =
+            XyceTestRunner::parse_xyce_netlist(source, Path::new("generic-live-measurement.cir"))
+                .expect("parse generic live-measurement fixture");
+        let records = vec![
+            crate::analysis::ContinuousMeasureRecord {
+                value: 10.0,
+                event_axis: Some(1.5),
+                trigger_axis: None,
+                target_axis: None,
+            },
+            crate::analysis::ContinuousMeasureRecord {
+                value: 30.0,
+                event_axis: Some(2.5),
+                trigger_axis: None,
+                target_axis: None,
+            },
+            crate::analysis::ContinuousMeasureRecord {
+                value: 50.0,
+                event_axis: Some(3.5),
+                trigger_axis: None,
+                target_axis: None,
+            },
+        ];
+
+        let traces = XyceTestRunner::measurement_output_traces(
+            &netlist,
+            &[1.0, 2.0, 3.0, 4.0],
+            ["scalar", "continuous", "rolling"],
+            "AC",
+            "AC_CONT",
+            &[],
+            |trace_netlist| {
+                trace_netlist
+                    .measurements
+                    .iter()
+                    .filter(|statement| statement.analysis.eq_ignore_ascii_case("AC_CONT"))
+                    .map(|statement| crate::analysis::ContinuousMeasureResult {
+                        name: statement.name.clone(),
+                        records: records.clone(),
+                        failure: None,
+                    })
+                    .collect()
+            },
+        )
+        .expect("project generic live measurement state");
+
+        assert_eq!(traces["SCALAR"], vec![(1, 10.0)]);
+        assert_eq!(traces["CONTINUOUS"], vec![(1, 10.0), (2, 30.0), (3, 50.0)]);
+        assert_eq!(traces["ROLLING"], vec![(2, 10.0), (3, 30.0)]);
     }
 
     #[test]
