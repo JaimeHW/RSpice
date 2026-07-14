@@ -2319,12 +2319,6 @@ impl XyceTestRunner {
                 execution_dir.as_deref(),
             )?
         };
-        if !measurement_reference_paths.is_empty() && static_plan.dc_data.is_some() {
-            return Err(
-                "scalar DC measurement artifact contract does not yet cover .DC DATA sweeps"
-                    .to_string(),
-            );
-        }
         let contract = if let Some(contract) = wrapper_contract {
             self.validate_native_static_prn_wrapper_contract(contract, &static_plan)?;
             contract
@@ -7054,15 +7048,6 @@ impl XyceTestRunner {
         }
 
         if let Some(dc_data) = &plan.dc_data {
-            let Some(reference) = reference.as_ref() else {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    "file-output-only .DC DATA comparison is not implemented".to_string(),
-                    Vec::new(),
-                );
-            };
             let results = match self.run_static_dc_data_results(&netlist, dc_data, start) {
                 Ok(results) => results,
                 Err(SimulationError::Aborted) => {
@@ -7095,24 +7080,58 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let mismatches = match self.compare_dc_data_prn_reference(
-                reference,
-                &plan.print,
-                &plan.source,
-                &plan.dc,
-                &results,
-            ) {
-                Ok(mismatches) => mismatches,
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("reference comparison error: {err}"),
-                        Vec::new(),
-                    );
+            let mut mismatches = if let Some(reference) = reference.as_ref() {
+                match self.compare_dc_data_prn_reference(
+                    reference,
+                    &plan.print,
+                    &plan.source,
+                    &plan.dc,
+                    &results,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("reference comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
                 }
+            } else {
+                Vec::new()
             };
+            if mismatches.is_empty() && !plan.measurement_reference_paths.is_empty() {
+                let measurement_sweep = results
+                    .iter()
+                    .map(|row| (row.point.sweep_value, row.point.result.clone()))
+                    .collect::<Vec<_>>();
+                let measurements = crate::analysis::advanced::evaluate_dc_measurements(
+                    &netlist,
+                    &measurement_sweep,
+                );
+                match self.compare_measurement_references(
+                    &plan.measurement_reference_paths,
+                    &measurements,
+                    plan.measurement_tolerance,
+                    netlist.options.measure_fail_output,
+                    netlist.options.measure_default_value,
+                    "DC",
+                    &netlist.measurements,
+                ) {
+                    Ok(measurement_mismatches) => mismatches.extend(measurement_mismatches),
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("DC DATA measurement reference comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                }
+            }
             return if mismatches.is_empty() {
                 self.passed_result(deck, start, contract)
             } else {
@@ -17330,7 +17349,10 @@ impl XyceTestRunner {
             results.push(XyceDcDataPointResult {
                 netlist: row_netlist,
                 point: DcSweepPointResult {
-                    sweep_value: row_index as Value,
+                    // Xyce exposes .DC DATA's synthetic independent variable
+                    // as the one-based table-row ordinal. This axis drives
+                    // measurement windows and point-event interpolation.
+                    sweep_value: (row_index + 1) as Value,
                     result,
                     device_op_report,
                 },
