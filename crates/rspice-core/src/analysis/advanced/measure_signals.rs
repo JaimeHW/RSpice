@@ -13,7 +13,8 @@
 use std::collections::HashMap;
 
 use super::measure::{
-    MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType, TriggerEvent,
+    ContinuousMeasureResult, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement,
+    MeasureType, TriggerEvent,
 };
 use crate::Value;
 use crate::analysis::AcResult;
@@ -835,6 +836,46 @@ pub fn evaluate_noise_measurements(
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "NOISE");
     results
+}
+
+/// Evaluate vector-valued `.MEASURE NOISE_CONT` point-event statements.
+///
+/// The returned records retain all qualifying event rows; they are not
+/// collapsed to the first scalar result as ordinary NOISE measurements are.
+pub fn evaluate_noise_continuous_measurements(
+    netlist: &Netlist,
+    sweep: &[crate::analysis::NoiseResult],
+) -> Vec<ContinuousMeasureResult> {
+    let statements = measurements_for_analysis(netlist, "NOISE_CONT");
+    if statements.is_empty() {
+        return Vec::new();
+    }
+    let Some(series) = NoiseSweepSeries::from_sweep(sweep) else {
+        return statements
+            .iter()
+            .map(|statement| ContinuousMeasureResult {
+                name: statement.name.clone(),
+                records: Vec::new(),
+                failure: Some("noise sweep produced no points".to_string()),
+            })
+            .collect();
+    };
+    let signals = series.equation_signal_map();
+    let derived = materialize_measure_expression_signals(
+        &statements,
+        series.axis(),
+        &signals,
+        &netlist.params,
+    );
+    let mut augmented_signals = signals;
+    for (name, waveform) in &derived {
+        augmented_signals.insert(name.clone(), waveform.as_slice());
+    }
+    let mut engine = MeasureEngine::new();
+    for statement in statements {
+        engine.add(statement.clone());
+    }
+    engine.evaluate_continuous(series.axis(), &augmented_signals, &[])
 }
 
 /// The netlist's measurement statements for one analysis kind
