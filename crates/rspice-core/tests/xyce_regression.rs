@@ -5879,6 +5879,21 @@ fn test_xyce_ac_error_function_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_stepped_ac_derivative_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_AC/STEP/DerivTestAC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should evaluate and reset AC derivative measurements for every expanded step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_stepped_dc_error_function_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
