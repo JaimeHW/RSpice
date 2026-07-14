@@ -30327,8 +30327,8 @@ impl XyceTestRunner {
             let normalized = declaration.name.to_ascii_uppercase();
             let path = available.remove(&normalized).ok_or_else(|| {
                 format!(
-                    "continuous measurement '{}' has no checked-in sidecar artifact",
-                    declaration.name
+                    "{analysis} measurement '{}' has no checked-in sidecar artifact",
+                    declaration.name,
                 )
             })?;
             paths.push(path);
