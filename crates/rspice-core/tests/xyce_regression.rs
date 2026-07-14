@@ -6085,6 +6085,10 @@ fn test_xyce_unimplemented_noise_surfaces_fail_closed() {
 
     for (relative, reason) in [
         ("Netlists/MEASURE_CONT/DerivTestNoise.cir", "NOISE_CONT"),
+        (
+            "Netlists/MEASURE_NOISE/STEP/DerivTestNoise.cir",
+            ".STEP NOISE DERIV",
+        ),
         ("Netlists/NOISE/commonEmitterBjt.cir", "DNO/DNI"),
         ("Netlists/VANOISE/commonEmitterBjt_vbic13.cir", "DNO/DNI"),
         ("Netlists/VANOISE/ekv_150nm_nmos_noise.cir", "DNO/DNI"),

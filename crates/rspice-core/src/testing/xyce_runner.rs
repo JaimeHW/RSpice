@@ -3348,6 +3348,20 @@ impl XyceTestRunner {
         let (output_node, reference_node, input_source, frequencies) =
             Self::noise_analysis_for_netlist(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
+        if !steps.is_empty()
+            && netlist.measurements.iter().any(|measurement| {
+                measurement.analysis.eq_ignore_ascii_case("NOISE")
+                    && matches!(
+                        measurement.measure_type,
+                        crate::analysis::MeasureType::Derivative { .. }
+                    )
+            })
+        {
+            return Err(
+                "native .STEP NOISE DERIV measurements are not yet qualified to Xyce precision"
+                    .to_string(),
+            );
+        }
 
         let measurement_reference_paths = if netlist
             .measurements
