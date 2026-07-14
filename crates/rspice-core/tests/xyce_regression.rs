@@ -6003,6 +6003,21 @@ fn test_xyce_noise_complex_components_and_measure_consumers() {
 }
 
 #[test]
+fn test_xyce_stepped_noise_find_when_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_NOISE/STEP/FindWhenTestNoise.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should reset and evaluate NOISE FIND/WHEN events and equation consumers for every materialized step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_unimplemented_noise_surfaces_fail_closed() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
