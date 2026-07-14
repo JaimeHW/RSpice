@@ -143,58 +143,74 @@ impl Engine {
             && conductance.is_finite()
             && conductance > 1e-30
         {
-            sources.push(NoiseSource::thermal(
-                format!("{}:id", device.name),
-                device.node_drain,
-                device.node_source,
-                1.0 / conductance,
-            ));
+            sources.push(
+                NoiseSource::thermal(
+                    format!("{}:id", device.name),
+                    device.node_drain,
+                    device.node_source,
+                    1.0 / conductance,
+                )
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                    &device.name,
+                    "ID",
+                )),
+            );
         }
 
         match model.noi_mod {
             1 | 4 | 5 => {
                 let denom = size.leff * size.leff * model.cox;
                 if model.kf > 0.0 && denom > 0.0 && op.cd.abs() > 1e-18 {
-                    sources.push(NoiseSource::flicker_with_frequency_exponent(
-                        format!("{}:flicker", device.name),
-                        device.node_drain,
-                        device.node_source,
-                        mult * model.kf / denom,
-                        model.af,
-                        model.ef,
-                        op.cd,
-                    ));
+                    sources.push(
+                        NoiseSource::flicker_with_frequency_exponent(
+                            format!("{}:flicker", device.name),
+                            device.node_drain,
+                            device.node_source,
+                            mult * model.kf / denom,
+                            model.af,
+                            model.ef,
+                            op.cd,
+                        )
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(&device.name, "FN"),
+                        ),
+                    );
                 }
             }
             2 | 3 | 6 => {
                 let leff_noise = size.leff - 2.0 * model.lintnoi;
                 if leff_noise > 0.0 && op.cd.abs() > 1e-18 {
-                    sources.push(NoiseSource::bsim3_flicker(
-                        format!("{}:flicker", device.name),
-                        device.node_drain,
-                        device.node_source,
-                        Bsim3FlickerNoise {
-                            multiplier: mult,
-                            cd: op.cd,
-                            vds: bias.vds,
-                            vdseff: op.vdseff,
-                            vsattemp: size.vsattemp,
-                            ueff: op.ueff,
-                            abulk: op.abulk,
-                            ab_ov_vgst2vtm: op.ab_ov_vgst2vtm,
-                            vgsteff: op.vgsteff,
-                            leff: size.leff,
-                            leff_noise,
-                            litl: size.litl,
-                            weff: size.weff,
-                            cox: model.cox,
-                            oxide_trap_density_a: model.oxide_trap_density_a,
-                            oxide_trap_density_b: model.oxide_trap_density_b,
-                            oxide_trap_density_c: model.oxide_trap_density_c,
-                            em: model.em,
-                            ef: model.ef,
-                        },
-                    ));
+                    sources.push(
+                        NoiseSource::bsim3_flicker(
+                            format!("{}:flicker", device.name),
+                            device.node_drain,
+                            device.node_source,
+                            Bsim3FlickerNoise {
+                                multiplier: mult,
+                                cd: op.cd,
+                                vds: bias.vds,
+                                vdseff: op.vdseff,
+                                vsattemp: size.vsattemp,
+                                ueff: op.ueff,
+                                abulk: op.abulk,
+                                ab_ov_vgst2vtm: op.ab_ov_vgst2vtm,
+                                vgsteff: op.vgsteff,
+                                leff: size.leff,
+                                leff_noise,
+                                litl: size.litl,
+                                weff: size.weff,
+                                cox: model.cox,
+                                oxide_trap_density_a: model.oxide_trap_density_a,
+                                oxide_trap_density_b: model.oxide_trap_density_b,
+                                oxide_trap_density_c: model.oxide_trap_density_c,
+                                em: model.em,
+                                ef: model.ef,
+                            },
+                        )
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(&device.name, "FN"),
+                        ),
+                    );
                 }
             }
             _ => {}
@@ -712,11 +728,11 @@ impl Engine {
             }
         }
 
-        // Builder-owned classic-MOS series resistors are physical resistor
+        // Builder-owned MOS series resistors are physical resistor
         // stamps, but Xyce exposes their noise under the parent MOS device as
         // its RD/RS mechanisms.  Build the ownership table from device
         // topology rather than inferring arbitrary user resistor names.
-        let classic_mos_series_noise_owners = circuit
+        let mut mos_series_noise_owners = circuit
             .mosfets
             .devices
             .iter()
@@ -734,6 +750,18 @@ impl Engine {
                 ]
             })
             .collect::<HashMap<_, _>>();
+        for mos in &circuit.bsim3v3.devices {
+            mos_series_noise_owners.extend([
+                (
+                    format!("{}.__rd", mos.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RD"),
+                ),
+                (
+                    format!("{}.__rs", mos.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RS"),
+                ),
+            ]);
+        }
 
         // Resistor thermal noise (4kT/R) and model-card flicker noise
         // (resnoise.c), both gated by the per-instance `noisy` switch.
@@ -762,8 +790,7 @@ impl Engine {
 
             let mut source =
                 NoiseSource::thermal(name.clone(), stamp.pp.row, stamp.nn.row, resistance);
-            if let Some(identity) = classic_mos_series_noise_owners.get(&name.to_ascii_lowercase())
-            {
+            if let Some(identity) = mos_series_noise_owners.get(&name.to_ascii_lowercase()) {
                 source.identity = identity.clone();
             }
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
@@ -1661,6 +1688,11 @@ impl Engine {
                 crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
             }));
         }
+        for mos in &circuit.bsim3v3.devices {
+            contribution_catalog.extend(["RD", "RS", "ID", "FN"].map(|mechanism| {
+                crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
+            }));
+        }
         let mut unique_catalog = Vec::with_capacity(contribution_catalog.len());
         for identity in contribution_catalog {
             if !unique_catalog
@@ -2308,7 +2340,9 @@ M1 D G 0 0 NM W=20u L=2u
         assert!(rs > 0.0, "externalized RS must contribute under M1");
         assert!(id > 0.0, "channel thermal noise must contribute under M1");
         assert_eq!(fn_noise, 0.0, "KF=0 keeps valid FN inactive");
-        assert_eq!(contribution("DNO(M1)"), rd + rs + id + fn_noise);
+        let whole = contribution("DNO(M1)");
+        let parts = rd + rs + id + fn_noise;
+        assert!((whole - parts).abs() <= 1.0e-14 * whole.max(parts));
     }
 
     /// Instance DTEMP must heat the channel thermal source and both
@@ -3030,6 +3064,43 @@ Q1 C B 0 QN
             5e-2,
             "bsim3-noimod1",
         );
+    }
+
+    #[test]
+    fn bsim3_noise_catalog_owns_series_sources_and_retains_inactive_flicker() {
+        let deck = bsim3_noise_deck("")
+            .replace("rsh=0", "rsh=100")
+            .replace("NRD=0 NRS=0", "NRD=1 NRS=1");
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("out").expect("output node");
+        let result = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &[1.0e3], 300.15)
+            .expect("noise analysis runs")
+            .into_iter()
+            .next()
+            .expect("one noise point");
+
+        let contribution = |probe: &str| {
+            let probe = crate::analysis::NoiseContributionProbe::parse(probe)
+                .expect("contribution probe parses");
+            result.contribution(&probe).expect("mechanism is valid")
+        };
+        let rd = contribution("DNO(M1,RD)");
+        let rs = contribution("DNO(m1,rs)");
+        let id = contribution("DNO(M1,id)");
+        let fn_noise = contribution("DNO(m1,FN)");
+        assert!(rd > 0.0, "lowered BSIM3 RD must contribute under M1");
+        assert!(rs > 0.0, "lowered BSIM3 RS must contribute under M1");
+        assert!(
+            id > 0.0,
+            "BSIM3 channel thermal noise must contribute under M1"
+        );
+        assert_eq!(fn_noise, 0.0, "KF=0 keeps valid BSIM3 FN inactive");
+        let whole = contribution("DNO(M1)");
+        let parts = rd + rs + id + fn_noise;
+        assert!((whole - parts).abs() <= 1.0e-14 * whole.max(parts));
     }
 
     #[test]
