@@ -3258,16 +3258,18 @@ impl XyceTestRunner {
             );
         }
 
-        let measurement_reference_paths = if netlist
-            .measurements
-            .iter()
-            .any(|measurement| measurement.analysis.eq_ignore_ascii_case("AC"))
-        {
+        let use_continuous_files = netlist.options.measure_use_cont_files();
+        let measurement_reference_paths = if netlist.measurements.iter().any(|measurement| {
+            measurement.print_policy == crate::analysis::MeasurePrintPolicy::All
+                && (measurement.analysis.eq_ignore_ascii_case("AC")
+                    || (!use_continuous_files
+                        && measurement.analysis.eq_ignore_ascii_case("AC_CONT")))
+        }) {
             self.measurement_reference_paths(&deck.path, "ma")?
         } else {
             Vec::new()
         };
-        let continuous_measurement_reference_paths = if netlist.options.measure_use_cont_files() {
+        let continuous_measurement_reference_paths = if use_continuous_files {
             self.continuous_measurement_reference_paths(&deck.path, &netlist, "AC_CONT", "ma")?
         } else {
             Vec::new()
@@ -4284,6 +4286,8 @@ impl XyceTestRunner {
     fn validate_scalar_dc_measurement_wrapper_source(source: &str) -> Result<(), String> {
         let mut primary_print_count = 0usize;
         let mut dc_measurement_count = 0usize;
+        let mut dc_continuous_measurement_count = 0usize;
+        let mut use_continuous_files = None;
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
             if trimmed.is_empty() {
@@ -4311,6 +4315,35 @@ impl XyceTestRunner {
                 }
                 if analysis.eq_ignore_ascii_case("DC") {
                     dc_measurement_count += 1;
+                } else {
+                    dc_continuous_measurement_count += 1;
+                }
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".options") || command.eq_ignore_ascii_case(".option") {
+                let fields = Self::split_print_fields(&trimmed)?;
+                if fields
+                    .get(1)
+                    .is_some_and(|group| group.eq_ignore_ascii_case("MEASURE"))
+                {
+                    for (index, field) in fields.iter().enumerate().skip(2) {
+                        let (name, value) = if let Some((name, value)) = field.split_once('=') {
+                            (name, Some(value))
+                        } else if field.eq_ignore_ascii_case("USE_CONT_FILES")
+                            && fields.get(index + 1).is_some_and(|field| field == "=")
+                        {
+                            (field.as_str(), fields.get(index + 2).map(String::as_str))
+                        } else {
+                            (field.as_str(), None)
+                        };
+                        if name.eq_ignore_ascii_case("USE_CONT_FILES") {
+                            use_continuous_files = match value {
+                                Some("0") => Some(false),
+                                Some("1") => Some(true),
+                                _ => None,
+                            };
+                        }
+                    }
                 }
                 continue;
             }
@@ -4331,9 +4364,11 @@ impl XyceTestRunner {
                 "scalar DC measurement artifact contract requires one primary .PRINT DC statement, found {primary_print_count}"
             ));
         }
-        if dc_measurement_count == 0 {
+        if dc_measurement_count == 0
+            && !(dc_continuous_measurement_count > 0 && use_continuous_files == Some(false))
+        {
             return Err(
-                "scalar DC measurement artifact contract requires at least one .MEASURE DC statement"
+                "DC measurement artifact contract requires a .MEASURE DC statement or an explicit USE_CONT_FILES=0 aggregate with at least one .MEASURE DC_CONT statement"
                     .to_string(),
             );
         }
@@ -32903,6 +32938,82 @@ mod tests {
             ["fixture.cir_second.ma0", "fixture.cir_first.ma0"]
         );
         fs::remove_dir_all(root).expect("remove continuous NOISE fixture");
+    }
+
+    #[test]
+    fn ac_plan_claims_continuous_only_aggregate_when_continuous_files_are_disabled() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-mixed-ac-plan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        let relative = "Netlists/MEASURE_CONT/fixture.cir";
+        let deck_path = root.join(relative);
+        let output = root.join("OutputData/MEASURE_CONT");
+        fs::create_dir_all(deck_path.parent().expect("fixture deck parent"))
+            .expect("create continuous AC netlist directory");
+        fs::create_dir_all(&output).expect("create continuous AC output directory");
+        fs::write(
+            &deck_path,
+            "continuous-only aggregate AC fixture\n\
+             .OPTIONS MEASURE USE_CONT_FILES=0\n\
+             V1 in 0 AC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .AC LIN 2 1 2\n\
+             .PRINT AC VM(out)\n\
+             .MEASURE AC_CONT crossing WHEN VM(out)=0.5\n\
+             .END\n",
+        )
+        .expect("write continuous AC fixture");
+        fs::write(output.join("fixture.cir.ma0"), "CROSSING = 1.0\n")
+            .expect("write aggregate AC measurement artifact");
+        let deck = XyceDeck {
+            path: deck_path,
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+
+        let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+            .static_ac_plan_for_deck(&deck)
+            .expect("continuous-only aggregate AC plan is supported");
+
+        assert_eq!(plan.measurement_reference_paths.len(), 1);
+        assert!(plan.continuous_measurement_reference_paths.is_empty());
+        assert_eq!(
+            plan.measurement_reference_paths[0]
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("fixture.cir.ma0")
+        );
+        fs::remove_dir_all(root).expect("remove continuous AC fixture");
+    }
+
+    #[test]
+    fn dc_wrapper_accepts_continuous_only_aggregate_but_not_split_or_implicit_output() {
+        let common = "V1 out 0 1\n\
+                      .DC V1 0 1 1\n\
+                      .PRINT DC V(out)\n\
+                      .MEASURE DC_CONT crossing WHEN V(out)=0.5\n";
+        let aggregate = format!(
+            "continuous-only aggregate DC fixture\n\
+             .OPTIONS MEASURE USE_CONT_FILES=0\n{common}.END\n"
+        );
+        XyceTestRunner::validate_scalar_dc_measurement_wrapper_source(&aggregate)
+            .expect("explicit aggregate DC_CONT output owns the ordinary .ms0 artifact");
+
+        for options in ["", ".OPTIONS MEASURE USE_CONT_FILES=1\n"] {
+            let source = format!("continuous-only split DC fixture\n{options}{common}.END\n");
+            let error = XyceTestRunner::validate_scalar_dc_measurement_wrapper_source(&source)
+                .expect_err("DC_CONT-only output must not claim an ordinary artifact implicitly");
+            assert!(
+                error.contains("explicit USE_CONT_FILES=0 aggregate"),
+                "{error}"
+            );
+        }
     }
 
     #[test]
