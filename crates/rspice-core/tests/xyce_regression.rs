@@ -6615,6 +6615,21 @@ fn test_xyce_ac_average_measurement_artifact_oracle() {
     assert!(result.mismatches.is_empty());
 }
 
+#[test]
+fn test_xyce_initial_condition_inverter_waveform_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/INIT_CONDS/inv1xIC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should preserve its explicit initial condition and match the transient waveform oracle, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
