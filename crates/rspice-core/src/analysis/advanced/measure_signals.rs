@@ -875,6 +875,7 @@ fn evaluate_statements_with_equation_traces(
     segment_starts: &[usize],
     traces: &[EquationMeasureTrace],
     global_default: Option<Value>,
+    equation_default: Value,
 ) -> Vec<MeasureResult> {
     let equation_positions = traces
         .iter()
@@ -890,7 +891,7 @@ fn evaluate_statements_with_equation_traces(
         .zip(&equation_positions)
         .map(|(trace, position)| {
             let local_default = position.and_then(|position| statements[position].default_value);
-            let default = global_default.or(local_default).unwrap_or(0.0);
+            let default = global_default.or(local_default).unwrap_or(equation_default);
             std::iter::once(default)
                 .chain(
                     trace
@@ -1293,6 +1294,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
             &segment_starts,
             traces,
             netlist.options.measure_default_value,
+            0.0,
         ),
         Err(_) => evaluate_statements_with_segment_starts(
             &statements,
@@ -1428,6 +1430,7 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
             &[],
             traces,
             netlist.options.measure_default_value,
+            -1.0,
         ),
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params),
     };
@@ -1651,6 +1654,8 @@ mod tests {
             "* prior AC equation references\n\
              V1 out 0 AC 1\n\
              .ac lin 3 1 3\n\
+             .measure ac forward_crossing WHEN level=-0.5\n\
+             .measure ac forward_found FIND VM(out) WHEN level=-0.5\n\
              .measure ac level EQN {VM(out)}\n\
              .measure ac crossing WHEN level=0.1\n\
              .measure ac found FIND VM(out) WHEN level=0.1\n\
@@ -1673,6 +1678,8 @@ mod tests {
                 .find(|result| result.name.eq_ignore_ascii_case(name))
                 .expect("named AC measurement")
         };
+        assert_eq!(result("forward_crossing").value, Some(1.5));
+        assert_eq!(result("forward_found").value, Some(0.025));
         assert_eq!(result("level").value, Some(0.15));
         assert_eq!(result("crossing").value, Some(2.5));
         assert_eq!(result("found").value, Some(0.1));
