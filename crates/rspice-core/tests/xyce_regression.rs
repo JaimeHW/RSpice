@@ -6099,7 +6099,10 @@ fn test_xyce_unimplemented_noise_surfaces_fail_closed() {
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
     for (relative, reason) in [
-        ("Netlists/MEASURE_CONT/DerivTestNoise.cir", "NOISE_CONT"),
+        (
+            "Netlists/MEASURE_CONT/DerivTestNoise.cir",
+            "sidecar artifact",
+        ),
         (
             "Netlists/MEASURE_NOISE/STEP/DerivTestNoise.cir",
             ".STEP NOISE DERIV",
