@@ -107,6 +107,8 @@ pub(super) fn generate_noise_file(
         options.runtime_path, options.runtime_path
     )
     .expect("write generated noise imports");
+    out.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n");
+    out.push_str("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;\n\n");
 
     writeln!(
         out,

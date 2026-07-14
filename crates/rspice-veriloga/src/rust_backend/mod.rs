@@ -662,6 +662,14 @@ endmodule
         assert!(noise.contains("GeneratedNoiseKind::White"), "{noise}");
         assert!(noise.contains("GeneratedNoiseKind::Flicker"), "{noise}");
         assert!(
+            noise.contains("const LIMEXP_MAX: f64 = 5.54062238439351e34;"),
+            "{noise}"
+        );
+        assert!(
+            noise.contains("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;"),
+            "{noise}"
+        );
+        assert!(
             noise.contains("Result<GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError>"),
             "{noise}"
         );
