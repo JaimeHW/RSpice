@@ -5924,6 +5924,21 @@ fn test_xyce_noise_equation_measurement_and_waveform_oracle() {
 }
 
 #[test]
+fn test_xyce_stepped_noise_equation_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_NOISE/STEP/EquationEvalTestNoise.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should reset and evaluate NOISE continuous equations for every materialized step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_noise_derivative_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
