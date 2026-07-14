@@ -77,6 +77,227 @@ impl Default for GeneratedDdtCoefficients {
     }
 }
 
+/// Canonical Verilog-A noise primitive represented by generated device code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedNoiseKind {
+    White,
+    Flicker,
+    Table,
+}
+
+/// One endpoint of a generated noise contribution in device-local topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedNoiseEndpoint {
+    /// Index into the generated instance's complete node array. `None` is ground.
+    pub local_node: Option<usize>,
+    pub name: &'static str,
+    pub is_internal: bool,
+}
+
+/// Immutable metadata emitted from a canonical Verilog-A noise contribution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedNoiseDescriptor {
+    pub mechanism: &'static str,
+    pub label: Option<&'static str>,
+    pub kind: GeneratedNoiseKind,
+    pub equation: usize,
+    pub is_current: bool,
+    pub branch_ordinal: Option<usize>,
+    pub pos: GeneratedNoiseEndpoint,
+    pub neg: GeneratedNoiseEndpoint,
+    pub table_len: usize,
+    pub table_log_interp: bool,
+}
+
+/// Evaluated, frequency-independent data for one generated noise primitive.
+///
+/// Table operands retain their canonical flat ordering. Interpretation and
+/// interpolation belong to the analysis layer, not the generated-device ABI.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeneratedNoiseEvaluation {
+    pub active: bool,
+    pub psd: Value,
+    pub exponent: Option<Value>,
+    pub table_operands: Vec<Value>,
+}
+
+/// A generated noise evaluator rejected invalid model state or output.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeneratedNoiseEvaluationError {
+    SourceIndexOutOfRange {
+        index: usize,
+        count: usize,
+    },
+    NonFinite {
+        index: usize,
+        quantity: &'static str,
+        value: Value,
+    },
+    NegativePower {
+        index: usize,
+        value: Value,
+    },
+    InvalidMultiplicity {
+        value: Value,
+    },
+}
+
+impl std::fmt::Display for GeneratedNoiseEvaluationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SourceIndexOutOfRange { index, count } => write!(
+                f,
+                "generated Verilog-A noise source index {index} is outside the {count}-source catalog"
+            ),
+            Self::NonFinite {
+                index,
+                quantity,
+                value,
+            } => write!(
+                f,
+                "generated Verilog-A noise source {index} produced non-finite {quantity} {value}"
+            ),
+            Self::NegativePower { index, value } => write!(
+                f,
+                "generated Verilog-A noise source {index} produced negative power {value}"
+            ),
+            Self::InvalidMultiplicity { value } => write!(
+                f,
+                "generated Verilog-A noise evaluation requires a finite positive multiplicity, found {value}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GeneratedNoiseEvaluationError {}
+
+/// Engine-neutral location at which a generated noise source is applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedNoiseInjection {
+    Current {
+        node_pos: usize,
+        node_neg: usize,
+    },
+    /// A potential-noise EMF applied to the equation for this concrete 1-based
+    /// circuit branch ordinal returned by `CircuitData::allocate_branch`. This
+    /// is not the descriptor's device-local branch ordinal; the analysis layer
+    /// owns its conversion to a matrix axis.
+    Potential {
+        branch: usize,
+    },
+}
+
+/// Canonical descriptor paired with topology mapped to a concrete instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedMappedNoiseDescriptor {
+    pub descriptor: GeneratedNoiseDescriptor,
+    pub injection: GeneratedNoiseInjection,
+}
+
+/// Generated noise topology was inconsistent with its concrete instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GeneratedNoiseTopologyError {
+    LocalNodeOutOfRange {
+        endpoint: &'static str,
+        local_node: usize,
+        node_count: usize,
+    },
+    CurrentSourceHasBranch {
+        branch_ordinal: usize,
+    },
+    PotentialSourceMissingBranch,
+    BranchOrdinalOutOfRange {
+        branch_ordinal: usize,
+        branch_count: usize,
+    },
+}
+
+impl std::fmt::Display for GeneratedNoiseTopologyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LocalNodeOutOfRange {
+                endpoint,
+                local_node,
+                node_count,
+            } => write!(
+                f,
+                "generated Verilog-A noise {endpoint} endpoint references local node {local_node}, but the instance has {node_count} nodes"
+            ),
+            Self::CurrentSourceHasBranch { branch_ordinal } => write!(
+                f,
+                "generated Verilog-A current-noise source unexpectedly references branch ordinal {branch_ordinal}"
+            ),
+            Self::PotentialSourceMissingBranch => write!(
+                f,
+                "generated Verilog-A potential-noise source has no branch equation"
+            ),
+            Self::BranchOrdinalOutOfRange {
+                branch_ordinal,
+                branch_count,
+            } => write!(
+                f,
+                "generated Verilog-A potential-noise source references branch ordinal {branch_ordinal}, but the instance has {branch_count} branches"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GeneratedNoiseTopologyError {}
+
+impl GeneratedNoiseDescriptor {
+    /// Validate and map device-local topology without assuming an engine matrix
+    /// layout. Ground is represented by circuit node zero.
+    pub fn map_topology(
+        self,
+        nodes: &[usize],
+        branches: &[usize],
+    ) -> Result<GeneratedMappedNoiseDescriptor, GeneratedNoiseTopologyError> {
+        // Validate both canonical endpoints even when a potential contribution
+        // is ultimately injected on its branch-equation row. This keeps corrupt
+        // generated metadata from being silently masked by injection topology.
+        let node_pos = map_generated_noise_endpoint(self.pos, "positive", nodes)?;
+        let node_neg = map_generated_noise_endpoint(self.neg, "negative", nodes)?;
+        let injection = if self.is_current {
+            if let Some(branch_ordinal) = self.branch_ordinal {
+                return Err(GeneratedNoiseTopologyError::CurrentSourceHasBranch { branch_ordinal });
+            }
+            GeneratedNoiseInjection::Current { node_pos, node_neg }
+        } else {
+            let branch_ordinal = self
+                .branch_ordinal
+                .ok_or(GeneratedNoiseTopologyError::PotentialSourceMissingBranch)?;
+            let branch = branches.get(branch_ordinal).copied().ok_or(
+                GeneratedNoiseTopologyError::BranchOrdinalOutOfRange {
+                    branch_ordinal,
+                    branch_count: branches.len(),
+                },
+            )?;
+            GeneratedNoiseInjection::Potential { branch }
+        };
+        Ok(GeneratedMappedNoiseDescriptor {
+            descriptor: self,
+            injection,
+        })
+    }
+}
+
+fn map_generated_noise_endpoint(
+    endpoint: GeneratedNoiseEndpoint,
+    endpoint_role: &'static str,
+    nodes: &[usize],
+) -> Result<usize, GeneratedNoiseTopologyError> {
+    endpoint.local_node.map_or(Ok(0), |local_node| {
+        nodes
+            .get(local_node)
+            .copied()
+            .ok_or(GeneratedNoiseTopologyError::LocalNodeOutOfRange {
+                endpoint: endpoint_role,
+                local_node,
+                node_count: nodes.len(),
+            })
+    })
+}
+
 #[cfg(feature = "veriloga-builtins")]
 #[derive(Clone)]
 pub struct BuiltinVerilogAInstance {
@@ -5193,7 +5414,37 @@ impl<'a> GeneratedReactiveStamper<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GeneratedAnalysisKind, GeneratedEvalContext, GeneratedSimulationParameters};
+    use super::{
+        GeneratedAnalysisKind, GeneratedEvalContext, GeneratedNoiseDescriptor,
+        GeneratedNoiseEndpoint, GeneratedNoiseInjection, GeneratedNoiseKind,
+        GeneratedNoiseTopologyError, GeneratedSimulationParameters,
+    };
+
+    fn noise_descriptor(
+        is_current: bool,
+        branch_ordinal: Option<usize>,
+    ) -> GeneratedNoiseDescriptor {
+        GeneratedNoiseDescriptor {
+            mechanism: "WHITE_P_N_SOURCE",
+            label: Some("source"),
+            kind: GeneratedNoiseKind::White,
+            equation: 0,
+            is_current,
+            branch_ordinal,
+            pos: GeneratedNoiseEndpoint {
+                local_node: Some(1),
+                name: "p",
+                is_internal: false,
+            },
+            neg: GeneratedNoiseEndpoint {
+                local_node: None,
+                name: "GND",
+                is_internal: false,
+            },
+            table_len: 0,
+            table_log_interp: false,
+        }
+    }
 
     #[test]
     fn generated_analysis_predicates_match_runtime_contract() {
@@ -5252,5 +5503,85 @@ mod tests {
             simparams,
         );
         assert_eq!(ctx.simparam_or("pnjmaxi", 1.0), 2.5);
+    }
+
+    #[test]
+    fn generated_noise_topology_maps_nodes_and_ground() {
+        let mapped = noise_descriptor(true, None)
+            .map_topology(&[41, 73], &[])
+            .expect("map current noise topology");
+
+        assert_eq!(
+            mapped.injection,
+            GeneratedNoiseInjection::Current {
+                node_pos: 73,
+                node_neg: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn generated_potential_noise_preserves_branch_ordinal_semantics() {
+        let mapped = noise_descriptor(false, Some(1))
+            .map_topology(&[41, 73], &[3, 9])
+            .expect("map potential noise topology");
+
+        assert_eq!(
+            mapped.injection,
+            GeneratedNoiseInjection::Potential { branch: 9 }
+        );
+    }
+
+    #[test]
+    fn generated_noise_topology_rejects_invalid_local_indices() {
+        let error = noise_descriptor(true, None)
+            .map_topology(&[41], &[])
+            .expect_err("invalid local endpoint must fail");
+
+        assert_eq!(
+            error,
+            GeneratedNoiseTopologyError::LocalNodeOutOfRange {
+                endpoint: "positive",
+                local_node: 1,
+                node_count: 1,
+            }
+        );
+
+        let error = noise_descriptor(false, Some(0))
+            .map_topology(&[41], &[3])
+            .expect_err("potential source metadata must validate endpoints");
+        assert_eq!(
+            error,
+            GeneratedNoiseTopologyError::LocalNodeOutOfRange {
+                endpoint: "positive",
+                local_node: 1,
+                node_count: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn generated_noise_topology_rejects_invalid_branch_contracts() {
+        assert_eq!(
+            noise_descriptor(false, None)
+                .map_topology(&[41, 73], &[3])
+                .expect_err("potential source without branch must fail"),
+            GeneratedNoiseTopologyError::PotentialSourceMissingBranch
+        );
+        assert_eq!(
+            noise_descriptor(false, Some(2))
+                .map_topology(&[41, 73], &[3])
+                .expect_err("invalid branch ordinal must fail"),
+            GeneratedNoiseTopologyError::BranchOrdinalOutOfRange {
+                branch_ordinal: 2,
+                branch_count: 1,
+            }
+        );
+        assert_eq!(
+            noise_descriptor(true, Some(0))
+                .map_topology(&[41, 73], &[3])
+                .expect_err("current source branch must fail"),
+            GeneratedNoiseTopologyError::CurrentSourceHasBranch { branch_ordinal: 0 }
+        );
     }
 }

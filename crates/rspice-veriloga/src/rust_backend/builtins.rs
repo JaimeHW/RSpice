@@ -1005,6 +1005,24 @@ fn generate_devices_with_stack(
 mod tests {
     use super::*;
 
+    fn generated_device_fixture(folder_name: &str, public_model_name: &str) -> GeneratedRustDevice {
+        GeneratedRustDevice {
+            module_name: public_model_name.to_string(),
+            public_model_name: public_model_name.to_string(),
+            folder_name: folder_name.to_string(),
+            files: Vec::new(),
+            source_digest: "fixture".to_string(),
+        }
+    }
+
+    fn temporary_registry_root(test_name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rspice-veriloga-{test_name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
+    }
+
     #[test]
     fn builtin_subset_filter_matches_module_without_selecting_siblings() {
         let model_root = Path::new("models");
@@ -1151,6 +1169,67 @@ mod tests {
         reject_legacy_ad_runtime_files(&root).expect("validate generated kernel runtime");
         fs::remove_dir_all(root).expect("remove generated root");
     }
+
+    #[test]
+    fn builtin_registry_dispatches_noise_metadata_and_evaluation_by_variant() {
+        let root = temporary_registry_root("noise-registry");
+        let _ = fs::remove_dir_all(&root);
+        let devices = vec![
+            generated_device_fixture("first_model", "first"),
+            generated_device_fixture("second_model", "second"),
+        ];
+
+        write_registry(&root, &devices).expect("write generated registry");
+        let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
+
+        assert!(
+            registry.contains(
+                "pub fn noise_descriptors(&self) -> &'static [super::GeneratedNoiseDescriptor]"
+            ),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("Self::Device0(_) => &first_model::NOISE_SOURCES"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("Self::Device1(_) => &second_model::NOISE_SOURCES"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains(
+                "Self::Device0(device) => device.evaluate_noise_source(source_index, ctx)"
+            ),
+            "{registry}"
+        );
+        assert!(
+            registry.contains(
+                "Self::Device1(device) => device.evaluate_noise_source(source_index, ctx)"
+            ),
+            "{registry}"
+        );
+
+        fs::remove_dir_all(root).expect("remove registry fixture");
+    }
+
+    #[test]
+    fn empty_builtin_registry_has_total_noise_dispatch_semantics() {
+        let root = temporary_registry_root("empty-noise-registry");
+        let _ = fs::remove_dir_all(&root);
+
+        write_registry(&root, &[]).expect("write empty generated registry");
+        let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
+
+        assert!(registry.contains("        &[]"), "{registry}");
+        assert!(
+            registry.contains(
+                "GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index: source_index, count: 0 }"
+            ),
+            "{registry}"
+        );
+
+        fs::remove_dir_all(root).expect("remove empty registry fixture");
+    }
 }
 
 fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> BuiltinResult<()> {
@@ -1195,6 +1274,45 @@ fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
             )?;
         }
         out.push_str("            (active, snapshot) => *active = snapshot,\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
+    out.push_str(
+        "    pub fn noise_descriptors(&self) -> &'static [super::GeneratedNoiseDescriptor] {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        &[]\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(_) => &{}::NOISE_SOURCES,",
+                device.folder_name
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
+    out.push_str(
+        "    pub fn evaluate_noise_source(&self, source_index: usize, ctx: &super::GeneratedEvalContext<'_>) -> Result<super::GeneratedNoiseEvaluation, super::GeneratedNoiseEvaluationError> {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, ctx);\n");
+        out.push_str(
+            "        Err(super::GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index: source_index, count: 0 })\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.evaluate_noise_source(source_index, ctx),"
+            )?;
+        }
         out.push_str("        }\n");
     }
     out.push_str("    }\n");
