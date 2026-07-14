@@ -163,6 +163,21 @@ fn build(deck: &str) -> Result<rspice_core::CircuitData, String> {
         .map_err(|err| err.to_string())
 }
 
+fn ac_branch_current(deck: &str, branch: &str, frequency: f64) -> rspice_core::Complex64 {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[frequency])
+        .expect("AC converges")
+        .pop()
+        .expect("one AC point");
+    let index = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(branch))
+        .unwrap_or_else(|| panic!("missing {branch} branch in {:?}", result.branch_names));
+    result.currents[index]
+}
+
 #[test]
 fn five_terminal_bjt_syntax_keeps_extra_nodes_and_model_name() {
     let deck = "* five-terminal BJT syntax\n\
@@ -335,6 +350,46 @@ fn ngspice_bjt_level2_runs_as_legacy_gummel_poon_alias() {
         branch_current(&deck, "vb"),
         -5.670_35e-7,
         1.2e-5,
+    );
+}
+
+#[test]
+fn level1_gummel_poon_bias_dependent_transit_time_parameters_stay_legacy() {
+    let deck_for = |transit_params: &str| {
+        format!(
+            "* SPICE Gummel-Poon bias-dependent forward transit time\n\
+             vc c 0 dc 5\n\
+             vb b 0 dc 0.7 ac 1\n\
+             q1 c b 0 qmod\n\
+             .model qmod NPN (IS=1e-16 BF=100 ISE=1e-16 NE=1.5 \
+             VAF=50 TF=1n {transit_params})\n\
+             .op\n\
+             .end\n"
+        )
+    };
+    let ordinary = deck_for("");
+    let bias_dependent = deck_for("XTF=3 VTF=10 ITF=0");
+
+    // XTF/VTF/ITF alter only stored charge. An implicit level-1 card carrying
+    // them must retain the same Gummel-Poon DC transport and base-current model.
+    for branch in ["vc", "vb"] {
+        assert_rel_close(
+            &format!("level-1 GP {branch} DC current"),
+            branch_current(&bias_dependent, branch),
+            branch_current(&ordinary, branch),
+            1.0e-12,
+        );
+    }
+
+    // The parameters must still participate in the legacy dynamic-charge
+    // equation: with ITF=0, XTF scales TF by the VBC-dependent factor.
+    let frequency = 1.0e8;
+    let ordinary_input = ac_branch_current(&ordinary, "vb", frequency);
+    let bias_dependent_input = ac_branch_current(&bias_dependent, "vb", frequency);
+    assert!(
+        bias_dependent_input.im.abs() > ordinary_input.im.abs() * 1.5,
+        "XTF/VTF/ITF should increase the level-1 GP input charge current: \
+         ordinary={ordinary_input:?}, bias-dependent={bias_dependent_input:?}"
     );
 }
 

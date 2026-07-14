@@ -1452,13 +1452,16 @@ impl Bjt {
                 .any(|expected| (level - expected).abs() <= 1e-9);
         }
 
+        // XTF, VTF, and ITF are shared by the SPICE Gummel-Poon model and
+        // VBIC. Their presence therefore cannot select VBIC; explicit VBIC
+        // levels and parameters unique to that family remain authoritative.
         [
             "RCX", "RBI", "RCI", "RS", "RBP", "VO", "GAMM", "HRCF", "AVC1", "AVC2", "TAVC", "CJEP",
             "CJCP", "AJE", "AJC", "ISP", "WSP", "NFP", "IKP", "IBEIP", "IBENP", "IBCIP", "IBCNP",
             "NCIP", "NCNP", "XRE", "XRBI", "XRCI", "XRS", "XVO", "XRBP", "TNF", "XIKF", "XRCX",
             "XRBX", "EAIS", "EANS", "EAP", "CBEO", "CBCO", "QCO", "PS", "MS", "AJS", "WBE", "QTF",
-            "VBBE", "NBBE", "IBBE", "TVBBE1", "TVBBE2", "TNBBE", "EBBE", "XTF", "VTF", "ITF",
-            "CCSO", "QBM", "TD", "RTH", "CTH", "SELFT",
+            "VBBE", "NBBE", "IBBE", "TVBBE1", "TVBBE2", "TNBBE", "EBBE", "CCSO", "QBM", "TD",
+            "RTH", "CTH", "SELFT",
         ]
         .iter()
         .any(|key| params.contains_key(*key))
