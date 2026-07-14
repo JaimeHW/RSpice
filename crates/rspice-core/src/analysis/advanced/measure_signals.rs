@@ -228,14 +228,13 @@ fn evaluate_equation_measurements(
                 from,
                 to,
                 td,
-                default_value,
             } = &statement.measure_type
             else {
                 return None;
             };
-            Some((statement, expression, *from, *to, *td, *default_value))
+            Some((statement, expression, *from, *to, *td))
         })
-        .map(|(statement, expression, from, to, td, default_value)| {
+        .map(|(statement, expression, from, to, td)| {
             let expression = crate::netlist::expr::parse_expression(expression).map_err(|err| {
                 format!(
                     "failed to parse continuous measure '{}': {err}",
@@ -256,7 +255,11 @@ fn evaluate_equation_measurements(
                 from,
                 to,
                 td,
-                current: default_value.unwrap_or(implicit_default),
+                current: netlist
+                    .options
+                    .measure_default_value
+                    .or(statement.default_value)
+                    .unwrap_or(implicit_default),
                 initialized: false,
                 values: Vec::with_capacity(axis.len()),
             })
@@ -772,6 +775,7 @@ fn evaluate_dc_statements_with_equation_traces(
     params: &crate::netlist::ParamContext,
     segment_starts: &[usize],
     traces: &[EquationMeasureTrace],
+    global_default: Option<Value>,
 ) -> Vec<MeasureResult> {
     let equation_positions = traces
         .iter()
@@ -786,12 +790,8 @@ fn evaluate_dc_statements_with_equation_traces(
         .iter()
         .zip(&equation_positions)
         .map(|(trace, position)| {
-            let default = position
-                .and_then(|position| match &statements[position].measure_type {
-                    MeasureType::Equation { default_value, .. } => *default_value,
-                    _ => None,
-                })
-                .unwrap_or(0.0);
+            let local_default = position.and_then(|position| statements[position].default_value);
+            let default = global_default.or(local_default).unwrap_or(0.0);
             std::iter::once(default)
                 .chain(
                     trace
@@ -1157,6 +1157,7 @@ pub fn evaluate_dc_measurements(
             &netlist.params,
             &segment_starts,
             traces,
+            netlist.options.measure_default_value,
         ),
         Err(_) => evaluate_statements_with_segment_starts(
             &statements,
@@ -1446,6 +1447,54 @@ mod tests {
         let signals = series.signal_map();
         assert!(signals.contains_key("TIME"));
         assert_eq!(signals["V(out)"], &[2.5, 2.5][..]);
+    }
+
+    #[test]
+    fn global_measure_default_overrides_equation_local_default() {
+        let netlist = Netlist::parse(
+            "global equation default\n\
+             V1 out 0 0\n\
+             .options measure default_val=-10\n\
+             .dc V1 0 1 1\n\
+             .measure dc outside EQN {V(out)} FROM=2 TO=3 DEFAULT_VAL=2\n\
+             .end\n",
+        )
+        .expect("global measurement default deck parses");
+        let sweep = [0.0, 1.0]
+            .into_iter()
+            .map(|axis| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, axis];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis, point)
+            })
+            .collect::<Vec<_>>();
+
+        let traces =
+            evaluate_dc_equation_measurements(&netlist, &sweep).expect("equation trace evaluates");
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].values, vec![-10.0, -10.0]);
+        assert!(!traces[0].initialized);
+    }
+
+    #[test]
+    fn programmatic_dc_sweeps_do_not_require_a_deck_dc_card() {
+        let netlist = Netlist::parse(
+            "OP-only DC measurement\n\
+             V1 out 0 1\n\
+             .op\n\
+             .measure dc maximum MAX V(out)\n\
+             .end\n",
+        )
+        .expect("OP-only measurement deck parses");
+        let mut point = SimulationResult::new(1, 0);
+        point.node_voltages = vec![0.0, 1.0];
+        point.node_names = vec!["0".to_string(), "out".to_string()];
+
+        let results = evaluate_dc_measurements(&netlist, &[(0.0, point)]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, Some(1.0));
+        assert!(results[0].passed);
     }
 
     #[test]

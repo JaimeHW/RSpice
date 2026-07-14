@@ -202,7 +202,6 @@ pub enum MeasureType {
         from: Option<Value>,
         to: Option<Value>,
         td: Option<Value>,
-        default_value: Option<Value>,
     },
 
     /// Pointwise relative error between two accepted-point waveforms.
@@ -307,6 +306,9 @@ pub struct MeasureStatement {
     /// Allowed deviation from the goal (`TOL=`). Defaults to
     /// max(1% of |goal|, 1e-12) when a goal is given without a tolerance.
     pub tolerance: Option<Value>,
+    /// Per-statement Xyce `DEFAULT_VAL`. The global
+    /// `.OPTIONS MEASURE DEFAULT_VAL` setting takes precedence when present.
+    pub default_value: Option<Value>,
 }
 
 /// Result of a measurement
@@ -1822,6 +1824,7 @@ mod tests {
     #[test]
     fn integration_over_one_selected_sample_is_zero() {
         let statement = MeasureStatement {
+            default_value: None,
             goal: None,
             tolerance: None,
             name: "area".to_string(),
@@ -1848,6 +1851,7 @@ mod tests {
         let statement = MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: "average".to_string(),
             measure_type: MeasureType::Avg {
                 signal: "V(out)".to_string(),
@@ -1873,6 +1877,7 @@ mod tests {
         let statement = |name: &str, analysis: &str| MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: name.to_string(),
             measure_type: MeasureType::Integ {
                 signal: "V(out)".to_string(),
@@ -1902,6 +1907,7 @@ mod tests {
         let statement = MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: "rms".to_string(),
             measure_type: MeasureType::Rms {
                 signal: "V(out)".to_string(),
@@ -1927,6 +1933,7 @@ mod tests {
         let maximum = MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: "maximum".to_string(),
             measure_type: MeasureType::Max {
                 signal: "V(out)".to_string(),
@@ -1939,6 +1946,7 @@ mod tests {
         let peak_to_peak = MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: "peak_to_peak".to_string(),
             measure_type: MeasureType::PeakToPeak {
                 signal: "V(out)".to_string(),
@@ -1966,6 +1974,7 @@ mod tests {
         let statement = MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: "peak_frequency".to_string(),
             measure_type: MeasureType::Max {
                 signal: "V(out)".to_string(),
@@ -1989,6 +1998,7 @@ mod tests {
         MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: "peak".to_string(),
             measure_type: MeasureType::Max {
                 signal: signal.to_string(),
@@ -2118,6 +2128,7 @@ mod tests {
         let statement = MeasureStatement {
             goal: None,
             tolerance: None,
+            default_value: None,
             name: "bad_param".to_string(),
             measure_type: MeasureType::Param {
                 expression: "sqrt(-1)".to_string(),
@@ -2161,6 +2172,7 @@ mod tests {
             analysis: "DC".to_string(),
             goal: None,
             tolerance: None,
+            default_value: None,
         }
     }
 
@@ -2302,6 +2314,7 @@ mod tests {
         let mut signals = HashMap::new();
         signals.insert("CONDITION".to_string(), condition.as_slice());
         let statement = |name: &str, from: Option<Value>, to: Option<Value>| MeasureStatement {
+            default_value: None,
             name: name.to_string(),
             measure_type: MeasureType::When {
                 condition: WhenCondition {
@@ -2348,6 +2361,7 @@ mod tests {
         };
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
+            default_value: None,
             name: "event_axis".to_string(),
             measure_type: MeasureType::When {
                 condition: when.clone(),
@@ -2359,6 +2373,7 @@ mod tests {
             tolerance: None,
         });
         engine.add(MeasureStatement {
+            default_value: None,
             name: "found_value".to_string(),
             measure_type: MeasureType::Find {
                 signal: "FOUND".to_string(),
@@ -2387,6 +2402,7 @@ mod tests {
         let statement =
             |name: &str, edge: EdgeType, number: isize, from: Option<Value>| -> MeasureStatement {
                 MeasureStatement {
+                    default_value: None,
                     name: name.to_string(),
                     measure_type: MeasureType::When {
                         condition: WhenCondition {
@@ -2437,6 +2453,7 @@ mod tests {
         };
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
+            default_value: None,
             name: "inherited_td".to_string(),
             measure_type: MeasureType::Delay {
                 trig: TrigSpec {
@@ -2453,6 +2470,7 @@ mod tests {
             tolerance: None,
         });
         engine.add(MeasureStatement {
+            default_value: None,
             name: "last_is_signed".to_string(),
             measure_type: MeasureType::Delay {
                 trig: TrigSpec {
@@ -2469,6 +2487,7 @@ mod tests {
             tolerance: None,
         });
         engine.add(MeasureStatement {
+            default_value: None,
             name: "unsupported_negative_occurrence".to_string(),
             measure_type: MeasureType::Delay {
                 trig: TrigSpec {

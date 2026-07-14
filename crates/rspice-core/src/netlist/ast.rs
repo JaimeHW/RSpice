@@ -2050,6 +2050,14 @@ impl NonlinearContinuationMode {
 /// All fields are optional - unspecified values use engine defaults.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationOptions {
+    /// Xyce `.OPTIONS MEASURE MEASFAIL`: emit `FAILED` rather than the
+    /// calculation default value in machine-readable measurement files.
+    /// Xyce defaults this to enabled.
+    pub measure_fail_output: Option<bool>,
+    /// Xyce `.OPTIONS MEASURE DEFAULT_VAL`: global measurement initialization
+    /// and failure value. It overrides a per-equation default and defaults to
+    /// zero when `MEASFAIL=0` serializes an unevaluated measurement.
+    pub measure_default_value: Option<Value>,
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
@@ -2153,6 +2161,12 @@ impl SimulationOptions {
 
     /// Merge another options set, preferring values from `other`
     pub fn merge(&mut self, other: &SimulationOptions) {
+        if other.measure_fail_output.is_some() {
+            self.measure_fail_output = other.measure_fail_output;
+        }
+        if other.measure_default_value.is_some() {
+            self.measure_default_value = other.measure_default_value;
+        }
         if other.reltol.is_some() {
             self.reltol = other.reltol;
         }

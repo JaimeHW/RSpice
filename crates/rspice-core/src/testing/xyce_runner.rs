@@ -5783,6 +5783,10 @@ impl XyceTestRunner {
                 &plan.measurement_reference_paths,
                 &measurements,
                 plan.measurement_tolerance,
+                netlist.options.measure_fail_output,
+                netlist.options.measure_default_value,
+                "AC",
+                &netlist.measurements,
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -5930,6 +5934,10 @@ impl XyceTestRunner {
                     &plan.measurement_reference_paths,
                     &measurements,
                     plan.measurement_tolerance,
+                    netlist.options.measure_fail_output,
+                    netlist.options.measure_default_value,
+                    "AC",
+                    &netlist.measurements,
                 ) {
                     Ok(mismatches) => mismatches,
                     Err(err) => {
@@ -6492,6 +6500,10 @@ impl XyceTestRunner {
                 std::slice::from_ref(reference_path),
                 &measurements,
                 plan.measurement_tolerance,
+                run.netlist.options.measure_fail_output,
+                run.netlist.options.measure_default_value,
+                "AC",
+                &run.netlist.measurements,
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -7184,12 +7196,27 @@ impl XyceTestRunner {
                 .iter()
                 .map(|point| (point.sweep_value, point.result.clone()))
                 .collect::<Vec<_>>();
-            let measurements =
-                crate::analysis::advanced::evaluate_dc_measurements(&netlist, &measurement_sweep);
+            let measurements = if netlist
+                .analyses
+                .iter()
+                .any(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            {
+                crate::analysis::advanced::evaluate_dc_measurements(&netlist, &measurement_sweep)
+            } else {
+                crate::analysis::advanced::unevaluated_measurements(
+                    &netlist,
+                    "DC",
+                    "DC measurement requires an explicit .DC analysis",
+                )
+            };
             let measurement_mismatches = match self.compare_measurement_references(
                 &plan.measurement_reference_paths,
                 &measurements,
                 plan.measurement_tolerance,
+                netlist.options.measure_fail_output,
+                netlist.options.measure_default_value,
+                "DC",
+                &netlist.measurements,
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -8732,14 +8759,31 @@ impl XyceTestRunner {
                 .iter()
                 .map(|point| (point.sweep_value, point.result.clone()))
                 .collect::<Vec<_>>();
-            let measurements = crate::analysis::advanced::evaluate_dc_measurements(
-                &run.netlist,
-                &measurement_sweep,
-            );
+            let measurements = if run
+                .netlist
+                .analyses
+                .iter()
+                .any(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            {
+                crate::analysis::advanced::evaluate_dc_measurements(
+                    &run.netlist,
+                    &measurement_sweep,
+                )
+            } else {
+                crate::analysis::advanced::unevaluated_measurements(
+                    &run.netlist,
+                    "DC",
+                    "DC measurement requires an explicit .DC analysis",
+                )
+            };
             let mut mismatches = match self.compare_measurement_references(
                 std::slice::from_ref(reference_path),
                 &measurements,
                 plan.measurement_tolerance,
+                run.netlist.options.measure_fail_output,
+                run.netlist.options.measure_default_value,
+                "DC",
+                &run.netlist.measurements,
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -12208,6 +12252,8 @@ impl XyceTestRunner {
         lte_reference: Option<TransientLteReference>,
     ) -> bool {
         let crate::netlist::SimulationOptions {
+            measure_fail_output: _,
+            measure_default_value: _,
             reltol,
             abstol,
             vntol,
@@ -25983,10 +26029,18 @@ impl XyceTestRunner {
         context.set("TIME", time);
         for measurement in &netlist.measurements {
             if measurement.analysis.eq_ignore_ascii_case("TRAN") {
-                if let crate::analysis::MeasureType::Equation { default_value, .. } =
-                    &measurement.measure_type
-                {
-                    context.set(&measurement.name, default_value.unwrap_or(-1.0));
+                if matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Equation { .. }
+                ) {
+                    context.set(
+                        &measurement.name,
+                        netlist
+                            .options
+                            .measure_default_value
+                            .or(measurement.default_value)
+                            .unwrap_or(-1.0),
+                    );
                 }
             }
         }
@@ -27566,6 +27620,10 @@ impl XyceTestRunner {
         paths: &[PathBuf],
         actual: &[crate::analysis::MeasureResult],
         tolerance: XyceFileCompareTolerance,
+        measure_fail_output: Option<bool>,
+        measure_default_value: Option<Value>,
+        analysis: &str,
+        declarations: &[crate::analysis::MeasureStatement],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         if paths.len() != 1 {
             return Err(format!(
@@ -27602,13 +27660,26 @@ impl XyceTestRunner {
                     value: expected_value,
                     quantization,
                 } => {
-                    let Some(actual_value) = result.value else {
-                        return Err(format!(
-                            "measurement '{}' was expected to evaluate to {} but FAILED: {}",
-                            reference.name,
-                            expected_value,
-                            result.error.as_deref().unwrap_or("no failure reason")
-                        ));
+                    let actual_value = match result.value {
+                        Some(value) => value,
+                        None if measure_fail_output == Some(false) => {
+                            let local_default = declarations
+                                .iter()
+                                .find(|statement| {
+                                    statement.name.eq_ignore_ascii_case(&reference.name)
+                                        && statement.analysis.eq_ignore_ascii_case(analysis)
+                                })
+                                .and_then(|statement| statement.default_value);
+                            measure_default_value.or(local_default).unwrap_or(0.0)
+                        }
+                        None => {
+                            return Err(format!(
+                                "measurement '{}' was expected to evaluate to {} but FAILED: {}",
+                                reference.name,
+                                expected_value,
+                                result.error.as_deref().unwrap_or("no failure reason")
+                            ));
+                        }
                     };
                     let absolute_error = (expected_value - actual_value).abs();
                     let relative_error = if expected_value == 0.0 {
@@ -30429,6 +30500,60 @@ mod tests {
             XyceTestRunner::measurement_literal_quantization("FAILED"),
             None
         );
+    }
+
+    #[test]
+    fn failed_measurement_projection_honors_local_and_global_defaults() {
+        let netlist = Netlist::parse(
+            "measurement defaults\n\
+             V1 1 0 1\n\
+             .dc V1 0 1 1\n\
+             .measure dc local AVG V(1) FROM=2 DEFAULT_VAL=-9\n\
+             .end\n",
+        )
+        .expect("local measurement default parses");
+        let actual = [crate::analysis::MeasureResult::failed(
+            "LOCAL",
+            "empty range",
+        )];
+        let path = std::env::temp_dir().join(format!(
+            "rspice-measure-default-{}-{}.ms0",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+        std::fs::write(&path, "LOCAL = -9.000000e+00\n").expect("write local-default artifact");
+        let local = runner
+            .compare_measurement_references(
+                std::slice::from_ref(&path),
+                &actual,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                Some(false),
+                None,
+                "DC",
+                &netlist.measurements,
+            )
+            .expect("local default projects failed measurement");
+        assert!(local.is_empty());
+
+        std::fs::write(&path, "LOCAL = -1.000000e+01\n").expect("write global-default artifact");
+        let global = runner
+            .compare_measurement_references(
+                std::slice::from_ref(&path),
+                &actual,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                Some(false),
+                Some(-10.0),
+                "DC",
+                &netlist.measurements,
+            )
+            .expect("global default overrides local default");
+        assert!(global.is_empty());
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
