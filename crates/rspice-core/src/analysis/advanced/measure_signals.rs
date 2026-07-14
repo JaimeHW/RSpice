@@ -751,10 +751,19 @@ impl NoiseSweepSeries {
         }
         Some(Self {
             axis: sweep.iter().map(|point| point.frequency).collect(),
-            onoise: sweep.iter().map(|point| point.output_noise_rms()).collect(),
+            // Xyce passes the total one-sided power spectral densities directly
+            // to the ONOISE and INOISE operators.  The exported
+            // `*_SPECTRUM` columns therefore have units of V^2/Hz (or the
+            // corresponding input-referred units), not amplitude-density
+            // units.  Keep square-root conversion confined to the explicit
+            // `NoiseResult::*_rms` convenience methods.
+            onoise: sweep
+                .iter()
+                .map(|point| point.output_noise_density)
+                .collect(),
             inoise: sweep
                 .iter()
-                .map(|point| point.input_referred_rms())
+                .map(|point| point.input_referred_density)
                 .collect(),
             projections,
         })
@@ -1673,10 +1682,10 @@ mod tests {
             signals["IDB(V1)"],
             &[20.0 * 2.0_f64.log10(), 20.0 * 5.0_f64.log10()]
         );
-        assert_eq!(signals["ONOISE"], &[2.0, 2.0]);
-        assert_eq!(signals["ONOISE_SPECTRUM"], &[2.0, 2.0]);
-        assert_eq!(signals["INOISE"], &[3.0, 3.0]);
-        assert_eq!(signals["INOISE_SPECTRUM"], &[3.0, 3.0]);
+        assert_eq!(signals["ONOISE"], &[4.0, 4.0]);
+        assert_eq!(signals["ONOISE_SPECTRUM"], &[4.0, 4.0]);
+        assert_eq!(signals["INOISE"], &[9.0, 9.0]);
+        assert_eq!(signals["INOISE_SPECTRUM"], &[9.0, 9.0]);
         assert_eq!(signals["HERTZ"], &[10.0, 20.0]);
 
         let equation_signals = series.equation_signal_map();
