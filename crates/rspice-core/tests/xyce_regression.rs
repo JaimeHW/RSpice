@@ -5924,6 +5924,21 @@ fn test_xyce_dc_continuous_measurement_sidecar_oracle() {
 }
 
 #[test]
+fn test_xyce_ac_continuous_trigger_target_mixed_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_CONT/TrigTargTestAC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should compare declaration-ordered AC_CONT trigger/target records and metadata in the aggregate artifact, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_noise_continuous_find_when_mixed_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
