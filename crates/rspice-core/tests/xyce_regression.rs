@@ -7192,6 +7192,30 @@ fn test_xyce_delimited_expression_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_age_cap_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        ("Netlists/AGECAP/agecap_master.cir", "age_cap_family_anchor"),
+        ("Netlists/AGECAP/agecap.cir", "age_cap_family_aged_baseline"),
+        (
+            "Netlists/AGECAP/agecap_ref.cir",
+            "age_cap_family_equivalent_member",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should reproduce its AGE/D-equivalent representation through independently simulated exact default PRN output, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_subcircuit_parameter_resolution_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
