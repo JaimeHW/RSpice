@@ -70,9 +70,9 @@ impl RecoveryCandidate {
     pub(crate) fn can_discard(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return self.binding.as_ref().is_some_and(|binding| {
+            self.binding.as_ref().is_some_and(|binding| {
                 matches!(binding.ownership, CheckpointOwnership::Managed { .. })
-            });
+            })
         }
         #[cfg(target_arch = "wasm32")]
         false
@@ -81,10 +81,9 @@ impl RecoveryCandidate {
     pub(crate) fn is_legacy_checkpoint(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return self
-                .binding
+            self.binding
                 .as_ref()
-                .is_some_and(|binding| matches!(binding.ownership, CheckpointOwnership::Legacy));
+                .is_some_and(|binding| matches!(binding.ownership, CheckpointOwnership::Legacy))
         }
         #[cfg(target_arch = "wasm32")]
         false
@@ -447,7 +446,7 @@ fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> 
                 "Recovery checkpoint identity no longer matches its saved source".to_owned(),
             );
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -694,7 +693,10 @@ fn build_comparison_workspace(
     workspace.set_active_dirty(true);
 
     if let Some(mut baseline) = baseline {
-        const BASELINE_LIBRARY: &str = "Recovery baseline";
+        // Library/cell/view identifiers are persisted slash-delimited keys and
+        // therefore follow the same alphanumeric/underscore contract as the
+        // library dialogs. Keep the human-readable role in metadata below.
+        const BASELINE_LIBRARY: &str = "recovery_baseline";
         const BASELINE_CELL: &str = "saved_baseline";
         const BASELINE_VIEW: &str = "schematic";
         let mut cell = Cell::new(BASELINE_CELL);
@@ -705,6 +707,9 @@ fn build_comparison_workspace(
         library
             .metadata
             .insert("role".to_owned(), "immutable recovery baseline".to_owned());
+        library
+            .metadata
+            .insert("display_name".to_owned(), "Recovery baseline".to_owned());
         libraries.add_library(library);
 
         baseline.is_dirty = false;
@@ -815,7 +820,7 @@ mod tests {
         assert_eq!(comparison.workspace.open_views.len(), 2);
         let baseline_library = comparison
             .libraries
-            .get_library("Recovery baseline")
+            .get_library("recovery_baseline")
             .expect("baseline library exists");
         assert!(baseline_library.read_only);
         assert!(comparison.workspace.any_dirty());

@@ -1,17 +1,29 @@
 use std::path::{Path, PathBuf};
 
-use super::EngineBridge;
+use rspice_core::abort_signal::AbortSignal;
+
+use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::runner::SimulationError;
 
 impl EngineBridge {
-    pub(super) fn parse_netlist_with_source_path(
+    pub(super) fn parse_netlist_with_abort_and_source_path(
         &self,
         netlist_str: &str,
         source_path: Option<&Path>,
+        abort: &dyn AbortSignal,
     ) -> Result<rspice_core::Netlist, SimulationError> {
+        ensure_not_aborted(abort)?;
         let parse_source = Self::netlist_parse_source(source_path);
-        rspice_core::Netlist::parse_with_path(netlist_str, &parse_source)
-            .map_err(|e| SimulationError::ParseError(e.to_string()))
+        let parsed =
+            rspice_core::Netlist::parse_with_path_and_abort(netlist_str, &parse_source, abort)
+                .map_err(|error| match error {
+                    rspice_core::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+                    rspice_core::netlist::ParseWithAbortError::Parse(error) => {
+                        SimulationError::ParseError(error.to_string())
+                    }
+                });
+        ensure_not_aborted(abort)?;
+        parsed
     }
 
     fn netlist_parse_source(source_path: Option<&Path>) -> PathBuf {

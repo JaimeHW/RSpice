@@ -403,19 +403,231 @@ pub fn store_key(raw: &str) -> std::io::Result<()> {
     let Some(path) = license_file_path() else {
         return Err(std::io::Error::other("no config directory"));
     };
+    store_key_to_path(&path, raw)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn store_key_to_path(path: &std::path::Path, raw: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, raw.trim())
+    #[cfg(unix)]
+    tighten_existing_license_permissions(path)?;
+    let expected = crate::io::durable_file::observe_expected_content(path)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let encoded = encode_stored_key(raw.trim())?;
+    publish_stored_key(path, expected, &encoded)
 }
 
 /// Load and verify a previously stored key (native).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_stored() -> Option<(String, LicenseInfo)> {
     let path = license_file_path()?;
-    let raw = std::fs::read_to_string(path).ok()?;
+    load_stored_from_path(&path)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_stored_from_path(path: &std::path::Path) -> Option<(String, LicenseInfo)> {
+    #[cfg(unix)]
+    {
+        tighten_existing_license_permissions(path).ok()?;
+        crate::io::durable_file::reconcile_publication(path).ok()?;
+    }
+    #[cfg(windows)]
+    let expected = crate::io::durable_file::observe_expected_content(path).ok()?;
+    let stored = std::fs::read(path).ok()?;
+    let (raw, legacy_plaintext) = decode_stored_key(&stored).ok()?;
     let info = parse_and_verify(&raw).ok()?;
+    #[cfg(windows)]
+    if legacy_plaintext {
+        let encrypted = encode_stored_key(raw.trim()).ok()?;
+        publish_stored_key(path, expected, &encrypted).ok()?;
+    }
+    #[cfg(not(windows))]
+    let _ = legacy_plaintext;
     Some((raw, info))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn publish_stored_key(
+    path: &std::path::Path,
+    expected: crate::io::durable_file::ExpectedContent,
+    encoded: &[u8],
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        crate::io::durable_file::compare_exchange_bytes_owner_only(path, expected, encoded)
+            .map_err(|error| std::io::Error::other(error.to_string()))
+    }
+    #[cfg(windows)]
+    {
+        // DPAPI ciphertext is safe to place in the generic durable staging
+        // and recovery machinery; plaintext never reaches those files.
+        crate::io::durable_file::compare_exchange_bytes(path, expected, encoded)
+            .map_err(|error| std::io::Error::other(error.to_string()))
+    }
+}
+
+#[cfg(unix)]
+fn tighten_existing_license_permissions(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+    let named = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !named.file_type().is_file() || named.nlink() != 1 {
+        return Err(std::io::Error::other(format!(
+            "license path '{}' is not one private regular file",
+            path.display()
+        )));
+    }
+    let file = std::fs::File::open(path)?;
+    let opened = file.metadata()?;
+    if opened.dev() != named.dev() || opened.ino() != named.ino() || opened.nlink() != 1 {
+        return Err(std::io::Error::other(format!(
+            "license path '{}' changed while permissions were checked",
+            path.display()
+        )));
+    }
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    file.sync_all()
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(windows)))]
+fn encode_stored_key(raw: &str) -> std::io::Result<Vec<u8>> {
+    Ok(raw.as_bytes().to_vec())
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(windows)))]
+fn decode_stored_key(stored: &[u8]) -> std::io::Result<(String, bool)> {
+    String::from_utf8(stored.to_vec())
+        .map(|raw| (raw, false))
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
+#[cfg(windows)]
+const WINDOWS_DPAPI_PREFIX: &[u8] = b"RSPICE-LICENSE-DPAPI\0\x01";
+
+#[cfg(windows)]
+fn encode_stored_key(raw: &str) -> std::io::Result<Vec<u8>> {
+    let ciphertext = windows_dpapi_protect(raw.as_bytes())?;
+    let total = WINDOWS_DPAPI_PREFIX
+        .len()
+        .checked_add(ciphertext.len())
+        .ok_or_else(|| std::io::Error::other("encrypted license size overflow"))?;
+    let mut encoded = Vec::new();
+    encoded.try_reserve_exact(total).map_err(|error| {
+        std::io::Error::other(format!("could not allocate encrypted license: {error}"))
+    })?;
+    encoded.extend_from_slice(WINDOWS_DPAPI_PREFIX);
+    encoded.extend_from_slice(&ciphertext);
+    Ok(encoded)
+}
+
+#[cfg(windows)]
+fn decode_stored_key(stored: &[u8]) -> std::io::Result<(String, bool)> {
+    let Some(ciphertext) = stored.strip_prefix(WINDOWS_DPAPI_PREFIX) else {
+        return String::from_utf8(stored.to_vec())
+            .map(|raw| (raw, true))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error));
+    };
+    let plaintext = windows_dpapi_unprotect(ciphertext)?;
+    String::from_utf8(plaintext)
+        .map(|raw| (raw, false))
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
+#[cfg(windows)]
+fn windows_dpapi_protect(plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
+    use windows_sys::Win32::Security::Cryptography::{
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData,
+    };
+
+    let input_len = u32::try_from(plaintext.len())
+        .map_err(|_| std::io::Error::other("license key is too large for DPAPI"))?;
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: input_len,
+        pbData: plaintext.as_ptr().cast_mut(),
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    let succeeded = unsafe {
+        CryptProtectData(
+            &input,
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+    };
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    copy_and_free_dpapi_blob(output)
+}
+
+#[cfg(windows)]
+fn windows_dpapi_unprotect(ciphertext: &[u8]) -> std::io::Result<Vec<u8>> {
+    use windows_sys::Win32::Security::Cryptography::{
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
+    };
+
+    let input_len = u32::try_from(ciphertext.len())
+        .map_err(|_| std::io::Error::other("encrypted license is too large for DPAPI"))?;
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: input_len,
+        pbData: ciphertext.as_ptr().cast_mut(),
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    let succeeded = unsafe {
+        CryptUnprotectData(
+            &input,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+    };
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    copy_and_free_dpapi_blob(output)
+}
+
+#[cfg(windows)]
+fn copy_and_free_dpapi_blob(
+    blob: windows_sys::Win32::Security::Cryptography::CRYPT_INTEGER_BLOB,
+) -> std::io::Result<Vec<u8>> {
+    use windows_sys::Win32::Foundation::LocalFree;
+
+    struct LocalBlob(*mut u8);
+    impl Drop for LocalBlob {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0.cast());
+                }
+            }
+        }
+    }
+
+    let allocation = LocalBlob(blob.pbData);
+    if blob.cbData > 0 && allocation.0.is_null() {
+        return Err(std::io::Error::other(
+            "DPAPI returned a null output allocation",
+        ));
+    }
+    let bytes = if blob.cbData == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(allocation.0, blob.cbData as usize) }
+    };
+    Ok(bytes.to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -477,5 +689,81 @@ mod tests {
     fn dates_render_civil() {
         assert_eq!(date_from_unix_days(0), "1970-01-01");
         assert_eq!(date_from_unix_days(20_615), "2026-06-11");
+    }
+
+    #[test]
+    fn stored_key_round_trips_through_secure_publication() {
+        let root = unique_temp_dir("round-trip");
+        let path = root.join("license.key");
+
+        store_key_to_path(&path, SAMPLE_KEY).expect("store key");
+        let (raw, info) = load_stored_from_path(&path).expect("load key");
+
+        assert_eq!(raw, SAMPLE_KEY);
+        assert_eq!(info.tier, "PRO");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn key_publication_rejects_late_external_change() {
+        let root = unique_temp_dir("late-change");
+        let path = root.join("license.key");
+        store_key_to_path(&path, SAMPLE_KEY).expect("store predecessor");
+        let expected =
+            crate::io::durable_file::observe_expected_content(&path).expect("observe destination");
+        let encoded = encode_stored_key(SAMPLE_KEY).expect("encode key");
+        std::fs::write(&path, b"late external edit").expect("race destination");
+
+        let result = publish_stored_key(&path, expected, &encoded);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"late external edit");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_key_and_successor_stay_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = unique_temp_dir("owner-only");
+        let path = root.join("license.key");
+        std::fs::write(&path, SAMPLE_KEY).expect("write permissive predecessor");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("make predecessor permissive");
+
+        store_key_to_path(&path, SAMPLE_KEY).expect("store key");
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_key_file_contains_only_dpapi_ciphertext() {
+        let root = unique_temp_dir("dpapi");
+        let path = root.join("license.key");
+
+        store_key_to_path(&path, SAMPLE_KEY).expect("store key");
+        let stored = std::fs::read(&path).expect("read encrypted key");
+
+        assert!(stored.starts_with(WINDOWS_DPAPI_PREFIX));
+        assert!(
+            !stored
+                .windows(SAMPLE_KEY.len())
+                .any(|window| window == SAMPLE_KEY.as_bytes())
+        );
+        assert!(load_stored_from_path(&path).is_some());
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("rspice-license-{label}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("create fixture");
+        root
     }
 }

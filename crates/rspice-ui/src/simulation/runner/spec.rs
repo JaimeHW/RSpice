@@ -1,5 +1,9 @@
 use std::path::Path;
 
+use rspice_core::abort_signal::AbortSignal;
+
+use crate::services::simulation_runner as svc_runner;
+
 use super::super::engine_bridge::EngineBridge;
 use super::super::multi_run::AnalysisSpec;
 use super::super::results::SimulationResult;
@@ -17,13 +21,13 @@ pub(super) fn run_spec_request(
     options: SpecExecutionOptions,
     netlist: &str,
     source_path: Option<&Path>,
-    abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
+    abort_flag: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    if abort_flag.is_aborted() {
-        return Err(SimulationError::Aborted);
-    }
+    ensure_not_aborted(abort_flag)?;
 
-    spec.validate().map_err(SimulationError::InvalidConfig)?;
+    let validation = spec.validate();
+    ensure_not_aborted(abort_flag)?;
+    validation.map_err(SimulationError::InvalidConfig)?;
 
     if matches!(spec, AnalysisSpec::Noise { .. }) {
         return Err(SimulationError::InvalidConfig(
@@ -38,7 +42,7 @@ pub(super) fn run_spec_request(
 
     match spec {
         AnalysisSpec::MonteCarlo | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
-            sweeps::run_sweep_spec(spec, options, netlist, source_path)
+            sweeps::run_sweep_spec(spec, options, netlist, source_path, abort_flag)
         }
         AnalysisSpec::AcData { frequencies, .. } => bridge.run_ac_frequencies_with_source_path(
             netlist,
@@ -48,19 +52,23 @@ pub(super) fn run_spec_request(
         ),
         AnalysisSpec::Reliability { .. }
         | AnalysisSpec::Optimization { .. }
-        | AnalysisSpec::Soa { .. } => device::run_device_spec(spec, netlist, source_path),
+        | AnalysisSpec::Soa { .. } => {
+            device::run_device_spec(spec, netlist, source_path, abort_flag)
+        }
         AnalysisSpec::Pss { .. }
         | AnalysisSpec::HarmonicBalance { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
-        | AnalysisSpec::Disto { .. } => periodic::run_periodic_spec(spec, netlist, source_path),
+        | AnalysisSpec::Disto { .. } => {
+            periodic::run_periodic_spec(spec, netlist, source_path, abort_flag)
+        }
         AnalysisSpec::SParameter { .. }
         | AnalysisSpec::Tf
         | AnalysisSpec::Pac
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Stb { .. }
-        | AnalysisSpec::Pstb => frequency::run_frequency_spec(spec, options, netlist),
+        | AnalysisSpec::Pstb => frequency::run_frequency_spec(spec, options, netlist, abort_flag),
         AnalysisSpec::DcOp
         | AnalysisSpec::DcSweep { .. }
         | AnalysisSpec::Transient { .. }
@@ -68,6 +76,37 @@ pub(super) fn run_spec_request(
         | AnalysisSpec::Noise { .. }
         | AnalysisSpec::PoleZero { .. }
         | AnalysisSpec::Sensitivity { .. } => Err(config_backed_spec_fallback_error(&spec)),
+    }
+}
+
+#[inline]
+pub(super) fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+/// Execute an abort-aware service without degrading its typed cancellation
+/// into an invalid-configuration message.
+pub(super) fn run_abort_aware_service<T, F>(
+    abort: &dyn AbortSignal,
+    run: F,
+) -> Result<T, SimulationError>
+where
+    F: FnOnce() -> svc_runner::ServiceRunResult<T>,
+{
+    ensure_not_aborted(abort)?;
+    let result = run();
+    ensure_not_aborted(abort)?;
+    result.map_err(translate_service_run_error)
+}
+
+fn translate_service_run_error(error: svc_runner::ServiceRunError) -> SimulationError {
+    match error {
+        svc_runner::ServiceRunError::Aborted => SimulationError::Aborted,
+        svc_runner::ServiceRunError::Failure(message) => SimulationError::InvalidConfig(message),
     }
 }
 
@@ -134,9 +173,34 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 mod tests {
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    struct AbortOnPoll {
+        abort_on: usize,
+        polls: AtomicUsize,
+    }
+
+    impl AbortOnPoll {
+        fn new(abort_on: usize) -> Self {
+            Self {
+                abort_on,
+                polls: AtomicUsize::new(0),
+            }
+        }
+
+        fn poll_count(&self) -> usize {
+            self.polls.load(Ordering::Relaxed)
+        }
+    }
+
+    impl AbortSignal for AbortOnPoll {
+        fn is_aborted(&self) -> bool {
+            self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
 
     struct TempDeckDir {
         path: PathBuf,
@@ -307,17 +371,28 @@ R2 out 0 1k\n\
                     SpecExecutionOptions::default(),
                     "",
                     None,
+                    &rspice_core::abort_signal::NoAbort,
                 ),
                 "AnalysisSpec::DcOp",
             ),
             (
                 "device",
-                device::run_device_spec(AnalysisSpec::DcOp, "", None),
+                device::run_device_spec(
+                    AnalysisSpec::DcOp,
+                    "",
+                    None,
+                    &rspice_core::abort_signal::NoAbort,
+                ),
                 "AnalysisSpec::DcOp",
             ),
             (
                 "periodic",
-                periodic::run_periodic_spec(AnalysisSpec::DcOp, "", None),
+                periodic::run_periodic_spec(
+                    AnalysisSpec::DcOp,
+                    "",
+                    None,
+                    &rspice_core::abort_signal::NoAbort,
+                ),
                 "AnalysisSpec::DcOp",
             ),
             (
@@ -326,6 +401,7 @@ R2 out 0 1k\n\
                     AnalysisSpec::DcOp,
                     SpecExecutionOptions::default(),
                     "",
+                    &rspice_core::abort_signal::NoAbort,
                 ),
                 "AnalysisSpec::DcOp",
             ),
@@ -346,6 +422,112 @@ R2 out 0 1k\n\
                 other => panic!("expected InvalidConfig from {runner} runner, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn specialized_spec_families_observe_the_supplied_counter_signal() {
+        let cases = [
+            ("sweep", AnalysisSpec::MonteCarlo),
+            (
+                "device",
+                AnalysisSpec::Reliability {
+                    target_years: vec![1.0],
+                    enable_hci: true,
+                    enable_nbti: false,
+                    enable_em: false,
+                    min_stress_voltage: 0.0,
+                },
+            ),
+            (
+                "periodic",
+                AnalysisSpec::Pss {
+                    fundamental_freq: 1.0e6,
+                    num_harmonics: 3,
+                    tolerance: 1.0e-6,
+                },
+            ),
+            ("frequency", AnalysisSpec::Tf),
+        ];
+
+        for (family, spec) in cases {
+            let signal = AbortOnPoll::new(3);
+            let result = run_spec_request(
+                &EngineBridge::new(),
+                spec,
+                SpecExecutionOptions::default(),
+                "cancellation boundary\n.end\n",
+                None,
+                &signal,
+            );
+
+            match result {
+                Err(SimulationError::Aborted) => {}
+                Err(SimulationError::InvalidConfig(message)) => panic!(
+                    "{family} cancellation was incorrectly reported as InvalidConfig: {message}"
+                ),
+                Err(other) => panic!("{family} expected typed Aborted, got {other}"),
+                Ok(_) => panic!("{family} should have observed cancellation"),
+            }
+            assert!(
+                signal.poll_count() >= 3,
+                "{family} dispatcher did not poll the supplied signal"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_service_abort_maps_to_runner_abort() {
+        let result: Result<(), SimulationError> =
+            run_abort_aware_service(&rspice_core::abort_signal::NoAbort, || {
+                Err(svc_runner::ServiceRunError::Aborted)
+            });
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+    }
+
+    #[test]
+    fn typed_service_failure_maps_to_invalid_config() {
+        let result: Result<(), SimulationError> =
+            run_abort_aware_service(&rspice_core::abort_signal::NoAbort, || {
+                Err(svc_runner::ServiceRunError::Failure(
+                    "bad input".to_string(),
+                ))
+            });
+
+        assert!(matches!(
+            result,
+            Err(SimulationError::InvalidConfig(message)) if message == "bad input"
+        ));
+    }
+
+    #[test]
+    fn ac_data_dispatch_threads_cancellation_into_the_frequency_solver_path() {
+        let signal = AbortOnPoll::new(5);
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            AnalysisSpec::AcData {
+                table_name: "measured".to_string(),
+                frequencies: vec![1.0, 10.0, 100.0],
+            },
+            SpecExecutionOptions::default(),
+            "AC DATA cancellation\n\
+             Vin in 0 AC 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1n\n\
+             .end\n",
+            None,
+            &signal,
+        );
+
+        match result {
+            Err(SimulationError::Aborted) => {}
+            Err(SimulationError::InvalidConfig(message)) => {
+                panic!("AC DATA cancellation became InvalidConfig: {message}")
+            }
+            Err(other) => panic!("AC DATA expected typed Aborted, got {other}"),
+            Ok(_) => panic!("AC DATA should have observed cancellation"),
+        }
+        assert!(signal.poll_count() >= 5);
     }
 
     fn config_backed_specs() -> Vec<AnalysisSpec> {

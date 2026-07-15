@@ -6,7 +6,6 @@
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::analysis::ac::AcResult;
-use rspice_core::engine::Engine;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OutputVoltageSpec {
@@ -26,14 +25,21 @@ pub(crate) enum OutputSpec {
 #[inline]
 fn parse_branch_current_name(output_var: &str) -> Option<&str> {
     let trimmed = output_var.trim();
-    if trimmed.len() <= 3 || !trimmed[..2].eq_ignore_ascii_case("I(") || !trimmed.ends_with(')') {
-        return None;
-    }
-    let branch_name = trimmed[2..trimmed.len() - 1].trim();
+    let branch_name = parse_ascii_function_call(trimmed, "I(")?.trim();
     if branch_name.is_empty() {
         return None;
     }
     Some(branch_name)
+}
+
+/// Return the body of an ASCII-named function call without slicing through a
+/// UTF-8 code point when the input starts with arbitrary Unicode text.
+fn parse_ascii_function_call<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = input.get(..prefix.len())?;
+    if !head.eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    input.strip_suffix(')')?.get(prefix.len()..)
 }
 
 #[inline]
@@ -48,31 +54,6 @@ pub(crate) const SENSITIVITY_NORMALIZATION_EPSILON: Value = 1e-15;
 #[inline]
 pub(crate) fn sensitivity_delta(param_value: Value) -> Value {
     (param_value.abs() * SENSITIVITY_RELATIVE_PERTURBATION).max(SENSITIVITY_MIN_DELTA)
-}
-
-pub(crate) fn finite_difference_derivative<F>(
-    param_value: Value,
-    mut evaluate_output: F,
-) -> Result<Value, String>
-where
-    F: FnMut(Value) -> Result<Value, String>,
-{
-    if !param_value.is_finite() {
-        return Err("Sensitivity parameter value must be finite".to_string());
-    }
-
-    let delta = sensitivity_delta(param_value);
-    let plus = evaluate_output(param_value + delta)?;
-    let minus = evaluate_output(param_value - delta)?;
-    if !plus.is_finite() || !minus.is_finite() {
-        return Err("Sensitivity perturbation produced non-finite outputs".to_string());
-    }
-
-    let derivative = (plus - minus) / (2.0 * delta);
-    if !derivative.is_finite() {
-        return Err("Sensitivity finite-difference derivative is non-finite".to_string());
-    }
-    Ok(derivative)
 }
 
 #[inline]
@@ -199,8 +180,8 @@ pub(crate) fn parse_output_voltage_spec(
         return None;
     }
 
-    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("V(") && trimmed.ends_with(')') {
-        let inner = trimmed[2..trimmed.len() - 1].trim();
+    if let Some(inner) = parse_ascii_function_call(trimmed, "V(") {
+        let inner = inner.trim();
         if inner.is_empty() {
             return None;
         }
@@ -335,54 +316,35 @@ pub(crate) fn ac_output_value(
     }
 }
 
-pub(crate) fn run_ac_output_at_frequency(
-    engine: &Engine,
-    netlist: &rspice_core::Netlist,
-    output_spec: &OutputSpec,
-    frequency: Value,
-) -> Result<Complex64, String> {
-    let ac_results = engine
-        .run_ac(netlist, &[frequency])
-        .map_err(|e| format!("AC analysis error at {} Hz: {}", frequency, e))?;
-    let point = ac_results
-        .first()
-        .ok_or_else(|| format!("AC analysis produced no data at {} Hz", frequency))?;
-    ac_output_value(point, output_spec)
-}
-
-pub(crate) fn run_dc_output_sensitivity(
-    engine: &Engine,
-    netlist: &rspice_core::Netlist,
-    output_spec: OutputVoltageSpec,
-    param_name: &str,
-    param_value: Value,
-) -> Result<Value, String> {
-    let pos_sensitivity = if output_spec.pos == 0 {
-        0.0
-    } else {
-        engine
-            .run_sensitivity(netlist, output_spec.pos, param_name, param_value, None)
-            .map_err(|e| e.to_string())?
-    };
-
-    let neg_sensitivity = match output_spec.neg {
-        Some(0) | None => 0.0,
-        Some(idx) => engine
-            .run_sensitivity(netlist, idx, param_name, param_value, None)
-            .map_err(|e| e.to_string())?,
-    };
-
-    Ok(pos_sensitivity - neg_sensitivity)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::resolve_sensitivity_ac_frequency;
+    use super::{
+        OutputVoltageSpec, is_branch_current_output, parse_output_voltage_spec,
+        resolve_sensitivity_ac_frequency,
+    };
 
     #[test]
     fn resolve_sensitivity_ac_frequency_rejects_non_finite_values() {
         let err = resolve_sensitivity_ac_frequency(true, Some(f64::INFINITY))
             .expect_err("infinite AC sensitivity frequency must be rejected");
         assert!(err.contains("finite"));
+    }
+
+    #[test]
+    fn output_parsing_accepts_arbitrary_unicode_without_byte_boundary_panics() {
+        let node_names = vec!["0".to_string(), "Δnode".to_string()];
+
+        assert!(!is_branch_current_output("é)"));
+        assert!(!is_branch_current_output("💥I(branch)"));
+        assert!(is_branch_current_output("I(Δbranch)"));
+        assert_eq!(parse_output_voltage_spec("💥)", &node_names), None);
+        assert_eq!(
+            parse_output_voltage_spec("Δnode", &node_names),
+            Some(OutputVoltageSpec { pos: 1, neg: None })
+        );
+        assert_eq!(
+            parse_output_voltage_spec("V(Δnode)", &node_names),
+            Some(OutputVoltageSpec { pos: 1, neg: None })
+        );
     }
 }

@@ -71,6 +71,9 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         app.state.workbench.toggle_drawer(Drawer::Inspector);
                     }
                     run_controls(ui, app, layout);
+                    if layout.show_run_config_selector {
+                        run_config_selector(ui, app);
+                    }
                     if layout.show_pvt_selector {
                         pvt_selector(ui, app);
                     }
@@ -96,6 +99,10 @@ fn trailing_controls_width(layout: LayoutSpec) -> f32 {
         width += 96.0;
         controls += 1;
     }
+    if layout.show_run_config_selector {
+        width += 190.0;
+        controls += 1;
+    }
     if layout.inspector_uses_drawer {
         width += layout.toolbar_control_height;
         controls += 1;
@@ -106,10 +113,12 @@ fn trailing_controls_width(layout: LayoutSpec) -> f32 {
 }
 
 fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let workspace = app.state.workbench.workspace;
+    let layout = toolbar_layout_for_workspace(workspace, layout);
     ui.data_mut(|data| {
         data.insert_temp(projected_tool_count_id(), 0_usize);
     });
-    match app.state.workbench.workspace {
+    match workspace {
         Workspace::Project => project_tools(ui, app, layout),
         Workspace::Design => design_tools(ui, app, layout),
         Workspace::Simulate => simulation_tools(ui, app, layout),
@@ -118,6 +127,16 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Workspace::Models => models_tools(ui, app, layout),
         Workspace::Netlist => netlist_tools(ui, app, layout),
     }
+}
+
+fn toolbar_layout_for_workspace(workspace: Workspace, mut layout: LayoutSpec) -> LayoutSpec {
+    // The canonical compact Design toolbar keeps every precision editing
+    // command in a horizontally scrollable lane. Other workspaces retain the
+    // compact projection limit defined by the responsive shell.
+    if workspace == Workspace::Design {
+        layout.toolbar_tool_limit = None;
+    }
+    layout
 }
 
 fn project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -147,19 +166,18 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     {
         app.state.schematic.tool = Tool::Select;
     }
-    toolbar_command(ui, app, Command::PlaceWire, WorkbenchIcon::Wire, layout);
-    toolbar_command(ui, app, Command::PlaceLabel, WorkbenchIcon::Label, layout);
-    toolbar_command(ui, app, Command::PlaceProbe, WorkbenchIcon::Probe, layout);
-    toolbar_command(ui, app, Command::PlaceInstance, WorkbenchIcon::Add, layout);
+    toolbar_icon_command(ui, app, Command::PlaceWire, WorkbenchIcon::Wire, layout);
+    toolbar_icon_command(ui, app, Command::PlaceLabel, WorkbenchIcon::Label, layout);
+    toolbar_icon_command(ui, app, Command::PlaceProbe, WorkbenchIcon::Probe, layout);
     context_separator(ui, layout);
-    toolbar_command(
+    toolbar_icon_command(
         ui,
         app,
         Command::RotateSelection,
         WorkbenchIcon::Rotate,
         layout,
     );
-    toolbar_command(
+    toolbar_icon_command(
         ui,
         app,
         Command::MirrorSelectionHorizontal,
@@ -167,16 +185,21 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         layout,
     );
     context_separator(ui, layout);
-    toolbar_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
-    toolbar_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
-    if !layout.width_class.is_phone() {
-        context_separator(ui, layout);
-        toolbar_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
-        toolbar_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
-        toolbar_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
-        toolbar_command(ui, app, Command::CycleGrid, WorkbenchIcon::Grid, layout);
-        toolbar_command(ui, app, Command::RunChecks, WorkbenchIcon::Check, layout);
-    }
+    toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
+    toolbar_icon_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
+    context_separator(ui, layout);
+    toolbar_icon_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
+    toolbar_icon_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
+    toolbar_icon_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
+    toolbar_icon_command(ui, app, Command::CycleGrid, WorkbenchIcon::Grid, layout);
+    toolbar_text_command(
+        ui,
+        app,
+        Command::RunChecks,
+        WorkbenchIcon::Check,
+        "Run schematic checks (Ctrl+E)",
+        layout,
+    );
 }
 
 fn simulation_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -309,26 +332,69 @@ fn toolbar_command(
     icon: WorkbenchIcon,
     layout: LayoutSpec,
 ) {
+    toolbar_command_with_label_policy(ui, app, command, icon, layout, layout.toolbar_labels, None);
+}
+
+/// Render a canonical compact precision tool. The design mockup uses these
+/// for all direct canvas transforms and placement modes.
+fn toolbar_icon_command(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    command: Command,
+    icon: WorkbenchIcon,
+    layout: LayoutSpec,
+) {
+    toolbar_command_with_label_policy(ui, app, command, icon, layout, false, None);
+}
+
+/// Render one explicitly labeled toolbar action. The design mockup reserves
+/// this treatment for checks so its state-changing validation scope remains
+/// visible without opening a menu.
+fn toolbar_text_command(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    command: Command,
+    icon: WorkbenchIcon,
+    label: &'static str,
+    layout: LayoutSpec,
+) {
+    toolbar_command_with_label_policy(ui, app, command, icon, layout, true, Some(label));
+}
+
+fn toolbar_command_with_label_policy(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    command: Command,
+    icon: WorkbenchIcon,
+    layout: LayoutSpec,
+    show_label: bool,
+    label_override: Option<&str>,
+) {
     if !take_projected_tool_slot(ui, layout) {
         return;
     }
     let spec = command.spec();
+    let label = label_override.unwrap_or(spec.label);
     let enabled = command.is_enabled(app);
     let response = ui.add_enabled_ui(enabled, |ui| {
-        if layout.toolbar_labels {
+        if show_label {
             labeled_icon_button_sized(
                 ui,
                 icon,
-                spec.label,
+                label,
                 false,
-                label_width(spec.label),
+                if label_override.is_some() {
+                    explicit_label_width(label)
+                } else {
+                    label_width(label)
+                },
                 layout.toolbar_control_height,
             )
         } else {
             icon_button(
                 ui,
                 icon,
-                spec.label,
+                label,
                 false,
                 Vec2::splat(layout.toolbar_control_height),
             )
@@ -376,11 +442,14 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     };
     let t = Tokens::get(ui.ctx());
     let label = if running {
-        "Stop"
-    } else if layout.width_class.is_phone() {
-        "Run plan"
+        "Stop".to_owned()
+    } else if layout.compact_shell {
+        format!(
+            "Run · {}",
+            app.state.sim_setup.reference_pvt.process.short_name()
+        )
     } else {
-        "Run active plan"
+        "Run plan".to_owned()
     };
     let width = if layout.width_class.is_phone() {
         100.0
@@ -397,7 +466,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         },
     );
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label)
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), &label)
     });
     ui.painter().rect_filled(
         rect,
@@ -423,7 +492,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     ui.painter().text(
         egui::Pos2::new(rect.left() + 30.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        label,
+        &label,
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
         if enabled {
             t.color.accent_ink
@@ -486,6 +555,112 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp) {
         });
 }
 
+fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp) {
+    const WIDTH: f32 = 190.0;
+    let t = Tokens::get(ui.ctx());
+    let analysis_count = app.state.sim_setup.enabled.len();
+    let pvt_count = configured_pvt_count(app);
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(WIDTH, 31.0),
+        if ui.is_enabled() {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            "Open Lab characterization simulation plan",
+        )
+    });
+
+    ui.painter().rect(
+        rect,
+        t.radius,
+        if response.hovered() {
+            t.color.bg_hover
+        } else {
+            t.color.bg_inset
+        },
+        egui::Stroke::new(
+            1.0,
+            if response.hovered() {
+                t.color.border_strong
+            } else {
+                t.color.border
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    WorkbenchIcon::Simulate.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::Pos2::new(rect.left() + 13.0, rect.center().y),
+            Vec2::splat(14.0),
+        ),
+        t.color.text_dim,
+    );
+    ui.painter().text(
+        egui::Pos2::new(rect.left() + 25.0, rect.top() + 9.0),
+        egui::Align2::LEFT_CENTER,
+        "Lab characterization",
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+    );
+    ui.painter().text(
+        egui::Pos2::new(rect.left() + 25.0, rect.bottom() - 8.0),
+        egui::Align2::LEFT_CENTER,
+        format!("{pvt_count} PVT · {analysis_count} analyses"),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    WorkbenchIcon::ChevronDown.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::Pos2::new(rect.right() - 10.0, rect.center().y),
+            Vec2::splat(11.0),
+        ),
+        t.color.text_faint,
+    );
+    theme::paint_focus_ring(ui, &response, rect);
+    if response.clicked() {
+        Command::OpenWorkspace(Workspace::Simulate).execute(app);
+    }
+}
+
+fn configured_pvt_count(app: &RSpiceApp) -> usize {
+    use crate::common::simulation_analysis_tabs::{TAB_CORNER, TAB_TEMPERATURE};
+
+    let mut count = usize::from(
+        app.state
+            .sim_setup
+            .enabled
+            .iter()
+            .any(|analysis| !matches!(*analysis, TAB_CORNER | TAB_TEMPERATURE)),
+    );
+    if app.state.sim_setup.enabled.contains(&TAB_CORNER) {
+        count = count.saturating_add(
+            app.state
+                .sim_setup
+                .corner
+                .to_config()
+                .map_or(0, |config| config.num_corners()),
+        );
+    }
+    if app.state.sim_setup.enabled.contains(&TAB_TEMPERATURE) {
+        count = count.saturating_add(
+            app.state
+                .sim_setup
+                .temp
+                .to_config()
+                .map_or(0, |config| config.num_temps()),
+        );
+    }
+    count.max(1)
+}
+
 fn pvt_temperature_label(value: f64) -> String {
     let text = if value.fract().abs() < f64::EPSILON {
         format!("{value:.0}")
@@ -509,6 +684,10 @@ fn label_width(label: &str) -> f32 {
     (label.chars().count() as f32 * 6.7 + 36.0).clamp(76.0, 162.0)
 }
 
+fn explicit_label_width(label: &str) -> f32 {
+    (label.chars().count() as f32 * 6.7 + 36.0).clamp(76.0, 224.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +697,8 @@ mod tests {
     fn long_toolbar_labels_remain_bounded() {
         assert_eq!(label_width("Run"), 76.0);
         assert!(label_width("A very long engineering command label") <= 162.0);
+        assert!(explicit_label_width("Run schematic checks (Ctrl+E)") > 162.0);
+        assert!(explicit_label_width("A very long engineering command label") <= 224.0);
     }
 
     #[test]
@@ -533,5 +714,20 @@ mod tests {
         let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
         assert_eq!(trailing_controls_width(phone), 140.0);
         assert!(context_tools_width(336.0, phone) > 0.0);
+    }
+
+    #[test]
+    fn compact_design_toolbar_scrolls_every_tool_without_changing_other_workspaces() {
+        let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
+        assert_eq!(compact.toolbar_tool_limit, Some(2));
+
+        assert_eq!(
+            toolbar_layout_for_workspace(Workspace::Design, compact).toolbar_tool_limit,
+            None
+        );
+        assert_eq!(
+            toolbar_layout_for_workspace(Workspace::Simulate, compact).toolbar_tool_limit,
+            Some(2)
+        );
     }
 }

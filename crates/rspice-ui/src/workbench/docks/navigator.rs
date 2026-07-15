@@ -33,28 +33,30 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    let close_label = if app.state.workbench.drawer == Some(super::super::state::Drawer::Navigator)
-    {
-        "Close navigator"
-    } else {
-        "Hide navigator"
-    };
+    let is_drawer = app.state.workbench.drawer == Some(super::super::state::Drawer::Navigator);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(app.state.workbench.workspace.navigator_title())
-                .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                .color(t.color.text),
+            egui::RichText::new(
+                app.state
+                    .workbench
+                    .workspace
+                    .navigator_title()
+                    .to_ascii_uppercase(),
+            )
+            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+            .color(t.color.text),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if icon_button(
-                ui,
-                WorkbenchIcon::Close,
-                close_label,
-                false,
-                egui::vec2(30.0, 30.0),
-            )
-            .clicked()
+            if is_drawer
+                && icon_button(
+                    ui,
+                    WorkbenchIcon::Close,
+                    "Close navigator",
+                    false,
+                    egui::vec2(30.0, 30.0),
+                )
+                .clicked()
             {
                 app.state.workbench.dismiss_navigator();
             }

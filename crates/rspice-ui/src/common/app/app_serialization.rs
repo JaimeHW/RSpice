@@ -34,7 +34,7 @@ impl serde::Serialize for AppState {
                         "session execution context is structurally invalid: {error}"
                     ))
                 })?;
-        let field_count = if simulation_results.is_empty() { 7 } else { 8 };
+        let field_count = if simulation_results.is_empty() { 9 } else { 10 };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
@@ -46,6 +46,14 @@ impl serde::Serialize for AppState {
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
         state.serialize_field("execution_context", &execution_context)?;
+        state.serialize_field(
+            "native_project_binding_receipt",
+            &self.native_project_binding_receipt,
+        )?;
+        state.serialize_field(
+            "browser_project_binding_receipt",
+            &self.browser_project_binding_receipt,
+        )?;
         if !simulation_results.is_empty() {
             state.serialize_field("simulation_results", &simulation_results)?;
         }
@@ -89,6 +97,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
             // recent files, or the rest of the session.
             #[serde(default)]
             execution_context: Option<serde_json::Value>,
+            #[serde(default)]
+            native_project_binding_receipt: Option<serde_json::Value>,
+            #[serde(default)]
+            browser_project_binding_receipt: Option<serde_json::Value>,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
@@ -105,6 +117,14 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .license_key
             .as_deref()
             .and_then(|key| crate::services::license::parse_and_verify(key).ok());
+        let (native_project_binding_receipt, native_receipt_warning) = decode_session_authority(
+            de.native_project_binding_receipt,
+            "native project binding receipt",
+        );
+        let (browser_project_binding_receipt, browser_receipt_warning) = decode_session_authority(
+            de.browser_project_binding_receipt,
+            "browser project binding receipt",
+        );
         let mut state = Self {
             schematic,
             workspace: project_workspace,
@@ -114,6 +134,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             recent_files: de.recent_files,
             license_key: de.license_key,
             license,
+            native_project_binding_receipt,
+            browser_project_binding_receipt,
             ..Default::default()
         };
         let execution_warnings = match de.execution_context {
@@ -152,8 +174,35 @@ impl<'de> serde::Deserialize<'de> for AppState {
         for warning in execution_warnings {
             state.push_user_message(ConsoleMessage::warning(warning));
         }
+        for warning in [native_receipt_warning, browser_receipt_warning]
+            .into_iter()
+            .flatten()
+        {
+            state.push_user_message(ConsoleMessage::warning(warning));
+        }
         state.workspace.save_active_schematic(&state.schematic);
         Ok(state)
+    }
+}
+
+fn decode_session_authority<T>(
+    value: Option<serde_json::Value>,
+    label: &str,
+) -> (Option<T>, Option<String>)
+where
+    T: serde::de::DeserializeOwned,
+{
+    let Some(value) = value else {
+        return (None, None);
+    };
+    match serde_json::from_value(value) {
+        Ok(receipt) => (Some(receipt), None),
+        Err(error) => (
+            None,
+            Some(format!(
+                "Ignored an invalid or unsupported {label}: {error}. Recovered project documents and working buffers were preserved without persistence authority"
+            )),
+        ),
     }
 }
 
@@ -203,6 +252,111 @@ mod tests {
         assert_eq!(restored.simulation.waveforms[0].name, "V(out)");
         assert!(!restored.simulation.is_running);
         assert!(!restored.simulation.trigger_abort);
+    }
+
+    #[test]
+    fn session_round_trip_preserves_exact_browser_binding_receipt() {
+        let mut state = AppState::default();
+        let receipt = crate::common::project_lifecycle::BrowserBindingReceipt {
+            binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb111b3ce1),
+            project_id: state.workspace.project.id().to_string(),
+            accepted_generation: 23,
+            accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
+            backend: crate::common::project_lifecycle::BrowserBindingBackend::Opfs,
+        };
+        state.browser_project_binding_receipt = Some(receipt.clone());
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert_eq!(restored.browser_project_binding_receipt, Some(receipt));
+    }
+
+    #[test]
+    fn session_round_trip_preserves_exact_native_binding_receipt() {
+        let mut state = AppState::default();
+        let receipt = crate::common::project_lifecycle::NativeBindingReceipt {
+            canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
+            project_id: state.workspace.project.id().to_string(),
+            accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
+        };
+        state.native_project_binding_receipt = Some(receipt.clone());
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert_eq!(restored.native_project_binding_receipt, Some(receipt));
+    }
+
+    #[test]
+    fn malformed_or_future_receipts_drop_only_authority_and_preserve_working_session() {
+        let mut state = AppState::default();
+        state
+            .workspace
+            .project
+            .rename("Recovered receipt-corruption fixture")
+            .expect("valid fixture name");
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(17, 29),
+        );
+        state.workspace.save_active_schematic(&state.schematic);
+        let active_key = state.workspace.active_key();
+
+        let mut session = serde_json::to_value(&state).expect("serialize recovery fixture");
+        let object = session.as_object_mut().expect("session object");
+        object.insert(
+            "native_project_binding_receipt".to_owned(),
+            serde_json::json!({
+                "canonical_path": 42,
+                "project_id": null,
+                "accepted_digest": "not-a-digest"
+            }),
+        );
+        object.insert(
+            "browser_project_binding_receipt".to_owned(),
+            serde_json::json!({
+                "binding_id": uuid::Uuid::new_v4(),
+                "project_id": state.workspace.project.id().to_string(),
+                "accepted_generation": 7,
+                "accepted_digest": "11".repeat(32),
+                "backend": "future-cloud-authority"
+            }),
+        );
+
+        let restored: AppState = serde_json::from_value(session)
+            .expect("receipt corruption is independently recoverable");
+        assert_eq!(
+            restored.workspace.project.name(),
+            "Recovered receipt-corruption fixture"
+        );
+        assert_eq!(
+            restored
+                .workspace
+                .schematic_buffers
+                .get(&active_key)
+                .expect("working schematic buffer survives")
+                .components
+                .len(),
+            1
+        );
+        assert!(restored.native_project_binding_receipt.is_none());
+        assert!(restored.browser_project_binding_receipt.is_none());
+        let messages = restored
+            .log_buffer
+            .entries()
+            .map(|entry| entry.message.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("native project binding receipt"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("browser project binding receipt"))
+        );
     }
 
     #[test]

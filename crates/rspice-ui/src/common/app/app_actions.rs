@@ -2,6 +2,7 @@ use egui::Context;
 
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{Point, SymbolDocument, SymbolShape};
+use crate::workbench::commands::Command as ShortcutCommand;
 use crate::workbench::{
     SymbolClipboard, SymbolSelection, mirror_point_h_about, mirror_point_v_about,
     mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
@@ -9,7 +10,7 @@ use crate::workbench::{
 
 use super::{
     ConsoleMessage, RSpiceApp,
-    app_shortcuts::{ShortcutCommand, ShortcutInputSnapshot, collect_shortcut_commands},
+    app_shortcuts::{ShortcutInputSnapshot, resolve_shortcuts},
 };
 
 fn symbol_pin_is_contract(ports: &[crate::state::PortSpec], name: &str) -> bool {
@@ -57,13 +58,13 @@ fn symbol_shortcut_command_allowed(
 ) -> bool {
     if matches!(
         command,
-        ShortcutCommand::ToolSelect
-            | ShortcutCommand::ToolWire
-            | ShortcutCommand::ToolProbe
-            | ShortcutCommand::PlaceCapacitor
-            | ShortcutCommand::PlaceDiode
-            | ShortcutCommand::PlaceGround
-            | ShortcutCommand::RotateSelectionOrPreview
+        ShortcutCommand::SelectTool
+            | ShortcutCommand::PlaceWire
+            | ShortcutCommand::PlaceProbe
+            | ShortcutCommand::Place(crate::state::ComponentType::Capacitor)
+            | ShortcutCommand::Place(crate::state::ComponentType::Diode)
+            | ShortcutCommand::Place(crate::state::ComponentType::Ground)
+            | ShortcutCommand::RotateSelection
             | ShortcutCommand::MirrorSelectionHorizontal
             | ShortcutCommand::MirrorSelectionVertical
             | ShortcutCommand::ZoomFit
@@ -81,7 +82,22 @@ impl RSpiceApp {
         }
         let has_focus = ctx.memory(|memory| memory.focused().is_some());
         let snapshot = ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, has_focus));
-        for command in collect_shortcut_commands(&snapshot) {
+        for resolved in resolve_shortcuts(
+            &snapshot,
+            crate::workbench::commands::current_command_platform(),
+        ) {
+            if !resolved.command.shortcut_context_matches(self) {
+                continue;
+            }
+            let consumed =
+                ctx.input_mut(|input| input.consume_key(snapshot.modifiers(), resolved.key));
+            if !consumed {
+                continue;
+            }
+            let command = resolved.command;
+            if !command.is_enabled(self) {
+                continue;
+            }
             if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol
                 && !symbol_shortcut_command_allowed(command, &snapshot)
             {
@@ -106,60 +122,80 @@ impl RSpiceApp {
         }
 
         match command {
-            ShortcutCommand::FileNew => self.action_file_new(),
-            ShortcutCommand::FileOpen => self.action_file_open(),
-            ShortcutCommand::FileSave => {
-                let _ = self.action_file_save();
+            ShortcutCommand::ProjectLauncher => self.state.workbench.open_project_launcher(),
+            ShortcutCommand::NewProject => self
+                .execute_project_file_shortcut(crate::common::menu_bar::FileMenuAction::NewProject),
+            ShortcutCommand::OpenProject => self.execute_project_file_shortcut(
+                crate::common::menu_bar::FileMenuAction::OpenProject,
+            ),
+            ShortcutCommand::Save => {
+                self.execute_project_file_shortcut(crate::common::menu_bar::FileMenuAction::Save)
             }
-            ShortcutCommand::EditUndo => self.action_edit_undo(),
-            ShortcutCommand::EditRedo => self.action_edit_redo(),
-            ShortcutCommand::EditCopy => self.action_edit_copy(),
-            ShortcutCommand::EditPaste => self.action_edit_paste(),
-            ShortcutCommand::EditCut => self.action_edit_cut(),
-            ShortcutCommand::EditDelete => self.action_edit_delete(),
-            ShortcutCommand::EditSelectAll => self.action_edit_select_all(),
-            ShortcutCommand::ToggleBrowserPanel => self.toggle_panel_browser(),
-            ShortcutCommand::ToggleLogPanel => self.toggle_panel_log(),
-            ShortcutCommand::ShowShortcutsHelp => {
+            ShortcutCommand::SaveAs => self.execute_project_file_shortcut(
+                crate::common::menu_bar::FileMenuAction::SaveProjectAs,
+            ),
+            ShortcutCommand::SaveAll => {
+                self.execute_project_file_shortcut(crate::common::menu_bar::FileMenuAction::SaveAll)
+            }
+            ShortcutCommand::CloseActiveDocument => self.execute_project_file_shortcut(
+                crate::common::menu_bar::FileMenuAction::CloseActiveDocument,
+            ),
+            ShortcutCommand::CloseProject => self.execute_project_file_shortcut(
+                crate::common::menu_bar::FileMenuAction::CloseProject,
+            ),
+            ShortcutCommand::Undo => self.action_edit_undo(),
+            ShortcutCommand::Redo => self.action_edit_redo(),
+            ShortcutCommand::Copy => self.action_edit_copy(),
+            ShortcutCommand::Paste => self.action_edit_paste(),
+            ShortcutCommand::Cut => self.action_edit_cut(),
+            ShortcutCommand::Delete => self.action_edit_delete(),
+            ShortcutCommand::SelectAll => self.action_edit_select_all(),
+            ShortcutCommand::ToggleNavigator => {
+                ShortcutCommand::ToggleNavigator.execute(self);
+            }
+            ShortcutCommand::ToggleConsole => {
+                ShortcutCommand::ToggleConsole.execute(self);
+            }
+            ShortcutCommand::KeyboardShortcuts => {
                 self.state.dialogs.shortcuts_help = true;
             }
-            ShortcutCommand::ToolSelect => {
+            ShortcutCommand::SelectTool => {
                 self.state.schematic.tool = Tool::Select;
             }
-            ShortcutCommand::ToolWire => {
+            ShortcutCommand::PlaceWire => {
                 self.state.schematic.tool = Tool::Wire;
             }
-            ShortcutCommand::PlaceGround => {
+            ShortcutCommand::Place(ComponentType::Ground) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Ground);
             }
-            ShortcutCommand::PlaceVoltageSource => {
+            ShortcutCommand::Place(ComponentType::VoltageSource) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::VoltageSource);
             }
-            ShortcutCommand::PlaceCurrentSource => {
+            ShortcutCommand::Place(ComponentType::CurrentSource) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::CurrentSource);
             }
-            ShortcutCommand::PlaceCapacitor => {
+            ShortcutCommand::Place(ComponentType::Capacitor) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Capacitor);
             }
-            ShortcutCommand::PlaceInductor => {
+            ShortcutCommand::Place(ComponentType::Inductor) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Inductor);
             }
-            ShortcutCommand::PlaceDiode => {
+            ShortcutCommand::Place(ComponentType::Diode) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Diode);
             }
-            ShortcutCommand::PlaceNmos => {
+            ShortcutCommand::Place(ComponentType::Nmos) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Nmos);
             }
-            ShortcutCommand::PlaceNpnBjt => {
+            ShortcutCommand::Place(ComponentType::NpnBjt) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::NpnBjt);
             }
-            ShortcutCommand::ToolProbe => {
+            ShortcutCommand::PlaceProbe => {
                 self.state.schematic.tool = Tool::Probe;
             }
-            ShortcutCommand::PlaceResistor => {
+            ShortcutCommand::Place(ComponentType::Resistor) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Resistor);
             }
-            ShortcutCommand::RotateSelectionOrPreview => {
+            ShortcutCommand::RotateSelection => {
                 self.state.schematic.preview_rotation =
                     self.state.schematic.preview_rotation.rotate_cw();
                 if !self.state.schematic.selection.is_empty() {
@@ -176,13 +212,15 @@ impl RSpiceApp {
                     self.mirror_schematic_selection_v_with_symbols();
                 }
             }
-            ShortcutCommand::OpenPropertiesEditor => {
+            ShortcutCommand::ObjectProperties => {
                 if let Some(comp_id) = self.state.schematic.selection.single_component() {
                     super::open_property_editor(&mut self.state, comp_id);
                 }
             }
-            ShortcutCommand::EscapeCancel => {
-                if self.state.tabbed_property_dialog.open {
+            ShortcutCommand::Cancel => {
+                if self.state.workbench.drawer.is_some() {
+                    self.state.workbench.close_drawer();
+                } else if self.state.tabbed_property_dialog.open {
                     self.state.tabbed_property_dialog.close();
                 } else if self.state.workbench.workspace
                     == crate::workbench::state::Workspace::Results
@@ -209,7 +247,9 @@ impl RSpiceApp {
                 }
             }
             ShortcutCommand::StopSimulation => {
-                if self.state.simulation.is_running {
+                if self.state.simulation.is_running
+                    && crate::simulation::execution::execution_target_supports_cancellation()
+                {
                     self.state.simulation.trigger_abort = true;
                 }
             }
@@ -222,31 +262,31 @@ impl RSpiceApp {
                     .activate(crate::workbench::state::Workspace::Design);
                 crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
             }
-            ShortcutCommand::PrevViolation => {
+            ShortcutCommand::PreviousViolation => {
                 self.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Design);
                 crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
             }
-            ShortcutCommand::NextWorkspaceTab => {
+            ShortcutCommand::NextWorkspace => {
                 self.state.workbench.cycle_workspace(false);
             }
             ShortcutCommand::ZoomIn => {
-                self.state.schematic.zoom = (self.state.schematic.zoom * 1.25).min(4.0);
+                self.state.schematic.zoom = (self.state.schematic.zoom * 1.25).min(8.0);
             }
             ShortcutCommand::ZoomOut => {
-                self.state.schematic.zoom = (self.state.schematic.zoom / 1.25).max(0.25);
+                self.state.schematic.zoom = (self.state.schematic.zoom / 1.25).max(0.1);
             }
             ShortcutCommand::ZoomFit => {
                 self.state.schematic.needs_fit = true;
             }
-            ShortcutCommand::Zoom100 => {
+            ShortcutCommand::ZoomOneToOne => {
                 self.state.schematic.zoom = 1.0;
             }
-            ShortcutCommand::ToolLabel => {
+            ShortcutCommand::PlaceLabel => {
                 self.state.schematic.tool = Tool::Label;
             }
-            ShortcutCommand::FocusCellSearch => {
+            ShortcutCommand::PlaceInstance => {
                 self.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Design);
@@ -256,33 +296,43 @@ impl RSpiceApp {
                     crate::workbench::state::DesignPanel::ComponentShelf;
                 self.state.workbench.focus_placement_search = true;
             }
-            ShortcutCommand::DescendIntoSelected => {
+            ShortcutCommand::DescendHierarchy => {
                 self.state.open_selected_instance_master();
             }
             ShortcutCommand::AscendHierarchy => {
                 self.state.ascend_workspace_level();
             }
-            ShortcutCommand::FocusDesignSearch => {
+            ShortcutCommand::FindInDesign => {
                 self.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Design);
                 self.state.workbench.navigator_visible = true;
                 self.state.workbench.focus_navigator_search = true;
             }
-            ShortcutCommand::OpenPreferences => {
+            ShortcutCommand::Preferences => {
                 self.state.dialogs.preferences_open = true;
             }
-            ShortcutCommand::OpenCommandPalette => {
+            ShortcutCommand::CommandPalette => {
                 self.state.dialogs.command_palette.open();
             }
+            _ => command.execute(self),
         }
+    }
+
+    fn execute_project_file_shortcut(&mut self, action: crate::common::menu_bar::FileMenuAction) {
+        crate::common::menu_bar::dispatch_file_menu_action(
+            &mut self.state,
+            action,
+            self.file_workflow_io.as_ref(),
+            self.export_workflow_io.as_ref(),
+        );
     }
 
     fn execute_symbol_shortcut_command(&mut self, command: ShortcutCommand) -> bool {
         use crate::workbench::SymbolTool;
 
         match command {
-            ShortcutCommand::EditUndo => {
+            ShortcutCommand::Undo => {
                 match self.state.undo_active_symbol_document() {
                     Ok(true) => self
                         .state
@@ -294,7 +344,7 @@ impl RSpiceApp {
                 }
                 true
             }
-            ShortcutCommand::EditRedo => {
+            ShortcutCommand::Redo => {
                 match self.state.redo_active_symbol_document() {
                     Ok(true) => self
                         .state
@@ -306,54 +356,54 @@ impl RSpiceApp {
                 }
                 true
             }
-            ShortcutCommand::EditDelete => {
+            ShortcutCommand::Delete => {
                 self.delete_selected_symbol_item(false);
                 true
             }
-            ShortcutCommand::EditCut => {
+            ShortcutCommand::Cut => {
                 self.delete_selected_symbol_item(true);
                 true
             }
-            ShortcutCommand::EditCopy => {
+            ShortcutCommand::Copy => {
                 self.copy_selected_symbol_shape();
                 true
             }
-            ShortcutCommand::EditPaste => {
+            ShortcutCommand::Paste => {
                 self.paste_symbol_shape();
                 true
             }
-            ShortcutCommand::EditSelectAll => {
+            ShortcutCommand::SelectAll => {
                 self.select_all_symbol_items();
                 true
             }
-            ShortcutCommand::ToolSelect => {
+            ShortcutCommand::SelectTool => {
                 self.state.ui.symbol.tool = SymbolTool::Select;
                 true
             }
-            ShortcutCommand::ToolProbe => {
+            ShortcutCommand::PlaceProbe => {
                 self.state.ui.symbol.tool = SymbolTool::PlacePin;
                 self.state.ui.symbol.clear_selection();
                 true
             }
-            ShortcutCommand::ToolWire => {
+            ShortcutCommand::PlaceWire => {
                 self.state.ui.symbol.tool = SymbolTool::Polyline;
                 self.state.ui.symbol.pending_polyline.clear();
                 true
             }
-            ShortcutCommand::PlaceCapacitor => {
+            ShortcutCommand::Place(crate::state::ComponentType::Capacitor) => {
                 self.state.ui.symbol.tool = SymbolTool::Circle;
                 self.state.ui.symbol.shape_start = None;
                 true
             }
-            ShortcutCommand::PlaceDiode => {
+            ShortcutCommand::Place(crate::state::ComponentType::Diode) => {
                 self.state.ui.symbol.tool = SymbolTool::Arrow;
                 true
             }
-            ShortcutCommand::PlaceGround => {
+            ShortcutCommand::Place(crate::state::ComponentType::Ground) => {
                 self.state.ui.symbol.tool = SymbolTool::Dot;
                 true
             }
-            ShortcutCommand::RotateSelectionOrPreview => {
+            ShortcutCommand::RotateSelection => {
                 self.transform_selected_symbol_item(rotate_point_cw_about, rotate_shape_cw_about);
                 true
             }
@@ -365,7 +415,7 @@ impl RSpiceApp {
                 self.transform_selected_symbol_item(mirror_point_v_about, mirror_shape_v_about);
                 true
             }
-            ShortcutCommand::EscapeCancel => {
+            ShortcutCommand::Cancel => {
                 self.finish_pending_symbol_polyline_from_shortcut();
                 self.state.ui.symbol.tool = SymbolTool::Select;
                 self.state.ui.symbol.clear_drag_state();
@@ -375,18 +425,18 @@ impl RSpiceApp {
                 true
             }
             ShortcutCommand::ZoomIn => {
-                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom * 1.25).min(18.0);
+                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom * 1.25).min(16.0);
                 true
             }
             ShortcutCommand::ZoomOut => {
-                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom / 1.25).max(1.0);
+                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom / 1.25).max(0.1);
                 true
             }
             ShortcutCommand::ZoomFit => {
                 self.state.ui.symbol.needs_fit = true;
                 true
             }
-            ShortcutCommand::Zoom100 => {
+            ShortcutCommand::ZoomOneToOne => {
                 self.state.ui.symbol.zoom = 4.0;
                 self.state.ui.symbol.pan = (0.0, 0.0);
                 true
@@ -399,22 +449,25 @@ impl RSpiceApp {
                 crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
                 true
             }
-            ShortcutCommand::PrevViolation => {
+            ShortcutCommand::PreviousViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
                 true
             }
-            ShortcutCommand::OpenPropertiesEditor
-            | ShortcutCommand::PlaceVoltageSource
-            | ShortcutCommand::PlaceCurrentSource
-            | ShortcutCommand::PlaceInductor
-            | ShortcutCommand::PlaceNmos
-            | ShortcutCommand::PlaceNpnBjt
-            | ShortcutCommand::PlaceResistor
-            | ShortcutCommand::ToolLabel
-            | ShortcutCommand::FocusCellSearch
-            | ShortcutCommand::DescendIntoSelected
-            | ShortcutCommand::AscendHierarchy
-            | ShortcutCommand::FocusDesignSearch => true,
+            ShortcutCommand::ObjectProperties => {
+                self.state.workbench.inspector_visible = true;
+                self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
+                true
+            }
+            ShortcutCommand::Place(crate::state::ComponentType::VoltageSource)
+            | ShortcutCommand::Place(crate::state::ComponentType::CurrentSource)
+            | ShortcutCommand::Place(crate::state::ComponentType::Inductor)
+            | ShortcutCommand::Place(crate::state::ComponentType::Nmos)
+            | ShortcutCommand::Place(crate::state::ComponentType::NpnBjt)
+            | ShortcutCommand::Place(crate::state::ComponentType::Resistor)
+            | ShortcutCommand::PlaceLabel
+            | ShortcutCommand::PlaceInstance
+            | ShortcutCommand::DescendHierarchy
+            | ShortcutCommand::AscendHierarchy => true,
             _ => false,
         }
     }
@@ -720,16 +773,6 @@ impl RSpiceApp {
         schematic.selection.components = schematic.components.iter().map(|c| c.id).collect();
         schematic.selection.wires = schematic.wires.iter().map(|w| w.id).collect();
     }
-
-    pub(super) fn toggle_panel_browser(&mut self) {
-        // Toggle the contextual side panels (focus mode).
-        self.state.workbench.focus_mode = !self.state.workbench.focus_mode;
-    }
-
-    pub(super) fn toggle_panel_log(&mut self) {
-        // Toggle the console between expanded and collapsed.
-        self.state.workbench.console_visible = !self.state.workbench.console_visible;
-    }
 }
 
 /// Commands that mutate the open schematic — refused on read-only views.
@@ -738,26 +781,18 @@ impl RSpiceApp {
 fn command_edits_schematic(command: ShortcutCommand) -> bool {
     matches!(
         command,
-        ShortcutCommand::EditUndo
-            | ShortcutCommand::EditRedo
-            | ShortcutCommand::EditPaste
-            | ShortcutCommand::EditCut
-            | ShortcutCommand::EditDelete
-            | ShortcutCommand::ToolWire
-            | ShortcutCommand::ToolLabel
-            | ShortcutCommand::PlaceResistor
-            | ShortcutCommand::PlaceGround
-            | ShortcutCommand::PlaceVoltageSource
-            | ShortcutCommand::PlaceCurrentSource
-            | ShortcutCommand::PlaceCapacitor
-            | ShortcutCommand::PlaceInductor
-            | ShortcutCommand::PlaceDiode
-            | ShortcutCommand::PlaceNmos
-            | ShortcutCommand::PlaceNpnBjt
-            | ShortcutCommand::RotateSelectionOrPreview
+        ShortcutCommand::Undo
+            | ShortcutCommand::Redo
+            | ShortcutCommand::Paste
+            | ShortcutCommand::Cut
+            | ShortcutCommand::Delete
+            | ShortcutCommand::PlaceWire
+            | ShortcutCommand::PlaceLabel
+            | ShortcutCommand::Place(_)
+            | ShortcutCommand::RotateSelection
             | ShortcutCommand::MirrorSelectionHorizontal
             | ShortcutCommand::MirrorSelectionVertical
-            | ShortcutCommand::OpenPropertiesEditor
+            | ShortcutCommand::ObjectProperties
     )
 }
 
@@ -804,7 +839,7 @@ mod symbol_action_tests {
     #[test]
     fn modified_app_symbol_tool_shortcuts_are_rejected() {
         assert!(symbol_shortcut_command_allowed(
-            ShortcutCommand::ToolSelect,
+            ShortcutCommand::SelectTool,
             &ShortcutInputSnapshot::from_modifiers_for_test(egui::Modifiers::NONE)
         ));
 
@@ -827,17 +862,17 @@ mod symbol_action_tests {
             },
         ] {
             assert!(!symbol_shortcut_command_allowed(
-                ShortcutCommand::ToolSelect,
+                ShortcutCommand::SelectTool,
                 &ShortcutInputSnapshot::from_modifiers_for_test(modifiers)
             ));
             assert!(!symbol_shortcut_command_allowed(
-                ShortcutCommand::PlaceCapacitor,
+                ShortcutCommand::Place(crate::state::ComponentType::Capacitor),
                 &ShortcutInputSnapshot::from_modifiers_for_test(modifiers)
             ));
         }
 
         assert!(symbol_shortcut_command_allowed(
-            ShortcutCommand::EditCopy,
+            ShortcutCommand::Copy,
             &ShortcutInputSnapshot::from_modifiers_for_test(egui::Modifiers {
                 ctrl: true,
                 command: true,

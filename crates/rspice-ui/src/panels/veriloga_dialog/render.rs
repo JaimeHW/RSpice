@@ -235,50 +235,68 @@ enum BrowserVerilogAImportResult {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct BrowserVerilogAImportCompletion {
+    token: crate::common::browser_file_import::TextImportToken,
+    result: BrowserVerilogAImportResult,
+}
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
-    static BROWSER_VERILOGA_IMPORT_RESULT: std::cell::RefCell<Option<BrowserVerilogAImportResult>> =
+    static BROWSER_VERILOGA_IMPORT_RESULT: std::cell::RefCell<Option<BrowserVerilogAImportCompletion>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_veriloga_source_import() -> Result<(), String> {
-    crate::common::browser_file_import::try_begin_text_import(
+    let token = crate::common::browser_file_import::try_begin_text_import(
         crate::common::browser_file_import::BrowserTextImportKind::VerilogA,
     )?;
 
-    crate::common::browser_file_import::pick_text_file("Verilog-A", &["va", "vams"], |result| {
-        let event = match result {
-            Ok(Some(file)) => BrowserVerilogAImportResult::Loaded(file),
-            Ok(None) => BrowserVerilogAImportResult::Cancelled,
-            Err(error) => BrowserVerilogAImportResult::Failed(error),
-        };
-        BROWSER_VERILOGA_IMPORT_RESULT.with(|slot| {
-            *slot.borrow_mut() = Some(event);
-        });
-    });
+    crate::common::browser_file_import::pick_text_file(
+        "Verilog-A",
+        &["va", "vams"],
+        move |result| {
+            if !crate::common::browser_file_import::text_import_is_current(token) {
+                return;
+            }
+            let event = match result {
+                Ok(Some(file)) => BrowserVerilogAImportResult::Loaded(file),
+                Ok(None) => BrowserVerilogAImportResult::Cancelled,
+                Err(error) => BrowserVerilogAImportResult::Failed(error),
+            };
+            BROWSER_VERILOGA_IMPORT_RESULT.with(|slot| {
+                *slot.borrow_mut() = Some(BrowserVerilogAImportCompletion {
+                    token,
+                    result: event,
+                });
+            });
+        },
+    );
     Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
 fn poll_browser_veriloga_source_import(state: &mut VerilogALoadDialogState) {
-    let event = BROWSER_VERILOGA_IMPORT_RESULT.with(|slot| slot.borrow_mut().take());
-    if event.is_some() {
-        crate::common::browser_file_import::finish_text_import(
-            crate::common::browser_file_import::BrowserTextImportKind::VerilogA,
-        );
+    let Some(completion) = BROWSER_VERILOGA_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())
+    else {
+        return;
+    };
+    if !crate::common::browser_file_import::finish_text_import(completion.token) {
+        return;
     }
-    match event {
-        Some(BrowserVerilogAImportResult::Loaded(file)) => {
+    match completion.result {
+        BrowserVerilogAImportResult::Loaded(file) => {
             state.set_browser_source_file(file.name, file.contents);
         }
-        Some(BrowserVerilogAImportResult::Failed(error)) => {
+        BrowserVerilogAImportResult::Failed(error) => {
             state.reset_compile_outcome();
             state.errors = vec![CompileErrorDisplay::error(format!(
                 "Verilog-A import failed: {error}"
             ))];
             state.compilation_state = CompilationState::Failed;
         }
-        Some(BrowserVerilogAImportResult::Cancelled) | None => {}
+        BrowserVerilogAImportResult::Cancelled => {}
     }
 }
 

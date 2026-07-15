@@ -1,16 +1,20 @@
 #![allow(clippy::too_many_arguments)]
 
+use super::error::{ensure_not_aborted, poll_periodically};
 use super::pnoise_sideband::{
-    build_pnoise_sideband_translated_frequencies, fold_sideband_contributors,
-    fold_sideband_noise_results, resolve_pnoise_sideband_stride,
+    build_pnoise_sideband_translated_frequencies_with_abort, fold_sideband_contributors_with_abort,
+    fold_sideband_noise_results_with_abort, resolve_pnoise_sideband_stride_with_abort,
 };
 use super::{
-    PssData, build_engine_config, generate_freq_points, infer_primary_output_node,
-    infer_primary_source_name, is_ground_like, netlist_has_independent_source_named,
-    normalize_voltage_signal_name, parse_runner_netlist, run_pss_analysis_with_source_path,
+    PssData, ServiceRunError, ServiceRunResult, build_engine_config,
+    generate_freq_points_with_abort, infer_primary_output_node_with_abort,
+    infer_primary_source_name_with_abort, is_ground_like,
+    netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
+    parse_runner_netlist_with_abort, run_pss_analysis_with_source_path_and_abort,
 };
 use crate::output_spec::resolve_node_or_ground_index;
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::Engine;
 use std::fmt;
@@ -19,25 +23,27 @@ use std::path::Path;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PnoiseRunError {
     Validation(String),
-    Parse(String),
     Resolution(String),
-    Execution(String),
     Data(String),
 }
 
 impl fmt::Display for PnoiseRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Validation(message)
-            | Self::Parse(message)
-            | Self::Resolution(message)
-            | Self::Execution(message)
-            | Self::Data(message) => f.write_str(message),
+            Self::Validation(message) | Self::Resolution(message) | Self::Data(message) => {
+                f.write_str(message)
+            }
         }
     }
 }
 
 impl std::error::Error for PnoiseRunError {}
+
+impl From<PnoiseRunError> for ServiceRunError {
+    fn from(error: PnoiseRunError) -> Self {
+        Self::Failure(error.to_string())
+    }
+}
 
 /// Frequency sweep type for periodic-noise analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,7 +201,17 @@ pub fn run_pnoise_analysis_with_config(
     netlist_text: &str,
     config: &PnoiseRunConfig,
 ) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_config_and_source_path(netlist_text, config, None)
+    run_pnoise_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run PNoise analysis with explicit configuration and cancellation.
+pub fn run_pnoise_analysis_with_config_and_abort(
+    netlist_text: &str,
+    config: &PnoiseRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    run_pnoise_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
 }
 
 /// Run PNoise analysis with explicit configuration and a source path used to
@@ -205,47 +221,59 @@ pub fn run_pnoise_analysis_with_config_and_source_path(
     config: &PnoiseRunConfig,
     source_path: Option<&Path>,
 ) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_config_typed(netlist_text, config, source_path)
-        .map_err(|error| error.to_string())
+    run_pnoise_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
 }
 
-fn run_pnoise_analysis_with_config_typed(
+/// Run PNoise analysis with source-path resolution and cooperative
+/// cancellation through periodic solve, sideband folding, and conversion.
+pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &PnoiseRunConfig,
     source_path: Option<&Path>,
-) -> Result<PnoiseData, PnoiseRunError> {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    ensure_not_aborted(abort)?;
     config.validate()?;
+    ensure_not_aborted(abort)?;
 
-    let netlist = parse_runner_netlist(netlist_text, source_path).map_err(PnoiseRunError::Parse)?;
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     if config.noise_ref == PnoiseReference::Input {
         let source_name = config.input_source.trim();
-        if !source_name.is_empty() && !netlist_has_independent_source_named(&netlist, source_name) {
+        if !source_name.is_empty()
+            && !netlist_has_independent_source_named_with_abort(&netlist, source_name, abort)?
+        {
             return Err(PnoiseRunError::Resolution(format!(
                 "PNOISE input source '{}' is not an independent voltage/current source in the netlist",
                 source_name
-            )));
+            )).into());
         }
     }
 
     // PNOISE requires a periodic operating point. We run PSS first and reuse
     // its carrier for phase-noise normalization.
-    let pss_data = run_pss_analysis_with_source_path(
+    let pss_data = run_pss_analysis_with_source_path_and_abort(
         netlist_text,
         config.pss_fundamental_freq,
         config.pss_num_harmonics,
         config.pss_tolerance,
         source_path,
-    )
-    .map_err(PnoiseRunError::Execution)?;
+        abort,
+    )?;
 
     let mut sim_config = build_engine_config(&netlist, None);
     sim_config.tolerance = config.pss_tolerance;
     let noise_temperature = sim_config.temperature;
     let engine = Engine::new(sim_config);
 
-    let dc_result = engine.run_dc_op(&netlist).map_err(|e| {
-        PnoiseRunError::Execution(format!("DC OP error (required for PNOISE): {}", e))
-    })?;
+    let dc_result = engine
+        .run_dc_op_with_abort(&netlist, abort)
+        .map_err(|error| ServiceRunError::from_core("DC OP error (required for PNOISE)", error))?;
     let output_idx = resolve_node_or_ground_index(config.output_node.trim(), &dc_result.node_names)
         .ok_or_else(|| {
             PnoiseRunError::Resolution(format!(
@@ -254,9 +282,9 @@ fn run_pnoise_analysis_with_config_typed(
             ))
         })?;
     if output_idx == 0 {
-        return Err(PnoiseRunError::Resolution(
-            "PNOISE output node cannot be ground".to_string(),
-        ));
+        return Err(
+            PnoiseRunError::Resolution("PNOISE output node cannot be ground".to_string()).into(),
+        );
     }
     let output_ref_idx = config
         .output_ref
@@ -277,43 +305,44 @@ fn run_pnoise_analysis_with_config_typed(
     {
         return Err(PnoiseRunError::Resolution(
             "PNOISE output node and output reference cannot be the same node".to_string(),
-        ));
+        )
+        .into());
     }
 
-    let frequencies = generate_freq_points(
+    let frequencies = generate_freq_points_with_abort(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
-    )
-    .map_err(PnoiseRunError::Data)?;
+        abort,
+    )?;
 
-    let sideband_stride =
-        resolve_pnoise_sideband_stride(config.max_sideband).map_err(PnoiseRunError::Data)?;
+    let sideband_stride = resolve_pnoise_sideband_stride_with_abort(config.max_sideband, abort)?;
     let sideband_factor = sideband_stride;
-    let translated_frequencies = build_pnoise_sideband_translated_frequencies(
+    let translated_frequencies = build_pnoise_sideband_translated_frequencies_with_abort(
         &frequencies,
         pss_data.frequency,
         config.max_sideband,
-    )
-    .map_err(PnoiseRunError::Data)?;
+        abort,
+    )?;
     let translated_noise_results = engine
-        .run_noise_ports(
+        .run_noise_ports_with_abort(
             &netlist,
             output_idx,
             output_ref_idx,
             &translated_frequencies,
             noise_temperature,
+            abort,
         )
-        .map_err(|e| PnoiseRunError::Execution(format!("PNOISE noise analysis error: {}", e)))?;
-    let folded_output_noise = fold_sideband_noise_results(
+        .map_err(|error| ServiceRunError::from_core("PNOISE noise analysis error", error))?;
+    let folded_output_noise = fold_sideband_noise_results_with_abort(
         &translated_noise_results,
         frequencies.len(),
         sideband_stride,
         "output-referred",
+        abort,
         |point| point.output_noise_density.max(0.0),
-    )
-    .map_err(PnoiseRunError::Data)?;
+    )?;
 
     let mut warnings = Vec::new();
 
@@ -333,7 +362,7 @@ fn run_pnoise_analysis_with_config_typed(
         .then(|| config.input_source.trim())
         .filter(|name| !name.is_empty());
     let mut exact_input_noise: Option<Vec<Value>> = None;
-    match engine.run_pnoise(
+    match engine.run_pnoise_with_abort(
         &netlist,
         pss_data.frequency,
         &frequencies,
@@ -341,31 +370,40 @@ fn run_pnoise_analysis_with_config_typed(
         pnoise_ref,
         pnoise_input,
         config.max_sideband.max(1),
+        abort,
     ) {
         Ok(exact) => {
             if config.noise_summary {
-                let total: f64 = exact.output_noise.iter().sum();
-                exact_contributors = Some(
-                    exact
-                        .contributors
-                        .iter()
-                        .map(|(name, psds)| {
-                            let share: f64 = psds.iter().sum();
-                            let pct = if total > 0.0 {
-                                100.0 * share / total
-                            } else {
-                                0.0
-                            };
-                            (name.clone(), pct)
-                        })
-                        .collect(),
-                );
+                let mut total = 0.0;
+                for (index, value) in exact.output_noise.iter().enumerate() {
+                    poll_periodically(abort, index)?;
+                    total += value;
+                }
+                let mut contributors = Vec::with_capacity(exact.contributors.len());
+                for (contributor_index, (name, psds)) in exact.contributors.iter().enumerate() {
+                    poll_periodically(abort, contributor_index)?;
+                    let mut share = 0.0;
+                    for (sample_index, value) in psds.iter().enumerate() {
+                        poll_periodically(abort, sample_index)?;
+                        share += value;
+                    }
+                    contributors.push((
+                        name.clone(),
+                        if total > 0.0 {
+                            100.0 * share / total
+                        } else {
+                            0.0
+                        },
+                    ));
+                }
+                exact_contributors = Some(contributors);
             }
             exact_input_noise = exact.input_noise.clone();
             output_noise = exact.output_noise;
         }
-        Err(e) => warnings.push(format!(
-            "PNOISE conversion-matrix solve unavailable ({e}); using the stationary sideband approximation"
+        Err(rspice_core::SimulationError::Aborted) => return Err(ServiceRunError::Aborted),
+        Err(error) => warnings.push(format!(
+            "PNOISE conversion-matrix solve unavailable ({error}); using the stationary sideband approximation"
         )),
     }
     if config.noise_ref == PnoiseReference::Input && exact_input_noise.is_none() {
@@ -375,7 +413,11 @@ fn run_pnoise_analysis_with_config_typed(
     }
     let mut input_noise = None;
     let total_output_noise = if config.integrated_noise {
-        Some(integrate_noise_rms(&frequencies, &output_noise))
+        Some(integrate_noise_rms_with_abort(
+            &frequencies,
+            &output_noise,
+            abort,
+        )?)
     } else {
         None
     };
@@ -396,6 +438,7 @@ fn run_pnoise_analysis_with_config_typed(
                     &translated_frequencies,
                     sideband_stride,
                     noise_temperature,
+                    abort,
                 )?;
                 input_noise = Some(estimate);
             }
@@ -411,7 +454,8 @@ fn run_pnoise_analysis_with_config_typed(
                 .with_tstab_periods(30)
                 .with_tolerance(config.pss_tolerance)
                 .with_max_iterations(60);
-            match engine.run_pnoise_oscillator(&netlist, osc_config, &frequencies) {
+            match engine.run_pnoise_oscillator_with_abort(&netlist, osc_config, &frequencies, abort)
+            {
                 Ok(osc) => {
                     return Ok(PnoiseData {
                         frequencies,
@@ -428,16 +472,20 @@ fn run_pnoise_analysis_with_config_typed(
                         warnings,
                     });
                 }
-                Err(e) => warnings.push(format!(
-                    "PNOISE oscillator (PPV) analysis unavailable ({e}); reporting \
+                Err(rspice_core::SimulationError::Aborted) => {
+                    return Err(ServiceRunError::Aborted);
+                }
+                Err(error) => warnings.push(format!(
+                    "PNOISE oscillator (PPV) analysis unavailable ({error}); reporting \
                      carrier-normalized driven noise instead"
                 )),
             }
-            let carrier_rms = estimate_carrier_rms_for_output(
+            let carrier_rms = estimate_carrier_rms_for_output_with_abort(
                 &pss_data,
                 config.output_node.trim(),
                 config.output_ref.as_deref(),
-            )
+                abort,
+            )?
             .ok_or_else(|| {
                 PnoiseRunError::Data(format!(
                     "PNOISE phase-noise conversion could not determine carrier amplitude at '{}'{}",
@@ -452,10 +500,10 @@ fn run_pnoise_analysis_with_config_typed(
                 ))
             })?;
             let carrier_power = (carrier_rms * carrier_rms).max(1e-30);
-            output_noise = output_noise
-                .iter()
-                .map(|psd| 10.0 * (psd.max(1e-30) / carrier_power).log10())
-                .collect();
+            for (index, psd) in output_noise.iter_mut().enumerate() {
+                poll_periodically(abort, index)?;
+                *psd = 10.0 * (psd.max(1e-30) / carrier_power).log10();
+            }
         }
     }
 
@@ -467,14 +515,18 @@ fn run_pnoise_analysis_with_config_typed(
                     "PNOISE contributor breakdown uses the stationary sideband approximation"
                         .to_string(),
                 );
-                fold_sideband_contributors(&translated_noise_results, sideband_stride)
-                    .map_err(PnoiseRunError::Data)?
+                fold_sideband_contributors_with_abort(
+                    &translated_noise_results,
+                    sideband_stride,
+                    abort,
+                )?
             }
         }
     } else {
         Vec::new()
     };
 
+    ensure_not_aborted(abort)?;
     Ok(PnoiseData {
         frequencies,
         output_noise,
@@ -498,21 +550,22 @@ fn compute_input_referred_pnoise(
     translated_frequencies: &[Value],
     sideband_stride: usize,
     temperature: Value,
-) -> Result<Vec<Value>, PnoiseRunError> {
-    let fold_input_density = |core_results: &[NoiseResult]| -> Result<Vec<Value>, PnoiseRunError> {
-        fold_sideband_noise_results(
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Vec<Value>> {
+    let fold_input_density = |core_results: &[NoiseResult]| -> ServiceRunResult<Vec<Value>> {
+        fold_sideband_noise_results_with_abort(
             core_results,
             num_offsets,
             sideband_stride,
             "input-referred",
+            abort,
             |point| point.input_referred_density.max(0.0),
         )
-        .map_err(PnoiseRunError::Data)
     };
 
     let source_name = if config.input_source.trim().is_empty() {
-        infer_primary_source_name(netlist).ok_or_else(|| {
-            PnoiseRunError::Resolution(
+        infer_primary_source_name_with_abort(netlist, abort)?.ok_or_else(|| {
+            ServiceRunError::Failure(
                 "PNOISE input-referred conversion requires an explicit input source or at least one inferable independent source".to_string(),
             )
         })?
@@ -521,23 +574,27 @@ fn compute_input_referred_pnoise(
     };
 
     let core_results = engine
-        .run_noise_with_input_source(
+        .run_noise_with_input_source_and_abort(
             netlist,
             output_idx,
             output_ref_idx,
             &source_name,
             translated_frequencies,
             temperature,
+            abort,
         )
         .map_err(|error| {
-            PnoiseRunError::Execution(format!(
-                "PNOISE input source '{}' failed during source-referred noise evaluation: {}",
-                source_name, error
-            ))
+            ServiceRunError::from_core(
+                &format!(
+                    "PNOISE input source '{}' failed during source-referred noise evaluation",
+                    source_name
+                ),
+                error,
+            )
         })?;
 
     if core_results.len() != translated_frequencies.len() {
-        return Err(PnoiseRunError::Data(format!(
+        return Err(ServiceRunError::Failure(format!(
             "PNOISE input source '{}' returned {} translated points, expected {}",
             source_name,
             core_results.len(),
@@ -550,7 +607,15 @@ fn compute_input_referred_pnoise(
 
 /// Run PNoise analysis using inferred/default settings.
 pub fn run_pnoise_analysis(netlist_text: &str) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_source_path(netlist_text, None)
+    run_pnoise_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run inferred/default PNoise analysis with cancellation.
+pub fn run_pnoise_analysis_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    run_pnoise_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run PNoise analysis using inferred/default settings and a source path used
@@ -559,114 +624,161 @@ pub fn run_pnoise_analysis_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_typed(netlist_text, source_path).map_err(|error| error.to_string())
+    run_pnoise_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
 }
 
-fn run_pnoise_analysis_typed(
+/// Run inferred/default PNoise analysis with source-path resolution and
+/// cancellation.
+pub fn run_pnoise_analysis_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
-) -> Result<PnoiseData, PnoiseRunError> {
-    let netlist = parse_runner_netlist(netlist_text, source_path).map_err(PnoiseRunError::Parse)?;
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
-    let dc_result = engine.run_dc_op(&netlist).map_err(|e| {
-        PnoiseRunError::Execution(format!("DC OP error (required for PNOISE defaults): {}", e))
-    })?;
-    let output_node = infer_primary_output_node(&dc_result.node_names).ok_or_else(|| {
-        PnoiseRunError::Resolution(
-            "PNOISE could not infer an output node; ensure at least one non-ground node exists"
-                .to_string(),
-        )
-    })?;
-    let input_source = infer_primary_source_name(&netlist).unwrap_or_else(|| "VIN".to_string());
+    let dc_result = engine
+        .run_dc_op_with_abort(&netlist, abort)
+        .map_err(|error| {
+            ServiceRunError::from_core("DC OP error (required for PNOISE defaults)", error)
+        })?;
+    let output_node = infer_primary_output_node_with_abort(&dc_result.node_names, abort)?
+        .ok_or_else(|| {
+            ServiceRunError::Failure(
+                "PNOISE could not infer an output node; ensure at least one non-ground node exists"
+                    .to_string(),
+            )
+        })?;
+    let input_source =
+        infer_primary_source_name_with_abort(&netlist, abort)?.unwrap_or_else(|| "VIN".to_string());
 
     let cfg = PnoiseRunConfig {
         output_node,
         input_source,
         ..PnoiseRunConfig::default()
     };
-    run_pnoise_analysis_with_config_typed(netlist_text, &cfg, source_path)
+    run_pnoise_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        &cfg,
+        source_path,
+        abort,
+    )
 }
 
-fn find_pss_waveform_by_node<'a>(pss_data: &'a PssData, node: &str) -> Option<&'a [Value]> {
+fn find_pss_waveform_by_node_with_abort<'a>(
+    pss_data: &'a PssData,
+    node: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Option<&'a [Value]>> {
     let target = normalize_voltage_signal_name(node);
-    pss_data
-        .waveforms
-        .iter()
-        .find(|(name, _)| normalize_voltage_signal_name(name) == target)
-        .map(|(_, values)| values.as_slice())
+    for (index, (name, values)) in pss_data.waveforms.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if normalize_voltage_signal_name(name) == target {
+            return Ok(Some(values.as_slice()));
+        }
+    }
+    Ok(None)
 }
 
-fn estimate_carrier_rms_for_node(pss_data: &PssData, output_node: &str) -> Option<Value> {
+fn estimate_carrier_rms_for_node_with_abort(
+    pss_data: &PssData,
+    output_node: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Option<Value>> {
     let target = normalize_voltage_signal_name(output_node);
 
-    if let Some((_, harmonics)) = pss_data
-        .harmonics
-        .iter()
-        .find(|(name, _)| normalize_voltage_signal_name(name) == target)
-        && let Some((_, magnitude, _)) = harmonics
-            .iter()
-            .filter(|(frequency, magnitude, _)| {
-                frequency.is_finite()
-                    && *frequency > 0.0
-                    && magnitude.is_finite()
-                    && *magnitude > 0.0
-            })
-            .max_by(|a, b| a.1.total_cmp(&b.1))
-    {
-        return Some(*magnitude / 2.0_f64.sqrt());
+    for (trace_index, (name, harmonics)) in pss_data.harmonics.iter().enumerate() {
+        poll_periodically(abort, trace_index)?;
+        if normalize_voltage_signal_name(name) != target {
+            continue;
+        }
+        let mut strongest = None;
+        for (harmonic_index, (frequency, magnitude, _)) in harmonics.iter().enumerate() {
+            poll_periodically(abort, harmonic_index)?;
+            if frequency.is_finite()
+                && *frequency > 0.0
+                && magnitude.is_finite()
+                && *magnitude > 0.0
+                && strongest.is_none_or(|current: Value| *magnitude > current)
+            {
+                strongest = Some(*magnitude);
+            }
+        }
+        if let Some(magnitude) = strongest {
+            return Ok(Some(magnitude / 2.0_f64.sqrt()));
+        }
     }
 
-    pss_data
-        .waveforms
-        .iter()
-        .find(|(name, _)| normalize_voltage_signal_name(name) == target)
-        .and_then(|(_, values)| {
-            if values.is_empty() {
-                return None;
-            }
-            let mean_sq =
-                values.iter().map(|value| value * value).sum::<Value>() / values.len() as Value;
-            (mean_sq > 0.0).then_some(mean_sq.sqrt())
-        })
+    for (trace_index, (name, values)) in pss_data.waveforms.iter().enumerate() {
+        poll_periodically(abort, trace_index)?;
+        if normalize_voltage_signal_name(name) != target || values.is_empty() {
+            continue;
+        }
+        let mut sum = 0.0;
+        for (sample_index, value) in values.iter().enumerate() {
+            poll_periodically(abort, sample_index)?;
+            sum += value * value;
+        }
+        let mean_sq = sum / values.len() as Value;
+        return Ok((mean_sq > 0.0).then_some(mean_sq.sqrt()));
+    }
+    Ok(None)
 }
 
-fn estimate_carrier_rms_for_output(
+fn estimate_carrier_rms_for_output_with_abort(
     pss_data: &PssData,
     output_node: &str,
     output_ref: Option<&str>,
-) -> Option<Value> {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Option<Value>> {
+    ensure_not_aborted(abort)?;
     let reference = output_ref
         .map(str::trim)
         .filter(|node| !node.is_empty() && !is_ground_like(node));
     if let Some(reference_node) = reference {
-        let out_values = find_pss_waveform_by_node(pss_data, output_node)?;
-        let ref_values = find_pss_waveform_by_node(pss_data, reference_node)?;
+        let Some(out_values) = find_pss_waveform_by_node_with_abort(pss_data, output_node, abort)?
+        else {
+            return Ok(None);
+        };
+        let Some(ref_values) =
+            find_pss_waveform_by_node_with_abort(pss_data, reference_node, abort)?
+        else {
+            return Ok(None);
+        };
         let count = out_values.len().min(ref_values.len());
         if count == 0 {
-            return None;
+            return Ok(None);
         }
-        let mean_sq = out_values
+        let mut sum = 0.0;
+        for (index, (out, reference)) in out_values
             .iter()
             .zip(ref_values.iter())
             .take(count)
-            .map(|(out, reference)| {
-                let vdiff = *out - *reference;
-                vdiff * vdiff
-            })
-            .sum::<Value>()
-            / count as Value;
-        return (mean_sq > 0.0).then_some(mean_sq.sqrt());
+            .enumerate()
+        {
+            poll_periodically(abort, index)?;
+            let difference = *out - *reference;
+            sum += difference * difference;
+        }
+        let mean_sq = sum / count as Value;
+        return Ok((mean_sq > 0.0).then_some(mean_sq.sqrt()));
     }
-    estimate_carrier_rms_for_node(pss_data, output_node)
+    estimate_carrier_rms_for_node_with_abort(pss_data, output_node, abort)
 }
 
-fn integrate_noise_rms(frequencies: &[Value], psd: &[Value]) -> Value {
+fn integrate_noise_rms_with_abort(
+    frequencies: &[Value],
+    psd: &[Value],
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Value> {
+    ensure_not_aborted(abort)?;
     if frequencies.len() < 2 || psd.len() < 2 {
-        return 0.0;
+        return Ok(0.0);
     }
     let n = frequencies.len().min(psd.len());
     let mut integrated = 0.0;
     for idx in 1..n {
+        poll_periodically(abort, idx)?;
         let df = frequencies[idx] - frequencies[idx - 1];
         if df <= 0.0 {
             continue;
@@ -674,5 +786,35 @@ fn integrate_noise_rms(frequencies: &[Value], psd: &[Value]) -> Value {
         let avg = (psd[idx].max(0.0) + psd[idx - 1].max(0.0)) * 0.5;
         integrated += avg * df;
     }
-    integrated.max(0.0).sqrt()
+    ensure_not_aborted(abort)?;
+    Ok(integrated.max(0.0).sqrt())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
+
+    #[test]
+    fn pnoise_service_preserves_typed_entry_abort() {
+        let result = run_pnoise_analysis_with_config_and_abort(
+            "not a netlist",
+            &PnoiseRunConfig::default(),
+            &ImmediateAbort,
+        );
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn pnoise_integration_honors_in_loop_abort() {
+        let frequencies = (0..256).map(|index| index as Value).collect::<Vec<_>>();
+        let psd = vec![1e-18; frequencies.len()];
+        let abort = CountingAbort::new(1);
+
+        let result = integrate_noise_rms_with_abort(&frequencies, &psd, &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(abort.count() > 1);
+    }
 }

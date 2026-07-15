@@ -55,6 +55,8 @@ pub(crate) use xspice_parser::{
 
 use thiserror::Error;
 
+use crate::abort_signal::{AbortSignal, NoAbort};
+
 /// Errors that can occur during netlist parsing
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -78,6 +80,87 @@ pub enum ParseError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Error returned by cooperative, abort-aware netlist parsing APIs.
+///
+/// Keeping cancellation separate from [`ParseError`] preserves the existing
+/// parser-error contract for legacy callers while allowing interactive
+/// execution to distinguish a user-requested stop from invalid input.
+#[derive(Debug, Error)]
+pub enum ParseWithAbortError {
+    /// Cooperative cancellation was requested.
+    #[error("Netlist parsing aborted")]
+    Aborted,
+    /// The source was invalid or could not be read.
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+}
+
+impl ParseWithAbortError {
+    /// Whether this error represents cooperative cancellation.
+    pub fn is_aborted(&self) -> bool {
+        matches!(self, Self::Aborted)
+    }
+}
+
+#[inline]
+pub(crate) fn ensure_parse_not_aborted(abort: &dyn AbortSignal) -> Result<(), ParseWithAbortError> {
+    if abort.is_aborted() {
+        Err(ParseWithAbortError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+pub(crate) fn poll_parse_abort(
+    abort: &dyn AbortSignal,
+    index: usize,
+) -> Result<(), ParseWithAbortError> {
+    const POLL_STRIDE: usize = 64;
+    if index.is_multiple_of(POLL_STRIDE) {
+        ensure_parse_not_aborted(abort)?;
+    }
+    Ok(())
+}
+
+/// Poll while traversing a potentially very large single logical line.
+///
+/// Outer line-level checks alone are insufficient for generated `.DATA`
+/// rows, expressions, or extraction records that can contain megabytes of
+/// tokens without a newline.
+pub(crate) fn poll_parse_text(
+    abort: &dyn AbortSignal,
+    text: &str,
+) -> Result<(), ParseWithAbortError> {
+    const TEXT_CHUNK_BYTES: usize = 4096;
+    for _ in text.as_bytes().chunks(TEXT_CHUNK_BYTES) {
+        ensure_parse_not_aborted(abort)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn finish_non_aborting_parse<T>(
+    result: Result<T, ParseWithAbortError>,
+) -> Result<T, ParseError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(ParseWithAbortError::Parse(error)) => Err(error),
+        Err(ParseWithAbortError::Aborted) => {
+            unreachable!("NoAbort cannot cancel netlist parsing")
+        }
+    }
+}
+
+pub(crate) fn map_abort_parse_error(
+    error: ParseWithAbortError,
+    map: impl FnOnce(ParseError) -> ParseError,
+) -> ParseWithAbortError {
+    match error {
+        ParseWithAbortError::Aborted => ParseWithAbortError::Aborted,
+        ParseWithAbortError::Parse(error) => ParseWithAbortError::Parse(map(error)),
+    }
 }
 
 use crate::analysis::MeasureStatement;
@@ -182,7 +265,15 @@ pub struct VerilogAInclude {
 impl Netlist {
     /// Parse a netlist from a string
     pub fn parse(input: &str) -> Result<Self, ParseError> {
-        Self::parse_with_options(input, NetlistParseOptions::default())
+        finish_non_aborting_parse(Self::parse_with_abort(input, &NoAbort))
+    }
+
+    /// Parse a netlist from a string with cooperative cancellation.
+    pub fn parse_with_abort(
+        input: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_with_options_and_abort(input, NetlistParseOptions::default(), abort)
     }
 
     /// Parse a netlist from a string with explicit parser options.
@@ -190,14 +281,27 @@ impl Netlist {
         input: &str,
         options: NetlistParseOptions,
     ) -> Result<Self, ParseError> {
-        let promoted_input = Self::promote_control_analysis_commands(input);
+        finish_non_aborting_parse(Self::parse_with_options_and_abort(input, options, &NoAbort))
+    }
+
+    /// Parse a netlist from a string with explicit options and cooperative
+    /// cancellation.
+    pub fn parse_with_options_and_abort(
+        input: &str,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
+        let promoted_input = Self::promote_control_analysis_commands_with_abort(input, abort)?;
         let (sanitized, mut diagnostics) =
-            Self::strip_control_blocks_with_diagnostics(&promoted_input)?;
-        let mut netlist = parser::parse_netlist_with_options(&sanitized, options)?;
+            Self::strip_control_blocks_with_diagnostics_and_abort(&promoted_input, abort)?;
+        let mut netlist = parser::parse_netlist_with_options_and_abort(&sanitized, options, abort)?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
+        ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = None;
+        ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
 
@@ -206,7 +310,21 @@ impl Netlist {
     /// This method preprocesses .include and .lib directives using the specified
     /// file path to resolve relative paths.
     pub fn parse_with_path(input: &str, file_path: &std::path::Path) -> Result<Self, ParseError> {
-        Self::parse_with_path_and_options(input, file_path, NetlistParseOptions::default())
+        finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
+    }
+
+    /// Parse a netlist with include resolution and cooperative cancellation.
+    pub fn parse_with_path_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_with_path_and_options_and_abort(
+            input,
+            file_path,
+            NetlistParseOptions::default(),
+            abort,
+        )
     }
 
     /// Parse a netlist from a string with include resolution and parser options.
@@ -215,7 +333,22 @@ impl Netlist {
         file_path: &std::path::Path,
         options: NetlistParseOptions,
     ) -> Result<Self, ParseError> {
-        Self::parse_with_path_execution_dir_and_options(input, file_path, None, options)
+        finish_non_aborting_parse(Self::parse_with_path_and_options_and_abort(
+            input, file_path, options, &NoAbort,
+        ))
+    }
+
+    /// Parse a netlist with include resolution, explicit parser options, and
+    /// cooperative cancellation.
+    pub fn parse_with_path_and_options_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_with_path_execution_dir_options_and_abort(
+            input, file_path, None, options, abort,
+        )
     }
 
     /// Parse a netlist from source text with include resolution and an explicit
@@ -231,38 +364,65 @@ impl Netlist {
         execution_dir: &std::path::Path,
         options: NetlistParseOptions,
     ) -> Result<Self, ParseError> {
-        Self::parse_with_path_execution_dir_and_options(
+        finish_non_aborting_parse(Self::parse_with_path_and_execution_dir_and_abort(
+            input,
+            file_path,
+            execution_dir,
+            options,
+            &NoAbort,
+        ))
+    }
+
+    /// Parse a netlist using an explicit include execution directory and
+    /// cooperative cancellation.
+    pub fn parse_with_path_and_execution_dir_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        execution_dir: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_with_path_execution_dir_options_and_abort(
             input,
             file_path,
             Some(execution_dir),
             options,
+            abort,
         )
     }
 
-    fn parse_with_path_execution_dir_and_options(
+    fn parse_with_path_execution_dir_options_and_abort(
         input: &str,
         file_path: &std::path::Path,
         execution_dir: Option<&std::path::Path>,
         options: NetlistParseOptions,
-    ) -> Result<Self, ParseError> {
-        let processed =
-            Self::preprocess_includes_with_execution_dir(input, file_path, execution_dir)?;
-        let mut netlist = Self::parse_with_options(&processed, options)?;
-        Self::normalize_model_string_paths(&mut netlist, file_path);
-        Self::normalize_source_file_paths(&mut netlist, file_path);
-        Self::normalize_measure_file_paths(&mut netlist, file_path);
-        Self::apply_spef_includes(&mut netlist, file_path)?;
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let processed = Self::preprocess_includes_with_execution_dir_and_abort(
+            input,
+            file_path,
+            execution_dir,
+            abort,
+        )?;
+        let mut netlist = Self::parse_with_options_and_abort(&processed, options, abort)?;
+        Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
+        Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
+        Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
+        Self::apply_spef_includes_with_abort(&mut netlist, file_path, abort)?;
+        ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(file_path.to_path_buf());
+        ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
 
     /// Back-annotate every `.spef_include` referenced by the deck
     /// (paths resolve relative to the deck file).
-    fn apply_spef_includes(
+    fn apply_spef_includes_with_abort(
         netlist: &mut Netlist,
         deck_path: &std::path::Path,
-    ) -> Result<(), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
         if netlist.spef_includes.is_empty() {
             return Ok(());
         }
@@ -270,19 +430,22 @@ impl Netlist {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| std::path::Path::new("."));
-        for entry in netlist.spef_includes.clone() {
+        for (index, entry) in netlist.spef_includes.clone().into_iter().enumerate() {
+            poll_parse_abort(abort, index)?;
             let candidate = std::path::Path::new(&entry);
             let path = if candidate.is_absolute() {
                 candidate.to_path_buf()
             } else {
                 base.join(candidate)
             };
-            let content = read_file_with_encoding(&path).map_err(|e| ParseError::Syntax {
-                line: 0,
-                message: format!("failed to read SPEF file `{}`: {e}", path.display()),
+            let content = read_file_with_encoding_with_abort(&path, abort).map_err(|error| {
+                map_abort_parse_error(error, |error| ParseError::Syntax {
+                    line: 0,
+                    message: format!("failed to read SPEF file `{}`: {error}", path.display()),
+                })
             })?;
-            let parasitics = spef::SpefFile::parse(&content)?;
-            let report = parasitics.apply(netlist);
+            let parasitics = spef::SpefFile::parse_with_abort(&content, abort)?;
+            let report = parasitics.apply_with_abort(netlist, abort)?;
             log::info!(
                 "SPEF `{}`: {} net(s), {} pin(s) rewired ({} skipped), {} R + {} C added",
                 path.display(),
@@ -293,6 +456,7 @@ impl Netlist {
                 report.capacitors
             );
         }
+        ensure_parse_not_aborted(abort)?;
         Ok(())
     }
 
@@ -300,6 +464,17 @@ impl Netlist {
     pub fn parse_file(path: &std::path::Path) -> Result<Self, ParseError> {
         let content = read_file_with_encoding(path)?;
         Self::parse_with_path(&content, path)
+    }
+
+    /// Parse a netlist file with include expansion and cooperative
+    /// cancellation. File reads are chunked so cancellation can be observed
+    /// while ingesting unusually large decks.
+    pub fn parse_file_with_abort(
+        path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let content = read_file_with_encoding_with_abort(path, abort)?;
+        Self::parse_with_path_and_abort(&content, path, abort)
     }
 
     /// Read a deck file with the same encoding handling `parse_file` uses
@@ -322,6 +497,17 @@ impl Netlist {
         Self::parse_with_search_paths(&content, path, search_paths)
     }
 
+    /// Parse a netlist file with additional include search paths and
+    /// cooperative cancellation.
+    pub fn parse_file_with_search_paths_and_abort(
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let content = read_file_with_encoding_with_abort(path, abort)?;
+        Self::parse_with_search_paths_and_abort(&content, path, search_paths, abort)
+    }
+
     /// Parse netlist source text as if it lived at `path`, with additional
     /// include search directories — the source-text twin of
     /// [`Netlist::parse_file_with_search_paths`], for callers that rewrite
@@ -331,18 +517,38 @@ impl Netlist {
         path: &std::path::Path,
         search_paths: &[std::path::PathBuf],
     ) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_with_search_paths_and_abort(
+            input,
+            path,
+            search_paths,
+            &NoAbort,
+        ))
+    }
+
+    /// Parse source text with additional include search paths and cooperative
+    /// cancellation.
+    pub fn parse_with_search_paths_and_abort(
+        input: &str,
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         let mut processor = IncludeProcessor::new(path);
-        for dir in search_paths {
+        for (index, dir) in search_paths.iter().enumerate() {
+            poll_parse_abort(abort, index)?;
             processor.add_lib_path(dir.clone());
         }
-        let processed = processor.expand_content(input, path)?;
-        let mut netlist = Self::parse(&processed)?;
-        Self::normalize_model_string_paths(&mut netlist, path);
-        Self::normalize_source_file_paths(&mut netlist, path);
-        Self::normalize_measure_file_paths(&mut netlist, path);
-        Self::apply_spef_includes(&mut netlist, path)?;
+        let processed = processor.expand_content_with_abort(input, path, abort)?;
+        let mut netlist = Self::parse_with_abort(&processed, abort)?;
+        Self::normalize_model_string_paths_with_abort(&mut netlist, path, abort)?;
+        Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
+        Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
+        Self::apply_spef_includes_with_abort(&mut netlist, path, abort)?;
+        ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(path.to_path_buf());
+        ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
 
@@ -354,16 +560,28 @@ impl Netlist {
         content: &str,
         file_path: &std::path::Path,
     ) -> Result<String, ParseError> {
-        Self::preprocess_includes_with_execution_dir(content, file_path, None)
+        finish_non_aborting_parse(Self::preprocess_includes_with_abort(
+            content, file_path, &NoAbort,
+        ))
     }
 
-    fn preprocess_includes_with_execution_dir(
+    /// Expand `.include` and `.lib` directives with cooperative cancellation.
+    pub fn preprocess_includes_with_abort(
+        content: &str,
+        file_path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        Self::preprocess_includes_with_execution_dir_and_abort(content, file_path, None, abort)
+    }
+
+    fn preprocess_includes_with_execution_dir_and_abort(
         content: &str,
         file_path: &std::path::Path,
         execution_dir: Option<&std::path::Path>,
-    ) -> Result<String, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let mut processor = IncludeProcessor::new_with_execution_dir(file_path, execution_dir);
-        processor.expand_content(content, file_path)
+        processor.expand_content_with_abort(content, file_path, abort)
     }
 
     /// Strip .control/.endc blocks from netlist
@@ -372,13 +590,20 @@ impl Netlist {
     /// conditionals). These contain operators like '>' that break the netlist
     /// parser. We strip them since RSpice runs the circuit directly.
     pub fn strip_control_blocks(input: &str) -> Result<String, ParseError> {
-        Ok(Self::strip_control_blocks_with_diagnostics(input)?.0)
+        finish_non_aborting_parse(
+            Self::strip_control_blocks_with_diagnostics_and_abort(input, &NoAbort)
+                .map(|(source, _)| source),
+        )
     }
 
-    fn promote_control_analysis_commands(input: &str) -> String {
-        let promoted = Self::collect_control_promoted_commands(input);
+    fn promote_control_analysis_commands_with_abort(
+        input: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        let promoted = Self::collect_control_promoted_commands_with_abort(input, abort)?;
         if promoted.is_empty() {
-            return input.to_string();
+            ensure_parse_not_aborted(abort)?;
+            return Ok(input.to_string());
         }
 
         let mut result = String::with_capacity(
@@ -391,7 +616,8 @@ impl Netlist {
         let mut in_control = false;
         let mut inserted = false;
 
-        for line in input.lines() {
+        for (line_index, line) in input.lines().enumerate() {
+            poll_parse_abort(abort, line_index)?;
             let trimmed = line.trim();
             let head = trimmed.split_whitespace().next().unwrap_or("");
 
@@ -414,20 +640,26 @@ impl Netlist {
         }
 
         if !inserted {
-            for command in &promoted {
+            for (index, command) in promoted.iter().enumerate() {
+                poll_parse_abort(abort, index)?;
                 result.push_str(command);
                 result.push('\n');
             }
         }
 
-        result
+        ensure_parse_not_aborted(abort)?;
+        Ok(result)
     }
 
-    fn collect_control_promoted_commands(input: &str) -> Vec<String> {
+    fn collect_control_promoted_commands_with_abort(
+        input: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<String>, ParseWithAbortError> {
         let mut promoted = Vec::new();
         let mut in_control = false;
 
-        for line in input.lines() {
+        for (line_index, line) in input.lines().enumerate() {
+            poll_parse_abort(abort, line_index)?;
             let trimmed = line.trim();
             let head = trimmed.split_whitespace().next().unwrap_or("");
 
@@ -469,7 +701,8 @@ impl Netlist {
             }
         }
 
-        promoted
+        ensure_parse_not_aborted(abort)?;
+        Ok(promoted)
     }
 
     fn promote_control_netlist_command(line: &str) -> Option<String> {
@@ -671,15 +904,17 @@ impl Netlist {
         ))
     }
 
-    fn strip_control_blocks_with_diagnostics(
+    fn strip_control_blocks_with_diagnostics_and_abort(
         input: &str,
-    ) -> Result<(String, Vec<ParseDiagnostic>), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(String, Vec<ParseDiagnostic>), ParseWithAbortError> {
         let mut result = String::with_capacity(input.len());
         let mut in_control = false;
         let mut opened_at_line = None;
         let mut diagnostics = Vec::new();
 
         for (line_index, line) in input.lines().enumerate() {
+            poll_parse_abort(abort, line_index)?;
             let line_num = line_index + 1;
             let trimmed = line.trim();
             let head = trimmed.split_whitespace().next().unwrap_or("");
@@ -700,7 +935,8 @@ impl Netlist {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: ".ENDC without matching .CONTROL".to_string(),
-                    });
+                    }
+                    .into());
                 }
                 in_control = false;
                 opened_at_line = None;
@@ -722,30 +958,44 @@ impl Netlist {
             return Err(ParseError::Syntax {
                 line,
                 message: ".CONTROL without a matching .ENDC".to_string(),
-            });
+            }
+            .into());
         }
 
+        ensure_parse_not_aborted(abort)?;
         Ok((result, diagnostics))
     }
 
-    fn normalize_model_string_paths(&mut self, file_path: &std::path::Path) {
+    fn normalize_model_string_paths_with_abort(
+        &mut self,
+        file_path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
         let Some(base_dir) = file_path.parent() else {
-            return;
+            return Ok(());
         };
 
-        for model in &mut self.models {
-            for (name, value) in &mut model.string_params {
+        for (model_index, model) in self.models.iter_mut().enumerate() {
+            poll_parse_abort(abort, model_index)?;
+            for (param_index, (name, value)) in model.string_params.iter_mut().enumerate() {
+                poll_parse_abort(abort, param_index)?;
                 *value = normalize_model_string_path_value(name, value, Some(base_dir));
             }
         }
+        ensure_parse_not_aborted(abort)
     }
 
-    fn normalize_source_file_paths(&mut self, file_path: &std::path::Path) {
+    fn normalize_source_file_paths_with_abort(
+        &mut self,
+        file_path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
         let Some(base_dir) = file_path.parent() else {
-            return;
+            return Ok(());
         };
 
-        for element in &mut self.elements {
+        for (index, element) in self.elements.iter_mut().enumerate() {
+            poll_parse_abort(abort, index)?;
             match &mut element.kind {
                 ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
                     normalize_source_spec_file_paths(spec, base_dir);
@@ -753,13 +1003,19 @@ impl Netlist {
                 _ => {}
             }
         }
+        ensure_parse_not_aborted(abort)
     }
 
-    fn normalize_measure_file_paths(&mut self, file_path: &std::path::Path) {
+    fn normalize_measure_file_paths_with_abort(
+        &mut self,
+        file_path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
         let Some(base_dir) = file_path.parent() else {
-            return;
+            return Ok(());
         };
-        for measurement in &mut self.measurements {
+        for (index, measurement) in self.measurements.iter_mut().enumerate() {
+            poll_parse_abort(abort, index)?;
             let crate::analysis::MeasureType::FileError { file, .. } =
                 &mut measurement.measure_type
             else {
@@ -773,6 +1029,7 @@ impl Netlist {
                 *file = base_dir.join(candidate).to_string_lossy().into_owned();
             }
         }
+        ensure_parse_not_aborted(abort)
     }
 
     /// Add a global node
@@ -1205,6 +1462,91 @@ fn read_file_with_encoding(path: &std::path::Path) -> Result<String, std::io::Er
     decode_source_bytes(&bytes)
 }
 
+/// Read and decode source text while polling between bounded I/O chunks.
+fn read_file_with_encoding_with_abort(
+    path: &std::path::Path,
+    abort: &dyn AbortSignal,
+) -> Result<String, ParseWithAbortError> {
+    use std::io::Read;
+
+    const READ_CHUNK_BYTES: usize = 64 * 1024;
+
+    ensure_parse_not_aborted(abort)?;
+    let mut file = std::fs::File::open(path).map_err(ParseError::Io)?;
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; READ_CHUNK_BYTES];
+    loop {
+        ensure_parse_not_aborted(abort)?;
+        let count = file.read(&mut chunk).map_err(ParseError::Io)?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+    }
+    ensure_parse_not_aborted(abort)?;
+    decode_source_bytes_with_abort(bytes, abort)
+}
+
+fn decode_source_bytes_with_abort(
+    bytes: Vec<u8>,
+    abort: &dyn AbortSignal,
+) -> Result<String, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        let source = String::from_utf8(bytes[3..].to_vec()).map_err(|error| {
+            ParseError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        })?;
+        ensure_parse_not_aborted(abort)?;
+        return Ok(source);
+    }
+
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        let little_endian = bytes.starts_with(&[0xFF, 0xFE]);
+        let body = &bytes[2..];
+        if !body.len().is_multiple_of(2) {
+            return Err(ParseError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "UTF-16 data has odd number of bytes",
+            ))
+            .into());
+        }
+        let mut utf16 = Vec::with_capacity(body.len() / 2);
+        for (index, pair) in body.chunks_exact(2).enumerate() {
+            poll_parse_abort(abort, index)?;
+            let pair = [pair[0], pair[1]];
+            utf16.push(if little_endian {
+                u16::from_le_bytes(pair)
+            } else {
+                u16::from_be_bytes(pair)
+            });
+        }
+        ensure_parse_not_aborted(abort)?;
+        let source = String::from_utf16(&utf16).map_err(|error| {
+            ParseError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        })?;
+        ensure_parse_not_aborted(abort)?;
+        return Ok(source);
+    }
+
+    match String::from_utf8(bytes) {
+        Ok(source) => {
+            ensure_parse_not_aborted(abort)?;
+            Ok(source)
+        }
+        Err(error) => {
+            let bytes = error.into_bytes();
+            let mut source = String::with_capacity(bytes.len());
+            for (index, chunk) in bytes.chunks(4096).enumerate() {
+                poll_parse_abort(abort, index)?;
+                source.extend(chunk.iter().map(|byte| char::from(*byte)));
+            }
+            ensure_parse_not_aborted(abort)?;
+            Ok(source)
+        }
+    }
+}
+
 /// Decode exact source bytes using RSpice's supported netlist/model encoding
 /// policy. Callers that authenticate raw bytes can decode those same bytes
 /// without reopening the source file.
@@ -1269,6 +1611,61 @@ fn decode_utf16_be(bytes: &[u8]) -> Result<String, std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cancellation_fixture_path(name: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time follows Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rspice-netlist-{name}-{}-{nonce}.tmp",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn source_file_ingestion_aborts_between_read_chunks() {
+        let path = cancellation_fixture_path("chunked-read");
+        std::fs::write(&path, vec![b' '; 1024 * 1024]).expect("write source fixture");
+        let abort = crate::abort_signal::CountingAbort::new(3);
+
+        let result = read_file_with_encoding_with_abort(&path, &abort);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > 3, "source reads must poll between chunks");
+    }
+
+    #[test]
+    fn model_path_normalization_aborts_after_multiple_internal_polls() {
+        let mut netlist = Netlist::default();
+        for index in 0..1_024 {
+            netlist.models.push(ModelDef {
+                name: format!("M{index}"),
+                model_type: "D".to_string(),
+                params: Vec::new(),
+                expr_params: Vec::new(),
+                string_params: vec![("file".to_string(), format!("models/m{index}.dat"))],
+                string_vector_params: Vec::new(),
+                real_vector_params: Vec::new(),
+                real_vector_expr_params: Vec::new(),
+                integer_vector_params: Vec::new(),
+            });
+        }
+        let abort = crate::abort_signal::CountingAbort::new(8);
+
+        let result = Netlist::normalize_model_string_paths_with_abort(
+            &mut netlist,
+            Path::new("project/deck.cir"),
+            &abort,
+        );
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(
+            abort.count() > 8,
+            "path normalization must poll during model traversal"
+        );
+    }
 
     fn first_mosfet(netlist: &Netlist) -> &ElementKind {
         netlist

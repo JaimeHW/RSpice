@@ -1,4 +1,6 @@
-use super::EngineBridge;
+use rspice_core::abort_signal::AbortSignal;
+
+use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
 use crate::simulation::results::SimulationResult;
 use crate::simulation::runner::SimulationError;
@@ -9,11 +11,14 @@ impl EngineBridge {
         &self,
         netlist: &rspice_core::Netlist,
         config: &PoleZeroConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
         let engine = self.engine_for_netlist(netlist);
         let dc = engine
-            .run_dc_op(netlist)
+            .run_dc_op_with_abort(netlist, abort)
             .map_err(|e| self.translate_error(e))?;
+        ensure_not_aborted(abort)?;
         let node_names = &dc.node_names;
 
         let input_idx =
@@ -58,7 +63,7 @@ impl EngineBridge {
         };
 
         let pz_result = engine
-            .run_pz_ports(
+            .run_pz_ports_with_abort(
                 netlist,
                 input_pos,
                 input_neg,
@@ -67,12 +72,24 @@ impl EngineBridge {
                 input_is_current,
                 compute_poles,
                 compute_zeros,
+                abort,
             )
             .map_err(|e| self.translate_error(e))?;
 
+        let mut poles = Vec::with_capacity(pz_result.poles.len());
+        for pole in &pz_result.poles {
+            ensure_not_aborted(abort)?;
+            poles.push((pole.re, pole.im));
+        }
+        let mut zeros = Vec::with_capacity(pz_result.zeros.len());
+        for zero in &pz_result.zeros {
+            ensure_not_aborted(abort)?;
+            zeros.push((zero.re, zero.im));
+        }
+
         Ok(SimulationResult::PoleZero {
-            poles: pz_result.poles.iter().map(|p| (p.re, p.im)).collect(),
-            zeros: pz_result.zeros.iter().map(|z| (z.re, z.im)).collect(),
+            poles,
+            zeros,
             gain: input_sign * output_sign * pz_result.dc_gain,
         })
     }

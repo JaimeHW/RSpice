@@ -86,28 +86,40 @@ enum BrowserNetlistImportResult {
 }
 
 #[cfg(target_arch = "wasm32")]
+struct BrowserNetlistImportCompletion {
+    token: crate::common::browser_file_import::TextImportToken,
+    result: BrowserNetlistImportResult,
+}
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
-    static BROWSER_NETLIST_IMPORT_RESULT: std::cell::RefCell<Option<BrowserNetlistImportResult>> =
+    static BROWSER_NETLIST_IMPORT_RESULT: std::cell::RefCell<Option<BrowserNetlistImportCompletion>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_netlist_import() -> Result<(), String> {
-    crate::common::browser_file_import::try_begin_text_import(
+    let token = crate::common::browser_file_import::try_begin_text_import(
         crate::common::browser_file_import::BrowserTextImportKind::Netlist,
     )?;
 
     crate::common::browser_file_import::pick_text_file(
         NETLIST_FILTER.0,
         NETLIST_FILTER.1,
-        |result| {
+        move |result| {
+            if !crate::common::browser_file_import::text_import_is_current(token) {
+                return;
+            }
             let event = match result {
                 Ok(Some(file)) => BrowserNetlistImportResult::Loaded(file),
                 Ok(None) => BrowserNetlistImportResult::Cancelled,
                 Err(error) => BrowserNetlistImportResult::Failed(error),
             };
             BROWSER_NETLIST_IMPORT_RESULT.with(|slot| {
-                *slot.borrow_mut() = Some(event);
+                *slot.borrow_mut() = Some(BrowserNetlistImportCompletion {
+                    token,
+                    result: event,
+                });
             });
         },
     );
@@ -116,23 +128,24 @@ fn start_browser_netlist_import() -> Result<(), String> {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
-    let event = BROWSER_NETLIST_IMPORT_RESULT.with(|slot| slot.borrow_mut().take());
-    if event.is_some() {
-        crate::common::browser_file_import::finish_text_import(
-            crate::common::browser_file_import::BrowserTextImportKind::Netlist,
-        );
+    let Some(completion) = BROWSER_NETLIST_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())
+    else {
+        return false;
+    };
+    if !crate::common::browser_file_import::finish_text_import(completion.token) {
+        return false;
     }
-    match event {
-        Some(BrowserNetlistImportResult::Loaded(file)) => {
+    match completion.result {
+        BrowserNetlistImportResult::Loaded(file) => {
             apply_imported_netlist(state, file.contents, None, &file.name)
         }
-        Some(BrowserNetlistImportResult::Failed(error)) => {
+        BrowserNetlistImportResult::Failed(error) => {
             state.push_user_message(ConsoleMessage::error(format!(
                 "SPICE deck import failed: {error}"
             )));
             false
         }
-        Some(BrowserNetlistImportResult::Cancelled) | None => false,
+        BrowserNetlistImportResult::Cancelled => false,
     }
 }
 

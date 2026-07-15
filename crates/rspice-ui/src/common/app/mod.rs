@@ -44,6 +44,7 @@ mod app_confirmation_state;
 pub use app_confirmation_state::{
     ConfirmationAction, ConfirmationDialogState, ConfirmationResponse,
 };
+pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
 
 mod app_dialog_state;
 pub use app_dialog_state::{DialogState, LibraryDeleteTarget, LicenseDialogState, LicensePhase};
@@ -191,6 +192,10 @@ pub struct AppState {
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Project/workspace model for active design context and open LCV views.
     pub(crate) workspace: crate::state::ProjectWorkspace,
+    /// Transactional document registry, accepted project baseline, and
+    /// canonical persistence identity. Runtime-only; session recovery keeps
+    /// the working set separately and reconstructs this boundary at startup.
+    pub(crate) project_lifecycle: crate::common::project_lifecycle::ProjectLifecycleState,
     /// Pending cell deletion (library, cell_name)
     pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
@@ -218,6 +223,15 @@ pub struct AppState {
     pub(crate) browser_schematic_save_name: Option<String>,
     /// Browser-only suggested filename for the next project download.
     pub(crate) browser_project_save_name: Option<String>,
+    /// Exact native canonical-file authority saved with the working session.
+    /// A restored pathname alone never grants ordinary Save authority.
+    pub(crate) native_project_binding_receipt:
+        Option<crate::common::project_lifecycle::NativeBindingReceipt>,
+    /// Exact browser canonical-binding authority saved with the working-set
+    /// session.  The binding UUID is opaque and intentionally independent of
+    /// the logical project UUID. Runtime file handles are never serialized.
+    pub(crate) browser_project_binding_receipt:
+        Option<crate::common::project_lifecycle::BrowserBindingReceipt>,
     /// The activated license key as pasted (persisted; re-verified on load).
     pub(crate) license_key: Option<String>,
     /// The verified grant behind `license_key` (derived, never persisted).
@@ -490,6 +504,7 @@ impl RSpiceApp {
         // Restore global user Verilog-A library (commercial-style user library).
         restore_global_veriloga_library(&mut state.library_manager);
         state.restore_active_schematic_from_workspace();
+        crate::common::project_lifecycle::initialize_from_session(&mut state);
 
         // A license file on disk wins over (or backfills) the session copy.
         #[cfg(not(target_arch = "wasm32"))]
@@ -550,8 +565,16 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         crate::common::browser_file_import::register_text_import_repaint_context(ctx);
         #[cfg(target_arch = "wasm32")]
+        crate::common::project_lifecycle::poll_browser_binding_restore(&mut self.state);
+        #[cfg(target_arch = "wasm32")]
         if crate::common::project_workflow::poll_browser_project_import(&mut self.state) {
             self.restore_workspace_after_project_load();
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(event) =
+            crate::common::project_workflow::poll_browser_project_save(&mut self.state)
+        {
+            self.handle_save_continuation_event(event);
         }
         #[cfg(target_arch = "wasm32")]
         if crate::common::file_workflow::poll_browser_schematic_import(&mut self.state) {
@@ -580,8 +603,8 @@ impl RSpiceApp {
     /// active document: `cell* — project — RSpice`.
     fn sync_window_title(&mut self, ctx: &Context) {
         let has_unsaved_changes = should_warn_before_browser_unload(
-            self.state.schematic.is_dirty,
-            self.state.workspace.any_dirty(),
+            crate::common::project_lifecycle::has_unsaved_changes(&self.state),
+            false,
         );
         #[cfg(target_arch = "wasm32")]
         update_browser_before_unload_guard(has_unsaved_changes);

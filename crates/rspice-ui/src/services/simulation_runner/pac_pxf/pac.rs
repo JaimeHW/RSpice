@@ -2,12 +2,15 @@ use std::path::Path;
 
 use num_complex::Complex64;
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::engine::Engine;
 
+use super::super::error::{ensure_not_aborted, poll_periodically};
 use super::super::{
-    build_engine_config, infer_primary_output_node, infer_primary_source_name, parse_runner_netlist,
+    ServiceRunError, ServiceRunResult, build_engine_config, infer_primary_output_node_with_abort,
+    infer_primary_source_name_with_abort, parse_runner_netlist_with_abort,
 };
-use super::shared::{normalize_pac_node_name, resolve_pac_output_node};
+use super::shared::{normalize_pac_node_name, resolve_pac_output_node_with_abort};
 // =============================================================================
 // PAC (Periodic AC) Analysis
 // =============================================================================
@@ -136,13 +139,15 @@ pub(super) struct PacInternalResult {
     pub(super) output_node_name: String,
 }
 
-pub(super) fn run_pac_internal(
+pub(super) fn run_pac_internal_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
-) -> Result<PacInternalResult, String> {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
     use rspice_core::analysis::advanced::pac::PacConfig;
 
-    config.validate()?;
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
 
     let mut sim_config = build_engine_config(netlist, None);
     sim_config.tolerance = config.pss_tolerance;
@@ -167,22 +172,26 @@ pub(super) fn run_pac_internal(
 
     pac_config
         .validate()
-        .map_err(|e| format!("PAC configuration error: {}", e))?;
+        .map_err(|error| ServiceRunError::Failure(format!("PAC configuration error: {error}")))?;
+    ensure_not_aborted(abort)?;
 
     // The engine solves the periodic operating point with harmonic balance
     // and the sideband-coupled small-signal system around it.
     let pac_result = engine
-        .run_pac(netlist, pac_config)
-        .map_err(|e| format!("PAC error: {}", e))?
+        .run_pac_with_abort(netlist, pac_config, abort)
+        .map_err(|error| ServiceRunError::from_core("PAC error", error))?
         .result;
 
     let output_node_idx =
-        resolve_pac_output_node(&pac_result, &config.output_node).ok_or_else(|| {
-            format!(
-                "PAC output node '{}' was not found in PSS result nodes {:?}",
-                config.output_node, pac_result.node_names
-            )
-        })?;
+        resolve_pac_output_node_with_abort(&pac_result, &config.output_node, abort)?.ok_or_else(
+            || {
+                ServiceRunError::Failure(format!(
+                    "PAC output node '{}' was not found in PSS result nodes {:?}",
+                    config.output_node, pac_result.node_names
+                ))
+            },
+        )?;
+    ensure_not_aborted(abort)?;
     let output_node_name = pac_result
         .node_names
         .get(output_node_idx)
@@ -198,7 +207,16 @@ pub(super) fn run_pac_internal(
 
 /// Run PAC analysis by first solving PSS and then linearizing around the periodic solution.
 pub fn run_pac_analysis(netlist_text: &str, config: &PacRunConfig) -> Result<PacData, String> {
-    run_pac_analysis_with_source_path(netlist_text, config, None)
+    run_pac_analysis_with_abort(netlist_text, config, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run PAC analysis with cooperative cancellation.
+pub fn run_pac_analysis_with_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    run_pac_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
 }
 
 /// Run PAC analysis by first solving PSS and then linearizing around the
@@ -209,25 +227,41 @@ pub fn run_pac_analysis_with_source_path(
     config: &PacRunConfig,
     source_path: Option<&Path>,
 ) -> Result<PacData, String> {
-    let netlist = parse_runner_netlist(netlist_text, source_path)?;
-    run_pac_analysis_for_netlist(&netlist, config)
+    run_pac_analysis_with_source_path_and_abort(netlist_text, config, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
 }
 
-fn run_pac_analysis_for_netlist(
+/// Run PAC analysis with source-path resolution and cooperative cancellation.
+pub fn run_pac_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pac_analysis_for_netlist_with_abort(&netlist, config, abort)
+}
+
+fn run_pac_analysis_for_netlist_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
-) -> Result<PacData, String> {
-    let pac_internal = run_pac_internal(netlist, config)?;
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let pac_internal = run_pac_internal_with_abort(netlist, config, abort)?;
     let output_node_idx = pac_internal.output_node_idx;
     let pac_result = pac_internal.pac_result;
 
-    let sidebands: Vec<i32> = pac_result
-        .sideband_indices()
-        .into_iter()
-        .filter(|sb| config.include_dc || *sb != 0)
-        .collect();
+    let mut sidebands = Vec::new();
+    for (index, sideband) in pac_result.sideband_indices().into_iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if config.include_dc || sideband != 0 {
+            sidebands.push(sideband);
+        }
+    }
     if sidebands.is_empty() {
-        return Err("PAC produced no sidebands with current configuration".to_string());
+        return Err(ServiceRunError::Failure(
+            "PAC produced no sidebands with current configuration".to_string(),
+        ));
     }
 
     let frequencies = pac_result.frequencies.clone();
@@ -235,9 +269,11 @@ fn run_pac_analysis_for_netlist(
 
     let mut spectra: Vec<(String, Vec<(Value, Value, Value)>)> =
         Vec::with_capacity(sidebands.len());
-    for sideband in &sidebands {
+    for (sideband_index, sideband) in sidebands.iter().enumerate() {
+        poll_periodically(abort, sideband_index)?;
         let mut spectrum = Vec::with_capacity(frequencies.len());
         for (freq_idx, freq_offset) in frequencies.iter().copied().enumerate() {
+            poll_periodically(abort, freq_idx)?;
             let voltage = pac_result.voltage(output_node_idx, freq_idx, *sideband)
                 * Complex64::new(config.pac_magnitude, 0.0);
             spectrum.push((freq_offset, voltage.norm(), voltage.arg().to_degrees()));
@@ -248,6 +284,7 @@ fn run_pac_analysis_for_netlist(
         ));
     }
 
+    ensure_not_aborted(abort)?;
     Ok(PacData {
         frequencies,
         sidebands,
@@ -258,7 +295,15 @@ fn run_pac_analysis_for_netlist(
 
 /// Run PAC analysis using inferred/default settings.
 pub fn run_pac_analysis_auto(netlist_text: &str) -> Result<PacData, String> {
-    run_pac_analysis_auto_with_source_path(netlist_text, None)
+    run_pac_analysis_auto_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run inferred/default PAC analysis with cancellation.
+pub fn run_pac_analysis_auto_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    run_pac_analysis_auto_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run PAC analysis using inferred/default settings and a source path used to
@@ -267,21 +312,55 @@ pub fn run_pac_analysis_auto_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<PacData, String> {
-    let netlist = parse_runner_netlist(netlist_text, source_path)?;
+    run_pac_analysis_auto_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run inferred/default PAC analysis with source-path resolution and
+/// cancellation.
+pub fn run_pac_analysis_auto_with_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error (required for PAC defaults): {}", e))?;
-    let input_source = infer_primary_source_name(&netlist)
-        .ok_or_else(|| "PAC requires at least one independent source in the netlist".to_string())?;
-    let output_node = infer_primary_output_node(&dc_result.node_names).ok_or_else(|| {
-        "PAC could not infer an output node; ensure at least one non-ground node exists".to_string()
+        .run_dc_op_with_abort(&netlist, abort)
+        .map_err(|error| {
+            ServiceRunError::from_core("DC OP error (required for PAC defaults)", error)
+        })?;
+    let input_source = infer_primary_source_name_with_abort(&netlist, abort)?.ok_or_else(|| {
+        ServiceRunError::Failure(
+            "PAC requires at least one independent source in the netlist".to_string(),
+        )
     })?;
+    let output_node = infer_primary_output_node_with_abort(&dc_result.node_names, abort)?
+        .ok_or_else(|| {
+            ServiceRunError::Failure(
+                "PAC could not infer an output node; ensure at least one non-ground node exists"
+                    .to_string(),
+            )
+        })?;
 
     let cfg = PacRunConfig {
         input_source,
         output_node,
         ..PacRunConfig::default()
     };
-    run_pac_analysis_for_netlist(&netlist, &cfg)
+    run_pac_analysis_for_netlist_with_abort(&netlist, &cfg, abort)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::abort_signal::ImmediateAbort;
+
+    #[test]
+    fn pac_service_preserves_typed_entry_abort() {
+        let result =
+            run_pac_analysis_with_abort("not a netlist", &PacRunConfig::default(), &ImmediateAbort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
 }

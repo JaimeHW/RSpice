@@ -15,7 +15,11 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::{ParseError, read_file_with_encoding};
+use super::{
+    ParseError, ParseWithAbortError, ensure_parse_not_aborted, finish_non_aborting_parse,
+    map_abort_parse_error, poll_parse_abort, poll_parse_text, read_file_with_encoding_with_abort,
+};
+use crate::abort_signal::{AbortSignal, NoAbort};
 
 /// Production include-depth limit shared by library discovery and executable
 /// netlist expansion. Foundry PDKs commonly have substantially deeper include
@@ -173,10 +177,9 @@ impl SealedSourceBundle {
 
         #[cfg(windows)]
         {
-            return self
-                .windows_identities
+            self.windows_identities
                 .get(&windows_path_identity(&candidate))
-                .cloned();
+                .cloned()
         }
 
         #[cfg(not(windows))]
@@ -332,8 +335,17 @@ impl IncludeProcessor {
     /// # Returns
     /// The file contents, or an error if the file cannot be read
     pub fn process_include(&mut self, filename: &str) -> Result<String, ParseError> {
+        finish_non_aborting_parse(self.process_include_with_abort(filename, &NoAbort))
+    }
+
+    /// Process an include directive with cooperative cancellation.
+    pub fn process_include_with_abort(
+        &mut self,
+        filename: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let owner = self.base_dir.join("__rspice_include_owner__");
-        self.process_include_from(&owner, filename)
+        self.process_include_from_with_abort(&owner, filename, abort)
     }
 
     /// Process a .LIB directive
@@ -352,8 +364,18 @@ impl IncludeProcessor {
         filename: &str,
         section: Option<&str>,
     ) -> Result<String, ParseError> {
+        finish_non_aborting_parse(self.process_lib_with_abort(filename, section, &NoAbort))
+    }
+
+    /// Process a library directive with cooperative cancellation.
+    pub fn process_lib_with_abort(
+        &mut self,
+        filename: &str,
+        section: Option<&str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let owner = self.base_dir.join("__rspice_include_owner__");
-        self.process_lib_from(&owner, filename, section)
+        self.process_lib_from_with_abort(&owner, filename, section, abort)
     }
 
     /// Materialize one listed root source, optionally selecting an inline
@@ -363,13 +385,25 @@ impl IncludeProcessor {
         root_path: &Path,
         section: Option<&str>,
     ) -> Result<String, ParseError> {
+        finish_non_aborting_parse(self.process_sealed_root_with_abort(root_path, section, &NoAbort))
+    }
+
+    /// Materialize one sealed root with cooperative cancellation.
+    pub fn process_sealed_root_with_abort(
+        &mut self,
+        root_path: &Path,
+        section: Option<&str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         let sources = self
             .sealed_sources
             .as_ref()
             .ok_or_else(|| ParseError::Syntax {
                 line: 0,
                 message: "process_sealed_root requires a sealed source bundle".to_owned(),
-            })?;
+            })
+            .map_err(ParseWithAbortError::from)?;
         let canonical = sources
             .canonical_member(root_path)
             .ok_or_else(|| ParseError::Syntax {
@@ -378,27 +412,37 @@ impl IncludeProcessor {
                     "Model root is not present in the verified source bundle: {}",
                     root_path.display()
                 ),
-            })?;
+            })
+            .map_err(ParseWithAbortError::from)?;
         let key = IncludeKey::new(canonical.clone(), section);
-        self.enter_include(&key)?;
+        self.enter_include(&key)
+            .map_err(ParseWithAbortError::from)?;
 
         let result = (|| {
-            let content = self.read_source(&canonical, &canonical.display().to_string())?;
-            let content = strip_terminal_end_cards(&content);
-            let expanded =
-                self.expand_content_from(&content, &canonical, section, section.is_some())?;
+            let content =
+                self.read_source_with_abort(&canonical, &canonical.display().to_string(), abort)?;
+            let content = strip_terminal_end_cards_with_abort(&content, abort)?;
+            let expanded = self.expand_content_from_with_abort(
+                &content,
+                &canonical,
+                section,
+                section.is_some(),
+                abort,
+            )?;
             for (line_index, line) in expanded.lines().enumerate() {
+                poll_parse_abort(abort, line_index)?;
                 if parse_include_directive(line).is_some() || parse_lib_directive(line).is_some() {
-                    return Err(ParseError::Syntax {
+                    return Err(ParseWithAbortError::from(ParseError::Syntax {
                         line: line_index + 1,
                         message: format!(
                             "{}: sealed model materialization left an unresolved include/library directive: {}",
                             canonical.display(),
                             line.trim()
                         ),
-                    });
+                    }));
                 }
             }
+            ensure_parse_not_aborted(abort)?;
             Ok(expanded)
         })();
 
@@ -412,17 +456,36 @@ impl IncludeProcessor {
         content: &str,
         current_path: &Path,
     ) -> Result<String, ParseError> {
-        self.expand_content_from(content, current_path, None, false)
+        finish_non_aborting_parse(self.expand_content_with_abort(content, current_path, &NoAbort))
+    }
+
+    /// Recursively expand `.INCLUDE` and `.LIB` directives with cooperative
+    /// cancellation.
+    pub fn expand_content_with_abort(
+        &mut self,
+        content: &str,
+        current_path: &Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        self.expand_content_from_with_abort(content, current_path, None, false, abort)
     }
 
     /// Resolve a filename to an absolute path
-    fn resolve_path_from(&self, owner_path: &Path, filename: &str) -> Result<PathBuf, ParseError> {
+    fn resolve_path_from_with_abort(
+        &self,
+        owner_path: &Path,
+        filename: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<PathBuf, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         // Remove quotes if present
         let clean_name = filename.trim_matches('"').trim_matches('\'');
         let path = Path::new(clean_name);
 
         if let Some(sources) = &self.sealed_sources {
-            return sources.resolve_edge(owner_path, clean_name);
+            return sources
+                .resolve_edge(owner_path, clean_name)
+                .map_err(ParseWithAbortError::from);
         }
 
         let base_dir = owner_path.parent().unwrap_or(Path::new("."));
@@ -440,7 +503,8 @@ impl IncludeProcessor {
                     clean_name,
                     self.base_dir.display()
                 ),
-            });
+            }
+            .into());
         }
 
         // If absolute, use as-is
@@ -451,7 +515,8 @@ impl IncludeProcessor {
             return Err(ParseError::Syntax {
                 line: 0,
                 message: format!("File not found: {}", clean_name),
-            });
+            }
+            .into());
         }
 
         // Try relative to base directory first
@@ -474,7 +539,8 @@ impl IncludeProcessor {
         }
 
         // Try library search paths
-        for lib_path in &self.lib_paths {
+        for (index, lib_path) in self.lib_paths.iter().enumerate() {
+            poll_parse_abort(abort, index)?;
             let candidate = lib_path.join(&relative_path);
             if candidate.exists() {
                 return Ok(candidate);
@@ -484,7 +550,8 @@ impl IncludeProcessor {
         // Try common library locations
         let common_paths = ["lib", "models", "../lib", "../models"];
 
-        for common in common_paths {
+        for (index, common) in common_paths.into_iter().enumerate() {
+            poll_parse_abort(abort, index)?;
             let candidate = base_dir.join(common).join(&relative_path);
             if candidate.exists() {
                 return Ok(candidate);
@@ -498,98 +565,123 @@ impl IncludeProcessor {
                 clean_name,
                 base_dir.display()
             ),
-        })
+        }
+        .into())
     }
 
-    fn read_source(&self, path: &Path, requested_name: &str) -> Result<Arc<str>, ParseError> {
+    fn read_source_with_abort(
+        &self,
+        path: &Path,
+        requested_name: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<Arc<str>, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         if let Some(sources) = &self.sealed_sources {
-            return sources.content(path).ok_or_else(|| ParseError::Syntax {
-                line: 0,
-                message: format!(
-                    "Dependency is not present in the verified sealed source bundle: '{}'",
-                    path.display()
-                ),
-            });
+            let content = sources
+                .content(path)
+                .ok_or_else(|| ParseError::Syntax {
+                    line: 0,
+                    message: format!(
+                        "Dependency is not present in the verified sealed source bundle: '{}'",
+                        path.display()
+                    ),
+                })
+                .map_err(ParseWithAbortError::from)?;
+            ensure_parse_not_aborted(abort)?;
+            return Ok(content);
         }
 
-        read_file_with_encoding(path)
+        read_file_with_encoding_with_abort(path, abort)
             .map(Arc::from)
-            .map_err(|error| ParseError::Syntax {
-                line: 0,
-                message: format!("Failed to include '{}': {error}", requested_name),
+            .map_err(|error| {
+                map_abort_parse_error(error, |error| ParseError::Syntax {
+                    line: 0,
+                    message: format!("Failed to include '{}': {error}", requested_name),
+                })
             })
     }
 
-    fn process_include_from(
+    fn process_include_from_with_abort(
         &mut self,
         owner_path: &Path,
         filename: &str,
-    ) -> Result<String, ParseError> {
-        self.process_include_from_with_selection(owner_path, filename, None)
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        self.process_include_from_with_selection_and_abort(owner_path, filename, None, abort)
     }
 
-    fn process_include_from_with_selection(
+    fn process_include_from_with_selection_and_abort(
         &mut self,
         owner_path: &Path,
         filename: &str,
         selected_section: Option<&str>,
-    ) -> Result<String, ParseError> {
-        let path = self.resolve_path_from(owner_path, filename)?;
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
+        let path = self.resolve_path_from_with_abort(owner_path, filename, abort)?;
         let canonical = if self.sealed_sources.is_some() {
             path.clone()
         } else {
             path.canonicalize().unwrap_or_else(|_| path.clone())
         };
         let key = IncludeKey::new(canonical, None);
-        self.enter_include(&key)?;
+        self.enter_include(&key)
+            .map_err(ParseWithAbortError::from)?;
 
         let result = (|| {
-            let content = self.read_source(&path, filename)?;
-            let content = strip_terminal_end_cards(&content);
-            self.expand_content_from(&content, &path, selected_section, false)
+            let content = self.read_source_with_abort(&path, filename, abort)?;
+            let content = strip_terminal_end_cards_with_abort(&content, abort)?;
+            self.expand_content_from_with_abort(&content, &path, selected_section, false, abort)
         })();
 
         self.leave_include(&key);
         result
     }
 
-    fn process_lib_from(
+    fn process_lib_from_with_abort(
         &mut self,
         owner_path: &Path,
         filename: &str,
         section: Option<&str>,
-    ) -> Result<String, ParseError> {
-        let path = self.resolve_path_from(owner_path, filename)?;
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
+        let path = self.resolve_path_from_with_abort(owner_path, filename, abort)?;
         let canonical = if self.sealed_sources.is_some() {
             path.clone()
         } else {
             path.canonicalize().unwrap_or_else(|_| path.clone())
         };
         let key = IncludeKey::new(canonical, section);
-        self.enter_include(&key)?;
+        self.enter_include(&key)
+            .map_err(ParseWithAbortError::from)?;
 
         let result = (|| {
-            let content = self.read_source(&path, filename)?;
-            let content = strip_terminal_end_cards(&content);
-            self.expand_content_from(&content, &path, section, section.is_some())
+            let content = self.read_source_with_abort(&path, filename, abort)?;
+            let content = strip_terminal_end_cards_with_abort(&content, abort)?;
+            self.expand_content_from_with_abort(&content, &path, section, section.is_some(), abort)
         })();
 
         self.leave_include(&key);
         result
     }
 
-    fn expand_content_from(
+    fn expand_content_from_with_abort(
         &mut self,
         content: &str,
         current_path: &Path,
         selected_section: Option<&str>,
         require_selected_section: bool,
-    ) -> Result<String, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         let mut result = String::new();
         let mut inline_sections: Vec<InlineLibFrame> = Vec::new();
         let mut selected_section_found = selected_section.is_none();
 
         for (line_index, line) in content.lines().enumerate() {
+            poll_parse_abort(abort, line_index)?;
+            poll_parse_text(abort, line)?;
             let line_number = line_index + 1;
             let trimmed = line.trim();
 
@@ -604,7 +696,8 @@ impl IncludeProcessor {
                             current_path.display(),
                             line_number
                         ),
-                    });
+                    }
+                    .into());
                 };
                 if section.is_none() {
                     let parent_selected = inline_sections
@@ -627,8 +720,12 @@ impl IncludeProcessor {
                 }
 
                 let included = self
-                    .process_lib_from(current_path, &filename, section.as_deref())
-                    .map_err(|error| include_error_at(error, current_path, line_number, ".lib"))?;
+                    .process_lib_from_with_abort(current_path, &filename, section.as_deref(), abort)
+                    .map_err(|error| {
+                        map_abort_parse_error(error, |error| {
+                            include_error_at(error, current_path, line_number, ".lib")
+                        })
+                    })?;
                 result.push_str(&included);
                 if !included.ends_with('\n') {
                     result.push('\n');
@@ -641,7 +738,8 @@ impl IncludeProcessor {
                     return Err(ParseError::Syntax {
                         line: line_number,
                         message: ".ENDL encountered without an open .LIB section".to_string(),
-                    });
+                    }
+                    .into());
                 };
                 if let Some(end_name) = end_name
                     && !end_name.eq_ignore_ascii_case(&open_frame.name)
@@ -652,7 +750,8 @@ impl IncludeProcessor {
                             ".ENDL section '{end_name}' does not match open .LIB section '{}'",
                             open_frame.name
                         ),
-                    });
+                    }
+                    .into());
                 }
                 inline_sections.pop();
                 continue;
@@ -673,7 +772,8 @@ impl IncludeProcessor {
                             current_path.display(),
                             line_number
                         ),
-                    });
+                    }
+                    .into());
                 };
                 // SPEF files are parasitic data, not SPICE text: route to
                 // the back-annotation pass (`.spef_include`) with the path
@@ -688,17 +788,25 @@ impl IncludeProcessor {
                                 line_number,
                                 filename
                             ),
-                        });
+                        }
+                        .into());
                     }
-                    let path = self.resolve_path_from(current_path, &filename)?;
+                    let path = self.resolve_path_from_with_abort(current_path, &filename, abort)?;
                     let normalized = path.display().to_string().replace('\\', "/");
                     result.push_str(&format!(".spef_include \"{normalized}\"\n"));
                     continue;
                 }
                 let included = self
-                    .process_include_from_with_selection(current_path, &filename, selected_section)
+                    .process_include_from_with_selection_and_abort(
+                        current_path,
+                        &filename,
+                        selected_section,
+                        abort,
+                    )
                     .map_err(|error| {
-                        include_error_at(error, current_path, line_number, ".include")
+                        map_abort_parse_error(error, |error| {
+                            include_error_at(error, current_path, line_number, ".include")
+                        })
                     })?;
                 result.push_str(&included);
                 if !included.ends_with('\n') {
@@ -715,7 +823,8 @@ impl IncludeProcessor {
             return Err(ParseError::Syntax {
                 line: frame.opened_at_line,
                 message: format!("Library section '{}' missing .ENDL", frame.name),
-            });
+            }
+            .into());
         }
 
         if require_selected_section && !selected_section_found {
@@ -726,9 +835,11 @@ impl IncludeProcessor {
                     current_path.display(),
                     selected_section.unwrap_or_default()
                 ),
-            });
+            }
+            .into());
         }
 
+        ensure_parse_not_aborted(abort)?;
         Ok(result)
     }
 
@@ -857,16 +968,21 @@ impl Default for IncludeProcessor {
     }
 }
 
-fn strip_terminal_end_cards(content: &str) -> String {
+fn strip_terminal_end_cards_with_abort(
+    content: &str,
+    abort: &dyn AbortSignal,
+) -> Result<String, ParseWithAbortError> {
     let mut out = String::with_capacity(content.len());
-    for line in content.lines() {
+    for (index, line) in content.lines().enumerate() {
+        poll_parse_abort(abort, index)?;
         if line.trim().eq_ignore_ascii_case(".END") {
             continue;
         }
         out.push_str(line);
         out.push('\n');
     }
-    out
+    ensure_parse_not_aborted(abort)?;
+    Ok(out)
 }
 
 /// Stable identity for a path literal as written in an include or external
@@ -1122,6 +1238,24 @@ fn parse_endl_directive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn include_expansion_aborts_after_multiple_mid_stream_polls() {
+        let mut source = String::from("include cancellation fixture\n");
+        for index in 0..1_024 {
+            source.push_str(&format!("R{index} n{index} 0 1k\n"));
+        }
+        let abort = crate::abort_signal::CountingAbort::new(8);
+        let mut processor = IncludeProcessor::new(Path::new("fixture.cir"));
+
+        let result = processor.expand_content_with_abort(&source, Path::new("fixture.cir"), &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(
+            abort.count() > 8,
+            "abort must be observed after repeated expansion work"
+        );
+    }
 
     #[test]
     fn include_directive_parser_accepts_xyce_aliases_exactly() {

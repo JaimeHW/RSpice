@@ -1,5 +1,10 @@
-use super::{build_engine_config, parse_runner_netlist};
+use super::{
+    ServiceRunError, ServiceRunResult, build_engine_config,
+    error::{ensure_not_aborted, poll_periodically},
+    parse_runner_netlist_with_abort,
+};
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::engine::Engine;
 use std::fmt;
 use std::path::Path;
@@ -7,7 +12,6 @@ use std::path::Path;
 #[derive(Debug)]
 enum PstbRunError {
     InvalidConfig(&'static str),
-    Parse(String),
     CircuitBuild(String),
     Pss(String),
     ProbeNotFound {
@@ -33,7 +37,6 @@ impl fmt::Display for PstbRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig(message) => f.write_str(message),
-            Self::Parse(err) => f.write_str(err),
             Self::CircuitBuild(err) => write!(f, "PSTB prerequisite circuit-build error: {err}"),
             Self::Pss(err) => write!(f, "PSTB prerequisite PSS error: {err}"),
             Self::ProbeNotFound { probe, available } => write!(
@@ -68,6 +71,12 @@ PSTB currently supports dynamic inductor-current probes only. Available inductor
             ),
             Self::NoFloquetMultipliers => f.write_str("PSTB produced no Floquet multipliers"),
         }
+    }
+}
+
+impl From<PstbRunError> for ServiceRunError {
+    fn from(error: PstbRunError) -> Self {
+        Self::Failure(error.to_string())
     }
 }
 
@@ -256,29 +265,33 @@ fn available_inductor_probe_names(circuit: &rspice_core::circuit::CircuitData) -
     normalize_branch_name_list(circuit.inductor_probe_names())
 }
 
-fn resolve_pstb_probe(
+fn resolve_pstb_probe_with_abort(
     circuit: &rspice_core::circuit::CircuitData,
     probe_instance: &str,
-) -> Result<ResolvedPstbProbe, PstbRunError> {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ResolvedPstbProbe> {
+    ensure_not_aborted(abort)?;
     let probe_name = probe_instance.trim();
     let branch_ordinal = circuit.get_branch_by_name(probe_name).ok_or_else(|| {
         let available = format_branch_name_list(&available_branch_names(circuit));
-        PstbRunError::ProbeNotFound {
+        ServiceRunError::from(PstbRunError::ProbeNotFound {
             probe: probe_name.to_string(),
             available,
-        }
+        })
     })?;
+    ensure_not_aborted(abort)?;
 
     let probe = circuit
         .inductor_probe_for_branch(branch_ordinal)
         .ok_or_else(|| {
             let available = format_branch_name_list(&available_inductor_probe_names(circuit));
-            PstbRunError::ProbeNotInductor {
+            ServiceRunError::from(PstbRunError::ProbeNotInductor {
                 probe: probe_name.to_string(),
                 branch_ordinal,
                 available,
-            }
+            })
         })?;
+    ensure_not_aborted(abort)?;
 
     Ok(ResolvedPstbProbe {
         canonical_name: probe.canonical_name,
@@ -287,15 +300,20 @@ fn resolve_pstb_probe(
     })
 }
 
-fn finite_l2_norm(values: impl Iterator<Item = Value>) -> Value {
+fn finite_l2_norm_with_abort(
+    values: impl Iterator<Item = Value>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Value> {
     let mut sum_sq = 0.0;
-    for value in values {
+    for (index, value) in values.enumerate() {
+        poll_periodically(abort, index)?;
         if !value.is_finite() {
-            return f64::INFINITY;
+            return Ok(f64::INFINITY);
         }
         sum_sq += value * value;
     }
-    sum_sq.sqrt()
+    ensure_not_aborted(abort)?;
+    Ok(sum_sq.sqrt())
 }
 
 fn sanitize_nonnegative(value: Value) -> Value {
@@ -310,25 +328,32 @@ fn sanitize_finite(value: Value) -> Value {
     if value.is_finite() { value } else { 0.0 }
 }
 
-fn normalized_probe_participation(
+fn normalized_probe_participation_with_abort(
     eigenvector: Option<&[num_complex::Complex64]>,
     state_index: usize,
-) -> Value {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Value> {
+    ensure_not_aborted(abort)?;
     let Some(vector) = eigenvector else {
-        return 0.0;
+        return Ok(0.0);
     };
     let Some(component) = vector.get(state_index) else {
-        return 0.0;
+        return Ok(0.0);
     };
-    let denom = vector.iter().map(|v| v.norm_sqr()).sum::<Value>().sqrt();
+    let mut denom_squared = 0.0;
+    for (index, value) in vector.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        denom_squared += value.norm_sqr();
+    }
+    let denom = denom_squared.sqrt();
     if !denom.is_finite() || denom <= 1e-30 {
-        return 0.0;
+        return Ok(0.0);
     }
     let ratio = component.norm() / denom;
     if ratio.is_finite() {
-        ratio.clamp(0.0, 1.0)
+        Ok(ratio.clamp(0.0, 1.0))
     } else {
-        0.0
+        Ok(0.0)
     }
 }
 
@@ -337,7 +362,17 @@ pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
     config: &PstbRunConfig,
 ) -> Result<PstbData, String> {
-    run_pstb_analysis_with_config_and_source_path(netlist_text, config, None)
+    run_pstb_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run PSTB analysis with cooperative cancellation.
+pub fn run_pstb_analysis_with_config_and_abort(
+    netlist_text: &str,
+    config: &PstbRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
+    run_pstb_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
 }
 
 /// Run PSTB analysis using a PSS operating point and monodromy-based Floquet
@@ -347,29 +382,41 @@ pub fn run_pstb_analysis_with_config_and_source_path(
     config: &PstbRunConfig,
     source_path: Option<&Path>,
 ) -> Result<PstbData, String> {
-    run_pstb_analysis_with_config_internal(netlist_text, config, source_path)
-        .map_err(|err| err.to_string())
+    run_pstb_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
 }
 
-fn run_pstb_analysis_with_config_internal(
+/// Run PSTB analysis with cooperative cancellation and source-relative include
+/// resolution.
+pub fn run_pstb_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &PstbRunConfig,
     source_path: Option<&Path>,
-) -> Result<PstbData, PstbRunError> {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
     use rspice_core::analysis::PssConfig;
     use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
 
-    config.validate()?;
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::from)?;
 
-    let netlist = parse_runner_netlist(netlist_text, source_path).map_err(PstbRunError::Parse)?;
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
 
     let mut sim_config = build_engine_config(&netlist, None);
     sim_config.tolerance = config.pss_tolerance;
     let engine = Engine::new(sim_config);
+    ensure_not_aborted(abort)?;
     let circuit = engine
         .build_circuit(&netlist)
-        .map_err(|e| PstbRunError::CircuitBuild(e.to_string()))?;
-    let probe = resolve_pstb_probe(&circuit, &config.probe_instance)?;
+        .map_err(|error| PstbRunError::CircuitBuild(error.to_string()))
+        .map_err(ServiceRunError::from)?;
+    ensure_not_aborted(abort)?;
+    let probe = resolve_pstb_probe_with_abort(&circuit, &config.probe_instance, abort)?;
 
     let pss_harmonics = config.pss_num_harmonics.max(config.max_harmonics);
     let pss_config = PssConfig::new(config.pss_fundamental_freq)
@@ -378,37 +425,43 @@ fn run_pstb_analysis_with_config_internal(
         .with_max_iterations(50)
         .with_tstab_periods(10);
     let pss_result = engine
-        .run_pss(&netlist, pss_config)
-        .map_err(|e| PstbRunError::Pss(e.to_string()))?;
+        .run_pss_with_abort(&netlist, pss_config, abort)
+        .map_err(|error| match error {
+            rspice_core::SimulationError::Aborted => ServiceRunError::Aborted,
+            other => ServiceRunError::from(PstbRunError::Pss(other.to_string())),
+        })?;
+    ensure_not_aborted(abort)?;
 
     if pss_result.monodromy.is_empty() {
-        return Err(PstbRunError::EmptyMonodromy);
+        return Err(PstbRunError::EmptyMonodromy.into());
     }
     let monodromy_dim = pss_result.monodromy.len();
-    if pss_result
-        .monodromy
-        .iter()
-        .any(|row| row.len() != monodromy_dim)
-    {
-        return Err(PstbRunError::NonSquareMonodromy);
+    for (index, row) in pss_result.monodromy.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if row.len() != monodromy_dim {
+            return Err(PstbRunError::NonSquareMonodromy.into());
+        }
     }
     if probe.state_index >= monodromy_dim {
         return Err(PstbRunError::ProbeStateOutOfRange {
             probe: probe.canonical_name.clone(),
             state_index: probe.state_index,
             monodromy_dim,
-        });
+        }
+        .into());
     }
 
     let probe_row = &pss_result.monodromy[probe.state_index];
     let probe_self_transition = sanitize_finite(probe_row[probe.state_index]);
-    let probe_column_norm = sanitize_nonnegative(finite_l2_norm(
+    let probe_column_norm = sanitize_nonnegative(finite_l2_norm_with_abort(
         pss_result
             .monodromy
             .iter()
             .map(|row| row[probe.state_index]),
-    ));
-    let probe_row_norm = sanitize_nonnegative(finite_l2_norm(probe_row.iter().copied()));
+        abort,
+    )?);
+    let probe_row_norm =
+        sanitize_nonnegative(finite_l2_norm_with_abort(probe_row.iter().copied(), abort)?);
     let probe_persistence_db = sanitize_db(20.0 * probe_self_transition.abs().max(1e-30).log10());
 
     let pstb_config = PstbConfig::new()
@@ -418,7 +471,9 @@ fn run_pstb_analysis_with_config_internal(
         .with_stability_threshold(config.stability_threshold)
         .with_subharmonic_detection(config.detect_subharmonics);
     let mut analyzer = PstbAnalyzer::new(pstb_config);
-    let pstb_result = analyzer.analyze_monodromy(&pss_result.monodromy, pss_result.period);
+    let pstb_result = analyzer
+        .analyze_monodromy_with_abort(&pss_result.monodromy, pss_result.period, abort)
+        .map_err(ServiceRunError::from)?;
 
     let retained_modes = pstb_result.multipliers.len().min(config.num_multipliers);
     let mut mode_indices = Vec::with_capacity(retained_modes);
@@ -435,11 +490,15 @@ fn run_pstb_analysis_with_config_internal(
         .take(config.num_multipliers)
         .enumerate()
     {
+        poll_periodically(abort, idx)?;
         mode_indices.push((idx + 1) as Value);
-        probe_mode_participation.push(sanitize_nonnegative(normalized_probe_participation(
-            multiplier.eigenvector.as_deref(),
-            probe.state_index,
-        )));
+        probe_mode_participation.push(sanitize_nonnegative(
+            normalized_probe_participation_with_abort(
+                multiplier.eigenvector.as_deref(),
+                probe.state_index,
+                abort,
+            )?,
+        ));
         multiplier_magnitude.push(sanitize_nonnegative(multiplier.magnitude()));
         multiplier_phase_deg.push(sanitize_finite(multiplier.phase_degrees()));
         mode_damping.push(sanitize_finite(multiplier.damping()));
@@ -448,15 +507,22 @@ fn run_pstb_analysis_with_config_internal(
     }
 
     if mode_indices.is_empty() {
-        return Err(PstbRunError::NoFloquetMultipliers);
+        return Err(PstbRunError::NoFloquetMultipliers.into());
     }
-    let (dominant_probe_mode, dominant_probe_mode_participation) = probe_mode_participation
-        .iter()
-        .copied()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.total_cmp(b))
-        .map(|(idx, value)| (idx + 1, value))
-        .unwrap_or((0, 0.0));
+    let mut dominant_probe_mode = 0;
+    let mut dominant_probe_mode_participation = 0.0;
+    for (index, &participation) in probe_mode_participation.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if dominant_probe_mode == 0
+            || participation
+                .total_cmp(&dominant_probe_mode_participation)
+                .is_gt()
+        {
+            dominant_probe_mode = index + 1;
+            dominant_probe_mode_participation = participation;
+        }
+    }
+    ensure_not_aborted(abort)?;
 
     Ok(PstbData {
         period: pstb_result.period,
@@ -487,7 +553,15 @@ fn run_pstb_analysis_with_config_internal(
 
 /// Run PSTB analysis with default configuration.
 pub fn run_pstb_analysis(netlist_text: &str) -> Result<PstbData, String> {
-    run_pstb_analysis_with_source_path(netlist_text, None)
+    run_pstb_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run PSTB analysis with default configuration and cooperative cancellation.
+pub fn run_pstb_analysis_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
+    run_pstb_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run PSTB analysis with default configuration and a source path used to
@@ -496,6 +570,34 @@ pub fn run_pstb_analysis_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<PstbData, String> {
+    run_pstb_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run PSTB analysis with default configuration, source-relative include
+/// resolution, and cooperative cancellation.
+pub fn run_pstb_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
     let cfg = PstbRunConfig::default();
-    run_pstb_analysis_with_config_and_source_path(netlist_text, &cfg, source_path)
+    run_pstb_analysis_with_config_and_source_path_and_abort(netlist_text, &cfg, source_path, abort)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::abort_signal::ImmediateAbort;
+
+    #[test]
+    fn pstb_service_preserves_typed_entry_abort() {
+        let mut config = PstbRunConfig::default();
+        config.pss_fundamental_freq = 0.0;
+
+        let result =
+            run_pstb_analysis_with_config_and_abort("not a netlist", &config, &ImmediateAbort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
 }

@@ -107,19 +107,62 @@ impl RSpiceApp {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    let writer = std::io::BufWriter::new(file);
-    let mut encoder = png::Encoder::new(writer, image.size[0] as u32, image.size[1] as u32);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    let expected = crate::io::durable_file::observe_expected_content(path)
+        .map_err(|error| format!("failed to authorize PNG destination: {error}"))?;
+    let encoded = encode_png(image)?;
+    publish_png(path, expected, &encoded)
+}
 
-    let mut data = Vec::with_capacity(image.pixels.len() * 4);
-    for pixel in &image.pixels {
-        data.extend_from_slice(&pixel.to_array());
+#[cfg(not(target_arch = "wasm32"))]
+fn encode_png(image: &egui::ColorImage) -> Result<Vec<u8>, String> {
+    let width = u32::try_from(image.size[0])
+        .map_err(|_| "PNG width exceeds the format limit".to_string())?;
+    let height = u32::try_from(image.size[1])
+        .map_err(|_| "PNG height exceeds the format limit".to_string())?;
+    if width == 0 || height == 0 {
+        return Err("PNG dimensions must be non-zero".to_string());
     }
-    writer.write_image_data(&data).map_err(|e| e.to_string())?;
-    Ok(())
+    let expected_pixels = image.size[0]
+        .checked_mul(image.size[1])
+        .ok_or_else(|| "PNG pixel count overflowed".to_string())?;
+    if image.pixels.len() != expected_pixels {
+        return Err(format!(
+            "PNG pixel buffer has {} pixels for a {}x{} image",
+            image.pixels.len(),
+            image.size[0],
+            image.size[1]
+        ));
+    }
+    let rgba_len = expected_pixels
+        .checked_mul(4)
+        .ok_or_else(|| "PNG RGBA buffer size overflowed".to_string())?;
+    let mut rgba = Vec::new();
+    rgba.try_reserve_exact(rgba_len)
+        .map_err(|error| format!("failed to allocate PNG RGBA buffer: {error}"))?;
+    for pixel in &image.pixels {
+        rgba.extend_from_slice(&pixel.to_array());
+    }
+
+    let mut encoded = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut encoded, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+        writer.write_image_data(&rgba).map_err(|e| e.to_string())?;
+        writer.finish().map_err(|e| e.to_string())?;
+    }
+    Ok(encoded)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn publish_png(
+    path: &std::path::Path,
+    expected: crate::io::durable_file::ExpectedContent,
+    encoded: &[u8],
+) -> Result<(), String> {
+    crate::io::durable_file::compare_exchange_bytes(path, expected, encoded)
+        .map_err(|error| format!("failed to publish PNG: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -321,5 +364,53 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn png_encode_failure_preserves_existing_destination() {
+        let root = unique_temp_dir("png-encode-failure");
+        let path = root.join("plot.png");
+        std::fs::write(&path, b"predecessor").expect("write predecessor");
+        let invalid = egui::ColorImage {
+            size: [2, 2],
+            source_size: egui::vec2(2.0, 2.0),
+            pixels: vec![egui::Color32::RED],
+        };
+
+        let result = write_png(&path, &invalid);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"predecessor");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn png_publication_rejects_late_external_change() {
+        let root = unique_temp_dir("png-late-change");
+        let path = root.join("plot.png");
+        std::fs::write(&path, b"authorized predecessor").expect("write predecessor");
+        let expected =
+            crate::io::durable_file::observe_expected_content(&path).expect("observe destination");
+        let image = egui::ColorImage::filled([2, 2], egui::Color32::BLUE);
+        let encoded = encode_png(&image).expect("encode PNG");
+        std::fs::write(&path, b"late external edit").expect("race destination");
+
+        let result = publish_png(&path, expected, &encoded);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"late external edit");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-image-export-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture");
+        root
     }
 }

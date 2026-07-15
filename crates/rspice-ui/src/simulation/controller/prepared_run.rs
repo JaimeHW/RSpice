@@ -1,0 +1,1196 @@
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use rspice_core::netlist::{IncludeProcessor, parse_include_directive, parse_lib_directive};
+
+use super::*;
+use crate::simulation::execution::{
+    AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionPermit, ExecutionTargetCapabilities,
+    ModelSourceIdentity, PreparationError, PreparationStage, PreparedRunMetadata,
+    PreparedRunSnapshot, RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
+    analysis_config_digest, analysis_instance_id, analysis_kind_tag, content_digest,
+    drc_receipt_digest, manual_source_receipt_digest,
+};
+
+pub(super) struct PendingPreparedRun {
+    snapshot: PreparedRunSnapshot,
+    permit: ExecutionPermit,
+}
+
+impl SimulationController {
+    /// Produce and retain the exact run-set tuple rendered by the mockup's
+    /// preflight surface. The caller runs DRC immediately before this method.
+    pub(crate) fn prepare_run_set_for_preflight(
+        &mut self,
+        state: &AppState,
+    ) -> Result<PreparedRunMetadata, PreparationError> {
+        let snapshot = self.build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
+        let metadata = snapshot.metadata();
+        self.authorize_snapshot(snapshot)?;
+        Ok(metadata)
+    }
+
+    pub(crate) fn clear_prepared_run(&mut self) {
+        self.pending_prepared_run = None;
+        if let Err(error) = self.execution_permits.invalidate() {
+            log::error!("Failed to invalidate prepared execution permit: {error}");
+        }
+    }
+
+    /// Resolve a fresh internal preflight when Run was invoked directly, or
+    /// validate an explicitly retained preflight snapshot. Only the retained
+    /// immutable snapshot is returned for execution.
+    pub(super) fn consume_snapshot_for_dispatch(
+        &mut self,
+        state: &mut AppState,
+    ) -> Result<AuthorizedRunDispatch, PreparationError> {
+        let intent = state.simulation.run_intent;
+        if self
+            .pending_prepared_run
+            .as_ref()
+            .is_some_and(|pending| pending.snapshot.intent() != intent)
+        {
+            self.clear_prepared_run();
+        }
+
+        if self.pending_prepared_run.is_none() {
+            if intent == SimulationRunIntent::SimulateRunSet {
+                crate::common::menu_bar::run_design_rule_check(state);
+            }
+            let snapshot = self.build_prepared_snapshot(state, intent)?;
+            self.authorize_snapshot(snapshot)?;
+        }
+
+        let pending = self.pending_prepared_run.take().ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::Authorization,
+                "No authorized prepared run is available",
+            )
+        })?;
+
+        let current = match self.build_prepared_snapshot(state, intent) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let _ = self.execution_permits.invalidate();
+                return Err(error);
+            }
+        };
+        let retained_digest = pending.snapshot.digest();
+        let current_digest = current.digest();
+        let proof = match pending.permit.consume(retained_digest, current_digest) {
+            Ok(proof) => proof,
+            Err(error) => {
+                let _ = self.execution_permits.invalidate();
+                return Err(PreparationError::new(
+                    PreparationStage::Authorization,
+                    format!(
+                        "Prepared run expired because a bound input, capability, or check receipt changed ({error})"
+                    ),
+                ));
+            }
+        };
+        pending.snapshot.authorize_dispatch(proof)
+    }
+
+    fn authorize_snapshot(
+        &mut self,
+        snapshot: PreparedRunSnapshot,
+    ) -> Result<(), PreparationError> {
+        let permit = self
+            .execution_permits
+            .issue(snapshot.digest())
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::Authorization,
+                    format!("Could not authorize prepared run: {error}"),
+                )
+            })?;
+        self.pending_prepared_run = Some(PendingPreparedRun { snapshot, permit });
+        Ok(())
+    }
+
+    fn build_prepared_snapshot(
+        &self,
+        state: &AppState,
+        intent: SimulationRunIntent,
+    ) -> Result<PreparedRunSnapshot, PreparationError> {
+        match intent {
+            SimulationRunIntent::SimulateRunSet => self.build_prepared_run_set(state),
+            SimulationRunIntent::ManualDeck => self.build_prepared_manual_deck(state),
+        }
+    }
+
+    fn build_prepared_run_set(
+        &self,
+        state: &AppState,
+    ) -> Result<PreparedRunSnapshot, PreparationError> {
+        if state.schematic.components.is_empty() {
+            return Err(PreparationError::new(
+                PreparationStage::DesignChecks,
+                "Add a component before preparing a schematic simulation",
+            ));
+        }
+        let drc = state.dialogs.drc_results.as_ref().ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::DesignChecks,
+                "Run schematic source checks before simulation",
+            )
+        })?;
+        if state.dialogs.drc_checked_version != state.schematic.topology_version() {
+            return Err(PreparationError::new(
+                PreparationStage::DesignChecks,
+                "Schematic source-check receipt is stale for the current topology",
+            ));
+        }
+        if !drc.completed {
+            return Err(PreparationError::new(
+                PreparationStage::DesignChecks,
+                "Schematic source checks did not complete",
+            ));
+        }
+        if drc.has_errors() {
+            let summary = drc.summary();
+            return Err(PreparationError::new(
+                PreparationStage::DesignChecks,
+                format!(
+                    "Fix schematic source-check errors before simulation ({} critical, {} error{})",
+                    summary.critical,
+                    summary.errors,
+                    if summary.errors == 1 { "" } else { "s" }
+                ),
+            ));
+        }
+
+        let plan = self.build_analysis_plan(state).map_err(|errors| {
+            PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
+        })?;
+        let sealed_models = state
+            .model_library_manager
+            .seal_execution_sources()
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let tasks = self
+            .build_queue_from_plan(state, &plan, &sealed_models)
+            .map_err(|errors| {
+                PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
+            })?;
+        if tasks.is_empty() {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                "No runnable analyses were selected",
+            ));
+        }
+        reject_deferred_corner_model_sources(&tasks)?;
+
+        let analysis_lines = tasks
+            .iter()
+            .map(|task| task.analysis_line.clone())
+            .collect::<Vec<_>>();
+        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
+            &state.library_manager,
+            &state.workspace.schematic_buffers,
+        );
+        let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+            &state.schematic,
+            &analysis_lines,
+            &hierarchy,
+        );
+        if !generated.errors.is_empty() {
+            return Err(PreparationError::new(
+                PreparationStage::Netlist,
+                generated.errors.join("; "),
+            ));
+        }
+
+        let model_cards = sealed_models
+            .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let mut netlist =
+            Self::apply_reference_model_bindings_to_netlist(&generated.netlist, &model_cards);
+        netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
+        reject_deferred_external_sources(&netlist)?;
+
+        let (analysis_instance_ids, analysis_config_digests, analysis_labels) =
+            self.task_identities(SimulationRunIntent::SimulateRunSet, &tasks);
+        let source_digest =
+            content_digest("rspice.generated-executable-source/v1", netlist.as_bytes());
+        let receipt = RunSourceReceipt::SchematicDrc(drc_receipt_digest(
+            state.schematic.topology_version(),
+            drc,
+        ));
+        let mut model_identities = model_cards
+            .iter()
+            .enumerate()
+            .map(|(index, cards)| {
+                ModelSourceIdentity::new(
+                    format!("reference-model-source-{index}"),
+                    content_digest("rspice.materialized-model-cards/v1", cards.as_bytes()),
+                )
+            })
+            .collect::<Vec<_>>();
+        append_corner_model_identities(&tasks, &mut model_identities);
+
+        let mut advisories = generated.warnings;
+        advisories.extend(
+            drc.warnings().into_iter().map(|violation| {
+                format!("{} · {}", violation.message, violation.location.display())
+            }),
+        );
+        let touchstone_export =
+            touchstone_export_policy(state, &tasks, state.schematic.current_file.as_deref())?;
+
+        PreparedRunSnapshot::new(SnapshotParts {
+            intent: SimulationRunIntent::SimulateRunSet,
+            project_revision: state.workspace.project.revision().get(),
+            topology_revision: state.schematic.topology_version(),
+            source_digest,
+            reference_process: state.sim_setup.reference_pvt.process,
+            reference_temperature_celsius: state.sim_setup.reference_pvt.temperature_celsius,
+            analysis_instance_ids,
+            analysis_config_digests,
+            analysis_labels,
+            tasks,
+            executable_netlist: netlist,
+            save_policy: SavePolicy::RetainEngineProducedResults,
+            model_identities,
+            target: ExecutionTargetCapabilities::current(),
+            receipt,
+            advisories,
+            manual_source: None,
+            cross_probe: Some(CrossProbeSnapshot::new(
+                generated.point_to_net,
+                generated.nets,
+                generated.net_segments,
+            )),
+            touchstone_export,
+        })
+    }
+
+    fn build_prepared_manual_deck(
+        &self,
+        state: &AppState,
+    ) -> Result<PreparedRunSnapshot, PreparationError> {
+        let source = state
+            .workspace
+            .netlist_source
+            .as_deref()
+            .unwrap_or(&state.simulation.netlist_content);
+        if source.trim().is_empty() {
+            return Err(PreparationError::new(
+                PreparationStage::SourceChecks,
+                "Enter a netlist before running",
+            ));
+        }
+
+        let composed = manual_deck::compose_manual_deck_source(source);
+        let origin = state.workspace.netlist_source_path.as_deref();
+        if origin.is_none() && contains_external_include_directive(&composed) {
+            return Err(PreparationError::new(
+                PreparationStage::SourceChecks,
+                "Relative .include/.inc/.lib sources require an imported deck origin before they can be sealed",
+            ));
+        }
+        let (expanded, canonical_origin) = expand_manual_dependencies(&composed, origin)?;
+        reject_deferred_external_sources(&expanded)?;
+        let tasks = manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
+            PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
+        })?;
+        reject_deferred_corner_model_sources(&tasks)?;
+        let (analysis_instance_ids, analysis_config_digests, analysis_labels) =
+            self.task_identities(SimulationRunIntent::ManualDeck, &tasks);
+        let receipt_digest = manual_source_receipt_digest(
+            source,
+            &expanded,
+            canonical_origin.as_deref(),
+            &analysis_config_digests,
+        );
+        let source_digest =
+            content_digest("rspice.manual-executable-source/v1", expanded.as_bytes());
+        let mut model_identities = Vec::new();
+        append_corner_model_identities(&tasks, &mut model_identities);
+        let touchstone_export = touchstone_export_policy(
+            state,
+            &tasks,
+            state.workspace.netlist_source_path.as_deref(),
+        )?;
+
+        PreparedRunSnapshot::new(SnapshotParts {
+            intent: SimulationRunIntent::ManualDeck,
+            project_revision: state.workspace.project.revision().get(),
+            topology_revision: state.schematic.topology_version(),
+            source_digest,
+            reference_process: state.sim_setup.reference_pvt.process,
+            reference_temperature_celsius: state.sim_setup.reference_pvt.temperature_celsius,
+            analysis_instance_ids,
+            analysis_config_digests,
+            analysis_labels,
+            tasks,
+            executable_netlist: expanded,
+            save_policy: SavePolicy::RetainEngineProducedResults,
+            model_identities,
+            target: ExecutionTargetCapabilities::current(),
+            receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
+            advisories: Vec::new(),
+            manual_source: Some(source.to_owned()),
+            cross_probe: None,
+            touchstone_export,
+        })
+    }
+
+    fn task_identities(
+        &self,
+        intent: SimulationRunIntent,
+        tasks: &[QueuedAnalysis],
+    ) -> (
+        Vec<crate::product::ContentDigest>,
+        Vec<crate::product::ContentDigest>,
+        Vec<String>,
+    ) {
+        let mut kind_occurrences = [0usize; 26];
+        let mut instance_ids = Vec::with_capacity(tasks.len());
+        let mut config_digests = Vec::with_capacity(tasks.len());
+        let mut labels = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            let kind = usize::from(analysis_kind_tag(&task.spec));
+            let occurrence = kind_occurrences[kind];
+            kind_occurrences[kind] += 1;
+            instance_ids.push(analysis_instance_id(intent, &task.spec, occurrence));
+            config_digests.push(analysis_config_digest(
+                &task.analysis_line,
+                &task.spec,
+                task.config.as_ref(),
+                &task.spec_options,
+            ));
+            labels.push(self.analysis_name_for_spec(&task.spec).to_owned());
+        }
+        (instance_ids, config_digests, labels)
+    }
+}
+
+fn expand_manual_dependencies(
+    source: &str,
+    origin: Option<&Path>,
+) -> Result<(String, Option<String>), PreparationError> {
+    let Some(origin) = origin else {
+        return Ok((source.to_owned(), None));
+    };
+    let absolute_origin = absolute_source_identity(origin)?;
+    let mut processor = IncludeProcessor::new(&absolute_origin);
+    let expanded = processor
+        .expand_content(source, &absolute_origin)
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!("Could not seal manual deck dependencies: {error}"),
+            )
+        })?;
+    Ok((expanded, Some(path_identity(&absolute_origin))))
+}
+
+fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
+    if path.is_absolute() {
+        return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+    }
+    let current = std::env::current_dir().map_err(|error| {
+        PreparationError::new(
+            PreparationStage::SourceChecks,
+            format!("Could not resolve manual deck origin: {error}"),
+        )
+    })?;
+    let joined = current.join(path);
+    Ok(joined.canonicalize().unwrap_or(joined))
+}
+
+fn path_identity(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn touchstone_export_policy(
+    state: &AppState,
+    tasks: &[QueuedAnalysis],
+    source_path: Option<&Path>,
+) -> Result<TouchstoneExportPolicy, PreparationError> {
+    if !tasks
+        .iter()
+        .any(|task| matches!(&task.spec, AnalysisSpec::SParameter { .. }))
+    {
+        return Ok(TouchstoneExportPolicy::disabled());
+    }
+
+    let mut dialog = state.sim_setup.sp.clone();
+    dialog.ensure_initialized();
+    let config = dialog.to_config().map_err(|error| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!("Invalid Touchstone export settings: {error}"),
+        )
+    })?;
+    if !config.touchstone_export {
+        return Ok(TouchstoneExportPolicy::disabled());
+    }
+
+    let (directory, stem) = touchstone_output_prefix(source_path)?;
+    TouchstoneExportPolicy::enabled(config.touchstone_version, directory, stem)
+}
+
+fn touchstone_output_prefix(
+    source_path: Option<&Path>,
+) -> Result<(PathBuf, OsString), PreparationError> {
+    let current = execution_current_directory()?;
+    let Some(source) = source_path else {
+        return Ok((current, OsString::from("untitled")));
+    };
+
+    let absolute = if source.is_absolute() {
+        source.to_path_buf()
+    } else {
+        current.join(source)
+    };
+    let directory = absolute
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| current.clone());
+    let directory = directory.canonicalize().unwrap_or(directory);
+    let stem = absolute
+        .file_stem()
+        .filter(|stem| !stem.is_empty())
+        .map(OsString::from)
+        .unwrap_or_else(|| OsString::from("untitled"));
+    Ok((directory, stem))
+}
+
+fn execution_current_directory() -> Result<PathBuf, PreparationError> {
+    match std::env::current_dir() {
+        Ok(path) => Ok(path),
+        #[cfg(target_arch = "wasm32")]
+        Err(_) => Ok(PathBuf::from(".")),
+        #[cfg(not(target_arch = "wasm32"))]
+        Err(error) => Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!("Could not resolve the automatic export directory: {error}"),
+        )),
+    }
+}
+
+fn contains_external_include_directive(source: &str) -> bool {
+    source
+        .lines()
+        .any(|line| parse_include_directive(line).is_some() || parse_lib_directive(line).is_some())
+}
+
+fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationError> {
+    for (line_number, logical_line) in executable_logical_lines(netlist) {
+        if let Some(reason) = deferred_external_source_reason(&logical_line) {
+            return Err(PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!(
+                    "Executable netlist contains an unsealed external dependency ({reason}) at line {}: {}",
+                    line_number, logical_line
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Fold physical SPICE continuation records exactly as the core parser does
+/// for executable lines: comment removal and trimming happen per physical
+/// line, then a leading `+` appends to the preceding logical record. Auditing
+/// the folded form prevents an external path or parameter name from being
+/// split across continuation boundaries after authorization.
+fn executable_logical_lines(source: &str) -> Vec<(usize, String)> {
+    let mut logical_lines = Vec::new();
+    let mut pending: Option<(usize, String)> = None;
+
+    for (index, physical_line) in source.lines().enumerate() {
+        let trimmed = executable_source_portion(physical_line).trim();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix('+') {
+            let (_, logical) = pending.get_or_insert_with(|| (index + 1, String::new()));
+            logical.push(' ');
+            logical.push_str(rest);
+            continue;
+        }
+
+        if let Some(previous) = pending.replace((index + 1, trimmed.to_owned())) {
+            logical_lines.push(previous);
+        }
+    }
+
+    if let Some(previous) = pending {
+        logical_lines.push(previous);
+    }
+    logical_lines
+}
+
+fn reject_deferred_corner_model_sources(tasks: &[QueuedAnalysis]) -> Result<(), PreparationError> {
+    for task in tasks {
+        let Some(corner) = task.spec_options.corner.as_ref() else {
+            continue;
+        };
+        for binding in &corner.model_bindings {
+            for (line_number, logical_line) in
+                executable_logical_lines(&binding.materialized_model_cards)
+            {
+                if let Some(reason) = deferred_external_source_reason(&logical_line) {
+                    return Err(PreparationError::new(
+                        PreparationStage::ModelBindings,
+                        format!(
+                            "Materialized corner model source '{}' contains an unsealed external dependency ({reason}) at line {line_number}: {logical_line}",
+                            binding.source_label
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
+    let line = executable_source_portion(line);
+    if line.is_empty() {
+        return None;
+    }
+    if parse_include_directive(line).is_some() || parse_lib_directive(line).is_some() {
+        return Some("include/library directive");
+    }
+    let lower = line.to_ascii_lowercase();
+    let directive = lower.split_whitespace().next().unwrap_or_default();
+    if matches!(
+        directive,
+        ".spef_include" | ".veriloga" | ".va" | ".ahdl_include" | ".hdl" | ".verilog" | ".load"
+    ) {
+        return Some("external source directive");
+    }
+
+    let without_whitespace = lower
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    if ["file", "input_file", "state_file", "process_file"]
+        .iter()
+        .any(|name| contains_parameter_assignment(&lower, name))
+    {
+        return Some("file-backed element or code-model parameter");
+    }
+    let tokens = lower
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    if lower.contains("pwl") && tokens.contains(&"file") {
+        return Some("file-backed PWL source");
+    }
+    if matches!(directive, ".measure" | ".meas") && tokens.contains(&"file") {
+        return Some("file-backed measurement reference");
+    }
+    // `simulation` is the d_cosim shared-library/provider selector and may be
+    // supplied either on its model or as an instance override.
+    if contains_parameter_assignment(&lower, "simulation") {
+        return Some("external co-simulation runtime");
+    }
+    const FILE_LOOKUPS: [&str; 16] = [
+        "table",
+        "tablefile",
+        "fasttable",
+        "fasttablefile",
+        "cubic",
+        "cubicfile",
+        "akima",
+        "akimafile",
+        "spline",
+        "splinefile",
+        "wodicka",
+        "wodickafile",
+        "bli",
+        "blifile",
+        "barycentric",
+        "barycentricfile",
+    ];
+    if FILE_LOOKUPS.iter().any(|function| {
+        [format!("{function}(\""), format!("{function}('")]
+            .iter()
+            .any(|needle| without_whitespace.contains(needle))
+    }) {
+        return Some("file-backed behavioral lookup");
+    }
+    None
+}
+
+fn executable_source_portion(line: &str) -> &str {
+    let line = line.trim();
+    if line.starts_with('*') {
+        return "";
+    }
+
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+    let mut previous = None;
+    let mut characters = line.char_indices().peekable();
+
+    while let Some((index, character)) = characters.next() {
+        if escaped {
+            escaped = false;
+            previous = Some(character);
+            continue;
+        }
+
+        match character {
+            '\\' if in_single_quote || in_double_quote => escaped = true,
+            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            '"' if !in_single_quote => in_double_quote = !in_double_quote,
+            ';' if !in_single_quote && !in_double_quote => {
+                return line[..index].trim_end();
+            }
+            '$' if !in_single_quote && !in_double_quote => {
+                if characters
+                    .peek()
+                    .is_none_or(|(_, next)| next.is_whitespace())
+                {
+                    return line[..index].trim_end();
+                }
+            }
+            '/' if !in_single_quote && !in_double_quote => {
+                if matches!(characters.peek(), Some((_, '/')))
+                    && previous.is_none_or(char::is_whitespace)
+                {
+                    return line[..index].trim_end();
+                }
+            }
+            _ => {}
+        }
+        previous = Some(character);
+    }
+    line
+}
+
+fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
+    line.match_indices(parameter).any(|(index, _)| {
+        let has_identifier_boundary = index == 0
+            || line[..index]
+                .chars()
+                .next_back()
+                .is_some_and(|character| !(character.is_ascii_alphanumeric() || character == '_'));
+        has_identifier_boundary
+            && line[index + parameter.len()..]
+                .trim_start()
+                .starts_with('=')
+    })
+}
+
+fn append_corner_model_identities(
+    tasks: &[QueuedAnalysis],
+    identities: &mut Vec<ModelSourceIdentity>,
+) {
+    for task in tasks {
+        let Some(corner) = task.spec_options.corner.as_ref() else {
+            continue;
+        };
+        for binding in &corner.model_bindings {
+            identities.push(ModelSourceIdentity::new(
+                binding.source_label.clone(),
+                content_digest(
+                    "rspice.materialized-corner-model-cards/v1",
+                    binding.materialized_model_cards.as_bytes(),
+                ),
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use crate::services::drc::DrcResult;
+    use crate::state::{ComponentType, Point};
+
+    static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
+
+    fn fixture_dir(label: &str) -> PathBuf {
+        let nonce = FIXTURE_NONCE.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-prepared-run-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).expect("create prepared-run fixture");
+        directory
+    }
+
+    fn runnable_state() -> AppState {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        let mut drc = DrcResult::new();
+        drc.completed = true;
+        state.dialogs.drc_results = Some(drc);
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        state
+    }
+
+    #[test]
+    fn prepared_snapshot_detects_analysis_mutation_without_revision_change() {
+        let mut state = runnable_state();
+        let controller = SimulationController::new();
+        let prepared = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare first snapshot");
+        let revision = state.workspace.project.revision().get();
+        state.sim_setup.tran.stop = "2m".to_owned();
+        let changed = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare changed snapshot");
+        assert_eq!(state.workspace.project.revision().get(), revision);
+        assert_ne!(prepared.digest(), changed.digest());
+    }
+
+    #[test]
+    fn prepared_snapshot_detects_non_topology_source_mutation() {
+        let mut state = runnable_state();
+        let controller = SimulationController::new();
+        let prepared = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare first snapshot");
+        let topology = state.schematic.topology_version();
+        state.schematic.components[0].value = "2k".to_owned();
+        let changed = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare changed snapshot");
+        assert_eq!(state.schematic.topology_version(), topology);
+        assert_ne!(prepared.digest(), changed.digest());
+    }
+
+    #[test]
+    fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
+        let mut state = AppState::default();
+        state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
+            &crate::simulation::dialog::SpConfig::default(),
+        );
+        state.schematic.current_file = Some(PathBuf::from("designs").join("amp.rsch"));
+        let tasks = vec![QueuedAnalysis {
+            spec: AnalysisSpec::SParameter {
+                start_freq: 1.0e6,
+                stop_freq: 1.0e9,
+                points_per_unit: 20,
+                sweep: FrequencySweep::Decade,
+                z0: 50.0,
+                ports: vec![SpPort {
+                    node_pos: "in".to_owned(),
+                    node_neg: "0".to_owned(),
+                    z0: None,
+                }],
+            },
+            config: None,
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: ".sp dec 20 1Meg 1Gig".to_owned(),
+        }];
+
+        let prepared =
+            touchstone_export_policy(&state, &tasks, state.schematic.current_file.as_deref())
+                .expect("capture enabled policy");
+        let prepared_path = prepared.output_path(7, 1, 2).expect("enabled export path");
+
+        state.schematic.current_file = Some(PathBuf::from("redirect").join("changed.rsch"));
+        let mut disabled = crate::simulation::dialog::SpConfig::default();
+        disabled.touchstone_export = false;
+        state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&disabled);
+        let current =
+            touchstone_export_policy(&state, &tasks, state.schematic.current_file.as_deref())
+                .expect("capture disabled policy");
+
+        assert!(current.output_path(7, 1, 2).is_none());
+        assert!(prepared_path.ends_with("designs/amp_run0007_sp01.s2p"));
+    }
+
+    #[test]
+    fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path() {
+        let mut state = AppState::default();
+        state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+        state.schematic.current_file = Some(PathBuf::from("stale").join("schematic.rsch"));
+        state.workspace.netlist_source_path =
+            Some(PathBuf::from("imported").join("rf_fixture.cir"));
+        state.workspace.netlist_source = Some(
+            "deck\nV2 out 0 dc 0 ac 1 portnum 2 z0 75\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in out 100\n.sp lin 3 1Meg 3Meg\n.end\n"
+                .to_owned(),
+        );
+        state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
+            &crate::simulation::dialog::SpConfig::default(),
+        );
+
+        let mut controller = SimulationController::new();
+        let snapshot = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare imported RF deck");
+        controller
+            .authorize_snapshot(snapshot)
+            .expect("authorize imported RF deck");
+        let mut dispatch = controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .expect("dispatch imported RF deck");
+        let policy = dispatch.take_touchstone_export_policy();
+
+        let path = policy.output_path(4, 1, 2).expect("export is enabled");
+        assert!(path.ends_with("imported/rf_fixture_run0004_sp01.s2p"));
+        assert!(!path.to_string_lossy().contains("schematic"));
+    }
+
+    #[test]
+    fn dispatch_rejects_mutation_after_explicit_preflight() {
+        let mut state = runnable_state();
+        let mut controller = SimulationController::new();
+        controller
+            .prepare_run_set_for_preflight(&state)
+            .expect("preflight");
+        state.sim_setup.tran.stop = "3m".to_owned();
+        let error = controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .expect_err("changed input must fail closed");
+        assert_eq!(error.stage(), PreparationStage::Authorization);
+        assert!(error.message().contains("expired"));
+    }
+
+    #[test]
+    fn manual_include_without_origin_fails_closed() {
+        let mut state = AppState::default();
+        state.workspace.netlist_source =
+            Some("deck\n.include models.lib\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+        let controller = SimulationController::new();
+        let error = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect_err("unbound include must fail");
+        assert_eq!(error.stage(), PreparationStage::SourceChecks);
+        assert!(error.message().contains("origin"));
+    }
+
+    #[test]
+    fn every_runtime_external_input_category_fails_closed() {
+        let cases = [
+            ".include model.lib",
+            ".lib model.lib TT",
+            ".spef_include parasitics.spef",
+            ".VERILOGA compact_model.va",
+            ".VA compact_model.va",
+            ".ahdl_include compact_model.va",
+            ".hdl compact_model.va",
+            ".verilog compact_model.va",
+            ".load prior.raw",
+            "Vstim in 0 PWL FILE \"wave.csv\"",
+            ".measure tran fit ERROR V(out) FILE reference.prn DEPVARCOL 2",
+            ".model touchstone transfer (file = \"network.s2p\")",
+            ".model source d_source (input_file = \"stimulus.txt\")",
+            ".model state d_state (state_file = \"state.tbl\")",
+            ".model process d_process (process_file = worker)",
+            ".model cosim d_cosim (simulation = \"payload.dll\")",
+            "Aco [in] [out] null cosim simulation = provider",
+        ];
+
+        for line in cases {
+            let Err(error) = reject_deferred_external_sources(line) else {
+                panic!("unsealed runtime input must be rejected: {line}");
+            };
+            assert_eq!(error.stage(), PreparationStage::SourceChecks, "{line}");
+            assert!(
+                error.message().contains("unsealed external dependency"),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn continuation_folding_cannot_hide_external_dependencies() {
+        for source in [
+            "deck\nBlookup out 0 V=table\n+ (\"C:/curves/transfer.tbl\")\n.end\n",
+            "deck\nVstim in 0 PWL(\n+ FILE = \"C:/stimulus/wave.csv\"\n+ )\n.end\n",
+            "deck\n.model cosim d_cosim (simulation\n* comment between continued records\n+ = \"C:/plugins/payload.dll\")\n.end\n",
+            "deck\n.model source d_source (input_file\n+ = 'C:/stimulus/input.txt')\n.end\n",
+        ] {
+            let error = reject_deferred_external_sources(source)
+                .expect_err("continued external dependency must fail closed");
+            assert_eq!(error.stage(), PreparationStage::SourceChecks, "{source}");
+            assert!(
+                error.message().contains("unsealed external dependency"),
+                "{source}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn benign_continuations_remain_accepted() {
+        for source in [
+            "deck\nBinline out 0 V=table(\n+ V(in), 0, 0, 1, 1)\n.end\n",
+            "deck\n.model diode D(\n+ IS=1e-12\n+ N=1.1)\n.end\n",
+        ] {
+            reject_deferred_external_sources(source).unwrap_or_else(|error| {
+                panic!("benign continuation was rejected: {source}: {error}")
+            });
+        }
+    }
+
+    #[test]
+    fn every_materialized_corner_binding_is_audited_before_dispatch() {
+        use crate::services::simulation_runner::{
+            CornerModelBinding, CornerProcess, CornerRunConfig,
+        };
+
+        let task = QueuedAnalysis {
+            spec: AnalysisSpec::Corner,
+            config: None,
+            spec_options: SpecExecutionOptions {
+                corner: Some(CornerRunConfig {
+                    process_corners: vec![CornerProcess::FF],
+                    model_bindings: vec![CornerModelBinding {
+                        process: CornerProcess::FF,
+                        source_label: "foundry.lib [FF]".to_owned(),
+                        section: Some("FF".to_owned()),
+                        materialized_model_cards:
+                            ".model external d_source (input_file\n+ = \"C:/late/stimulus.txt\")"
+                                .to_owned(),
+                    }],
+                    ..CornerRunConfig::default()
+                }),
+                ..SpecExecutionOptions::default()
+            },
+            analysis_line: ".corner".to_owned(),
+        };
+
+        let error = reject_deferred_corner_model_sources(&[task])
+            .expect_err("non-reference corner source must be sealed");
+        assert_eq!(error.stage(), PreparationStage::ModelBindings);
+        assert!(error.message().contains("foundry.lib [FF]"));
+        assert!(error.message().contains("unsealed external dependency"));
+    }
+
+    #[test]
+    fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
+        let mut state = AppState::default();
+        state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+        state.workspace.netlist_source =
+            Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+        let mut controller = SimulationController::new();
+        let snapshot = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare replacement request");
+        let prepared_digest = snapshot.digest();
+        controller
+            .authorize_snapshot(snapshot)
+            .expect("authorize replacement request");
+
+        let active_run_id = state.simulation.start_run().id;
+        controller.current_run_id = Some(active_run_id);
+        controller.current_spec = Some(AnalysisSpec::DcOp);
+        controller.current_analysis_idx = 1;
+        controller.total_analyses = 2;
+        controller.cached_netlist = Some("existing sealed batch".to_owned());
+
+        controller.start_authorized_snapshot(&mut state);
+
+        assert_eq!(controller.current_run_id, Some(active_run_id));
+        assert_eq!(controller.current_spec, Some(AnalysisSpec::DcOp));
+        assert_eq!(controller.current_analysis_idx, 1);
+        assert_eq!(controller.total_analyses, 2);
+        assert_eq!(
+            controller.cached_netlist.as_deref(),
+            Some("existing sealed batch")
+        );
+        assert_eq!(state.simulation.runs.len(), 1);
+        assert_eq!(
+            controller
+                .pending_prepared_run
+                .as_ref()
+                .map(|pending| pending.snapshot.digest()),
+            Some(prepared_digest)
+        );
+    }
+
+    #[test]
+    fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
+        let mut state = AppState::default();
+        state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+        state.workspace.netlist_source =
+            Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+        let mut controller = SimulationController::new();
+        let snapshot = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare replacement request");
+        let prepared_digest = snapshot.digest();
+        controller
+            .authorize_snapshot(snapshot)
+            .expect("authorize replacement request");
+        controller
+            .runner
+            .store_pending_result(Err(SimulationError::Aborted))
+            .expect("seed finished, unpolled worker result");
+
+        controller.start_authorized_snapshot(&mut state);
+
+        assert!(state.simulation.runs.is_empty());
+        assert_eq!(controller.total_analyses, 0);
+        assert_eq!(
+            controller
+                .pending_prepared_run
+                .as_ref()
+                .map(|pending| pending.snapshot.digest()),
+            Some(prepared_digest)
+        );
+        assert!(!controller.runner.can_accept_prepared_task());
+    }
+
+    #[test]
+    fn every_behavioral_file_lookup_alias_fails_closed() {
+        let functions = [
+            "table",
+            "tablefile",
+            "fasttable",
+            "fasttablefile",
+            "cubic",
+            "cubicfile",
+            "akima",
+            "akimafile",
+            "spline",
+            "splinefile",
+            "wodicka",
+            "wodickafile",
+            "bli",
+            "blifile",
+            "barycentric",
+            "barycentricfile",
+        ];
+
+        for function in functions {
+            let line = format!("Blookup out 0 V={function}(\"curve.dat\")");
+            assert_eq!(
+                deferred_external_source_reason(&line),
+                Some("file-backed behavioral lookup"),
+                "{function}"
+            );
+        }
+    }
+
+    #[test]
+    fn external_input_audit_ignores_comments_and_inline_data() {
+        for line in [
+            "* .include ignored.lib",
+            "// .VERILOGA ignored.va",
+            "R1 out 0 1k $ file=ignored.tbl",
+            "R2 out 0 2k ; file=ignored.tbl",
+            "R3 out 0 3k // file=ignored.tbl",
+            ".data sweep_values",
+            "+ 0 1 2 3",
+            ".enddata",
+            "Binline out 0 V=table(V(in), 0, 0, 1, 1)",
+            ".param profile=1",
+        ] {
+            assert_eq!(deferred_external_source_reason(line), None, "{line}");
+        }
+
+        for line in [
+            "Aco $G_DPWR [in] [out] null cosim simulation=provider",
+            ".model source d_source (input_file='stimulus;production.txt')",
+            ".model source d_source (input_file=\"stimulus\\\"production.txt\")",
+        ] {
+            assert!(
+                deferred_external_source_reason(line).is_some(),
+                "executable dependency must survive comment scanning: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
+        let mut state = AppState::default();
+        state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+        state.workspace.netlist_source =
+            Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+        let mut controller = SimulationController::new();
+
+        controller.start_simulation(&mut state);
+
+        assert!(controller.pending_prepared_run.is_none());
+        assert_eq!(controller.total_analyses, 1);
+        assert!(
+            controller
+                .cached_netlist
+                .as_deref()
+                .is_some_and(|netlist| netlist.contains(".op"))
+        );
+        controller.abort();
+    }
+
+    #[test]
+    fn included_source_mutation_after_prepare_is_rejected() {
+        let directory = fixture_dir("include-mutation");
+        let origin = directory.join("deck.cir");
+        let include = directory.join("device.inc");
+        fs::write(&include, "R1 out 0 1k\n").expect("write include");
+        let source = "deck\n.include device.inc\nV1 out 0 1\n.op\n.end\n";
+        fs::write(&origin, source).expect("write deck origin");
+
+        let mut state = AppState::default();
+        state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+        state.workspace.netlist_source = Some(source.to_owned());
+        state.workspace.netlist_source_path = Some(origin);
+        let mut controller = SimulationController::new();
+        let metadata = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare first include closure")
+            .metadata();
+        let authorized = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("authorize include closure");
+        controller
+            .authorize_snapshot(authorized)
+            .expect("issue authorization");
+
+        fs::write(&include, "R1 out 0 2k\n").expect("mutate include");
+        let changed = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare changed include closure")
+            .metadata();
+        assert_ne!(metadata.source_digest, changed.source_digest);
+        let error = controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .expect_err("changed include must invalidate authorization");
+        assert_eq!(error.stage(), PreparationStage::Authorization);
+
+        fs::remove_dir_all(directory).expect("remove include fixture");
+    }
+
+    #[test]
+    fn accepted_model_file_mutation_after_prepare_fails_closed() {
+        let directory = fixture_dir("model-mutation");
+        let model = directory.join("foundry.lib");
+        fs::write(
+            &model,
+            ".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n",
+        )
+        .expect("write model");
+        let mut state = runnable_state();
+        state
+            .model_library_manager
+            .load_library_file(&model, None)
+            .expect("load model library");
+        let mut controller = SimulationController::new();
+        controller
+            .prepare_run_set_for_preflight(&state)
+            .expect("prepare model-bound run");
+
+        fs::write(
+            &model,
+            ".lib TT\n.model nch NMOS (LEVEL=1 KP=2e-3)\n.endl TT\n",
+        )
+        .expect("mutate model");
+        let error = controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .expect_err("changed accepted model bytes must block dispatch");
+        assert_eq!(error.stage(), PreparationStage::ModelBindings);
+        assert!(error.message().contains("changed"));
+
+        fs::remove_dir_all(directory).expect("remove model fixture");
+    }
+}

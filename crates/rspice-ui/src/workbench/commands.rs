@@ -10,6 +10,38 @@ use crate::state::{ComponentType, Tool};
 
 use super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
+mod registry;
+
+fn stop_simulation_enabled(is_running: bool) -> bool {
+    is_running && crate::simulation::execution::execution_target_supports_cancellation()
+}
+
+pub use registry::{
+    CommandAvailability, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext,
+    ShortcutKind, current_command_platform,
+};
+
+#[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+const PROJECT_NEW_SHORTCUT: &str = "Ctrl+Alt+Shift+N";
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+const PROJECT_NEW_SHORTCUT: &str = "Ctrl+Shift+N";
+#[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+const PROJECT_OPEN_SHORTCUT: &str = "Ctrl+Alt+O";
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+const PROJECT_OPEN_SHORTCUT: &str = "Ctrl+O";
+#[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+const PROJECT_SAVE_SHORTCUT: &str = "Ctrl+Alt+S";
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+const PROJECT_SAVE_SHORTCUT: &str = "Ctrl+S";
+#[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+const CLOSE_ACTIVE_DOCUMENT_SHORTCUT: &str = "Ctrl+Shift+Backspace";
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+const CLOSE_ACTIVE_DOCUMENT_SHORTCUT: &str = "Ctrl+W";
+#[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+const CLOSE_PROJECT_SHORTCUT: &str = "";
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+const CLOSE_PROJECT_SHORTCUT: &str = "Ctrl+Shift+W";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     OpenWorkspace(Workspace),
@@ -19,6 +51,10 @@ pub enum Command {
     OpenProject,
     Save,
     SaveAs,
+    SaveAll,
+    RevertActiveDocument,
+    CloseActiveDocument,
+    CloseProject,
     NewCell,
     OpenDocument,
     ImportNetlist,
@@ -52,6 +88,7 @@ pub enum Command {
     ResetLayout,
     PreviousWorkspace,
     NextWorkspace,
+    SelectTool,
     PlaceInstance,
     PlaceWire,
     PlaceLabel,
@@ -59,11 +96,15 @@ pub enum Command {
     Place(ComponentType),
     RotateSelection,
     MirrorSelectionHorizontal,
+    MirrorSelectionVertical,
+    Cancel,
     AscendHierarchy,
     DescendHierarchy,
     RunChecks,
     CheckAndSave,
     ClearChecks,
+    NextViolation,
+    PreviousViolation,
     RunSimulation,
     StopSimulation,
     PreflightChecks,
@@ -90,217 +131,304 @@ pub enum Command {
 pub struct CommandSpec {
     pub id: &'static str,
     pub label: &'static str,
-    pub shortcut: &'static str,
     pub group: &'static str,
 }
 
 impl Command {
     pub const fn spec(self) -> CommandSpec {
         match self {
-            Self::OpenWorkspace(Workspace::Project) => spec(
-                "workspace.project",
-                "Open Project workspace",
-                "Alt+1",
-                "Navigate",
-            ),
-            Self::OpenWorkspace(Workspace::Design) => spec(
-                "workspace.design",
-                "Open Design workspace",
-                "Alt+2",
-                "Navigate",
-            ),
-            Self::OpenWorkspace(Workspace::Simulate) => spec(
-                "workspace.simulate",
-                "Open Simulation workspace",
-                "Alt+3",
-                "Navigate",
-            ),
-            Self::OpenWorkspace(Workspace::Results) => spec(
-                "workspace.results",
-                "Open Results workspace",
-                "Alt+4",
-                "Navigate",
-            ),
-            Self::OpenWorkspace(Workspace::Verify) => spec(
-                "workspace.verify",
-                "Open Verification workspace",
-                "Alt+5",
-                "Navigate",
-            ),
-            Self::OpenWorkspace(Workspace::Models) => spec(
-                "workspace.models",
-                "Open Models workspace",
-                "Alt+6",
-                "Navigate",
-            ),
-            Self::OpenWorkspace(Workspace::Netlist) => spec(
-                "workspace.netlist",
-                "Open Netlist workspace",
-                "Alt+7",
-                "Navigate",
-            ),
+            Self::OpenWorkspace(Workspace::Project) => {
+                spec("project", "Open project workspace", "Alt+1", "Navigate")
+            }
+            Self::OpenWorkspace(Workspace::Design) => {
+                spec("design", "Open design workspace", "Alt+2", "Navigate")
+            }
+            Self::OpenWorkspace(Workspace::Simulate) => {
+                spec("simulate", "Open simulation workspace", "Alt+3", "Navigate")
+            }
+            Self::OpenWorkspace(Workspace::Results) => {
+                spec("results", "Open results workspace", "Alt+4", "Navigate")
+            }
+            Self::OpenWorkspace(Workspace::Verify) => {
+                spec("verify", "Open verification workspace", "Alt+5", "Navigate")
+            }
+            Self::OpenWorkspace(Workspace::Models) => {
+                spec("models", "Open models workspace", "Alt+6", "Navigate")
+            }
+            Self::OpenWorkspace(Workspace::Netlist) => {
+                spec("netlist", "Open automation workspace", "Alt+7", "Navigate")
+            }
             Self::ProjectLauncher => spec(
-                "project.launcher",
+                "project-launcher",
                 "Project launcher…",
                 "Ctrl+Shift+O",
                 "File",
             ),
-            Self::RecentProjects => spec("project.recent", "Recent projects…", "", "File"),
-            Self::NewProject => spec("project.new", "New project…", "Ctrl+Shift+N", "File"),
-            Self::OpenProject => spec("project.open", "Open project…", "Ctrl+O", "File"),
-            Self::Save => spec("file.save", "Save", "Ctrl+S", "File"),
+            Self::RecentProjects => spec("recent-projects", "Recent projects…", "", "File"),
+            Self::NewProject => spec("new-project", "New project…", PROJECT_NEW_SHORTCUT, "File"),
+            Self::OpenProject => spec(
+                "open-project",
+                "Open project…",
+                PROJECT_OPEN_SHORTCUT,
+                "File",
+            ),
+            Self::Save => spec("save-project", "Save", PROJECT_SAVE_SHORTCUT, "File"),
             Self::SaveAs => spec(
-                "file.save_as",
+                "save-project-as",
                 "Save as project copy…",
                 "Ctrl+Shift+Alt+S",
                 "File",
             ),
-            Self::NewCell => spec("design.new_cell", "New cell…", "Ctrl+N", "File"),
-            Self::OpenDocument => spec("design.open", "Open schematic…", "", "File"),
-            Self::ImportNetlist => spec("netlist.import", "Import SPICE deck…", "", "File"),
-            Self::ImportVerilogA => spec("models.import_veriloga", "Import Verilog-A…", "", "File"),
+            Self::SaveAll => spec("save-all", "Save all", "Ctrl+Shift+S", "File"),
+            Self::RevertActiveDocument => {
+                spec("revert-document", "Revert active document…", "", "File")
+            }
+            Self::CloseActiveDocument => spec(
+                "close-document",
+                "Close active document",
+                CLOSE_ACTIVE_DOCUMENT_SHORTCUT,
+                "File",
+            ),
+            Self::CloseProject => spec(
+                "close-project",
+                "Close project…",
+                CLOSE_PROJECT_SHORTCUT,
+                "File",
+            ),
+            Self::NewCell => spec("new-cell", "New cell…", "", "File"),
+            Self::OpenDocument => spec("open-schematic", "Open schematic…", "", "File"),
+            Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "", "File"),
+            Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "", "File"),
             Self::ExportSchematicSvg => {
-                spec("design.export_svg", "Export schematic SVG…", "", "File")
+                spec("export-schematic-svg", "Export schematic SVG…", "", "File")
             }
             Self::ExportWaveformsCsv => {
-                spec("results.export_csv", "Export waveform data…", "", "File")
+                spec("export-waveforms", "Export waveform data…", "", "File")
             }
-            Self::ExportNetlist(_) => spec("netlist.export", "Export netlist", "", "File"),
-            Self::Exit => spec("application.exit", "Exit RSpice…", "Alt+F4", "File"),
-            Self::Undo => spec("edit.undo", "Undo", "Ctrl+Z", "Edit"),
-            Self::Redo => spec("edit.redo", "Redo", "Ctrl+Shift+Z", "Edit"),
-            Self::Cut => spec("edit.cut", "Cut selection", "Ctrl+X", "Edit"),
-            Self::Copy => spec("edit.copy", "Copy selection", "Ctrl+C", "Edit"),
-            Self::Paste => spec("edit.paste", "Paste", "Ctrl+V", "Edit"),
-            Self::Duplicate => spec("edit.duplicate", "Duplicate selection", "Ctrl+D", "Edit"),
-            Self::Delete => spec("edit.delete", "Delete selection", "Delete", "Edit"),
-            Self::SelectAll => spec(
-                "edit.select_all",
-                "Select all in edit context",
-                "Ctrl+A",
+            Self::ExportNetlist(_) => spec("export-netlist", "Export netlist", "", "File"),
+            Self::Exit => spec("exit-rspice", "Exit RSpice…", "Alt+F4", "File"),
+            Self::Undo => spec("undo", "Undo", "Ctrl+Z", "Edit"),
+            Self::Redo => spec("redo", "Redo", "Ctrl+Shift+Z", "Edit"),
+            Self::Cut => spec("cut-selection", "Cut selection", "Ctrl+X", "Edit"),
+            Self::Copy => spec("copy-selection", "Copy selection", "Ctrl+C", "Edit"),
+            Self::Paste => spec("paste-selection", "Paste", "Ctrl+V", "Edit"),
+            Self::Duplicate => spec(
+                "duplicate-selection",
+                "Duplicate selection",
+                "Ctrl+D",
                 "Edit",
             ),
-            Self::ObjectProperties => spec("edit.properties", "Object properties…", "Q", "Edit"),
-            Self::FindInDesign => spec("design.find", "Find in design…", "Ctrl+F", "Edit"),
-            Self::Preferences => spec("application.preferences", "Preferences…", "Ctrl+,", "Edit"),
-            Self::ZoomIn => spec("view.zoom_in", "Zoom in", "+", "View"),
-            Self::ZoomOut => spec("view.zoom_out", "Zoom out", "−", "View"),
-            Self::ZoomFit => spec("view.zoom_fit", "Zoom active canvas to fit", "F", "View"),
-            Self::ZoomOneToOne => spec("view.zoom_100", "Zoom 100%", "Ctrl+0", "View"),
-            Self::CycleGrid => spec("view.grid", "Canvas grid and snap", "G", "View"),
-            Self::ToggleFullScreen => spec("view.full_screen", "Enter full screen", "F11", "View"),
-            Self::ResetActiveView => spec("view.reset_active", "Reset active view", "", "View"),
+            Self::Delete => spec("delete-selection", "Delete selection", "Delete", "Edit"),
+            Self::SelectAll => spec("select-all", "Select all in edit context", "Ctrl+A", "Edit"),
+            Self::ObjectProperties => spec("object-properties", "Object properties…", "Q", "Edit"),
+            Self::FindInDesign => spec("find-design", "Find in design…", "Ctrl+F", "Edit"),
+            Self::Preferences => spec("preferences", "Preferences…", "Ctrl+,", "Edit"),
+            Self::ZoomIn => spec("zoom-in", "Zoom in", "+", "View"),
+            Self::ZoomOut => spec("zoom-out", "Zoom out", "−", "View"),
+            Self::ZoomFit => spec("fit-canvas", "Zoom active canvas to fit", "F", "View"),
+            Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "Ctrl+0", "View"),
+            Self::CycleGrid => spec("toggle-grid", "Canvas grid and snap", "G", "View"),
+            Self::ToggleFullScreen => spec("full-screen", "Enter full screen", "F11", "View"),
+            Self::ResetActiveView => spec("reset-active-view", "Reset active view", "", "View"),
             Self::ToggleNavigator => {
-                spec("window.navigator", "Toggle navigator", "Ctrl+B", "Window")
+                spec("toggle-navigator", "Toggle navigator", "Ctrl+B", "Window")
             }
             Self::ToggleInspector => {
-                spec("window.inspector", "Toggle inspector", "Ctrl+I", "Window")
+                spec("toggle-inspector", "Toggle inspector", "Ctrl+I", "Window")
             }
-            Self::ToggleConsole => spec("window.console", "Toggle console", "Ctrl+J", "Window"),
-            Self::ToggleFocusMode => {
-                spec("window.focus", "Focus workspace", "Ctrl+Shift+F", "Window")
-            }
-            Self::ResetLayout => spec("window.reset", "Reset workspace layout…", "", "Window"),
+            Self::ToggleConsole => spec("console", "Toggle console", "Ctrl+J", "Window"),
+            Self::ToggleFocusMode => spec(
+                "toggle-focus-mode",
+                "Focus workspace",
+                "Ctrl+Shift+F",
+                "Window",
+            ),
+            Self::ResetLayout => spec(
+                "reset-workspace-layout",
+                "Reset workspace layout…",
+                "",
+                "Window",
+            ),
             Self::PreviousWorkspace => spec(
-                "window.previous_workspace",
+                "previous-workspace",
                 "Previous workspace",
                 "Ctrl+Shift+Tab",
                 "Window",
             ),
-            Self::NextWorkspace => spec(
-                "window.next_workspace",
-                "Next workspace",
-                "Ctrl+Tab",
-                "Window",
-            ),
-            Self::PlaceInstance => spec(
-                "design.place_instance",
-                "Place instance…",
-                "Shift+I",
+            Self::NextWorkspace => spec("next-workspace", "Next workspace", "Ctrl+Tab", "Window"),
+            Self::SelectTool => spec("select-tool", "Select tool", "", "Design"),
+            Self::PlaceInstance => spec("place-instance", "Place instance…", "Shift+I", "Design"),
+            Self::PlaceWire => spec("place-wire", "Draw wire", "W", "Design"),
+            Self::PlaceLabel => spec("place-label", "Place net label", "N", "Design"),
+            Self::PlaceProbe => spec("place-probe", "Place probe", "P", "Design"),
+            Self::Place(_) => spec("place-component", "Place component", "", "Design"),
+            Self::RotateSelection => spec("rotate-selection", "Rotate clockwise", "", "Design"),
+            Self::MirrorSelectionHorizontal => spec(
+                "mirror-selection-horizontal",
+                "Mirror horizontally",
+                "",
                 "Design",
             ),
-            Self::PlaceWire => spec("design.place_wire", "Draw wire", "W", "Design"),
-            Self::PlaceLabel => spec("design.place_label", "Place net label", "N", "Design"),
-            Self::PlaceProbe => spec("design.place_probe", "Place probe", "P", "Design"),
-            Self::Place(_) => spec("design.place_component", "Place component", "", "Design"),
-            Self::RotateSelection => spec("design.rotate", "Rotate clockwise", "R", "Design"),
-            Self::MirrorSelectionHorizontal => {
-                spec("design.mirror", "Mirror horizontally", "M", "Design")
+            Self::MirrorSelectionVertical => spec(
+                "mirror-selection-vertical",
+                "Mirror vertically",
+                "",
+                "Design",
+            ),
+            Self::Cancel => spec(
+                "cancel-active-command",
+                "Cancel active command",
+                "Escape",
+                "Design",
+            ),
+            Self::AscendHierarchy => {
+                spec("ascend-hierarchy", "Ascend hierarchy", "Shift+H", "Design")
             }
-            Self::AscendHierarchy => spec("design.ascend", "Ascend hierarchy", "Shift+H", "Design"),
             Self::DescendHierarchy => spec(
-                "design.descend",
+                "descend-hierarchy",
                 "Descend into selected instance",
                 "H",
                 "Design",
             ),
-            Self::RunChecks => spec("design.check", "Run schematic checks", "Ctrl+E", "Design"),
-            Self::CheckAndSave => spec(
-                "design.check_and_save",
-                "Check and save",
-                "Ctrl+Shift+E",
-                "Design",
-            ),
-            Self::ClearChecks => spec("design.clear_checks", "Clear check results", "", "Design"),
-            Self::RunSimulation => spec("simulation.run", "Run active plan", "F5", "Simulate"),
-            Self::StopSimulation => {
-                spec("simulation.stop", "Stop active run", "Shift+F5", "Simulate")
+            Self::RunChecks => spec("run-checks", "Run schematic checks", "Ctrl+E", "Design"),
+            Self::CheckAndSave => {
+                spec("check-and-save", "Check and save", "Ctrl+Shift+E", "Design")
             }
-            Self::PreflightChecks => spec(
-                "simulation.preflight",
-                "Preflight checks",
-                "Ctrl+E",
+            Self::ClearChecks => spec("clear-checks", "Clear check results", "", "Design"),
+            Self::NextViolation => spec("next-violation", "Next violation", "", "Verify"),
+            Self::PreviousViolation => {
+                spec("previous-violation", "Previous violation", "", "Verify")
+            }
+            Self::RunSimulation => spec("start-run", "Run active plan", "F5", "Simulate"),
+            Self::StopSimulation => spec("stop-run", "Stop active run", "Shift+F5", "Simulate"),
+            Self::PreflightChecks => spec("check", "Preflight checks", "Ctrl+E", "Simulate"),
+            Self::SimulationOptions => {
+                spec("solver", "Global solver & convergence", "", "Simulate")
+            }
+            Self::GenerateNetlist => spec(
+                "generated-netlist",
+                "Open generated netlist",
+                "Ctrl+L",
                 "Simulate",
             ),
-            Self::SimulationOptions => spec(
-                "simulation.options",
-                "Global solver & convergence",
+            Self::ClearResults => spec("clear-results", "Clear result history", "", "Results"),
+            Self::WaveformCalculator => spec("calculator", "Calculator…", "", "Results"),
+            Self::ResultViewer(crate::workbench::ResultViewer::Waves) => {
+                spec("waveforms", "Open results workspace", "", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::Bode) => {
+                spec("result-bode", "Open Bode viewer", "", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::Fft) => {
+                spec("result-fft", "Open FFT viewer", "", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::Eye) => {
+                spec("result-eye", "Open eye-diagram viewer", "", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::Hist) => {
+                spec("result-histogram", "Open histogram viewer", "", "Results")
+            }
+            Self::ResultViewer(crate::workbench::ResultViewer::Op) => spec(
+                "result-operating-point",
+                "Open operating-point viewer",
                 "",
-                "Simulate",
+                "Results",
             ),
-            Self::GenerateNetlist => spec("netlist.generate", "Generate netlist", "", "Simulate"),
-            Self::ClearResults => spec("results.clear", "Clear result history", "", "Results"),
-            Self::WaveformCalculator => {
-                spec("results.calculator", "Waveform calculator…", "", "Results")
-            }
-            Self::ResultViewer(_) => spec("results.viewer", "Open result viewer", "", "Results"),
-            Self::EditSpecifications => spec(
-                "verify.specifications",
-                "Edit specification matrix",
+            Self::ResultViewer(crate::workbench::ResultViewer::NoiseContrib) => spec(
+                "result-noise",
+                "Open noise-contribution viewer",
                 "",
-                "Verify",
+                "Results",
             ),
-            Self::VerificationPage(_) => {
-                spec("verify.page", "Open verification page", "", "Verify")
+            Self::ResultViewer(crate::workbench::ResultViewer::Specs) => spec(
+                "result-specifications",
+                "Open specification results",
+                "",
+                "Results",
+            ),
+            Self::ResultViewer(crate::workbench::ResultViewer::Nyquist) => {
+                spec("result-nyquist", "Open Nyquist viewer", "", "Results")
             }
-            Self::ProjectPage(_) => spec("project.page", "Open project page", "", "Project"),
-            Self::ModelsPage(_) => spec("models.page", "Open models page", "", "Models"),
-            Self::ModelBrowser => spec("models.browser", "Model browser…", "", "Models"),
-            Self::PdkSettings => spec("models.pdk", "PDK and model paths…", "", "Models"),
-            Self::CompileVerilogA => {
-                spec("models.veriloga", "Verilog-A/AMS compiler", "", "Models")
+            Self::ResultViewer(crate::workbench::ResultViewer::Smith) => {
+                spec("result-smith", "Open Smith-chart viewer", "", "Results")
             }
-            Self::AutomationConsole => spec(
-                "automation.console",
-                "Automation console",
-                "Ctrl+`",
-                "Automation",
+            Self::ResultViewer(crate::workbench::ResultViewer::PoleZero) => {
+                spec("result-pole-zero", "Open pole-zero viewer", "", "Results")
+            }
+            Self::EditSpecifications => {
+                spec("specifications", "Edit specification matrix", "", "Verify")
+            }
+            Self::VerificationPage(VerificationPage::Cockpit) => {
+                spec("yield", "Verification cockpit", "", "Verify")
+            }
+            Self::VerificationPage(VerificationPage::Specifications) => {
+                spec("specification-page", "Specification matrix", "", "Verify")
+            }
+            Self::VerificationPage(VerificationPage::Checks) => {
+                spec("verification-checks", "Design checks", "", "Verify")
+            }
+            Self::VerificationPage(VerificationPage::Reliability) => {
+                spec("reliability-workbench", "Reliability and SOA", "", "Verify")
+            }
+            Self::VerificationPage(VerificationPage::History) => {
+                spec("verification-history", "Run history", "", "Verify")
+            }
+            Self::ProjectPage(_) => spec("project-page", "Open project page", "", "Project"),
+            Self::ModelsPage(ModelsPage::Catalog) => {
+                spec("models-catalog", "Model & library catalog", "", "Models")
+            }
+            Self::ModelsPage(ModelsPage::Libraries) => spec(
+                "library-cellview-manager",
+                "Libraries and cellviews",
+                "",
+                "Models",
             ),
-            Self::CommandPalette => spec(
-                "application.command_palette",
-                "Search and run a command",
-                "Ctrl+K",
-                "Navigate",
-            ),
-            Self::KeyboardShortcuts => spec("help.shortcuts", "Keyboard shortcuts", "F1", "Help"),
-            Self::License => spec("help.license", "License and activation…", "", "Help"),
-            Self::About => spec("help.about", "About RSpice", "", "Help"),
+            Self::ModelsPage(ModelsPage::Pdk) => {
+                spec("model-pdk", "PDK configuration", "", "Models")
+            }
+            Self::ModelsPage(ModelsPage::Behavioral) => {
+                spec("model-behavioral", "Verilog-A / AMS", "", "Models")
+            }
+            Self::ModelsPage(ModelsPage::Qualification) => {
+                spec("model-qualification", "Qualification", "", "Models")
+            }
+            Self::ModelBrowser => spec("model-browser", "Model browser…", "", "Models"),
+            Self::PdkSettings => spec("pdk-settings", "PDK and model paths…", "", "Models"),
+            Self::CompileVerilogA => spec("veriloga", "Verilog-A/AMS compiler", "", "Models"),
+            Self::AutomationConsole => {
+                spec("automation", "Automation workspace", "Ctrl+`", "Automation")
+            }
+            Self::CommandPalette => {
+                spec("command-palette", "Command palette", "Ctrl+K", "Navigate")
+            }
+            Self::KeyboardShortcuts => spec("command-reference", "Command reference", "", "Help"),
+            Self::License => spec("license-activation", "License and activation…", "", "Help"),
+            Self::About => spec("about", "About RSpice", "", "Help"),
         }
     }
 
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
+        if crate::common::project_lifecycle::operation_in_progress(state)
+            && self.blocked_by_project_operation()
+        {
+            return false;
+        }
         match self {
+            Self::Save | Self::SaveAs => state.project_lifecycle.project_open,
+            Self::SaveAll => {
+                state.project_lifecycle.project_open
+                    && crate::common::project_lifecycle::has_unsaved_changes(state)
+            }
+            Self::RevertActiveDocument => {
+                state.project_lifecycle.accepted().is_some()
+                    && crate::common::project_lifecycle::active_document_is_dirty(state)
+                    && !state.simulation.is_running
+            }
+            Self::CloseActiveDocument => {
+                crate::common::project_lifecycle::can_close_active_document(state)
+            }
+            Self::CloseProject => state.project_lifecycle.project_open,
             Self::Undo => {
                 if active_symbol_editor(app) {
                     state.can_undo_active_symbol_document()
@@ -342,7 +470,9 @@ impl Command {
                 }
             }
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::RotateSelection | Self::MirrorSelectionHorizontal => {
+            Self::RotateSelection
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic.read_only
                     && !state.schematic.selection.is_empty()
@@ -359,7 +489,8 @@ impl Command {
             Self::ZoomIn | Self::ZoomOut | Self::ZoomFit | Self::ZoomOneToOne => {
                 active_symbol_editor(app) || active_schematic_editor(app)
             }
-            Self::CycleGrid => active_schematic_editor(app),
+            Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
             Self::PlaceInstance
             | Self::PlaceWire
             | Self::PlaceLabel
@@ -374,8 +505,15 @@ impl Command {
             }
             Self::RunChecks | Self::CheckAndSave => active_schematic_editor(app),
             Self::ClearChecks => state.dialogs.drc_results.is_some(),
-            Self::RunSimulation => state.can_run_simulation(),
-            Self::StopSimulation => state.simulation.is_running,
+            Self::NextViolation | Self::PreviousViolation => state.dialogs.drc_results.is_some(),
+            Self::RunSimulation => {
+                if state.workbench.workspace == Workspace::Netlist {
+                    state.manual_deck_run_block_reason().is_none()
+                } else {
+                    state.can_run_simulation()
+                }
+            }
+            Self::StopSimulation => stop_simulation_enabled(state.simulation.is_running),
             Self::ClearResults => state.simulation.has_results(),
             Self::ExportWaveformsCsv => state.simulation.has_results(),
             _ => true,
@@ -383,6 +521,15 @@ impl Command {
     }
 
     pub fn execute(self, app: &mut RSpiceApp) {
+        if crate::common::project_lifecycle::operation_in_progress(&app.state)
+            && self.blocked_by_project_operation()
+        {
+            app.state
+                .push_user_message(crate::common::app::ConsoleMessage::warning(
+                    "Wait for the current project operation to finish before starting another.",
+                ));
+            return;
+        }
         match self {
             Self::OpenWorkspace(workspace) => activate_workspace(app, workspace),
             Self::ProjectLauncher | Self::RecentProjects => {
@@ -392,6 +539,10 @@ impl Command {
             Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
             Self::Save => file_action(app, FileMenuAction::Save),
             Self::SaveAs => file_action(app, FileMenuAction::SaveProjectAs),
+            Self::SaveAll => file_action(app, FileMenuAction::SaveAll),
+            Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
+            Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
+            Self::CloseProject => file_action(app, FileMenuAction::CloseProject),
             Self::NewCell => file_action(app, FileMenuAction::New),
             Self::OpenDocument => file_action(app, FileMenuAction::Open),
             Self::ImportNetlist => {
@@ -571,6 +722,13 @@ impl Command {
             Self::ResetLayout => app.state.workbench.reset_layout(),
             Self::PreviousWorkspace => app.state.workbench.cycle_workspace(true),
             Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
+            Self::SelectTool => {
+                if active_symbol_editor(app) {
+                    app.state.ui.symbol.tool = crate::workbench::SymbolTool::Select;
+                } else {
+                    set_tool(app, Tool::Select);
+                }
+            }
             Self::PlaceInstance => {
                 activate_workspace(app, Workspace::Design);
                 app.state.workbench.navigator_visible = true;
@@ -587,6 +745,25 @@ impl Command {
             }
             Self::MirrorSelectionHorizontal => {
                 app.state.schematic.mirror_selection_h();
+            }
+            Self::MirrorSelectionVertical => {
+                app.state.schematic.mirror_selection_v();
+            }
+            Self::Cancel => {
+                if app.state.workbench.drawer.is_some() {
+                    app.state.workbench.close_drawer();
+                } else if app.state.tabbed_property_dialog.open {
+                    app.state.tabbed_property_dialog.close();
+                } else if app.state.workbench.workspace == Workspace::Results
+                    && app.state.ui.results.cursors.any()
+                {
+                    app.state.ui.results.clear_cursors();
+                } else {
+                    app.state.schematic.tool = Tool::Select;
+                    app.state.schematic.cancel_wire();
+                    app.state.schematic.selection.clear();
+                    app.state.schematic.selection_rect.cancel();
+                }
             }
             Self::AscendHierarchy => {
                 app.state.ascend_workspace_level();
@@ -613,11 +790,35 @@ impl Command {
                 }
             }
             Self::ClearChecks => app.state.dialogs.drc_results = None,
-            Self::RunSimulation => {
-                app.state.request_run_set_simulation();
-                activate_workspace(app, Workspace::Simulate);
+            Self::NextViolation => {
+                activate_workspace(app, Workspace::Design);
+                crate::schematic::view::violations::cycle_violation(&mut app.state, 1);
             }
-            Self::StopSimulation => app.state.simulation.trigger_abort = true,
+            Self::PreviousViolation => {
+                activate_workspace(app, Workspace::Design);
+                crate::schematic::view::violations::cycle_violation(&mut app.state, -1);
+            }
+            Self::RunSimulation => {
+                if app.state.workbench.workspace == Workspace::Netlist {
+                    if app.state.manual_deck_run_block_reason().is_none() {
+                        app.state.request_netlist_manual_deck_run();
+                    }
+                } else if app.state.can_run_simulation() {
+                    app.state.request_run_set_simulation();
+                    activate_workspace(app, Workspace::Simulate);
+                }
+            }
+            Self::StopSimulation => {
+                if stop_simulation_enabled(app.state.simulation.is_running) {
+                    app.state.simulation.trigger_abort = true;
+                } else if app.state.simulation.is_running {
+                    app.state.push_sim_message(
+                        crate::common::app::ConsoleMessage::warning(
+                            "This execution target cannot yet guarantee cancellation; the active run was left intact",
+                        ),
+                    );
+                }
+            }
             Self::PreflightChecks => super::preflight::run(app),
             Self::SimulationOptions => {
                 crate::common::menu_bar::open_simulation_options(&mut app.state)
@@ -671,15 +872,10 @@ impl Command {
 const fn spec(
     id: &'static str,
     label: &'static str,
-    shortcut: &'static str,
+    _display_hint: &'static str,
     group: &'static str,
 ) -> CommandSpec {
-    CommandSpec {
-        id,
-        label,
-        shortcut,
-        group,
-    }
+    CommandSpec { id, label, group }
 }
 
 fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
@@ -757,14 +953,31 @@ fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
     );
 }
 
-/// Commands shown by the new command search. Every entry has an implemented
-/// dispatcher above.
-pub const COMMAND_CATALOG: &[Command] = &[
+/// Every command registered with application chrome. Search, menus,
+/// accessibility help, and keyboard resolution all project from this list.
+/// Context-only commands are retained here but can opt out of search.
+pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ProjectLauncher,
     Command::RecentProjects,
     Command::OpenProject,
     Command::NewProject,
     Command::Save,
+    Command::SaveAs,
+    Command::SaveAll,
+    Command::RevertActiveDocument,
+    Command::CloseActiveDocument,
+    Command::CloseProject,
+    Command::Undo,
+    Command::Redo,
+    Command::Cut,
+    Command::Copy,
+    Command::Paste,
+    Command::Duplicate,
+    Command::Delete,
+    Command::SelectAll,
+    Command::ObjectProperties,
+    Command::FindInDesign,
+    Command::Preferences,
     Command::OpenWorkspace(Workspace::Project),
     Command::OpenWorkspace(Workspace::Design),
     Command::OpenWorkspace(Workspace::Simulate),
@@ -772,9 +985,24 @@ pub const COMMAND_CATALOG: &[Command] = &[
     Command::OpenWorkspace(Workspace::Verify),
     Command::OpenWorkspace(Workspace::Models),
     Command::OpenWorkspace(Workspace::Netlist),
+    Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+    Command::VerificationPage(VerificationPage::Cockpit),
+    Command::ModelsPage(ModelsPage::Catalog),
+    Command::ZoomIn,
+    Command::ZoomOut,
+    Command::ZoomFit,
+    Command::CycleGrid,
+    Command::ToggleFullScreen,
+    Command::ToggleNavigator,
+    Command::ToggleInspector,
+    Command::ToggleConsole,
+    Command::ToggleFocusMode,
     Command::PlaceInstance,
     Command::PlaceWire,
     Command::PlaceLabel,
+    Command::PlaceProbe,
+    Command::AscendHierarchy,
+    Command::DescendHierarchy,
     Command::RunChecks,
     Command::CheckAndSave,
     Command::RunSimulation,
@@ -782,18 +1010,28 @@ pub const COMMAND_CATALOG: &[Command] = &[
     Command::PreflightChecks,
     Command::SimulationOptions,
     Command::GenerateNetlist,
+    Command::ExportWaveformsCsv,
+    Command::ClearResults,
     Command::WaveformCalculator,
     Command::EditSpecifications,
     Command::ModelBrowser,
     Command::PdkSettings,
     Command::CompileVerilogA,
     Command::AutomationConsole,
-    Command::ToggleFullScreen,
-    Command::ResetActiveView,
-    Command::Preferences,
+    Command::CommandPalette,
     Command::KeyboardShortcuts,
     Command::About,
+    Command::Cancel,
 ];
+
+/// Searchable projection of [`COMMAND_REGISTRY`]. The command palette itself
+/// and context-only cancellation are intentionally not self-referential rows.
+pub fn command_catalog() -> impl Iterator<Item = Command> {
+    COMMAND_REGISTRY
+        .iter()
+        .copied()
+        .filter(|command| command.palette_visible())
+}
 
 #[cfg(test)]
 mod tests {
@@ -802,11 +1040,14 @@ mod tests {
     #[test]
     fn command_catalog_has_unique_stable_ids() {
         let mut ids = std::collections::HashSet::new();
-        for command in COMMAND_CATALOG {
+        for command in COMMAND_REGISTRY {
+            let id = command.spec().id;
+            assert!(ids.insert(id), "duplicate command id {}", id);
+            assert!(!id.is_empty());
             assert!(
-                ids.insert(command.spec().id),
-                "duplicate command id {}",
-                command.spec().id
+                id.bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'),
+                "command id is not a hyphenated product action: {id}"
             );
         }
     }
@@ -814,7 +1055,93 @@ mod tests {
     #[test]
     fn all_workspace_commands_are_discoverable() {
         for workspace in Workspace::ALL {
-            assert!(COMMAND_CATALOG.contains(&Command::OpenWorkspace(workspace)));
+            assert!(COMMAND_REGISTRY.contains(&Command::OpenWorkspace(workspace)));
         }
+    }
+
+    #[test]
+    fn protected_commands_keep_the_exact_mockup_action_ids() {
+        assert_eq!(Command::CommandPalette.spec().id, "command-palette");
+        assert_eq!(Command::ToggleFocusMode.spec().id, "toggle-focus-mode");
+        assert_eq!(Command::RunSimulation.spec().id, "start-run");
+        assert_eq!(Command::StopSimulation.spec().id, "stop-run");
+        assert_eq!(Command::OpenProject.spec().id, "open-project");
+        assert_eq!(Command::NewProject.spec().id, "new-project");
+        assert_eq!(Command::Save.spec().id, "save-project");
+        assert_eq!(Command::CloseActiveDocument.spec().id, "close-document");
+        assert_eq!(Command::ToggleFullScreen.spec().id, "full-screen");
+        assert_eq!(Command::GenerateNetlist.spec().id, "generated-netlist");
+        assert_eq!(Command::ToggleConsole.spec().id, "console");
+        assert_eq!(
+            Command::OpenWorkspace(Workspace::Results).spec().id,
+            "results"
+        );
+        assert_eq!(
+            Command::OpenWorkspace(Workspace::Verify).spec().id,
+            "verify"
+        );
+        assert_eq!(
+            Command::OpenWorkspace(Workspace::Models).spec().id,
+            "models"
+        );
+        assert_eq!(
+            Command::OpenWorkspace(Workspace::Netlist).spec().label,
+            "Open automation workspace"
+        );
+        assert_eq!(
+            Command::ModelsPage(ModelsPage::Catalog).spec().label,
+            "Model & library catalog"
+        );
+    }
+
+    #[test]
+    fn incomplete_reset_and_document_cycle_actions_are_not_discoverable() {
+        let searchable = command_catalog().collect::<Vec<_>>();
+        for command in [
+            Command::ResetActiveView,
+            Command::ResetLayout,
+            Command::PreviousWorkspace,
+            Command::NextWorkspace,
+        ] {
+            assert!(!COMMAND_REGISTRY.contains(&command));
+            assert!(!searchable.contains(&command));
+        }
+    }
+
+    #[test]
+    fn project_operation_gate_covers_every_mutating_project_command() {
+        for command in [
+            Command::ProjectLauncher,
+            Command::RecentProjects,
+            Command::NewProject,
+            Command::OpenProject,
+            Command::Save,
+            Command::SaveAs,
+            Command::SaveAll,
+            Command::RevertActiveDocument,
+            Command::CloseActiveDocument,
+            Command::CloseProject,
+            Command::NewCell,
+            Command::OpenDocument,
+            Command::ImportNetlist,
+            Command::ImportVerilogA,
+            Command::CheckAndSave,
+        ] {
+            assert!(
+                command.blocked_by_project_operation(),
+                "ungated: {command:?}"
+            );
+        }
+        assert!(!Command::Copy.blocked_by_project_operation());
+        assert!(!Command::ExportWaveformsCsv.blocked_by_project_operation());
+    }
+
+    #[test]
+    fn stop_command_follows_the_execution_target_capability() {
+        assert!(!stop_simulation_enabled(false));
+        assert_eq!(
+            stop_simulation_enabled(true),
+            crate::simulation::execution::execution_target_supports_cancellation()
+        );
     }
 }

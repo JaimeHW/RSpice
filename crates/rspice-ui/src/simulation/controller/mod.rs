@@ -14,6 +14,7 @@
 //! Call `SimulationController::update()` once per frame in the app update loop.
 
 use std::collections::VecDeque;
+#[cfg(test)]
 use std::path::PathBuf;
 
 use crate::common::app::{AppState, ConsoleMessage};
@@ -24,6 +25,7 @@ use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
     PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
+use crate::simulation::execution::TouchstoneExportPolicy;
 use crate::simulation::multi_run::{
     AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
     OptimizationGoal, OptimizationVariable, SpPort,
@@ -41,6 +43,7 @@ mod analysis_plan;
 mod analysis_run_config;
 mod analysis_spec_build;
 mod manual_deck;
+mod prepared_run;
 mod results_convert;
 mod results_post;
 mod results_update;
@@ -52,11 +55,11 @@ pub(crate) use transient_post::DerivedViewerLoadState;
 use self::spice_value::parse_spice_value_checked;
 
 #[derive(Debug, Clone)]
-struct QueuedAnalysis {
-    spec: AnalysisSpec,
-    config: Option<AnalysisConfig>,
-    spec_options: SpecExecutionOptions,
-    analysis_line: String,
+pub(super) struct QueuedAnalysis {
+    pub(super) spec: AnalysisSpec,
+    pub(super) config: Option<AnalysisConfig>,
+    pub(super) spec_options: SpecExecutionOptions,
+    pub(super) analysis_line: String,
 }
 
 //=============================================================================
@@ -84,7 +87,7 @@ pub struct SimulationController {
     // Multi-Analysis Queue
     // =========================================================================
     /// Queue of pending analyses to run in current simulation batch
-    pending_analyses: VecDeque<QueuedAnalysis>,
+    pending_analyses: VecDeque<crate::simulation::execution::AuthorizedTaskDispatch>,
     /// Current analysis index (1-based for display: "Analysis 2/4")
     current_analysis_idx: usize,
     /// Total number of analyses in current batch
@@ -95,6 +98,12 @@ pub struct SimulationController {
     transient_post: transient_post::TransientPostCoordinator,
     /// App-state design epoch this controller's runner/queue belong to.
     design_execution_epoch: u64,
+    /// Single outstanding immutable preflight result, if any.
+    pending_prepared_run: Option<prepared_run::PendingPreparedRun>,
+    /// Run-bound automatic export policy captured by immutable preflight.
+    touchstone_export_policy: TouchstoneExportPolicy,
+    /// Generation-safe authority shared by every prepared dispatch token.
+    execution_permits: crate::simulation::execution::ExecutionPermitIssuer,
 }
 
 impl Default for SimulationController {
@@ -118,6 +127,9 @@ impl SimulationController {
             cached_netlist: None,
             transient_post: transient_post::TransientPostCoordinator::default(),
             design_execution_epoch: 0,
+            pending_prepared_run: None,
+            touchstone_export_policy: TouchstoneExportPolicy::disabled(),
+            execution_permits: crate::simulation::execution::ExecutionPermitIssuer::default(),
         }
     }
 
@@ -149,9 +161,11 @@ impl SimulationController {
             // Clear pending analyses since we're stopping
             self.pending_analyses.clear();
             self.cached_netlist = None;
+            self.clear_prepared_run();
             self.current_config = None;
             self.current_spec = None;
             self.current_run_id = None;
+            self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
             state.ui.netlist.pending_manual_run_id = None;
             state.ui.netlist.pending_run_buffer = None;
             state.simulation.status = "Aborted".to_string();
@@ -188,6 +202,84 @@ impl SimulationController {
         }
     }
 
+    fn start_authorized_snapshot(&mut self, state: &mut AppState) {
+        if self.has_active_batch() {
+            state.push_sim_message(ConsoleMessage::warning(
+                "A simulation batch is already active; wait for it to finish or abort it before starting another run"
+                    .to_owned(),
+            ));
+            return;
+        }
+
+        let mut dispatch = match self.consume_snapshot_for_dispatch(state) {
+            Ok(dispatch) => dispatch,
+            Err(error) => {
+                state.push_sim_message(ConsoleMessage::warning(error.to_string()));
+                state.simulation.status = "Run blocked".to_owned();
+                return;
+            }
+        };
+
+        self.pending_analyses.clear();
+        self.total_analyses = dispatch.task_count();
+        self.current_analysis_idx = 0;
+        self.cached_netlist = Some(dispatch.executable_netlist().to_owned());
+
+        if let Some(cross_probe) = dispatch.take_cross_probe() {
+            cross_probe.apply(state);
+        }
+        self.touchstone_export_policy = dispatch.take_touchstone_export_policy();
+        for advisory in dispatch.advisories() {
+            state.push_sim_message(ConsoleMessage::warning(advisory.clone()));
+        }
+
+        let queued_names = dispatch
+            .tasks()
+            .map(|entry| self.analysis_name_for_spec(entry.spec()))
+            .collect::<Vec<_>>();
+        log::info!(
+            "Dispatching prepared snapshot {} with {} ordered task(s): {:?}",
+            dispatch.digest(),
+            self.total_analyses,
+            queued_names
+        );
+
+        let run_id = state.simulation.start_run().id;
+        self.current_run_id = Some(run_id);
+        if dispatch.intent() == SimulationRunIntent::ManualDeck {
+            let manual_source = dispatch.manual_source().unwrap_or_default().to_owned();
+            state.ui.netlist.pending_manual_run_id = Some(run_id);
+            state.ui.netlist.pending_run_buffer = Some(manual_source);
+            state.push_sim_message(ConsoleMessage::info(
+                "Running sealed manually edited netlist source".to_owned(),
+            ));
+        }
+        state.simulation.reliability_results.clear();
+        state.simulation.soa_violations.clear();
+
+        if self.total_analyses > 1 {
+            state.push_sim_message(ConsoleMessage::info(format!(
+                "Starting simulation batch: {} analyses",
+                self.total_analyses
+            )));
+        }
+        self.pending_analyses = dispatch.into_tasks();
+        self.start_next_analysis(state);
+    }
+
+    /// Treat both controller-owned batch metadata and runner-local work as
+    /// authoritative. In particular, `is_running()` alone is insufficient: a
+    /// native worker can have finished while its result is still unpolled.
+    fn has_active_batch(&self) -> bool {
+        self.current_run_id.is_some()
+            || self.current_spec.is_some()
+            || self.current_config.is_some()
+            || self.total_analyses != 0
+            || !self.pending_analyses.is_empty()
+            || !self.runner.can_accept_prepared_task()
+    }
+
+    #[cfg(test)]
     fn analysis_source_path(state: &AppState) -> Option<PathBuf> {
         match state.simulation.run_intent {
             SimulationRunIntent::ManualDeck => state.workspace.netlist_source_path.clone(),
@@ -208,260 +300,33 @@ impl SimulationController {
         self.runner.reset_for_design_replacement();
         self.pending_analyses.clear();
         self.cached_netlist = None;
+        self.clear_prepared_run();
         self.current_config = None;
         self.current_spec = None;
         self.current_run_id = None;
+        self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;
         self.total_analyses = 0;
         self.transient_post = transient_post::TransientPostCoordinator::default();
     }
 
     fn start_manual_deck_simulation(&mut self, state: &mut AppState) {
-        if let Some(reason) = state.manual_deck_run_block_reason() {
-            state.push_sim_message(ConsoleMessage::warning(reason));
-            state.simulation.status = "Run blocked".to_string();
-            return;
-        }
-
-        self.pending_analyses.clear();
-        let source = state
-            .workspace
-            .netlist_source
-            .clone()
-            .unwrap_or_else(|| state.simulation.netlist_content.clone());
-        let queued = match manual_deck::build_manual_deck_queue(state, &source) {
-            Ok(queue) => queue,
-            Err(errors) => {
-                for err in errors {
-                    state.push_sim_message(ConsoleMessage::error(err));
-                }
-                state.simulation.status = "Configuration error".to_string();
-                return;
-            }
-        };
-        state.push_sim_message(ConsoleMessage::info(
-            "Running manually edited netlist source".to_string(),
-        ));
-        self.begin_simulation_batch(
-            state,
-            queued,
-            manual_deck::compose_manual_deck_source(&source),
-            source,
-        );
+        self.start_authorized_snapshot(state);
     }
-
     fn start_simulate_run_set(&mut self, state: &mut AppState) {
-        // Backstop direct trigger paths (tuner re-sim, automation, tests).
-        if let Some(reason) = state.simulation_run_preflight_block_reason() {
-            state.push_sim_message(ConsoleMessage::warning(reason));
-            state.simulation.status = "Run blocked".to_string();
-            return;
-        }
-
-        self.pending_analyses.clear();
-        let plan = match self.build_analysis_plan(state) {
-            Ok(plan) => plan,
-            Err(errors) => {
-                for err in errors {
-                    state.push_sim_message(ConsoleMessage::error(err));
-                }
-                state.simulation.status = "Configuration error".to_string();
-                return;
-            }
-        };
-
-        // Seal all external model bytes exactly once for this run. Reference
-        // and corner materialization below share this immutable snapshot, so
-        // no worker or engine can reopen a model path after verification.
-        let sealed_model_sources = match state.model_library_manager.seal_execution_sources() {
-            Ok(sources) => sources,
-            Err(error) => {
-                state.push_sim_message(ConsoleMessage::error(error));
-                state.simulation.status = "Model binding error".to_owned();
-                return;
-            }
-        };
-
-        let queued = match self.build_queue_from_plan(state, &plan, &sealed_model_sources) {
-            Ok(queue) => queue,
-            Err(errors) => {
-                for err in errors {
-                    state.push_sim_message(ConsoleMessage::error(err));
-                }
-                state.simulation.status = "Configuration error".to_string();
-                return;
-            }
-        };
-
-        self.total_analyses = queued.len();
-        if self.total_analyses == 0 {
-            state.push_sim_message(ConsoleMessage::error(
-                "No runnable analyses were selected".to_string(),
-            ));
-            state.simulation.status = "Configuration error".to_string();
-            return;
-        }
-        self.current_analysis_idx = 0;
-
-        let analysis_lines: Vec<String> = queued
-            .iter()
-            .map(|item| item.analysis_line.clone())
-            .collect();
-
-        // Simulate actions always regenerate from the schematic and the
-        // selected run set. The Netlist tab owns manual deck execution.
-        let mut netlist = {
-            let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
-                &state.library_manager,
-                &state.workspace.schematic_buffers,
-            );
-            let result = crate::simulation::netlist_gen::generate_netlist_hierarchical(
-                &state.schematic,
-                &analysis_lines,
-                &hierarchy,
-            );
-
-            if !result.errors.is_empty() {
-                for err in result.errors {
-                    state.push_sim_message(ConsoleMessage::error(err));
-                }
-                state.simulation.status = "Netlist error".to_string();
-                return;
-            }
-            for warning in result.warnings {
-                state.push_sim_message(ConsoleMessage::warning(warning));
-            }
-
-            // Populate cross-probe mapping for probe mode. The schematic
-            // keeps its own copy so the inspector's terminal-net rows and
-            // the simulate panel's net count resolve without reaching
-            // simulation state (the node map is small — nodes only).
-            state.schematic.net_mapping = result.point_to_net.clone();
-            state.simulation.cross_probe.update(
-                result.point_to_net,
-                result.nets,
-                result.net_segments,
-            );
-            log::info!(
-                "Cross-probe mapping populated: {} points, {} nets",
-                state.simulation.cross_probe.point_to_net.len(),
-                state.simulation.cross_probe.net_to_points.len()
-            );
-
-            result.netlist
-        };
-
-        let model_cards = match sealed_model_sources
-            .reference_process_model_cards(state.sim_setup.reference_pvt.process)
-        {
-            Ok(model_cards) => model_cards,
-            Err(error) => {
-                state.push_sim_message(ConsoleMessage::error(error));
-                state.simulation.status = "Model binding error".to_owned();
-                return;
-            }
-        };
-        netlist = Self::apply_reference_model_bindings_to_netlist(&netlist, &model_cards);
-        netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
-
-        log::info!(
-            "Prepared netlist ({} bytes):\n{}",
-            netlist.len(),
-            &netlist[..netlist.len().min(500)]
-        );
-
-        self.pending_analyses = queued.into_iter().collect();
-        self.cached_netlist = Some(netlist);
-
-        let queued_names: Vec<&'static str> = self
-            .pending_analyses
-            .iter()
-            .map(|entry| self.analysis_name_for_spec(&entry.spec))
-            .collect();
-        log::info!(
-            "Queued {} analyses for execution: {:?}",
-            self.total_analyses,
-            queued_names
-        );
-
-        // Create new run in Results Browser
-        self.current_run_id = Some(state.simulation.start_run().id);
-        state.simulation.reliability_results.clear();
-        state.simulation.soa_violations.clear();
-        log::info!("Created new simulation run");
-
-        // Log summary to console
-        if self.total_analyses > 1 {
-            state.push_sim_message(ConsoleMessage::info(format!(
-                "Starting simulation batch: {} analyses",
-                self.total_analyses
-            )));
-        }
-
-        // Start the first analysis
-        self.start_next_analysis(state);
+        self.start_authorized_snapshot(state);
     }
-
-    fn begin_simulation_batch(
-        &mut self,
-        state: &mut AppState,
-        queued: Vec<QueuedAnalysis>,
-        netlist: String,
-        pending_manual_source: String,
-    ) {
-        self.total_analyses = queued.len();
-        if self.total_analyses == 0 {
-            state.push_sim_message(ConsoleMessage::error(
-                "No runnable analyses were selected".to_string(),
-            ));
-            state.simulation.status = "Configuration error".to_string();
-            return;
-        }
-        self.current_analysis_idx = 0;
-
-        log::info!(
-            "Prepared netlist ({} bytes):\n{}",
-            netlist.len(),
-            &netlist[..netlist.len().min(500)]
-        );
-
-        self.pending_analyses = queued.into_iter().collect();
-        self.cached_netlist = Some(netlist);
-
-        let queued_names: Vec<&'static str> = self
-            .pending_analyses
-            .iter()
-            .map(|entry| self.analysis_name_for_spec(&entry.spec))
-            .collect();
-        log::info!(
-            "Queued {} analyses for execution: {:?}",
-            self.total_analyses,
-            queued_names
-        );
-
-        let run_id = state.simulation.start_run().id;
-        self.current_run_id = Some(run_id);
-        state.ui.netlist.pending_manual_run_id = Some(run_id);
-        state.ui.netlist.pending_run_buffer = Some(pending_manual_source);
-        state.simulation.reliability_results.clear();
-        state.simulation.soa_violations.clear();
-        log::info!("Created new simulation run");
-
-        if self.total_analyses > 1 {
-            state.push_sim_message(ConsoleMessage::info(format!(
-                "Starting simulation batch: {} analyses",
-                self.total_analyses
-            )));
-        }
-
-        self.start_next_analysis(state);
-    }
-
     /// Start the next analysis in the queue
     ///
     /// Called after start_simulation() initializes the queue, and again
     /// after each analysis completes until the queue is empty.
     fn start_next_analysis(&mut self, state: &mut AppState) {
+        if !self.runner.can_accept_prepared_task() {
+            log::error!(
+                "Refusing to dequeue a prepared analysis while the runner still owns active or unpolled work"
+            );
+            return;
+        }
         let Some(next_analysis) = self.pending_analyses.pop_front() else {
             // Queue exhausted - should not happen if called correctly
             log::warn!("start_next_analysis called with empty queue");
@@ -469,11 +334,10 @@ impl SimulationController {
         };
         log::info!(
             "Starting queued analysis: {:?}",
-            next_analysis.spec.run_type()
+            next_analysis.spec().run_type()
         );
-        let spec = next_analysis.spec;
-        let config = next_analysis.config;
-        let spec_options = next_analysis.spec_options;
+        let spec = next_analysis.spec().clone();
+        let config = next_analysis.config().cloned();
         let analysis_name = self.analysis_name_for_spec(&spec);
 
         self.current_analysis_idx += 1;
@@ -506,7 +370,7 @@ impl SimulationController {
 
         // Use cached netlist. If this is unexpectedly missing, fail gracefully
         // instead of panicking so the UI can recover.
-        let Some(netlist) = self.cached_netlist.clone() else {
+        if self.cached_netlist.is_none() {
             let message = format!(
                 "Internal error: missing cached netlist while starting {}",
                 analysis_name
@@ -523,21 +387,10 @@ impl SimulationController {
             self.finish_simulation_batch(state);
             state.simulation.status = "Error".to_string();
             return;
-        };
+        }
 
         // Start the simulation
-        let source_path = Self::analysis_source_path(state);
-        let start_result = if let Some(cfg) = config {
-            self.runner
-                .start_with_source_path(cfg, netlist, source_path)
-        } else {
-            self.runner.start_spec_with_options_with_source_path(
-                spec,
-                netlist,
-                spec_options,
-                source_path,
-            )
-        };
+        let start_result = self.runner.start_prepared(next_analysis);
         match start_result {
             Ok(()) => log::info!(
                 "Analysis {}/{} started successfully",
@@ -595,6 +448,7 @@ impl SimulationController {
         self.current_config = None;
         self.current_spec = None;
         self.current_run_id = None;
+        self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;
         self.total_analyses = 0;
 
@@ -970,6 +824,7 @@ impl SimulationController {
                     self.current_config = None;
                     self.current_spec = None;
                     self.current_run_id = None;
+                    self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
                     state.ui.netlist.pending_manual_run_id = None;
                     state.ui.netlist.pending_run_buffer = None;
                     state.simulation.status = "Aborted".to_string();
@@ -1061,6 +916,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct MockExportWorkflowIo {
         writes: RefCell<Vec<(PathBuf, String)>>,
+        create_only_writes: RefCell<Vec<(PathBuf, String)>>,
     }
 
     impl ExportWorkflowIo for MockExportWorkflowIo {
@@ -1073,6 +929,13 @@ mod tests {
 
         fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
             self.writes
+                .borrow_mut()
+                .push((path.to_path_buf(), contents.to_string()));
+            Ok(())
+        }
+
+        fn write_new_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
+            self.create_only_writes
                 .borrow_mut()
                 .push((path.to_path_buf(), contents.to_string()));
             Ok(())
@@ -1427,13 +1290,15 @@ mod tests {
     #[test]
     fn touchstone_auto_export_uses_export_workflow_io() {
         let mut state = AppState::default();
-        state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
-            &crate::simulation::dialog::SpConfig::default(),
-        );
-        state.schematic.current_file = Some(PathBuf::from("designs").join("amp.sch"));
         state.simulation.start_run();
 
         let mut controller = SimulationController::new();
+        controller.touchstone_export_policy = TouchstoneExportPolicy::enabled(
+            2,
+            PathBuf::from("designs"),
+            std::ffi::OsString::from("amp"),
+        )
+        .expect("valid prepared Touchstone policy");
         controller.current_spec = Some(AnalysisSpec::SParameter {
             start_freq: 1.0e6,
             stop_freq: 2.0e6,
@@ -1454,6 +1319,13 @@ mod tests {
             ],
         });
         controller.current_analysis_idx = 1;
+        // Live editor mutations after dispatch must not redirect or reformat
+        // the prepared automatic export.
+        state.schematic.current_file = Some(PathBuf::from("changed").join("redirect.sch"));
+        let mut changed = crate::simulation::dialog::SpConfig::default();
+        changed.touchstone_export = false;
+        changed.touchstone_version = 1;
+        state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&changed);
 
         let export_io = MockExportWorkflowIo::default();
         controller.maybe_export_touchstone_for_run(
@@ -1463,7 +1335,8 @@ mod tests {
             1,
         );
 
-        let writes = export_io.writes.borrow();
+        assert!(export_io.writes.borrow().is_empty());
+        let writes = export_io.create_only_writes.borrow();
         assert_eq!(writes.len(), 1);
         assert_eq!(
             writes[0].0,

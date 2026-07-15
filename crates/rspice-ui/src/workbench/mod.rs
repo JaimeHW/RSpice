@@ -4,6 +4,8 @@
 //! Document engines such as the schematic canvas and precision result viewers
 //! render inside its central surface but do not own navigation or chrome.
 
+use std::time::Duration;
+
 pub mod commands;
 pub mod design_system;
 pub mod netlist_document;
@@ -14,6 +16,7 @@ mod chrome;
 mod docks;
 mod layout;
 pub(crate) mod menu;
+mod notification_center;
 mod preflight;
 mod project_launcher;
 mod recovery;
@@ -34,16 +37,13 @@ use egui::{CentralPanel, Context, Frame};
 use crate::common::RSpiceApp;
 use crate::ui::tokens::Tokens;
 
-use commands::Command;
 use layout::LayoutSpec;
 use state::Workspace;
 
 /// Render one complete workbench frame.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     reconcile_platform_full_screen(app);
-    if !app.state.workbench.application_modal_open() {
-        handle_workbench_shortcuts(ctx, app);
-    }
+    synchronize_activity_stream(ctx, app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
     let layout = LayoutSpec::resolve_with_pointer(
@@ -95,6 +95,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     project_launcher::show(ctx, app);
     preflight::show(ctx, app);
+    notification_center::show(ctx, app);
 
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
@@ -111,6 +112,53 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     }
     app.state.ui.toasts.show(ctx);
     apply_platform_full_screen_request(ctx, app);
+}
+
+fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
+    use crate::panels::{LogSeverity, LogSource};
+    use crate::ui::widgets::{NotificationCategory, ToastKind};
+
+    let revision = app.state.log_buffer.revision();
+    let observed = app.state.ui.toasts.observed_log_revision();
+    if revision == observed {
+        return;
+    }
+    let now = ctx.input(|input| input.time);
+    let session_elapsed = app.state.log_buffer.session_elapsed();
+    let entries = app
+        .state
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.id >= observed)
+        .filter_map(|entry| {
+            let category = match entry.source {
+                LogSource::Simulation | LogSource::Engine | LogSource::Netlist | LogSource::Drc => {
+                    NotificationCategory::Job
+                }
+                LogSource::User | LogSource::System => NotificationCategory::System,
+            };
+            let kind = match entry.severity {
+                LogSeverity::Error => ToastKind::Error,
+                LogSeverity::Warning => ToastKind::Warn,
+                LogSeverity::Info => ToastKind::Info,
+                LogSeverity::Debug | LogSeverity::Trace => return None,
+            };
+            Some((
+                entry.id,
+                category,
+                kind,
+                entry.message.clone(),
+                project_log_timestamp(now, session_elapsed, entry.timestamp),
+            ))
+        })
+        .collect::<Vec<_>>();
+    app.state.ui.toasts.synchronize_activity(revision, entries);
+}
+
+/// Project a timestamp from the log buffer's session clock onto egui's
+/// monotonic clock while preserving the event's original age.
+fn project_log_timestamp(now: f64, session_elapsed: Duration, timestamp: Duration) -> f64 {
+    now - session_elapsed.saturating_sub(timestamp).as_secs_f64()
 }
 
 fn pointer_is_coarse(ctx: &Context, retained_touch_capability: bool) -> bool {
@@ -200,38 +248,6 @@ fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
     }
 }
 
-fn handle_workbench_shortcuts(ctx: &Context, app: &mut RSpiceApp) {
-    let command = ctx.input(|input| {
-        if input.key_pressed(egui::Key::Escape) && app.state.workbench.drawer.is_some() {
-            return Some(None);
-        }
-        if input.key_pressed(egui::Key::F11) {
-            return Some(Some(Command::ToggleFullScreen));
-        }
-        if !input.modifiers.alt || input.modifiers.command || input.modifiers.shift {
-            return None;
-        }
-        let workspace = [
-            (egui::Key::Num1, Workspace::Project),
-            (egui::Key::Num2, Workspace::Design),
-            (egui::Key::Num3, Workspace::Simulate),
-            (egui::Key::Num4, Workspace::Results),
-            (egui::Key::Num5, Workspace::Verify),
-            (egui::Key::Num6, Workspace::Models),
-            (egui::Key::Num7, Workspace::Netlist),
-        ]
-        .into_iter()
-        .find_map(|(key, workspace)| input.key_pressed(key).then_some(workspace));
-        workspace.map(|workspace| Some(Command::OpenWorkspace(workspace)))
-    });
-
-    match command {
-        Some(Some(command)) => command.execute(app),
-        Some(None) => app.state.workbench.close_drawer(),
-        None => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +266,21 @@ mod tests {
         state.toggle_drawer(Drawer::Navigator);
         assert_eq!(state.workspace, Workspace::Design);
         assert_eq!(state.drawer, Some(Drawer::Navigator));
+    }
+
+    #[test]
+    fn log_timestamp_projection_preserves_original_event_age() {
+        assert_eq!(
+            project_log_timestamp(120.0, Duration::from_secs(45), Duration::from_secs(15)),
+            90.0
+        );
+    }
+
+    #[test]
+    fn log_timestamp_projection_bounds_future_source_timestamps_to_now() {
+        assert_eq!(
+            project_log_timestamp(120.0, Duration::from_secs(10), Duration::from_secs(15)),
+            120.0
+        );
     }
 }

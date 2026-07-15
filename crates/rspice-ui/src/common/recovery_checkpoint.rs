@@ -850,18 +850,18 @@ pub(crate) fn cleanup_checkpoint(source: &Path) -> Result<(), String> {
 }
 
 fn cleanup_owned_checkpoint(source: &Path, checkpoint: &Path) -> Result<(), String> {
-    let manifest = read_manifest(&checkpoint)?.ok_or_else(|| {
+    let manifest = read_manifest(checkpoint)?.ok_or_else(|| {
         "the current autosave checkpoint has no committed ownership manifest and was retained for explicit Recovery review"
             .to_owned()
     })?;
-    validate_manifest_paths(&manifest, source, &checkpoint)?;
+    validate_manifest_paths(&manifest, source, checkpoint)?;
     if manifest.session_id != process_session_id() || manifest.process_id != std::process::id() {
         return Err(
             "a recovery checkpoint owned by another session was retained; review it in Recovery before discarding it"
                 .to_owned(),
         );
     }
-    let (_, current_identity) = read_exact_bytes(&checkpoint).map_err(|error| {
+    let (_, current_identity) = read_exact_bytes(checkpoint).map_err(|error| {
         format!(
             "the current autosave checkpoint could not be revalidated and was retained: {error}"
         )
@@ -872,7 +872,7 @@ fn cleanup_owned_checkpoint(source: &Path, checkpoint: &Path) -> Result<(), Stri
                 .to_owned(),
         );
     }
-    let manifest = checkpoint_manifest_path(&checkpoint);
+    let manifest = checkpoint_manifest_path(checkpoint);
     match std::fs::remove_file(&manifest) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -889,7 +889,7 @@ fn cleanup_owned_checkpoint(source: &Path, checkpoint: &Path) -> Result<(), Stri
             checkpoint.display()
         )
     })?;
-    match std::fs::remove_file(&checkpoint) {
+    match std::fs::remove_file(checkpoint) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
@@ -905,7 +905,7 @@ fn cleanup_owned_checkpoint(source: &Path, checkpoint: &Path) -> Result<(), Stri
             checkpoint.display()
         )
     });
-    let release = release_writer_lease(&checkpoint);
+    let release = release_writer_lease(checkpoint);
     deletion_sync?;
     release
 }

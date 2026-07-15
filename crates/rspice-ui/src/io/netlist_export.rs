@@ -528,9 +528,32 @@ impl NetlistExporter {
 
     /// Write to file
     pub fn write_to_file(&self, path: &Path) -> Result<(), String> {
-        let content = self.generate();
-        std::fs::write(path, content).map_err(|e| format!("Failed to write: {}", e))
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path;
+            Err(
+                "Path-based netlist export is unavailable in the browser; use the generated netlist with the browser download workflow"
+                    .to_string(),
+            )
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let expected = crate::io::durable_file::observe_expected_content(path)
+                .map_err(|error| format!("Failed to authorize netlist destination: {error}"))?;
+            let content = self.generate();
+            publish_netlist(path, expected, content.as_bytes())
+        }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn publish_netlist(
+    path: &Path,
+    expected: crate::io::durable_file::ExpectedContent,
+    content: &[u8],
+) -> Result<(), String> {
+    crate::io::durable_file::compare_exchange_bytes(path, expected, content)
+        .map_err(|error| format!("Failed to publish netlist: {error}"))
 }
 
 /// Line wrapping helper
@@ -576,3 +599,57 @@ fn chrono_lite_now() -> String {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_to_file_publishes_complete_netlist() {
+        let root = unique_temp_dir("complete");
+        let path = root.join("design.scs");
+        let mut exporter = NetlistExporter::new(ExportOptions {
+            include_timestamp: false,
+            ..ExportOptions::default()
+        });
+        exporter.title = "Durable netlist".to_string();
+        exporter.add_instance(ComponentInstance::new(
+            "R1",
+            'R',
+            vec!["in".to_string(), "0".to_string()],
+        ));
+
+        exporter.write_to_file(&path).expect("write netlist");
+
+        let saved = std::fs::read_to_string(&path).expect("read netlist");
+        assert!(saved.contains("Durable netlist"));
+        assert!(saved.contains("R1"));
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn publication_rejects_late_external_change() {
+        let root = unique_temp_dir("late-change");
+        let path = root.join("design.cir");
+        std::fs::write(&path, b"authorized predecessor").expect("write predecessor");
+        let expected =
+            crate::io::durable_file::observe_expected_content(&path).expect("observe destination");
+        let content = NetlistExporter::default().generate();
+        std::fs::write(&path, b"late external edit").expect("race destination");
+
+        let result = publish_netlist(&path, expected, content.as_bytes());
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"late external edit");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-netlist-export-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture");
+        root
+    }
+}

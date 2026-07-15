@@ -13,29 +13,16 @@ impl SimulationController {
         else {
             return;
         };
-
-        let mut sp_state = state.sim_setup.sp.clone();
-        sp_state.ensure_initialized();
-        let sp_cfg = match sp_state.to_config() {
-            Ok(cfg) => cfg,
-            Err(e) => {
-                state.push_sim_message(ConsoleMessage::warning(format!(
-                    "Skipping Touchstone export: invalid S-parameter settings ({})",
-                    e
-                )));
-                return;
-            }
-        };
-        if !sp_cfg.touchstone_export {
+        let Some(touchstone_version) = self.touchstone_export_policy.version() else {
             return;
-        }
+        };
 
         let z0_by_port: Vec<f64> = ports.iter().map(|port| port.z0.unwrap_or(*z0)).collect();
         let dataset = match Self::build_touchstone_dataset(
             result,
             *z0,
             &z0_by_port,
-            sp_cfg.touchstone_version as usize,
+            touchstone_version as usize,
         ) {
             Ok(dataset) => dataset,
             Err(e) => {
@@ -51,13 +38,21 @@ impl SimulationController {
             .get("num_ports")
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(2);
-        let path =
-            Self::touchstone_export_path(state, run_id, self.current_analysis_idx, num_ports);
+        let Some(path) =
+            self.touchstone_export_policy
+                .output_path(run_id, self.current_analysis_idx, num_ports)
+        else {
+            state.push_sim_message(ConsoleMessage::warning(
+                "Touchstone export skipped because its prepared output policy is unavailable"
+                    .to_owned(),
+            ));
+            return;
+        };
 
         let writer = WaveformWriter::new(WaveformFormat::Touchstone);
         let export_result = writer
             .write_text(&dataset)
-            .and_then(|contents| export_io.write_text_file(&path, &contents));
+            .and_then(|contents| export_io.write_new_text_file(&path, &contents));
         match export_result {
             Ok(()) => state.push_sim_message(ConsoleMessage::info(
                 Self::touchstone_export_completed_message(&path),
@@ -255,39 +250,5 @@ impl SimulationController {
         } else {
             format!("S{}_{}", row, col)
         }
-    }
-
-    pub(super) fn touchstone_export_path(
-        state: &AppState,
-        run_id: u64,
-        analysis_idx: usize,
-        num_ports: usize,
-    ) -> PathBuf {
-        let source_path = state.schematic.current_file.as_ref();
-        let (base_dir, stem) = if let Some(path) = source_path {
-            let dir = path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or("untitled");
-            (dir, stem.to_string())
-        } else {
-            (
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                "untitled".to_string(),
-            )
-        };
-
-        base_dir.join(format!(
-            "{}_run{:04}_sp{:02}.s{}p",
-            stem,
-            run_id,
-            analysis_idx.max(1),
-            num_ports.max(2)
-        ))
     }
 }

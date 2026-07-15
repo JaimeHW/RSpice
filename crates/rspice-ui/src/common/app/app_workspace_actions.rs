@@ -579,23 +579,6 @@ impl AppState {
         }
     }
 
-    pub(crate) fn should_save_project_for_active_document(&self) -> bool {
-        let active_view_type = self.workspace.active_view_type();
-        let dirty_symbol_view = self
-            .workspace
-            .open_views
-            .iter()
-            .any(|open| open.view_type == ViewType::Symbol && open.dirty);
-        let project_backed_schematic = is_schematic_like(active_view_type)
-            && self.schematic.current_file.is_none()
-            && (self.schematic.is_dirty || self.workspace.any_dirty());
-
-        active_view_type == ViewType::Symbol
-            || dirty_symbol_view
-            || self.workspace.netlist_source_dirty
-            || project_backed_schematic
-    }
-
     pub(crate) fn generate_active_symbol_document(&mut self) -> Result<(), String> {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
@@ -740,6 +723,9 @@ impl AppState {
         let reference = self.workspace.active_view.clone();
         let schematic_reference = self.workspace.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
+        // Project persistence stores topology, not the derived rubber-band
+        // connection cache. Rebuild it whenever a schematic becomes active.
+        self.schematic.rebuild_connections();
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
     }
@@ -2274,50 +2260,6 @@ mod tests {
         let ports = state.schematic.interface_ports();
         assert_eq!(ports.len(), 1);
         assert_eq!(ports[0].name, "PAIR");
-    }
-
-    #[test]
-    fn symbol_dirty_state_routes_ordinary_save_to_project() {
-        let mut state = AppState::default();
-        let reference = CellViewRef::new("user", "top", "symbol");
-        state.workspace.open_view(reference, ViewType::Symbol);
-        state.workspace.set_active_dirty(true);
-
-        assert!(state.should_save_project_for_active_document());
-    }
-
-    #[test]
-    fn project_schematic_dirty_state_routes_ordinary_save_to_project() {
-        let mut state = AppState::default();
-        state.schematic.is_dirty = true;
-        state.workspace.set_active_dirty(true);
-
-        assert!(state.should_save_project_for_active_document());
-    }
-
-    #[test]
-    fn standalone_schematic_current_file_keeps_ordinary_save_on_schematic_file() {
-        let mut state = AppState::default();
-        state.schematic.current_file = Some(std::path::PathBuf::from("standalone.rsch"));
-        state.schematic.is_dirty = true;
-        state.workspace.set_active_dirty(true);
-
-        assert!(!state.should_save_project_for_active_document());
-    }
-
-    #[test]
-    fn dirty_manual_netlist_source_routes_ordinary_save_to_project() {
-        let mut state = AppState::default();
-        state.schematic.current_file = Some(std::path::PathBuf::from("standalone.rsch"));
-        state.workspace.netlist_source = Some("deck\n.op\n.end\n".to_owned());
-        state.workspace.set_netlist_source_dirty(true);
-
-        assert!(state.should_save_project_for_active_document());
-        assert!(state.workspace.any_dirty());
-
-        state.workspace.mark_all_clean();
-
-        assert!(!state.workspace.any_dirty());
     }
 }
 

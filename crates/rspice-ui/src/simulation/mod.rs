@@ -9,6 +9,7 @@ pub mod controller;
 pub mod convergence;
 pub mod dialog;
 pub mod engine_bridge;
+pub(crate) mod execution;
 pub mod multi_run;
 pub mod netlist_gen;
 pub mod netlist_viewer;

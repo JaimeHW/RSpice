@@ -1,9 +1,12 @@
-use super::{build_engine_config, is_ground_like, parse_runner_netlist};
+use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
+use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
 use crate::simulation::optimizer::{
     DesignVar, OptimizationGoal, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
 };
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::engine::Engine;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -191,7 +194,15 @@ pub struct OptimizationData {
 
 /// Run optimization analysis with default configuration.
 pub fn run_optimization_analysis(netlist_text: &str) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_source_path(netlist_text, None)
+    run_optimization_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run optimization analysis with cooperative cancellation.
+pub fn run_optimization_analysis_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<OptimizationData> {
+    run_optimization_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run optimization analysis with default configuration and a source path used
@@ -200,10 +211,22 @@ pub fn run_optimization_analysis_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_config_and_source_path(
+    run_optimization_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run optimization analysis with source-path resolution and cooperative
+/// cancellation.
+pub fn run_optimization_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<OptimizationData> {
+    run_optimization_analysis_with_config_and_source_path_and_abort(
         netlist_text,
         &OptimizationRunConfig::default(),
         source_path,
+        abort,
     )
 }
 
@@ -212,7 +235,23 @@ pub fn run_optimization_analysis_with_config(
     netlist_text: &str,
     config: &OptimizationRunConfig,
 ) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_config_and_source_path(netlist_text, config, None)
+    run_optimization_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run explicitly configured optimization analysis with cooperative
+/// cancellation.
+pub fn run_optimization_analysis_with_config_and_abort(
+    netlist_text: &str,
+    config: &OptimizationRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<OptimizationData> {
+    run_optimization_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        None,
+        abort,
+    )
 }
 
 /// Run optimization analysis with explicit configuration and a source path used
@@ -222,7 +261,27 @@ pub fn run_optimization_analysis_with_config_and_source_path(
     config: &OptimizationRunConfig,
     source_path: Option<&Path>,
 ) -> Result<OptimizationData, String> {
-    config.validate()?;
+    run_optimization_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Run explicitly configured optimization analysis with source-path
+/// resolution and cooperative cancellation through every objective trial and
+/// outer iteration.
+pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
+    netlist_text: &str,
+    config: &OptimizationRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<OptimizationData> {
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
+    ensure_not_aborted(abort)?;
 
     let optimizer_config = OptimizerConfig {
         algorithm: match config.algorithm {
@@ -239,7 +298,8 @@ pub fn run_optimization_analysis_with_config_and_source_path(
     };
 
     let mut optimizer = OptimizerEngine::with_config(optimizer_config);
-    for var in &config.variables {
+    for (variable_index, var) in config.variables.iter().enumerate() {
+        poll_periodically(abort, variable_index)?;
         optimizer.add_var(DesignVar::new(
             var.name.clone(),
             var.initial,
@@ -258,7 +318,8 @@ pub fn run_optimization_analysis_with_config_and_source_path(
     optimizer.add_goal(synthetic_goal);
 
     let mut variable_traces: HashMap<String, Vec<Value>> = HashMap::new();
-    for var in &config.variables {
+    for (variable_index, var) in config.variables.iter().enumerate() {
+        poll_periodically(abort, variable_index)?;
         variable_traces.insert(
             var.name.clone(),
             Vec::with_capacity(config.max_iterations + 1),
@@ -267,51 +328,74 @@ pub fn run_optimization_analysis_with_config_and_source_path(
     let mut iterations = Vec::with_capacity(config.max_iterations + 1);
     let mut costs = Vec::with_capacity(config.max_iterations + 1);
 
-    let mut eval_error: Option<String> = None;
-    let mut successful_evals: usize = 0;
+    let eval_error: RefCell<Option<String>> = RefCell::new(None);
+    let successful_evals = Cell::new(0usize);
+    let abort_seen = Cell::new(false);
     let mut cost_fn = |vars: &HashMap<String, Value>| -> Value {
-        match evaluate_optimization_objective(netlist_text, vars, config, source_path) {
+        if abort_seen.get() {
+            return 1e30;
+        }
+        match evaluate_optimization_objective(netlist_text, vars, config, source_path, abort) {
             Ok(value) => {
-                successful_evals += 1;
+                successful_evals.set(successful_evals.get().saturating_add(1));
                 objective_to_cost(value, config.goal, config.target)
             }
-            Err(err) => {
-                if eval_error.is_none() {
-                    eval_error = Some(err);
+            Err(ServiceRunError::Aborted) => {
+                abort_seen.set(true);
+                1e30
+            }
+            Err(ServiceRunError::Failure(error)) => {
+                if eval_error.borrow().is_none() {
+                    *eval_error.borrow_mut() = Some(error);
                 }
                 1e30
             }
         }
     };
 
-    let mut record_state = |iter: Value, vars: &HashMap<String, Value>, cost: Value| {
-        iterations.push(iter);
-        costs.push(cost);
-        for (name, trace) in &mut variable_traces {
-            trace.push(vars.get(name).copied().unwrap_or(0.0));
-        }
-    };
-
     let initial_vars = optimizer.current_vars();
     let initial_cost = cost_fn(&initial_vars);
-    record_state(0.0, &initial_vars, initial_cost);
+    ensure_optimization_not_aborted(abort, &abort_seen)?;
+    record_optimization_state(
+        0.0,
+        &initial_vars,
+        initial_cost,
+        &mut iterations,
+        &mut costs,
+        &mut variable_traces,
+        abort,
+    )?;
 
     while optimizer.current_iteration() < config.max_iterations {
+        ensure_optimization_not_aborted(abort, &abort_seen)?;
         optimizer.step(&mut cost_fn);
+        ensure_optimization_not_aborted(abort, &abort_seen)?;
         let vars = optimizer.current_vars();
         let cost = cost_fn(&vars);
-        record_state(optimizer.current_iteration() as Value, &vars, cost);
+        ensure_optimization_not_aborted(abort, &abort_seen)?;
+        record_optimization_state(
+            optimizer.current_iteration() as Value,
+            &vars,
+            cost,
+            &mut iterations,
+            &mut costs,
+            &mut variable_traces,
+            abort,
+        )?;
         if optimizer.is_converged() {
             break;
         }
     }
 
-    if successful_evals == 0 {
-        return Err(eval_error.unwrap_or_else(|| {
-            "Optimization failed: objective evaluation returned no valid samples".to_string()
-        }));
+    if successful_evals.get() == 0 {
+        return Err(ServiceRunError::Failure(
+            eval_error.into_inner().unwrap_or_else(|| {
+                "Optimization failed: objective evaluation returned no valid samples".to_string()
+            }),
+        ));
     }
 
+    ensure_not_aborted(abort)?;
     let (best_vars, best_cost) = optimizer.best_result();
     Ok(OptimizationData {
         iterations,
@@ -321,6 +405,37 @@ pub fn run_optimization_analysis_with_config_and_source_path(
         best_variables: best_vars.clone(),
         converged: optimizer.is_converged(),
     })
+}
+
+fn ensure_optimization_not_aborted(
+    abort: &dyn AbortSignal,
+    abort_seen: &Cell<bool>,
+) -> ServiceRunResult<()> {
+    if abort_seen.get() {
+        Err(ServiceRunError::Aborted)
+    } else {
+        ensure_not_aborted(abort)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_optimization_state(
+    iteration: Value,
+    vars: &HashMap<String, Value>,
+    cost: Value,
+    iterations: &mut Vec<Value>,
+    costs: &mut Vec<Value>,
+    variable_traces: &mut HashMap<String, Vec<Value>>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<()> {
+    ensure_not_aborted(abort)?;
+    iterations.push(iteration);
+    costs.push(cost);
+    for (trace_index, (name, trace)) in variable_traces.iter_mut().enumerate() {
+        poll_periodically(abort, trace_index)?;
+        trace.push(vars.get(name).copied().unwrap_or(0.0));
+    }
+    ensure_not_aborted(abort)
 }
 
 fn objective_to_cost(objective: Value, goal: OptimizationGoalMode, target: Option<Value>) -> Value {
@@ -345,86 +460,101 @@ fn evaluate_optimization_objective(
     vars: &HashMap<String, Value>,
     config: &OptimizationRunConfig,
     source_path: Option<&Path>,
-) -> Result<Value, String> {
-    let overridden = inject_param_overrides(netlist_text, vars);
-    let netlist = parse_runner_netlist(&overridden, source_path)?;
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Value> {
+    ensure_not_aborted(abort)?;
+    let overridden = inject_param_overrides(netlist_text, vars, abort)?;
+    let netlist = parse_runner_netlist_with_abort(&overridden, source_path, abort)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC operating point failed during optimization: {}", e))?;
-
-    let node_idx = resolve_node_index_case_insensitive(&dc.node_names, &config.objective_node)
-        .ok_or_else(|| {
-            format!(
-                "Optimization objective node '{}' not found",
-                config.objective_node
-            )
+        .run_dc_op_with_abort(&netlist, abort)
+        .map_err(|error| {
+            ServiceRunError::from_core("DC operating point failed during optimization", error)
         })?;
+
+    let node_idx =
+        resolve_node_index_case_insensitive(&dc.node_names, &config.objective_node, abort)?
+            .ok_or_else(|| {
+                ServiceRunError::Failure(format!(
+                    "Optimization objective node '{}' not found",
+                    config.objective_node
+                ))
+            })?;
     let ref_idx = if is_ground_like(&config.objective_ref) {
         Some(0usize)
     } else {
-        resolve_node_index_case_insensitive(&dc.node_names, &config.objective_ref)
+        resolve_node_index_case_insensitive(&dc.node_names, &config.objective_ref, abort)?
     }
     .ok_or_else(|| {
-        format!(
+        ServiceRunError::Failure(format!(
             "Optimization objective reference node '{}' not found",
             config.objective_ref
-        )
+        ))
     })?;
 
-    let node_v = *dc
-        .node_voltages
-        .get(node_idx)
-        .ok_or_else(|| "Optimization node voltage index out of bounds".to_string())?;
-    let ref_v = *dc
-        .node_voltages
-        .get(ref_idx)
-        .ok_or_else(|| "Optimization reference voltage index out of bounds".to_string())?;
+    let node_v = *dc.node_voltages.get(node_idx).ok_or_else(|| {
+        ServiceRunError::Failure("Optimization node voltage index out of bounds".to_string())
+    })?;
+    let ref_v = *dc.node_voltages.get(ref_idx).ok_or_else(|| {
+        ServiceRunError::Failure("Optimization reference voltage index out of bounds".to_string())
+    })?;
+    ensure_not_aborted(abort)?;
     Ok(node_v - ref_v)
 }
 
-fn inject_param_overrides(netlist_text: &str, vars: &HashMap<String, Value>) -> String {
+fn inject_param_overrides(
+    netlist_text: &str,
+    vars: &HashMap<String, Value>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<String> {
+    ensure_not_aborted(abort)?;
     if vars.is_empty() {
-        return netlist_text.to_string();
+        return Ok(netlist_text.to_string());
     }
 
-    let mut entries: Vec<(String, String, Value)> = vars
-        .iter()
-        .filter_map(|(name, value)| {
-            if is_valid_param_identifier(name) {
-                Some((name.to_ascii_uppercase(), name.clone(), *value))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let mut entries = Vec::with_capacity(vars.len());
+    for (index, (name, value)) in vars.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if is_valid_param_identifier(name) {
+            entries.push((name.to_ascii_uppercase(), name.clone(), *value));
+        }
+    }
+    ensure_not_aborted(abort)?;
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     if entries.is_empty() {
-        return netlist_text.to_string();
+        return Ok(netlist_text.to_string());
     }
 
-    let mut lines: Vec<String> = netlist_text.lines().map(str::to_string).collect();
+    let mut lines = Vec::new();
+    for (line_index, line) in netlist_text.lines().enumerate() {
+        poll_periodically(abort, line_index)?;
+        lines.push(line.to_string());
+    }
     if lines.is_empty() {
         let mut line = ".param".to_string();
-        for (_, name, value) in &entries {
+        for (entry_index, (_, name, value)) in entries.iter().enumerate() {
+            poll_periodically(abort, entry_index)?;
             line.push(' ');
             line.push_str(name);
             line.push('=');
             line.push_str(&format_param_override_value(*value));
         }
-        return format!("{}\n", line);
+        ensure_not_aborted(abort)?;
+        return Ok(format!("{}\n", line));
     }
 
     let mut overrides_found: HashSet<String> = HashSet::new();
 
-    for line in lines.iter_mut().skip(1) {
+    for (line_index, line) in lines.iter_mut().enumerate().skip(1) {
+        poll_periodically(abort, line_index)?;
         if !is_param_directive_line(line) {
             continue;
         }
 
         let assigned = collect_param_assignment_names(line);
         let mut append_parts = Vec::new();
-        for (upper, name, value) in &entries {
+        for (entry_index, (upper, name, value)) in entries.iter().enumerate() {
+            poll_periodically(abort, entry_index)?;
             if assigned.contains(upper) {
                 overrides_found.insert(upper.clone());
                 append_parts.push(format!("{}={}", name, format_param_override_value(*value)));
@@ -448,15 +578,18 @@ fn inject_param_overrides(netlist_text: &str, vars: &HashMap<String, Value>) -> 
         }
     }
 
-    let missing: Vec<(String, Value)> = entries
-        .iter()
-        .filter(|(upper, _, _)| !overrides_found.contains(upper))
-        .map(|(_, name, value)| (name.clone(), *value))
-        .collect();
+    let mut missing = Vec::new();
+    for (entry_index, (upper, name, value)) in entries.iter().enumerate() {
+        poll_periodically(abort, entry_index)?;
+        if !overrides_found.contains(upper) {
+            missing.push((name.clone(), *value));
+        }
+    }
 
     if !missing.is_empty() {
         let mut line = ".param".to_string();
-        for (name, value) in &missing {
+        for (entry_index, (name, value)) in missing.iter().enumerate() {
+            poll_periodically(abort, entry_index)?;
             line.push(' ');
             line.push_str(name);
             line.push('=');
@@ -469,7 +602,8 @@ fn inject_param_overrides(netlist_text: &str, vars: &HashMap<String, Value>) -> 
     if netlist_text.ends_with('\n') {
         out.push('\n');
     }
-    out
+    ensure_not_aborted(abort)?;
+    Ok(out)
 }
 
 fn format_param_override_value(value: Value) -> String {
@@ -544,14 +678,24 @@ fn collect_param_assignment_names(line: &str) -> HashSet<String> {
     names
 }
 
-fn resolve_node_index_case_insensitive(node_names: &[String], target: &str) -> Option<usize> {
+fn resolve_node_index_case_insensitive(
+    node_names: &[String],
+    target: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Option<usize>> {
+    ensure_not_aborted(abort)?;
     let trimmed = target.trim();
     if trimmed.is_empty() {
-        return None;
+        return Ok(None);
     }
-    node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(trimmed))
+    for (index, name) in node_names.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if name.eq_ignore_ascii_case(trimmed) {
+            return Ok(Some(index));
+        }
+    }
+    ensure_not_aborted(abort)?;
+    Ok(None)
 }
 
 fn is_valid_param_identifier(name: &str) -> bool {
@@ -563,4 +707,58 @@ fn is_valid_param_identifier(name: &str) -> bool {
         return false;
     }
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct AbortOnPoll {
+        abort_on: usize,
+        polls: AtomicUsize,
+    }
+
+    impl AbortOnPoll {
+        fn new(abort_on: usize) -> Self {
+            Self {
+                abort_on,
+                polls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl AbortSignal for AbortOnPoll {
+        fn is_aborted(&self) -> bool {
+            self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
+
+    const OPTIMIZATION_DECK: &str = "\
+Optimization cancellation
+.param RLOAD=1k
+V1 in 0 1
+R1 in out {RLOAD}
+R2 out 0 1k
+.op
+.end
+";
+
+    #[test]
+    fn optimization_honors_early_abort_before_invalid_input() {
+        let abort = AbortOnPoll::new(1);
+        let result = run_optimization_analysis_with_abort("invalid", &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn optimization_honors_abort_during_objective_trials() {
+        let abort = AbortOnPoll::new(12);
+        let result = run_optimization_analysis_with_abort(OPTIMIZATION_DECK, &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(abort.polls.load(Ordering::Relaxed) >= 12);
+    }
 }

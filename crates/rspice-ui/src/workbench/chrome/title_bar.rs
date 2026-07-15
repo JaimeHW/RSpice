@@ -1,5 +1,6 @@
 //! Application title bar and complete implemented menu taxonomy.
 
+use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, Sense, TopBottomPanel, Ui, Vec2};
 
 use crate::common::RSpiceApp;
@@ -43,10 +44,16 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(6.0);
-                    if viewport_width > 560.0
-                        && icon_action(ui, WorkbenchIcon::Settings, "Open preferences")
-                    {
-                        Command::Preferences.execute(app);
+                    if viewport_width > 560.0 {
+                        if license_avatar_action(ui, app) {
+                            Command::License.execute(app);
+                        }
+                        if notification_action(ui, app.state.ui.toasts.unread_count()) {
+                            app.state.workbench.notification_center_open = true;
+                        }
+                        if icon_action(ui, WorkbenchIcon::Settings, "Open preferences") {
+                            Command::Preferences.execute(app);
+                        }
                     }
                     if search_button(ui, viewport_width, app) {
                         Command::CommandPalette.execute(app);
@@ -249,25 +256,31 @@ fn menus(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
 }
 
 fn top_menu(ui: &mut Ui, label: &str, contents: impl FnOnce(&mut Ui)) {
-    ui.menu_button(
-        egui::RichText::new(label).font(theme::sans(tokens::FS_1, FontWeight::Regular)),
-        |ui| {
-            ui.set_min_width(286.0);
-            contents(ui);
-        },
-    );
+    MenuButton::from_button(
+        egui::Button::new(
+            egui::RichText::new(label).font(theme::sans(tokens::FS_1, FontWeight::Regular)),
+        )
+        .frame(false),
+    )
+    .ui(ui, |ui| {
+        ui.set_min_width(286.0);
+        contents(ui);
+    });
 }
 
 fn overflow_menu_button(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
-    let response = ui.menu_button(
-        egui::RichText::new(projection.overflow_trigger_label())
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular)),
-        |ui| {
-            ui.set_min_width(286.0);
-            overflow_menu(ui, app);
-        },
-    );
-    response.response.on_hover_text("More application menus");
+    let (response, _) = MenuButton::from_button(
+        egui::Button::new(
+            egui::RichText::new(projection.overflow_trigger_label())
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular)),
+        )
+        .frame(false),
+    )
+    .ui(ui, |ui| {
+        ui.set_min_width(286.0);
+        overflow_menu(ui, app);
+    });
+    response.on_hover_text("More application menus");
 }
 
 fn command_item(ui: &mut Ui, app: &mut RSpiceApp, command: Command) {
@@ -298,8 +311,10 @@ fn command_item_as(
     }
 }
 
-fn shortcut_for_occurrence<'a>(command: Command, shortcut_override: Option<&'a str>) -> &'a str {
-    shortcut_override.unwrap_or(command.spec().shortcut)
+fn shortcut_for_occurrence(command: Command, shortcut_override: Option<&str>) -> &str {
+    shortcut_override.unwrap_or_else(|| {
+        command.shortcut_label(crate::workbench::commands::current_command_platform())
+    })
 }
 
 fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -311,8 +326,11 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.separator();
     command_item(ui, app, Command::Save);
     command_item(ui, app, Command::SaveAs);
+    command_item(ui, app, Command::SaveAll);
+    command_item(ui, app, Command::RevertActiveDocument);
     ui.separator();
-    command_item(ui, app, Command::Exit);
+    command_item(ui, app, Command::CloseActiveDocument);
+    command_item(ui, app, Command::CloseProject);
 }
 
 fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -358,7 +376,6 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         },
         None,
     );
-    command_item(ui, app, Command::ResetActiveView);
 }
 
 fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -403,7 +420,7 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::OpenWorkspace(Workspace::Results),
+        Command::ResultViewer(crate::workbench::ResultViewer::Waves),
         "Open results workspace",
         None,
     );
@@ -415,7 +432,7 @@ fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::OpenWorkspace(Workspace::Verify),
+        Command::VerificationPage(VerificationPage::Cockpit),
         "Verification cockpit",
         None,
     );
@@ -423,7 +440,7 @@ fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::VerificationPage(VerificationPage::Specifications),
+        Command::EditSpecifications,
         "Specification matrix",
         None,
     );
@@ -474,8 +491,6 @@ fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::ToggleInspector);
     command_item(ui, app, Command::ToggleConsole);
     command_item(ui, app, Command::ToggleFocusMode);
-    ui.separator();
-    command_item(ui, app, Command::ResetLayout);
 }
 
 fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -632,6 +647,112 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str) -> bool {
     response.on_hover_text(label).clicked()
 }
 
+fn notification_action(ui: &mut Ui, unread_count: usize) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+    let accessible_label = if unread_count == 0 {
+        "Notifications and activity".to_owned()
+    } else {
+        format!("Notifications and activity · {unread_count} unread")
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            accessible_label.clone(),
+        )
+    });
+    if response.hovered() {
+        ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
+    }
+    WorkbenchIcon::Bell.paint(ui.painter(), rect.shrink(6.0), t.color.text_dim);
+    if unread_count > 0 {
+        let badge_center = egui::pos2(rect.right() - 3.0, rect.top() + 3.0);
+        ui.painter().circle_filled(badge_center, 7.0, t.color.err);
+        ui.painter().text(
+            badge_center,
+            egui::Align2::CENTER_CENTER,
+            if unread_count > 9 {
+                "9+".to_owned()
+            } else {
+                unread_count.to_string()
+            },
+            theme::sans(tokens::FS_0 - 2.0, FontWeight::SemiBold),
+            t.color.accent_ink,
+        );
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response.on_hover_text(accessible_label).clicked()
+}
+
+fn license_avatar_action(ui: &mut Ui, app: &RSpiceApp) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let initials = license_initials(app);
+    let label = app.state.license.as_ref().map_or_else(
+        || "License and activation".to_owned(),
+        |license| format!("License and activation · {}", license.licensed_to),
+    );
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label.clone())
+    });
+    ui.painter().circle_filled(
+        rect.center(),
+        13.0,
+        if response.hovered() {
+            t.color.accent.gamma_multiply(0.28)
+        } else {
+            t.color.accent.gamma_multiply(0.18)
+        },
+    );
+    ui.painter().circle_stroke(
+        rect.center(),
+        13.0,
+        egui::Stroke::new(1.0, t.color.accent.gamma_multiply(0.65)),
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        initials,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+    theme::paint_focus_ring(ui, &response, rect);
+    response.on_hover_text(label).clicked()
+}
+
+fn license_initials(app: &RSpiceApp) -> String {
+    initials_for_licensee(
+        app.state
+            .license
+            .as_ref()
+            .map(|license| license.licensed_to.trim())
+            .filter(|name| !name.is_empty() && *name != "—"),
+    )
+}
+
+fn initials_for_licensee(name: Option<&str>) -> String {
+    let Some(name) = name else {
+        return "RS".to_owned();
+    };
+    let words = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().find(char::is_ascii_alphanumeric))
+        .collect::<Vec<_>>();
+    match words.as_slice() {
+        [] => "RS".to_owned(),
+        [only] => only.to_uppercase().collect::<String>(),
+        [first, rest @ ..] => {
+            let last = rest.last().copied().unwrap_or(*first);
+            format!(
+                "{}{}",
+                first.to_ascii_uppercase(),
+                last.to_ascii_uppercase()
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,6 +853,28 @@ mod tests {
     }
 
     #[test]
+    fn menu_shortcuts_are_projected_from_the_typed_registry() {
+        let platform = crate::workbench::commands::current_command_platform();
+        for command in [
+            Command::OpenProject,
+            Command::Save,
+            Command::RunSimulation,
+            Command::ToggleFullScreen,
+            Command::GenerateNetlist,
+            Command::ToggleConsole,
+        ] {
+            assert_eq!(
+                shortcut_for_occurrence(command, None),
+                command.shortcut_label(platform)
+            );
+        }
+        assert_eq!(
+            shortcut_for_occurrence(Command::KeyboardShortcuts, None),
+            ""
+        );
+    }
+
+    #[test]
     fn core_menu_commands_are_all_real_dispatch_commands() {
         let commands = [
             Command::OpenProject,
@@ -744,5 +887,13 @@ mod tests {
             Command::AutomationConsole,
         ];
         assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
+    }
+
+    #[test]
+    fn license_avatar_uses_verified_identity_without_fixture_data() {
+        assert_eq!(initials_for_licensee(None), "RS");
+        assert_eq!(initials_for_licensee(Some("Jaime Whitfield")), "JW");
+        assert_eq!(initials_for_licensee(Some("Cher")), "C");
+        assert_eq!(initials_for_licensee(Some("  ")), "RS");
     }
 }

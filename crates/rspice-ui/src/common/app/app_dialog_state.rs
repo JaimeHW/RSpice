@@ -3,7 +3,7 @@
 //! Modal/dialog payload used by `AppState`. Analysis configuration lives
 //! in `SimSetupState`, not here.
 
-use super::ConfirmationDialogState;
+use super::{ConfirmationDialogState, ProjectReviewDialogState};
 
 /// A library deletion awaiting user confirmation.
 #[derive(Debug, Clone)]
@@ -62,7 +62,7 @@ pub struct CommandPaletteState {
     pub want_focus: bool,
     /// Commands run from the palette, newest first — leads the empty-query
     /// list under a RECENT header. Survives close/reopen, capped at five.
-    pub(crate) recent: Vec<super::app_shortcuts::ShortcutCommand>,
+    pub(crate) recent: Vec<crate::workbench::commands::Command>,
 }
 
 impl CommandPaletteState {
@@ -177,4 +177,9 @@ pub struct DialogState {
 
     /// State for save confirmation modal (unsaved changes warning)
     pub confirmation_dialog: ConfirmationDialogState,
+
+    /// Dedicated engineering review for Revert and Close Project. These
+    /// destructive ellipsis actions intentionally do not use the generic
+    /// Save/Don't save confirmation grammar.
+    pub(crate) project_review_dialog: ProjectReviewDialogState,
 }

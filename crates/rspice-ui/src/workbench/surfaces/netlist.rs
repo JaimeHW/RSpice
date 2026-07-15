@@ -58,10 +58,15 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let running = app.state.simulation.is_running;
+                    let run_command = if running {
+                        Command::StopSimulation
+                    } else {
+                        Command::RunSimulation
+                    };
                     if ui
                         .add_enabled(
                             if running {
-                                true
+                                run_command.is_enabled(app)
                             } else {
                                 app.state.manual_deck_run_block_reason().is_none()
                             },
@@ -70,7 +75,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
                         .clicked()
                     {
                         if running {
-                            Command::StopSimulation.execute(app);
+                            run_command.execute(app);
                         } else {
                             app.state.request_netlist_manual_deck_run();
                         }

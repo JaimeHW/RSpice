@@ -74,23 +74,21 @@ fn plan_summary(ui: &mut Ui, app: &mut RSpiceApp) {
             &app.state.model_library_manager.library_count().to_string(),
         );
         ui.horizontal_wrapped(|ui| {
+            let command = if app.state.simulation.is_running {
+                Command::StopSimulation
+            } else {
+                Command::RunSimulation
+            };
             let run = if app.state.simulation.is_running {
                 "Stop active run"
             } else {
                 "Run active plan"
             };
             if ui
-                .add_enabled(
-                    Command::RunSimulation.is_enabled(app) || app.state.simulation.is_running,
-                    egui::Button::new(run),
-                )
+                .add_enabled(command.is_enabled(app), egui::Button::new(run))
                 .clicked()
             {
-                if app.state.simulation.is_running {
-                    Command::StopSimulation.execute(app);
-                } else {
-                    Command::RunSimulation.execute(app);
-                }
+                command.execute(app);
             }
             if ui.button("Global solver and convergence…").clicked() {
                 Command::SimulationOptions.execute(app);

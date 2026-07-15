@@ -6,22 +6,28 @@
 //! schematic export remains available through `.rsch`; project files are the
 //! native professional workflow container.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{BufReader, Read};
-#[cfg(not(target_arch = "wasm32"))]
-use std::io::{BufWriter, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 use crate::io::project_execution::ProjectExecutionContext;
-use crate::product::{DatasetId, RunId};
+use crate::product::{ContentDigest, DatasetId, RunId};
+use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
     AnalysisResult, AnalysisType, CellViewRef, DcOpResult, LibraryManager, NoiseContributorRow,
     NoiseSummary, OperatingPointValue, ProjectWorkspace, SimulationRun, SimulationState, ViewType,
     WaveformData,
 };
+
+#[derive(Debug)]
+struct ValidatedLibraryView {
+    reference: CellViewRef,
+    view_type: ViewType,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectVersion {
@@ -125,8 +131,8 @@ impl ProjectFile {
             .project
             .validate()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
-        self.validate_library_tree_keys()?;
-        self.validate_workspace_references()?;
+        let view_index = self.validate_library_tree()?;
+        self.validate_workspace_references(&view_index)?;
         if let Some(context) = &self.execution_context {
             context.validate().map_err(|error| {
                 ProjectIoError::InvalidData(format!("execution context is invalid: {error}"))
@@ -135,36 +141,115 @@ impl ProjectFile {
         Ok(())
     }
 
-    fn validate_library_tree_keys(&self) -> Result<(), ProjectIoError> {
-        for (library_key, library) in self.libraries.libraries_by_key() {
+    fn validate_library_tree(
+        &self,
+    ) -> Result<HashMap<String, ValidatedLibraryView>, ProjectIoError> {
+        let mut view_index: HashMap<String, ValidatedLibraryView> = HashMap::new();
+        let mut first_invalid_name = None;
+        let mut libraries = self.libraries.libraries_by_key().collect::<Vec<_>>();
+        libraries.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+        for (library_key, library) in libraries {
             if library.name != library_key {
                 return Err(ProjectIoError::InvalidData(format!(
                     "library map key '{library_key}' does not match embedded library name '{}'",
                     library.name
                 )));
             }
-            for (cell_key, cell) in &library.cells {
+            record_invalid_lcv_name(
+                &mut first_invalid_name,
+                &format!("library '{library_key}'"),
+                library_key,
+            );
+
+            let mut cells = library.cells.iter().collect::<Vec<_>>();
+            cells.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (cell_key, cell) in cells {
                 if cell.name != *cell_key {
                     return Err(ProjectIoError::InvalidData(format!(
                         "cell map key '{library_key}/{cell_key}' does not match embedded cell name '{}'",
                         cell.name
                     )));
                 }
-                for (view_key, view) in &cell.views {
+                record_invalid_lcv_name(
+                    &mut first_invalid_name,
+                    &format!("cell '{library_key}/{cell_key}'"),
+                    cell_key,
+                );
+
+                let mut views = cell.views.iter().collect::<Vec<_>>();
+                views.sort_by(|(left, _), (right, _)| left.cmp(right));
+                for (view_key, view) in views {
                     if view.name != *view_key {
                         return Err(ProjectIoError::InvalidData(format!(
                             "view map key '{library_key}/{cell_key}/{view_key}' does not match embedded view name '{}'",
                             view.name
                         )));
                     }
+                    record_invalid_lcv_name(
+                        &mut first_invalid_name,
+                        &format!("view '{library_key}/{cell_key}/{view_key}'"),
+                        view_key,
+                    );
+
+                    let reference = CellViewRef::new(library_key, cell_key, view_key);
+                    let key = reference.key();
+                    if let Some(existing) = view_index.get(&key) {
+                        return Err(ProjectIoError::InvalidData(format!(
+                            "library tree generates duplicate cell-view key '{key}' for {} and {}; slash-delimited persisted keys must be injective",
+                            format_lcv_segments(&existing.reference),
+                            format_lcv_segments(&reference)
+                        )));
+                    }
+                    view_index.insert(
+                        key,
+                        ValidatedLibraryView {
+                            reference,
+                            view_type: view.view_type,
+                        },
+                    );
                 }
             }
         }
-        Ok(())
+
+        if let Some(message) = first_invalid_name {
+            return Err(ProjectIoError::InvalidData(message));
+        }
+        Ok(view_index)
     }
 
-    fn validate_workspace_references(&self) -> Result<(), ProjectIoError> {
+    fn validate_workspace_references(
+        &self,
+        view_index: &HashMap<String, ValidatedLibraryView>,
+    ) -> Result<(), ProjectIoError> {
         let mut required_schematic_buffers = HashSet::new();
+
+        validate_lcv_name(
+            "workspace.project.root_library",
+            &self.workspace.project.root_library,
+        )?;
+        validate_lcv_name(
+            "workspace.project.top_cell",
+            &self.workspace.project.top_cell,
+        )?;
+        let root_library = self
+            .libraries
+            .get_library(&self.workspace.project.root_library)
+            .ok_or_else(|| {
+                ProjectIoError::InvalidData(format!(
+                    "workspace.project.root_library '{}' was not found",
+                    self.workspace.project.root_library
+                ))
+            })?;
+        if root_library
+            .get_cell(&self.workspace.project.top_cell)
+            .is_none()
+        {
+            return Err(ProjectIoError::InvalidData(format!(
+                "workspace.project.top_cell '{}' was not found in root library '{}'",
+                self.workspace.project.top_cell, self.workspace.project.root_library
+            )));
+        }
 
         let active_view_type =
             self.validate_library_reference("workspace.active_view", &self.workspace.active_view)?;
@@ -182,7 +267,14 @@ impl ProjectFile {
         if project_view_requires_schematic_buffer(active_view_type) {
             required_schematic_buffers.insert(self.workspace.active_key());
         }
+        let mut open_view_keys = HashSet::new();
         for (index, open_view) in self.workspace.open_views.iter().enumerate() {
+            let open_key = open_view.reference.key();
+            if !open_view_keys.insert(open_key.clone()) {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace.open_views contains duplicate cell-view key '{open_key}' at index {index}"
+                )));
+            }
             let library_view_type = self.validate_library_reference(
                 &format!("workspace.open_views[{index}]"),
                 &open_view.reference,
@@ -206,6 +298,38 @@ impl ProjectFile {
             )?;
         }
 
+        let mut schematic_buffer_keys = self
+            .workspace
+            .schematic_buffers
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        schematic_buffer_keys.sort_unstable();
+        for key in schematic_buffer_keys {
+            let Some(view) = view_index.get(key) else {
+                let message = if persisted_lcv_key_is_well_formed(key) {
+                    format!(
+                        "workspace schematic/testbench buffer '{key}' is orphaned because no library view owns that key"
+                    )
+                } else {
+                    format!(
+                        "workspace schematic/testbench buffer key '{key}' is malformed; expected exactly three valid library/cell/view segments"
+                    )
+                };
+                return Err(ProjectIoError::InvalidData(message));
+            };
+            if !project_view_requires_schematic_buffer(view.view_type) {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace schematic buffer '{key}' targets {} view {}, which cannot own schematic/testbench data",
+                    view.view_type.display_name(),
+                    format_lcv_segments(&view.reference)
+                )));
+            }
+        }
+
+        let mut required_schematic_buffers =
+            required_schematic_buffers.into_iter().collect::<Vec<_>>();
+        required_schematic_buffers.sort_unstable();
         for key in required_schematic_buffers {
             if !self.workspace.schematic_buffers.contains_key(&key) {
                 return Err(ProjectIoError::InvalidData(format!(
@@ -221,6 +345,13 @@ impl ProjectFile {
         context: &str,
         reference: &CellViewRef,
     ) -> Result<ViewType, ProjectIoError> {
+        for (field, value) in [
+            ("library", reference.library.as_str()),
+            ("cell", reference.cell.as_str()),
+            ("view", reference.view.as_str()),
+        ] {
+            validate_lcv_name(&format!("{context}.{field}"), value)?;
+        }
         let key = reference.key();
         let library = self
             .libraries
@@ -245,6 +376,48 @@ impl ProjectFile {
         })?;
         Ok(view.view_type)
     }
+}
+
+fn record_invalid_lcv_name(first_error: &mut Option<String>, context: &str, value: &str) {
+    if first_error.is_none()
+        && let Err(error) = validate_cell_view_name_segment(value)
+    {
+        *first_error = Some(format!(
+            "persisted {context} name '{value}' violates the cell-view name contract: {error}"
+        ));
+    }
+}
+
+fn validate_lcv_name(context: &str, value: &str) -> Result<(), ProjectIoError> {
+    validate_cell_view_name_segment(value).map_err(|error| {
+        ProjectIoError::InvalidData(format!(
+            "persisted {context} name '{value}' violates the cell-view name contract: {error}"
+        ))
+    })
+}
+
+fn persisted_lcv_key_is_well_formed(key: &str) -> bool {
+    let mut segments = key.split('/');
+    let Some(library) = segments.next() else {
+        return false;
+    };
+    let Some(cell) = segments.next() else {
+        return false;
+    };
+    let Some(view) = segments.next() else {
+        return false;
+    };
+    segments.next().is_none()
+        && [library, cell, view]
+            .into_iter()
+            .all(|segment| validate_cell_view_name_segment(segment).is_ok())
+}
+
+fn format_lcv_segments(reference: &CellViewRef) -> String {
+    format!(
+        "(library={:?}, cell={:?}, view={:?})",
+        reference.library, reference.cell, reference.view
+    )
 }
 
 fn project_view_requires_schematic_buffer(view_type: ViewType) -> bool {
@@ -1390,6 +1563,10 @@ impl From<std::io::Error> for ProjectIoError {
 }
 
 pub const PROJECT_FILTER: (&str, &[&str]) = ("RSpice Project", &["rspiceproj", "json"]);
+/// Hard boundary for one project container. It prevents corrupt or hostile
+/// files from causing unbounded allocation while retaining ample headroom for
+/// large retained result histories.
+pub const MAX_PROJECT_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn show_open_project_dialog() -> Result<PathBuf, ProjectIoError> {
@@ -1432,16 +1609,22 @@ pub fn show_save_project_dialog(default_name: Option<&str>) -> Result<PathBuf, P
     Ok(suggested_project_save_path(default_name))
 }
 
+/// Legacy create-only project export.
+///
+/// Canonical Save/Save As operations must use the project lifecycle so they
+/// retain exact persistence identity, overwrite authorization, and recovery
+/// semantics. This compatibility entry point deliberately refuses to replace
+/// an existing pathname; it cannot regain unconditional overwrite authority if
+/// a production caller reappears.
+#[deprecated(
+    since = "0.1.0",
+    note = "use the project lifecycle persistence API; this compatibility function is create-only"
+)]
 pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), ProjectIoError> {
-    project.validate()?;
-    project
-        .simulation_results
-        .validate()
-        .map_err(ProjectIoError::InvalidData)?;
+    let contents = serialize_project_file(project)?;
 
     #[cfg(target_arch = "wasm32")]
     {
-        let contents = serialize_project_file(project)?;
         crate::common::browser_download::download_text_file(path, &contents)
             .map_err(ProjectIoError::Io)?;
         return Ok(());
@@ -1449,22 +1632,17 @@ pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), Proje
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        if path.exists() {
-            let backup = path.with_extension("rspiceproj.bak");
-            if let Err(error) = crate::io::durable_file::atomic_copy(path, &backup) {
-                log::warn!("Failed to create project backup: {}", error);
-            }
-        }
-
-        crate::io::durable_file::atomic_write_with::<ProjectIoError>(path, |temp| {
-            let mut writer = BufWriter::new(temp);
-            serde_json::to_writer_pretty(&mut writer, project)
-                .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
-            writer.flush()?;
-            Ok(())
-        })?;
-
-        Ok(())
+        crate::io::durable_file::compare_exchange_bytes(
+            path,
+            crate::io::durable_file::ExpectedContent::Missing,
+            contents.as_bytes(),
+        )
+        .map_err(|error| {
+            ProjectIoError::Io(format!(
+                "legacy create-only project export could not publish '{}': {error}",
+                path.display()
+            ))
+        })
     }
 }
 
@@ -1479,7 +1657,6 @@ pub(crate) fn suggested_project_save_path(default_name: Option<&str>) -> PathBuf
     path
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) fn serialize_project_file(project: &ProjectFile) -> Result<String, ProjectIoError> {
     project.validate()?;
     project
@@ -1489,6 +1666,12 @@ pub(crate) fn serialize_project_file(project: &ProjectFile) -> Result<String, Pr
     let mut contents = serde_json::to_string_pretty(project)
         .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
     contents.push('\n');
+    if contents.len() as u64 > MAX_PROJECT_FILE_BYTES {
+        return Err(ProjectIoError::InvalidData(format!(
+            "serialized project is {} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes",
+            contents.len()
+        )));
+    }
     Ok(contents)
 }
 
@@ -1523,15 +1706,81 @@ pub(crate) fn load_project_text(
 }
 
 pub fn load_project_file(path: &Path) -> Result<ProjectFile, ProjectIoError> {
+    load_project_file_with_digest(path).map(|(project, _)| project)
+}
+
+/// Read, hash, parse, migrate, and validate one immutable byte snapshot.
+/// The returned digest is therefore the exact persistence identity accepted
+/// by the caller, not a later re-read that could race an external editor.
+pub(crate) fn load_project_file_with_digest(
+    path: &Path,
+) -> Result<(ProjectFile, ContentDigest), ProjectIoError> {
     if !path.exists() {
         return Err(ProjectIoError::NotFound(path.to_path_buf()));
     }
 
+    let (bytes, digest) = read_project_bytes_and_digest(path)?;
+    let contents = std::str::from_utf8(&bytes).map_err(|error| {
+        ProjectIoError::ParseError(format!("project is not valid UTF-8: {error}"))
+    })?;
+    let project = load_project_text(contents, Some(path))?;
+    Ok((project, digest))
+}
+
+/// Read one bounded byte snapshot and parse it only when it matches an exact
+/// previously accepted persistence identity.
+///
+/// Session restoration uses this boundary so a file replaced at a remembered
+/// pathname cannot become parser input, much less regain canonical Save
+/// authority. A mismatch is an ordinary `Ok(None)` conflict; malformed bytes
+/// are reported only when they carry the expected digest.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn load_project_file_with_expected_digest(
+    path: &Path,
+    expected: ContentDigest,
+) -> Result<Option<ProjectFile>, ProjectIoError> {
+    if !path.exists() {
+        return Err(ProjectIoError::NotFound(path.to_path_buf()));
+    }
+
+    let (bytes, digest) = read_project_bytes_and_digest(path)?;
+    if digest != expected {
+        return Ok(None);
+    }
+    let contents = std::str::from_utf8(&bytes).map_err(|error| {
+        ProjectIoError::ParseError(format!("project is not valid UTF-8: {error}"))
+    })?;
+    load_project_text(contents, Some(path)).map(Some)
+}
+
+fn read_project_bytes_and_digest(path: &Path) -> Result<(Vec<u8>, ContentDigest), ProjectIoError> {
     let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut contents = String::new();
-    reader.read_to_string(&mut contents)?;
-    load_project_text(&contents, Some(path))
+    let advertised = file.metadata()?.len();
+    if advertised > MAX_PROJECT_FILE_BYTES {
+        return Err(ProjectIoError::InvalidData(format!(
+            "project is {advertised} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes"
+        )));
+    }
+    let mut file = file;
+    let mut bytes = Vec::with_capacity(advertised.min(8 * 1024 * 1024) as usize);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut total = 0_u64;
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        total = total.saturating_add(read as u64);
+        if total > MAX_PROJECT_FILE_BYTES {
+            return Err(ProjectIoError::InvalidData(format!(
+                "project grew beyond the supported {MAX_PROJECT_FILE_BYTES} byte maximum while it was being read"
+            )));
+        }
+        hasher.update(&buffer[..read]);
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+    Ok((bytes, ContentDigest::from_bytes(hasher.finalize().into())))
 }
 
 #[cfg(test)]
@@ -1622,6 +1871,36 @@ mod tests {
             ProjectSimulationResults::default(),
             execution_context,
         )
+    }
+
+    #[test]
+    fn expected_digest_gate_rejects_replaced_bytes_before_parsing() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-expected-project-digest-{}-{}.rspiceproj",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let project = project_with_execution_context();
+        let contents = serialize_project_file(&project).expect("serialize fixture");
+        std::fs::write(&path, contents).expect("write accepted fixture");
+        let (_, accepted) =
+            load_project_file_with_digest(&path).expect("load accepted fixture identity");
+
+        assert!(
+            load_project_file_with_expected_digest(&path, accepted)
+                .expect("matching project loads")
+                .is_some()
+        );
+
+        std::fs::write(&path, b"replacement bytes are intentionally not JSON")
+            .expect("replace fixture");
+        assert!(
+            load_project_file_with_expected_digest(&path, accepted)
+                .expect("digest mismatch is rejected without parsing")
+                .is_none()
+        );
+
+        std::fs::remove_file(path).expect("remove isolated fixture");
     }
 
     #[test]
@@ -2692,6 +2971,152 @@ mod tests {
                 "unexpected {case} mismatch error: {err}"
             );
         }
+    }
+
+    #[test]
+    fn project_load_rejects_slash_alias_triples_before_key_lookup() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+
+        let mut first_cell = crate::state::Cell::new("b");
+        first_cell.add_view(crate::state::View::new("c/d", ViewType::Symbol));
+        let mut first_library = crate::state::Library::new("a");
+        first_library.add_cell(first_cell);
+        libraries.add_library(first_library);
+
+        let mut second_cell = crate::state::Cell::new("c");
+        second_cell.add_view(crate::state::View::new("d", ViewType::Symbol));
+        let mut second_library = crate::state::Library::new("a/b");
+        second_library.add_cell(second_cell);
+        libraries.add_library(second_library);
+
+        let project = ProjectFile::new(workspace, libraries);
+        let json = serde_json::to_string_pretty(&project).expect("alias fixture serializes");
+        let error = load_project_text(&json, None)
+            .expect_err("two distinct triples must not alias one generated key");
+
+        assert!(matches!(error, ProjectIoError::InvalidData(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate cell-view key 'a/b/c/d'")
+                && error.to_string().contains("injective"),
+            "unexpected alias error: {error}"
+        );
+    }
+
+    #[test]
+    fn project_load_rejects_lcv_names_outside_the_ui_contract() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let mut invalid_cell = crate::state::Cell::new("bad-name");
+        invalid_cell.add_view(crate::state::View::new("schematic", ViewType::Schematic));
+        libraries
+            .get_library_mut("user")
+            .expect("default library")
+            .add_cell(invalid_cell);
+        let project = ProjectFile::new(workspace, libraries);
+        let json = serde_json::to_string_pretty(&project).expect("invalid fixture serializes");
+
+        let error = load_project_text(&json, None)
+            .expect_err("persisted names outside the UI contract must fail closed");
+
+        assert!(error.to_string().contains("bad-name"));
+        assert!(error.to_string().contains("cell-view name contract"));
+    }
+
+    #[test]
+    fn project_load_rejects_orphan_and_malformed_schematic_buffers() {
+        for (key, expected) in [
+            ("ghost/cell/schematic", "orphaned"),
+            ("user/top/schematic/alias", "malformed"),
+        ] {
+            let mut libraries = LibraryManager::with_primitives();
+            let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+            let buffer = workspace
+                .schematic_buffers
+                .values()
+                .next()
+                .cloned()
+                .expect("default schematic buffer");
+            workspace.schematic_buffers.insert(key.to_owned(), buffer);
+            let project = ProjectFile::new(workspace, libraries);
+            let json = serde_json::to_string_pretty(&project).expect("buffer fixture serializes");
+
+            let error = load_project_text(&json, None)
+                .expect_err("unowned or malformed persisted buffers must fail closed");
+            assert!(
+                error.to_string().contains(key) && error.to_string().contains(expected),
+                "unexpected buffer error for {key}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn project_load_rejects_schematic_buffer_bound_to_symbol_view() {
+        let mut libraries = LibraryManager::with_primitives();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        assert!(libraries.create_view("user", "top", "symbol", ViewType::Symbol));
+        let buffer = workspace
+            .schematic_buffers
+            .values()
+            .next()
+            .cloned()
+            .expect("default schematic buffer");
+        workspace
+            .schematic_buffers
+            .insert("user/top/symbol".to_owned(), buffer);
+        let project = ProjectFile::new(workspace, libraries);
+        let json = serde_json::to_string_pretty(&project).expect("buffer fixture serializes");
+
+        let error =
+            load_project_text(&json, None).expect_err("symbol views cannot own schematic buffers");
+        assert!(
+            error.to_string().contains("user/top/symbol")
+                && error.to_string().contains("cannot own")
+        );
+    }
+
+    #[test]
+    fn project_load_rejects_duplicate_open_view_keys() {
+        let mut libraries = LibraryManager::with_primitives();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        workspace.open_views.push(workspace.open_views[0].clone());
+        let project = ProjectFile::new(workspace, libraries);
+        let json = serde_json::to_string_pretty(&project).expect("duplicate fixture serializes");
+
+        let error =
+            load_project_text(&json, None).expect_err("duplicate open-view keys must fail closed");
+        assert!(
+            error.to_string().contains("duplicate cell-view key")
+                && error.to_string().contains("workspace.open_views")
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[allow(deprecated)]
+    fn legacy_public_project_save_is_create_only_and_preserves_existing_bytes() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-legacy-create-only-project-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create isolated project test directory");
+        let path = root.join("design.rspiceproj");
+        std::fs::write(&path, "external project bytes").expect("write existing target");
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new(workspace, libraries);
+
+        let error = save_project_file(&project, &path)
+            .expect_err("legacy public save must not overwrite an existing destination");
+
+        assert!(error.to_string().contains("create-only"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read preserved destination"),
+            "external project bytes"
+        );
+        std::fs::remove_dir_all(root).expect("remove isolated project test directory");
     }
 
     #[test]

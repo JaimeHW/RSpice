@@ -31,7 +31,10 @@ pub(super) fn action_export_svg_with_io(
         Ok(Some(mut path)) => {
             crate::common::file_actions::ensure_file_extension(&mut path, "svg");
 
-            match io.write_text_file(&path, &svg_content) {
+            let export = io
+                .observe_destination(&path)
+                .and_then(|destination| io.write_text_file_observed(&destination, &svg_content));
+            match export {
                 Ok(()) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::info(
                         crate::common::export_workflow::export_completion_message(
@@ -101,7 +104,10 @@ pub(crate) fn action_export_netlist_with_io(
         Ok(Some(mut path)) => {
             crate::common::file_actions::ensure_file_extension(&mut path, extension);
 
-            match io.write_text_file(&path, &netlist_content) {
+            let export = io.observe_destination(&path).and_then(|destination| {
+                io.write_text_file_observed(&destination, &netlist_content)
+            });
+            match export {
                 Ok(()) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::info(
                         crate::common::export_workflow::export_completion_message(
@@ -340,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn svg_export_reports_file_write_errors() {
+    fn svg_export_propagates_injected_publication_failure_without_claiming_success() {
         let mut state = AppState::default();
         let io = MockExportWorkflowIo::returning_path(PathBuf::from("schematic.svg"))
             .with_write_error("disk full");

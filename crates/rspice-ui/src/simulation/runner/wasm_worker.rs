@@ -1,10 +1,30 @@
+/// Worker IDs cross the JavaScript number boundary twice. Keeping them in the
+/// exact u32 integer range avoids precision loss while still leaving more than
+/// four billion collision-free requests between wraps.
+const MAX_BROWSER_REQUEST_ID: u64 = u32::MAX as u64;
+
 pub(crate) fn next_request_id(current: u64) -> u64 {
-    let next = current.wrapping_add(1);
-    if next == 0 { 1 } else { next }
+    if current >= MAX_BROWSER_REQUEST_ID {
+        1
+    } else {
+        current + 1
+    }
 }
 
 pub(crate) fn stale_result(active: Option<u64>, incoming: u64) -> bool {
     active != Some(incoming)
+}
+
+fn request_id_from_js_number(value: f64) -> Option<u64> {
+    (value.is_finite()
+        && value >= 1.0
+        && value <= MAX_BROWSER_REQUEST_ID as f64
+        && value.fract() == 0.0)
+        .then_some(value as u64)
+}
+
+fn stale_worker_epoch(current: Option<u64>, incoming: u64) -> bool {
+    current != Some(incoming)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +40,7 @@ mod browser {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::prelude::*;
 
-    use super::{next_request_id, stale_result};
+    use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
     use crate::simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
         WorkerProgressSnapshot, WorkerRequest, validate_worker_response_id,
@@ -31,6 +51,7 @@ mod browser {
 
     #[derive(Default)]
     struct WorkerState {
+        current_worker_epoch: Option<u64>,
         active_request_id: Option<u64>,
         active_progress: Option<Arc<Mutex<SimulationProgress>>>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
@@ -43,6 +64,7 @@ mod browser {
         onerror: Option<Closure<dyn FnMut(web_sys::ErrorEvent)>>,
         onmessageerror: Option<Closure<dyn FnMut(web_sys::MessageEvent)>>,
         next_id: u64,
+        next_worker_epoch: u64,
     }
 
     impl WorkerHandle {
@@ -54,6 +76,7 @@ mod browser {
                 onerror: None,
                 onmessageerror: None,
                 next_id: 0,
+                next_worker_epoch: 0,
             }
         }
 
@@ -82,12 +105,13 @@ mod browser {
                 return;
             }
 
-            drop_cached_worker(&self.worker);
-
             let mut state = self.state.borrow_mut();
+            state.current_worker_epoch = None;
             state.active_request_id = None;
             state.active_progress = None;
             state.pending_result = Some(Err(SimulationError::Aborted));
+            drop(state);
+            drop_cached_worker(&self.worker);
         }
 
         fn allocate_request_id(&mut self) -> u64 {
@@ -95,8 +119,18 @@ mod browser {
             self.next_id
         }
 
+        fn allocate_worker_epoch(&mut self) -> u64 {
+            self.next_worker_epoch = self.next_worker_epoch.wrapping_add(1);
+            if self.next_worker_epoch == 0 {
+                self.next_worker_epoch = 1;
+            }
+            self.next_worker_epoch
+        }
+
         fn ensure_worker(&mut self) -> Result<web_sys::Worker, SimulationError> {
-            if let Some(worker) = self.worker.borrow().as_ref() {
+            if let Some(worker) = self.worker.borrow().as_ref()
+                && self.state.borrow().current_worker_epoch.is_some()
+            {
                 return Ok(worker.clone());
             }
 
@@ -111,15 +145,20 @@ mod browser {
                     "browser simulation worker is not available".to_string(),
                 )
             })?;
-            self.install_handlers(&worker);
+            let worker_epoch = self.allocate_worker_epoch();
             *self.worker.borrow_mut() = Some(worker.clone());
+            self.state.borrow_mut().current_worker_epoch = Some(worker_epoch);
+            self.install_handlers(&worker, worker_epoch);
             Ok(worker)
         }
 
-        fn install_handlers(&mut self, worker: &web_sys::Worker) {
+        fn install_handlers(&mut self, worker: &web_sys::Worker, worker_epoch: u64) {
             let state = Rc::clone(&self.state);
             let onmessage = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
                 move |event: web_sys::MessageEvent| {
+                    if stale_worker_epoch(state.borrow().current_worker_epoch, worker_epoch) {
+                        return;
+                    }
                     handle_worker_message(&state, event.data());
                     request_repaint();
                 },
@@ -137,6 +176,10 @@ mod browser {
                         event.message()
                     };
                     let mut state = state.borrow_mut();
+                    if stale_worker_epoch(state.current_worker_epoch, worker_epoch) {
+                        return;
+                    }
+                    state.current_worker_epoch = None;
                     if state.active_request_id.is_some() {
                         state.active_request_id = None;
                         state.active_progress = None;
@@ -154,6 +197,10 @@ mod browser {
             let onmessageerror = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
                 move |_event: web_sys::MessageEvent| {
                     let mut state = state.borrow_mut();
+                    if stale_worker_epoch(state.current_worker_epoch, worker_epoch) {
+                        return;
+                    }
+                    state.current_worker_epoch = None;
                     if state.active_request_id.is_some() {
                         state.active_request_id = None;
                         state.active_progress = None;
@@ -167,6 +214,16 @@ mod browser {
             ));
             worker.set_onmessageerror(Some(onmessageerror.as_ref().unchecked_ref()));
             self.onmessageerror = Some(onmessageerror);
+        }
+    }
+
+    impl Drop for WorkerHandle {
+        fn drop(&mut self) {
+            self.state.borrow_mut().current_worker_epoch = None;
+            drop_cached_worker(&self.worker);
+            self.onmessage.take();
+            self.onerror.take();
+            self.onmessageerror.take();
         }
     }
 
@@ -337,6 +394,9 @@ mod browser {
 
     fn drop_cached_worker(worker: &Rc<RefCell<Option<web_sys::Worker>>>) {
         if let Some(worker) = worker.borrow_mut().take() {
+            worker.set_onmessage(None);
+            worker.set_onerror(None);
+            worker.set_onmessageerror(None);
             worker.terminate();
         }
         clear_global_worker();
@@ -433,13 +493,7 @@ mod browser {
         Reflect::get(value, &JsValue::from_str(property))
             .ok()
             .and_then(|value| value.as_f64())
-            .and_then(|value| {
-                if value.is_finite() && value >= 0.0 {
-                    Some(value as u64)
-                } else {
-                    None
-                }
-            })
+            .and_then(request_id_from_js_number)
     }
 
     fn reflect_error(error: JsValue) -> SimulationError {
@@ -468,6 +522,11 @@ mod tests {
     #[test]
     fn next_request_id_skips_zero_after_wraparound() {
         assert_eq!(next_request_id(0), 1);
+        assert_eq!(
+            next_request_id(MAX_BROWSER_REQUEST_ID - 1),
+            MAX_BROWSER_REQUEST_ID
+        );
+        assert_eq!(next_request_id(MAX_BROWSER_REQUEST_ID), 1);
         assert_eq!(next_request_id(u64::MAX), 1);
     }
 
@@ -476,5 +535,28 @@ mod tests {
         assert!(!stale_result(Some(8), 8));
         assert!(stale_result(Some(8), 7));
         assert!(stale_result(None, 8));
+    }
+
+    #[test]
+    fn javascript_request_ids_are_exact_bounded_integers() {
+        assert_eq!(request_id_from_js_number(1.0), Some(1));
+        assert_eq!(
+            request_id_from_js_number(MAX_BROWSER_REQUEST_ID as f64),
+            Some(MAX_BROWSER_REQUEST_ID)
+        );
+        assert_eq!(request_id_from_js_number(0.0), None);
+        assert_eq!(request_id_from_js_number(1.5), None);
+        assert_eq!(
+            request_id_from_js_number(MAX_BROWSER_REQUEST_ID as f64 + 1.0),
+            None
+        );
+        assert_eq!(request_id_from_js_number(f64::NAN), None);
+    }
+
+    #[test]
+    fn stale_worker_callbacks_cannot_target_a_replacement_epoch() {
+        assert!(!stale_worker_epoch(Some(9), 9));
+        assert!(stale_worker_epoch(Some(10), 9));
+        assert!(stale_worker_epoch(None, 9));
     }
 }

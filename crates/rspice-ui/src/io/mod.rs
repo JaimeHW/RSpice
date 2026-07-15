@@ -33,6 +33,7 @@ pub use netlist_export::{ExportOptions, NetlistExporter, NetlistFormat};
 pub use project_execution::{
     PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext, ProjectModelLibrary,
 };
+#[allow(deprecated)]
 pub use project_io::{
     ProjectFile, ProjectIoError, ProjectSimulationResults, ProjectVersion, load_project_file,
     save_project_file, show_open_project_dialog, show_save_project_dialog,

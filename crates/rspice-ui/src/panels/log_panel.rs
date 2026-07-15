@@ -343,6 +343,14 @@ impl LogBuffer {
         self.next_id
     }
 
+    /// Elapsed time on the same session clock used by [`LogEntry::timestamp`].
+    ///
+    /// UI projections can subtract an entry timestamp from this value to
+    /// preserve the event's original age when mapping it onto another clock.
+    pub fn session_elapsed(&self) -> Duration {
+        self.session_start.elapsed()
+    }
+
     /// Get entries filtered by severity
     pub fn entries_by_severity(
         &self,

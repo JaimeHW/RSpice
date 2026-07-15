@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use super::EngineBridge;
+use rspice_core::abort_signal::AbortSignal;
+
+use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::DcSweepConfig;
 use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
@@ -10,13 +12,16 @@ impl EngineBridge {
     pub(super) fn run_dc_op(
         &self,
         netlist: &rspice_core::Netlist,
+        abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
         let engine = self.engine_for_netlist(netlist);
         let (core_result, device_report) = engine
-            .run_dc_op_with_report(netlist)
+            .run_dc_op_with_report_and_abort(netlist, abort)
             .map_err(|e| self.translate_error(e))?;
 
-        let mut result = convert_dc_result(&core_result);
+        let mut result = convert_dc_result(&core_result, abort)?;
+        ensure_not_aborted(abort)?;
         if !device_report.is_empty() {
             result.device_report = Some(device_report);
         }
@@ -28,9 +33,13 @@ impl EngineBridge {
         &self,
         netlist: &rspice_core::Netlist,
         config: &DcSweepConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
         let engine = self.engine_for_netlist(netlist);
-        let nested_cfg = nested_dc_sweep_config(config)?;
+        let nested_cfg = nested_dc_sweep_config(config);
+        ensure_not_aborted(abort)?;
+        let nested_cfg = nested_cfg?;
         let mut sweep_values = Vec::new();
         let mut waveforms = HashMap::new();
 
@@ -38,6 +47,7 @@ impl EngineBridge {
             let sweep2 =
                 rspice_core::analysis::DcSweep::new(source2.to_string(), start2, stop2, step2);
             let sweep2_values = sweep2.points();
+            ensure_not_aborted(abort)?;
             if sweep2_values.is_empty() {
                 return Err(SimulationError::InvalidConfig(
                     "Nested DC secondary sweep produced no points".to_string(),
@@ -45,16 +55,18 @@ impl EngineBridge {
             }
 
             for &sweep2_value in &sweep2_values {
+                ensure_not_aborted(abort)?;
                 let mut nested_netlist = netlist.clone();
-                set_dc_source_value(&mut nested_netlist, source2, sweep2_value)?;
+                set_dc_source_value(&mut nested_netlist, source2, sweep2_value, abort)?;
 
                 let sweep_results = engine
-                    .run_dc_sweep(
+                    .run_dc_sweep_with_abort(
                         &nested_netlist,
                         &config.source,
                         config.start,
                         config.stop,
                         config.step,
+                        abort,
                     )
                     .map_err(|e| self.translate_error(e))?;
 
@@ -63,20 +75,25 @@ impl EngineBridge {
                 }
 
                 if sweep_values.is_empty() {
-                    sweep_values = sweep_results.iter().map(|(v, _)| *v).collect();
+                    sweep_values.reserve(sweep_results.len());
+                    for (value, _) in &sweep_results {
+                        ensure_not_aborted(abort)?;
+                        sweep_values.push(*value);
+                    }
                 }
 
                 if let Some((_, first_result)) = sweep_results.first() {
                     for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
+                        ensure_not_aborted(abort)?;
                         if node_idx == 0 {
                             continue;
                         }
-                        let voltages: Vec<f64> = sweep_results
-                            .iter()
-                            .map(|(_, result)| {
-                                result.node_voltages.get(node_idx).copied().unwrap_or(0.0)
-                            })
-                            .collect();
+                        let mut voltages = Vec::with_capacity(sweep_results.len());
+                        for (_, result) in &sweep_results {
+                            ensure_not_aborted(abort)?;
+                            voltages
+                                .push(result.node_voltages.get(node_idx).copied().unwrap_or(0.0));
+                        }
                         let trace_name = format!("{} [{}={:.6}]", node_name, source2, sweep2_value);
                         waveforms.insert(
                             trace_name.clone(),
@@ -91,26 +108,33 @@ impl EngineBridge {
             }
         } else {
             let sweep_results = engine
-                .run_dc_sweep(
+                .run_dc_sweep_with_abort(
                     netlist,
                     &config.source,
                     config.start,
                     config.stop,
                     config.step,
+                    abort,
                 )
                 .map_err(|e| self.translate_error(e))?;
 
-            sweep_values = sweep_results.iter().map(|(v, _)| *v).collect();
+            sweep_values.reserve(sweep_results.len());
+            for (value, _) in &sweep_results {
+                ensure_not_aborted(abort)?;
+                sweep_values.push(*value);
+            }
 
             if let Some((_, first_result)) = sweep_results.first() {
                 for (i, name) in first_result.node_names.iter().enumerate() {
+                    ensure_not_aborted(abort)?;
                     if i == 0 {
                         continue;
                     }
-                    let voltages: Vec<f64> = sweep_results
-                        .iter()
-                        .map(|(_, result)| result.node_voltages.get(i).copied().unwrap_or(0.0))
-                        .collect();
+                    let mut voltages = Vec::with_capacity(sweep_results.len());
+                    for (_, result) in &sweep_results {
+                        ensure_not_aborted(abort)?;
+                        voltages.push(result.node_voltages.get(i).copied().unwrap_or(0.0));
+                    }
 
                     waveforms.insert(
                         name.clone(),
@@ -121,7 +145,7 @@ impl EngineBridge {
         }
 
         let measurements =
-            super::measure::evaluate_measurements(netlist, "DC", &sweep_values, &waveforms);
+            super::measure::evaluate_measurements(netlist, "DC", &sweep_values, &waveforms, abort)?;
         Ok(SimulationResult::DcSweep {
             sweep_var: config.source.clone(),
             sweep_values,
@@ -131,10 +155,14 @@ impl EngineBridge {
     }
 }
 
-fn convert_dc_result(core_result: &rspice_core::SimulationResult) -> DcOpResult {
+fn convert_dc_result(
+    core_result: &rspice_core::SimulationResult,
+    abort: &dyn AbortSignal,
+) -> Result<DcOpResult, SimulationError> {
     let mut result = DcOpResult::default();
 
     for (i, &voltage) in core_result.node_voltages.iter().enumerate() {
+        ensure_not_aborted(abort)?;
         if i > 0 {
             let name = core_result
                 .node_names
@@ -146,11 +174,12 @@ fn convert_dc_result(core_result: &rspice_core::SimulationResult) -> DcOpResult 
     }
 
     for (i, &current) in core_result.branch_currents.iter().enumerate() {
+        ensure_not_aborted(abort)?;
         let name = dc_branch_waveform_name(core_result, i);
         result.branch_currents.insert(name, current);
     }
 
-    result
+    Ok(result)
 }
 
 fn dc_branch_waveform_name(result: &rspice_core::SimulationResult, branch_idx: usize) -> String {
@@ -180,7 +209,9 @@ fn set_dc_source_value(
     netlist: &mut rspice_core::Netlist,
     source_name: &str,
     value: f64,
+    abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
+    ensure_not_aborted(abort)?;
     if source_name.trim().is_empty() {
         return Err(SimulationError::InvalidConfig(
             "DC sweep source name cannot be empty".to_string(),
@@ -188,6 +219,7 @@ fn set_dc_source_value(
     }
 
     for element in &mut netlist.elements {
+        ensure_not_aborted(abort)?;
         if !element.name.eq_ignore_ascii_case(source_name) {
             continue;
         }

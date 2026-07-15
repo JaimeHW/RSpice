@@ -17,14 +17,23 @@ impl WaveformWriter {
 
     /// Write dataset to file
     pub fn write(&self, dataset: &WaveformDataset, path: &Path) -> Result<(), String> {
-        match self.format {
-            WaveformFormat::Csv => self.write_csv(dataset, path),
-            WaveformFormat::Tsv => self.write_tsv(dataset, path),
-            WaveformFormat::Touchstone => self.write_touchstone(dataset, path),
-            _ => Err(format!(
-                "Format {:?} write is not implemented (supported: Csv, Tsv, Touchstone)",
-                self.format
-            )),
+        let contents = self.write_text(dataset)?;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Direct writer callers have no earlier picker authorization, but
+            // still receive a complete-byte, crash-consistent CAS instead of
+            // a partial or unconditional filesystem write.
+            let expected = crate::io::durable_file::observe_expected_content(path)
+                .map_err(|error| error.to_string())?;
+            crate::io::durable_file::compare_exchange_bytes(path, expected, contents.as_bytes())
+                .map_err(|error| error.to_string())
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (contents, path);
+            Err("direct filesystem waveform writes are unavailable in the browser; use the download export workflow".to_string())
         }
     }
 
@@ -35,26 +44,10 @@ impl WaveformWriter {
             WaveformFormat::Tsv => Ok(Self::delimited_text(dataset, '\t')),
             WaveformFormat::Touchstone => Self::touchstone_text(dataset),
             _ => Err(format!(
-                "Format {:?} text export is not implemented (supported: Csv, Tsv, Touchstone)",
+                "Format {:?} is read-only or unsupported for export; writable waveform formats are Csv, Tsv, and Touchstone",
                 self.format
             )),
         }
-    }
-
-    /// Write CSV
-    fn write_csv(&self, dataset: &WaveformDataset, path: &Path) -> Result<(), String> {
-        self.write_delimited(dataset, path, ',')
-    }
-
-    /// Write TSV
-    fn write_tsv(&self, dataset: &WaveformDataset, path: &Path) -> Result<(), String> {
-        self.write_delimited(dataset, path, '\t')
-    }
-
-    /// Write Touchstone N-port S-parameter data (RI format).
-    fn write_touchstone(&self, dataset: &WaveformDataset, path: &Path) -> Result<(), String> {
-        std::fs::write(path, Self::touchstone_text(dataset)?)
-            .map_err(|e| format!("Failed to write: {}", e))
     }
 
     fn touchstone_text(dataset: &WaveformDataset) -> Result<String, String> {
@@ -304,17 +297,6 @@ impl WaveformWriter {
         None
     }
 
-    /// Write delimited file
-    fn write_delimited(
-        &self,
-        dataset: &WaveformDataset,
-        path: &Path,
-        delimiter: char,
-    ) -> Result<(), String> {
-        std::fs::write(path, Self::delimited_text(dataset, delimiter))
-            .map_err(|e| format!("Failed to write: {}", e))
-    }
-
     fn delimited_text(dataset: &WaveformDataset, delimiter: char) -> String {
         let separator = delimiter.to_string();
         let mut contents = String::new();
@@ -425,6 +407,24 @@ mod tests {
             .expect("csv text serializes");
 
         assert_eq!(csv, "time,V(out),I(R1)\n0,0,0.001\n0.000001,1.25,0.002\n");
+    }
+
+    #[test]
+    fn non_writable_formats_report_the_export_contract() {
+        for format in [
+            WaveformFormat::Psf,
+            WaveformFormat::Nutmeg,
+            WaveformFormat::AsciiRaw,
+            WaveformFormat::BinaryRaw,
+        ] {
+            assert!(!format.can_write());
+            let error = WaveformWriter::new(format)
+                .write_text(&sample_dataset())
+                .expect_err("non-writable formats must reject export");
+            assert!(error.contains("read-only or unsupported for export"));
+            assert!(error.contains("Csv, Tsv, and Touchstone"));
+            assert!(!error.contains("not implemented"));
+        }
     }
 
     #[test]

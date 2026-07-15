@@ -266,28 +266,41 @@ enum BrowserSchematicImportResult {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct BrowserSchematicImportCompletion {
+    token: crate::common::browser_file_import::TextImportToken,
+    result: BrowserSchematicImportResult,
+}
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
-    static BROWSER_SCHEMATIC_IMPORT_RESULT: std::cell::RefCell<Option<BrowserSchematicImportResult>> =
+    static BROWSER_SCHEMATIC_IMPORT_RESULT: std::cell::RefCell<Option<BrowserSchematicImportCompletion>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_schematic_import() -> Result<(), String> {
-    crate::common::browser_file_import::try_begin_text_import(
+    let token = crate::common::browser_file_import::try_begin_text_import(
         crate::common::browser_file_import::BrowserTextImportKind::Schematic,
     )?;
 
     crate::common::browser_file_import::pick_text_file(
         crate::io::schematic_io::SCHEMATIC_FILTER.0,
         crate::io::schematic_io::SCHEMATIC_FILTER.1,
-        |result| {
+        move |result| {
+            if !crate::common::browser_file_import::text_import_is_current(token) {
+                return;
+            }
             let event = match result {
                 Ok(Some(file)) => BrowserSchematicImportResult::Loaded(file),
                 Ok(None) => BrowserSchematicImportResult::Cancelled,
                 Err(error) => BrowserSchematicImportResult::Failed(error),
             };
             BROWSER_SCHEMATIC_IMPORT_RESULT.with(|slot| {
-                *slot.borrow_mut() = Some(event);
+                *slot.borrow_mut() = Some(BrowserSchematicImportCompletion {
+                    token,
+                    result: event,
+                });
             });
         },
     );
@@ -296,14 +309,15 @@ fn start_browser_schematic_import() -> Result<(), String> {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn poll_browser_schematic_import(state: &mut AppState) -> bool {
-    let event = BROWSER_SCHEMATIC_IMPORT_RESULT.with(|slot| slot.borrow_mut().take());
-    if event.is_some() {
-        crate::common::browser_file_import::finish_text_import(
-            crate::common::browser_file_import::BrowserTextImportKind::Schematic,
-        );
+    let Some(completion) = BROWSER_SCHEMATIC_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())
+    else {
+        return false;
+    };
+    if !crate::common::browser_file_import::finish_text_import(completion.token) {
+        return false;
     }
-    match event {
-        Some(BrowserSchematicImportResult::Loaded(file)) => {
+    match completion.result {
+        BrowserSchematicImportResult::Loaded(file) => {
             match crate::io::schematic_io::load_schematic_text(&file.contents, None) {
                 Ok(schematic) => apply_loaded_schematic(
                     state,
@@ -319,11 +333,11 @@ pub(crate) fn poll_browser_schematic_import(state: &mut AppState) -> bool {
                 }
             }
         }
-        Some(BrowserSchematicImportResult::Failed(error)) => {
+        BrowserSchematicImportResult::Failed(error) => {
             state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", error)));
             false
         }
-        Some(BrowserSchematicImportResult::Cancelled) | None => false,
+        BrowserSchematicImportResult::Cancelled => false,
     }
 }
 

@@ -13,12 +13,14 @@ use super::{
     AnalysisCommand, BjtType, DataTable, Element, ElementKind, ExpressionDialect, FftAnalysis,
     FftFormat, FftOutput, FftWindow, FreqVariation, InitialCondition, JfetType, MesfetType,
     ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet, ParamContext,
-    ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType, PoleZeroTransferType,
-    PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions,
-    SourceRfPort, SourceSpec, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
-    SubcircuitDef, SwitchState, VerilogAInclude,
+    ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError, PoleZeroAnalysisType,
+    PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal,
+    SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
 };
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use std::collections::{HashMap, HashSet};
 
 mod command_parsers;
@@ -79,17 +81,27 @@ struct DataTableBuilder {
 }
 
 impl DataTableBuilder {
-    fn new(opened_at_line: usize, line: &str) -> Result<Self, ParseError> {
+    fn new(
+        opened_at_line: usize,
+        line: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        poll_parse_text(abort, line)?;
         let mut fields = line.split_whitespace();
         let _data = fields.next();
         let Some(name) = fields.next() else {
             return Err(ParseError::Syntax {
                 line: opened_at_line,
                 message: ".DATA requires a table name".to_string(),
-            });
+            }
+            .into());
         };
-        let params = fields.map(|field| field.to_string()).collect::<Vec<_>>();
-        validate_data_table_params(opened_at_line, name, &params)?;
+        let mut params = Vec::new();
+        for (index, field) in fields.enumerate() {
+            poll_parse_abort(abort, index)?;
+            params.push(field.to_string());
+        }
+        validate_data_table_params_with_abort(opened_at_line, name, &params, abort)?;
         Ok(Self {
             opened_at_line,
             name: name.to_string(),
@@ -103,35 +115,48 @@ impl DataTableBuilder {
         line_num: usize,
         line: &str,
         params: &ParamContext,
-    ) -> Result<(), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        poll_parse_text(abort, line)?;
         let body = line.strip_prefix('+').unwrap_or(line).trim();
         if body.is_empty() {
             return Ok(());
         }
-        let fields = body.split_whitespace().collect::<Vec<_>>();
-        if fields.is_empty() {
+        let mut fields = body.split_whitespace().peekable();
+        if fields.peek().is_none() {
             return Ok(());
         }
 
         if self.params.is_empty() {
-            self.params = fields.iter().map(|field| (*field).to_string()).collect();
-            validate_data_table_params(line_num, &self.name, &self.params)?;
+            for (index, field) in fields.enumerate() {
+                poll_parse_abort(abort, index)?;
+                self.params.push(field.to_string());
+            }
+            validate_data_table_params_with_abort(line_num, &self.name, &self.params, abort)?;
             return Ok(());
         }
 
-        for field in fields {
-            self.flat_values
-                .push(parse_data_table_value(line_num, &self.name, field, params)?);
+        for (index, field) in fields.enumerate() {
+            poll_parse_abort(abort, index)?;
+            self.flat_values.push(parse_data_table_value_with_abort(
+                line_num, &self.name, field, params, abort,
+            )?);
         }
+        ensure_parse_not_aborted(abort)?;
         Ok(())
     }
 
-    fn finish(self, line_num: usize) -> Result<DataTable, ParseError> {
+    fn finish(
+        self,
+        line_num: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<DataTable, ParseWithAbortError> {
         if self.params.is_empty() {
             return Err(ParseError::Syntax {
                 line: self.opened_at_line,
                 message: format!(".DATA {} has no parameter columns", self.name),
-            });
+            }
+            .into());
         }
         let columns = self.params.len();
         if !self.flat_values.len().is_multiple_of(columns) {
@@ -143,13 +168,15 @@ impl DataTableBuilder {
                     self.flat_values.len(),
                     columns
                 ),
-            });
+            }
+            .into());
         }
-        let rows = self
-            .flat_values
-            .chunks_exact(columns)
-            .map(|chunk| chunk.to_vec())
-            .collect::<Vec<_>>();
+        let mut rows = Vec::with_capacity(self.flat_values.len() / columns);
+        for (index, chunk) in self.flat_values.chunks_exact(columns).enumerate() {
+            poll_parse_abort(abort, index)?;
+            rows.push(chunk.to_vec());
+        }
+        ensure_parse_not_aborted(abort)?;
         Ok(DataTable {
             name: self.name,
             params: self.params,
@@ -158,12 +185,15 @@ impl DataTableBuilder {
     }
 }
 
-fn validate_data_table_params(
+fn validate_data_table_params_with_abort(
     line_num: usize,
     table_name: &str,
     params: &[String],
-) -> Result<(), ParseError> {
-    for param in params {
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    for (index, param) in params.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        poll_parse_text(abort, param)?;
         let mut chars = param.chars();
         let valid = chars
             .next()
@@ -177,18 +207,22 @@ fn validate_data_table_params(
                 message: format!(
                     ".DATA {table_name} parameter column '{param}' is not a valid parameter name"
                 ),
-            });
+            }
+            .into());
         }
     }
+    ensure_parse_not_aborted(abort)?;
     Ok(())
 }
 
-fn parse_data_table_value(
+fn parse_data_table_value_with_abort(
     line_num: usize,
     table_name: &str,
     token: &str,
     params: &ParamContext,
-) -> Result<Value, ParseError> {
+    abort: &dyn AbortSignal,
+) -> Result<Value, ParseWithAbortError> {
+    poll_parse_text(abort, token)?;
     if let Ok(value) = parse_spice_value(token) {
         return Ok(value);
     }
@@ -196,10 +230,12 @@ fn parse_data_table_value(
         .strip_prefix('{')
         .and_then(|rest| rest.strip_suffix('}'))
         .unwrap_or(token);
-    eval_expression(expr, params).map_err(|err| ParseError::Syntax {
+    let value = eval_expression(expr, params).map_err(|err| ParseError::Syntax {
         line: line_num,
         message: format!(".DATA {table_name} value '{token}' is not numeric: {err}"),
-    })
+    })?;
+    ensure_parse_not_aborted(abort)?;
+    Ok(value)
 }
 
 /// Parse a complete netlist from string
@@ -212,7 +248,24 @@ pub fn parse_netlist_with_options(
     input: &str,
     options: NetlistParseOptions,
 ) -> Result<Netlist, ParseError> {
-    let lines: Vec<&str> = input.lines().collect();
+    finish_non_aborting_parse(parse_netlist_with_options_and_abort(
+        input, options, &NoAbort,
+    ))
+}
+
+/// Parse a complete netlist with explicit options and cooperative
+/// cancellation.
+pub fn parse_netlist_with_options_and_abort(
+    input: &str,
+    options: NetlistParseOptions,
+    abort: &dyn AbortSignal,
+) -> Result<Netlist, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    let mut lines: Vec<&str> = Vec::new();
+    for (index, line) in input.lines().enumerate() {
+        poll_parse_abort(abort, index)?;
+        lines.push(line);
+    }
 
     if lines.is_empty() {
         return Ok(Netlist::default());
@@ -229,17 +282,19 @@ pub fn parse_netlist_with_options(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    if let Some(seed) = prescan_random_seed(&lines)? {
+    if let Some(seed) = prescan_random_seed_with_abort(&lines, abort)? {
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
     }
-    prescan_temperature_options(&lines, &mut state)?;
+    prescan_temperature_options_with_abort(&lines, &mut state, abort)?;
 
     let mut line_num = 1;
     let mut continuation = String::new();
     let mut data_table: Option<DataTableBuilder> = None;
 
-    for line in lines.iter().skip(1) {
+    for (line_index, line) in lines.iter().skip(1).enumerate() {
+        poll_parse_abort(abort, line_index)?;
+        poll_parse_text(abort, line)?;
         line_num += 1;
 
         // Strip inline comments (common SPICE syntax), then trim.
@@ -257,20 +312,22 @@ pub fn parse_netlist_with_options(
                 let table = data_table
                     .take()
                     .expect(".DATA builder exists while inside data block")
-                    .finish(line_num)?;
+                    .finish(line_num, abort)?;
                 state.data_tables.push(table);
             } else if head.eq_ignore_ascii_case(".data") {
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: ".DATA cannot be nested inside another .DATA block".to_string(),
-                });
+                }
+                .into());
             } else if is_dot_command_head(head) {
                 return Err(ParseError::Syntax {
                     line: table.opened_at_line,
                     message: ".DATA without a matching .ENDDATA".to_string(),
-                });
+                }
+                .into());
             } else {
-                table.push_line(line_num, trimmed, &state.params)?;
+                table.push_line(line_num, trimmed, &state.params, abort)?;
             }
             continue;
         }
@@ -284,7 +341,8 @@ pub fn parse_netlist_with_options(
 
         // Process previous continued line if exists
         if !continuation.is_empty() {
-            process_line_gated(&continuation, line_num - 1, &mut state)?;
+            process_line_gated(&continuation, line_num - 1, &mut state)
+                .map_err(ParseWithAbortError::from)?;
             continuation.clear();
         }
 
@@ -303,14 +361,15 @@ pub fn parse_netlist_with_options(
             break;
         }
         if head.eq_ignore_ascii_case(".data") {
-            data_table = Some(DataTableBuilder::new(line_num, trimmed)?);
+            data_table = Some(DataTableBuilder::new(line_num, trimmed, abort)?);
             continue;
         }
         if head.eq_ignore_ascii_case(".enddata") {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: ".ENDDATA without matching .DATA".to_string(),
-            });
+            }
+            .into());
         }
 
         // Handle .VERILOGA directive directly (before continuation handling)
@@ -328,50 +387,59 @@ pub fn parse_netlist_with_options(
         return Err(ParseError::Syntax {
             line: table.opened_at_line,
             message: ".DATA without a matching .ENDDATA".to_string(),
-        });
+        }
+        .into());
     }
 
     // Process final line
     if !continuation.is_empty() {
-        process_line_gated(&continuation, line_num, &mut state)?;
+        process_line_gated(&continuation, line_num, &mut state)
+            .map_err(ParseWithAbortError::from)?;
     }
 
     if let Some(frame) = state.conditional_stack.last() {
         return Err(ParseError::Syntax {
             line: frame.opened_at_line,
             message: ".if without a matching .endif".to_string(),
-        });
+        }
+        .into());
     }
 
-    normalize_pspice_u_timing_aliases(&mut state);
-    resolve_top_level_deferred_source_specs(&mut state.elements, &state.params)?;
-    validate_resistor_model_references(&state)?;
+    normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
+    resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
+    validate_resistor_model_references_with_abort(&state, abort)?;
 
-    state.into_netlist(title, input, line_num)
+    ensure_parse_not_aborted(abort)?;
+    state
+        .into_netlist(title, input, line_num)
+        .map_err(ParseWithAbortError::from)
 }
 
-fn resolve_top_level_deferred_source_specs(
+fn resolve_top_level_deferred_source_specs_with_abort(
     elements: &mut [Element],
     params: &ParamContext,
-) -> Result<(), ParseError> {
-    for element in elements {
-        let replacement =
-            match &element.kind {
-                ElementKind::VoltageSourceDeferred(raw_spec) => Some(
-                    resolve_top_level_source_kind(&element.name, raw_spec, params, true)?,
-                ),
-                ElementKind::CurrentSourceDeferred(raw_spec) => Some(
-                    resolve_top_level_source_kind(&element.name, raw_spec, params, false)?,
-                ),
-                _ => None,
-            };
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    for (index, element) in elements.iter_mut().enumerate() {
+        poll_parse_abort(abort, index)?;
+        let replacement = match &element.kind {
+            ElementKind::VoltageSourceDeferred(raw_spec) => Some(
+                resolve_top_level_source_kind(&element.name, raw_spec, params, true)
+                    .map_err(ParseWithAbortError::from)?,
+            ),
+            ElementKind::CurrentSourceDeferred(raw_spec) => Some(
+                resolve_top_level_source_kind(&element.name, raw_spec, params, false)
+                    .map_err(ParseWithAbortError::from)?,
+            ),
+            _ => None,
+        };
 
         if let Some(kind) = replacement {
             element.kind = kind;
         }
     }
 
-    Ok(())
+    ensure_parse_not_aborted(abort)
 }
 
 fn resolve_top_level_source_kind(
@@ -428,7 +496,11 @@ fn top_level_source_resolution_error(
     ))
 }
 
-fn normalize_pspice_u_timing_aliases(state: &mut ParseState) {
+fn normalize_pspice_u_timing_aliases_with_abort(
+    state: &mut ParseState,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let source_models = state.models.clone();
     let mut existing_names: HashSet<String> = state
         .models
@@ -437,56 +509,67 @@ fn normalize_pspice_u_timing_aliases(state: &mut ParseState) {
         .collect();
     let mut generated_models = Vec::new();
 
-    normalize_pspice_u_timing_in_elements(
+    normalize_pspice_u_timing_in_elements_with_abort(
         &mut state.elements,
         "TOP",
         &source_models,
         &mut existing_names,
         &mut generated_models,
-    );
-    for subckt in &mut state.subcircuits {
-        normalize_pspice_u_timing_in_subckt(
+        abort,
+    )?;
+    for (index, subckt) in state.subcircuits.iter_mut().enumerate() {
+        poll_parse_abort(abort, index)?;
+        normalize_pspice_u_timing_in_subckt_with_abort(
             subckt,
             &source_models,
             &mut existing_names,
             &mut generated_models,
-        );
+            abort,
+        )?;
     }
 
     state.models.extend(generated_models);
+    ensure_parse_not_aborted(abort)
 }
 
-fn normalize_pspice_u_timing_in_subckt(
+fn normalize_pspice_u_timing_in_subckt_with_abort(
     subckt: &mut SubcircuitDef,
     source_models: &[ModelDef],
     existing_names: &mut HashSet<String>,
     generated_models: &mut Vec<ModelDef>,
-) {
-    normalize_pspice_u_timing_in_elements(
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    normalize_pspice_u_timing_in_elements_with_abort(
         &mut subckt.elements,
         &subckt.name,
         source_models,
         existing_names,
         generated_models,
-    );
-    for nested in &mut subckt.nested_subcircuits {
-        normalize_pspice_u_timing_in_subckt(
+        abort,
+    )?;
+    for (index, nested) in subckt.nested_subcircuits.iter_mut().enumerate() {
+        poll_parse_abort(abort, index)?;
+        normalize_pspice_u_timing_in_subckt_with_abort(
             nested,
             source_models,
             existing_names,
             generated_models,
-        );
+            abort,
+        )?;
     }
+    Ok(())
 }
 
-fn normalize_pspice_u_timing_in_elements(
+fn normalize_pspice_u_timing_in_elements_with_abort(
     elements: &mut [Element],
     scope: &str,
     source_models: &[ModelDef],
     existing_names: &mut HashSet<String>,
     generated_models: &mut Vec<ModelDef>,
-) {
-    for element in elements {
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    for (index, element) in elements.iter_mut().enumerate() {
+        poll_parse_abort(abort, index)?;
         let ElementKind::Xspice {
             model,
             pspice_u_timing,
@@ -516,6 +599,7 @@ fn normalize_pspice_u_timing_in_elements(
         *model = alias_name;
         generated_models.push(alias);
     }
+    Ok(())
 }
 
 fn pspice_u_timing_model_supported(code_model: &str, timing_model: &ModelDef) -> bool {
@@ -973,35 +1057,44 @@ fn sanitize_pspice_u_generated_model_name(raw: &str) -> String {
     out
 }
 
-fn validate_resistor_model_references(state: &ParseState) -> Result<(), ParseError> {
+fn validate_resistor_model_references_with_abort(
+    state: &ParseState,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let models = state
         .models
         .iter()
         .map(|model| model.name.to_ascii_uppercase())
         .collect::<HashSet<_>>();
-    validate_resistor_model_references_in_elements(&state.elements, &models)?;
-    for subckt in &state.subcircuits {
-        validate_resistor_model_references_in_subckt(subckt, &models)?;
+    validate_resistor_model_references_in_elements_with_abort(&state.elements, &models, abort)?;
+    for (index, subckt) in state.subcircuits.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        validate_resistor_model_references_in_subckt_with_abort(subckt, &models, abort)?;
     }
-    Ok(())
+    ensure_parse_not_aborted(abort)
 }
 
-fn validate_resistor_model_references_in_subckt(
+fn validate_resistor_model_references_in_subckt_with_abort(
     subckt: &SubcircuitDef,
     models: &HashSet<String>,
-) -> Result<(), ParseError> {
-    validate_resistor_model_references_in_elements(&subckt.elements, models)?;
-    for nested in &subckt.nested_subcircuits {
-        validate_resistor_model_references_in_subckt(nested, models)?;
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    validate_resistor_model_references_in_elements_with_abort(&subckt.elements, models, abort)?;
+    for (index, nested) in subckt.nested_subcircuits.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        validate_resistor_model_references_in_subckt_with_abort(nested, models, abort)?;
     }
     Ok(())
 }
 
-fn validate_resistor_model_references_in_elements(
+fn validate_resistor_model_references_in_elements_with_abort(
     elements: &[Element],
     models: &HashSet<String>,
-) -> Result<(), ParseError> {
-    for element in elements {
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    for (index, element) in elements.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
         let ElementKind::Resistor {
             model: Some(model),
             instance_params,
@@ -1023,7 +1116,8 @@ fn validate_resistor_model_references_in_elements(
                     "Resistor '{}' references unknown model '{}'",
                     element.name, model
                 ),
-            });
+            }
+            .into());
         }
     }
     Ok(())
@@ -1035,12 +1129,18 @@ fn is_dot_command_head(head: &str) -> bool {
         .is_some_and(|ch| ch.is_ascii_alphabetic())
 }
 
-fn prescan_temperature_options(lines: &[&str], state: &mut ParseState) -> Result<(), ParseError> {
+fn prescan_temperature_options_with_abort(
+    lines: &[&str],
+    state: &mut ParseState,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
     let mut continuation = String::new();
     let mut in_options = false;
     let mut line_num = 1usize;
 
-    for line in lines.iter().skip(1) {
+    for (index, line) in lines.iter().skip(1).enumerate() {
+        poll_parse_abort(abort, index)?;
+        poll_parse_text(abort, line)?;
         line_num += 1;
         let stripped = strip_inline_semicolon_comment(line);
         let trimmed = stripped.trim();
@@ -1057,7 +1157,8 @@ fn prescan_temperature_options(lines: &[&str], state: &mut ParseState) -> Result
         }
 
         if !continuation.is_empty() {
-            scan_temperature_option_line(&continuation, line_num - 1, state)?;
+            scan_temperature_option_line(&continuation, line_num - 1, state)
+                .map_err(ParseWithAbortError::from)?;
             continuation.clear();
         }
 
@@ -1074,10 +1175,11 @@ fn prescan_temperature_options(lines: &[&str], state: &mut ParseState) -> Result
     }
 
     if !continuation.is_empty() {
-        scan_temperature_option_line(&continuation, line_num, state)?;
+        scan_temperature_option_line(&continuation, line_num, state)
+            .map_err(ParseWithAbortError::from)?;
     }
 
-    Ok(())
+    ensure_parse_not_aborted(abort)
 }
 
 fn scan_temperature_option_line(
@@ -1162,12 +1264,17 @@ fn process_line_gated(
 /// Scans `.options` logical lines (including `+` continuations); the last
 /// occurrence wins, matching SPICE option-override behavior. `seed=random`
 /// is ignored here — `parse_options_command` emits the warning for it.
-fn prescan_random_seed(lines: &[&str]) -> Result<Option<u64>, ParseError> {
+fn prescan_random_seed_with_abort(
+    lines: &[&str],
+    abort: &dyn AbortSignal,
+) -> Result<Option<u64>, ParseWithAbortError> {
     let mut seed = None;
     let mut in_options = false;
     let mut line_num = 1usize;
 
-    for line in lines.iter().skip(1) {
+    for (index, line) in lines.iter().skip(1).enumerate() {
+        poll_parse_abort(abort, index)?;
+        poll_parse_text(abort, line)?;
         line_num += 1;
         let stripped = strip_inline_semicolon_comment(line);
         let trimmed = stripped.trim();
@@ -1180,7 +1287,8 @@ fn prescan_random_seed(lines: &[&str]) -> Result<Option<u64>, ParseError> {
             if !in_options {
                 continue;
             }
-            scan_options_tokens_for_seed(rest, line_num, &mut seed)?;
+            scan_options_tokens_for_seed(rest, line_num, &mut seed)
+                .map_err(ParseWithAbortError::from)?;
             continue;
         }
 
@@ -1192,12 +1300,14 @@ fn prescan_random_seed(lines: &[&str]) -> Result<Option<u64>, ParseError> {
             // commands starting with `.opt` are not misread.
             Some(rest) if rest.is_empty() || rest.starts_with([' ', '\t']) => {
                 in_options = true;
-                scan_options_tokens_for_seed(rest, line_num, &mut seed)?;
+                scan_options_tokens_for_seed(rest, line_num, &mut seed)
+                    .map_err(ParseWithAbortError::from)?;
             }
             _ => in_options = false,
         }
     }
 
+    ensure_parse_not_aborted(abort)?;
     Ok(seed)
 }
 
@@ -1255,3 +1365,43 @@ fn scan_options_tokens_for_seed(
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn parser_aborts_after_multiple_internal_deck_polls() {
+        let mut source = String::from("parser cancellation fixture\n");
+        for index in 0..4_096 {
+            source.push_str(&format!("R{index} n{index} 0 1k\n"));
+        }
+        source.push_str(".end\n");
+        let abort = crate::abort_signal::CountingAbort::new(100);
+
+        let result =
+            parse_netlist_with_options_and_abort(&source, NetlistParseOptions::default(), &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > 100, "parser must poll during deck work");
+    }
+
+    #[test]
+    fn data_row_tokenization_aborts_inside_one_large_logical_line() {
+        let mut builder =
+            DataTableBuilder::new(2, ".data sweep value", &crate::abort_signal::NoAbort)
+                .expect("fixture .DATA header is valid");
+        let row = std::iter::repeat_n("1", 8_192)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let abort = crate::abort_signal::CountingAbort::new(7);
+
+        let result = builder.push_line(3, &row, &ParamContext::new(), &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(
+            abort.count() > 7,
+            "one large .DATA row must poll beyond its outer line boundary"
+        );
+    }
+}

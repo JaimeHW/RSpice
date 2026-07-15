@@ -14,6 +14,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 
 use super::config::AnalysisConfig;
+use super::execution::AuthorizedTaskDispatch;
 use super::multi_run::AnalysisSpec;
 use super::results::SimulationResult;
 use super::status::{SimulationProgress, SimulationStatus};
@@ -218,6 +219,17 @@ impl SimulationRunner {
         }
     }
 
+    /// Whether a new prepared task can be accepted without displacing either
+    /// active work or a completion that the controller has not consumed yet.
+    ///
+    /// A finished native thread is intentionally still busy from the
+    /// controller's perspective until `poll_result` joins it. This closes the
+    /// otherwise small window where a second Run action could overwrite the
+    /// batch metadata needed to classify that completion.
+    pub(in crate::simulation) fn can_accept_prepared_task(&self) -> bool {
+        !self.is_running() && !self.has_unpolled_result()
+    }
+
     #[cfg(test)]
     pub(crate) fn store_pending_result(
         &mut self,
@@ -231,19 +243,42 @@ impl SimulationRunner {
         Ok(())
     }
 
+    /// Dispatch one task taken from an authorized immutable run snapshot.
+    ///
+    /// Prepared netlists are self-contained, so a source path is deliberately
+    /// unavailable here: the worker cannot reopen editor-era dependencies.
+    pub(in crate::simulation) fn start_prepared(
+        &mut self,
+        dispatch: AuthorizedTaskDispatch,
+    ) -> Result<(), SimulationError> {
+        let (task, executable_netlist) = dispatch.into_runner_parts();
+        let request = match task.config {
+            Some(config) => SimulationRequest::Config(Box::new(config)),
+            None => SimulationRequest::Spec {
+                spec: Box::new(task.spec),
+                options: Box::new(task.spec_options),
+            },
+        };
+        self.start_request(
+            request,
+            NetlistInput {
+                netlist: executable_netlist.to_string(),
+                source_path: None,
+            },
+        )
+    }
+
     /// Start a simulation with the given configuration
     ///
     /// Returns error if a simulation is already running.
-    pub fn start(
-        &mut self,
-        config: AnalysisConfig,
-        netlist: String,
-    ) -> Result<(), SimulationError> {
+    #[cfg(test)]
+    fn start(&mut self, config: AnalysisConfig, netlist: String) -> Result<(), SimulationError> {
         self.start_with_source_path(config, netlist, None)
     }
 
     /// Start a simulation with the given configuration and source path.
-    pub fn start_with_source_path(
+    #[cfg(test)]
+    fn start_with_source_path(
         &mut self,
         config: AnalysisConfig,
         netlist: String,
@@ -259,11 +294,9 @@ impl SimulationRunner {
     }
 
     /// Start a simulation from strongly-typed analysis spec.
-    pub fn start_spec(
-        &mut self,
-        spec: AnalysisSpec,
-        netlist: String,
-    ) -> Result<(), SimulationError> {
+    #[allow(dead_code)]
+    #[cfg(test)]
+    fn start_spec(&mut self, spec: AnalysisSpec, netlist: String) -> Result<(), SimulationError> {
         self.start_spec_with_options_with_source_path(
             spec,
             netlist,
@@ -273,7 +306,9 @@ impl SimulationRunner {
     }
 
     /// Start a simulation from strongly-typed analysis spec with explicit execution options.
-    pub fn start_spec_with_options(
+    #[allow(dead_code)]
+    #[cfg(test)]
+    fn start_spec_with_options(
         &mut self,
         spec: AnalysisSpec,
         netlist: String,
@@ -284,7 +319,9 @@ impl SimulationRunner {
 
     /// Start a simulation from strongly-typed analysis spec with explicit
     /// execution options and a source path for relative include resolution.
-    pub fn start_spec_with_options_with_source_path(
+    #[allow(dead_code)]
+    #[cfg(test)]
+    fn start_spec_with_options_with_source_path(
         &mut self,
         spec: AnalysisSpec,
         netlist: String,
@@ -347,13 +384,17 @@ impl SimulationRunner {
     }
 
     /// Run DC operating point analysis
-    pub fn run_dc_op(&mut self, netlist: String) -> Result<(), SimulationError> {
+    #[allow(dead_code)]
+    #[cfg(test)]
+    fn run_dc_op(&mut self, netlist: String) -> Result<(), SimulationError> {
         self.start(AnalysisConfig::DcOp, netlist)
     }
 
     /// Run DC operating point analysis with a source path for relative include
     /// resolution.
-    pub fn run_dc_op_with_source_path(
+    #[allow(dead_code)]
+    #[cfg(test)]
+    fn run_dc_op_with_source_path(
         &mut self,
         netlist: String,
         source_path: Option<PathBuf>,
@@ -945,5 +986,102 @@ mod tests {
                 stop_freq: 30.0
             }
         );
+    }
+
+    #[test]
+    fn production_runner_surface_exposes_only_the_opaque_prepared_start() {
+        let source = include_str!("mod.rs");
+        let controller_source = include_str!("../controller/mod.rs");
+        // Split boundary-sensitive search strings so this test's own source
+        // cannot satisfy or invalidate the assertions.
+        let prepared_signature = ["pub(in crate::simulation) fn ", "start_prepared"].concat();
+        assert_eq!(source.match_indices(&prepared_signature).count(), 1);
+        for forbidden in [
+            ["pub(crate) fn ", "start_request"].concat(),
+            ["pub(in crate::simulation) fn ", "start_request"].concat(),
+        ] {
+            assert!(
+                !source.contains(&forbidden),
+                "raw start request must remain private: {forbidden}"
+            );
+        }
+
+        for signature in [
+            "\n    fn start(&mut self",
+            "\n    fn start_with_source_path(",
+            "\n    fn start_spec(&mut self",
+            "\n    fn start_spec_with_options(",
+            "\n    fn start_spec_with_options_with_source_path(",
+            "\n    fn run_dc_op(&mut self",
+            "\n    fn run_dc_op_with_source_path(",
+        ] {
+            let index = source
+                .find(signature)
+                .unwrap_or_else(|| panic!("missing raw test helper {signature}"));
+            let prefix = &source[..index];
+            assert_eq!(
+                prefix.lines().next_back().map(str::trim),
+                Some("#[cfg(test)]"),
+                "raw start helper must remain test-only: {signature}",
+            );
+        }
+
+        assert_eq!(
+            controller_source
+                .match_indices("self.runner.start_prepared(")
+                .count(),
+            1,
+            "the controller must have one opaque task dispatch point"
+        );
+        for forbidden in [
+            "self.runner.start(",
+            "self.runner.start_with_source_path(",
+            "self.runner.start_spec(",
+            "self.runner.start_spec_with_options(",
+            "self.runner.start_spec_with_options_with_source_path(",
+            "self.runner.run_dc_op(",
+            "self.runner.run_dc_op_with_source_path(",
+        ] {
+            assert!(
+                !controller_source.contains(forbidden),
+                "controller bypasses the authorized dispatch boundary: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_task_readiness_rejects_active_and_finished_unpolled_threads() {
+        let mut runner = SimulationRunner::new();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel::<()>();
+        runner.thread_handle = Some(std::thread::spawn(move || {
+            release_receiver.recv().expect("release active worker");
+            Err(SimulationError::Aborted)
+        }));
+
+        assert!(runner.is_running());
+        assert!(!runner.can_accept_prepared_task());
+        release_sender.send(()).expect("release worker");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while runner
+            .thread_handle
+            .as_ref()
+            .is_some_and(|handle| !handle.is_finished())
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "test worker did not finish"
+            );
+            std::thread::yield_now();
+        }
+
+        assert!(!runner.is_running());
+        assert!(runner.has_unpolled_result());
+        assert!(!runner.can_accept_prepared_task());
+        assert!(matches!(
+            runner.poll_result(),
+            Some(Err(SimulationError::Aborted))
+        ));
+        assert!(runner.can_accept_prepared_task());
     }
 }

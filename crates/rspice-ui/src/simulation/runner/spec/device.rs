@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use rspice_core::abort_signal::AbortSignal;
+
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::{AnalysisSpec, OptimizationAlgorithm, OptimizationGoal};
 use crate::simulation::results::{SimulationResult, WaveformData};
@@ -10,7 +12,9 @@ pub(super) fn run_device_spec(
     spec: AnalysisSpec,
     netlist: &str,
     source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
     match spec {
         AnalysisSpec::Reliability {
             target_years,
@@ -20,12 +24,15 @@ pub(super) fn run_device_spec(
             min_stress_voltage,
         } => run_reliability(
             netlist,
-            target_years,
-            enable_hci,
-            enable_nbti,
-            enable_em,
-            min_stress_voltage,
+            ReliabilityRunRequest {
+                target_years,
+                enable_hci,
+                enable_nbti,
+                enable_em,
+                min_stress_voltage,
+            },
             source_path,
+            abort,
         ),
         AnalysisSpec::Optimization {
             variables,
@@ -53,6 +60,7 @@ pub(super) fn run_device_spec(
             initial_step,
             min_step,
             source_path,
+            abort,
         ),
         AnalysisSpec::Soa {
             stop_time,
@@ -78,20 +86,33 @@ pub(super) fn run_device_spec(
             check_vce_max,
             max_vce,
             source_path,
+            abort,
         ),
         other => Err(super::misrouted_spec_error("device", &other)),
     }
 }
 
-fn run_reliability(
-    netlist: &str,
+struct ReliabilityRunRequest {
     target_years: Vec<f64>,
     enable_hci: bool,
     enable_nbti: bool,
     enable_em: bool,
     min_stress_voltage: f64,
+}
+
+fn run_reliability(
+    netlist: &str,
+    request: ReliabilityRunRequest,
     source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    let ReliabilityRunRequest {
+        target_years,
+        enable_hci,
+        enable_nbti,
+        enable_em,
+        min_stress_voltage,
+    } = request;
     let cfg = svc_runner::ReliabilityRunConfig {
         target_years,
         enable_hci,
@@ -99,21 +120,25 @@ fn run_reliability(
         enable_em,
         min_stress_voltage,
     };
-    let data = svc_runner::run_reliability_analysis_with_config_and_source_path(
-        netlist,
-        &cfg,
-        source_path,
-    )
-    .map_err(SimulationError::InvalidConfig)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_reliability_analysis_with_config_and_source_path_and_abort(
+            netlist,
+            &cfg,
+            source_path,
+            abort,
+        )
+    })?;
 
     let mut waveforms = HashMap::new();
     for device in &data.device_results {
+        super::ensure_not_aborted(abort)?;
         let mut years = Vec::with_capacity(data.years.len());
         let mut vth = Vec::with_capacity(data.years.len());
         let mut mobility = Vec::with_capacity(data.years.len());
         let mut rds = Vec::with_capacity(data.years.len());
 
         for years_key in &data.years {
+            super::ensure_not_aborted(abort)?;
             let key = format!("{}y", years_key);
             let shift = device.shifts.get(&key).cloned().unwrap_or_default();
             years.push(*years_key);
@@ -170,17 +195,20 @@ fn run_optimization(
     initial_step: f64,
     min_step: f64,
     source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    let mut configured_variables = Vec::with_capacity(variables.len());
+    for variable in variables {
+        super::ensure_not_aborted(abort)?;
+        configured_variables.push(svc_runner::OptimizationVariable {
+            name: variable.name,
+            min: variable.min,
+            max: variable.max,
+            initial: variable.initial,
+        });
+    }
     let cfg = svc_runner::OptimizationRunConfig {
-        variables: variables
-            .into_iter()
-            .map(|var| svc_runner::OptimizationVariable {
-                name: var.name,
-                min: var.min,
-                max: var.max,
-                initial: var.initial,
-            })
-            .collect(),
+        variables: configured_variables,
         objective_node,
         objective_ref,
         goal: match goal {
@@ -207,14 +235,17 @@ fn run_optimization(
         min_step,
     };
 
-    let data = svc_runner::run_optimization_analysis_with_config_and_source_path(
-        netlist,
-        &cfg,
-        source_path,
-    )
-    .map_err(SimulationError::InvalidConfig)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_optimization_analysis_with_config_and_source_path_and_abort(
+            netlist,
+            &cfg,
+            source_path,
+            abort,
+        )
+    })?;
 
     let mut waveforms = HashMap::new();
+    super::ensure_not_aborted(abort)?;
     insert_scalar_waveform(
         &mut waveforms,
         "OPT_COST".to_string(),
@@ -224,6 +255,7 @@ fn run_optimization(
         "iter",
     );
     for (name, values) in &data.variable_traces {
+        super::ensure_not_aborted(abort)?;
         insert_scalar_waveform(
             &mut waveforms,
             format!("OPT_{}", name),
@@ -257,6 +289,7 @@ fn run_soa(
     check_vce_max: bool,
     max_vce: f64,
     source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let cfg = svc_runner::SoaRunConfig {
         stop_time,
@@ -270,9 +303,16 @@ fn run_soa(
         check_vce_max,
         max_vce,
     };
-    let data = svc_runner::run_soa_analysis_with_config_and_source_path(netlist, &cfg, source_path)
-        .map_err(SimulationError::InvalidConfig)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_soa_analysis_with_config_and_source_path_and_abort(
+            netlist,
+            &cfg,
+            source_path,
+            abort,
+        )
+    })?;
     let mut waveforms = HashMap::new();
+    super::ensure_not_aborted(abort)?;
     insert_scalar_waveform(
         &mut waveforms,
         "SOA_VIOLATION_COUNT".to_string(),

@@ -1,8 +1,10 @@
-use super::{build_engine_config, parse_runner_netlist};
+use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
+use super::{build_engine_config, parse_runner_netlist_with_abort};
 use crate::simulation::reliability_engine::{
     ParamShift, ReliabilityEngine, ReliabilityResult, StressMetrics,
 };
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
@@ -13,8 +15,6 @@ use std::path::Path;
 #[derive(Debug)]
 enum ReliabilityRunError {
     InvalidConfig(&'static str),
-    Parse(String),
-    DcOperatingPoint(String),
     NoStressedDevices,
 }
 
@@ -22,8 +22,6 @@ impl fmt::Display for ReliabilityRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig(message) => f.write_str(message),
-            Self::Parse(err) => f.write_str(err),
-            Self::DcOperatingPoint(err) => write!(f, "DC operating point error: {err}"),
             Self::NoStressedDevices => f.write_str(
                 "Reliability analysis found no stressed semiconductor devices in the circuit",
             ),
@@ -99,7 +97,15 @@ pub struct ReliabilityData {
 
 /// Run reliability analysis with default configuration.
 pub fn run_reliability_analysis(netlist_text: &str) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_source_path(netlist_text, None)
+    run_reliability_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run reliability analysis with cooperative cancellation.
+pub fn run_reliability_analysis_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ReliabilityData> {
+    run_reliability_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run reliability analysis with default configuration and a source path used
@@ -108,10 +114,22 @@ pub fn run_reliability_analysis_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_config_and_source_path(
+    run_reliability_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run reliability analysis with source-path resolution and cooperative
+/// cancellation.
+pub fn run_reliability_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ReliabilityData> {
+    run_reliability_analysis_with_config_and_source_path_and_abort(
         netlist_text,
         &ReliabilityRunConfig::default(),
         source_path,
+        abort,
     )
 }
 
@@ -120,7 +138,23 @@ pub fn run_reliability_analysis_with_config(
     netlist_text: &str,
     config: &ReliabilityRunConfig,
 ) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_config_and_source_path(netlist_text, config, None)
+    run_reliability_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run explicitly configured reliability analysis with cooperative
+/// cancellation.
+pub fn run_reliability_analysis_with_config_and_abort(
+    netlist_text: &str,
+    config: &ReliabilityRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ReliabilityData> {
+    run_reliability_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        None,
+        abort,
+    )
 }
 
 /// Run reliability analysis using explicit configuration and a source path used
@@ -130,45 +164,67 @@ pub fn run_reliability_analysis_with_config_and_source_path(
     config: &ReliabilityRunConfig,
     source_path: Option<&Path>,
 ) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_config_internal(netlist_text, config, source_path)
-        .map_err(|err| err.to_string())
+    run_reliability_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
 }
 
-fn run_reliability_analysis_with_config_internal(
+/// Run explicitly configured reliability analysis with source-path resolution
+/// and cooperative cancellation.
+pub fn run_reliability_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &ReliabilityRunConfig,
     source_path: Option<&Path>,
-) -> Result<ReliabilityData, ReliabilityRunError> {
-    config.validate()?;
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ReliabilityData> {
+    ensure_not_aborted(abort)?;
+    config
+        .validate()
+        .map_err(|error| ServiceRunError::Failure(error.to_string()))?;
 
-    let mut years = config.target_years.clone();
+    let mut years = Vec::with_capacity(config.target_years.len());
+    for (index, value) in config.target_years.iter().copied().enumerate() {
+        poll_periodically(abort, index)?;
+        years.push(value);
+    }
+    ensure_not_aborted(abort)?;
     years.sort_by(|a, b| a.total_cmp(b));
     years.dedup_by(|a, b| (*a - *b).abs() <= 1e-12);
+    ensure_not_aborted(abort)?;
 
-    let netlist =
-        parse_runner_netlist(netlist_text, source_path).map_err(ReliabilityRunError::Parse)?;
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     let sim_config = build_engine_config(&netlist, None);
     let temperature_k = sim_config.temperature;
     let engine = Engine::new(sim_config);
     let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| ReliabilityRunError::DcOperatingPoint(e.to_string()))?;
+        .run_dc_op_with_abort(&netlist, abort)
+        .map_err(|error| ServiceRunError::from_core("DC operating point error", error))?;
 
-    let node_voltages = build_node_voltage_lookup(&dc_result);
+    let node_voltages = build_node_voltage_lookup(&dc_result, abort)?;
     let stress_data = extract_reliability_stress_data(
         &netlist.elements,
         &node_voltages,
         temperature_k,
         config.min_stress_voltage,
-    );
+        abort,
+    )?;
     if stress_data.is_empty() {
-        return Err(ReliabilityRunError::NoStressedDevices);
+        return Err(ServiceRunError::Failure(
+            ReliabilityRunError::NoStressedDevices.to_string(),
+        ));
     }
 
     let reliability_engine = ReliabilityEngine::new();
-    let mut device_results = reliability_engine.analyze_circuit(&stress_data, &years);
-    apply_reliability_mechanism_scaling(&mut device_results, config);
+    let mut device_results =
+        analyze_circuit_with_abort(&reliability_engine, &stress_data, &years, abort)?;
+    apply_reliability_mechanism_scaling(&mut device_results, config, abort)?;
+    ensure_not_aborted(abort)?;
     device_results.sort_by_cached_key(|result| result.device_id.to_ascii_uppercase());
+    ensure_not_aborted(abort)?;
 
     Ok(ReliabilityData {
         years,
@@ -176,9 +232,13 @@ fn run_reliability_analysis_with_config_internal(
     })
 }
 
-fn build_node_voltage_lookup(dc_result: &CoreSimulationResult) -> HashMap<String, Value> {
+fn build_node_voltage_lookup(
+    dc_result: &CoreSimulationResult,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<HashMap<String, Value>> {
     let mut lookup = HashMap::new();
     for (idx, node_name) in dc_result.node_names.iter().enumerate() {
+        poll_periodically(abort, idx)?;
         if let Some(voltage) = dc_result.node_voltages.get(idx) {
             lookup.insert(node_name.clone(), *voltage);
             lookup.insert(node_name.to_ascii_uppercase(), *voltage);
@@ -186,7 +246,8 @@ fn build_node_voltage_lookup(dc_result: &CoreSimulationResult) -> HashMap<String
     }
     lookup.insert("0".to_string(), 0.0);
     lookup.insert("GND".to_string(), 0.0);
-    lookup
+    ensure_not_aborted(abort)?;
+    Ok(lookup)
 }
 
 fn resolve_node_voltage(node_voltages: &HashMap<String, Value>, node_name: &str) -> Value {
@@ -209,11 +270,13 @@ fn extract_reliability_stress_data(
     node_voltages: &HashMap<String, Value>,
     temperature_k: Value,
     min_stress_voltage: Value,
-) -> HashMap<String, StressMetrics> {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<HashMap<String, StressMetrics>> {
     let mut stress_data = HashMap::new();
     let min_stress = min_stress_voltage.max(0.0);
 
-    for element in elements {
+    for (element_index, element) in elements.iter().enumerate() {
+        poll_periodically(abort, element_index)?;
         let stress_pair = match &element.kind {
             ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
                 if element.nodes.len() < 3 {
@@ -266,13 +329,44 @@ fn extract_reliability_stress_data(
         );
     }
 
-    stress_data
+    ensure_not_aborted(abort)?;
+    Ok(stress_data)
+}
+
+fn analyze_circuit_with_abort(
+    reliability_engine: &ReliabilityEngine,
+    stress_data: &HashMap<String, StressMetrics>,
+    target_years: &[Value],
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Vec<ReliabilityResult>> {
+    let mut results = Vec::with_capacity(stress_data.len());
+
+    for (device_index, (device_id, stress)) in stress_data.iter().enumerate() {
+        poll_periodically(abort, device_index)?;
+        let mut shifts = HashMap::with_capacity(target_years.len());
+        for (year_index, &years) in target_years.iter().enumerate() {
+            poll_periodically(abort, year_index)?;
+            shifts.insert(
+                format!("{}y", years),
+                reliability_engine.calculate_shift(stress, years),
+            );
+        }
+        results.push(ReliabilityResult {
+            device_id: device_id.clone(),
+            stress: stress.clone(),
+            shifts,
+        });
+    }
+
+    ensure_not_aborted(abort)?;
+    Ok(results)
 }
 
 fn apply_reliability_mechanism_scaling(
     results: &mut [ReliabilityResult],
     config: &ReliabilityRunConfig,
-) {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<()> {
     let mut vth_factor = 0.0;
     let mut mobility_factor = 0.0;
     let mut rds_factor = 0.0;
@@ -291,11 +385,14 @@ fn apply_reliability_mechanism_scaling(
         rds_factor += 2.2;
     }
 
-    for result in results {
-        for shift in result.shifts.values_mut() {
+    for (result_index, result) in results.iter_mut().enumerate() {
+        poll_periodically(abort, result_index)?;
+        for (shift_index, shift) in result.shifts.values_mut().enumerate() {
+            poll_periodically(abort, shift_index)?;
             apply_shift_factors(shift, vth_factor, mobility_factor, rds_factor);
         }
     }
+    ensure_not_aborted(abort)
 }
 
 fn apply_shift_factors(
@@ -307,4 +404,60 @@ fn apply_shift_factors(
     shift.vth_shift *= vth_factor;
     shift.mobility_shift *= mobility_factor;
     shift.rds_shift *= rds_factor;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct AbortOnPoll {
+        abort_on: usize,
+        polls: AtomicUsize,
+    }
+
+    impl AbortOnPoll {
+        fn new(abort_on: usize) -> Self {
+            Self {
+                abort_on,
+                polls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl AbortSignal for AbortOnPoll {
+        fn is_aborted(&self) -> bool {
+            self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
+
+    #[test]
+    fn reliability_honors_early_abort_before_invalid_input() {
+        let abort = AbortOnPoll::new(1);
+        let result = run_reliability_analysis_with_abort("invalid", &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn reliability_honors_abort_during_device_and_lifetime_work() {
+        let stress_data = HashMap::from([(
+            "M1".to_string(),
+            StressMetrics {
+                avg_vgs_stress: 1.0,
+                avg_vds_stress: 1.0,
+                avg_temp: 300.0,
+                duration: 3_600.0,
+            },
+        )]);
+        let years: Vec<Value> = (1..=512).map(|year| year as Value).collect();
+        let abort = AbortOnPoll::new(3);
+        let engine = ReliabilityEngine::new();
+
+        let result = analyze_circuit_with_abort(&engine, &stress_data, &years, &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(abort.polls.load(Ordering::Relaxed) >= 3);
+    }
 }

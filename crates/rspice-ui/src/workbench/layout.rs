@@ -15,12 +15,14 @@ pub struct LayoutSpec {
     pub inspector_uses_drawer: bool,
     pub workspaces_uses_drawer: bool,
     pub has_overlay_drawer: bool,
+    pub show_console_strip: bool,
     pub show_console_body: bool,
     pub console_resizable: bool,
     pub show_phone_navigation: bool,
     pub toolbar_labels: bool,
     pub toolbar_tool_limit: Option<usize>,
     pub show_pvt_selector: bool,
+    pub show_run_config_selector: bool,
     pub navigator_resizable: bool,
     pub inspector_resizable: bool,
     pub title_bar_height: f32,
@@ -57,6 +59,10 @@ impl LayoutSpec {
         let workspaces_uses_drawer = viewport_width <= 560.0 || short_landscape;
         let show_console_body =
             (state.console_visible || state.console_maximized) && !state.focus_mode;
+        // The canonical phone-landscape composition gives the constrained
+        // canvas the entire remaining height. The console re-enters the grid
+        // only when the user explicitly opens it.
+        let show_console_strip = show_console_body || !short_landscape;
         let touch_console = compact_shell || coarse_pointer;
         let maximized = state.console_maximized && !touch_console;
         let metrics = ChromeMetrics::resolve(viewport_width, short_landscape, coarse_pointer);
@@ -96,12 +102,13 @@ impl LayoutSpec {
             has_overlay_drawer: navigator_uses_drawer
                 || inspector_uses_drawer
                 || workspaces_uses_drawer,
+            show_console_strip,
             show_console_body,
             console_resizable: show_console_body && !touch_console && !maximized,
             show_phone_navigation: compact_shell,
             // The mockup retains labeled tools above its 820 px compact-shell
             // cutoff; only the compact toolbar projects icons alone.
-            toolbar_labels: viewport_width > 820.0,
+            toolbar_labels: viewport_width > 820.0 && !short_landscape,
             toolbar_tool_limit: if viewport_width <= 560.0 {
                 Some(2)
             } else if short_landscape {
@@ -110,6 +117,9 @@ impl LayoutSpec {
                 None
             },
             show_pvt_selector: viewport_width > 820.0 && !short_landscape,
+            // The canonical run-configuration summary is present only when
+            // both workstation docks fit (the mockup removes it at 1260 px).
+            show_run_config_selector: matches!(width_class, WidthClass::Wide) && !short_landscape,
             navigator_resizable: matches!(width_class, WidthClass::Wide),
             inspector_resizable: matches!(width_class, WidthClass::Wide),
             title_bar_height: metrics.title,
@@ -274,6 +284,7 @@ mod tests {
         assert!(!spec.show_phone_navigation);
         assert!(spec.navigator_resizable);
         assert!(spec.inspector_resizable);
+        assert!(spec.show_run_config_selector);
     }
 
     #[test]
@@ -317,10 +328,13 @@ mod tests {
         assert!(spec.compact_shell);
         assert!(spec.workspaces_uses_drawer);
         assert!(spec.show_phone_navigation);
+        assert!(spec.show_console_strip);
+        assert!(spec.show_console_body);
         assert!(!spec.show_status_bar);
         assert_eq!(spec.title_bar_height, 44.0);
         assert_eq!(spec.toolbar_height, 48.0);
         assert_eq!(spec.document_bar_height, 34.0);
+        assert!(!spec.toolbar_labels);
         assert_eq!(spec.console_height, 175.5);
         assert_eq!(spec.console_max_height, 175.5);
         assert!(!spec.show_pvt_selector);
@@ -328,9 +342,25 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_phone_landscape_removes_the_console_row() {
+        let spec = LayoutSpec::resolve(844.0, 390.0, &WorkbenchState::default());
+
+        assert!(spec.compact_shell);
+        assert!(!spec.show_console_body);
+        assert!(!spec.show_console_strip);
+    }
+
+    #[test]
     fn pvt_selector_follows_the_mockup_width_cutoff() {
         assert!(!LayoutSpec::resolve(820.0, 900.0, &WorkbenchState::default()).show_pvt_selector);
         assert!(LayoutSpec::resolve(821.0, 900.0, &WorkbenchState::default()).show_pvt_selector);
         assert!(!LayoutSpec::resolve(844.0, 390.0, &WorkbenchState::default()).show_pvt_selector);
+        assert!(
+            !LayoutSpec::resolve(1260.0, 900.0, &WorkbenchState::default())
+                .show_run_config_selector
+        );
+        assert!(
+            LayoutSpec::resolve(1261.0, 900.0, &WorkbenchState::default()).show_run_config_selector
+        );
     }
 }

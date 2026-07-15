@@ -364,7 +364,6 @@ impl ModelsPage {
 pub enum PreflightRemediation {
     DesignChecks,
     SimulationPlan,
-    ModelBindings,
 }
 
 /// One ordered, actionable finding in a simulation-preflight report.
@@ -385,16 +384,30 @@ pub struct PreflightReport {
     pub topology_revision: u64,
     pub blockers: Vec<PreflightIssue>,
     pub advisories: Vec<String>,
-    pub analysis_count: usize,
-    pub task_count: usize,
-    pub reference_pvt: String,
-    pub target: String,
+    /// Present only when the controller retained a real authorized immutable
+    /// execution snapshot. Blocked reports never fabricate contract fields.
+    pub prepared: Option<PreparedPreflightContract>,
 }
 
 impl PreflightReport {
     pub fn is_runnable(&self) -> bool {
-        self.blockers.is_empty()
+        self.blockers.is_empty() && self.prepared.is_some()
     }
+}
+
+/// Display-safe copy of the authoritative prepared snapshot metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedPreflightContract {
+    pub snapshot_digest: crate::product::ContentDigest,
+    pub source_digest: crate::product::ContentDigest,
+    pub receipt_digest: crate::product::ContentDigest,
+    pub receipt_label: &'static str,
+    pub analysis_ids: Vec<crate::product::ContentDigest>,
+    pub task_count: usize,
+    pub pvt_point_count: usize,
+    pub target: &'static str,
+    pub save_policy: &'static str,
+    pub model_identity_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -410,6 +423,30 @@ pub struct PreflightDialogState {
     pub open: bool,
     pub report: Option<PreflightReport>,
     pub pending_toast: Option<PreflightToast>,
+}
+
+/// Domain projection selected in the mockup-specified notification center.
+/// The underlying activity stream is never discarded when this changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NotificationFilter {
+    #[default]
+    All,
+    Jobs,
+    Approvals,
+    System,
+}
+
+impl NotificationFilter {
+    pub const ALL: [Self; 4] = [Self::All, Self::Jobs, Self::Approvals, Self::System];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Jobs => "Jobs",
+            Self::Approvals => "Approvals",
+            Self::System => "System",
+        }
+    }
 }
 
 /// New workbench session state.  Durable layout preferences are serialized;
@@ -515,6 +552,12 @@ pub struct WorkbenchState {
     /// revision-bound runtime evidence and therefore never serialized.
     #[serde(skip)]
     pub preflight: PreflightDialogState,
+    /// Session activity center. Its records live in `UiSessionState::toasts`;
+    /// only this transient presentation state belongs to the workbench.
+    #[serde(skip)]
+    pub notification_center_open: bool,
+    #[serde(skip)]
+    pub notification_filter: NotificationFilter,
 }
 
 const fn default_true() -> bool {
@@ -577,6 +620,8 @@ impl Default for WorkbenchState {
             placement_query: String::new(),
             focus_placement_search: false,
             preflight: PreflightDialogState::default(),
+            notification_center_open: false,
+            notification_filter: NotificationFilter::default(),
         }
     }
 }
@@ -586,7 +631,7 @@ impl WorkbenchState {
     /// pointer intent. Global shortcuts must not mutate the document behind
     /// these surfaces.
     pub fn application_modal_open(&self) -> bool {
-        self.project_launcher_open || self.preflight.open
+        self.project_launcher_open || self.preflight.open || self.notification_center_open
     }
 
     pub fn open_project_launcher(&mut self) {

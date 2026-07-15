@@ -58,8 +58,8 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
     let t = Tokens::get(ctx);
     let screen = ctx.screen_rect();
     let size = Vec2::new(
-        (screen.width() - 24.0).min(1040.0).max(280.0),
-        (screen.height() - 24.0).min(760.0).max(280.0),
+        (screen.width() - 24.0).clamp(280.0, 1040.0),
+        (screen.height() - 24.0).clamp(280.0, 760.0),
     );
     let surface_rect = Rect::from_center_size(screen.center(), size);
 
@@ -906,7 +906,7 @@ fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_wrapped(|ui| {
         let search = ui.add_sized(
-            [ui.available_width().min(560.0).max(220.0), t.metrics.ctl_h],
+            [ui.available_width().clamp(220.0, 560.0), t.metrics.ctl_h],
             egui::TextEdit::singleline(&mut app.state.workbench.project_launcher_query)
                 .hint_text("Project, path, owner, tag…")
                 .font(theme::mono(tokens::FS_1, FontWeight::Regular))

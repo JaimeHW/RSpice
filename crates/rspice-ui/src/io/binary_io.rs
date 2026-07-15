@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
 
 const HEADER_SIZE_BYTES: u64 = 24;
 const F64_SIZE_BYTES: usize = std::mem::size_of::<f64>();
@@ -94,23 +96,166 @@ impl PsfReader {
 
 /// A writer for PSF-Lite binary files
 pub struct PsfWriter {
-    file: File,
+    #[cfg(not(target_arch = "wasm32"))]
+    path: PathBuf,
+    #[cfg(not(target_arch = "wasm32"))]
+    expected: crate::io::durable_file::ExpectedContent,
+    encoded: Vec<u8>,
+    header: Option<PsfHeader>,
+    traces_written: u32,
+    published: bool,
 }
 
 impl PsfWriter {
     pub fn create<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
-        let file = File::create(path)?;
-        Ok(Self { file })
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path;
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "PSF path publication is unavailable in the browser; serialize waveform data for a browser download instead",
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let path = path.as_ref().to_path_buf();
+        #[cfg(not(target_arch = "wasm32"))]
+        let expected = crate::io::durable_file::observe_expected_content(&path)
+            .map_err(publication_io_error)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        Ok(Self {
+            path,
+            expected,
+            encoded: Vec::new(),
+            header: None,
+            traces_written: 0,
+            published: false,
+        })
     }
 
     pub fn write_header(&mut self, header: &PsfHeader) -> std::io::Result<()> {
-        write_header(&mut self.file, header)
+        if self.published || self.header.is_some() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "PSF header may be written exactly once",
+            ));
+        }
+        if header.magic != PsfHeader::MAGIC || header.version != PsfHeader::VERSION {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "PSF header has an unsupported magic or version",
+            ));
+        }
+        let trace_bytes = (header.num_points as usize)
+            .checked_mul(F64_SIZE_BYTES)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "PSF trace size overflow"))?;
+        let payload_bytes = (header.num_traces as usize)
+            .checked_mul(trace_bytes)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "PSF payload size overflow"))?;
+        let total_bytes = (HEADER_SIZE_BYTES as usize)
+            .checked_add(payload_bytes)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "PSF file size overflow"))?;
+        self.encoded
+            .try_reserve_exact(total_bytes)
+            .map_err(|error| {
+                Error::other(format!(
+                    "could not allocate {total_bytes} bytes for complete PSF serialization: {error}"
+                ))
+            })?;
+        write_header(&mut self.encoded, header)?;
+        self.header = Some(header.clone());
+        self.publish_if_complete()
     }
 
     pub fn write_trace(&mut self, data: &[f64]) -> std::io::Result<()> {
-        let encoded = encode_f64_slice_le(data);
-        self.file.write_all(&encoded)
+        if self.published {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "PSF file is already complete and published",
+            ));
+        }
+        let header = self.header.as_ref().ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "write the PSF header before traces",
+            )
+        })?;
+        if self.traces_written >= header.num_traces {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "PSF contains more traces than declared by its header",
+            ));
+        }
+        if data.len() != header.num_points as usize {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "PSF trace has {} points; header declares {}",
+                    data.len(),
+                    header.num_points
+                ),
+            ));
+        }
+        for value in data {
+            self.encoded.extend_from_slice(&value.to_le_bytes());
+        }
+        self.traces_written += 1;
+        self.publish_if_complete()
     }
+
+    /// Require a complete declared payload and durably publish it. The final
+    /// `write_trace` already publishes automatically; this method makes
+    /// completeness explicit for callers and reports incomplete writers.
+    pub fn finish(mut self) -> std::io::Result<()> {
+        if self.published {
+            return Ok(());
+        }
+        let header = self
+            .header
+            .as_ref()
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "PSF writer has no header"))?;
+        if self.traces_written != header.num_traces {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                format!(
+                    "PSF writer has {} of {} declared traces",
+                    self.traces_written, header.num_traces
+                ),
+            ));
+        }
+        self.publish_if_complete()
+    }
+
+    fn publish_if_complete(&mut self) -> std::io::Result<()> {
+        let Some(header) = self.header.as_ref() else {
+            return Ok(());
+        };
+        if self.traces_written != header.num_traces || self.published {
+            return Ok(());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "PSF path publication is unavailable in the browser",
+            ))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            crate::io::durable_file::compare_exchange_bytes(
+                &self.path,
+                self.expected,
+                &self.encoded,
+            )
+            .map_err(publication_io_error)?;
+            self.published = true;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn publication_io_error(error: crate::io::durable_file::CompareExchangeError) -> Error {
+    Error::other(format!("PSF publication failed: {error}"))
 }
 
 fn read_header(file: &mut File) -> std::io::Result<PsfHeader> {
@@ -131,7 +276,7 @@ fn read_header(file: &mut File) -> std::io::Result<PsfHeader> {
     })
 }
 
-fn write_header(file: &mut File, header: &PsfHeader) -> std::io::Result<()> {
+fn write_header(file: &mut impl Write, header: &PsfHeader) -> std::io::Result<()> {
     file.write_all(&header.magic)?;
     file.write_all(&header.version.to_le_bytes())?;
     file.write_all(&header.num_traces.to_le_bytes())?;
@@ -149,14 +294,6 @@ fn read_u64_le(file: &mut File) -> std::io::Result<u64> {
     let mut bytes = [0u8; 8];
     file.read_exact(&mut bytes)?;
     Ok(u64::from_le_bytes(bytes))
-}
-
-fn encode_f64_slice_le(data: &[f64]) -> Vec<u8> {
-    let mut encoded = Vec::with_capacity(data.len() * F64_SIZE_BYTES);
-    for value in data {
-        encoded.extend_from_slice(&value.to_le_bytes());
-    }
-    encoded
 }
 
 fn decode_f64_slice_le(bytes: &[u8]) -> std::io::Result<Vec<f64>> {
@@ -179,3 +316,70 @@ fn decode_f64_slice_le(bytes: &[u8]) -> std::io::Result<Vec<f64>> {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_writer_publishes_readable_psf() {
+        let root = unique_temp_dir("complete");
+        let path = root.join("wave.psfl");
+        let header = PsfHeader::new(2, 3);
+        let mut writer = PsfWriter::create(&path).expect("create writer");
+        writer.write_header(&header).expect("write header");
+        writer.write_trace(&[1.0, 2.0, 3.0]).expect("trace one");
+        writer.write_trace(&[4.0, 5.0, 6.0]).expect("trace two");
+        writer.finish().expect("finish writer");
+
+        let mut reader = PsfReader::open(&path).expect("open PSF");
+        assert_eq!(reader.header().num_traces, 2);
+        assert_eq!(reader.read_trace(0).unwrap(), vec![1.0, 2.0, 3.0]);
+        assert_eq!(reader.read_trace(1).unwrap(), vec![4.0, 5.0, 6.0]);
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn invalid_or_incomplete_payload_never_touches_predecessor() {
+        let root = unique_temp_dir("incomplete");
+        let path = root.join("wave.psfl");
+        std::fs::write(&path, b"predecessor").expect("write predecessor");
+        let mut writer = PsfWriter::create(&path).expect("create writer");
+        writer
+            .write_header(&PsfHeader::new(1, 3))
+            .expect("write header");
+
+        assert!(writer.write_trace(&[1.0, 2.0]).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"predecessor");
+        assert!(writer.finish().is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"predecessor");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn complete_writer_rejects_late_external_change() {
+        let root = unique_temp_dir("late-change");
+        let path = root.join("wave.psfl");
+        std::fs::write(&path, b"authorized predecessor").expect("write predecessor");
+        let mut writer = PsfWriter::create(&path).expect("create writer");
+        writer
+            .write_header(&PsfHeader::new(1, 2))
+            .expect("write header");
+        std::fs::write(&path, b"late external edit").expect("race destination");
+
+        let result = writer.write_trace(&[1.0, 2.0]);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"late external edit");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-psf-writer-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture");
+        root
+    }
+}

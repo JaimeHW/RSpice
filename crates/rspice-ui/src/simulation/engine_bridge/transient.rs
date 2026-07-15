@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use super::EngineBridge;
+use rspice_core::abort_signal::AbortSignal;
+
+use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::TransientAnalysisConfig;
 use crate::simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
@@ -13,30 +15,10 @@ impl EngineBridge {
         &self,
         netlist: &rspice_core::Netlist,
         config: &TransientAnalysisConfig,
-    ) -> Result<SimulationResult, SimulationError> {
-        let prepared_netlist = netlist_for_transient_config(netlist, config);
-        let netlist = prepared_netlist.as_ref();
-        let engine = self.engine_for_netlist(netlist);
-        let max_step = resolve_transient_max_step(config);
-        let tran_result = engine
-            .run_tran(netlist, config.stop_time, max_step)
-            .map_err(|e| self.translate_error(e))?;
-
-        Ok(convert_transient_result(
-            netlist,
-            tran_result,
-            config.start_time,
-        ))
-    }
-
-    /// Run transient analysis with abort signal for cooperative cancellation.
-    pub(super) fn run_transient_with_abort(
-        &self,
-        netlist: &rspice_core::Netlist,
-        config: &TransientAnalysisConfig,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
-        let prepared_netlist = netlist_for_transient_config(netlist, config);
+        ensure_not_aborted(abort)?;
+        let prepared_netlist = netlist_for_transient_config(netlist, config, abort)?;
         let netlist = prepared_netlist.as_ref();
         let engine = self.engine_for_netlist(netlist);
         let max_step = resolve_transient_max_step(config);
@@ -44,21 +26,20 @@ impl EngineBridge {
             .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
             .map_err(|e| self.translate_error(e))?;
 
-        Ok(convert_transient_result(
-            netlist,
-            tran_result,
-            config.start_time,
-        ))
+        convert_transient_result(netlist, tran_result, config.start_time, abort)
     }
 }
 
 fn netlist_for_transient_config<'a>(
     netlist: &'a rspice_core::Netlist,
     config: &TransientAnalysisConfig,
-) -> Cow<'a, rspice_core::Netlist> {
+    abort: &dyn AbortSignal,
+) -> Result<Cow<'a, rspice_core::Netlist>, SimulationError> {
+    ensure_not_aborted(abort)?;
     let mut transient_count = 0usize;
     let mut matching_count = 0usize;
     for analysis in &netlist.analyses {
+        ensure_not_aborted(abort)?;
         if matches!(analysis, AnalysisCommand::Tran { .. }) {
             transient_count += 1;
             if transient_command_matches_config(analysis, config) {
@@ -67,17 +48,24 @@ fn netlist_for_transient_config<'a>(
         }
     }
     if transient_count == 1 && matching_count == 1 {
-        return Cow::Borrowed(netlist);
+        return Ok(Cow::Borrowed(netlist));
     }
 
+    ensure_not_aborted(abort)?;
     let mut prepared = netlist.clone();
-    prepared
-        .analyses
-        .retain(|analysis| !matches!(analysis, AnalysisCommand::Tran { .. }));
+    let mut analyses = Vec::with_capacity(prepared.analyses.len() + 1);
+    for analysis in prepared.analyses.drain(..) {
+        ensure_not_aborted(abort)?;
+        if !matches!(analysis, AnalysisCommand::Tran { .. }) {
+            analyses.push(analysis);
+        }
+    }
+    prepared.analyses = analyses;
     prepared
         .analyses
         .push(transient_command_from_config(config));
-    Cow::Owned(prepared)
+    ensure_not_aborted(abort)?;
+    Ok(Cow::Owned(prepared))
 }
 
 fn transient_command_from_config(config: &TransientAnalysisConfig) -> AnalysisCommand {
@@ -141,7 +129,9 @@ fn convert_transient_result(
     netlist: &rspice_core::Netlist,
     tran_result: rspice_core::engine::TransientResult,
     start_time: f64,
-) -> SimulationResult {
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    ensure_not_aborted(abort)?;
     let start_idx = transient_start_index(&tran_result.time, start_time);
     let sample_count =
         transient_sample_count_after_index(&tran_result.time, &tran_result.voltages, start_idx);
@@ -149,6 +139,7 @@ fn convert_transient_result(
     let mut waveforms = HashMap::new();
 
     for (node_idx, voltages) in tran_result.voltages.iter().enumerate() {
+        ensure_not_aborted(abort)?;
         let name = tran_result
             .node_names
             .get(node_idx)
@@ -166,12 +157,12 @@ fn convert_transient_result(
     }
 
     let measurements =
-        super::measure::evaluate_measurements(netlist, "TRAN", &filtered_time, &waveforms);
-    SimulationResult::Transient {
+        super::measure::evaluate_measurements(netlist, "TRAN", &filtered_time, &waveforms, abort)?;
+    Ok(SimulationResult::Transient {
         time: filtered_time,
         waveforms,
         measurements,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -205,7 +196,9 @@ mod tests {
             uic: true,
         };
 
-        let prepared = netlist_for_transient_config(&netlist, &config);
+        let prepared =
+            netlist_for_transient_config(&netlist, &config, &rspice_core::abort_signal::NoAbort)
+                .expect("transient netlist preparation");
         let tran = prepared
             .analyses
             .iter()
@@ -247,7 +240,9 @@ mod tests {
             uic: true,
         };
 
-        let prepared = netlist_for_transient_config(&netlist, &config);
+        let prepared =
+            netlist_for_transient_config(&netlist, &config, &rspice_core::abort_signal::NoAbort)
+                .expect("transient netlist preparation");
         let transients: Vec<_> = prepared
             .analyses
             .iter()
@@ -290,7 +285,9 @@ mod tests {
             uic: true,
         };
 
-        let prepared = netlist_for_transient_config(&netlist, &config);
+        let prepared =
+            netlist_for_transient_config(&netlist, &config, &rspice_core::abort_signal::NoAbort)
+                .expect("transient netlist preparation");
 
         assert!(
             matches!(prepared, std::borrow::Cow::Borrowed(_)),

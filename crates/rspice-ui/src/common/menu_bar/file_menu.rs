@@ -12,6 +12,10 @@ pub(crate) enum FileMenuAction {
     OpenProject,
     SaveProject,
     SaveProjectAs,
+    SaveAll,
+    RevertActiveDocument,
+    CloseActiveDocument,
+    CloseProject,
     New,
     Open,
     Save,
@@ -47,6 +51,18 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::SaveProjectAs => {
             crate::common::project_workflow::save_project_as(state);
         }
+        FileMenuAction::SaveAll => {
+            crate::common::project_workflow::save_all(state);
+        }
+        FileMenuAction::RevertActiveDocument => {
+            crate::common::project_workflow::request_revert_active_document(state);
+        }
+        FileMenuAction::CloseActiveDocument => {
+            crate::common::project_workflow::close_active_document(state);
+        }
+        FileMenuAction::CloseProject => {
+            crate::common::project_workflow::request_close_project(state);
+        }
         FileMenuAction::New => {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileNew) {
                 return;
@@ -60,7 +76,7 @@ pub(crate) fn dispatch_file_menu_action(
             crate::common::file_actions::action_file_open_with_io(state, file_workflow_io);
         }
         FileMenuAction::Save => {
-            if state.should_save_project_for_active_document() {
+            if state.project_lifecycle.project_open {
                 let _ = crate::common::project_workflow::save_project(state);
             } else {
                 let _ =
@@ -85,7 +101,7 @@ pub(crate) fn dispatch_file_menu_action(
 }
 
 fn require_save_confirmation_if_dirty(state: &mut AppState, action: ConfirmationAction) -> bool {
-    if !state.schematic.is_dirty && !state.workspace.any_dirty() {
+    if !crate::common::project_lifecycle::has_unsaved_changes(state) {
         return false;
     }
 
@@ -107,7 +123,7 @@ fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
-    if !state.schematic.is_dirty && !state.workspace.any_dirty() {
+    if !crate::common::project_lifecycle::has_unsaved_changes(state) {
         return false;
     }
 

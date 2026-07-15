@@ -10,25 +10,31 @@ platform split is handled entirely through target-specific dependencies in
 
 ## What the application is
 
-The shell (`src/shell/`) is an IDE-style window — menubar, toolbar,
-workspace tabs, contextual side panels, console, status bar — whose
-workspace tabs switch between five views (`src/shell/views/`):
+The contract-driven workbench (`src/workbench/`) is the sole owner of the
+application chrome: menu bar, contextual toolbar, activity rail, document
+strip, responsive docks and drawers, console, status bar, phone navigation,
+and the central engineering surface. Its seven canonical workspaces are:
 
-- **Library** — a three-column library/cell/view browser; read-only
-  libraries are marked as such, and empty columns explain why they are
-  empty.
-- **Schematic** — the schematic editor: component placement from a palette,
+- **Project** — project identity, documents, run history, configuration,
+  storage state, and project-level actions.
+- **Design** — the schematic editor: component placement from a palette,
   orthogonal wire routing with grid and magnetic snap, net labels and
   junctions, selection with net highlighting, rotation/mirroring, copy/
   paste, and an undo/redo history. Symbols are SVG, embedded into the
   binary at build time from `assets/component_symbols/`.
+- **Simulate** — analysis setup forms.
+- **Results** — immutable run/dataset selection and precision result viewers.
+- **Verify** — checks, specifications, measurements, yield, and reliability
+  evidence owned by the project.
+- **Models** — model and library catalog, bindings, Verilog-A, and PDK setup.
 - **Netlist** — a syntax-highlighted SPICE netlist editor with completion
   and a parameter tuner panel.
-- **Simulate** — analysis setup forms.
-- **Results** — a docbar (run metadata, viewer tabs, per-viewer controls;
-  it also echoes the current schematic selection) above the result viewers.
 
-Result viewers implemented in `src/shell/results/`: waveform strips with
+Desktop, browser, tablet, and phone use the same workbench state and command
+registry. Layout composition adapts to available width and pointer capability;
+document engines never create a second application shell.
+
+Result viewers implemented in `src/workbench/result_document/`: waveform strips with
 expression traces and A/B cursors (`waves.rs`, `strip.rs`), Bode
 (`bode.rs`), FFT spectrum (`fft.rs`), eye diagram (`eye.rs`), histogram
 (`hist.rs`), operating-point inspector (`op_inspector.rs`), noise
@@ -61,7 +67,7 @@ Other user-facing machinery, all verified in source:
 
 | Module | Contents |
 | :--- | :--- |
-| `shell/` | IDE chrome: menubar, toolbar, workspace tabs (`wtabs.rs`), side panels, console, status bar, shell state, the five views, and the result viewers |
+| `workbench/` | Contract-driven responsive application chrome, typed command registry, project launcher, preflight, workspace surfaces, docks/drawers, netlist document, and result-document viewers |
 | `common/` | The `RSpiceApp` application type (egui `App` impl) and its state/dialog plumbing: command palette, shortcuts, help/About dialogs, license dialog, file and project workflows, menu bar implementations, built-in examples |
 | `schematic/` | Schematic rendering: canvas view (pan/zoom/interaction), SVG symbol library, component palette, source labels, SVG export |
 | `state/` | Application state: schematic state (components, wires, nets, selection, snap, clipboard, undo history, symbol generation), simulation state (runs, waveforms, cross-probing), workspace, library browser, model library, property registry, PDK config |
@@ -77,18 +83,28 @@ Other user-facing machinery, all verified in source:
 
 ## Engine integration
 
-`src/simulation/engine_bridge/` is the only place the UI talks to
-rspice-core: it parses netlist text (resolving includes against the source
-path), dispatches the configured analysis, converts engine results into the
-UI's waveform containers, and threads an abort signal through so the Stop
-button works. Platform differences are set in `Cargo.toml`:
+The UI never calls `rspice-core` from a surface or widget. Execution enters
+through `src/simulation/runner/`: config-backed SPICE analyses are adapted by
+`src/simulation/engine_bridge/`, while specialized RF, periodic, statistical,
+reliability, optimization, and sweep analyses are adapted by
+`src/services/simulation_runner/`. Both adapters consume the same
+preflight-sealed netlist and abort signal and convert engine results into the
+UI's waveform containers. Platform differences are set in `Cargo.toml`:
 
 - **Desktop** (`cfg(not(target_arch = "wasm32"))`): `rspice-core` with
   default features (parallel + SIMD solver paths) plus `veriloga-native`
   (RSpice-owned native JIT contract for Verilog-A devices; full JIT or typed construction error); multi-threaded tokio runtime.
 - **wasm32**: `rspice-core` with `default-features = false` and the
   `veriloga` + `wasm` features — interpreted Verilog-A, no rayon/SIMD;
-  current-thread tokio runtime; `web-sys`/`wasm-bindgen` for the DOM.
+  current-thread tokio runtime; `web-sys`/`wasm-bindgen` for the DOM. Runs
+  execute in a module worker, so cancellation terminates the worker and does
+  not leave detached computation.
+
+Native execution remains on a background thread and every analysis family now
+cooperatively polls the same typed abort signal through parsing, expansion,
+solver, transform, and result-conversion loops. The Stop command is therefore
+enabled on both native and browser targets: native runs unwind cooperatively,
+while browser runs additionally terminate their isolated module worker.
 
 The pure-Rust `rspice-veriloga` compiler is a direct dependency on all
 platforms (it backs the Verilog-A dialog), and `ed25519-dalek` is used

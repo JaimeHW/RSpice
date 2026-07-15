@@ -40,6 +40,9 @@ pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 }
 
 pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+    if !layout.show_console_strip {
+        return;
+    }
     let t = Tokens::get(ctx);
     TopBottomPanel::bottom("workbench.console")
         .default_height(layout.console_height)

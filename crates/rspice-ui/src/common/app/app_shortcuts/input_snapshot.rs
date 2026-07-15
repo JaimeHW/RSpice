@@ -9,7 +9,7 @@ pub(crate) struct ShortcutInputSnapshot {
 
 impl ShortcutInputSnapshot {
     pub(crate) fn from_input_state(input: &InputState, has_focus: bool) -> Self {
-        const TRACKED_KEYS: [Key; 37] = [
+        const TRACKED_KEYS: [Key; 47] = [
             Key::K,
             Key::N,
             Key::O,
@@ -20,10 +20,12 @@ impl ShortcutInputSnapshot {
             Key::V,
             Key::X,
             Key::Delete,
+            Key::Backspace,
             Key::A,
             Key::L,
             Key::Backtick,
             Key::F1,
+            Key::F11,
             Key::W,
             Key::G,
             Key::I,
@@ -42,10 +44,18 @@ impl ShortcutInputSnapshot {
             Key::J,
             Key::Tab,
             Key::F5,
+            Key::Enter,
             Key::Plus,
             Key::Equals,
             Key::Minus,
             Key::Num0,
+            Key::Num1,
+            Key::Num2,
+            Key::Num3,
+            Key::Num4,
+            Key::Num5,
+            Key::Num6,
+            Key::Num7,
             Key::Comma,
         ];
 
@@ -75,8 +85,12 @@ impl ShortcutInputSnapshot {
         self.pressed_keys.contains(&key)
     }
 
-    pub(super) fn ctrl(&self) -> bool {
-        self.modifiers.ctrl
+    pub(super) fn primary(&self) -> bool {
+        self.modifiers.command
+    }
+
+    pub(super) fn alt(&self) -> bool {
+        self.modifiers.alt
     }
 
     pub(super) fn shift(&self) -> bool {
@@ -92,5 +106,18 @@ impl ShortcutInputSnapshot {
 
     pub(super) fn has_focus(&self) -> bool {
         self.has_focus
+    }
+
+    pub(crate) fn modifiers(&self) -> Modifiers {
+        self.modifiers
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(key: Key, modifiers: Modifiers, has_focus: bool) -> Self {
+        Self {
+            pressed_keys: vec![key],
+            modifiers,
+            has_focus,
+        }
     }
 }

@@ -1,112 +1,140 @@
-use super::ShortcutCommand;
+use crate::workbench::commands::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShortcutCategory {
     File,
     Edit,
     View,
-    Tools,
-    ComponentPlacement,
-    Transform,
+    Design,
     Simulation,
     Navigation,
     General,
 }
 
 impl ShortcutCategory {
-    pub(crate) const ALL: [ShortcutCategory; 9] = [
-        ShortcutCategory::File,
-        ShortcutCategory::Edit,
-        ShortcutCategory::View,
-        ShortcutCategory::Tools,
-        ShortcutCategory::ComponentPlacement,
-        ShortcutCategory::Transform,
-        ShortcutCategory::Simulation,
-        ShortcutCategory::Navigation,
-        ShortcutCategory::General,
+    pub(crate) const ALL: [Self; 7] = [
+        Self::File,
+        Self::Edit,
+        Self::View,
+        Self::Design,
+        Self::Simulation,
+        Self::Navigation,
+        Self::General,
     ];
 
-    pub(crate) fn display_name(self) -> &'static str {
+    pub(crate) const fn display_name(self) -> &'static str {
         match self {
-            ShortcutCategory::File => "File",
-            ShortcutCategory::Edit => "Edit",
-            ShortcutCategory::View => "View",
-            ShortcutCategory::Tools => "Tools",
-            ShortcutCategory::ComponentPlacement => "Component Placement",
-            ShortcutCategory::Transform => "Transform",
-            ShortcutCategory::Simulation => "Simulation",
-            ShortcutCategory::Navigation => "Navigation",
-            ShortcutCategory::General => "General",
+            Self::File => "File",
+            Self::Edit => "Edit",
+            Self::View => "View and window",
+            Self::Design => "Design",
+            Self::Simulation => "Simulation",
+            Self::Navigation => "Workspaces",
+            Self::General => "General",
         }
     }
 
-    pub(crate) fn commands(self) -> &'static [ShortcutCommand] {
+    pub(crate) const fn commands(self) -> &'static [Command] {
         match self {
-            ShortcutCategory::File => &[
-                ShortcutCommand::FileNew,
-                ShortcutCommand::FileOpen,
-                ShortcutCommand::FileSave,
+            Self::File => &[
+                Command::ProjectLauncher,
+                Command::NewProject,
+                Command::OpenProject,
+                Command::Save,
+                Command::SaveAs,
+                Command::SaveAll,
+                Command::CloseActiveDocument,
+                Command::CloseProject,
             ],
-            ShortcutCategory::Edit => &[
-                ShortcutCommand::EditUndo,
-                ShortcutCommand::EditRedo,
-                ShortcutCommand::EditCopy,
-                ShortcutCommand::EditPaste,
-                ShortcutCommand::EditCut,
-                ShortcutCommand::EditDelete,
-                ShortcutCommand::EditSelectAll,
+            Self::Edit => &[
+                Command::Undo,
+                Command::Redo,
+                Command::Cut,
+                Command::Copy,
+                Command::Paste,
+                Command::Duplicate,
+                Command::Delete,
+                Command::SelectAll,
+                Command::ObjectProperties,
+                Command::FindInDesign,
             ],
-            ShortcutCategory::View => &[
-                ShortcutCommand::ToggleBrowserPanel,
-                ShortcutCommand::ToggleLogPanel,
+            Self::View => &[
+                Command::ZoomIn,
+                Command::ZoomOut,
+                Command::ZoomFit,
+                Command::CycleGrid,
+                Command::ToggleFullScreen,
+                Command::ToggleNavigator,
+                Command::ToggleInspector,
+                Command::ToggleConsole,
+                Command::ToggleFocusMode,
             ],
-            ShortcutCategory::Tools => &[
-                ShortcutCommand::ToolSelect,
-                ShortcutCommand::ToolWire,
-                ShortcutCommand::ToolLabel,
-                ShortcutCommand::ToolProbe,
+            Self::Design => &[
+                Command::PlaceInstance,
+                Command::PlaceWire,
+                Command::PlaceLabel,
+                Command::PlaceProbe,
+                Command::AscendHierarchy,
+                Command::DescendHierarchy,
+                Command::RunChecks,
+                Command::CheckAndSave,
             ],
-            ShortcutCategory::ComponentPlacement => &[
-                ShortcutCommand::PlaceResistor,
-                ShortcutCommand::PlaceGround,
-                ShortcutCommand::PlaceVoltageSource,
-                ShortcutCommand::PlaceCurrentSource,
-                ShortcutCommand::PlaceCapacitor,
-                ShortcutCommand::PlaceInductor,
-                ShortcutCommand::PlaceDiode,
-                ShortcutCommand::PlaceNmos,
-                ShortcutCommand::PlaceNpnBjt,
+            Self::Simulation => &[
+                Command::RunSimulation,
+                Command::StopSimulation,
+                Command::PreflightChecks,
+                Command::GenerateNetlist,
             ],
-            ShortcutCategory::Transform => &[
-                ShortcutCommand::RotateSelectionOrPreview,
-                ShortcutCommand::MirrorSelectionHorizontal,
-                ShortcutCommand::MirrorSelectionVertical,
+            Self::Navigation => &[
+                Command::OpenWorkspace(crate::workbench::state::Workspace::Project),
+                Command::OpenWorkspace(crate::workbench::state::Workspace::Design),
+                Command::OpenWorkspace(crate::workbench::state::Workspace::Simulate),
+                Command::OpenWorkspace(crate::workbench::state::Workspace::Results),
+                Command::OpenWorkspace(crate::workbench::state::Workspace::Verify),
+                Command::OpenWorkspace(crate::workbench::state::Workspace::Models),
+                Command::OpenWorkspace(crate::workbench::state::Workspace::Netlist),
             ],
-            ShortcutCategory::Simulation => &[
-                ShortcutCommand::RunSimulation,
-                ShortcutCommand::StopSimulation,
-                ShortcutCommand::RunChecks,
-                ShortcutCommand::NextViolation,
-                ShortcutCommand::PrevViolation,
-            ],
-            ShortcutCategory::Navigation => &[
-                ShortcutCommand::ZoomIn,
-                ShortcutCommand::ZoomOut,
-                ShortcutCommand::ZoomFit,
-                ShortcutCommand::Zoom100,
-                ShortcutCommand::NextWorkspaceTab,
-                ShortcutCommand::DescendIntoSelected,
-                ShortcutCommand::AscendHierarchy,
-                ShortcutCommand::FocusDesignSearch,
-                ShortcutCommand::FocusCellSearch,
-            ],
-            ShortcutCategory::General => &[
-                ShortcutCommand::OpenPropertiesEditor,
-                ShortcutCommand::EscapeCancel,
-                ShortcutCommand::ShowShortcutsHelp,
-                ShortcutCommand::OpenPreferences,
-                ShortcutCommand::OpenCommandPalette,
+            Self::General => &[
+                Command::CommandPalette,
+                Command::Preferences,
+                Command::AutomationConsole,
             ],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workbench::commands::{COMMAND_REGISTRY, CommandPlatform};
+
+    #[test]
+    fn help_is_a_lossless_projection_of_registered_shortcuts() {
+        let mut seen = Vec::new();
+        for category in ShortcutCategory::ALL {
+            for command in category.commands() {
+                assert!(COMMAND_REGISTRY.contains(command));
+                assert!(
+                    !command.shortcut_bindings().is_empty(),
+                    "help row has no typed binding: {command:?}"
+                );
+                assert!(!seen.contains(command), "duplicate help row: {command:?}");
+                seen.push(*command);
+            }
+        }
+
+        for command in COMMAND_REGISTRY {
+            if !command.shortcut_bindings().is_empty() && *command != Command::Cancel {
+                assert!(
+                    seen.contains(command),
+                    "registered shortcut missing from help: {command:?}"
+                );
+            }
+        }
+
+        assert_eq!(
+            Command::OpenProject.shortcut_label(CommandPlatform::Browser),
+            "Ctrl+Alt+O"
+        );
     }
 }

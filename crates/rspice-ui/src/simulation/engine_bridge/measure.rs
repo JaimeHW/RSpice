@@ -10,7 +10,12 @@
 
 use std::collections::HashMap;
 
+use rspice_core::abort_signal::AbortSignal;
+
 use crate::simulation::results::WaveformData;
+use crate::simulation::runner::SimulationError;
+
+use super::ensure_not_aborted;
 
 /// Evaluate the netlist's `.MEAS <analysis>` statements against one
 /// analysis' waveforms. Returns an empty vector when the netlist carries
@@ -20,37 +25,43 @@ pub(super) fn evaluate_measurements(
     analysis: &str,
     x: &[f64],
     waveforms: &HashMap<String, WaveformData>,
-) -> Vec<rspice_core::MeasureResult> {
-    let statements: Vec<_> = netlist
-        .measurements
-        .iter()
-        .filter(|m| m.analysis.eq_ignore_ascii_case(analysis))
-        .collect();
+    abort: &dyn AbortSignal,
+) -> Result<Vec<rspice_core::MeasureResult>, SimulationError> {
+    ensure_not_aborted(abort)?;
+    let mut statements = Vec::new();
+    for measurement in &netlist.measurements {
+        ensure_not_aborted(abort)?;
+        if measurement.analysis.eq_ignore_ascii_case(analysis) {
+            statements.push(measurement);
+        }
+    }
     if statements.is_empty() || x.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     // Owned magnitude arrays for complex waveforms; the signals map borrows
     // from these and from real waveforms' y arrays.
-    let magnitudes: Vec<(&String, Vec<f64>)> = waveforms
-        .iter()
-        .filter_map(|(name, wf)| {
-            let imag = wf.y_imag.as_ref()?;
-            let mag = wf
-                .y_values
-                .iter()
-                .zip(imag)
-                .map(|(re, im)| re.hypot(*im))
-                .collect();
-            Some((name, mag))
-        })
-        .collect();
+    let mut magnitudes: Vec<(&String, Vec<f64>)> = Vec::new();
+    for (name, waveform) in waveforms {
+        ensure_not_aborted(abort)?;
+        let Some(imaginary) = waveform.y_imag.as_ref() else {
+            continue;
+        };
+        let mut magnitude = Vec::with_capacity(waveform.y_values.len().min(imaginary.len()));
+        for (real, imaginary) in waveform.y_values.iter().zip(imaginary) {
+            ensure_not_aborted(abort)?;
+            magnitude.push(real.hypot(*imaginary));
+        }
+        magnitudes.push((name, magnitude));
+    }
 
     let mut signals: HashMap<String, &[f64]> = HashMap::new();
     for (name, mag) in &magnitudes {
+        ensure_not_aborted(abort)?;
         insert_aliases(&mut signals, name, mag.as_slice());
     }
     for (name, wf) in waveforms {
+        ensure_not_aborted(abort)?;
         if wf.y_imag.is_some() {
             continue; // magnitude alias already inserted
         }
@@ -62,9 +73,13 @@ pub(super) fn evaluate_measurements(
 
     let mut engine = rspice_core::MeasureEngine::new();
     for statement in statements {
+        ensure_not_aborted(abort)?;
         engine.add(statement.clone());
     }
-    engine.evaluate(x, &signals)
+    ensure_not_aborted(abort)?;
+    let results = engine.evaluate(x, &signals);
+    ensure_not_aborted(abort)?;
+    Ok(results)
 }
 
 /// Insert one trace under its own key plus the spelling variants a `.MEAS`

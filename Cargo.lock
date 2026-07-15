@@ -4002,6 +4002,7 @@ dependencies = [
  "rspice-core",
  "rspice-veriloga",
  "rustfft",
+ "rustix 1.1.4",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

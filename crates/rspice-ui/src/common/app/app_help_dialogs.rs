@@ -3,22 +3,32 @@
 
 use egui::Context;
 
-use super::{
-    RSpiceApp,
-    app_shortcuts::{ShortcutCategory, ShortcutCommand},
-};
+use super::{RSpiceApp, app_shortcuts::ShortcutCategory};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
+use crate::workbench::commands::Command;
 
-fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {
-    (command.shortcut_string(), command.display_name())
+fn shortcut_help_row(command: Command) -> (&'static str, &'static str) {
+    (
+        command.shortcut_label(crate::workbench::commands::current_command_platform()),
+        command.spec().label,
+    )
 }
 
-fn shortcut_row_matches(command: ShortcutCommand, filter: &str) -> bool {
+fn shortcut_row_matches(command: Command, filter: &str) -> bool {
     filter.is_empty()
-        || command.display_name().to_lowercase().contains(filter)
-        || command.shortcut_string().to_lowercase().contains(filter)
+        || command.spec().label.to_lowercase().contains(filter)
+        || command
+            .shortcut_label(crate::workbench::commands::current_command_platform())
+            .to_lowercase()
+            .contains(filter)
+}
+
+fn shortcut_is_visible(command: Command) -> bool {
+    !command
+        .shortcut_label(crate::workbench::commands::current_command_platform())
+        .is_empty()
 }
 
 impl RSpiceApp {
@@ -157,12 +167,13 @@ impl RSpiceApp {
         let filter = self.state.dialogs.shortcuts_filter.trim().to_lowercase();
         let total: usize = ShortcutCategory::ALL
             .iter()
-            .map(|c| c.commands().len())
-            .sum();
+            .flat_map(|category| category.commands())
+            .filter(|command| shortcut_is_visible(**command))
+            .count();
         let shown: usize = ShortcutCategory::ALL
             .iter()
             .flat_map(|c| c.commands())
-            .filter(|c| shortcut_row_matches(**c, &filter))
+            .filter(|c| shortcut_is_visible(**c) && shortcut_row_matches(**c, &filter))
             .count();
         let hint = format!("{shown} of {total} shortcuts");
 
@@ -176,7 +187,7 @@ impl RSpiceApp {
 
                 ui.add(
                     egui::TextEdit::singleline(filter_text)
-                        .hint_text("Filter — try 'mirror' or 'zoom'")
+                        .hint_text("Filter — try 'project' or 'zoom'")
                         .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                         .desired_width(f32::INFINITY),
                 );
@@ -190,7 +201,7 @@ impl RSpiceApp {
                         .commands()
                         .iter()
                         .copied()
-                        .filter(|c| shortcut_row_matches(*c, &filter))
+                        .filter(|c| shortcut_is_visible(*c) && shortcut_row_matches(*c, &filter))
                         .collect();
                     if commands.is_empty() {
                         continue;

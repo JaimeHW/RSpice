@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use super::EngineBridge;
+use rspice_core::abort_signal::AbortSignal;
+
+use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::{AcAnalysisConfig, NoiseAnalysisConfig};
 use crate::simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
@@ -11,16 +13,21 @@ impl EngineBridge {
         &self,
         netlist: &rspice_core::Netlist,
         config: &AcAnalysisConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
         let frequencies = config.generate_frequencies();
-        self.run_ac_frequencies(netlist, frequencies)
+        ensure_not_aborted(abort)?;
+        self.run_ac_frequencies(netlist, frequencies, abort)
     }
 
     pub(super) fn run_ac_frequencies(
         &self,
         netlist: &rspice_core::Netlist,
         frequencies: Vec<f64>,
+        abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
         if frequencies.is_empty() {
             return Err(SimulationError::InvalidConfig(
                 "Invalid frequency sweep configuration".to_string(),
@@ -29,8 +36,9 @@ impl EngineBridge {
 
         let engine = self.engine_for_netlist(netlist);
         let ac_results = engine
-            .run_ac(netlist, &frequencies)
+            .run_ac_with_abort(netlist, &frequencies, abort)
             .map_err(|e| self.translate_error(e))?;
+        ensure_not_aborted(abort)?;
         if ac_results.is_empty() {
             return Ok(SimulationResult::default());
         }
@@ -39,10 +47,12 @@ impl EngineBridge {
         let mut waveforms = HashMap::new();
 
         for node_idx in 0..first_result.voltages.len() {
+            ensure_not_aborted(abort)?;
             let mut real_values = Vec::with_capacity(frequencies.len());
             let mut imag_values = Vec::with_capacity(frequencies.len());
 
             for result in &ac_results {
+                ensure_not_aborted(abort)?;
                 if node_idx < result.voltages.len() {
                     let v = result.voltages[node_idx];
                     real_values.push(v.re);
@@ -61,10 +71,12 @@ impl EngineBridge {
         }
 
         for branch_idx in 0..first_result.currents.len() {
+            ensure_not_aborted(abort)?;
             let mut real_values = Vec::with_capacity(frequencies.len());
             let mut imag_values = Vec::with_capacity(frequencies.len());
 
             for result in &ac_results {
+                ensure_not_aborted(abort)?;
                 if branch_idx < result.currents.len() {
                     let i = result.currents[branch_idx];
                     real_values.push(i.re);
@@ -83,7 +95,7 @@ impl EngineBridge {
         }
 
         let measurements =
-            super::measure::evaluate_measurements(netlist, "AC", &frequencies, &waveforms);
+            super::measure::evaluate_measurements(netlist, "AC", &frequencies, &waveforms, abort)?;
         Ok(SimulationResult::Ac {
             frequencies,
             waveforms,
@@ -96,9 +108,12 @@ impl EngineBridge {
         &self,
         netlist: &rspice_core::Netlist,
         config: &NoiseAnalysisConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
         let engine = self.engine_for_netlist(netlist);
         let frequencies = config.generate_frequencies();
+        ensure_not_aborted(abort)?;
 
         if frequencies.is_empty() {
             return Err(SimulationError::InvalidConfig(
@@ -106,7 +121,7 @@ impl EngineBridge {
             ));
         }
 
-        let output_node = self.resolve_node_index(&config.output_node, netlist);
+        let output_node = self.resolve_node_index(&config.output_node, netlist, abort)?;
         if output_node == 0 {
             return Err(SimulationError::InvalidConfig(format!(
                 "Invalid output node '{}' for noise analysis",
@@ -115,13 +130,15 @@ impl EngineBridge {
         }
 
         let noise_results = engine
-            .run_noise(
+            .run_noise_with_abort(
                 netlist,
                 output_node,
                 &frequencies,
                 config.default_temperature(),
+                abort,
             )
             .map_err(|e| self.translate_error(e))?;
+        ensure_not_aborted(abort)?;
 
         if noise_results.is_empty() {
             return Ok(SimulationResult::default());
@@ -132,10 +149,12 @@ impl EngineBridge {
         let mut contributors: HashMap<String, Vec<f64>> = HashMap::new();
 
         for result in &noise_results {
+            ensure_not_aborted(abort)?;
             output_noise.push(result.output_noise_density);
             input_noise.push(result.input_referred_density);
 
             for contrib in &result.contributions {
+                ensure_not_aborted(abort)?;
                 contributors
                     .entry(contrib.identity.device.clone())
                     .or_insert_with(|| Vec::with_capacity(frequencies.len()))
@@ -144,7 +163,9 @@ impl EngineBridge {
         }
 
         for values in contributors.values_mut() {
+            ensure_not_aborted(abort)?;
             while values.len() < frequencies.len() {
+                ensure_not_aborted(abort)?;
                 values.push(0.0);
             }
         }
@@ -156,17 +177,21 @@ impl EngineBridge {
             frequencies.first().copied().unwrap_or(0.0),
             frequencies.last().copied().unwrap_or(0.0),
         );
+        ensure_not_aborted(abort)?;
         let integrated = rspice_core::analysis::IntegratedNoise::new(noise_results);
-        let rows: Vec<crate::state::NoiseContributorRow> = integrated
-            .contribution_summary()
-            .into_iter()
-            .map(|contribution| crate::state::NoiseContributorRow {
+        ensure_not_aborted(abort)?;
+        let contribution_summary = integrated.contribution_summary();
+        ensure_not_aborted(abort)?;
+        let mut rows = Vec::with_capacity(contribution_summary.len());
+        for contribution in contribution_summary {
+            ensure_not_aborted(abort)?;
+            rows.push(crate::state::NoiseContributorRow {
                 device: contribution.device_name,
                 mechanism: contribution.noise_type.label(),
                 power: contribution.integrated_power,
                 share_pct: contribution.percentage,
-            })
-            .collect();
+            });
+        }
         let summary = crate::state::NoiseSummary {
             rows,
             total_rms: integrated.total_output_noise(),
@@ -182,29 +207,35 @@ impl EngineBridge {
         })
     }
 
-    fn resolve_node_index(&self, name: &str, netlist: &rspice_core::Netlist) -> usize {
+    fn resolve_node_index(
+        &self,
+        name: &str,
+        netlist: &rspice_core::Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<usize, SimulationError> {
+        ensure_not_aborted(abort)?;
         let lower = name.to_lowercase();
         if lower == "0" || lower == "gnd" || lower == "ground" {
-            return 0;
+            return Ok(0);
         }
 
         if let Ok(idx) = name.parse::<usize>() {
-            return idx;
+            return Ok(idx);
         }
 
         let engine = self.engine_for_netlist(netlist);
-        if let Ok(dc) = engine.run_dc_op(netlist) {
-            let upper = name.to_ascii_uppercase();
-            if let Some(idx) = dc
-                .node_names
-                .iter()
-                .position(|n| n.to_ascii_uppercase() == upper)
-            {
-                return idx;
+        let dc = engine
+            .run_dc_op_with_abort(netlist, abort)
+            .map_err(|error| self.translate_error(error))?;
+        let upper = name.to_ascii_uppercase();
+        for (index, node_name) in dc.node_names.iter().enumerate() {
+            ensure_not_aborted(abort)?;
+            if node_name.to_ascii_uppercase() == upper {
+                return Ok(index);
             }
         }
 
-        0
+        Ok(0)
     }
 }
 

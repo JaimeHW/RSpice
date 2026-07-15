@@ -2,13 +2,16 @@ use std::path::Path;
 
 use num_complex::Complex64;
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::engine::Engine;
 
+use super::super::error::{ensure_not_aborted, poll_periodically};
 use super::super::{
-    build_engine_config, build_voltage_output_expr, infer_primary_output_node,
-    infer_primary_source_name, is_ground_like, parse_runner_netlist,
+    ServiceRunError, ServiceRunResult, build_engine_config, build_voltage_output_expr,
+    infer_primary_output_node_with_abort, infer_primary_source_name_with_abort, is_ground_like,
+    parse_runner_netlist_with_abort,
 };
-use super::pac::{PacFrequencySweep, PacRunConfig, run_pac_internal};
+use super::pac::{PacFrequencySweep, PacRunConfig, run_pac_internal_with_abort};
 use super::shared::normalize_pac_node_name;
 // =============================================================================
 // PXF (Periodic Transfer Function) Analysis
@@ -174,7 +177,17 @@ pub fn run_pxf_analysis_with_config(
     netlist_text: &str,
     config: &PxfRunConfig,
 ) -> Result<PxfData, String> {
-    run_pxf_analysis_with_config_and_source_path(netlist_text, config, None)
+    run_pxf_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run PXF analysis with explicit configuration and cancellation.
+pub fn run_pxf_analysis_with_config_and_abort(
+    netlist_text: &str,
+    config: &PxfRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    run_pxf_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
 }
 
 /// Run PXF analysis with explicit configuration and a source path used to
@@ -184,17 +197,35 @@ pub fn run_pxf_analysis_with_config_and_source_path(
     config: &PxfRunConfig,
     source_path: Option<&Path>,
 ) -> Result<PxfData, String> {
-    let netlist = parse_runner_netlist(netlist_text, source_path)?;
-    run_pxf_analysis_for_netlist(&netlist, config)
+    run_pxf_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
 }
 
-fn run_pxf_analysis_for_netlist(
+/// Run PXF analysis with source-path resolution and cancellation.
+pub fn run_pxf_analysis_with_config_and_source_path_and_abort(
+    netlist_text: &str,
+    config: &PxfRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pxf_analysis_for_netlist_with_abort(&netlist, config, abort)
+}
+
+fn run_pxf_analysis_for_netlist_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PxfRunConfig,
-) -> Result<PxfData, String> {
-    use rspice_core::analysis::advanced::pxf::{PxfAnalyzer, PxfConfig};
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    use rspice_core::analysis::advanced::pxf::PxfConfig;
 
-    config.validate()?;
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
 
     let required_sideband = config
         .input_sideband
@@ -223,30 +254,33 @@ fn run_pxf_analysis_for_netlist(
         abstol: config.abstol,
     };
 
-    let pac_internal = run_pac_internal(netlist, &pac_cfg)?;
+    let pac_internal = run_pac_internal_with_abort(netlist, &pac_cfg, abort)?;
     let pac_result = pac_internal.pac_result;
 
     let sideband_indices = pac_result.conversion_matrix.sideband_indices();
     if !sideband_indices.contains(&config.input_sideband) {
-        return Err(format!(
+        return Err(ServiceRunError::Failure(format!(
             "PXF input sideband {} is outside analyzed PAC sideband range {:?}",
             config.input_sideband, sideband_indices
-        ));
+        )));
     }
     if !sideband_indices.contains(&config.output_sideband) {
-        return Err(format!(
+        return Err(ServiceRunError::Failure(format!(
             "PXF output sideband {} is outside analyzed PAC sideband range {:?}",
             config.output_sideband, sideband_indices
-        ));
+        )));
     }
 
     let frequencies = pac_result.conversion_matrix.frequencies().to_vec();
     if frequencies.is_empty() {
-        return Err("PXF conversion matrix has no frequency points".to_string());
+        return Err(ServiceRunError::Failure(
+            "PXF conversion matrix has no frequency points".to_string(),
+        ));
     }
 
     let mut matrix_cube: Vec<Vec<Vec<Complex64>>> = Vec::with_capacity(frequencies.len());
     for freq_idx in 0..frequencies.len() {
+        poll_periodically(abort, freq_idx)?;
         let mut out_rows = Vec::with_capacity(sideband_indices.len());
         for out_sb in &sideband_indices {
             let mut row = Vec::with_capacity(sideband_indices.len());
@@ -274,53 +308,43 @@ fn run_pxf_analysis_for_netlist(
     }
     pxf_cfg
         .validate()
-        .map_err(|e| format!("PXF configuration error: {}", e))?;
+        .map_err(|error| ServiceRunError::Failure(format!("PXF configuration error: {error}")))?;
 
-    let analyzer = PxfAnalyzer::new(pxf_cfg);
-    let pxf_result = analyzer
-        .analyze_from_conversion_matrix(
-            &frequencies,
-            &matrix_cube,
-            pac_result.fundamental_frequency,
-        )
-        .map_err(|e| format!("PXF error: {}", e))?;
+    let pxf_result = analyze_conversion_matrix_with_abort(
+        &pxf_cfg,
+        &frequencies,
+        &matrix_cube,
+        pac_result.fundamental_frequency,
+        abort,
+    )?;
 
     if pxf_result.points.is_empty() {
-        return Err("PXF produced no transfer points".to_string());
+        return Err(ServiceRunError::Failure(
+            "PXF produced no transfer points".to_string(),
+        ));
     }
 
-    let sweep_freqs: Vec<Value> = pxf_result
-        .points
-        .iter()
-        .map(|point| point.freq_in)
-        .collect();
-    let output_freqs: Vec<Value> = pxf_result
-        .points
-        .iter()
-        .map(|point| point.freq_out)
-        .collect();
-    let transfer: Vec<Complex64> = pxf_result
-        .points
-        .iter()
-        .map(|point| point.transfer)
-        .collect();
-    let magnitude_db: Vec<Value> = pxf_result
-        .points
-        .iter()
-        .map(|point| point.magnitude_db())
-        .collect();
-    let phase_deg: Vec<Value> = pxf_result
-        .points
-        .iter()
-        .map(|point| point.phase_degrees())
-        .collect();
+    let mut sweep_freqs = Vec::with_capacity(pxf_result.points.len());
+    let mut output_freqs = Vec::with_capacity(pxf_result.points.len());
+    let mut transfer = Vec::with_capacity(pxf_result.points.len());
+    let mut magnitude_db = Vec::with_capacity(pxf_result.points.len());
+    let mut phase_deg = Vec::with_capacity(pxf_result.points.len());
+    for (index, point) in pxf_result.points.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        sweep_freqs.push(point.freq_in);
+        output_freqs.push(point.freq_out);
+        transfer.push(point.transfer);
+        magnitude_db.push(point.magnitude_db());
+        phase_deg.push(point.phase_degrees());
+    }
 
-    let group_delay_curve = pxf_result.group_delay_curve();
+    let group_delay_curve = pxf_group_delay_with_abort(&pxf_result.points, abort)?;
     let group_delay = (!group_delay_curve.is_empty()).then_some(group_delay_curve);
 
     let output_label =
         build_voltage_output_expr(config.output_node.trim(), config.output_ref.as_deref());
 
+    ensure_not_aborted(abort)?;
     Ok(PxfData {
         frequencies: sweep_freqs,
         output_frequencies: output_freqs,
@@ -340,9 +364,146 @@ fn run_pxf_analysis_for_netlist(
     })
 }
 
+fn analyze_conversion_matrix_with_abort(
+    config: &rspice_core::analysis::advanced::pxf::PxfConfig,
+    frequencies: &[Value],
+    conversion_matrix: &[Vec<Vec<Complex64>>],
+    fundamental_frequency: Value,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<rspice_core::analysis::advanced::pxf::PxfResult> {
+    use rspice_core::analysis::advanced::pxf::{PxfResult, TransferPoint};
+
+    ensure_not_aborted(abort)?;
+    if frequencies.is_empty() {
+        return Err(ServiceRunError::Failure(
+            "PXF conversion analysis has no frequency points".to_string(),
+        ));
+    }
+    if conversion_matrix.len() != frequencies.len() {
+        return Err(ServiceRunError::Failure(
+            "PXF frequency/conversion-matrix size mismatch".to_string(),
+        ));
+    }
+
+    let mut result = PxfResult::new(
+        fundamental_frequency,
+        config.input_sideband,
+        config.output_sideband,
+    );
+    for (index, frequency) in frequencies.iter().copied().enumerate() {
+        poll_periodically(abort, index)?;
+        let matrix = &conversion_matrix[index];
+        let Some(first_row) = matrix.first() else {
+            continue;
+        };
+        let offset = (matrix.len() as i32 - 1) / 2;
+        let output_index = (config.output_sideband + offset) as usize;
+        let input_index = (config.input_sideband + offset) as usize;
+        if output_index >= matrix.len() || input_index >= first_row.len() {
+            continue;
+        }
+        let Some(transfer) = matrix
+            .get(output_index)
+            .and_then(|row| row.get(input_index))
+            .copied()
+        else {
+            continue;
+        };
+        result.add_point(TransferPoint {
+            freq_in: frequency,
+            freq_out: frequency
+                + (config.output_sideband - config.input_sideband) as Value * fundamental_frequency,
+            transfer,
+            sideband_in: config.input_sideband,
+            sideband_out: config.output_sideband,
+        });
+    }
+    compute_pxf_metrics_with_abort(&mut result, abort)?;
+    Ok(result)
+}
+
+fn compute_pxf_metrics_with_abort(
+    result: &mut rspice_core::analysis::advanced::pxf::PxfResult,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<()> {
+    let mut peak: Option<(Value, Value)> = None;
+    for (index, point) in result.points.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        let gain = point.magnitude_db();
+        if gain.is_finite() && peak.is_none_or(|(_, current)| gain > current) {
+            peak = Some((point.freq_in, gain));
+        }
+    }
+    result.peak_gain = peak;
+
+    if let Some((peak_frequency, peak_db)) = peak {
+        let threshold = peak_db - 3.0;
+        let mut lower = None;
+        let mut upper = None;
+        for (index, point) in result.points.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if point.magnitude_db() <= threshold {
+                if point.freq_in < peak_frequency {
+                    lower = Some(point.freq_in);
+                } else if point.freq_in > peak_frequency && upper.is_none() {
+                    upper = Some(point.freq_in);
+                }
+            }
+        }
+        result.bandwidth_3db = match (lower, upper, result.points.first(), result.points.last()) {
+            (Some(lower), Some(upper), _, _) => Some(upper - lower),
+            (None, Some(upper), Some(first), _) => Some(upper - first.freq_in),
+            (Some(lower), None, _, Some(last)) => Some(last.freq_in - lower),
+            _ => None,
+        };
+    }
+
+    for (index, window) in result.points.windows(2).enumerate() {
+        poll_periodically(abort, index)?;
+        let first = window[0].magnitude_db();
+        let second = window[1].magnitude_db();
+        if (first >= 0.0 && second < 0.0) || (first < 0.0 && second >= 0.0) {
+            let fraction = -first / (second - first);
+            result.unity_gain_freq =
+                Some(window[0].freq_in + fraction * (window[1].freq_in - window[0].freq_in));
+            break;
+        }
+    }
+    if let Some(first) = result.points.first()
+        && first.freq_in < 100.0
+    {
+        result.dc_gain = Some(first.transfer);
+    }
+    ensure_not_aborted(abort)
+}
+
+fn pxf_group_delay_with_abort(
+    points: &[rspice_core::analysis::advanced::pxf::TransferPoint],
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Vec<(Value, Value)>> {
+    let mut group_delay = Vec::with_capacity(points.len().saturating_sub(1));
+    for (index, window) in points.windows(2).enumerate() {
+        poll_periodically(abort, index)?;
+        group_delay.push((
+            (window[0].freq_in + window[1].freq_in) * 0.5,
+            window[0].group_delay(&window[1]),
+        ));
+    }
+    ensure_not_aborted(abort)?;
+    Ok(group_delay)
+}
+
 /// Run PXF analysis using inferred/default settings.
 pub fn run_pxf_analysis(netlist_text: &str) -> Result<PxfData, String> {
-    run_pxf_analysis_with_source_path(netlist_text, None)
+    run_pxf_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run inferred/default PXF analysis with cancellation.
+pub fn run_pxf_analysis_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    run_pxf_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run PXF analysis using inferred/default settings and a source path used to
@@ -351,21 +512,80 @@ pub fn run_pxf_analysis_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<PxfData, String> {
-    let netlist = parse_runner_netlist(netlist_text, source_path)?;
+    run_pxf_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run inferred/default PXF analysis with source-path resolution and
+/// cancellation.
+pub fn run_pxf_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error (required for PXF defaults): {}", e))?;
-    let input_source = infer_primary_source_name(&netlist)
-        .ok_or_else(|| "PXF requires at least one independent source in the netlist".to_string())?;
-    let output_node = infer_primary_output_node(&dc_result.node_names).ok_or_else(|| {
-        "PXF could not infer an output node; ensure at least one non-ground node exists".to_string()
+        .run_dc_op_with_abort(&netlist, abort)
+        .map_err(|error| {
+            ServiceRunError::from_core("DC OP error (required for PXF defaults)", error)
+        })?;
+    let input_source = infer_primary_source_name_with_abort(&netlist, abort)?.ok_or_else(|| {
+        ServiceRunError::Failure(
+            "PXF requires at least one independent source in the netlist".to_string(),
+        )
     })?;
+    let output_node = infer_primary_output_node_with_abort(&dc_result.node_names, abort)?
+        .ok_or_else(|| {
+            ServiceRunError::Failure(
+                "PXF could not infer an output node; ensure at least one non-ground node exists"
+                    .to_string(),
+            )
+        })?;
 
     let cfg = PxfRunConfig {
         input_source,
         output_node,
         ..PxfRunConfig::default()
     };
-    run_pxf_analysis_for_netlist(&netlist, &cfg)
+    run_pxf_analysis_for_netlist_with_abort(&netlist, &cfg, abort)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
+
+    #[test]
+    fn pxf_service_preserves_typed_entry_abort() {
+        let result = run_pxf_analysis_with_config_and_abort(
+            "not a netlist",
+            &PxfRunConfig::default(),
+            &ImmediateAbort,
+        );
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn pxf_conversion_honors_in_loop_abort() {
+        const POINTS: usize = 130;
+        let mut config = rspice_core::analysis::advanced::pxf::PxfConfig::new();
+        config.input_sideband = 0;
+        config.output_sideband = 0;
+        let frequencies = (1..=POINTS).map(|point| point as Value).collect::<Vec<_>>();
+        let conversion_matrix = vec![vec![vec![Complex64::new(1.0, 0.0)]]; POINTS];
+        let abort = CountingAbort::new(2);
+
+        let result = analyze_conversion_matrix_with_abort(
+            &config,
+            &frequencies,
+            &conversion_matrix,
+            1e6,
+            &abort,
+        );
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(abort.count() > 2);
+    }
 }

@@ -23,8 +23,12 @@
 use std::collections::HashMap;
 
 use super::ast::{Element, ElementKind};
-use super::{Netlist, ParseError};
+use super::{
+    Netlist, ParseError, ParseWithAbortError, ensure_parse_not_aborted, finish_non_aborting_parse,
+    poll_parse_abort,
+};
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 
 /// One parsed SPEF node reference.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,31 +96,72 @@ pub struct SpefReport {
 impl SpefFile {
     /// Parse SPEF text.
     pub fn parse(content: &str) -> Result<Self, ParseError> {
-        Parser::new(content).parse()
+        finish_non_aborting_parse(Self::parse_with_abort(content, &NoAbort))
+    }
+
+    /// Parse SPEF text with cooperative cancellation.
+    pub fn parse_with_abort(
+        content: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Parser::new(content).parse_with_abort(abort)
     }
 
     /// Back-annotate `netlist` with this file's parasitics.
     pub fn apply(&self, netlist: &mut Netlist) -> SpefReport {
+        match self.apply_with_abort(netlist, &NoAbort) {
+            Ok(report) => report,
+            Err(ParseWithAbortError::Aborted) => {
+                unreachable!("NoAbort cannot cancel SPEF back-annotation")
+            }
+            Err(ParseWithAbortError::Parse(_)) => {
+                unreachable!("SPEF back-annotation does not produce parse errors")
+            }
+        }
+    }
+
+    /// Back-annotate `netlist` with cooperative cancellation.
+    pub fn apply_with_abort(
+        &self,
+        netlist: &mut Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<SpefReport, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
+        let mut staged = netlist.clone();
+        ensure_parse_not_aborted(abort)?;
+        let report = self.apply_in_place_with_abort(&mut staged, abort)?;
+        ensure_parse_not_aborted(abort)?;
+        *netlist = staged;
+        Ok(report)
+    }
+
+    fn apply_in_place_with_abort(
+        &self,
+        netlist: &mut Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<SpefReport, ParseWithAbortError> {
         let mut report = SpefReport::default();
         let mut element_index: HashMap<String, usize> = HashMap::new();
         for (idx, element) in netlist.elements.iter().enumerate() {
+            poll_parse_abort(abort, idx)?;
             element_index.insert(element.name.to_ascii_uppercase(), idx);
         }
-        let subckt_ports: HashMap<String, Vec<String>> = netlist
-            .subcircuits
-            .iter()
-            .map(|def| {
-                (
-                    def.name.to_ascii_uppercase(),
-                    def.ports.iter().map(|p| p.to_ascii_uppercase()).collect(),
-                )
-            })
-            .collect();
+        let mut subckt_ports: HashMap<String, Vec<String>> = HashMap::new();
+        for (subckt_index, def) in netlist.subcircuits.iter().enumerate() {
+            poll_parse_abort(abort, subckt_index)?;
+            let mut ports = Vec::with_capacity(def.ports.len());
+            for (port_index, port) in def.ports.iter().enumerate() {
+                poll_parse_abort(abort, port_index)?;
+                ports.push(port.to_ascii_uppercase());
+            }
+            subckt_ports.insert(def.name.to_ascii_uppercase(), ports);
+        }
 
         let mut new_elements: Vec<Element> = Vec::new();
         let mut parasitic_seq = 0_usize;
 
-        for net in &self.nets {
+        for (net_index, net) in self.nets.iter().enumerate() {
+            poll_parse_abort(abort, net_index)?;
             report.nets += 1;
 
             // Bare references (ports are referenced by name, which already
@@ -132,7 +177,11 @@ impl SpefFile {
             };
 
             // Rewire instance pins onto their SPEF subnodes.
-            for conn in net.conns.iter().filter(|conn| !conn.is_port) {
+            for (conn_index, conn) in net.conns.iter().enumerate() {
+                poll_parse_abort(abort, conn_index)?;
+                if conn.is_port {
+                    continue;
+                }
                 let NodeRef::Pin(inst, pin) = &conn.node else {
                     continue;
                 };
@@ -156,7 +205,8 @@ impl SpefFile {
                 }
             }
 
-            for cap in &net.caps {
+            for (cap_index, cap) in net.caps.iter().enumerate() {
+                poll_parse_abort(abort, cap_index)?;
                 if !(cap.farads.is_finite() && cap.farads > 0.0) {
                     continue;
                 }
@@ -182,7 +232,8 @@ impl SpefFile {
                 report.capacitors += 1;
             }
 
-            for res in &net.ress {
+            for (res_index, res) in net.ress.iter().enumerate() {
+                poll_parse_abort(abort, res_index)?;
                 if !(res.ohms.is_finite() && res.ohms > 0.0) {
                     continue;
                 }
@@ -202,8 +253,12 @@ impl SpefFile {
             }
         }
 
-        netlist.elements.extend(new_elements);
-        report
+        for (index, element) in new_elements.into_iter().enumerate() {
+            poll_parse_abort(abort, index)?;
+            netlist.elements.push(element);
+        }
+        ensure_parse_not_aborted(abort)?;
+        Ok(report)
     }
 }
 
@@ -330,7 +385,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse(mut self) -> Result<SpefFile, ParseError> {
+    fn parse_with_abort(
+        mut self,
+        abort: &dyn AbortSignal,
+    ) -> Result<SpefFile, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         let mut nets = Vec::new();
         let mut in_name_map = false;
         let mut current: Option<DNet> = None;
@@ -338,11 +397,16 @@ impl<'a> Parser<'a> {
 
         while let Some(raw) = self.lines.next() {
             self.line_num += 1;
-            let line = strip_comment(raw).trim();
+            poll_parse_abort(abort, self.line_num - 1)?;
+            let line = strip_comment_with_abort(raw, abort)?.trim();
             if line.is_empty() {
                 continue;
             }
-            let fields: Vec<&str> = line.split_whitespace().collect();
+            let mut fields: Vec<&str> = Vec::new();
+            for (field_index, field) in line.split_whitespace().enumerate() {
+                poll_parse_abort(abort, field_index)?;
+                fields.push(field);
+            }
             let keyword = fields[0].to_ascii_uppercase();
 
             // Name-map entries: `*<index> <name>`.
@@ -366,21 +430,24 @@ impl<'a> Parser<'a> {
                 }
                 "*C_UNIT" => {
                     in_name_map = false;
-                    self.cap_scale = self.parse_unit(
-                        &fields,
-                        &[
-                            ("FF", 1e-15),
-                            ("PF", 1e-12),
-                            ("NF", 1e-9),
-                            ("UF", 1e-6),
-                            ("F", 1.0),
-                        ],
-                    )?;
+                    self.cap_scale = self
+                        .parse_unit(
+                            &fields,
+                            &[
+                                ("FF", 1e-15),
+                                ("PF", 1e-12),
+                                ("NF", 1e-9),
+                                ("UF", 1e-6),
+                                ("F", 1.0),
+                            ],
+                        )
+                        .map_err(ParseWithAbortError::from)?;
                 }
                 "*R_UNIT" => {
                     in_name_map = false;
-                    self.res_scale =
-                        self.parse_unit(&fields, &[("OHM", 1.0), ("KOHM", 1e3), ("MOHM", 1e6)])?;
+                    self.res_scale = self
+                        .parse_unit(&fields, &[("OHM", 1.0), ("KOHM", 1e3), ("MOHM", 1e6)])
+                        .map_err(ParseWithAbortError::from)?;
                 }
                 "*NAME_MAP" => in_name_map = true,
                 "*PORTS" | "*PHYSICAL_PORTS" => in_name_map = false,
@@ -391,7 +458,8 @@ impl<'a> Parser<'a> {
                     }
                     let name_field = fields
                         .get(1)
-                        .ok_or_else(|| self.error("*D_NET without a net name"))?;
+                        .ok_or_else(|| self.error("*D_NET without a net name"))
+                        .map_err(ParseWithAbortError::from)?;
                     current = Some(DNet {
                         name: self.resolve_name(name_field),
                         conns: Vec::new(),
@@ -433,7 +501,8 @@ impl<'a> Parser<'a> {
                     };
                     let node_field = fields
                         .get(1)
-                        .ok_or_else(|| self.error("connection entry without a node"))?;
+                        .ok_or_else(|| self.error("connection entry without a node"))
+                        .map_err(ParseWithAbortError::from)?;
                     let node = self.parse_node_ref(node_field);
                     net.conns.push(Conn {
                         node,
@@ -450,12 +519,18 @@ impl<'a> Parser<'a> {
                     // `id node value` (ground) or `id node node value`.
                     match fields.len() {
                         3 => {
-                            let farads = self.parse_value(fields[2])? * self.cap_scale;
+                            let farads = self
+                                .parse_value(fields[2])
+                                .map_err(ParseWithAbortError::from)?
+                                * self.cap_scale;
                             let a = self.parse_node_ref(fields[1]);
                             net.caps.push(Cap { a, b: None, farads });
                         }
                         4 => {
-                            let farads = self.parse_value(fields[3])? * self.cap_scale;
+                            let farads = self
+                                .parse_value(fields[3])
+                                .map_err(ParseWithAbortError::from)?
+                                * self.cap_scale;
                             let a = self.parse_node_ref(fields[1]);
                             let b = self.parse_node_ref(fields[2]);
                             net.caps.push(Cap {
@@ -465,9 +540,11 @@ impl<'a> Parser<'a> {
                             });
                         }
                         _ => {
-                            return Err(self.error(format!(
-                                "malformed *CAP entry `{line}` (expected 3 or 4 fields)"
-                            )));
+                            return Err(self
+                                .error(format!(
+                                    "malformed *CAP entry `{line}` (expected 3 or 4 fields)"
+                                ))
+                                .into());
                         }
                     }
                 }
@@ -477,9 +554,13 @@ impl<'a> Parser<'a> {
                     };
                     if fields.len() != 4 {
                         return Err(self
-                            .error(format!("malformed *RES entry `{line}` (expected 4 fields)")));
+                            .error(format!("malformed *RES entry `{line}` (expected 4 fields)"))
+                            .into());
                     }
-                    let ohms = self.parse_value(fields[3])? * self.res_scale;
+                    let ohms = self
+                        .parse_value(fields[3])
+                        .map_err(ParseWithAbortError::from)?
+                        * self.res_scale;
                     let a = self.parse_node_ref(fields[1]);
                     let b = self.parse_node_ref(fields[2]);
                     net.ress.push(Res { a, b, ohms });
@@ -491,6 +572,7 @@ impl<'a> Parser<'a> {
         if let Some(net) = current.take() {
             nets.push(net);
         }
+        ensure_parse_not_aborted(abort)?;
         Ok(SpefFile { nets })
     }
 
@@ -553,16 +635,82 @@ fn parse_map_index(field: &str) -> Option<u64> {
 }
 
 /// SPEF `//` end-of-line comments.
-fn strip_comment(line: &str) -> &str {
-    match line.find("//") {
-        Some(pos) => &line[..pos],
-        None => line,
+fn strip_comment_with_abort<'a>(
+    line: &'a str,
+    abort: &dyn AbortSignal,
+) -> Result<&'a str, ParseWithAbortError> {
+    let bytes = line.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        if *byte == b'/' && bytes.get(index + 1) == Some(&b'/') {
+            return Ok(&line[..index]);
+        }
     }
+    ensure_parse_not_aborted(abort)?;
+    Ok(line)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spef_parser_aborts_after_multiple_mid_document_polls() {
+        let mut source =
+            String::from("*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*D_NET data 1\n*CAP\n");
+        for index in 0..1_024 {
+            source.push_str(&format!("{} data:{} 1\n", index + 1, index + 1));
+        }
+        source.push_str("*END\n");
+        let abort = crate::abort_signal::CountingAbort::new(20);
+
+        let result = SpefFile::parse_with_abort(&source, &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > 20, "SPEF parsing must poll during work");
+    }
+
+    #[test]
+    fn spef_parser_aborts_inside_a_large_single_record() {
+        let mut source = String::from("*SPEF");
+        for index in 0..4_096 {
+            source.push_str(&format!(" field{index}"));
+        }
+        source.push('\n');
+        let abort = crate::abort_signal::CountingAbort::new(12);
+
+        let result = SpefFile::parse_with_abort(&source, &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(
+            abort.count() > 12,
+            "single-record tokenization must remain cancellable"
+        );
+    }
+
+    #[test]
+    fn spef_back_annotation_aborts_transactionally_mid_network() {
+        let mut source =
+            String::from("*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*D_NET data 1\n*CAP\n");
+        for index in 0..1_024 {
+            source.push_str(&format!("{} data:{} 1\n", index + 1, index + 1));
+        }
+        source.push_str("*END\n");
+        let spef = SpefFile::parse(&source).expect("fixture SPEF parses");
+        let mut netlist = Netlist::default();
+        let original_elements = netlist.elements.len();
+        let abort = crate::abort_signal::CountingAbort::new(8);
+
+        let result = spef.apply_with_abort(&mut netlist, &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > 8, "SPEF application must poll during work");
+        assert_eq!(
+            netlist.elements.len(),
+            original_elements,
+            "an aborted back-annotation must not publish partial elements"
+        );
+    }
 
     const SPEF: &str = r#"
 *SPEF "IEEE 1481-2009"

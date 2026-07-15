@@ -1,5 +1,9 @@
-use super::{build_engine_config, parse_runner_netlist};
+use super::error::{ensure_not_aborted, poll_periodically};
+use super::{
+    ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
+};
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::engine::Engine;
 use std::path::Path;
 
@@ -86,13 +90,34 @@ pub fn run_stb_analysis(
     stop_freq: Value,
     points_per_decade: usize,
 ) -> Result<StbData, String> {
-    run_stb_analysis_with_source_path(
+    run_stb_analysis_with_abort(
+        netlist_text,
+        probe,
+        start_freq,
+        stop_freq,
+        points_per_decade,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Run STB analysis with cooperative cancellation.
+pub fn run_stb_analysis_with_abort(
+    netlist_text: &str,
+    probe: &str,
+    start_freq: Value,
+    stop_freq: Value,
+    points_per_decade: usize,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<StbData> {
+    run_stb_analysis_with_source_path_and_abort(
         netlist_text,
         probe,
         start_freq,
         stop_freq,
         points_per_decade,
         None,
+        abort,
     )
 }
 
@@ -111,7 +136,30 @@ pub fn run_stb_analysis_with_source_path(
     points_per_decade: usize,
     source_path: Option<&Path>,
 ) -> Result<StbData, String> {
-    run_stb_analysis_with_sweep_and_source_path(
+    run_stb_analysis_with_source_path_and_abort(
+        netlist_text,
+        probe,
+        start_freq,
+        stop_freq,
+        points_per_decade,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Run STB analysis with source-path resolution and cancellation.
+#[allow(clippy::too_many_arguments)]
+pub fn run_stb_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    probe: &str,
+    start_freq: Value,
+    stop_freq: Value,
+    points_per_decade: usize,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<StbData> {
+    run_stb_analysis_with_sweep_and_source_path_and_abort(
         netlist_text,
         probe,
         start_freq,
@@ -119,6 +167,7 @@ pub fn run_stb_analysis_with_source_path(
         rspice_core::analysis::advanced::stb::StbSweepType::Decade,
         points_per_decade,
         source_path,
+        abort,
     )
 }
 
@@ -132,9 +181,35 @@ pub fn run_stb_analysis_with_sweep_and_source_path(
     points_per_decade: usize,
     source_path: Option<&Path>,
 ) -> Result<StbData, String> {
+    run_stb_analysis_with_sweep_and_source_path_and_abort(
+        netlist_text,
+        probe,
+        start_freq,
+        stop_freq,
+        sweep_type,
+        points_per_decade,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Run STB analysis with an explicit sweep, source path, and cancellation.
+#[allow(clippy::too_many_arguments)]
+pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
+    netlist_text: &str,
+    probe: &str,
+    start_freq: Value,
+    stop_freq: Value,
+    sweep_type: rspice_core::analysis::advanced::stb::StbSweepType,
+    points_per_decade: usize,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<StbData> {
     use rspice_core::analysis::advanced::stb::StbConfig;
 
-    let netlist = parse_runner_netlist(netlist_text, source_path)?;
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    ensure_not_aborted(abort)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
 
     let stb_config = StbConfig::new()
@@ -144,22 +219,20 @@ pub fn run_stb_analysis_with_sweep_and_source_path(
         .with_nyquist(true);
 
     let analysis = engine
-        .run_stb(&netlist, stb_config)
-        .map_err(|e| format!("STB analysis error: {}", e))?;
+        .run_stb_with_abort(&netlist, stb_config, abort)
+        .map_err(|error| ServiceRunError::from_core("STB analysis error", error))?;
 
     let result_frequencies = analysis.frequencies;
     let stb_result = analysis.result;
 
-    let loop_gain_db: Vec<Value> = stb_result
-        .bode_points
-        .iter()
-        .map(|point| point.magnitude_db)
-        .collect();
-    let loop_phase_deg: Vec<Value> = stb_result
-        .bode_points
-        .iter()
-        .map(|point| point.phase_deg)
-        .collect();
+    let mut loop_gain_db = Vec::with_capacity(stb_result.bode_points.len());
+    let mut loop_phase_deg = Vec::with_capacity(stb_result.bode_points.len());
+    for (index, point) in stb_result.bode_points.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        loop_gain_db.push(point.magnitude_db);
+        loop_phase_deg.push(point.phase_deg);
+    }
+    ensure_not_aborted(abort)?;
 
     Ok(StbData {
         frequencies: result_frequencies,
@@ -171,4 +244,17 @@ pub fn run_stb_analysis_with_sweep_and_source_path(
         phase_crossover_freq: stb_result.margins.gain_margin_freq,
         is_stable: stb_result.margins.is_stable(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::abort_signal::ImmediateAbort;
+
+    #[test]
+    fn stb_service_preserves_typed_entry_abort() {
+        let result = run_stb_analysis_with_abort("not a netlist", "", 0.0, 0.0, 0, &ImmediateAbort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
 }

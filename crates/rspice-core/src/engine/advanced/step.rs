@@ -1053,6 +1053,9 @@ fn step_point_error(
     value: Value,
     error: SimulationError,
 ) -> SimulationError {
+    if matches!(error, SimulationError::Aborted) {
+        return SimulationError::Aborted;
+    }
     SimulationError::Circuit(format!(
         ".STEP {target_kind} {target_name} = {value} failed: {error}"
     ))
@@ -1081,6 +1084,28 @@ fn validate_step_values(values: &[Value]) -> Result<(), SimulationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn step_point_error_preserves_only_typed_cancellation() {
+        assert!(matches!(
+            step_point_error("PARAM", "RLOAD", 1_000.0, SimulationError::Aborted),
+            SimulationError::Aborted
+        ));
+
+        let adversarial = step_point_error(
+            "PARAM",
+            "RLOAD",
+            1_000.0,
+            SimulationError::Circuit("Simulation aborted".to_string()),
+        );
+        match adversarial {
+            SimulationError::Circuit(message) => {
+                assert!(message.contains(".STEP PARAM RLOAD = 1000"));
+                assert!(message.contains("Simulation aborted"));
+            }
+            other => panic!("string-like cancellation must remain a circuit error: {other:?}"),
+        }
+    }
     use crate::engine::{SimulationConfig, SpiceDialect};
     use crate::netlist::{AnalysisCommand, ElementKind, Netlist, SourceSpec};
 

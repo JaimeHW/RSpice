@@ -13,12 +13,13 @@
 
 use egui::{Context, Key};
 
-use crate::state::ComponentType;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::commands::{
+    Command, CommandAvailability, command_catalog, current_command_platform,
+};
 
 use super::RSpiceApp;
-use super::app_shortcuts::ShortcutCommand;
 
 /// Most rows shown at once; the rest are reachable by typing.
 const MAX_ROWS: usize = 12;
@@ -67,7 +68,7 @@ fn find_chars(haystack: &[char], needle: &[char]) -> Option<usize> {
 
 /// One renderable palette row.
 struct PaletteRow {
-    command: ShortcutCommand,
+    command: Command,
     /// Matched display-name char indices (accent-rendered).
     marks: Vec<usize>,
     /// None = runnable; Some(reason) renders dimmed with the reason in
@@ -77,40 +78,27 @@ struct PaletteRow {
 
 /// Commands the palette offers — everything except Cancel and the palette
 /// itself, which are pointless from inside the palette.
-fn palette_commands() -> impl Iterator<Item = ShortcutCommand> {
-    ShortcutCommand::ALL.iter().copied().filter(|c| {
-        !matches!(
-            c,
-            ShortcutCommand::EscapeCancel | ShortcutCommand::OpenCommandPalette
-        )
-    })
+fn palette_commands() -> impl Iterator<Item = Command> {
+    command_catalog()
+}
+
+fn command_name(command: Command) -> &'static str {
+    command.spec().label.trim_end_matches('…')
 }
 
 impl RSpiceApp {
     /// Why a context verb cannot run right now (None = it can).
-    fn palette_blocker(&self, command: ShortcutCommand) -> Option<&'static str> {
-        match command {
-            ShortcutCommand::DescendIntoSelected => {
-                let schematic = &self.state.schematic;
-                let descendable = schematic
-                    .selection
-                    .single_component()
-                    .and_then(|id| schematic.components.iter().find(|c| c.id == id))
-                    .is_some_and(|c| {
-                        c.kind == ComponentType::CellInstance && c.library_cell.is_some()
-                    });
-                (!descendable).then_some("select one cell instance")
-            }
-            ShortcutCommand::AscendHierarchy => {
-                (self.state.workspace.hierarchy_stack.len() < 2).then_some("already at top")
-            }
-            _ => None,
+    fn palette_blocker(&self, command: Command) -> Option<&'static str> {
+        match command.availability(self) {
+            CommandAvailability::Available => None,
+            CommandAvailability::Disabled(reason) => Some(reason),
+            CommandAvailability::Hidden => Some("not available in command search"),
         }
     }
 
     /// The filtered, ranked rows plus how many of them are RECENT entries.
     fn palette_rows(&self, query: &str) -> (Vec<PaletteRow>, usize) {
-        let row = |command: ShortcutCommand, marks: Vec<usize>| PaletteRow {
+        let row = |command: Command, marks: Vec<usize>| PaletteRow {
             command,
             marks,
             blocked: self.palette_blocker(command),
@@ -133,7 +121,7 @@ impl RSpiceApp {
         }
 
         let mut ranked: Vec<(u8, PaletteRow)> = palette_commands()
-            .filter_map(|c| match_spans(c.display_name(), query).map(|(r, m)| (r, row(c, m))))
+            .filter_map(|c| match_spans(command_name(c), query).map(|(r, m)| (r, row(c, m))))
             .collect();
         // Stable by rank only — ties keep the canonical ALL order, so the
         // Place family stays a family instead of alphabet soup.
@@ -177,12 +165,12 @@ impl RSpiceApp {
             palette.selected = palette.selected.checked_sub(1).unwrap_or(visible - 1);
         }
 
-        let mut run: Option<ShortcutCommand> = None;
+        let mut run: Option<Command> = None;
         let screen = ctx.screen_rect();
         let width = 520.0_f32.min(screen.width() - 48.0);
         let query_empty = query.is_empty();
 
-        egui::Area::new(egui::Id::new("volta.command_palette"))
+        egui::Area::new(egui::Id::new("rspice.command-palette"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(
                 screen.center().x - width * 0.5,
@@ -271,7 +259,7 @@ impl RSpiceApp {
             recent.insert(0, command);
             recent.truncate(MAX_RECENT);
             self.state.dialogs.command_palette.open = false;
-            self.execute_shortcut_command(command);
+            command.execute(self);
         }
     }
 }
@@ -304,7 +292,7 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
 
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::click());
-    let command_name = row.command.display_name();
+    let command_name = command_name(row.command);
     let accessibility_label = row.blocked.map_or_else(
         || command_name.to_owned(),
         |reason| format!("{command_name}, unavailable: {reason}"),
@@ -319,7 +307,7 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::ListBoxOption);
         node.set_selected(selected);
-        let shortcut = row.command.shortcut_string();
+        let shortcut = row.command.shortcut_label(current_command_platform());
         if !shortcut.is_empty() {
             node.set_keyboard_shortcut(shortcut);
         }
@@ -387,7 +375,9 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
         base_color,
     );
 
-    let right_text = row.blocked.unwrap_or_else(|| row.command.shortcut_string());
+    let right_text = row
+        .blocked
+        .unwrap_or_else(|| row.command.shortcut_label(current_command_platform()));
     if !right_text.is_empty() {
         painter.text(
             egui::pos2(rect.right() - 10.0, rect.center().y),
@@ -406,4 +396,35 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workbench::commands::COMMAND_REGISTRY;
+
+    #[test]
+    fn palette_is_a_typed_registry_projection() {
+        let commands = palette_commands().collect::<Vec<_>>();
+        assert!(!commands.contains(&Command::CommandPalette));
+        assert!(!commands.contains(&Command::Cancel));
+        assert!(commands.contains(&Command::OpenProject));
+        assert!(commands.contains(&Command::GenerateNetlist));
+        assert!(
+            commands
+                .iter()
+                .all(|command| COMMAND_REGISTRY.contains(command))
+        );
+        assert!(commands.iter().all(|command| command.palette_visible()));
+    }
+
+    #[test]
+    fn palette_names_are_the_canonical_menu_labels_without_ellipsis() {
+        assert_eq!(command_name(Command::OpenProject), "Open project");
+        assert_eq!(command_name(Command::SaveAll), "Save all");
+        assert_eq!(
+            command_name(Command::GenerateNetlist),
+            "Open generated netlist"
+        );
+    }
 }

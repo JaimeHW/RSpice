@@ -1,9 +1,11 @@
+use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{
-    is_ground_like, normalize_voltage_signal_name, parse_runner_netlist,
-    run_transient_analysis_with_source_path,
+    is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort,
+    run_transient_analysis_with_source_path_and_abort,
 };
 use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::netlist::{Element, ElementKind};
 use std::collections::HashMap;
 use std::path::Path;
@@ -94,7 +96,15 @@ pub struct SoaData {
 
 /// Run SOA analysis using default configuration.
 pub fn run_soa_analysis(netlist_text: &str) -> Result<SoaData, String> {
-    run_soa_analysis_with_source_path(netlist_text, None)
+    run_soa_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run SOA analysis with cooperative cancellation.
+pub fn run_soa_analysis_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<SoaData> {
+    run_soa_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run SOA analysis using default configuration and a source path used to
@@ -103,10 +113,21 @@ pub fn run_soa_analysis_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<SoaData, String> {
-    run_soa_analysis_with_config_and_source_path(
+    run_soa_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run SOA analysis with source-path resolution and cooperative cancellation.
+pub fn run_soa_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<SoaData> {
+    run_soa_analysis_with_config_and_source_path_and_abort(
         netlist_text,
         &SoaRunConfig::default(),
         source_path,
+        abort,
     )
 }
 
@@ -115,7 +136,17 @@ pub fn run_soa_analysis_with_config(
     netlist_text: &str,
     config: &SoaRunConfig,
 ) -> Result<SoaData, String> {
-    run_soa_analysis_with_config_and_source_path(netlist_text, config, None)
+    run_soa_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run explicitly configured SOA analysis with cooperative cancellation.
+pub fn run_soa_analysis_with_config_and_abort(
+    netlist_text: &str,
+    config: &SoaRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<SoaData> {
+    run_soa_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
 }
 
 /// Run SOA analysis using explicit configuration and a source path used to
@@ -125,39 +156,65 @@ pub fn run_soa_analysis_with_config_and_source_path(
     config: &SoaRunConfig,
     source_path: Option<&Path>,
 ) -> Result<SoaData, String> {
-    config.validate()?;
+    run_soa_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
+}
 
-    let netlist = parse_runner_netlist(netlist_text, source_path)?;
-    let transient = run_transient_analysis_with_source_path(
+/// Run explicitly configured SOA analysis with source-path resolution and
+/// cooperative cancellation through parsing, transient solving, and every
+/// device/time-point check.
+pub fn run_soa_analysis_with_config_and_source_path_and_abort(
+    netlist_text: &str,
+    config: &SoaRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<SoaData> {
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let transient = run_transient_analysis_with_source_path_and_abort(
         netlist_text,
         config.stop_time,
         config.step_time,
         source_path,
+        abort,
     )?;
 
     let mut manager = SoAManager::new();
-    register_soa_limits_for_netlist(&mut manager, &netlist.elements, config);
+    register_soa_limits_for_netlist(&mut manager, &netlist.elements, config, abort)?;
     if manager.violations().is_empty() && netlist.elements.is_empty() {
-        return Err("SOA analysis received an empty netlist".to_string());
+        return Err(ServiceRunError::Failure(
+            "SOA analysis received an empty netlist".to_string(),
+        ));
     }
 
     let mut active_devices = 0usize;
-    for element in &netlist.elements {
+    for (element_index, element) in netlist.elements.iter().enumerate() {
+        poll_periodically(abort, element_index)?;
         if is_soa_supported_element(&element.kind) {
             active_devices += 1;
         }
     }
     if active_devices == 0 {
-        return Err("SOA analysis found no supported semiconductor devices".to_string());
+        return Err(ServiceRunError::Failure(
+            "SOA analysis found no supported semiconductor devices".to_string(),
+        ));
     }
 
-    let node_waveforms = build_transient_node_lookup(&transient.voltages);
+    let node_waveforms = build_transient_node_lookup(&transient.voltages, abort)?;
     let mut violation_count = Vec::with_capacity(transient.time.len());
 
     for (idx, &time) in transient.time.iter().enumerate() {
+        poll_periodically(abort, idx)?;
         let mut values: HashMap<String, HashMap<SoAParameter, Value>> = HashMap::new();
 
-        for element in &netlist.elements {
+        for (element_index, element) in netlist.elements.iter().enumerate() {
+            poll_periodically(abort, element_index)?;
             match &element.kind {
                 ElementKind::Mosfet { .. }
                 | ElementKind::Jfet { .. }
@@ -205,10 +262,16 @@ pub fn run_soa_analysis_with_config_and_source_path(
         violation_count.push(manager.violations().len() as Value);
     }
 
+    let mut violations = Vec::with_capacity(manager.violations().len());
+    for (violation_index, violation) in manager.violations().iter().enumerate() {
+        poll_periodically(abort, violation_index)?;
+        violations.push(violation.clone());
+    }
+    ensure_not_aborted(abort)?;
     Ok(SoaData {
         time: transient.time,
         violation_count,
-        violations: manager.violations().to_vec(),
+        violations,
     })
 }
 
@@ -226,8 +289,10 @@ fn register_soa_limits_for_netlist(
     manager: &mut SoAManager,
     elements: &[Element],
     config: &SoaRunConfig,
-) {
-    for element in elements {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<()> {
+    for (element_index, element) in elements.iter().enumerate() {
+        poll_periodically(abort, element_index)?;
         let mut def = SoADefinition::new();
         match &element.kind {
             ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
@@ -280,16 +345,27 @@ fn register_soa_limits_for_netlist(
             manager.register_device(element.name.clone(), def);
         }
     }
+    ensure_not_aborted(abort)
 }
 
-fn build_transient_node_lookup(voltages: &[(String, Vec<Value>)]) -> HashMap<String, Vec<Value>> {
+fn build_transient_node_lookup(
+    voltages: &[(String, Vec<Value>)],
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<HashMap<String, Vec<Value>>> {
     let mut map = HashMap::with_capacity(voltages.len() + 2);
-    for (name, values) in voltages {
-        map.insert(normalize_voltage_signal_name(name), values.clone());
+    for (trace_index, (name, values)) in voltages.iter().enumerate() {
+        poll_periodically(abort, trace_index)?;
+        let mut copied_values = Vec::with_capacity(values.len());
+        for (sample_index, value) in values.iter().copied().enumerate() {
+            poll_periodically(abort, sample_index)?;
+            copied_values.push(value);
+        }
+        map.insert(normalize_voltage_signal_name(name), copied_values);
     }
     map.insert("0".to_string(), Vec::new());
     map.insert("GND".to_string(), Vec::new());
-    map
+    ensure_not_aborted(abort)?;
+    Ok(map)
 }
 
 fn sample_node_waveform(
@@ -305,4 +381,49 @@ fn sample_node_waveform(
         .get(&key)
         .and_then(|values| values.get(idx).copied())
         .unwrap_or(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct AbortOnPoll {
+        abort_on: usize,
+        polls: AtomicUsize,
+    }
+
+    impl AbortOnPoll {
+        fn new(abort_on: usize) -> Self {
+            Self {
+                abort_on,
+                polls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl AbortSignal for AbortOnPoll {
+        fn is_aborted(&self) -> bool {
+            self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
+
+    #[test]
+    fn soa_honors_early_abort_before_invalid_input() {
+        let abort = AbortOnPoll::new(1);
+        let result = run_soa_analysis_with_abort("invalid", &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn soa_honors_abort_inside_waveform_sample_conversion() {
+        let voltages = vec![("V(out)".to_string(), vec![1.0; 512])];
+        let abort = AbortOnPoll::new(3);
+        let result = build_transient_node_lookup(&voltages, &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(abort.polls.load(Ordering::Relaxed) >= 3);
+    }
 }

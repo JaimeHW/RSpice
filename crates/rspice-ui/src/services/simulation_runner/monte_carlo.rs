@@ -1,7 +1,9 @@
 //! Monte Carlo analysis runner.
 
-use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist};
+use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
+use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort};
 use rspice_core::Value;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
@@ -31,7 +33,15 @@ pub struct MonteCarloData {
 
 /// Run Monte Carlo analysis by executing the first `.MC` command in the netlist.
 pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, String> {
-    run_monte_carlo_analysis_with_source_path(netlist_text, None)
+    run_monte_carlo_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
+}
+
+/// Run Monte Carlo analysis with cooperative cancellation.
+pub fn run_monte_carlo_analysis_with_abort(
+    netlist_text: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<MonteCarloData> {
+    run_monte_carlo_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
 /// Run Monte Carlo analysis with a source path used to resolve relative
@@ -40,7 +50,19 @@ pub fn run_monte_carlo_analysis_with_source_path(
     netlist_text: &str,
     source_path: Option<&Path>,
 ) -> Result<MonteCarloData, String> {
-    let netlist = parse_runner_netlist(netlist_text, source_path)?;
+    run_monte_carlo_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run Monte Carlo analysis with source-path resolution and cooperative
+/// cancellation through parsing, trial execution, and result conversion.
+pub fn run_monte_carlo_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<MonteCarloData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    ensure_not_aborted(abort)?;
 
     let mc_cmd = netlist
         .analyses
@@ -49,7 +71,11 @@ pub fn run_monte_carlo_analysis_with_source_path(
             AnalysisCommand::MonteCarlo(cmd) => Some(cmd),
             _ => None,
         })
-        .ok_or_else(|| "Monte Carlo analysis requires a .MC command in the netlist".to_string())?;
+        .ok_or_else(|| {
+            ServiceRunError::Failure(
+                "Monte Carlo analysis requires a .MC command in the netlist".to_string(),
+            )
+        })?;
 
     let distribution = match mc_cmd.distribution {
         MonteCarloDistribution::Gaussian => Distribution::Gaussian {
@@ -68,13 +94,20 @@ pub fn run_monte_carlo_analysis_with_source_path(
 
     let engine = Engine::new(build_engine_config(&netlist, None));
     let result = engine
-        .run_monte_carlo_with_options(&netlist, mc_cmd.runs, seed, distribution, parameter_filter)
-        .map_err(|e| format!("Monte Carlo analysis error: {}", e))?;
+        .run_monte_carlo_with_options_and_abort(
+            &netlist,
+            mc_cmd.runs,
+            seed,
+            distribution,
+            parameter_filter,
+            abort,
+        )
+        .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
 
-    let mut variables: Vec<MonteCarloVariableData> = result
-        .variables
-        .into_values()
-        .map(|stats| MonteCarloVariableData {
+    let mut variables = Vec::with_capacity(result.variables.len());
+    for (index, stats) in result.variables.into_values().enumerate() {
+        poll_periodically(abort, index)?;
+        variables.push(MonteCarloVariableData {
             name: stats.name,
             mean: stats.mean,
             std_dev: stats.std_dev,
@@ -82,9 +115,11 @@ pub fn run_monte_carlo_analysis_with_source_path(
             max: stats.max,
             histogram: stats.histogram,
             bin_edges: stats.bin_edges,
-        })
-        .collect();
+        });
+    }
+    ensure_not_aborted(abort)?;
     variables.sort_by(|a, b| a.name.cmp(&b.name));
+    ensure_not_aborted(abort)?;
 
     Ok(MonteCarloData {
         runs_requested: mc_cmd.runs,
@@ -93,4 +128,58 @@ pub fn run_monte_carlo_analysis_with_source_path(
         all_converged: result.all_converged,
         variables,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct AbortOnPoll {
+        abort_on: usize,
+        polls: AtomicUsize,
+    }
+
+    impl AbortOnPoll {
+        fn new(abort_on: usize) -> Self {
+            Self {
+                abort_on,
+                polls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl AbortSignal for AbortOnPoll {
+        fn is_aborted(&self) -> bool {
+            self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
+
+    const MONTE_CARLO_DECK: &str = "\
+Monte Carlo cancellation
+.param rload=1k
+V1 in 0 1
+R1 in out {rload}
+R2 out 0 1k
+.mc 64 gauss 0.1 seed 7 params rload
+.end
+";
+
+    #[test]
+    fn monte_carlo_honors_early_abort_before_invalid_input() {
+        let abort = AbortOnPoll::new(1);
+        let result = run_monte_carlo_analysis_with_abort("invalid", &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn monte_carlo_honors_abort_during_trial_execution() {
+        let abort = AbortOnPoll::new(8);
+        let result = run_monte_carlo_analysis_with_abort(MONTE_CARLO_DECK, &abort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(abort.polls.load(Ordering::Relaxed) >= 8);
+    }
 }

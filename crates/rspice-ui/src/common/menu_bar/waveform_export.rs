@@ -29,7 +29,10 @@ pub(crate) fn action_export_csv_with_io(
         Ok(Some(mut path)) => {
             crate::common::file_actions::ensure_file_extension(&mut path, "csv");
 
-            match io.write_waveform_csv(&prepared.dataset, &path) {
+            let export = io.observe_destination(&path).and_then(|destination| {
+                io.write_waveform_csv_observed(&prepared.dataset, &destination)
+            });
+            match export {
                 Ok(()) => {
                     let detail = format!(
                         "{} signals, {} points",

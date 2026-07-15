@@ -29,7 +29,8 @@
 //! The other exponents determine amplitude stability.
 
 #![allow(clippy::needless_range_loop)]
-use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::{SimulationError, Value};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -370,92 +371,141 @@ impl PstbAnalyzer {
 
     /// Analyze stability from a pre-computed Monodromy matrix
     pub fn analyze_monodromy(&mut self, monodromy: &[Vec<Value>], period: Value) -> PstbResult {
+        self.analyze_monodromy_with_abort(monodromy, period, &NoAbort)
+            .expect("NoAbort cannot cancel PSTB eigen-analysis")
+    }
+
+    /// Analyze stability from a pre-computed Monodromy matrix, cooperatively
+    /// returning [`SimulationError::Aborted`] when cancellation is requested.
+    ///
+    /// Cancellation is polled throughout matrix preparation, QR iteration,
+    /// inverse iteration, and result conversion so large state spaces do not
+    /// become an uninterruptible post-processing stage.
+    pub fn analyze_monodromy_with_abort(
+        &mut self,
+        monodromy: &[Vec<Value>],
+        period: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<PstbResult, SimulationError> {
+        ensure_not_aborted(abort)?;
         let n = monodromy.len();
         self.dimension = n;
 
         // Compute eigenvalues using QR iteration or power method
-        let eigenvalues = self.compute_eigenvalues(monodromy);
+        let eigenvalues = self.compute_eigenvalues_with_abort(monodromy, abort)?;
         let eigenvectors = if self.config.compute_eigenvectors {
-            self.compute_right_eigenvectors(monodromy, &eigenvalues)
+            self.compute_right_eigenvectors_with_abort(monodromy, &eigenvalues, abort)?
         } else {
             vec![None; eigenvalues.len()]
         };
 
         // Create FloquetMultiplier objects
-        let mut multipliers: Vec<FloquetMultiplier> = eigenvalues
-            .iter()
-            .enumerate()
-            .map(|(i, &ev)| {
-                let mut fm = FloquetMultiplier::new(ev, period, self.config.stability_threshold);
-                fm.index = i;
-                fm.eigenvector = eigenvectors.get(i).cloned().unwrap_or(None);
-                fm
-            })
-            .collect();
+        let mut multipliers = Vec::with_capacity(eigenvalues.len());
+        for (i, &ev) in eigenvalues.iter().enumerate() {
+            poll_periodically(abort, i)?;
+            let mut fm = FloquetMultiplier::new(ev, period, self.config.stability_threshold);
+            fm.index = i;
+            fm.eigenvector = eigenvectors.get(i).cloned().unwrap_or(None);
+            multipliers.push(fm);
+        }
 
         // Sort by magnitude (most unstable first)
+        ensure_not_aborted(abort)?;
         multipliers.sort_by(|a, b| b.magnitude().total_cmp(&a.magnitude()));
+        ensure_not_aborted(abort)?;
 
         // Re-index after sorting
         for (i, m) in multipliers.iter_mut().enumerate() {
+            poll_periodically(abort, i)?;
             m.index = i;
         }
 
         // Classify stability
-        let stability = self.classify_stability(&multipliers);
+        let stability = self.classify_stability_with_abort(&multipliers, abort)?;
 
         // Count unstable and compute margins
-        let num_unstable = multipliers.iter().filter(|m| m.is_unstable).count();
+        let mut num_unstable = 0;
+        for (index, multiplier) in multipliers.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if multiplier.is_unstable {
+                num_unstable += 1;
+            }
+        }
         let max_magnitude = multipliers.first().map(|m| m.magnitude()).unwrap_or(0.0);
 
         let min_margin_db = if num_unstable == 0 && !multipliers.is_empty() {
             // Find the largest non-trivial magnitude
-            multipliers
-                .iter()
-                .filter(|m| !m.is_trivial)
-                .map(|m| m.stability_margin_db())
-                .filter(|margin| margin.is_finite())
-                .min_by(|a, b| a.total_cmp(b))
-                .unwrap_or(f64::INFINITY)
+            let mut minimum = f64::INFINITY;
+            for (index, multiplier) in multipliers.iter().enumerate() {
+                poll_periodically(abort, index)?;
+                if !multiplier.is_trivial {
+                    let margin = multiplier.stability_margin_db();
+                    if margin.is_finite() && margin.total_cmp(&minimum).is_lt() {
+                        minimum = margin;
+                    }
+                }
+            }
+            minimum
         } else {
             -max_magnitude.log10() * 20.0 // Negative margin = unstable
         };
 
         // Detect subharmonics
-        let subharmonics: Vec<usize> = multipliers
-            .iter()
-            .filter_map(|m| m.subharmonic_order)
-            .collect();
+        let mut subharmonics = Vec::new();
+        for (index, multiplier) in multipliers.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if let Some(order) = multiplier.subharmonic_order {
+                subharmonics.push(order);
+            }
+        }
 
-        PstbResult {
+        let mut monodromy_copy = Vec::with_capacity(monodromy.len());
+        let mut flat_index = 0;
+        for row in monodromy {
+            let mut copied_row = Vec::with_capacity(row.len());
+            for &value in row {
+                poll_periodically(abort, flat_index)?;
+                flat_index += 1;
+                copied_row.push(value);
+            }
+            monodromy_copy.push(copied_row);
+        }
+        ensure_not_aborted(abort)?;
+
+        Ok(PstbResult {
             period,
             fundamental_frequency: 1.0 / period,
             multipliers,
             stability,
-            monodromy: monodromy.to_vec(),
+            monodromy: monodromy_copy,
             num_unstable,
             min_stability_margin_db: min_margin_db,
             max_multiplier_magnitude: max_magnitude,
             subharmonics,
             converged: true,
             iterations: 0,
-        }
+        })
     }
 
     /// Compute eigenvalues of the Monodromy matrix
-    fn compute_eigenvalues(&self, matrix: &[Vec<Value>]) -> Vec<Complex64> {
+    fn compute_eigenvalues_with_abort(
+        &self,
+        matrix: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Complex64>, SimulationError> {
+        ensure_not_aborted(abort)?;
         let n = matrix.len();
         if n == 0 {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         // For 2x2, use analytical formula
         if n == 2 {
-            return self.eigenvalues_2x2(matrix);
+            return Ok(self.eigenvalues_2x2(matrix));
         }
 
         // For larger matrices, use QR iteration
-        self.qr_eigenvalues(matrix)
+        self.qr_eigenvalues_with_abort(matrix, abort)
     }
 
     /// Analytical eigenvalues for 2x2 matrix
@@ -480,24 +530,42 @@ impl PstbAnalyzer {
     }
 
     /// QR iteration for eigenvalues of larger matrices
-    fn qr_eigenvalues(&self, matrix: &[Vec<Value>]) -> Vec<Complex64> {
+    fn qr_eigenvalues_with_abort(
+        &self,
+        matrix: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Complex64>, SimulationError> {
+        ensure_not_aborted(abort)?;
         let n = matrix.len();
         let mut eigenvalues = Vec::with_capacity(n);
 
         // Convert to working matrix (Hessenberg form would be more efficient)
-        let mut a: Vec<Vec<Value>> = matrix.to_vec();
+        let mut a = Vec::with_capacity(n);
+        let mut flat_index = 0;
+        for row in matrix {
+            let mut copied_row = Vec::with_capacity(row.len());
+            for &value in row {
+                poll_periodically(abort, flat_index)?;
+                flat_index += 1;
+                copied_row.push(value);
+            }
+            a.push(copied_row);
+        }
+        ensure_not_aborted(abort)?;
 
         // Simple QR iteration (for production, use LAPACK)
-        for _iter in 0..self.config.max_iterations {
+        for iter in 0..self.config.max_iterations {
+            poll_periodically(abort, iter)?;
             // QR decomposition using Gram-Schmidt
-            let (q, r) = self.qr_decompose(&a);
+            let (q, r) = self.qr_decompose_with_abort(&a, abort)?;
 
             // A_new = R * Q
-            a = self.matrix_multiply(&r, &q);
+            a = self.matrix_multiply_with_abort(&r, &q, abort)?;
 
             // Check for convergence (subdiagonal elements small)
             let mut converged = true;
             for i in 1..n {
+                poll_periodically(abort, i)?;
                 if a[i][i - 1].abs() > self.config.eigenvalue_tolerance {
                     converged = false;
                     break;
@@ -512,6 +580,7 @@ impl PstbAnalyzer {
         // Extract eigenvalues from diagonal (and 2x2 blocks for complex pairs)
         let mut i = 0;
         while i < n {
+            poll_periodically(abort, i)?;
             if i == n - 1 || a[i + 1][i].abs() < self.config.eigenvalue_tolerance {
                 // Real eigenvalue on diagonal
                 eigenvalues.push(Complex64::new(a[i][i], 0.0));
@@ -528,43 +597,54 @@ impl PstbAnalyzer {
             }
         }
 
-        eigenvalues
+        ensure_not_aborted(abort)?;
+        Ok(eigenvalues)
     }
 
     /// Compute right eigenvectors for each eigenvalue using shifted inverse iteration.
-    fn compute_right_eigenvectors(
+    fn compute_right_eigenvectors_with_abort(
         &self,
         matrix: &[Vec<Value>],
         eigenvalues: &[Complex64],
-    ) -> Vec<Option<Vec<Complex64>>> {
-        eigenvalues
-            .iter()
-            .map(|&lambda| self.inverse_iteration_right_eigenvector(matrix, lambda))
-            .collect()
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Option<Vec<Complex64>>>, SimulationError> {
+        let mut eigenvectors = Vec::with_capacity(eigenvalues.len());
+        for (index, &lambda) in eigenvalues.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            eigenvectors
+                .push(self.inverse_iteration_right_eigenvector_with_abort(matrix, lambda, abort)?);
+        }
+        ensure_not_aborted(abort)?;
+        Ok(eigenvectors)
     }
 
     /// Shifted inverse iteration for right eigenvector associated with `lambda`.
-    fn inverse_iteration_right_eigenvector(
+    fn inverse_iteration_right_eigenvector_with_abort(
         &self,
         matrix: &[Vec<Value>],
         lambda: Complex64,
-    ) -> Option<Vec<Complex64>> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Complex64>>, SimulationError> {
+        ensure_not_aborted(abort)?;
         let n = matrix.len();
         if n == 0 {
-            return None;
+            return Ok(None);
         }
         if n == 1 {
-            return Some(vec![Complex64::new(1.0, 0.0)]);
+            return Ok(Some(vec![Complex64::new(1.0, 0.0)]));
         }
 
-        let mut v = (0..n)
-            .map(|i| Complex64::new((i + 1) as Value, 0.0))
-            .collect::<Vec<_>>();
-        let mut v_norm = Self::complex_l2_norm(&v);
-        if !v_norm.is_finite() || v_norm <= 1e-20 {
-            return None;
+        let mut v = Vec::with_capacity(n);
+        for i in 0..n {
+            poll_periodically(abort, i)?;
+            v.push(Complex64::new((i + 1) as Value, 0.0));
         }
-        for x in &mut v {
+        let mut v_norm = Self::complex_l2_norm_with_abort(&v, abort)?;
+        if !v_norm.is_finite() || v_norm <= 1e-20 {
+            return Ok(None);
+        }
+        for (index, x) in v.iter_mut().enumerate() {
+            poll_periodically(abort, index)?;
             *x /= v_norm;
         }
 
@@ -573,55 +653,69 @@ impl PstbAnalyzer {
         let lambda_shifted = lambda + Complex64::new(shift, shift * 0.1);
 
         const MAX_ITERS: usize = 24;
-        for _ in 0..MAX_ITERS {
-            let mut w = self.solve_shifted_complex_system(matrix, lambda_shifted, &v)?;
-            let w_norm = Self::complex_l2_norm(&w);
+        for iteration in 0..MAX_ITERS {
+            poll_periodically(abort, iteration)?;
+            let Some(mut w) =
+                self.solve_shifted_complex_system_with_abort(matrix, lambda_shifted, &v, abort)?
+            else {
+                return Ok(None);
+            };
+            let w_norm = Self::complex_l2_norm_with_abort(&w, abort)?;
             if !w_norm.is_finite() || w_norm <= 1e-20 {
-                return None;
+                return Ok(None);
             }
-            for x in &mut w {
+            for (index, x) in w.iter_mut().enumerate() {
+                poll_periodically(abort, index)?;
                 *x /= w_norm;
             }
-            Self::phase_normalize(&mut w);
+            Self::phase_normalize_with_abort(&mut w, abort)?;
 
-            let delta = w
-                .iter()
-                .zip(v.iter())
-                .map(|(a, b)| (*a - *b).norm_sqr())
-                .sum::<Value>()
-                .sqrt();
+            let mut delta_sum = 0.0;
+            for (index, (a, b)) in w.iter().zip(v.iter()).enumerate() {
+                poll_periodically(abort, index)?;
+                delta_sum += (*a - *b).norm_sqr();
+            }
+            let delta = delta_sum.sqrt();
             v = w;
-            v_norm = Self::complex_l2_norm(&v);
+            v_norm = Self::complex_l2_norm_with_abort(&v, abort)?;
             if !v_norm.is_finite() || v_norm <= 1e-20 {
-                return None;
+                return Ok(None);
             }
             if delta <= 1e-8 {
                 break;
             }
         }
 
-        if v.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
-            Some(v)
-        } else {
-            None
+        for (index, component) in v.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if !component.re.is_finite() || !component.im.is_finite() {
+                return Ok(None);
+            }
         }
+        ensure_not_aborted(abort)?;
+        Ok(Some(v))
     }
 
     /// Solve (A - λI)x = rhs for x, where A is real and λ, rhs are complex.
-    fn solve_shifted_complex_system(
+    fn solve_shifted_complex_system_with_abort(
         &self,
         matrix: &[Vec<Value>],
         lambda: Complex64,
         rhs: &[Complex64],
-    ) -> Option<Vec<Complex64>> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Complex64>>, SimulationError> {
+        ensure_not_aborted(abort)?;
         let n = matrix.len();
         if rhs.len() != n {
-            return None;
+            return Ok(None);
         }
 
         let mut aug = vec![vec![Complex64::new(0.0, 0.0); n + 1]; n];
+        let mut flat_index = 0;
         for i in 0..n {
             for j in 0..n {
+                poll_periodically(abort, flat_index)?;
+                flat_index += 1;
                 aug[i][j] = Complex64::new(matrix[i][j], 0.0);
             }
             aug[i][i] -= lambda;
@@ -631,9 +725,11 @@ impl PstbAnalyzer {
         const PIVOT_EPS: Value = 1e-20;
 
         for col in 0..n {
+            poll_periodically(abort, col)?;
             let mut pivot_row = col;
             let mut pivot_norm = aug[col][col].norm();
             for (row, row_data) in aug.iter().enumerate().skip(col + 1) {
+                poll_periodically(abort, row)?;
                 let candidate = row_data[col].norm();
                 if candidate > pivot_norm {
                     pivot_norm = candidate;
@@ -642,7 +738,7 @@ impl PstbAnalyzer {
             }
 
             if !pivot_norm.is_finite() || pivot_norm <= PIVOT_EPS {
-                return None;
+                return Ok(None);
             }
             if pivot_row != col {
                 aug.swap(pivot_row, col);
@@ -651,11 +747,14 @@ impl PstbAnalyzer {
             let pivot = aug[col][col];
             let pivot_entries = aug[col].clone();
             for row in (col + 1)..n {
+                poll_periodically(abort, row)?;
                 let factor = aug[row][col] / pivot;
                 if factor.norm() <= PIVOT_EPS {
                     continue;
                 }
                 for k in col..=n {
+                    poll_periodically(abort, flat_index)?;
+                    flat_index += 1;
                     aug[row][k] -= factor * pivot_entries[k];
                 }
             }
@@ -663,146 +762,283 @@ impl PstbAnalyzer {
 
         let mut x = vec![Complex64::new(0.0, 0.0); n];
         for i_rev in 0..n {
+            poll_periodically(abort, i_rev)?;
             let i = n - 1 - i_rev;
             let mut sum = aug[i][n];
             for (k, xk) in x.iter().enumerate().skip(i + 1) {
+                poll_periodically(abort, k)?;
                 sum -= aug[i][k] * *xk;
             }
             let diag = aug[i][i];
             if diag.norm() <= PIVOT_EPS {
-                return None;
+                return Ok(None);
             }
             x[i] = sum / diag;
         }
 
-        if x.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
-            Some(x)
-        } else {
-            None
+        for (index, component) in x.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if !component.re.is_finite() || !component.im.is_finite() {
+                return Ok(None);
+            }
         }
+        ensure_not_aborted(abort)?;
+        Ok(Some(x))
     }
 
-    fn complex_l2_norm(values: &[Complex64]) -> Value {
-        values.iter().map(|c| c.norm_sqr()).sum::<Value>().sqrt()
+    fn complex_l2_norm_with_abort(
+        values: &[Complex64],
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, SimulationError> {
+        let mut sum = 0.0;
+        for (index, component) in values.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            sum += component.norm_sqr();
+        }
+        Ok(sum.sqrt())
     }
 
     /// Normalize phase so the largest-magnitude component is real-positive.
-    fn phase_normalize(vector: &mut [Complex64]) {
-        let Some((idx, _)) = vector.iter().enumerate().max_by(|(_, a), (_, b)| {
-            a.norm()
-                .partial_cmp(&b.norm())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        }) else {
-            return;
+    fn phase_normalize_with_abort(
+        vector: &mut [Complex64],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let mut anchor_index = None;
+        let mut anchor_norm = Value::NEG_INFINITY;
+        for (index, component) in vector.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            let norm = component.norm();
+            if norm > anchor_norm {
+                anchor_norm = norm;
+                anchor_index = Some(index);
+            }
+        }
+        let Some(idx) = anchor_index else {
+            return Ok(());
         };
         let anchor = vector[idx];
         if anchor.norm() <= 1e-20 {
-            return;
+            return Ok(());
         }
         let rot = Complex64::from_polar(1.0, -anchor.arg());
-        for x in vector {
+        for (index, x) in vector.iter_mut().enumerate() {
+            poll_periodically(abort, index)?;
             *x *= rot;
         }
+        Ok(())
     }
 
     /// QR decomposition using modified Gram-Schmidt
-    fn qr_decompose(&self, a: &[Vec<Value>]) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
+    fn qr_decompose_with_abort(
+        &self,
+        a: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<Vec<Value>>, Vec<Vec<Value>>), SimulationError> {
+        ensure_not_aborted(abort)?;
         let n = a.len();
         let mut q: Vec<Vec<Value>> = vec![vec![0.0; n]; n];
         let mut r: Vec<Vec<Value>> = vec![vec![0.0; n]; n];
 
         // Extract columns
-        let cols: Vec<Vec<Value>> = (0..n).map(|j| (0..n).map(|i| a[i][j]).collect()).collect();
+        let mut cols = Vec::with_capacity(n);
+        let mut flat_index = 0;
+        for j in 0..n {
+            let mut column = Vec::with_capacity(n);
+            for i in 0..n {
+                poll_periodically(abort, flat_index)?;
+                flat_index += 1;
+                column.push(a[i][j]);
+            }
+            cols.push(column);
+        }
 
         for j in 0..n {
+            poll_periodically(abort, j)?;
             let mut v = cols[j].clone();
 
             // Orthogonalize against previous columns
             for i in 0..j {
-                let q_col: Vec<Value> = (0..n).map(|k| q[k][i]).collect();
-                let dot: Value = v.iter().zip(q_col.iter()).map(|(a, b)| a * b).sum();
+                poll_periodically(abort, i)?;
+                let mut q_col = Vec::with_capacity(n);
+                for k in 0..n {
+                    poll_periodically(abort, flat_index)?;
+                    flat_index += 1;
+                    q_col.push(q[k][i]);
+                }
+                let mut dot = 0.0;
+                for (k, (&v_value, &q_value)) in v.iter().zip(q_col.iter()).enumerate() {
+                    poll_periodically(abort, k)?;
+                    dot += v_value * q_value;
+                }
                 r[i][j] = dot;
                 for k in 0..n {
+                    poll_periodically(abort, flat_index)?;
+                    flat_index += 1;
                     v[k] -= dot * q_col[k];
                 }
             }
 
             // Normalize
-            let norm: Value = v.iter().map(|x| x * x).sum::<Value>().sqrt();
+            let mut norm_squared = 0.0;
+            for (index, value) in v.iter().enumerate() {
+                poll_periodically(abort, index)?;
+                norm_squared += value * value;
+            }
+            let norm = norm_squared.sqrt();
             r[j][j] = norm;
 
             if norm > 1e-15 {
                 for k in 0..n {
+                    poll_periodically(abort, k)?;
                     q[k][j] = v[k] / norm;
                 }
             }
         }
 
-        (q, r)
+        ensure_not_aborted(abort)?;
+        Ok((q, r))
     }
 
     /// Matrix multiplication
-    fn matrix_multiply(&self, a: &[Vec<Value>], b: &[Vec<Value>]) -> Vec<Vec<Value>> {
+    fn matrix_multiply_with_abort(
+        &self,
+        a: &[Vec<Value>],
+        b: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Vec<Value>>, SimulationError> {
+        ensure_not_aborted(abort)?;
         let n = a.len();
         let mut c = vec![vec![0.0; n]; n];
 
+        let mut flat_index = 0;
         for i in 0..n {
             for j in 0..n {
                 for k in 0..n {
+                    poll_periodically(abort, flat_index)?;
+                    flat_index += 1;
                     c[i][j] += a[i][k] * b[k][j];
                 }
             }
         }
 
-        c
+        ensure_not_aborted(abort)?;
+        Ok(c)
     }
 
     /// Classify stability based on multipliers
-    fn classify_stability(&self, multipliers: &[FloquetMultiplier]) -> StabilityType {
-        let unstable: Vec<&FloquetMultiplier> =
-            multipliers.iter().filter(|m| m.is_unstable).collect();
+    fn classify_stability_with_abort(
+        &self,
+        multipliers: &[FloquetMultiplier],
+        abort: &dyn AbortSignal,
+    ) -> Result<StabilityType, SimulationError> {
+        let mut unstable = Vec::new();
+        for (index, multiplier) in multipliers.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if multiplier.is_unstable {
+                unstable.push(multiplier);
+            }
+        }
 
         if unstable.is_empty() {
             // Check for bifurcations at unit circle
-            for m in multipliers.iter().filter(|m| !m.is_trivial) {
+            for (index, m) in multipliers.iter().enumerate() {
+                poll_periodically(abort, index)?;
+                if m.is_trivial {
+                    continue;
+                }
                 let mag = m.magnitude();
                 let imag = m.value.im.abs();
 
                 // Near λ = -1: period doubling
                 if (m.value + Complex64::new(1.0, 0.0)).norm() < 0.01 {
-                    return StabilityType::PeriodDoubling;
+                    return Ok(StabilityType::PeriodDoubling);
                 }
 
                 // Near λ = +1 (non-trivial): saddle-node
                 if (m.value - Complex64::new(1.0, 0.0)).norm() < 0.01 && !m.is_trivial {
-                    return StabilityType::SaddleNode;
+                    return Ok(StabilityType::SaddleNode);
                 }
 
                 // Complex pair near unit circle: Neimark-Sacker
                 if (mag - 1.0).abs() < 0.01 && imag > 0.01 {
-                    return StabilityType::NeimarkSacker;
+                    return Ok(StabilityType::NeimarkSacker);
                 }
 
                 // Check for marginal stability
                 if (mag - self.config.stability_threshold).abs() < 0.01 {
-                    return StabilityType::Marginal;
+                    return Ok(StabilityType::Marginal);
                 }
             }
 
-            StabilityType::Stable
+            Ok(StabilityType::Stable)
         } else {
             // There are unstable multipliers
             let dominant = &unstable[0];
 
             if dominant.value.im.abs() > 0.01 {
-                StabilityType::UnstableComplex
+                Ok(StabilityType::UnstableComplex)
             } else {
-                StabilityType::UnstableReal
+                Ok(StabilityType::UnstableReal)
             }
         }
     }
 }
 
+#[inline]
+fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), SimulationError> {
+    const ABORT_POLL_STRIDE: usize = 64;
+    if index % ABORT_POLL_STRIDE == 0 {
+        ensure_not_aborted(abort)?;
+    }
+    Ok(())
+}
+
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abort_signal::{CountingAbort, ImmediateAbort};
+
+    #[test]
+    fn pstb_eigenanalysis_honors_entry_abort() {
+        let mut analyzer = PstbAnalyzer::new(PstbConfig::default());
+        let result = analyzer.analyze_monodromy_with_abort(
+            &[vec![1.0, 0.0], vec![0.0, 0.5]],
+            1.0,
+            &ImmediateAbort,
+        );
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+    }
+
+    #[test]
+    fn pstb_eigenanalysis_honors_abort_inside_qr_preparation() {
+        const DIMENSION: usize = 16;
+        let mut monodromy = vec![vec![0.0; DIMENSION]; DIMENSION];
+        for (row, values) in monodromy.iter_mut().enumerate() {
+            values[row] = 0.9 - row as Value * 0.001;
+            values[(row + 1) % DIMENSION] = 0.01;
+        }
+
+        // Ten polls carry execution through the public stage checks and the
+        // working-matrix copy. The next poll occurs inside QR column setup.
+        let abort = CountingAbort::new(10);
+        let mut analyzer = PstbAnalyzer::new(PstbConfig::default());
+        let result = analyzer.analyze_monodromy_with_abort(&monodromy, 1e-6, &abort);
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+        assert!(abort.count() > 10);
+    }
+}

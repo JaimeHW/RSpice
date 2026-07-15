@@ -31,5 +31,5 @@ pub use pill::{Pill, PillState};
 pub use section::section_header;
 pub use select::select;
 pub use table::measurement_table;
-pub use toast::{Toast, ToastKind, Toasts};
+pub use toast::{NotificationCategory, NotificationRecord, Toast, ToastKind, Toasts};
 pub use tree::{TreeRow, TreeRowResult};

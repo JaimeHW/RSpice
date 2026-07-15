@@ -1,21 +1,33 @@
 use rspice_core::Value;
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{ElementKind, SourceSpec};
+
+use super::super::error::{
+    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
+};
 
 pub(super) fn apply_voltage_corner(
     netlist: &mut rspice_core::Netlist,
     corner_voltage: Value,
     nominal_voltage: Value,
-) -> Result<(), String> {
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<()> {
+    ensure_not_aborted(abort)?;
     if !corner_voltage.is_finite() || corner_voltage <= 0.0 {
-        return Err("Corner voltage must be a positive finite value".to_string());
+        return Err(ServiceRunError::Failure(
+            "Corner voltage must be a positive finite value".to_string(),
+        ));
     }
     if !nominal_voltage.is_finite() || nominal_voltage <= 0.0 {
-        return Err("Corner nominal voltage must be a positive finite value".to_string());
+        return Err(ServiceRunError::Failure(
+            "Corner nominal voltage must be a positive finite value".to_string(),
+        ));
     }
     let scale = corner_voltage / nominal_voltage;
 
     let mut candidate_indices = Vec::new();
     for (idx, element) in netlist.elements.iter().enumerate() {
+        poll_periodically(abort, idx)?;
         let Some(neg) = element.nodes.get(1) else {
             continue;
         };
@@ -31,6 +43,7 @@ pub(super) fn apply_voltage_corner(
 
     if candidate_indices.is_empty() {
         for (idx, element) in netlist.elements.iter().enumerate() {
+            poll_periodically(abort, idx)?;
             if let ElementKind::VoltageSource(spec) = &element.kind
                 && dc_value_from_source(spec).is_some()
             {
@@ -39,7 +52,8 @@ pub(super) fn apply_voltage_corner(
         }
     }
 
-    for idx in candidate_indices {
+    for (candidate_index, idx) in candidate_indices.into_iter().enumerate() {
+        poll_periodically(abort, candidate_index)?;
         let Some(element) = netlist.elements.get_mut(idx) else {
             continue;
         };
@@ -50,14 +64,20 @@ pub(super) fn apply_voltage_corner(
         }
     }
 
+    ensure_not_aborted(abort)?;
     Ok(())
 }
 
-pub(super) fn infer_nominal_supply_voltage(netlist: &rspice_core::Netlist) -> Option<Value> {
+pub(super) fn infer_nominal_supply_voltage(
+    netlist: &rspice_core::Netlist,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Option<Value>> {
+    ensure_not_aborted(abort)?;
     let mut ground_referenced = Vec::new();
     let mut all_sources = Vec::new();
 
-    for element in &netlist.elements {
+    for (index, element) in netlist.elements.iter().enumerate() {
+        poll_periodically(abort, index)?;
         if let ElementKind::VoltageSource(spec) = &element.kind
             && let Some(dc) = dc_value_from_source(spec)
         {
@@ -78,9 +98,11 @@ pub(super) fn infer_nominal_supply_voltage(netlist: &rspice_core::Netlist) -> Op
     }
 
     if !ground_referenced.is_empty() {
-        return ground_referenced.into_iter().max_by(|a, b| a.total_cmp(b));
+        ensure_not_aborted(abort)?;
+        return Ok(ground_referenced.into_iter().max_by(|a, b| a.total_cmp(b)));
     }
-    all_sources.into_iter().max_by(|a, b| a.total_cmp(b))
+    ensure_not_aborted(abort)?;
+    Ok(all_sources.into_iter().max_by(|a, b| a.total_cmp(b)))
 }
 
 fn is_ground_node(node: &str) -> bool {

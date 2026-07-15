@@ -118,8 +118,9 @@ impl Default for IntegrationCoefficients {
 /// Newton assembly must use [`Self::NewtonLimited`]. Physical residual
 /// probes and small-signal analyses evaluate the unmodified proposal and do
 /// not read or update Newton limiter history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VerilogAEvaluationMode {
+    #[default]
     NewtonLimited,
     StaticProbe,
     SmallSignal,
@@ -137,12 +138,6 @@ impl VerilogAEvaluationMode {
 
     pub(crate) const fn limiting_enabled(self) -> bool {
         matches!(self, Self::NewtonLimited)
-    }
-}
-
-impl Default for VerilogAEvaluationMode {
-    fn default() -> Self {
-        Self::NewtonLimited
     }
 }
 

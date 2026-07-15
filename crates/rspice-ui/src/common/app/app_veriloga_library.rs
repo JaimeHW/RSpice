@@ -85,6 +85,7 @@ fn load_global_veriloga_library() -> Option<Library> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_global_veriloga_library_from_path(path: &Path) -> Option<Library> {
+    crate::io::durable_file::reconcile_publication(path).ok()?;
     let text = std::fs::read_to_string(path).ok()?;
     let parsed: PersistedVerilogALibrary = serde_json::from_str(&text).ok()?;
     if parsed.version != VERILOGA_LIBRARY_FORMAT_VERSION {
@@ -105,18 +106,17 @@ fn save_global_veriloga_library_to_path(path: &Path, library: &Library) -> Resul
         })?;
     }
 
+    // The periodic autosave calls this every ~30 s; skip the disk write
+    // when nothing changed since the last save on this thread.
+    thread_local! {
+        static LAST_SAVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
     let persisted = PersistedVerilogALibraryRef {
         version: VERILOGA_LIBRARY_FORMAT_VERSION,
         library,
     };
     let json = serde_json::to_string_pretty(&persisted)
         .map_err(|e| format!("failed to serialize Verilog-A library: {}", e))?;
-
-    // The periodic autosave calls this every ~30 s; skip the disk write
-    // when nothing changed since the last save on this thread.
-    thread_local! {
-        static LAST_SAVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    }
     let hash = {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -128,7 +128,13 @@ fn save_global_veriloga_library_to_path(path: &Path, library: &Library) -> Resul
         return Ok(());
     }
 
-    write_file_atomically(path, json.as_bytes())?;
+    let expected = crate::io::durable_file::observe_expected_content(path).map_err(|error| {
+        format!(
+            "failed to authorize Verilog-A library destination '{}': {error}",
+            path.display()
+        )
+    })?;
+    publish_global_veriloga_library(path, expected, json.as_bytes())?;
     LAST_SAVED.with(|last| last.set(hash));
     Ok(())
 }
@@ -141,63 +147,64 @@ fn install_loaded_veriloga_library(library_manager: &mut LibraryManager, mut lib
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn write_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let temp_path = temporary_path_for(path);
-    std::fs::write(&temp_path, bytes).map_err(|e| {
+fn publish_global_veriloga_library(
+    path: &Path,
+    expected: crate::io::durable_file::ExpectedContent,
+    bytes: &[u8],
+) -> Result<(), String> {
+    crate::io::durable_file::compare_exchange_bytes(path, expected, bytes).map_err(|error| {
         format!(
-            "failed to write temporary Verilog-A library file '{}': {}",
-            temp_path.display(),
-            e
+            "failed to publish Verilog-A library '{}': {error}",
+            path.display()
         )
-    })?;
-
-    match std::fs::rename(&temp_path, path) {
-        Ok(()) => Ok(()),
-        Err(first_err) => {
-            if path.exists() {
-                std::fs::remove_file(path).map_err(|remove_err| {
-                    let _ = std::fs::remove_file(&temp_path);
-                    format!(
-                        "failed to replace existing Verilog-A library '{}': {} (rename error: {})",
-                        path.display(),
-                        remove_err,
-                        first_err
-                    )
-                })?;
-
-                std::fs::rename(&temp_path, path).map_err(|second_err| {
-                    let _ = std::fs::remove_file(&temp_path);
-                    format!(
-                        "failed to finalize Verilog-A library update '{}': {}",
-                        path.display(),
-                        second_err
-                    )
-                })?;
-                Ok(())
-            } else {
-                let _ = std::fs::remove_file(&temp_path);
-                Err(format!(
-                    "failed to move Verilog-A library into place '{}': {}",
-                    path.display(),
-                    first_err
-                ))
-            }
-        }
-    }
+    })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn temporary_path_for(path: &Path) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(VERILOGA_LIBRARY_CONFIG_FILE);
-    let nonce = crate::common::time_compat::unix_epoch().as_nanos();
-    parent.join(format!(
-        ".{}.{}.{}.tmp",
-        file_name,
-        std::process::id(),
-        nonce
-    ))
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publication_rejects_late_external_change_without_losing_it() {
+        let root = unique_temp_dir("late-change");
+        let path = root.join(VERILOGA_LIBRARY_CONFIG_FILE);
+        std::fs::write(&path, b"authorized predecessor").expect("write predecessor");
+        let expected =
+            crate::io::durable_file::observe_expected_content(&path).expect("observe destination");
+        let library = Library::new(VERILOGA_LIBRARY_NAME).with_technology("test");
+        let bytes = serde_json::to_vec_pretty(&PersistedVerilogALibraryRef {
+            version: VERILOGA_LIBRARY_FORMAT_VERSION,
+            library: &library,
+        })
+        .expect("serialize library");
+        std::fs::write(&path, b"late external edit").expect("race destination");
+
+        let result = publish_global_veriloga_library(&path, expected, &bytes);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"late external edit");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn save_and_load_round_trip_through_durable_publication() {
+        let root = unique_temp_dir("round-trip");
+        let path = root.join(VERILOGA_LIBRARY_CONFIG_FILE);
+        let library = Library::new("source-name").with_technology("rf-cmos");
+
+        save_global_veriloga_library_to_path(&path, &library).expect("save library");
+        let loaded = load_global_veriloga_library_from_path(&path).expect("load library");
+
+        assert_eq!(loaded.technology, "rf-cmos");
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-veriloga-library-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture");
+        root
+    }
 }

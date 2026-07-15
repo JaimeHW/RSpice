@@ -23,6 +23,35 @@ pub const DEFAULT_SCHEMATIC_VIEW: &str = "schematic";
 /// Persisted schema for project identity metadata.
 pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
 
+/// Validate one persisted library, cell, or view name.
+///
+/// The slash-delimited workspace key format is unambiguous only while every
+/// segment follows the same contract enforced by the library dialogs: a
+/// non-empty sequence of Unicode letters/numbers and underscores. Persisted
+/// data is validated against this boundary before any generated key is used.
+pub fn validate_cell_view_name_segment(value: &str) -> Result<(), CellViewNameError> {
+    if value.is_empty() {
+        return Err(CellViewNameError::Empty);
+    }
+    if let Some(character) = value
+        .chars()
+        .find(|character| !character.is_alphanumeric() && *character != '_')
+    {
+        return Err(CellViewNameError::UnsupportedCharacter(character));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CellViewNameError {
+    #[error("must not be empty")]
+    Empty,
+    #[error(
+        "contains unsupported character {0:?}; only letters, numbers, and underscores are allowed"
+    )]
+    UnsupportedCharacter(char),
+}
+
 fn default_project_name() -> String {
     "Untitled Project".to_owned()
 }
@@ -62,6 +91,14 @@ impl CellViewRef {
 
     pub fn key(&self) -> String {
         format!("{}/{}/{}", self.library, self.cell, self.view)
+    }
+
+    /// Validate every segment before this reference participates in a
+    /// persisted slash-delimited key.
+    pub fn validate_name_segments(&self) -> Result<(), CellViewNameError> {
+        validate_cell_view_name_segment(&self.library)?;
+        validate_cell_view_name_segment(&self.cell)?;
+        validate_cell_view_name_segment(&self.view)
     }
 
     pub fn display_path(&self) -> String {
@@ -217,6 +254,21 @@ impl ProjectDescriptor {
             let _ = self.rename(stem.to_owned());
         }
         self.path = Some(path);
+    }
+
+    /// Create the descriptor for an independent project copy.
+    ///
+    /// A project copy is not a rename or move of the source project: it owns
+    /// a fresh stable identity and starts a new revision history at the
+    /// selected location.  The receiver is borrowed, so this operation cannot
+    /// accidentally rebind or otherwise mutate the source project.
+    #[must_use]
+    pub fn fork_copy_at(&self, path: PathBuf) -> Self {
+        let mut copy = self.clone();
+        copy.id = ProjectId::new();
+        copy.revision = ObjectRevision::INITIAL;
+        copy.path = Some(path);
+        copy
     }
 
     pub fn directory(&self) -> Option<&Path> {
@@ -866,6 +918,25 @@ mod tests {
     }
 
     #[test]
+    fn cell_view_name_contract_keeps_slash_delimited_keys_injective() {
+        for valid in ["user", "bandgap_2", "ΔΣ"] {
+            assert!(validate_cell_view_name_segment(valid).is_ok(), "{valid}");
+        }
+        assert_eq!(
+            validate_cell_view_name_segment(""),
+            Err(CellViewNameError::Empty)
+        );
+        assert_eq!(
+            validate_cell_view_name_segment("bad/name"),
+            Err(CellViewNameError::UnsupportedCharacter('/'))
+        );
+        assert_eq!(
+            validate_cell_view_name_segment("has space"),
+            Err(CellViewNameError::UnsupportedCharacter(' '))
+        );
+    }
+
+    #[test]
     fn changing_source_path_does_not_rename_an_existing_project() {
         let mut project = ProjectDescriptor::default();
         project.set_path(PathBuf::from("first-save.rspiceproj"));
@@ -880,6 +951,28 @@ mod tests {
             project.path.as_deref(),
             Some(Path::new("moved-copy.rspiceproj"))
         );
+    }
+
+    #[test]
+    fn project_copy_has_independent_identity_without_rebinding_source() {
+        let mut source = ProjectDescriptor::default();
+        source
+            .rename("Precision reference")
+            .expect("source name is valid");
+        source.set_path(PathBuf::from("source.rspiceproj"));
+        let source_id = source.id();
+        let source_revision = source.revision();
+        let source_path = source.path.clone();
+
+        let copy = source.fork_copy_at(PathBuf::from("copy.rspiceproj"));
+
+        assert_ne!(copy.id(), source_id);
+        assert_eq!(copy.revision(), ObjectRevision::INITIAL);
+        assert_eq!(copy.name(), source.name());
+        assert_eq!(copy.path.as_deref(), Some(Path::new("copy.rspiceproj")));
+        assert_eq!(source.id(), source_id);
+        assert_eq!(source.revision(), source_revision);
+        assert_eq!(source.path, source_path);
     }
 
     #[test]
