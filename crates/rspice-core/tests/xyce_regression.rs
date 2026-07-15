@@ -7325,6 +7325,36 @@ fn test_xyce_subcircuit_parameter_resolution_relational_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_nested_include_identity_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_1686/bug_1686.cir",
+            "nested_include_identity_family_anchor",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1686/bug_1686a.cir",
+            "nested_include_identity_family_repeated_target_baseline",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1686/bug_1686_dup.cir",
+            "nested_include_identity_family_split_targets_member",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should preserve scope-qualified nested-include identity through independently simulated exact default PRN output, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
