@@ -683,6 +683,19 @@ struct XyceSwitchStateCaseFamilyContract {
     role: XyceSwitchStateCaseFamilyRole,
 }
 
+#[derive(Debug, Clone)]
+struct XyceDiodeModelAliasFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    role: XyceDiodeModelAliasFamilyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceDiodeModelAliasFamilyRole {
+    Anchor,
+    CanonicalBaseline,
+    AliasMember,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceSwitchStateCaseFamilyRole {
     Anchor,
@@ -791,6 +804,27 @@ struct XyceSwitchStateCaseFamilySnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceDiodeModelAliasFamilySnapshot {
+    representation: XyceDiodeModelAliasRepresentation,
+    canonical_source: String,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    model_name: String,
+    model_type: String,
+    canonical_model_bits: Vec<(String, u64)>,
+    ordered_probes: Vec<String>,
+    runtime_diode: XyceNativeDiodeRuntimeFingerprint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceNativeDiodeRuntimeFingerprint {
+    name: String,
+    node_anode: usize,
+    node_cathode: usize,
+    numeric_bits: Vec<u64>,
+    boolean_state: Vec<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceGenericSwitchRuntimeFingerprint {
     name: String,
     node_pos: usize,
@@ -886,6 +920,7 @@ struct XyceAcAnalysisExpressionSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
     AgeCap(XyceAgeCapFamilySnapshot),
+    DiodeModelAlias(XyceDiodeModelAliasFamilySnapshot),
     SwitchStateCase(XyceSwitchStateCaseFamilySnapshot),
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
@@ -905,6 +940,12 @@ enum XyceAgeCapRepresentation {
 enum XyceSwitchStateCaseRepresentation {
     Lowercase,
     Uppercase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceDiodeModelAliasRepresentation {
+    Canonical,
+    Alias,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1038,6 +1079,7 @@ enum XyceBjtExternalNodeRepresentation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
     AgeCap,
+    DiodeModelAlias,
     SwitchStateCase,
     AcAnalysisExpression,
     BjtExternalNode,
@@ -1121,6 +1163,7 @@ impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
             Self::AgeCap => "AGE_CAP_EQUIVALENCE",
+            Self::DiodeModelAlias => "DIODE_MODEL_ALIAS_EQUIVALENCE",
             Self::SwitchStateCase => "SWITCH_STATE_CASE_EQUIVALENCE",
             Self::AcAnalysisExpression => "AC_ANALYSIS_EXPRESSION",
             Self::BjtExternalNode => "BJT_EXTNODE",
@@ -1143,6 +1186,7 @@ impl XyceBaselineFamilyKind {
     fn wrapper_contract(self) -> &'static str {
         match self {
             Self::AgeCap => "age_cap_family_anchor",
+            Self::DiodeModelAlias => "diode_model_alias_family_anchor",
             Self::SwitchStateCase => "switch_state_case_family_anchor",
             Self::AcAnalysisExpression => "ac_analysis_expression_family_wrapper",
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
@@ -1165,6 +1209,7 @@ impl XyceBaselineFamilyKind {
     fn baseline_contract(self) -> &'static str {
         match self {
             Self::AgeCap => "age_cap_family_aged_baseline",
+            Self::DiodeModelAlias => "diode_model_alias_family_canonical_baseline",
             Self::SwitchStateCase => "switch_state_case_family_uppercase_baseline",
             Self::AcAnalysisExpression => "ac_analysis_expression_family_baseline",
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
@@ -1200,6 +1245,7 @@ impl XyceBaselineFamilyKind {
             | Self::BjtExternalNode
             | Self::DcAnalysisExpression
             | Self::DelimitedExpression
+            | Self::DiodeModelAlias
             | Self::SinExpression
             | Self::ParamExpression
             | Self::PassiveCapPrimaryValue
@@ -2395,6 +2441,19 @@ impl XyceTestRunner {
 
         if let Some(contract) = self.age_cap_family_contract(deck) {
             let result = self.run_age_cap_family_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.diode_model_alias_family_contract(deck) {
+            let result = self.run_diode_model_alias_family_contract(deck, contract, start);
             if self.config.verbose {
                 println!(
                     "{} [{}] {}",
@@ -10399,6 +10458,7 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::SubcktParameterPrecedence
             | XyceBaselineFamilyKind::SubcktParameterResolution => false,
             XyceBaselineFamilyKind::AgeCap
+            | XyceBaselineFamilyKind::DiodeModelAlias
             | XyceBaselineFamilyKind::SwitchStateCase
             | XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
@@ -11743,6 +11803,28 @@ impl XyceTestRunner {
         result
     }
 
+    fn run_diode_model_alias_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceDiodeModelAliasFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
+        if result.passed && !result.expected_unsupported {
+            result.contract = match contract.role {
+                XyceDiodeModelAliasFamilyRole::Anchor => "diode_model_alias_family_anchor",
+                XyceDiodeModelAliasFamilyRole::CanonicalBaseline => {
+                    "diode_model_alias_family_canonical_baseline"
+                }
+                XyceDiodeModelAliasFamilyRole::AliasMember => {
+                    "diode_model_alias_family_alias_member"
+                }
+            }
+            .to_string();
+        }
+        result
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -11804,6 +11886,7 @@ impl XyceTestRunner {
         if matches!(
             contract.kind,
             XyceBaselineFamilyKind::AgeCap
+                | XyceBaselineFamilyKind::DiodeModelAlias
                 | XyceBaselineFamilyKind::SwitchStateCase
                 | XyceBaselineFamilyKind::SinExpression
                 | XyceBaselineFamilyKind::ParamExpression
@@ -13082,6 +13165,20 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::DiodeModelAlias
+            && let Err(err) = Self::validate_diode_model_alias_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.kind == XyceBaselineFamilyKind::SwitchStateCase
             && let Err(err) = Self::validate_switch_state_case_transient_plan(&baseline_plan)
         {
@@ -13395,6 +13492,21 @@ impl XyceTestRunner {
             }
             if contract.kind == XyceBaselineFamilyKind::AgeCap
                 && let Err(err) = Self::validate_age_cap_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::DiodeModelAlias
+                && let Err(err) = Self::validate_diode_model_alias_transient_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,
@@ -17367,6 +17479,10 @@ impl XyceTestRunner {
         match contract.kind {
             XyceBaselineFamilyKind::AgeCap => Self::age_cap_family_snapshot(netlist, print)
                 .map(XyceStrictTransientFamilySnapshot::AgeCap),
+            XyceBaselineFamilyKind::DiodeModelAlias => {
+                Self::diode_model_alias_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::DiodeModelAlias)
+            }
             XyceBaselineFamilyKind::SwitchStateCase => {
                 Self::switch_state_case_family_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::SwitchStateCase)
@@ -19955,6 +20071,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::AgeCap(target),
             ) => Self::compare_age_cap_family_snapshots(baseline, target),
             (
+                XyceStrictTransientFamilySnapshot::DiodeModelAlias(baseline),
+                XyceStrictTransientFamilySnapshot::DiodeModelAlias(target),
+            ) => Self::compare_diode_model_alias_family_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::SwitchStateCase(baseline),
                 XyceStrictTransientFamilySnapshot::SwitchStateCase(target),
             ) => Self::compare_switch_state_case_family_snapshots(baseline, target),
@@ -19990,6 +20110,621 @@ impl XyceTestRunner {
             ) => Self::compare_transient_analysis_expression_snapshots(baseline, target),
             _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
+    }
+
+    fn validate_diode_model_alias_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
+        const LABEL: &str = "native diode model-parameter alias equivalence";
+        if plan.contract != XyceStaticTranContract::PlainStatic
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires one ordinary, unstepped, adaptive default .prn transient output"
+            ));
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step <= 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires finite '.TRAN step stop' values and no START, MAXSTEP, or UIC"
+            ));
+        }
+        if plan.print.probes.len() != 2 {
+            return Err(format!("{LABEL} requires exactly two ordered probes"));
+        }
+        Self::diode_model_alias_source_qualification(&plan.source)?;
+        let comp_targets = Self::diode_model_alias_comp_targets(&plan.source)?;
+        let expected_targets = [
+            "time".to_string(),
+            Self::normalize_probe(&plan.print.probes[0]),
+            Self::normalize_probe(&plan.print.probes[1]),
+        ];
+        if comp_targets != expected_targets
+            || comp_targets.iter().collect::<BTreeSet<_>>().len() != comp_targets.len()
+        {
+            return Err(format!(
+                "{LABEL} requires unique ordered *COMP targets TIME then the two .PRINT probes"
+            ));
+        }
+        Ok(())
+    }
+
+    fn diode_model_alias_comp_targets(source: &str) -> Result<Vec<String>, String> {
+        const LABEL: &str = "native diode model-parameter alias equivalence";
+        let mut targets = Vec::new();
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            let Some(head) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if !head.eq_ignore_ascii_case("*COMP") {
+                continue;
+            }
+            let fields = trimmed.split_whitespace().collect::<Vec<_>>();
+            if fields.len() != 4 {
+                return Err(format!("{LABEL} requires four fields on every *COMP line"));
+            }
+            let tolerance = |field: &str, expected: &str| -> Option<Value> {
+                let (name, literal) = field.split_once('=')?;
+                if !name.eq_ignore_ascii_case(expected) {
+                    return None;
+                }
+                Self::single_spice_numeric_literal_value(literal)
+                    .ok()
+                    .filter(|value| value.is_finite() && *value > 0.0)
+            };
+            if tolerance(fields[2], "RELTOL").is_none() || tolerance(fields[3], "ABSTOL").is_none()
+            {
+                return Err(format!(
+                    "{LABEL} requires finite positive RELTOL and ABSTOL on every *COMP line"
+                ));
+            }
+            targets.push(Self::normalize_probe(fields[1]));
+        }
+        if targets.len() != 3 {
+            return Err(format!("{LABEL} requires exactly three *COMP targets"));
+        }
+        Ok(targets)
+    }
+
+    fn diode_model_alias_source_qualification(
+        source: &str,
+    ) -> Result<(XyceDiodeModelAliasRepresentation, String), String> {
+        const LABEL: &str = "native diode model-parameter alias equivalence";
+        const CANONICAL_ORDER: [&str; 12] = [
+            "IS", "N", "BV", "IBV", "RS", "CJO", "VJ", "M", "FC", "EG", "XTI", "TT",
+        ];
+        let alias_canonical = |name: &str| match name.to_ascii_uppercase().as_str() {
+            "IS" | "JS" => Some("IS"),
+            "BV" | "VB" => Some("BV"),
+            "CJO" | "CJ" => Some("CJO"),
+            _ => None,
+        };
+        let mut assignments = Vec::<(String, String)>::new();
+        let mut canonical_source = String::with_capacity(source.len());
+        let mut in_model = false;
+        let mut model_headers = 0usize;
+        let mut comp_lines = 0usize;
+
+        for raw_line in source.split_inclusive('\n') {
+            let newline = if raw_line.ends_with('\n') { "\n" } else { "" };
+            let physical = raw_line
+                .strip_suffix('\n')
+                .unwrap_or(raw_line)
+                .strip_suffix('\r')
+                .unwrap_or_else(|| raw_line.strip_suffix('\n').unwrap_or(raw_line));
+            let carriage = if raw_line
+                .strip_suffix('\n')
+                .is_some_and(|line| line.ends_with('\r'))
+            {
+                "\r"
+            } else {
+                ""
+            };
+            let comment_at = physical.find(';').unwrap_or(physical.len());
+            let active = &physical[..comment_at];
+            let suffix = &physical[comment_at..];
+            let trimmed = active.trim_start();
+            if trimmed.to_ascii_uppercase().starts_with("*COMP") {
+                comp_lines += 1;
+                let fields = trimmed.split_whitespace().collect::<Vec<_>>();
+                if fields.len() != 4
+                    || !fields[0].eq_ignore_ascii_case("*COMP")
+                    || !fields[2].to_ascii_lowercase().starts_with("reltol=")
+                    || !fields[3].to_ascii_lowercase().starts_with("abstol=")
+                    || Self::single_spice_numeric_literal_value(
+                        fields[2]
+                            .split_once('=')
+                            .map(|(_, value)| value)
+                            .unwrap_or(""),
+                    )
+                    .is_err()
+                    || Self::single_spice_numeric_literal_value(
+                        fields[3]
+                            .split_once('=')
+                            .map(|(_, value)| value)
+                            .unwrap_or(""),
+                    )
+                    .is_err()
+                {
+                    return Err(format!(
+                        "{LABEL} requires scalar reltol/abstol assignments on each *COMP line"
+                    ));
+                }
+            }
+            let is_comment =
+                trimmed.starts_with('*') || trimmed.starts_with("//") || trimmed.is_empty();
+            let model_start = trimmed
+                .split_whitespace()
+                .next()
+                .is_some_and(|token| token.eq_ignore_ascii_case(".MODEL"));
+            let continuation = trimmed.starts_with('+');
+            if model_start {
+                model_headers += 1;
+                in_model = true;
+                let header = trimmed.split_whitespace().take(3).collect::<Vec<_>>();
+                if header.len() != 3 || !header[2].eq_ignore_ascii_case("D") {
+                    return Err(format!("{LABEL} requires one plain native D model"));
+                }
+            } else if !continuation && !is_comment {
+                in_model = false;
+            }
+
+            if !in_model || is_comment {
+                canonical_source.push_str(physical);
+                canonical_source.push_str(carriage);
+                canonical_source.push_str(newline);
+                continue;
+            }
+
+            let bytes = active.as_bytes();
+            let mut index = 0usize;
+            let mut copied = 0usize;
+            while index < bytes.len() {
+                if !(bytes[index].is_ascii_alphabetic() || bytes[index] == b'_') {
+                    index += 1;
+                    continue;
+                }
+                let start = index;
+                index += 1;
+                while index < bytes.len()
+                    && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+                {
+                    index += 1;
+                }
+                let end = index;
+                let mut equals = end;
+                while equals < bytes.len() && bytes[equals].is_ascii_whitespace() {
+                    equals += 1;
+                }
+                if equals >= bytes.len() || bytes[equals] != b'=' {
+                    continue;
+                }
+                let mut value_start = equals + 1;
+                while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
+                    value_start += 1;
+                }
+                let mut value_end = value_start;
+                while value_end < bytes.len() && !bytes[value_end].is_ascii_whitespace() {
+                    value_end += 1;
+                }
+                let name = &active[start..end];
+                let value = &active[value_start..value_end];
+                if value.is_empty() || !Self::is_single_spice_numeric_literal(value) {
+                    return Err(format!(
+                        "{LABEL} model parameters must be direct scalar numeric assignments"
+                    ));
+                }
+                assignments.push((name.to_ascii_uppercase(), value.to_string()));
+                if let Some(canonical) = alias_canonical(name) {
+                    canonical_source.push_str(&active[copied..start]);
+                    canonical_source.push_str(canonical);
+                    copied = end;
+                }
+                index = value_end;
+            }
+            canonical_source.push_str(&active[copied..]);
+            canonical_source.push_str(suffix);
+            canonical_source.push_str(carriage);
+            canonical_source.push_str(newline);
+        }
+        if model_headers != 1 || comp_lines != 3 || assignments.len() != CANONICAL_ORDER.len() {
+            return Err(format!(
+                "{LABEL} requires one model card, twelve ordered parameters, and three *COMP records"
+            ));
+        }
+        let canonical_names = assignments
+            .iter()
+            .map(|(name, _)| alias_canonical(name).unwrap_or(name.as_str()))
+            .collect::<Vec<_>>();
+        if canonical_names != CANONICAL_ORDER {
+            return Err(format!(
+                "{LABEL} model parameter set/order or alias-group cardinality is ambiguous"
+            ));
+        }
+        let alias_spellings = assignments
+            .iter()
+            .filter(|(name, _)| matches!(name.as_str(), "JS" | "VB" | "CJ"))
+            .count();
+        let canonical_spellings = assignments
+            .iter()
+            .filter(|(name, _)| matches!(name.as_str(), "IS" | "BV" | "CJO"))
+            .count();
+        let representation = match (canonical_spellings, alias_spellings) {
+            (3, 0) => XyceDiodeModelAliasRepresentation::Canonical,
+            (0, 3) => XyceDiodeModelAliasRepresentation::Alias,
+            _ => {
+                return Err(format!(
+                    "{LABEL} requires one complete canonical or synonym spelling set"
+                ));
+            }
+        };
+
+        let mut element_counts = BTreeMap::<char, usize>::new();
+        let mut directive_counts = BTreeMap::<String, usize>::new();
+        let mut logical_lines = Self::logical_netlist_lines(source).into_iter();
+        let title = logical_lines
+            .next()
+            .ok_or_else(|| format!("{LABEL} requires a circuit title"))?;
+        let title = Self::strip_netlist_comment(&title).trim();
+        if title.is_empty() || title.starts_with('.') || title.starts_with('*') {
+            return Err(format!(
+                "{LABEL} requires one ordinary non-directive circuit title"
+            ));
+        }
+        for line in logical_lines {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                *directive_counts
+                    .entry(command.to_ascii_lowercase())
+                    .or_default() += 1;
+                continue;
+            }
+            let designator = command
+                .chars()
+                .next()
+                .map(|ch| ch.to_ascii_uppercase())
+                .ok_or_else(|| format!("{LABEL} contains an empty element name"))?;
+            if !matches!(designator, 'V' | 'D' | 'R') {
+                return Err(format!("{LABEL} contains an unqualified element statement"));
+            }
+            *element_counts.entry(designator).or_default() += 1;
+        }
+        if element_counts != BTreeMap::from([('D', 1), ('R', 1), ('V', 1)])
+            || directive_counts
+                != BTreeMap::from([
+                    (".end".to_string(), 1),
+                    (".model".to_string(), 1),
+                    (".print".to_string(), 1),
+                    (".tran".to_string(), 1),
+                ])
+        {
+            return Err(format!(
+                "{LABEL} requires exactly one V, D, R, MODEL, PRINT, TRAN, and END"
+            ));
+        }
+        Ok((representation, canonical_source))
+    }
+
+    fn diode_model_alias_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceDiodeModelAliasFamilySnapshot, String> {
+        const LABEL: &str = "native diode model-parameter alias equivalence";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let (representation, canonical_source) =
+            Self::diode_model_alias_source_qualification(source)?;
+        if !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }])
+            || netlist.models.len() != 1
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat, parameter-free, diagnostic-free native transient circuit without auxiliary state"
+            ));
+        }
+        let model = &netlist.models[0];
+        if !model.model_type.eq_ignore_ascii_case("D")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || model.params.len() != 12
+        {
+            return Err(format!(
+                "{LABEL} requires one scalar numeric native D model"
+            ));
+        }
+        let canonical_name = |name: &str| match name.to_ascii_uppercase().as_str() {
+            "JS" => "IS".to_string(),
+            "VB" => "BV".to_string(),
+            "CJ" => "CJO".to_string(),
+            other => other.to_string(),
+        };
+        let mut canonical_model_bits = model
+            .params
+            .iter()
+            .map(|(name, value)| (canonical_name(name), value.to_bits()))
+            .collect::<Vec<_>>();
+        canonical_model_bits.sort_by(|left, right| left.0.cmp(&right.0));
+        if canonical_model_bits
+            .windows(2)
+            .any(|pair| pair[0].0 == pair[1].0)
+            || model.params.iter().any(|(_, value)| !value.is_finite())
+        {
+            return Err(format!(
+                "{LABEL} model parameters are non-finite or ambiguous"
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut source_nodes = None;
+        let mut diode_nodes = None;
+        let mut resistor_nodes = None;
+        for element in &netlist.elements {
+            if element.nodes.iter().any(|node| {
+                Self::canonical_passive_primary_node_name(node) == "0" && node.trim() != "0"
+            }) {
+                return Err(format!("{LABEL} requires literal node 0 for ground"));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_passive_primary_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Pulse {
+                    v1,
+                    v2,
+                    delay,
+                    rise,
+                    fall,
+                    width,
+                    period,
+                    phase,
+                    width_defaults_to_zero,
+                }) if nodes.len() == 2
+                    && [v1, v2, delay, rise, fall, width, period, phase]
+                        .iter()
+                        .all(|value| value.is_finite())
+                    && *delay >= 0.0
+                    && *rise > 0.0
+                    && *fall > 0.0
+                    && *width > 0.0
+                    && *period > 0.0
+                    && *rise + *width + *fall <= *period
+                    && !*width_defaults_to_zero
+                    && source_nodes.replace(nodes.clone()).is_none() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:PULSE".to_string(),
+                        nodes,
+                        numeric_bits: [v1, v2, delay, rise, fall, width, period, phase]
+                            .into_iter()
+                            .map(|value| value.to_bits())
+                            .collect(),
+                        text: vec![width_defaults_to_zero.to_string()],
+                    }
+                }
+                ElementKind::Diode {
+                    model: device_model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && device_model.eq_ignore_ascii_case(&model.name)
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && diode_nodes.replace(nodes.clone()).is_none() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "D".to_string(),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec![device_model.to_ascii_lowercase()],
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && resistor_nodes.replace(nodes.clone()).is_none() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => return Err(format!("{LABEL} contains an unqualified native element")),
+            };
+            let key = Self::normalize_device_instance_name(&element.name);
+            if key.is_empty() || elements.insert(key, fingerprint).is_some() {
+                return Err(format!("{LABEL} has an empty or duplicate element name"));
+            }
+        }
+        let [source_pos, source_neg] = source_nodes
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} has no PULSE source"))?
+        else {
+            return Err(format!("{LABEL} source topology is invalid"));
+        };
+        let [diode_anode, diode_cathode] = diode_nodes
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} has no diode"))?
+        else {
+            return Err(format!("{LABEL} diode topology is invalid"));
+        };
+        let [resistor_pos, resistor_neg] = resistor_nodes
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} has no resistor"))?
+        else {
+            return Err(format!("{LABEL} resistor topology is invalid"));
+        };
+        if elements.len() != 3
+            || source_neg != "0"
+            || resistor_neg != "0"
+            || source_pos == "0"
+            || diode_cathode == "0"
+            || diode_anode != source_pos
+            || resistor_pos != diode_cathode
+            || source_pos == diode_cathode
+        {
+            return Err(format!(
+                "{LABEL} requires the grounded PULSE-source/diode/resistor series topology"
+            ));
+        }
+        let [first_probe, second_probe] = print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires exactly two ordered probes"));
+        };
+        let first = Self::parse_voltage_probe(first_probe)
+            .ok_or_else(|| format!("{LABEL} first probe is not an atomic voltage"))?;
+        let second = Self::parse_voltage_probe(second_probe)
+            .ok_or_else(|| format!("{LABEL} second probe is not an atomic voltage"))?;
+        if first.accessor != XyceVoltageAccessor::Value
+            || second.accessor != XyceVoltageAccessor::Value
+            || first.node_neg.is_some()
+            || second.node_neg.is_some()
+            || Self::canonical_passive_primary_node_name(&first.node_pos) != *source_pos
+            || Self::canonical_passive_primary_node_name(&second.node_pos) != *diode_cathode
+        {
+            return Err(format!(
+                "{LABEL} probes must be ordered source-node then load-node voltage"
+            ));
+        }
+
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+        let circuit = engine
+            .build_circuit(netlist)
+            .map_err(|err| format!("{LABEL} circuit build failed: {err}"))?;
+        let [runtime] = circuit.diodes.devices.as_slice() else {
+            return Err(format!("{LABEL} must resolve to exactly one native diode"));
+        };
+        let runtime_diode = XyceNativeDiodeRuntimeFingerprint {
+            name: Self::normalize_device_instance_name(&runtime.name),
+            node_anode: runtime.node_anode,
+            node_cathode: runtime.node_cathode,
+            numeric_bits: [
+                runtime.is,
+                runtime.n,
+                runtime.vt,
+                runtime.rs,
+                runtime.bv.unwrap_or(0.0),
+                runtime.ibv,
+                runtime.forward_knee_current,
+                runtime.reverse_knee_current,
+                runtime.recombination_saturation_current,
+                runtime.recombination_emission_coefficient,
+                runtime.sidewall_perimeter,
+                runtime.sidewall_saturation_current,
+                runtime.sidewall_emission_coefficient,
+                runtime.cj0,
+                runtime.vj,
+                runtime.m,
+                runtime.tt,
+                runtime.fc,
+                runtime.sidewall_cj0,
+                runtime.sidewall_vj,
+                runtime.sidewall_m,
+                runtime.sidewall_fc,
+                runtime.breakdown_emission_coefficient,
+                runtime.xti,
+                runtime.eg,
+                runtime.tnom_c.unwrap_or(0.0),
+                runtime.kf,
+                runtime.af,
+                runtime.multiplicity,
+            ]
+            .into_iter()
+            .map(Value::to_bits)
+            .collect(),
+            boolean_state: vec![
+                runtime.bv.is_some(),
+                runtime.sidewall_current_given,
+                runtime.sidewall_emission_given,
+                runtime.breakdown_emission_given,
+                runtime.tnom_c.is_some(),
+                runtime.pspice_level2,
+            ],
+        };
+        Ok(XyceDiodeModelAliasFamilySnapshot {
+            representation,
+            canonical_source,
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_uppercase(),
+            canonical_model_bits,
+            ordered_probes: print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect(),
+            runtime_diode,
+        })
+    }
+
+    fn compare_diode_model_alias_family_snapshots(
+        baseline: &XyceDiodeModelAliasFamilySnapshot,
+        target: &XyceDiodeModelAliasFamilySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceDiodeModelAliasRepresentation::Canonical
+            || target.representation != XyceDiodeModelAliasRepresentation::Alias
+        {
+            return Err(
+                "family must compare the canonical IS/BV/CJO model card to JS/VB/CJ aliases"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceDiodeModelAliasRepresentation::Canonical;
+        target.representation = XyceDiodeModelAliasRepresentation::Canonical;
+        if baseline != target {
+            return Err(
+                "source bytes, typed topology, model state, probes, or resolved native diode differ outside the admitted alias tokens"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     fn validate_switch_state_case_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
@@ -38028,6 +38763,141 @@ impl XyceTestRunner {
         })
     }
 
+    fn diode_model_alias_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceDiodeModelAliasFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let mut records = Vec::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            let source = fs::read_to_string(&path).ok()?;
+            let wrapper = self.requires_upstream_wrapper(&self.relative_key(&path));
+            let worker = if source.trim().is_empty() {
+                None
+            } else {
+                let plan = self
+                    .static_tran_family_plan_for_path(
+                        &path,
+                        XyceStaticTranPlanPurpose::RelationalFamily,
+                    )
+                    .ok()?;
+                Self::validate_diode_model_alias_transient_plan(&plan).ok()?;
+                let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
+                let snapshot =
+                    Self::diode_model_alias_family_snapshot(&netlist, &plan.print).ok()?;
+                Some((plan, snapshot))
+            };
+            records.push((path, wrapper, worker));
+        }
+        if records.len() != 3
+            || !records
+                .iter()
+                .any(|(path, _, _)| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+        let anchors = records
+            .iter()
+            .filter(|(_, wrapper, worker)| *wrapper && worker.is_none())
+            .collect::<Vec<_>>();
+        let workers = records
+            .iter()
+            .filter(|(_, wrapper, worker)| !*wrapper && worker.is_some())
+            .collect::<Vec<_>>();
+        if anchors.len() != 1
+            || workers.len() != 2
+            || records.iter().any(|(_, wrapper, worker)| {
+                (*wrapper && worker.is_some()) || (!*wrapper && worker.is_none())
+            })
+        {
+            return None;
+        }
+        let canonical = workers.iter().find(|(_, _, worker)| {
+            worker.as_ref().is_some_and(|(_, snapshot)| {
+                snapshot.representation == XyceDiodeModelAliasRepresentation::Canonical
+            })
+        })?;
+        let alias = workers.iter().find(|(_, _, worker)| {
+            worker.as_ref().is_some_and(|(_, snapshot)| {
+                snapshot.representation == XyceDiodeModelAliasRepresentation::Alias
+            })
+        })?;
+        if Self::same_path(&canonical.0, &alias.0) {
+            return None;
+        }
+        let (canonical_plan, canonical_snapshot) = canonical.2.as_ref()?;
+        let (alias_plan, alias_snapshot) = alias.2.as_ref()?;
+        if canonical_plan.print.probes != alias_plan.print.probes
+            || !Self::tran_analyses_match_exactly(&canonical_plan.tran, &alias_plan.tran)
+            || canonical_plan.timeint_conststep != alias_plan.timeint_conststep
+            || canonical_plan.wrapper_tolerance.is_some()
+            || alias_plan.wrapper_tolerance.is_some()
+            || canonical_plan.comparison_mode != alias_plan.comparison_mode
+            || Self::compare_diode_model_alias_family_snapshots(canonical_snapshot, alias_snapshot)
+                .is_err()
+        {
+            return None;
+        }
+
+        let artifact_dir = self
+            .static_output_reference_path(&canonical.0, "artifact")?
+            .parent()?
+            .to_path_buf();
+        if artifact_dir.try_exists().ok()? {
+            if !fs::metadata(&artifact_dir).ok()?.is_dir() {
+                return None;
+            }
+            if let Some(artifact) = fs::read_dir(&artifact_dir).ok()?.next() {
+                let artifact = artifact.ok()?;
+                artifact.file_type().ok()?;
+                return None;
+            }
+        }
+
+        let anchor_path = anchors[0].0.clone();
+        let role = if Self::same_path(&deck.path, &anchor_path) {
+            XyceDiodeModelAliasFamilyRole::Anchor
+        } else if Self::same_path(&deck.path, &canonical.0) {
+            XyceDiodeModelAliasFamilyRole::CanonicalBaseline
+        } else if Self::same_path(&deck.path, &alias.0) {
+            XyceDiodeModelAliasFamilyRole::AliasMember
+        } else {
+            return None;
+        };
+        let target_path = match role {
+            XyceDiodeModelAliasFamilyRole::Anchor => None,
+            XyceDiodeModelAliasFamilyRole::CanonicalBaseline => Some(canonical.0.clone()),
+            XyceDiodeModelAliasFamilyRole::AliasMember => Some(alias.0.clone()),
+        };
+        Some(XyceDiodeModelAliasFamilyContract {
+            relational: XyceBaselineFamilyContract {
+                kind: XyceBaselineFamilyKind::DiodeModelAlias,
+                comparison: XyceBaselineFamilyComparison::ExactPrn,
+                family: parent.file_name()?.to_str()?.to_string(),
+                baseline_path: canonical.0.clone(),
+                member_paths: vec![canonical.0.clone(), alias.0.clone()],
+                target_path,
+            },
+            role,
+        })
+    }
+
     fn switch_state_case_family_contract(
         &self,
         deck: &XyceDeck,
@@ -50820,5 +51690,205 @@ R2 2 0 1
                 .is_empty(),
             "Release 7.10 zero-frequency check rejects only positive test deviations"
         );
+    }
+
+    #[test]
+    fn diode_model_alias_family_is_strict_and_fail_closed() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let family = root.join("Netlists/Certification_Tests/BUG_46_SON");
+        let path = family.join("baseline.cir");
+        let alias_path = family.join("synonyms.cir");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = runner
+            .static_tran_family_plan_for_path(&path, XyceStaticTranPlanPurpose::RelationalFamily)
+            .expect("plan");
+        XyceTestRunner::validate_diode_model_alias_transient_plan(&plan).expect("validate");
+        let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, &path).expect("parse");
+        let baseline = XyceTestRunner::diode_model_alias_family_snapshot(&netlist, &plan.print)
+            .expect("snapshot");
+        let alias_plan = runner
+            .static_tran_family_plan_for_path(
+                &alias_path,
+                XyceStaticTranPlanPurpose::RelationalFamily,
+            )
+            .expect("alias plan");
+        let alias_netlist = XyceTestRunner::parse_xyce_netlist(&alias_plan.source, &alias_path)
+            .expect("alias parse");
+        let alias =
+            XyceTestRunner::diode_model_alias_family_snapshot(&alias_netlist, &alias_plan.print)
+                .expect("alias snapshot");
+        XyceTestRunner::compare_diode_model_alias_family_snapshots(&baseline, &alias)
+            .expect("canonical and alias workers match exactly");
+
+        let source_mutations = [
+            ("IS =", "JS =", "mixed alias spelling"),
+            ("IS =", "CJ0 =", "unadmitted zero-spelling alias"),
+            ("N =", "IS =", "duplicate alias group"),
+            (
+                "IS = 2.355E-14 N = 1.112",
+                "N = 1.112 IS = 2.355E-14",
+                "reordered model card",
+            ),
+            (".end", ".options temp=27\n.end", "extra directive"),
+            (".end", "Rextra 2 0 1k\n.end", "extra element"),
+            (".end", ".model OTHER D IS=1e-12\n.end", "extra model"),
+        ];
+        for (from, to, reason) in source_mutations {
+            let mutated = plan.source.replacen(from, to, 1);
+            assert_ne!(mutated, plan.source, "mutation fixture must change source");
+            assert!(
+                XyceTestRunner::diode_model_alias_source_qualification(&mutated).is_err(),
+                "{reason} must fail source qualification"
+            );
+        }
+
+        let mut reordered_comp = plan.clone();
+        reordered_comp.source = reordered_comp
+            .source
+            .replacen("*COMP V(1)", "*COMP TIME", 1);
+        assert!(
+            XyceTestRunner::validate_diode_model_alias_transient_plan(&reordered_comp).is_err(),
+            "reordered or duplicate *COMP targets are not equivalent"
+        );
+        let mut zero_comp = plan.clone();
+        zero_comp.source = zero_comp.source.replacen("reltol=1e-7", "reltol=0", 1);
+        assert!(
+            XyceTestRunner::validate_diode_model_alias_transient_plan(&zero_comp).is_err(),
+            "nonpositive *COMP tolerances are rejected"
+        );
+        let mut changed_tran = plan.clone();
+        changed_tran.tran.stop = 0.0;
+        assert!(
+            XyceTestRunner::validate_diode_model_alias_transient_plan(&changed_tran).is_err(),
+            "invalid transient bounds are rejected"
+        );
+        let mut changed_probe = plan.clone();
+        changed_probe.print.probes.swap(0, 1);
+        assert!(
+            XyceTestRunner::validate_diode_model_alias_transient_plan(&changed_probe).is_err(),
+            "PRINT and *COMP target order must agree"
+        );
+
+        let mut invalid_pulse = netlist.clone();
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Pulse { rise, .. }) =
+            &mut invalid_pulse.elements[0].kind
+        else {
+            panic!("fixture has one PULSE source");
+        };
+        *rise = 0.0;
+        assert!(
+            XyceTestRunner::diode_model_alias_family_snapshot(&invalid_pulse, &plan.print).is_err(),
+            "degenerate PULSE timing is outside the periodic-source envelope"
+        );
+        let mut changed_topology = alias_netlist.clone();
+        changed_topology.elements[1].nodes[1] = "0".to_string();
+        assert!(
+            XyceTestRunner::diode_model_alias_family_snapshot(
+                &changed_topology,
+                &alias_plan.print,
+            )
+            .is_err(),
+            "altered series topology is rejected"
+        );
+        let mut changed_title = alias.clone();
+        changed_title.canonical_source = changed_title.canonical_source.replacen(
+            "Test of diode parameter synonyms",
+            "Changed circuit title",
+            1,
+        );
+        assert!(
+            XyceTestRunner::compare_diode_model_alias_family_snapshots(&baseline, &changed_title)
+                .is_err(),
+            "non-alias source bytes participate in exact semantic parity"
+        );
+        let mut changed_runtime = alias.clone();
+        changed_runtime.runtime_diode.boolean_state[0] = false;
+        assert!(
+            XyceTestRunner::compare_diode_model_alias_family_snapshots(&baseline, &changed_runtime)
+                .is_err(),
+            "resolved BV Option/given state participates in runtime parity"
+        );
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!(
+            "rspice-xyce-diode-alias-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let temp_family = temp_root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_DIODE_ALIAS");
+        fs::create_dir_all(&temp_family).expect("create diode-alias fixture");
+        let anchor_path = temp_family.join("owner.cir");
+        let canonical_path = temp_family.join("canonical.cir");
+        let alias_path = temp_family.join("alias.cir");
+        fs::write(&anchor_path, "\n").expect("write trim-empty anchor");
+        fs::write(&canonical_path, &plan.source).expect("write canonical worker");
+        fs::write(&alias_path, &alias_plan.source).expect("write alias worker");
+        let anchor_relative = "Netlists/Certification_Tests/GENERIC_DIODE_ALIAS/owner.cir";
+        fs::write(
+            temp_root.join(HARNESS_MANIFEST_FILE),
+            format!("{anchor_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper provenance");
+        let temp_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        let deck = |path: &Path, relative: &str| XyceDeck {
+            path: path.to_path_buf(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let anchor_deck = deck(&anchor_path, anchor_relative);
+        assert_eq!(
+            temp_runner
+                .diode_model_alias_family_contract(&anchor_deck)
+                .expect("complete generic directory qualifies")
+                .role,
+            XyceDiodeModelAliasFamilyRole::Anchor
+        );
+        fs::write(temp_root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+        let missing_provenance_runner =
+            XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        assert!(
+            missing_provenance_runner
+                .diode_model_alias_family_contract(&anchor_deck)
+                .is_none(),
+            "empty owner without wrapper provenance is not a family"
+        );
+        fs::write(
+            temp_root.join(HARNESS_MANIFEST_FILE),
+            format!("{anchor_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("restore wrapper provenance");
+        let restored_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        let extra_path = temp_family.join("extra.cir");
+        fs::write(&extra_path, &plan.source).expect("write fourth record");
+        assert!(
+            restored_runner
+                .diode_model_alias_family_contract(&anchor_deck)
+                .is_none(),
+            "a fourth circuit changes the complete-directory contract"
+        );
+        fs::remove_file(&extra_path).expect("remove fourth record");
+        let output_dir = temp_root
+            .join("OutputData")
+            .join("Certification_Tests")
+            .join("GENERIC_DIODE_ALIAS");
+        fs::create_dir_all(&output_dir).expect("create mirrored output directory");
+        fs::write(output_dir.join("unexpected.prn"), "artifact")
+            .expect("write unexpected artifact");
+        assert!(
+            restored_runner
+                .diode_model_alias_family_contract(&anchor_deck)
+                .is_none(),
+            "the canonical zero-artifact directory rejects every output artifact"
+        );
+        fs::remove_dir_all(&temp_root).expect("remove diode-alias fixture");
     }
 }
