@@ -1337,6 +1337,96 @@ fn test_xyce_resistor_default_value_warning_wrapper_case_runs_natively() {
 }
 
 #[test]
+fn test_xyce_exact_is_diode_transient_case_runs_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/DIODE/diode.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a numeric exact-IS diode transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the Release 7.10 integrated-RMS transient contract"
+    );
+}
+
+#[test]
+fn test_xyce_sandler28_comp_transient_case_runs_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/SANDLER28/sandler28.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass the canonical Xyce *COMP integrated-RMS transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should satisfy every checked-in *COMP probe tolerance"
+    );
+    assert_eq!(
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the canonical Xyce transient-verifier contract"
+    );
+}
+
+#[test]
+fn test_xyce_output_interval_comp_transient_case_runs_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_343/bug_343.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should compare on its declared OUTPUT INITIAL_INTERVAL schedule, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should satisfy its checked-in *COMP tolerances on serialized output rows"
+    );
+    assert_eq!(
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the canonical Xyce transient-verifier contract"
+    );
+}
+
+#[test]
+fn test_xyce_vbic_named_noise_mechanisms_follow_generated_device_availability() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/VANOISE/commonEmitterBjt_vbic13.cir",
+        "Netlists/VANOISE/commonEmitterBjt_vbic13_3T.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        #[cfg(feature = "veriloga-builtins")]
+        assert!(
+            result.passed && !result.expected_unsupported && result.mismatches.is_empty(),
+            "{relative} should use the canonical generated VBIC noise mechanisms, got {result:?}"
+        );
+        #[cfg(not(feature = "veriloga-builtins"))]
+        assert!(
+            result.expected_unsupported && result.passed,
+            "{relative} must fail closed when canonical generated VBIC mechanisms are unavailable, got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_diode_sidewall_cd_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
@@ -2555,8 +2645,8 @@ fn test_xyce_sandler_op_amp_transient_case_runs() {
         "{relative} should match the checked-in Xyce .prn oracle"
     );
     assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the canonical Xyce transient-verifier contract"
     );
 }
 
