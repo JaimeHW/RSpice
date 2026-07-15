@@ -2808,6 +2808,93 @@ set auto_bridge_parm_d = vdd
             "auto_bridge_parm_d should select vdd instead of the default vcc parameter"
         );
     }
+
+    #[test]
+    fn legacy_bsim1_rsh_uses_unit_default_diffusion_squares() {
+        let netlist = Netlist::parse(
+            "legacy BSIM1 default diffusion squares\n\
+             vds d 0 0.05\n\
+             vgs g 0 1.8\n\
+             m1 d g 0 0 b1 l=10u w=50u\n\
+             .model b1 nmos level=4 tox=0.03 vdd=5 rsh=35\n\
+             .end\n",
+        )
+        .expect("legacy BSIM1 deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("legacy BSIM1 circuit builds");
+        let drain = circuit.get_node_by_name("d").expect("external drain node");
+        let drain_prime = circuit
+            .get_node_by_name("m1.__dint")
+            .expect("RSH creates a drain prime node");
+        let source_prime = circuit
+            .get_node_by_name("m1.__sint")
+            .expect("RSH creates a source prime node");
+        let mosfet = circuit
+            .mosfets
+            .devices
+            .first()
+            .expect("one legacy BSIM1 device");
+
+        assert!(mosfet.uses_legacy_bsim());
+        assert_eq!(mosfet.node_drain, drain_prime);
+        assert_eq!(mosfet.node_source, source_prime);
+
+        for (name, node_pos, node_neg) in [
+            ("m1.__rd", drain, drain_prime),
+            ("m1.__rs", 0, source_prime),
+        ] {
+            let index = circuit
+                .resistors
+                .names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("expected generated resistor {name}"));
+            let stamp = circuit.resistors.stamps[index];
+            assert_eq!(stamp.pp.row, node_pos, "{name} positive terminal");
+            assert_eq!(stamp.nn.row, node_neg, "{name} negative terminal");
+            assert!(
+                (circuit.resistors.conductances[index] - 1.0 / 35.0).abs() <= 1.0e-15,
+                "{name} must implement RSH times the default one diffusion square"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_bsim1_explicit_zero_diffusion_squares_disable_prime_nodes() {
+        let netlist = Netlist::parse(
+            "legacy BSIM1 zero diffusion squares\n\
+             vds d 0 0.05\n\
+             vgs g 0 1.8\n\
+             m1 d g 0 0 b1 l=10u w=50u nrd=0 nrs=0\n\
+             .model b1 nmos level=4 tox=0.03 vdd=5 rsh=35\n\
+             .end\n",
+        )
+        .expect("legacy BSIM1 deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("legacy BSIM1 circuit builds");
+        let drain = circuit.get_node_by_name("d").expect("external drain node");
+        let mosfet = circuit
+            .mosfets
+            .devices
+            .first()
+            .expect("one legacy BSIM1 device");
+
+        assert!(mosfet.uses_legacy_bsim());
+        assert_eq!(mosfet.node_drain, drain);
+        assert_eq!(mosfet.node_source, 0);
+        assert!(circuit.get_node_by_name("m1.__dint").is_none());
+        assert!(circuit.get_node_by_name("m1.__sint").is_none());
+        assert!(
+            circuit.resistors.names.iter().all(|name| {
+                !name.eq_ignore_ascii_case("m1.__rd") && !name.eq_ignore_ascii_case("m1.__rs")
+            }),
+            "explicit zero NRD/NRS must suppress both generated resistors"
+        );
+    }
 }
 
 impl Engine {
@@ -4206,21 +4293,18 @@ impl Engine {
                             temp_k - self.config.temperature
                         };
 
-                    // Drain/source ohmic resistances, mos1temp.c precedence:
-                    // RD (or RS) when given, else RSH times the diffusion
-                    // squares. ngspice stamps the conductance at internal
-                    // prime nodes scaled by the multiplicity; the explicit
-                    // resistor uses the reciprocal equivalent R/m, and the
-                    // repointed device terminals make junction noise and
-                    // limiting act at the true internal nodes.
-                    // Legacy BSIM1/BSIM2 instances keep their historical
-                    // terminal topology; their sheet-resistance handling is
-                    // part of the bsim parity program.
+                    // Drain/source ohmic resistances, matching the canonical
+                    // prime-node topology used by mos1temp.c and the legacy
+                    // BSIM1/BSIM2 b1temp.c/b2temp.c paths: RD (or RS) when
+                    // given, else RSH times the diffusion squares. ngspice
+                    // stamps the conductance at internal prime nodes scaled
+                    // by the multiplicity; the explicit resistor uses the
+                    // reciprocal equivalent R/m, and the repointed device
+                    // terminals make junction noise and limiting act at the
+                    // true internal nodes. BSIM1/BSIM2 default NRD/NRS to one
+                    // and therefore participate in this path as well.
                     let multiplicity = mosfet.multiplicity.max(1e-12);
-                    let resistances_apply = !mosfet.uses_legacy_bsim();
-                    let drain_r = if !resistances_apply {
-                        0.0
-                    } else if mosfet.rd_model > 0.0 {
+                    let drain_r = if mosfet.rd_model > 0.0 {
                         mosfet.rd_model
                     } else if mosfet.rsh > 0.0 {
                         mosfet.rsh * mosfet.nrd.max(0.0)
@@ -4241,9 +4325,7 @@ impl Engine {
                                 .set_last_noise_temperature_offset(mosfet.noise_temperature_offset);
                         }
                     }
-                    let source_r = if !resistances_apply {
-                        0.0
-                    } else if mosfet.rs_model > 0.0 {
+                    let source_r = if mosfet.rs_model > 0.0 {
                         mosfet.rs_model
                     } else if mosfet.rsh > 0.0 {
                         mosfet.rsh * mosfet.nrs.max(0.0)
