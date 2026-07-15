@@ -1,5 +1,7 @@
 use super::*;
 
+pub(crate) const XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION: f64 = 0.0233;
+
 /// Resolve the effective capacitance of a capacitor instance.
 ///
 /// Resolution order mirrors ngspice's CAP model (`capsetup.c`/`captemp.c`):
@@ -166,7 +168,8 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
 
     if spice_dialect == SpiceDialect::Xyce {
         let age = instance_param(instance_params, &["AGE"]);
-        let degradation = instance_param(instance_params, &["D"]).unwrap_or(0.0233);
+        let degradation = instance_param(instance_params, &["D"])
+            .unwrap_or(XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION);
         if !degradation.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "Capacitor '{}' has non-finite Xyce aging coefficient D={}",
@@ -417,6 +420,24 @@ mod tests {
         assert!(
             ((resolved - expected) / expected).abs() < 1e-12,
             "resolved {resolved}, expected {expected}"
+        );
+
+        let circuit = Engine::new(crate::engine::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..crate::engine::SimulationConfig::default()
+        })
+        .build_circuit(&netlist)
+        .expect("aged capacitor circuit builds");
+        let capacitors = circuit.capacitor_storage();
+        let index = capacitors
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("C1"))
+            .expect("aged capacitor reaches circuit storage");
+        assert_eq!(
+            capacitors.capacitances[index].to_bits(),
+            expected.to_bits(),
+            "the Xyce-resolved aged capacitance must be the value stamped at runtime"
         );
     }
 

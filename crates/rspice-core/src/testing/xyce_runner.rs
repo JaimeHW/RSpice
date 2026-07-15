@@ -377,6 +377,9 @@ enum XyceStaticTranPlanPurpose {
     /// per-member gold file and absolute device-model eligibility are neither
     /// required nor consulted.
     RelationalFamily,
+    /// Exact structural AGE/D-versus-expression capacitor equivalence. AGE/D
+    /// eligibility is scoped to this dedicated proof.
+    AgeCapRelationalFamily,
     /// Parse a manifest-marked wrapper whose reference waveforms are generated
     /// by independently simulated sibling decks. Admission to this purpose is
     /// deliberately available only after a dedicated family selector has
@@ -669,6 +672,19 @@ struct XyceBaselineFamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceAgeCapFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    role: XyceAgeCapFamilyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAgeCapFamilyRole {
+    Anchor,
+    AgedBaseline,
+    EquivalentMember,
+}
+
+#[derive(Debug, Clone)]
 struct XyceSubcktParameterResolutionFamilyContract {
     family: String,
     anchor_path: PathBuf,
@@ -737,6 +753,15 @@ struct XyceParamExpressionFamilySnapshot {
     subcircuit_ports: Vec<String>,
     flattened_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
     representation: XyceParamExpressionRepresentation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceAgeCapFamilySnapshot {
+    representation: XyceAgeCapRepresentation,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    ordered_probes: Vec<String>,
+    option_directives: Vec<String>,
+    age_semantics: [u64; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -824,12 +849,19 @@ struct XyceAcAnalysisExpressionSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
+    AgeCap(XyceAgeCapFamilySnapshot),
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
     ParamExpression(XyceParamExpressionFamilySnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
     TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAgeCapRepresentation {
+    NativeAge,
+    ParameterExpression,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -962,6 +994,7 @@ enum XyceBjtExternalNodeRepresentation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
+    AgeCap,
     AcAnalysisExpression,
     BjtExternalNode,
     DcAnalysisExpression,
@@ -1043,6 +1076,7 @@ impl XyceBaselineFamilyComparison {
 impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
+            Self::AgeCap => "AGE_CAP_EQUIVALENCE",
             Self::AcAnalysisExpression => "AC_ANALYSIS_EXPRESSION",
             Self::BjtExternalNode => "BJT_EXTNODE",
             Self::DcAnalysisExpression => "DC_ANALYSIS_EXPRESSION",
@@ -1063,6 +1097,7 @@ impl XyceBaselineFamilyKind {
 
     fn wrapper_contract(self) -> &'static str {
         match self {
+            Self::AgeCap => "age_cap_family_anchor",
             Self::AcAnalysisExpression => "ac_analysis_expression_family_wrapper",
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
             Self::DcAnalysisExpression => "dc_analysis_expression_family_wrapper",
@@ -1083,6 +1118,7 @@ impl XyceBaselineFamilyKind {
 
     fn baseline_contract(self) -> &'static str {
         match self {
+            Self::AgeCap => "age_cap_family_aged_baseline",
             Self::AcAnalysisExpression => "ac_analysis_expression_family_baseline",
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
             Self::DcAnalysisExpression => "dc_analysis_expression_family_baseline",
@@ -1112,6 +1148,7 @@ impl XyceBaselineFamilyKind {
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+            Self::AgeCap => XyceStaticTranPlanPurpose::AgeCapRelationalFamily,
             Self::AcAnalysisExpression
             | Self::BjtExternalNode
             | Self::DcAnalysisExpression
@@ -2308,6 +2345,19 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.age_cap_family_contract(deck) {
+            let result = self.run_age_cap_family_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.subckt_parameter_resolution_family_contract(deck) {
             let result =
                 self.run_subckt_parameter_resolution_family_contract(deck, contract, start);
@@ -3099,7 +3149,11 @@ impl XyceTestRunner {
             purpose
         };
         if validation_purpose.validates_absolute_device_contract()
-            || validation_purpose == XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
+            || matches!(
+                validation_purpose,
+                XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
+                    | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
+            )
         {
             Self::validate_native_transient_contract_for_purpose(&netlist, validation_purpose)?;
         } else {
@@ -10283,7 +10337,8 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::PassiveResPrimaryValue
             | XyceBaselineFamilyKind::SubcktParameterPrecedence
             | XyceBaselineFamilyKind::SubcktParameterResolution => false,
-            XyceBaselineFamilyKind::SinExpression
+            XyceBaselineFamilyKind::AgeCap
+            | XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
             | XyceBaselineFamilyKind::PassiveCapPrimaryValue
             | XyceBaselineFamilyKind::PassiveTemperatureOverride
@@ -11586,6 +11641,24 @@ impl XyceTestRunner {
         result
     }
 
+    fn run_age_cap_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceAgeCapFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
+        if result.passed && !result.expected_unsupported {
+            result.contract = match contract.role {
+                XyceAgeCapFamilyRole::Anchor => "age_cap_family_anchor",
+                XyceAgeCapFamilyRole::AgedBaseline => "age_cap_family_aged_baseline",
+                XyceAgeCapFamilyRole::EquivalentMember => "age_cap_family_equivalent_member",
+            }
+            .to_string();
+        }
+        result
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -11646,7 +11719,8 @@ impl XyceTestRunner {
         }
         if matches!(
             contract.kind,
-            XyceBaselineFamilyKind::SinExpression
+            XyceBaselineFamilyKind::AgeCap
+                | XyceBaselineFamilyKind::SinExpression
                 | XyceBaselineFamilyKind::ParamExpression
                 | XyceBaselineFamilyKind::PassiveCapPrimaryValue
                 | XyceBaselineFamilyKind::PassiveTemperatureOverride
@@ -12909,6 +12983,20 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::AgeCap
+            && let Err(err) = Self::validate_age_cap_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.kind == XyceBaselineFamilyKind::ParamExpression
             && let Err(err) = Self::validate_param_expression_transient_plan(&baseline_plan)
         {
@@ -13193,6 +13281,21 @@ impl XyceTestRunner {
             }
             if contract.kind == XyceBaselineFamilyKind::SinExpression
                 && let Err(err) = Self::validate_sin_expression_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::AgeCap
+                && let Err(err) = Self::validate_age_cap_transient_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,
@@ -17148,6 +17251,8 @@ impl XyceTestRunner {
         print: &XycePrintRequest,
     ) -> Result<XyceStrictTransientFamilySnapshot, String> {
         match contract.kind {
+            XyceBaselineFamilyKind::AgeCap => Self::age_cap_family_snapshot(netlist, print)
+                .map(XyceStrictTransientFamilySnapshot::AgeCap),
             XyceBaselineFamilyKind::ScopedModel => {
                 Self::scoped_model_family_snapshot(contract, netlist)?
                     .map(XyceStrictTransientFamilySnapshot::ScopedModel)
@@ -19728,6 +19833,10 @@ impl XyceTestRunner {
     ) -> Result<(), String> {
         match (baseline, target) {
             (
+                XyceStrictTransientFamilySnapshot::AgeCap(baseline),
+                XyceStrictTransientFamilySnapshot::AgeCap(target),
+            ) => Self::compare_age_cap_family_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::ScopedModel(baseline),
                 XyceStrictTransientFamilySnapshot::ScopedModel(target),
             ) if baseline == target => Ok(()),
@@ -19759,6 +19868,723 @@ impl XyceTestRunner {
             ) => Self::compare_transient_analysis_expression_snapshots(baseline, target),
             _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
+    }
+
+    fn validate_age_cap_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
+        const LABEL: &str = "native capacitor AGE/D equivalence";
+        if plan.contract != XyceStaticTranContract::PlainStatic
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires one ordinary, unstepped, adaptive default .prn transient output"
+            ));
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step <= 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires finite '.TRAN step stop' values and no START, MAXSTEP, or UIC"
+            ));
+        }
+        if plan.print.probes.len() != 2 {
+            return Err(format!("{LABEL} requires exactly two ordered probes"));
+        }
+        Self::age_cap_source_qualification(&plan.source).map(|_| ())
+    }
+
+    fn age_cap_source_qualification(source: &str) -> Result<XyceAgeCapRepresentation, String> {
+        const LABEL: &str = "native capacitor AGE/D equivalence";
+        let mut capacitor_field = None;
+        let mut resistor_count = 0usize;
+        let mut voltage_count = 0usize;
+        let mut parameters = BTreeMap::<String, crate::netlist::expr::Expr>::new();
+        let mut directive_counts = BTreeMap::<String, usize>::new();
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                let directive = command.to_ascii_lowercase();
+                *directive_counts.entry(directive.clone()).or_default() += 1;
+                match directive.as_str() {
+                    ".param" => {
+                        let rest = stripped[command.len()..].trim();
+                        let Some((name, expression)) = rest.split_once('=') else {
+                            return Err(format!("{LABEL} requires one assignment per .PARAM"));
+                        };
+                        let name = name.trim().to_ascii_lowercase();
+                        let expression = expression.trim();
+                        if !Self::is_single_spice_identifier(&name)
+                            || expression.is_empty()
+                            || expression.contains('=')
+                            || parameters.contains_key(&name)
+                        {
+                            return Err(format!(
+                                "{LABEL} contains a malformed or duplicate .PARAM assignment"
+                            ));
+                        }
+                        let inner = Self::print_expression_inner(expression).unwrap_or(expression);
+                        let ast = crate::netlist::expr::parse_expression(inner).map_err(|err| {
+                            format!("{LABEL} could not parse .PARAM expression: {err}")
+                        })?;
+                        parameters.insert(name, ast);
+                    }
+                    ".tran" => {
+                        let fields = stripped.split_whitespace().collect::<Vec<_>>();
+                        if fields.len() != 3
+                            || !Self::is_single_spice_numeric_literal(fields[1])
+                            || !Self::is_single_spice_numeric_literal(fields[2])
+                        {
+                            return Err(format!(
+                                "{LABEL} requires direct '.TRAN step stop' syntax"
+                            ));
+                        }
+                    }
+                    ".options" => {
+                        let fields = stripped.split_whitespace().collect::<Vec<_>>();
+                        let valid = fields.len() == 3
+                            && fields[1].eq_ignore_ascii_case("TIMEINT")
+                            && fields[2]
+                                .split_once('=')
+                                .filter(|(name, _)| name.eq_ignore_ascii_case("RELTOL"))
+                                .and_then(|(_, value)| {
+                                    Self::single_spice_numeric_literal_value(value).ok()
+                                })
+                                .is_some_and(|value| value.is_finite() && value > 0.0);
+                        if !valid {
+                            return Err(format!(
+                                "{LABEL} requires one bounded TIMEINT RELTOL option"
+                            ));
+                        }
+                    }
+                    ".print" => {
+                        let fields = Self::split_print_fields(stripped)?;
+                        if fields.len() != 4 || !fields[1].eq_ignore_ascii_case("TRAN") {
+                            return Err(format!(
+                                "{LABEL} requires one default two-probe .PRINT TRAN"
+                            ));
+                        }
+                    }
+                    ".end" if stripped.eq_ignore_ascii_case(".end") => {}
+                    ".end" => return Err(format!("{LABEL} requires a bare .END")),
+                    other => return Err(format!("{LABEL} does not admit directive '{other}'")),
+                }
+                continue;
+            }
+            let designator = command.chars().next().map(|ch| ch.to_ascii_uppercase());
+            match designator {
+                Some('C') => {
+                    if capacitor_field.is_some() {
+                        return Err(format!("{LABEL} requires exactly one capacitor"));
+                    }
+                    capacitor_field = Some(Self::split_grouped_whitespace_fields(
+                        stripped,
+                        "AGE/D capacitor statement",
+                    )?);
+                }
+                Some('R') => {
+                    let fields = Self::split_grouped_whitespace_fields(
+                        stripped,
+                        "AGE/D resistor statement",
+                    )?;
+                    if fields.len() != 4 || !Self::is_single_spice_numeric_literal(&fields[3]) {
+                        return Err(format!(
+                            "{LABEL} resistors must use direct numeric Rname n+ n- value syntax"
+                        ));
+                    }
+                    resistor_count += 1;
+                }
+                Some('V') => {
+                    let fields = Self::split_grouped_whitespace_fields(
+                        stripped,
+                        "AGE/D voltage-source statement",
+                    )?;
+                    if fields.len() != 4
+                        || !(Self::is_single_spice_numeric_literal(&fields[3])
+                            || Self::age_cap_direct_pulse_field(&fields[3]))
+                    {
+                        return Err(format!(
+                            "{LABEL} voltage sources must use direct numeric DC or direct numeric PULSE syntax"
+                        ));
+                    }
+                    voltage_count += 1;
+                }
+                _ => {}
+            }
+        }
+        if directive_counts.get(".tran") != Some(&1)
+            || directive_counts.get(".options") != Some(&1)
+            || directive_counts.get(".print") != Some(&1)
+            || directive_counts.get(".end") != Some(&1)
+            || directive_counts
+                .iter()
+                .any(|(name, count)| name != ".param" && *count != 1)
+            || resistor_count != 2
+            || voltage_count != 2
+        {
+            return Err(format!(
+                "{LABEL} requires exactly one .TRAN, .OPTIONS, .PRINT, and .END"
+            ));
+        }
+        let fields = capacitor_field.ok_or_else(|| format!("{LABEL} has no capacitor"))?;
+        if fields.len() == 4 && Self::print_expression_inner(&fields[3]).is_some() {
+            if parameters.is_empty() {
+                return Err(format!(
+                    "{LABEL} expression representation requires parameters"
+                ));
+            }
+            let cap_expression = Self::print_expression_inner(&fields[3]).expect("checked above");
+            let cap_ast = crate::netlist::expr::parse_expression(cap_expression)
+                .map_err(|err| format!("{LABEL} could not parse capacitance expression: {err}"))?;
+            Self::age_cap_parameter_graph(&parameters, &cap_ast)?;
+            return Ok(XyceAgeCapRepresentation::ParameterExpression);
+        }
+        if fields.len() < 5 || !Self::is_single_spice_numeric_literal(&fields[3]) {
+            return Err(format!(
+                "{LABEL} aged representation requires a direct numeric capacitance"
+            ));
+        }
+        if !parameters.is_empty() {
+            return Err(format!(
+                "{LABEL} aged representation does not admit parameters"
+            ));
+        }
+        let mut age = None;
+        let mut degradation = None;
+        for assignment in &fields[4..] {
+            let Some((name, value)) = assignment.split_once('=') else {
+                return Err(format!("{LABEL} AGE/D fields must be named assignments"));
+            };
+            let parsed = Self::single_spice_numeric_literal_value(value)?;
+            if name.eq_ignore_ascii_case("AGE") && age.replace(parsed).is_none() {
+                continue;
+            }
+            if name.eq_ignore_ascii_case("D") && degradation.replace(parsed).is_none() {
+                continue;
+            }
+            return Err(format!(
+                "{LABEL} aged capacitor admits exactly one AGE and at most one D"
+            ));
+        }
+        if age.is_none_or(|value| !value.is_finite() || value <= 1.0)
+            || degradation.is_some_and(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "{LABEL} AGE must be finite and greater than one, and D must be finite"
+            ));
+        }
+        Ok(XyceAgeCapRepresentation::NativeAge)
+    }
+
+    fn age_cap_direct_pulse_field(field: &str) -> bool {
+        let field = field.trim();
+        let Some(prefix) = field.get(..6) else {
+            return false;
+        };
+        if !prefix.eq_ignore_ascii_case("PULSE(") || !field.ends_with(')') {
+            return false;
+        }
+        let arguments = &field[6..field.len() - 1];
+        let arguments = arguments
+            .split(|ch: char| ch == ',' || ch.is_whitespace())
+            .filter(|argument| !argument.is_empty())
+            .collect::<Vec<_>>();
+        matches!(arguments.len(), 6 | 7)
+            && arguments
+                .iter()
+                .all(|argument| Self::is_single_spice_numeric_literal(argument))
+    }
+
+    fn age_cap_pulse_spec_is_bounded(spec: &crate::netlist::SourceSpec) -> bool {
+        let crate::netlist::SourceSpec::Pulse {
+            v1,
+            v2,
+            delay,
+            rise,
+            fall,
+            width,
+            period,
+            phase,
+            ..
+        } = spec
+        else {
+            return false;
+        };
+        v1.is_finite()
+            && v2.is_finite()
+            && delay.is_finite()
+            && *delay >= 0.0
+            && rise.is_finite()
+            && *rise > 0.0
+            && fall.is_finite()
+            && *fall > 0.0
+            && width.is_finite()
+            && *width > 0.0
+            && (period.is_nan() || (period.is_finite() && *period > 0.0))
+            && phase.is_finite()
+    }
+
+    fn age_cap_parameter_graph(
+        definitions: &BTreeMap<String, crate::netlist::expr::Expr>,
+        cap_expression: &crate::netlist::expr::Expr,
+    ) -> Result<[String; 5], String> {
+        use crate::netlist::expr::{BinOpKind, Expr};
+        const LABEL: &str = "native capacitor AGE/D equivalence";
+        let Expr::Param(effective_name) = cap_expression else {
+            return Err(format!(
+                "{LABEL} capacitor must reference one effective-capacitance parameter"
+            ));
+        };
+        let effective_name = effective_name.to_ascii_lowercase();
+        let Some(Expr::BinOp {
+            op: BinOpKind::Mul,
+            left,
+            right,
+        }) = definitions.get(&effective_name)
+        else {
+            return Err(format!(
+                "{LABEL} effective parameter must be base*(1-D*log_age)"
+            ));
+        };
+        let Expr::Param(base_name) = left.as_ref() else {
+            return Err(format!(
+                "{LABEL} effective parameter must begin with a base parameter"
+            ));
+        };
+        let Expr::BinOp {
+            op: BinOpKind::Sub,
+            left: one,
+            right: degradation_product,
+        } = right.as_ref()
+        else {
+            return Err(format!("{LABEL} effective parameter must use 1-D*log_age"));
+        };
+        if !matches!(one.as_ref(), Expr::Number(value) if value.to_bits() == 1.0f64.to_bits()) {
+            return Err(format!("{LABEL} effective parameter requires literal one"));
+        }
+        let Expr::BinOp {
+            op: BinOpKind::Mul,
+            left: degradation,
+            right: log_age,
+        } = degradation_product.as_ref()
+        else {
+            return Err(format!("{LABEL} effective parameter requires D*log_age"));
+        };
+        let (Expr::Param(degradation_name), Expr::Param(log_name)) =
+            (degradation.as_ref(), log_age.as_ref())
+        else {
+            return Err(format!("{LABEL} D and log-age terms must be parameters"));
+        };
+        let base_name = base_name.to_ascii_lowercase();
+        let degradation_name = degradation_name.to_ascii_lowercase();
+        let log_name = log_name.to_ascii_lowercase();
+        let Some(Expr::FnCall { name, args }) = definitions.get(&log_name) else {
+            return Err(format!("{LABEL} log-age parameter must be log10(age)"));
+        };
+        let [Expr::Param(age_name)] = args.as_slice() else {
+            return Err(format!(
+                "{LABEL} log10 must consume exactly one age parameter"
+            ));
+        };
+        if !name.eq_ignore_ascii_case("log10") {
+            return Err(format!("{LABEL} age degradation requires log10"));
+        }
+        let age_name = age_name.to_ascii_lowercase();
+        let names = [
+            base_name,
+            degradation_name,
+            age_name,
+            log_name,
+            effective_name,
+        ];
+        if definitions.len() != 5 || names.iter().collect::<BTreeSet<_>>().len() != 5 {
+            return Err(format!(
+                "{LABEL} requires five distinct, fully used parameters"
+            ));
+        }
+        let literal = |name: &str| match definitions.get(name) {
+            Some(Expr::Number(value)) if value.is_finite() => Some(*value),
+            _ => None,
+        };
+        let base =
+            literal(&names[0]).ok_or_else(|| format!("{LABEL} base must be a finite literal"))?;
+        let degradation =
+            literal(&names[1]).ok_or_else(|| format!("{LABEL} D must be a finite literal"))?;
+        let age =
+            literal(&names[2]).ok_or_else(|| format!("{LABEL} age must be a finite literal"))?;
+        if base <= 0.0 || degradation < 0.0 || age <= 1.0 {
+            return Err(format!("{LABEL} requires base>0, D>=0, and age>1"));
+        }
+        Ok(names)
+    }
+
+    fn age_cap_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceAgeCapFamilySnapshot, String> {
+        const LABEL: &str = "native capacitor AGE/D equivalence";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let representation = Self::age_cap_source_qualification(source)?;
+        if netlist.title.trim().is_empty()
+            || netlist.title.trim_start().starts_with('.')
+            || !netlist.models.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }])
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat diagnostic-free native transient circuit without auxiliary or external state"
+            ));
+        }
+        let numeric_params = netlist.params.all_params();
+        if (representation == XyceAgeCapRepresentation::NativeAge && !numeric_params.is_empty())
+            || (representation == XyceAgeCapRepresentation::ParameterExpression
+                && (numeric_params.is_empty()
+                    || numeric_params.iter().any(|(_, value)| !value.is_finite())))
+        {
+            return Err(format!(
+                "{LABEL} has invalid representation parameter state"
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut resistors = Vec::new();
+        let mut pulse = None;
+        let mut monitor = None;
+        let mut capacitor = None;
+        let mut effective_capacitance = None;
+        for element in &netlist.elements {
+            let key = Self::normalize_device_instance_name(&element.name);
+            if element.nodes.iter().any(|node| {
+                Self::canonical_passive_primary_node_name(node) == "0" && node.trim() != "0"
+            }) {
+                return Err(format!("{LABEL} requires literal node 0 for ground"));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_passive_primary_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    resistors.push(nodes.clone());
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(spec) if nodes.len() == 2 => {
+                    let (waveform, bits) = Self::scoped_model_source_fingerprint(spec)?;
+                    if waveform == "PULSE"
+                        && Self::age_cap_pulse_spec_is_bounded(spec)
+                        && pulse.replace(nodes.clone()).is_none()
+                    {
+                    } else if waveform == "DC"
+                        && bits == [0.0f64.to_bits()]
+                        && monitor
+                            .replace((element.name.clone(), nodes.clone()))
+                            .is_none()
+                    {
+                    } else {
+                        return Err(format!("{LABEL} has an unqualified voltage source"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: format!("V:{waveform}"),
+                        nodes,
+                        numeric_bits: bits,
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_voltage.is_none()
+                    && model.is_none()
+                    && deferred_params.is_empty() =>
+                {
+                    let aged_params = instance_params
+                        .iter()
+                        .filter(|(name, _)| {
+                            name.eq_ignore_ascii_case("AGE") || name.eq_ignore_ascii_case("D")
+                        })
+                        .count();
+                    if (representation == XyceAgeCapRepresentation::NativeAge
+                        && (aged_params != instance_params.len() || aged_params == 0))
+                        || (representation == XyceAgeCapRepresentation::ParameterExpression
+                            && !instance_params.is_empty())
+                        || capacitor.is_some()
+                    {
+                        return Err(format!("{LABEL} capacitor representation is inconsistent"));
+                    }
+                    let effective = Engine::new(SimulationConfig {
+                        spice_dialect: SpiceDialect::Xyce,
+                        ..SimulationConfig::default()
+                    })
+                    .resolved_capacitor_value(netlist, &element.name)
+                    .map_err(|err| format!("{LABEL} could not resolve capacitance: {err}"))?
+                    .ok_or_else(|| format!("{LABEL} has no resolved capacitance"))?;
+                    if !effective.is_finite() || effective <= 0.0 {
+                        return Err(format!("{LABEL} resolved capacitance is invalid"));
+                    }
+                    effective_capacitance = Some(effective);
+                    capacitor = Some((element.name.clone(), nodes.clone()));
+                    XyceRelationalElementFingerprint {
+                        kind: "C:EFFECTIVE".to_string(),
+                        nodes,
+                        numeric_bits: vec![effective.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => return Err(format!("{LABEL} contains an unqualified native element")),
+            };
+            if key.is_empty() || elements.insert(key, fingerprint).is_some() {
+                return Err(format!("{LABEL} has an empty or duplicate element name"));
+            }
+        }
+        if elements.len() != 5 || resistors.len() != 2 {
+            return Err(format!("{LABEL} requires exactly two R, two V, and one C"));
+        }
+        let pulse_nodes = pulse.ok_or_else(|| format!("{LABEL} has no pulse source"))?;
+        let (monitor_name, monitor_nodes) =
+            monitor.ok_or_else(|| format!("{LABEL} has no zero-volt monitor"))?;
+        let (capacitor_name, capacitor_nodes) =
+            capacitor.ok_or_else(|| format!("{LABEL} has no capacitor"))?;
+        let [drive, ground] = pulse_nodes.as_slice() else {
+            return Err(format!("{LABEL} pulse topology is invalid"));
+        };
+        let [monitor_input, cap_node] = monitor_nodes.as_slice() else {
+            return Err(format!("{LABEL} monitor topology is invalid"));
+        };
+        if ground != "0"
+            || drive == "0"
+            || monitor_input == "0"
+            || cap_node == "0"
+            || drive == monitor_input
+            || drive == cap_node
+            || monitor_input == cap_node
+            || capacitor_nodes != [cap_node.clone(), "0".to_string()]
+            || !resistors
+                .iter()
+                .any(|nodes| nodes == &[drive.clone(), monitor_input.clone()])
+            || !resistors
+                .iter()
+                .any(|nodes| nodes == &[monitor_input.clone(), "0".to_string()])
+        {
+            return Err(format!(
+                "{LABEL} requires the bounded pulse/R/R/monitor/C topology"
+            ));
+        }
+        let [current_text, voltage_text] = print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires two ordered probes"));
+        };
+        let current = Self::parse_current_probe(current_text)
+            .ok_or_else(|| format!("{LABEL} first probe is not an atomic current"))?;
+        let voltage = Self::parse_voltage_probe(voltage_text)
+            .ok_or_else(|| format!("{LABEL} second probe is not an atomic voltage"))?;
+        if !Self::device_instance_names_match(&current, &monitor_name)
+            || voltage.accessor != XyceVoltageAccessor::Value
+            || voltage.node_neg.is_some()
+            || Self::canonical_passive_primary_node_name(&voltage.node_pos) != *cap_node
+            || Self::normalize_device_instance_name(&capacitor_name).is_empty()
+        {
+            return Err(format!(
+                "{LABEL} probes must be ordered monitor current then capacitor voltage"
+            ));
+        }
+        let option_directives = Self::logical_netlist_lines(source)
+            .into_iter()
+            .map(|line| {
+                Self::strip_netlist_comment(&line)
+                    .trim()
+                    .to_ascii_lowercase()
+            })
+            .filter(|line| line.starts_with(".options"))
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect();
+        let age_semantics = Self::age_cap_semantic_values(
+            netlist,
+            source,
+            representation,
+            effective_capacitance.expect("qualified capacitor"),
+        )?;
+        Ok(XyceAgeCapFamilySnapshot {
+            representation,
+            elements,
+            ordered_probes: print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect(),
+            option_directives,
+            age_semantics,
+        })
+    }
+
+    fn age_cap_semantic_values(
+        netlist: &Netlist,
+        source: &str,
+        representation: XyceAgeCapRepresentation,
+        effective: Value,
+    ) -> Result<[u64; 4], String> {
+        const LABEL: &str = "native capacitor AGE/D equivalence";
+        if representation == XyceAgeCapRepresentation::NativeAge {
+            let capacitor = netlist
+                .elements
+                .iter()
+                .find(|element| matches!(element.kind, ElementKind::Capacitor { .. }))
+                .ok_or_else(|| format!("{LABEL} has no capacitor"))?;
+            let ElementKind::Capacitor {
+                value,
+                instance_params,
+                ..
+            } = &capacitor.kind
+            else {
+                unreachable!()
+            };
+            let age = instance_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("AGE"))
+                .map(|(_, value)| *value)
+                .ok_or_else(|| format!("{LABEL} aged capacitor has no AGE"))?;
+            let degradation = instance_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("D"))
+                .map(|(_, value)| *value)
+                .unwrap_or(crate::engine::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION);
+            return Ok([
+                value.to_bits(),
+                age.to_bits(),
+                degradation.to_bits(),
+                effective.to_bits(),
+            ]);
+        }
+        let mut definitions = BTreeMap::new();
+        let mut cap_ast = None;
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".param") {
+                let (name, expression) = stripped[command.len()..]
+                    .trim()
+                    .split_once('=')
+                    .ok_or_else(|| format!("{LABEL} malformed parameter"))?;
+                let expression = expression.trim();
+                let inner = Self::print_expression_inner(expression).unwrap_or(expression);
+                definitions.insert(
+                    name.trim().to_ascii_lowercase(),
+                    crate::netlist::expr::parse_expression(inner)
+                        .map_err(|err| format!("{LABEL} malformed parameter: {err}"))?,
+                );
+            } else if command
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.eq_ignore_ascii_case(&'C'))
+            {
+                let fields = Self::split_grouped_whitespace_fields(stripped, LABEL)?;
+                let expression = fields
+                    .get(3)
+                    .and_then(|field| Self::print_expression_inner(field))
+                    .ok_or_else(|| format!("{LABEL} parameter capacitor is not an expression"))?;
+                cap_ast = Some(
+                    crate::netlist::expr::parse_expression(expression)
+                        .map_err(|err| format!("{LABEL} malformed capacitor expression: {err}"))?,
+                );
+            }
+        }
+        let names = Self::age_cap_parameter_graph(
+            &definitions,
+            &cap_ast.ok_or_else(|| format!("{LABEL} missing capacitor expression"))?,
+        )?;
+        let value = |name: &str| {
+            netlist
+                .params
+                .get(name)
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| format!("{LABEL} parameter '{name}' is not finite"))
+        };
+        let base = value(&names[0])?;
+        let degradation = value(&names[1])?;
+        let age = value(&names[2])?;
+        let declared_effective = value(&names[4])?;
+        if declared_effective.to_bits() != effective.to_bits() {
+            return Err(format!("{LABEL} declared and stamped capacitances differ"));
+        }
+        Ok([
+            base.to_bits(),
+            age.to_bits(),
+            degradation.to_bits(),
+            effective.to_bits(),
+        ])
+    }
+
+    fn compare_age_cap_family_snapshots(
+        baseline: &XyceAgeCapFamilySnapshot,
+        target: &XyceAgeCapFamilySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceAgeCapRepresentation::NativeAge
+            || target.representation != XyceAgeCapRepresentation::ParameterExpression
+        {
+            return Err(
+                "family must compare native AGE/D capacitance to parameter-expression capacitance"
+                    .to_string(),
+            );
+        }
+        if baseline.elements != target.elements
+            || baseline.ordered_probes != target.ordered_probes
+            || baseline.option_directives != target.option_directives
+            || baseline.age_semantics != target.age_semantics
+        {
+            return Err("resolved topology, sources, effective capacitance, ordered probes, or options differ".to_string());
+        }
+        Ok(())
     }
 
     fn validate_sin_expression_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
@@ -26819,7 +27645,7 @@ impl XyceTestRunner {
                     Self::validate_static_step_resistor_contract(netlist, &element.name)?;
                 }
                 ElementKind::Capacitor { .. } => {
-                    Self::validate_static_step_capacitor_contract(netlist, &element.name)?
+                    Self::validate_static_step_capacitor_contract(netlist, &element.name, false)?
                 }
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
@@ -26892,8 +27718,9 @@ impl XyceTestRunner {
     fn validate_static_step_capacitor_contract(
         netlist: &Netlist,
         element_name: &str,
+        allow_age_params: bool,
     ) -> Result<(), String> {
-        Self::validate_xyce_capacitor_contract_params(netlist, element_name)?;
+        Self::validate_xyce_capacitor_contract_params(netlist, element_name, allow_age_params)?;
         let capacitance = Engine::new(SimulationConfig {
             spice_dialect: SpiceDialect::Xyce,
             ..SimulationConfig::default()
@@ -26924,6 +27751,7 @@ impl XyceTestRunner {
     fn validate_xyce_capacitor_contract_params(
         netlist: &Netlist,
         element_name: &str,
+        allow_age_params: bool,
     ) -> Result<(), String> {
         let element = Self::find_capacitor_element(netlist, element_name)
             .ok_or_else(|| format!("capacitor '{}' not found", element_name))?;
@@ -26959,6 +27787,8 @@ impl XyceTestRunner {
             if !INSTANCE_PARAMS
                 .iter()
                 .any(|candidate| name.eq_ignore_ascii_case(candidate))
+                && !(allow_age_params
+                    && (name.eq_ignore_ascii_case("AGE") || name.eq_ignore_ascii_case("D")))
             {
                 return Err(format!(
                     "native static .PRINT TRAN comparison does not yet support Xyce capacitor instance parameter {} on element '{}'",
@@ -27258,9 +28088,11 @@ impl XyceTestRunner {
                         )?;
                     }
                 }
-                ElementKind::Capacitor { .. } => {
-                    Self::validate_static_step_capacitor_contract(netlist, &element.name)?
-                }
+                ElementKind::Capacitor { .. } => Self::validate_static_step_capacitor_contract(
+                    netlist,
+                    &element.name,
+                    purpose == XyceStaticTranPlanPurpose::AgeCapRelationalFamily,
+                )?,
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
                 }
@@ -27379,6 +28211,7 @@ impl XyceTestRunner {
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::RelationalFamily
+                        | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                         | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily => format!(
                             "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
@@ -36425,6 +37258,135 @@ impl XyceTestRunner {
             .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
             .or_else(|| self.supernode_family_contract(deck))
+    }
+
+    fn age_cap_family_contract(&self, deck: &XyceDeck) -> Option<XyceAgeCapFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let mut anchor = None;
+        let mut workers = Vec::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            let source = fs::read_to_string(&path).ok()?;
+            let wrapper = self.requires_upstream_wrapper(&self.relative_key(&path));
+            if source.trim().is_empty() {
+                if !wrapper || anchor.replace(path).is_some() {
+                    return None;
+                }
+                continue;
+            }
+            if wrapper {
+                return None;
+            }
+            let plan = self
+                .static_tran_family_plan_for_path(
+                    &path,
+                    XyceStaticTranPlanPurpose::AgeCapRelationalFamily,
+                )
+                .ok()?;
+            Self::validate_age_cap_transient_plan(&plan).ok()?;
+            let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
+            let snapshot = Self::age_cap_family_snapshot(&netlist, &plan.print).ok()?;
+            workers.push((path, plan, snapshot));
+        }
+        let anchor = anchor?;
+        if workers.len() != 2
+            || ![&anchor]
+                .into_iter()
+                .chain(workers.iter().map(|(path, _, _)| path))
+                .any(|path| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+        let aged = workers.iter().find(|(_, _, snapshot)| {
+            snapshot.representation == XyceAgeCapRepresentation::NativeAge
+        })?;
+        let equivalent = workers.iter().find(|(_, _, snapshot)| {
+            snapshot.representation == XyceAgeCapRepresentation::ParameterExpression
+        })?;
+        if Self::same_path(&aged.0, &equivalent.0)
+            || aged.1.print.probes != equivalent.1.print.probes
+            || !Self::tran_analyses_match_exactly(&aged.1.tran, &equivalent.1.tran)
+            || aged.1.timeint_conststep != equivalent.1.timeint_conststep
+            || Self::compare_age_cap_family_snapshots(&aged.2, &equivalent.2).is_err()
+        {
+            return None;
+        }
+        let family_paths = [&anchor, &aged.0, &equivalent.0];
+        let output_parent = self
+            .static_prn_reference_path(&aged.0)?
+            .parent()?
+            .to_path_buf();
+        let prefixes = family_paths
+            .iter()
+            .filter_map(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| format!("{name}."))
+            })
+            .collect::<Vec<_>>();
+        if prefixes.len() != family_paths.len() {
+            return None;
+        }
+        let mut artifacts = Vec::new();
+        for entry in fs::read_dir(&output_parent).ok()? {
+            let entry = entry.ok()?;
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            if !prefixes.iter().any(|prefix| name.starts_with(prefix)) {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            artifacts.push(entry.path());
+        }
+        let aged_prn = self.static_prn_reference_path(&aged.0)?;
+        if artifacts.len() != 1
+            || !Self::same_path(&artifacts[0], &aged_prn)
+            || fs::metadata(&aged_prn).ok()?.len() == 0
+        {
+            return None;
+        }
+        let role = if Self::same_path(&deck.path, &anchor) {
+            XyceAgeCapFamilyRole::Anchor
+        } else if Self::same_path(&deck.path, &aged.0) {
+            XyceAgeCapFamilyRole::AgedBaseline
+        } else if Self::same_path(&deck.path, &equivalent.0) {
+            XyceAgeCapFamilyRole::EquivalentMember
+        } else {
+            return None;
+        };
+        let target_path = match role {
+            XyceAgeCapFamilyRole::Anchor => None,
+            XyceAgeCapFamilyRole::AgedBaseline => Some(aged.0.clone()),
+            XyceAgeCapFamilyRole::EquivalentMember => Some(equivalent.0.clone()),
+        };
+        Some(XyceAgeCapFamilyContract {
+            relational: XyceBaselineFamilyContract {
+                kind: XyceBaselineFamilyKind::AgeCap,
+                comparison: XyceBaselineFamilyComparison::ExactPrn,
+                family: parent.file_name()?.to_str()?.to_string(),
+                baseline_path: aged.0.clone(),
+                member_paths: vec![aged.0.clone(), equivalent.0.clone()],
+                target_path,
+            },
+            role,
+        })
     }
 
     fn delimited_expression_family_contract(
@@ -45607,6 +46569,109 @@ Cload node 0 3u
         );
 
         fs::remove_dir_all(&root).expect("remove AC-expression family fixture");
+    }
+
+    #[test]
+    fn age_cap_family_is_complete_structural_and_fail_closed() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-age-cap-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root.join("Netlists").join("GENERIC_AGE_EQUIVALENCE");
+        let output_dir = root.join("OutputData").join("GENERIC_AGE_EQUIVALENCE");
+        fs::create_dir_all(&family_dir).unwrap();
+        fs::create_dir_all(&output_dir).unwrap();
+        let anchor_path = family_dir.join("owner.cir");
+        let aged_path = family_dir.join("native.cir");
+        let equivalent_path = family_dir.join("equivalent.cir");
+        let aged = "Generic capacitor aging equivalence\nRDRIVE drive sense 1\nVPULSE drive 0 PULSE(0 2 100N 1U 1U 15U)\nRLEAK sense 0 10E12\nVMON sense out 0\nCSTORE out 0 4UF AGE=87600\n.TRAN 0.1US 100US\n.OPTIONS TIMEINT RELTOL=1.0e-4\n.PRINT TRAN I(VMON) V(out)\n.END\n";
+        let equivalent = "Generic capacitor aging equivalence\nRDRIVE drive sense 1\nVPULSE drive 0 PULSE(0 2 100N 1U 1U 15U)\nRLEAK sense 0 10E12\nVMON sense out 0\n.PARAM loss = {0.0233}\n.PARAM nominal = {4UF}\n.PARAM lifetime = {87600}\n.PARAM log_lifetime = {log10(lifetime)}\n.PARAM effective = {nominal*(1-loss*log_lifetime)}\nCSTORE out 0 {effective}\n.TRAN 0.1US 100US\n.OPTIONS TIMEINT RELTOL=1.0e-4\n.PRINT TRAN I(VMON) V(out)\n.END\n";
+        fs::write(&anchor_path, " \r\n").unwrap();
+        fs::write(&aged_path, aged).unwrap();
+        fs::write(&equivalent_path, equivalent).unwrap();
+        fs::write(output_dir.join("native.cir.prn"), "ownership only\n").unwrap();
+        let manifest = format!(
+            "Netlists/GENERIC_AGE_EQUIVALENCE/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).unwrap();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let deck = XyceDeck {
+            path: aged_path.clone(),
+            relative_path: runner.relative_key(&aged_path),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .age_cap_family_contract(&deck)
+            .expect("complete generic AGE family qualifies");
+        assert_eq!(contract.role, XyceAgeCapFamilyRole::AgedBaseline);
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::ExactPrn
+        );
+
+        for invalid in [
+            equivalent.replace(
+                "nominal*(1-loss*log_lifetime)",
+                "nominal+(1-loss*log_lifetime)",
+            ),
+            equivalent.replace("log10(lifetime)", "sqrt(lifetime)"),
+            equivalent.replace("{4UF}", "{5UF}"),
+            equivalent.replace("{87600}", "{87601}"),
+            equivalent.replace("{0.0233}", "{0.0234}"),
+            equivalent.replace("CSTORE out 0 {effective}", "CSTORE out 0 {nominal}"),
+            equivalent.replace(".PARAM effective", ".PARAM unused = {1}\n.PARAM effective"),
+            equivalent.replace("RDRIVE drive sense 1", "RDRIVE drive changed 1"),
+            equivalent.replace("RDRIVE drive sense 1", "RDRIVE drive sense {1}"),
+            equivalent.replace("VPULSE drive 0", "VPULSE drive GND"),
+            equivalent.replace("PULSE(0 2", "PULSE(0 3"),
+            equivalent.replace("PULSE(0 2", "PULSE({0} 2"),
+            equivalent.replace("I(VMON) V(out)", "V(out) I(VMON)"),
+            equivalent.replace(".TRAN 0.1US 100US", ".TRAN 0.2US 100US"),
+            equivalent.replace("RELTOL=1.0e-4", "RELTOL=2.0e-4"),
+            equivalent.replace(".END", ".GLOBAL extra\n.END"),
+        ] {
+            fs::write(&equivalent_path, invalid).unwrap();
+            assert!(runner.age_cap_family_contract(&deck).is_none());
+        }
+        fs::write(&equivalent_path, equivalent).unwrap();
+        for invalid in [
+            aged.replace("AGE=87600", "AGE=1"),
+            aged.replace("AGE=87600", "AGE=87600 M=2"),
+            aged.replace("CSTORE out 0 4UF", "CSTORE out 0 5UF"),
+            aged.replace("VMON sense out 0", "VMON changed out 0"),
+            aged.replace("RLEAK sense 0", "RLEAK sense GND"),
+            aged.replace("I(VMON) V(out)", "I(VMON) V(sense)"),
+            aged.replace("100N 1U 1U 15U", "-100N 1U 1U 15U"),
+            aged.replace("100N 1U 1U 15U", "100N 0 1U 15U"),
+        ] {
+            fs::write(&aged_path, invalid).unwrap();
+            assert!(runner.age_cap_family_contract(&deck).is_none());
+        }
+        fs::write(&aged_path, aged).unwrap();
+        let extra_path = family_dir.join("extra.cir");
+        fs::write(&extra_path, equivalent).unwrap();
+        assert!(runner.age_cap_family_contract(&deck).is_none());
+        fs::remove_file(&extra_path).unwrap();
+        fs::write(root.join(HARNESS_MANIFEST_FILE), "").unwrap();
+        assert!(
+            XyceTestRunner::new(&root, XyceRunnerConfig::default())
+                .age_cap_family_contract(&deck)
+                .is_none()
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).unwrap();
+        fs::write(output_dir.join("owner.cir.prn"), "ambiguous\n").unwrap();
+        assert!(runner.age_cap_family_contract(&deck).is_none());
+        fs::remove_file(output_dir.join("owner.cir.prn")).unwrap();
+        fs::write(output_dir.join("native.cir.prn"), "").unwrap();
+        assert!(runner.age_cap_family_contract(&deck).is_none());
+        fs::write(output_dir.join("native.cir.prn"), "ownership only\n").unwrap();
+        fs::remove_file(output_dir.join("native.cir.prn")).unwrap();
+        assert!(runner.age_cap_family_contract(&deck).is_none());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

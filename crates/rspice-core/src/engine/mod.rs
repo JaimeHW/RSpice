@@ -21,6 +21,7 @@
 mod ac;
 mod advanced;
 mod builder;
+pub(crate) use builder::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
 mod config;
 mod config_resolver;
 mod convergence;

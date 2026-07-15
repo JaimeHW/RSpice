@@ -29,6 +29,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 mod model_resolution;
+pub(crate) use model_resolution::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
 use model_resolution::*;
 mod behavioral;
 mod builtin_models;

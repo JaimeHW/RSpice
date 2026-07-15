@@ -8,6 +8,7 @@ mod resistors;
 mod transmission;
 mod xspice;
 
+pub(crate) use capacitors::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
 pub(super) use capacitors::*;
 pub(super) use inductors::*;
 pub(super) use magnetic::*;
