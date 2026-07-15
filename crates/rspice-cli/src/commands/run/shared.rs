@@ -152,46 +152,16 @@ pub(super) fn generate_step_values(
                     analysis: Some("Step".to_string()),
                 });
             }
-            if (*stop - *start).abs() <= f64::EPSILON {
-                return Ok(vec![*start]);
+            let values = sweep.values();
+            if values.len() > MAX_STEP_POINTS {
+                return Err(CliError::SimulationError {
+                    message: format!(
+                        ".STEP DEC sweep exceeded {} points; reduce the range or points_per_decade",
+                        MAX_STEP_POINTS
+                    ),
+                    analysis: Some("Step".to_string()),
+                });
             }
-
-            let ascending = stop > start;
-            let ratio = if ascending {
-                stop / start
-            } else {
-                start / stop
-            };
-            let total_steps = (ratio.log10() * (*points_per_decade as f64)).ceil() as usize;
-            let tol = stop.abs().max(1.0) * 1e-12;
-
-            let mut values = Vec::with_capacity(total_steps + 2);
-            for i in 0..=total_steps {
-                let factor = 10_f64.powf(i as f64 / *points_per_decade as f64);
-                let value = if ascending {
-                    start * factor
-                } else {
-                    start / factor
-                };
-
-                let in_range = if ascending {
-                    value <= *stop + tol
-                } else {
-                    value >= *stop - tol
-                };
-                if in_range {
-                    values.push(value);
-                }
-            }
-
-            if values.is_empty() {
-                values.push(*start);
-            }
-            let last = *values.last().unwrap_or(start);
-            if (last - *stop).abs() > tol {
-                values.push(*stop);
-            }
-
             Ok(values)
         }
         StepSweep::Octave {
@@ -212,46 +182,16 @@ pub(super) fn generate_step_values(
                     analysis: Some("Step".to_string()),
                 });
             }
-            if (*stop - *start).abs() <= f64::EPSILON {
-                return Ok(vec![*start]);
+            let values = sweep.values();
+            if values.len() > MAX_STEP_POINTS {
+                return Err(CliError::SimulationError {
+                    message: format!(
+                        ".STEP OCT sweep exceeded {} points; reduce the range or points_per_octave",
+                        MAX_STEP_POINTS
+                    ),
+                    analysis: Some("Step".to_string()),
+                });
             }
-
-            let ascending = stop > start;
-            let ratio = if ascending {
-                stop / start
-            } else {
-                start / stop
-            };
-            let total_steps = (ratio.log2() * (*points_per_octave as f64)).ceil() as usize;
-            let tol = stop.abs().max(1.0) * 1e-12;
-
-            let mut values = Vec::with_capacity(total_steps + 2);
-            for i in 0..=total_steps {
-                let factor = 2_f64.powf(i as f64 / *points_per_octave as f64);
-                let value = if ascending {
-                    start * factor
-                } else {
-                    start / factor
-                };
-
-                let in_range = if ascending {
-                    value <= *stop + tol
-                } else {
-                    value >= *stop - tol
-                };
-                if in_range {
-                    values.push(value);
-                }
-            }
-
-            if values.is_empty() {
-                values.push(*start);
-            }
-            let last = *values.last().unwrap_or(start);
-            if (last - *stop).abs() > tol {
-                values.push(*stop);
-            }
-
             Ok(values)
         }
         StepSweep::List(values) => {
@@ -328,6 +268,114 @@ pub(super) fn ensure_finite_series<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_core::netlist::StepSweep;
+
+    fn assert_step_error_contains(sweep: StepSweep, expected: &str) {
+        let err = generate_step_values(&sweep).expect_err("invalid step sweep must fail");
+        let CliError::SimulationError { message, analysis } = err else {
+            panic!("expected a step simulation error");
+        };
+        assert_eq!(analysis.as_deref(), Some("Step"));
+        assert!(
+            message.contains(expected),
+            "error '{message}' does not contain '{expected}'"
+        );
+    }
+
+    #[test]
+    fn logarithmic_step_values_follow_core_geometric_grid_without_appending_stop() {
+        let dec = generate_step_values(&StepSweep::Decade {
+            points_per_decade: 5,
+            start: 1.0,
+            stop: 10_001.0,
+        })
+        .expect("valid DEC sweep");
+        assert_eq!(dec.len(), 21);
+        assert!((dec[20] - 10_000.0).abs() <= 1.0e-10);
+        assert!(dec.iter().all(|value| *value != 10_001.0));
+
+        let octave = generate_step_values(&StepSweep::Octave {
+            points_per_octave: 1,
+            start: 1.0,
+            stop: 9.0,
+        })
+        .expect("valid OCT sweep");
+        assert_eq!(octave, vec![1.0, 2.0, 4.0, 8.0]);
+    }
+
+    #[test]
+    fn logarithmic_step_values_include_an_exact_grid_stop() {
+        let dec = generate_step_values(&StepSweep::Decade {
+            points_per_decade: 1,
+            start: 1.0,
+            stop: 10_000.0,
+        })
+        .expect("valid exact-grid DEC sweep");
+        assert_eq!(dec, vec![1.0, 10.0, 100.0, 1_000.0, 10_000.0]);
+
+        let octave = generate_step_values(&StepSweep::Octave {
+            points_per_octave: 1,
+            start: 1.0,
+            stop: 8.0,
+        })
+        .expect("valid exact-grid OCT sweep");
+        assert_eq!(octave, vec![1.0, 2.0, 4.0, 8.0]);
+    }
+
+    #[test]
+    fn descending_logarithmic_step_values_match_core_one_start_semantics() {
+        let dec = generate_step_values(&StepSweep::Decade {
+            points_per_decade: 5,
+            start: 100.0,
+            stop: 1.0,
+        })
+        .expect("valid descending DEC sweep");
+        assert_eq!(dec, vec![100.0]);
+
+        let octave = generate_step_values(&StepSweep::Octave {
+            points_per_octave: 3,
+            start: 8.0,
+            stop: 1.0,
+        })
+        .expect("valid descending OCT sweep");
+        assert_eq!(octave, vec![8.0]);
+    }
+
+    #[test]
+    fn logarithmic_step_values_preserve_strong_cli_validation() {
+        assert_step_error_contains(
+            StepSweep::Decade {
+                points_per_decade: 0,
+                start: 1.0,
+                stop: 10.0,
+            },
+            "points_per_decade > 0",
+        );
+        assert_step_error_contains(
+            StepSweep::Decade {
+                points_per_decade: 5,
+                start: 0.0,
+                stop: 10.0,
+            },
+            "finite positive start/stop",
+        );
+        assert_step_error_contains(
+            StepSweep::Octave {
+                points_per_octave: 0,
+                start: 1.0,
+                stop: 8.0,
+            },
+            "points_per_octave > 0",
+        );
+        assert_step_error_contains(
+            StepSweep::Octave {
+                points_per_octave: 1,
+                start: 1.0,
+                stop: f64::INFINITY,
+            },
+            "finite positive start/stop",
+        );
+    }
 
     #[test]
     fn finite_series_gate_rejects_nonfinite_values_unless_allowed() {
