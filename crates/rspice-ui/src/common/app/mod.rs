@@ -81,6 +81,7 @@ mod sim_setup_state;
 pub use sim_setup_state::{
     AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, TranSetup,
 };
+mod sim_setup_analysis_drafts;
 
 mod app_simulation_dialogs;
 
@@ -269,26 +270,34 @@ impl AppState {
     /// User-facing preflight reason a new run cannot start, excluding the
     /// transient "already running" state so queued re-runs can share it.
     pub fn simulation_run_preflight_block_reason(&self) -> Option<String> {
-        if self.sim_setup.enabled.is_empty() {
-            return Some("Tick at least one analysis in the Simulate view".to_string());
+        let plan = match self.sim_setup.stable_analysis_plan() {
+            Ok(plan) => plan,
+            Err(error) => return Some(error),
+        };
+        let enabled = plan
+            .instances()
+            .iter()
+            .filter(|instance| instance.enabled())
+            .collect::<Vec<_>>();
+        if enabled.is_empty() {
+            return Some("Enable at least one analysis instance in the simulation plan".to_owned());
         }
         if self.schematic.components.is_empty() {
             return Some("Add a component before running a schematic simulation".to_string());
         }
-        if let Some((index, error)) = (0..25)
-            .filter(|index| self.sim_setup.enabled.contains(index))
-            .find_map(|index| {
-                self.sim_setup
-                    .validation_error(index)
-                    .map(|error| (index, error))
-            })
-        {
-            let name = crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES
-                .iter()
-                .flat_map(|(_, analyses)| analyses.iter())
-                .find_map(|(candidate, name)| (*candidate == index).then_some(*name))
-                .unwrap_or("analysis");
-            return Some(format!("Correct {name} configuration: {error}"));
+        if let Some(issue) = plan.validation_issues().first() {
+            return Some(format!("Correct simulation plan: {issue}"));
+        }
+        if let Some((instance, error)) = enabled.iter().find_map(|instance| {
+            self.sim_setup
+                .analysis_draft_validation_error(instance.draft())
+                .map(|error| (*instance, error))
+        }) {
+            return Some(format!(
+                "Correct {} instance {}: {error}",
+                instance.kind().label(),
+                instance.id()
+            ));
         }
         if let Err(error) = self
             .model_library_manager
@@ -549,10 +558,6 @@ impl RSpiceApp {
     }
 
     fn prepare_frame(&mut self, ctx: &Context) {
-        // Direct checkbox callers update the membership set. Reconcile once
-        // per frame so disabling removes an entry and a later re-enable
-        // appends it, while every run path still consumes the same order.
-        self.state.sim_setup.normalize_analysis_order();
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
         if self.first_frame || self.applied_theme != Some(self.state.ui.theme) {
@@ -771,8 +776,11 @@ mod tests {
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));
         assert!(
-            !state.sim_setup.enabled.is_empty(),
-            "default run set should contain a runnable analysis"
+            state
+                .sim_setup
+                .stable_analysis_plan()
+                .is_ok_and(|plan| plan.instances().iter().any(|instance| instance.enabled())),
+            "default plan should contain a runnable analysis instance"
         );
         state
     }

@@ -8,8 +8,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use unicode_segmentation::UnicodeSegmentation;
+use uuid::Uuid;
 
 use crate::product::{ObjectRevision, ProjectId, RevisionError};
 use crate::state::{Cell, Library, LibraryManager, SchematicState, View, ViewType};
@@ -22,6 +23,13 @@ pub const DEFAULT_TOP_CELL: &str = "top";
 pub const DEFAULT_SCHEMATIC_VIEW: &str = "schematic";
 /// Persisted schema for project identity metadata.
 pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
+
+/// Versioned identity domain for legacy session descriptors that predate a
+/// persisted [`ProjectId`]. Project-file migration derives its ID from the
+/// complete source bytes before deserialization; this namespace is reserved
+/// for standalone/session descriptor migration.
+const LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE: Uuid =
+    Uuid::from_u128(0xd59a_680f_c781_5f1a_a69f_9a67_64bb_32ac);
 
 /// Validate one persisted library, cell, or view name.
 ///
@@ -56,8 +64,58 @@ fn default_project_name() -> String {
     "Untitled Project".to_owned()
 }
 
-const fn default_project_descriptor_schema_version() -> u16 {
-    PROJECT_DESCRIPTOR_SCHEMA_VERSION
+/// Presence-aware project identity used only while decoding persisted data.
+///
+/// `Option<T>` intentionally maps both a missing field (through `default`) and
+/// an explicit JSON `null` to `None`. Those states have different security
+/// semantics for project identity: only a genuinely missing field from an
+/// unversioned legacy descriptor may be migrated.
+#[derive(Debug, Default)]
+enum DeserializedProjectId {
+    #[default]
+    Missing,
+    Null,
+    Value(ProjectId),
+}
+
+#[derive(Debug, Default)]
+enum DeserializedProjectSchemaVersion {
+    #[default]
+    Missing,
+    Null,
+    Value(u16),
+}
+
+impl<'de> Deserialize<'de> for DeserializedProjectSchemaVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_null() {
+            Ok(Self::Null)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Value)
+                .map_err(D::Error::custom)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DeserializedProjectId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_null() {
+            Ok(Self::Null)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Value)
+                .map_err(D::Error::custom)
+        }
+    }
 }
 
 /// A stable reference to one Library/Cell/View document.
@@ -107,14 +165,12 @@ impl CellViewRef {
 }
 
 /// Metadata for the active RSpice project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProjectDescriptor {
     /// Stable product identity. Legacy project files receive an ID exactly
     /// once during deserialization and retain it on every later save.
-    #[serde(default)]
     id: ProjectId,
     /// Schema of this object, independent of the outer project container.
-    #[serde(default = "default_project_descriptor_schema_version")]
     schema_version: u16,
     /// Monotonic logical revision. Runtime-only path changes do not alter it.
     #[serde(default)]
@@ -126,6 +182,93 @@ pub struct ProjectDescriptor {
     pub top_cell: String,
     pub technology: Option<String>,
     pub description: String,
+}
+
+impl<'de> Deserialize<'de> for ProjectDescriptor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct ProjectDescriptorDe {
+            #[serde(default)]
+            id: DeserializedProjectId,
+            #[serde(default)]
+            schema_version: DeserializedProjectSchemaVersion,
+            #[serde(default)]
+            revision: ObjectRevision,
+            #[serde(default = "default_project_name")]
+            name: String,
+            path: Option<PathBuf>,
+            root_library: String,
+            top_cell: String,
+            technology: Option<String>,
+            description: String,
+        }
+
+        let descriptor = ProjectDescriptorDe::deserialize(deserializer)?;
+        if matches!(
+            &descriptor.schema_version,
+            DeserializedProjectSchemaVersion::Null
+        ) {
+            return Err(D::Error::custom(
+                "project schema version must not be explicitly null",
+            ));
+        }
+        let has_schema_version = matches!(
+            &descriptor.schema_version,
+            DeserializedProjectSchemaVersion::Value(_)
+        );
+        let id = match descriptor.id {
+            DeserializedProjectId::Null => {
+                return Err(D::Error::custom(
+                    "project identity must not be explicitly null",
+                ));
+            }
+            DeserializedProjectId::Value(id) => id,
+            DeserializedProjectId::Missing if has_schema_version => {
+                return Err(D::Error::custom(
+                    "versioned project descriptor is missing its stable identity",
+                ));
+            }
+            DeserializedProjectId::Missing => {
+                // Serialize the complete identity-bearing descriptor state in
+                // a fixed field order. Project/session containers inject an ID
+                // scoped to their complete artifact before reaching this
+                // fallback; this path covers standalone genuine-legacy
+                // descriptors without inventing random identity.
+                let material = serde_json::to_vec(&(
+                    descriptor.revision,
+                    &descriptor.name,
+                    &descriptor.path,
+                    &descriptor.root_library,
+                    &descriptor.top_cell,
+                    &descriptor.technology,
+                    &descriptor.description,
+                ))
+                .map_err(D::Error::custom)?;
+                ProjectId::from_namespace(LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE, &material)
+            }
+        };
+
+        Ok(Self {
+            id,
+            schema_version: match descriptor.schema_version {
+                DeserializedProjectSchemaVersion::Value(version) => version,
+                DeserializedProjectSchemaVersion::Missing => PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+                DeserializedProjectSchemaVersion::Null => {
+                    unreachable!("explicitly null project schema rejected above")
+                }
+            },
+            revision: descriptor.revision,
+            name: descriptor.name,
+            path: descriptor.path,
+            root_library: descriptor.root_library,
+            top_cell: descriptor.top_cell,
+            technology: descriptor.technology,
+            description: descriptor.description,
+        })
+    }
 }
 
 impl Default for ProjectDescriptor {
@@ -891,6 +1034,91 @@ mod tests {
         assert_eq!(project.name(), "Precision ΔΣ ADC");
         assert_eq!(project.revision(), renamed_revision);
         assert_eq!(project.id(), id);
+    }
+
+    #[test]
+    fn legacy_project_descriptor_identity_migration_is_deterministic() {
+        let original = ProjectDescriptor::default();
+        let mut legacy = serde_json::to_value(&original).expect("descriptor serializes");
+        legacy
+            .as_object_mut()
+            .expect("descriptor is an object")
+            .remove("id");
+        legacy
+            .as_object_mut()
+            .expect("descriptor is an object")
+            .remove("schema_version");
+        legacy
+            .as_object_mut()
+            .expect("descriptor is an object")
+            .remove("revision");
+        let legacy_json = serde_json::to_string(&legacy).expect("legacy descriptor serializes");
+
+        let first: ProjectDescriptor =
+            serde_json::from_str(&legacy_json).expect("legacy descriptor restores");
+        let second: ProjectDescriptor =
+            serde_json::from_str(&legacy_json).expect("legacy descriptor restores again");
+
+        assert_eq!(first.id(), second.id());
+        assert!(!first.id().as_uuid().is_nil());
+        assert_ne!(first.id(), original.id());
+
+        let persisted = serde_json::to_value(&first).expect("migrated descriptor serializes");
+        assert_eq!(
+            persisted.get("id"),
+            Some(&serde_json::to_value(first.id()).expect("identity serializes"))
+        );
+    }
+
+    #[test]
+    fn versioned_or_explicitly_null_project_identity_and_schema_are_rejected() {
+        let project = ProjectDescriptor::default();
+        let mut missing = serde_json::to_value(&project).expect("descriptor serializes");
+        missing
+            .as_object_mut()
+            .expect("descriptor object")
+            .remove("id");
+        let missing_error = serde_json::from_value::<ProjectDescriptor>(missing)
+            .expect_err("versioned descriptor must retain identity");
+        assert!(
+            missing_error
+                .to_string()
+                .contains("missing its stable identity")
+        );
+
+        let mut null = serde_json::to_value(&project).expect("descriptor serializes");
+        null["id"] = serde_json::Value::Null;
+        let null_error = serde_json::from_value::<ProjectDescriptor>(null)
+            .expect_err("explicit null identity is not legacy absence");
+        assert!(
+            null_error
+                .to_string()
+                .contains("must not be explicitly null")
+        );
+
+        let mut unversioned_null = serde_json::to_value(&project).expect("descriptor serializes");
+        unversioned_null
+            .as_object_mut()
+            .expect("descriptor object")
+            .remove("schema_version");
+        unversioned_null["id"] = serde_json::Value::Null;
+        let unversioned_null_error = serde_json::from_value::<ProjectDescriptor>(unversioned_null)
+            .expect_err("unversioned explicit null is not genuine legacy absence");
+        assert!(
+            unversioned_null_error
+                .to_string()
+                .contains("must not be explicitly null")
+        );
+
+        let mut null_schema = serde_json::to_value(&project).expect("descriptor serializes");
+        null_schema["schema_version"] = serde_json::Value::Null;
+        let null_schema_error = serde_json::from_value::<ProjectDescriptor>(null_schema)
+            .expect_err("explicit null schema is not an unversioned descriptor");
+        assert!(
+            null_schema_error
+                .to_string()
+                .contains("schema version must not be explicitly null")
+        );
     }
 
     #[test]

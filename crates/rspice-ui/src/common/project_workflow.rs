@@ -789,9 +789,10 @@ fn apply_loaded_project_authorized(
         return false;
     }
     let accepted_execution_context = project.execution_context.clone();
+    let project_id = project.workspace.project.id();
     let (simulation_plan, model_library_manager, execution_warnings) =
         match project.execution_context.take() {
-            Some(context) => match context.into_state() {
+            Some(context) => match context.into_state(project_id) {
                 Ok(restored) => restored,
                 Err(error) => {
                     state.push_user_message(ConsoleMessage::error(format!(
@@ -1210,6 +1211,11 @@ mod tests {
     use crate::common::app::ActiveViewer;
     use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 
+    fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
+        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+            .expect("synthetic historical run has valid unattributed legacy provenance");
+    }
+
     fn project_named(path: &str) -> ProjectFile {
         let mut libraries = crate::state::LibraryManager::with_primitives();
         let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
@@ -1288,6 +1294,7 @@ mod tests {
             crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![waveform]),
         );
+        seal_legacy_unattributed(&mut run);
         let mut simulation = crate::state::SimulationState::default();
         simulation.runs = vec![run];
         simulation.next_run_id = 4;
@@ -1387,7 +1394,7 @@ mod tests {
     #[test]
     fn browser_import_applies_project_clears_runs_and_skips_recents() {
         let mut state = AppState::default();
-        state.simulation.start_run();
+        seal_legacy_unattributed(state.simulation.start_run());
         assert!(state.simulation.has_results());
 
         let mut project = project_named("browser-import.rspiceproj");
@@ -1481,22 +1488,35 @@ mod tests {
 
     #[test]
     fn create_new_project_resets_project_owned_plan_and_model_context() {
-        use crate::common::simulation_analysis_tabs::{TAB_NOISE, TAB_TRANSIENT};
+        use crate::simulation::plan::AnalysisKind;
         use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
 
         let mut state = AppState::default();
-        state.sim_setup.enabled.clear();
-        state.sim_setup.enabled.insert(TAB_NOISE);
-        state.sim_setup.analysis_order = vec![TAB_NOISE];
+        let stale_plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan");
+        let transient_id = stale_plan.instances()[0].id();
+        stale_plan
+            .remove(transient_id, Vec::new())
+            .expect("default transient removes");
+        stale_plan
+            .insert(AnalysisKind::Noise)
+            .expect("stale noise analysis inserts");
         let mut stale_models = ModelLibraryManager::new();
         stale_models.add_library(ModelLibrary::new("stale_project_models"));
         state.model_library_manager = stale_models;
 
         create_new_project(&mut state);
 
-        assert_eq!(state.sim_setup.enabled.len(), 1);
-        assert!(state.sim_setup.enabled.contains(&TAB_TRANSIENT));
-        assert_eq!(state.sim_setup.analysis_order, vec![TAB_TRANSIENT]);
+        let reset_plan = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("new project owns a stable plan");
+        assert_eq!(reset_plan.instances().len(), 1);
+        assert_eq!(reset_plan.instances()[0].kind(), AnalysisKind::Transient);
+        assert!(reset_plan.instances()[0].enabled());
         assert!(
             state
                 .model_library_manager
@@ -1508,14 +1528,32 @@ mod tests {
 
     #[test]
     fn project_import_restores_plan_order_solver_options_and_model_catalog() {
-        use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
         use crate::simulation::dialog::{IntegrationMethod, MatrixSolver};
+        use crate::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
         use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
 
         let mut source = AppState::default();
-        source.sim_setup.enabled.extend([TAB_AC, TAB_NOISE]);
-        source.sim_setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
-        source.sim_setup.listed.insert(TAB_NOISE);
+        let source_plan = source
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan");
+        let transient_id = source_plan.instances()[0].id();
+        let (op_id, _) = source_plan
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("OP inserts first");
+        let (ac_id, _) = source_plan
+            .insert_at(AnalysisKind::Ac, 1)
+            .expect("AC inserts second");
+        source_plan
+            .bind_dependency(ac_id, AnalysisKind::OperatingPoint, op_id)
+            .expect("AC binds exact OP");
+        let (noise_id, _) = source_plan
+            .insert_at(AnalysisKind::Noise, 2)
+            .expect("noise inserts third");
+        source_plan
+            .bind_dependency(noise_id, AnalysisKind::OperatingPoint, op_id)
+            .expect("noise binds exact OP");
         source.sim_setup.options.reltol = 2e-4;
         source.sim_setup.options.method = IntegrationMethod::Gear2Only;
         source.sim_setup.options.solver = MatrixSolver::SparseLu;
@@ -1524,9 +1562,12 @@ mod tests {
         project_models.add_library(ModelLibrary::new("project_exact_models"));
         source.model_library_manager = project_models;
 
-        let context =
-            ProjectExecutionContext::from_state(&source.sim_setup, &source.model_library_manager)
-                .expect("source context validates");
+        let context = ProjectExecutionContext::from_state(
+            source.workspace.project.id(),
+            &source.sim_setup,
+            &source.model_library_manager,
+        )
+        .expect("source context validates");
         let expected_plan =
             serde_json::to_value(&context.simulation_plan).expect("expected plan serializes");
         let mut design_libraries = crate::state::LibraryManager::with_primitives();
@@ -1542,7 +1583,13 @@ mod tests {
         );
 
         let mut target = AppState::default();
-        target.sim_setup.enabled.clear();
+        target
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("target owns a stable plan")
+            .insert(AnalysisKind::DcSweep)
+            .expect("target stale analysis inserts");
         target.model_library_manager.clear();
         let imported = apply_loaded_project(
             &mut target,
@@ -1555,6 +1602,37 @@ mod tests {
             serde_json::to_value(&target.sim_setup).expect("restored plan serializes"),
             expected_plan
         );
+        let restored = target
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("import restores stable plan");
+        assert_eq!(
+            restored
+                .instances()
+                .iter()
+                .map(|instance| instance.id())
+                .collect::<Vec<_>>(),
+            vec![op_id, ac_id, noise_id, transient_id]
+        );
+        assert_eq!(
+            restored
+                .instance(ac_id)
+                .expect("AC restored")
+                .dependencies()[0]
+                .target(),
+            op_id
+        );
+        assert_eq!(
+            restored
+                .instance(noise_id)
+                .expect("noise restored")
+                .dependencies()[0]
+                .target(),
+            op_id
+        );
+        assert!(restored.instances().iter().all(|instance| {
+            instance.enabled() && instance.lifecycle() == AnalysisLifecycleState::Draft
+        }));
         assert_eq!(
             target.sim_setup.options_draft.reltol,
             crate::simulation::dialog::options::format_si_value(2e-4)
@@ -1573,13 +1651,20 @@ mod tests {
     #[test]
     fn invalid_execution_context_does_not_partially_replace_open_project() {
         let mut project = project_named("invalid-context.rspiceproj");
-        let mut context = ProjectExecutionContext::from_state(
+        let context = ProjectExecutionContext::from_state(
+            project.workspace.project.id(),
             &crate::common::app::SimSetupState::new(),
             &crate::state::model_library::ModelLibraryManager::new(),
         )
         .expect("baseline context validates");
-        context.simulation_plan.enabled.insert(99);
-        context.simulation_plan.analysis_order.push(99);
+        let mut value = serde_json::to_value(context).expect("context serializes");
+        let instances = value["simulation_plan"]["analysis_plan"]["instances"]
+            .as_array_mut()
+            .expect("v4 instances are an array");
+        let duplicate = instances[0].clone();
+        instances.push(duplicate);
+        let context: ProjectExecutionContext =
+            serde_json::from_value(value).expect("corrupt structure deserializes for validation");
         project.execution_context = Some(context);
 
         let mut state = AppState::default();
@@ -1599,16 +1684,17 @@ mod tests {
         );
         assert_eq!(state.workspace.active_view, original_active_view);
         assert!(state.log_buffer.entries().any(|entry| {
-            entry.message.contains(
-                "persisted execution context is invalid: simulation_plan.enabled contains unsupported analysis index 99",
-            )
+            entry
+                .message
+                .contains("persisted execution context is invalid")
+                && entry.message.contains("appears more than once")
         }));
     }
 
     #[test]
     fn browser_import_restores_project_simulation_results_and_skips_recents() {
         let mut state = AppState::default();
-        state.simulation.start_run();
+        seal_legacy_unattributed(state.simulation.start_run());
         assert!(state.simulation.has_results());
 
         let project = project_named_with_results("browser-import.rspiceproj");
@@ -1687,6 +1773,7 @@ mod tests {
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![waveform]),
         );
+        seal_legacy_unattributed(&mut run);
         state.simulation.runs = vec![run];
         state.simulation.next_run_id = 9;
         state.simulation.active_run_idx = Some(0);

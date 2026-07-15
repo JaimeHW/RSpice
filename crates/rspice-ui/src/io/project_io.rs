@@ -11,17 +11,103 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 
 use crate::io::project_execution::ProjectExecutionContext;
-use crate::product::{ContentDigest, DatasetId, RunId};
+use crate::product::{
+    AnalysisInstanceId, ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId,
+    SimulationPlanId,
+};
+use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
-    AnalysisResult, AnalysisType, CellViewRef, DcOpResult, LibraryManager, NoiseContributorRow,
-    NoiseSummary, OperatingPointValue, ProjectWorkspace, SimulationRun, SimulationState, ViewType,
+    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
+    CellViewRef, DcOpResult, LibraryManager, NoiseContributorRow, NoiseSummary,
+    OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
+    ProjectWorkspace, SimulationRun, SimulationRunProvenance, SimulationState, ViewType,
     WaveformData,
 };
+
+/// Presence-aware persisted field used at schema-era boundaries.
+///
+/// Serde's `Option<T>` intentionally treats an explicit JSON `null` exactly
+/// like an absent field. That is unsafe for fields introduced by a later
+/// schema because a caller could otherwise add the field as `null`, relabel
+/// the container as an older schema, and have migration accept it as genuine
+/// absence. This representation keeps all three wire states distinct.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PersistedField<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<T> PersistedField<T> {
+    #[must_use]
+    pub const fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+
+    #[must_use]
+    pub const fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    #[must_use]
+    pub const fn is_present(&self) -> bool {
+        !self.is_missing()
+    }
+
+    #[must_use]
+    pub const fn as_ref(&self) -> Option<&T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Missing | Self::Null => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Missing | Self::Null => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_value(self) -> Option<T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Missing | Self::Null => None,
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for PersistedField<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Value(value) => value.serialize(serializer),
+            Self::Missing | Self::Null => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for PersistedField<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(|value| match value {
+            Some(value) => Self::Value(value),
+            None => Self::Null,
+        })
+    }
+}
 
 #[derive(Debug)]
 struct ValidatedLibraryView {
@@ -137,6 +223,185 @@ impl ProjectFile {
             context.validate().map_err(|error| {
                 ProjectIoError::InvalidData(format!("execution context is invalid: {error}"))
             })?;
+        }
+        Ok(())
+    }
+
+    /// Validate the cross-document edge from retained results to the exact
+    /// simulation-plan identity that produced them. Execution context and
+    /// result history are independently well-formed documents, but a project
+    /// may persist them only as one referentially closed engineering record.
+    fn validate_result_plan_references(&self) -> Result<(), String> {
+        Self::validate_result_plan_references_for(
+            &self.simulation_results,
+            self.execution_context
+                .as_ref()
+                .map(|context| &context.simulation_plan),
+            self.workspace.project.revision(),
+        )
+    }
+
+    pub(crate) fn validate_result_plan_references_for(
+        simulation_results: &ProjectSimulationResults,
+        simulation_plan: Option<&crate::common::app::SimSetupState>,
+        project_revision: ObjectRevision,
+    ) -> Result<(), String> {
+        let has_plan_receipt = simulation_results.runs.iter().any(|run| {
+            run.prepared_receipt.as_ref().is_some_and(|receipt| {
+                receipt.source_domain == AnalysisResultSourceDomain::SimulationPlan
+            })
+        });
+        let plan = if has_plan_receipt {
+            Some(
+                simulation_plan
+                    .ok_or_else(|| {
+                        "simulation-plan result history has no persisted simulation plan".to_owned()
+                    })?
+                    .stable_analysis_plan()?,
+            )
+        } else {
+            None
+        };
+        let current = plan
+            .map(|plan| {
+                plan.instances()
+                    .iter()
+                    .map(|instance| (instance.id(), instance))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+        let retired = plan
+            .map(|plan| {
+                plan.tombstones()
+                    .iter()
+                    .map(|tombstone| (tombstone.id(), tombstone))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        for (run_idx, run) in simulation_results.runs.iter().enumerate() {
+            let Some(receipt) = run.prepared_receipt.as_ref() else {
+                continue;
+            };
+            if receipt.project_revision > project_revision {
+                return Err(format!(
+                    "runs[{run_idx}].prepared_receipt.project_revision {} is newer than project revision {}",
+                    receipt.project_revision.get(),
+                    project_revision.get()
+                ));
+            }
+            match receipt.source_domain {
+                AnalysisResultSourceDomain::SimulationPlan => {
+                    let plan = plan.expect("plan receipt precondition established above");
+                    if receipt.simulation_plan_id != Some(plan.id()) {
+                        return Err(format!(
+                            "runs[{run_idx}].prepared_receipt.simulation_plan_id does not match persisted plan {}",
+                            plan.id()
+                        ));
+                    }
+                    let produced_task_ids = run
+                        .analyses
+                        .iter()
+                        .filter_map(|analysis| analysis.provenance.as_ref())
+                        .map(|provenance| provenance.source_instance_id)
+                        .collect::<HashSet<_>>();
+                    for (task_idx, task) in receipt.tasks.iter().enumerate() {
+                        let prefix = format!("runs[{run_idx}].prepared_receipt.tasks[{task_idx}]");
+                        let (kind, created_revision, latest_revision, is_retired) = if let Some(
+                            instance,
+                        ) =
+                            current.get(&task.source_instance_id)
+                        {
+                            (
+                                instance.kind(),
+                                instance.created_revision(),
+                                plan.revision(),
+                                false,
+                            )
+                        } else if let Some(tombstone) = retired.get(&task.source_instance_id) {
+                            if produced_task_ids.contains(&task.source_instance_id) {
+                                let run_id = run.run_id.ok_or_else(|| {
+                                        format!(
+                                            "runs[{run_idx}] has prepared provenance but no stable run id"
+                                        )
+                                    })?;
+                                if !tombstone.prior_run_ids().contains(&run_id) {
+                                    return Err(format!(
+                                        "{prefix}.source_instance_id identifies retired analysis {}, but run {run_id} is not retained by its tombstone",
+                                        task.source_instance_id
+                                    ));
+                                }
+                            }
+                            (
+                                tombstone.kind(),
+                                tombstone.created_revision(),
+                                tombstone.removed_revision(),
+                                true,
+                            )
+                        } else {
+                            return Err(format!(
+                                "{prefix}.source_instance_id {} is absent from the persisted plan and its tombstones",
+                                task.source_instance_id
+                            ));
+                        };
+                        let outside_lifetime = task.source_revision < created_revision
+                            || if is_retired {
+                                task.source_revision >= latest_revision
+                            } else {
+                                task.source_revision > latest_revision
+                            };
+                        if outside_lifetime {
+                            let interval = if is_retired {
+                                format!("{}..{}", created_revision.get(), latest_revision.get())
+                            } else {
+                                format!("{}..={}", created_revision.get(), latest_revision.get())
+                            };
+                            return Err(format!(
+                                "{prefix}.source_revision {} is outside the retained analysis revision interval {interval}",
+                                task.source_revision.get()
+                            ));
+                        }
+                        if task.analysis_kind_tag != analysis_kind_tag_for_plan_kind(kind) {
+                            return Err(format!(
+                                "{prefix}.analysis_kind_tag does not match persisted {kind} analysis"
+                            ));
+                        }
+                    }
+                }
+                AnalysisResultSourceDomain::ManualDeck => {
+                    if receipt.simulation_plan_id.is_some() {
+                        return Err(format!(
+                            "runs[{run_idx}].prepared_receipt manual source must not claim a simulation plan"
+                        ));
+                    }
+                    let mut occurrences = HashMap::<u8, usize>::new();
+                    for (task_idx, task) in receipt.tasks.iter().enumerate() {
+                        let occurrence = occurrences.entry(task.analysis_kind_tag).or_default();
+                        let expected =
+                            crate::simulation::execution::manual_deck_analysis_instance_id_from_tag(
+                                receipt.source_content_digest,
+                                task.analysis_kind_tag,
+                                *occurrence,
+                            );
+                        *occurrence += 1;
+                        if task.source_instance_id != expected {
+                            return Err(format!(
+                                "runs[{run_idx}].prepared_receipt.tasks[{task_idx}].source_instance_id is not derived from the retained manual source identity"
+                            ));
+                        }
+                        if task.source_revision != receipt.project_revision {
+                            return Err(format!(
+                                "runs[{run_idx}].prepared_receipt.tasks[{task_idx}].source_revision does not match the authenticated manual-run project revision"
+                            ));
+                        }
+                    }
+                }
+                AnalysisResultSourceDomain::LegacyUnclassified => {
+                    return Err(format!(
+                        "runs[{run_idx}].prepared_receipt cannot use a legacy-unclassified source"
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -425,11 +690,22 @@ fn project_view_requires_schematic_buffer(view_type: ViewType) -> bool {
 }
 
 const LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 1;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 2;
+const STABLE_DATASET_RESULTS_SCHEMA_VERSION: u32 = 2;
+const PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION: u32 = 3;
+const EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION: u32 = 4;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 5;
+
+const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
+    uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
+const LEGACY_RESULT_RUN_ID_NAMESPACE: uuid::Uuid =
+    uuid::Uuid::from_u128(0xe515_12ea_10c0_58c8_8bd7_ea31_003f_f6cf);
+const LEGACY_RESULT_DATASET_ID_NAMESPACE: uuid::Uuid =
+    uuid::Uuid::from_u128(0xa697_7219_0a25_536d_8dde_4319_08e4_d0c7);
 
 fn default_simulation_results_schema_version() -> u32 {
     // A present result-history object without a version predates the stable-ID
-    // schema. New objects set v2 explicitly through `Default`/`from_state`.
+    // schema. New objects set the current version explicitly through
+    // `Default`/`from_state`.
     LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION
 }
 
@@ -491,6 +767,36 @@ fn analysis_type_from_key(key: &str) -> Option<AnalysisType> {
         "HarmonicBalance" | ".hb" => Some(AnalysisType::HarmonicBalance),
         "Pss" | ".pss" => Some(AnalysisType::Pss),
         _ => None,
+    }
+}
+
+const fn analysis_kind_tag_for_plan_kind(kind: AnalysisKind) -> u8 {
+    match kind {
+        AnalysisKind::OperatingPoint => 0,
+        AnalysisKind::DcSweep => 1,
+        AnalysisKind::Ac => 2,
+        AnalysisKind::Disto => 4,
+        AnalysisKind::Transient => 5,
+        AnalysisKind::Noise => 6,
+        AnalysisKind::Pss => 7,
+        AnalysisKind::HarmonicBalance => 8,
+        AnalysisKind::TransferFunction => 9,
+        AnalysisKind::Sensitivity => 10,
+        AnalysisKind::PoleZero => 11,
+        AnalysisKind::Pac => 12,
+        AnalysisKind::Pnoise => 13,
+        AnalysisKind::Pxf => 14,
+        AnalysisKind::Pstb => 15,
+        AnalysisKind::Stb => 16,
+        AnalysisKind::MonteCarlo => 17,
+        AnalysisKind::Temperature => 18,
+        AnalysisKind::Corner => 19,
+        AnalysisKind::Reliability => 20,
+        AnalysisKind::Optimization => 21,
+        AnalysisKind::Soa => 22,
+        AnalysisKind::SParameter => 23,
+        AnalysisKind::Envelope => 24,
+        AnalysisKind::Fourier => 25,
     }
 }
 
@@ -586,8 +892,10 @@ impl ProjectSimulationResults {
         Ok(state)
     }
 
-    pub fn apply_to_state(mut self, state: &mut SimulationState) -> Result<(), String> {
-        self.migrate_to_current()?;
+    /// Apply an already-current, validated result document. Legacy migration
+    /// requires the owning [`ProjectId`] and must be completed explicitly at
+    /// the project/session boundary before this method is called.
+    pub fn apply_to_state(self, state: &mut SimulationState) -> Result<(), String> {
         self.validate()?;
         let runs = self
             .runs
@@ -605,82 +913,132 @@ impl ProjectSimulationResults {
         Ok(())
     }
 
-    /// Upgrade v1 display-sequence references to stable run and dataset IDs.
-    /// Missing identities remain explicit after deserialization and are minted
-    /// only in this v1 branch. The next save persists them under schema v2.
-    pub(crate) fn migrate_to_current(&mut self) -> Result<(), String> {
-        if self.schema_version != LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION {
+    /// Upgrade historical result schemas without fabricating analysis-source
+    /// identity. V1 display-sequence references are converted to stable run and
+    /// dataset IDs. V1/v2 analyses retain `provenance: None`; schema v5 records
+    /// that fact explicitly per run so provenance cannot disappear from a
+    /// current prepared-task result history without validation failing.
+    pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
+        if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
         }
+        let mut candidate = self.clone();
+        candidate.migrate_to_current_in_place(project_id)?;
+        *self = candidate;
+        Ok(())
+    }
 
-        for run in &mut self.runs {
-            if run.run_id.is_none() {
-                run.run_id = Some(RunId::new());
+    fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
+        let source_schema = self.schema_version;
+        let migrate_v1_references = match source_schema {
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION => return Ok(()),
+            LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION => true,
+            STABLE_DATASET_RESULTS_SCHEMA_VERSION
+            | PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION
+            | EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION => false,
+            unsupported => {
+                return Err(format!(
+                    "unsupported simulation results schema version {unsupported}"
+                ));
             }
-            if run.dataset_id.is_none() {
-                run.dataset_id = Some(DatasetId::new());
-            }
-        }
+        };
 
-        if let Some(run_sequence) = self.active_run_id {
-            let active_run = self
-                .runs
-                .iter()
-                .find(|run| run.id == run_sequence)
-                .ok_or_else(|| {
-                    format!("legacy active simulation run sequence {run_sequence} does not exist")
+        self.validate_legacy_schema_shape(source_schema)?;
+
+        if migrate_v1_references {
+            for (run_idx, run) in self.runs.iter_mut().enumerate() {
+                let identity = serde_json::to_vec(&(
+                    project_id,
+                    run_idx,
+                    run.id,
+                    &run.label,
+                    run.timestamp.to_bits(),
+                    &run.analyses,
+                    run.elapsed_time.to_bits(),
+                    run.success,
+                ))
+                .map_err(|error| {
+                    format!(
+                        "legacy simulation run sequence {} could not be assigned a reproducible identity: {error}",
+                        run.id
+                    )
                 })?;
-            self.active_run_stable_id = Some(active_run.run_id.ok_or_else(|| {
-                format!(
-                    "legacy simulation run sequence {} has no stable id",
-                    active_run.id
-                )
-            })?);
-            self.active_dataset_id = Some(active_run.dataset_id.ok_or_else(|| {
-                format!(
-                    "legacy simulation run sequence {} has no dataset id",
-                    active_run.id
-                )
-            })?);
-            self.active_analysis_sequence = if let Some(sequence) = self.active_analysis_id {
-                if !active_run
-                    .analyses
-                    .iter()
-                    .any(|analysis| analysis.id == sequence)
-                {
-                    return Err(format!(
-                        "legacy active analysis sequence {sequence} does not exist in run {}",
-                        active_run.id
+                if run.run_id.is_none() {
+                    run.run_id = Some(RunId::from_namespace(
+                        LEGACY_RESULT_RUN_ID_NAMESPACE,
+                        &identity,
                     ));
                 }
-                Some(sequence)
-            } else {
-                None
-            };
-        } else if self.active_analysis_id.is_some() {
-            return Err("legacy active analysis has no active simulation run".to_owned());
-        }
+                if run.dataset_id.is_none() {
+                    run.dataset_id = Some(DatasetId::from_namespace(
+                        LEGACY_RESULT_DATASET_ID_NAMESPACE,
+                        &identity,
+                    ));
+                }
+            }
 
-        if !self.overlay_run_ids.is_empty() {
-            self.overlay_dataset_ids.clear();
-            for sequence in &self.overlay_run_ids {
-                let dataset_id = self
+            if let Some(run_sequence) = self.active_run_id {
+                let active_run = self
                     .runs
                     .iter()
-                    .find(|run| run.id == *sequence)
-                    .map(|run| {
-                        run.dataset_id.ok_or_else(|| {
-                            format!("legacy overlay run sequence {sequence} has no dataset id")
-                        })
-                    })
-                    .transpose()?
+                    .find(|run| run.id == run_sequence)
                     .ok_or_else(|| {
-                        format!("legacy overlay run sequence {sequence} does not exist")
+                        format!(
+                            "legacy active simulation run sequence {run_sequence} does not exist"
+                        )
                     })?;
-                if Some(dataset_id) != self.active_dataset_id
-                    && !self.overlay_dataset_ids.contains(&dataset_id)
-                {
-                    self.overlay_dataset_ids.push(dataset_id);
+                self.active_run_stable_id = Some(active_run.run_id.ok_or_else(|| {
+                    format!(
+                        "legacy simulation run sequence {} has no stable id",
+                        active_run.id
+                    )
+                })?);
+                self.active_dataset_id = Some(active_run.dataset_id.ok_or_else(|| {
+                    format!(
+                        "legacy simulation run sequence {} has no dataset id",
+                        active_run.id
+                    )
+                })?);
+                self.active_analysis_sequence = if let Some(sequence) = self.active_analysis_id {
+                    if !active_run
+                        .analyses
+                        .iter()
+                        .any(|analysis| analysis.id == sequence)
+                    {
+                        return Err(format!(
+                            "legacy active analysis sequence {sequence} does not exist in run {}",
+                            active_run.id
+                        ));
+                    }
+                    Some(sequence)
+                } else {
+                    None
+                };
+            } else if self.active_analysis_id.is_some() {
+                return Err("legacy active analysis has no active simulation run".to_owned());
+            }
+
+            if !self.overlay_run_ids.is_empty() {
+                self.overlay_dataset_ids.clear();
+                for sequence in &self.overlay_run_ids {
+                    let dataset_id = self
+                        .runs
+                        .iter()
+                        .find(|run| run.id == *sequence)
+                        .map(|run| {
+                            run.dataset_id.ok_or_else(|| {
+                                format!("legacy overlay run sequence {sequence} has no dataset id")
+                            })
+                        })
+                        .transpose()?
+                        .ok_or_else(|| {
+                            format!("legacy overlay run sequence {sequence} does not exist")
+                        })?;
+                    if Some(dataset_id) != self.active_dataset_id
+                        && !self.overlay_dataset_ids.contains(&dataset_id)
+                    {
+                        self.overlay_dataset_ids.push(dataset_id);
+                    }
                 }
             }
         }
@@ -688,7 +1046,160 @@ impl ProjectSimulationResults {
         self.active_run_id = None;
         self.active_analysis_id = None;
         self.overlay_run_ids.clear();
+
+        for (run_idx, run) in self.runs.iter_mut().enumerate() {
+            let provenance_count = run
+                .analyses
+                .iter()
+                .filter(|analysis| analysis.provenance.is_some())
+                .count();
+            let migrated_mode = match source_schema {
+                LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION
+                | STABLE_DATASET_RESULTS_SCHEMA_VERSION => {
+                    ProjectRunProvenanceMode::LegacyUnattributed
+                }
+                PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION => {
+                    if provenance_count == 0 {
+                        ProjectRunProvenanceMode::LegacyUnattributed
+                    } else if provenance_count == run.analyses.len() {
+                        set_legacy_unclassified_source_domains(run);
+                        ProjectRunProvenanceMode::LegacyPreparedUnclassified
+                    } else {
+                        return Err(format!(
+                            "runs[{run_idx}] mixes schema-v3 analyses with and without prepared-task provenance"
+                        ));
+                    }
+                }
+                EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION => {
+                    match run.provenance_mode.as_ref().copied() {
+                        Some(ProjectRunProvenanceMode::LegacyUnattributed)
+                            if provenance_count == 0 =>
+                        {
+                            ProjectRunProvenanceMode::LegacyUnattributed
+                        }
+                        Some(ProjectRunProvenanceMode::PreparedTaskBound)
+                            if provenance_count == run.analyses.len() && provenance_count != 0 =>
+                        {
+                            set_legacy_unclassified_source_domains(run);
+                            ProjectRunProvenanceMode::LegacyPreparedUnclassified
+                        }
+                        Some(ProjectRunProvenanceMode::LegacyUnattributed) => {
+                            return Err(format!(
+                                "runs[{run_idx}] is schema-v4 legacy_unattributed but contains prepared-task provenance"
+                            ));
+                        }
+                        Some(ProjectRunProvenanceMode::PreparedTaskBound) => {
+                            return Err(format!(
+                                "runs[{run_idx}] is schema-v4 prepared_task_bound but its complete provenance is missing"
+                            ));
+                        }
+                        Some(ProjectRunProvenanceMode::Unspecified) | None => {
+                            return Err(format!(
+                                "runs[{run_idx}].provenance_mode is missing from schema-v4 simulation results"
+                            ));
+                        }
+                        Some(ProjectRunProvenanceMode::LegacyPreparedUnclassified) => {
+                            return Err(format!(
+                                "runs[{run_idx}] uses a provenance mode introduced after schema v4"
+                            ));
+                        }
+                    }
+                }
+                _ => unreachable!("supported legacy result schema matched above"),
+            };
+            run.provenance_mode = PersistedField::Value(migrated_mode);
+        }
         self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+        Ok(())
+    }
+
+    fn validate_legacy_schema_shape(&self, source_schema: u32) -> Result<(), String> {
+        let stable_ids_required = source_schema >= STABLE_DATASET_RESULTS_SCHEMA_VERSION;
+        let legacy_sequence_refs_allowed =
+            source_schema == LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
+        if legacy_sequence_refs_allowed {
+            if self.active_run_stable_id.is_some()
+                || self.active_dataset_id.is_some()
+                || self.active_analysis_sequence.is_some()
+                || !self.overlay_dataset_ids.is_empty()
+            {
+                return Err(
+                    "schema-v1 simulation results contain stable references introduced by schema v2"
+                        .to_owned(),
+                );
+            }
+        } else if self.active_run_id.is_some()
+            || self.active_analysis_id.is_some()
+            || !self.overlay_run_ids.is_empty()
+        {
+            return Err(format!(
+                "schema-v{source_schema} simulation results retain schema-v1 sequence references"
+            ));
+        }
+
+        for (run_idx, run) in self.runs.iter().enumerate() {
+            if run.prepared_receipt.is_present() {
+                return Err(format!(
+                    "runs[{run_idx}] contains a prepared run receipt introduced after schema v{source_schema}"
+                ));
+            }
+            if stable_ids_required {
+                if run.run_id.is_none() || run.dataset_id.is_none() {
+                    return Err(format!(
+                        "runs[{run_idx}] is missing stable run/dataset identity required by schema v{source_schema}"
+                    ));
+                }
+            } else if run.run_id.is_some() || run.dataset_id.is_some() {
+                return Err(format!(
+                    "runs[{run_idx}] contains stable identity introduced after schema v1"
+                ));
+            }
+
+            match source_schema {
+                LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION
+                | STABLE_DATASET_RESULTS_SCHEMA_VERSION => {
+                    if run.provenance_mode.is_present() {
+                        return Err(format!(
+                            "runs[{run_idx}] contains provenance_mode introduced after schema v{source_schema}"
+                        ));
+                    }
+                    if run
+                        .analyses
+                        .iter()
+                        .any(|analysis| analysis.provenance.is_some())
+                    {
+                        return Err(format!(
+                            "runs[{run_idx}] contains prepared provenance introduced after schema v{source_schema}"
+                        ));
+                    }
+                }
+                PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION => {
+                    if run.provenance_mode.is_present() {
+                        return Err(format!(
+                            "runs[{run_idx}] contains provenance_mode introduced after schema v3"
+                        ));
+                    }
+                }
+                EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION => {
+                    if run.provenance_mode.as_ref().is_none() {
+                        return Err(format!(
+                            "runs[{run_idx}].provenance_mode is required by schema v4"
+                        ));
+                    }
+                }
+                _ => unreachable!("supported legacy result schema matched above"),
+            }
+
+            for (analysis_idx, analysis) in run.analyses.iter().enumerate() {
+                if let Some(provenance) = &analysis.provenance
+                    && provenance.source_domain.is_present()
+                {
+                    return Err(format!(
+                        "runs[{run_idx}].analyses[{analysis_idx}].provenance.source_domain was introduced after schema v{source_schema}"
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -807,6 +1318,151 @@ impl ProjectSimulationResults {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectRunProvenanceMode {
+    /// Missing only while reading schemas older than v4. Current-schema
+    /// validation rejects this state.
+    #[default]
+    Unspecified,
+    /// Results written before prepared analysis-instance provenance existed.
+    LegacyUnattributed,
+    /// Prepared-task identity was stored before its source domain was
+    /// persisted. No plan/manual origin is inferred during migration.
+    LegacyPreparedUnclassified,
+    /// Every result is bound to one authenticated prepared task.
+    PreparedTaskBound,
+}
+
+fn set_legacy_unclassified_source_domains(run: &mut ProjectSimulationRun) {
+    for provenance in run
+        .analyses
+        .iter_mut()
+        .filter_map(|analysis| analysis.provenance.as_mut())
+    {
+        provenance.source_domain =
+            PersistedField::Value(AnalysisResultSourceDomain::LegacyUnclassified);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "digest", rename_all = "snake_case")]
+pub enum ProjectPreparedSourceCheckReceipt {
+    SchematicDrc(ContentDigest),
+    ManualSourceCheck(ContentDigest),
+}
+
+impl From<PreparedSourceCheckReceipt> for ProjectPreparedSourceCheckReceipt {
+    fn from(receipt: PreparedSourceCheckReceipt) -> Self {
+        match receipt {
+            PreparedSourceCheckReceipt::SchematicDrc(digest) => Self::SchematicDrc(digest),
+            PreparedSourceCheckReceipt::ManualSourceCheck(digest) => {
+                Self::ManualSourceCheck(digest)
+            }
+        }
+    }
+}
+
+impl From<ProjectPreparedSourceCheckReceipt> for PreparedSourceCheckReceipt {
+    fn from(receipt: ProjectPreparedSourceCheckReceipt) -> Self {
+        match receipt {
+            ProjectPreparedSourceCheckReceipt::SchematicDrc(digest) => Self::SchematicDrc(digest),
+            ProjectPreparedSourceCheckReceipt::ManualSourceCheck(digest) => {
+                Self::ManualSourceCheck(digest)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectPreparedRunTaskReceipt {
+    pub source_instance_id: AnalysisInstanceId,
+    pub source_revision: ObjectRevision,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependency_ids: Vec<AnalysisInstanceId>,
+    pub analysis_kind_tag: u8,
+    pub config_digest: ContentDigest,
+}
+
+impl ProjectPreparedRunTaskReceipt {
+    fn into_receipt(self) -> Result<PreparedRunTaskReceipt, String> {
+        PreparedRunTaskReceipt::new(
+            self.source_instance_id,
+            self.source_revision,
+            self.dependency_ids,
+            self.analysis_kind_tag,
+            self.config_digest,
+        )
+    }
+}
+
+impl From<&PreparedRunTaskReceipt> for ProjectPreparedRunTaskReceipt {
+    fn from(receipt: &PreparedRunTaskReceipt) -> Self {
+        Self {
+            source_instance_id: receipt.instance_id(),
+            source_revision: receipt.source_revision(),
+            dependency_ids: receipt.dependencies().to_vec(),
+            analysis_kind_tag: receipt.analysis_kind_tag(),
+            config_digest: receipt.config_digest(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectPreparedRunReceipt {
+    pub source_domain: AnalysisResultSourceDomain,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulation_plan_id: Option<SimulationPlanId>,
+    pub project_revision: ObjectRevision,
+    pub prepared_snapshot_digest: ContentDigest,
+    pub source_content_digest: ContentDigest,
+    pub source_check_receipt: ProjectPreparedSourceCheckReceipt,
+    pub tasks: Vec<ProjectPreparedRunTaskReceipt>,
+}
+
+impl ProjectPreparedRunReceipt {
+    fn into_receipt(self) -> Result<PreparedRunReceipt, String> {
+        let tasks = self
+            .tasks
+            .into_iter()
+            .map(ProjectPreparedRunTaskReceipt::into_receipt)
+            .collect::<Result<Vec<_>, _>>()?;
+        PreparedRunReceipt::new(
+            self.source_domain,
+            self.simulation_plan_id,
+            self.project_revision,
+            self.prepared_snapshot_digest,
+            self.source_content_digest,
+            self.source_check_receipt.into(),
+            tasks,
+        )
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        self.clone().into_receipt().map(|_| ())
+    }
+}
+
+impl From<&PreparedRunReceipt> for ProjectPreparedRunReceipt {
+    fn from(receipt: &PreparedRunReceipt) -> Self {
+        Self {
+            source_domain: receipt.source_domain(),
+            simulation_plan_id: receipt.simulation_plan_id(),
+            project_revision: receipt.project_revision(),
+            prepared_snapshot_digest: receipt.prepared_snapshot_digest(),
+            source_content_digest: receipt.source_content_digest(),
+            source_check_receipt: receipt.source_check_receipt().into(),
+            tasks: receipt
+                .tasks()
+                .iter()
+                .map(ProjectPreparedRunTaskReceipt::from)
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSimulationRun {
     #[serde(default)]
@@ -819,6 +1475,10 @@ pub struct ProjectSimulationRun {
     pub timestamp: f64,
     #[serde(default)]
     pub analyses: Vec<ProjectAnalysisResult>,
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub provenance_mode: PersistedField<ProjectRunProvenanceMode>,
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub prepared_receipt: PersistedField<ProjectPreparedRunReceipt>,
     #[serde(default)]
     pub elapsed_time: f64,
     #[serde(default = "default_true")]
@@ -837,23 +1497,158 @@ impl ProjectSimulationRun {
             .analyses
             .into_iter()
             .map(ProjectAnalysisResult::into_analysis)
-            .collect();
-        Ok(SimulationRun {
-            run_id,
-            dataset_id,
-            id: self.id,
-            label: self.label,
-            timestamp: self.timestamp,
-            analyses,
-            elapsed_time: self.elapsed_time,
-            success: self.success,
-        })
+            .collect::<Result<Vec<_>, _>>()?;
+        if self.provenance_mode.is_null() {
+            return Err(format!(
+                "simulation run sequence {} has an explicitly null provenance mode",
+                self.id
+            ));
+        }
+        if self.prepared_receipt.is_null() {
+            return Err(format!(
+                "simulation run sequence {} has an explicitly null prepared receipt",
+                self.id
+            ));
+        }
+        let provenance = match self.provenance_mode.into_value() {
+            Some(ProjectRunProvenanceMode::LegacyUnattributed) => {
+                if self.prepared_receipt.is_present() {
+                    return Err(format!(
+                        "simulation run sequence {} is legacy-unattributed but carries a prepared receipt",
+                        self.id
+                    ));
+                }
+                SimulationRunProvenance::LegacyUnattributed
+            }
+            Some(ProjectRunProvenanceMode::LegacyPreparedUnclassified) => {
+                if self.prepared_receipt.is_present() {
+                    return Err(format!(
+                        "simulation run sequence {} is legacy prepared-unclassified but carries a current prepared receipt",
+                        self.id
+                    ));
+                }
+                SimulationRunProvenance::LegacyPreparedUnclassified
+            }
+            Some(ProjectRunProvenanceMode::PreparedTaskBound) => SimulationRunProvenance::Prepared(
+                self.prepared_receipt
+                    .into_value()
+                    .ok_or_else(|| {
+                        format!(
+                            "simulation run sequence {} is prepared-task-bound but has no receipt",
+                            self.id
+                        )
+                    })?
+                    .into_receipt()?,
+            ),
+            Some(ProjectRunProvenanceMode::Unspecified) | None => {
+                return Err(format!(
+                    "simulation run sequence {} has no authoritative provenance mode",
+                    self.id
+                ));
+            }
+        };
+        let mut run = SimulationRun::new(self.id);
+        run.run_id = run_id;
+        run.dataset_id = dataset_id;
+        run.label = self.label;
+        run.timestamp = self.timestamp;
+        run.analyses = analyses;
+        run.elapsed_time = self.elapsed_time;
+        run.success = self.success;
+        run.restore_provenance(provenance)?;
+        Ok(run)
     }
 
     fn validate(&self, run_idx: usize) -> Result<(), String> {
         require_finite(self.timestamp, &format!("runs[{run_idx}].timestamp"))?;
         require_finite(self.elapsed_time, &format!("runs[{run_idx}].elapsed_time"))?;
         let mut analysis_ids = HashSet::new();
+        let provenance_count = self
+            .analyses
+            .iter()
+            .filter(|analysis| analysis.provenance.is_some())
+            .count();
+        let legacy_domain_count = self
+            .analyses
+            .iter()
+            .filter_map(|analysis| analysis.provenance.as_ref())
+            .filter(|provenance| {
+                provenance.source_domain.as_ref()
+                    == Some(&AnalysisResultSourceDomain::LegacyUnclassified)
+            })
+            .count();
+        if self.provenance_mode.is_null() {
+            return Err(format!(
+                "runs[{run_idx}].provenance_mode must not be explicitly null"
+            ));
+        }
+        if self.prepared_receipt.is_null() {
+            return Err(format!(
+                "runs[{run_idx}].prepared_receipt must not be explicitly null"
+            ));
+        }
+        match self.provenance_mode.as_ref().copied() {
+            None | Some(ProjectRunProvenanceMode::Unspecified) => {
+                return Err(format!(
+                    "runs[{run_idx}].provenance_mode is missing from current simulation results"
+                ));
+            }
+            Some(ProjectRunProvenanceMode::LegacyUnattributed) if provenance_count != 0 => {
+                return Err(format!(
+                    "runs[{run_idx}] is marked legacy_unattributed but contains prepared-task provenance"
+                ));
+            }
+            Some(ProjectRunProvenanceMode::LegacyPreparedUnclassified)
+                if provenance_count != self.analyses.len()
+                    || legacy_domain_count != self.analyses.len() =>
+            {
+                return Err(format!(
+                    "runs[{run_idx}] is legacy_prepared_unclassified but its prepared source domains are not uniformly legacy-unclassified"
+                ));
+            }
+            Some(ProjectRunProvenanceMode::PreparedTaskBound)
+                if provenance_count != self.analyses.len() || legacy_domain_count != 0 =>
+            {
+                return Err(format!(
+                    "runs[{run_idx}] is prepared_task_bound but {} of {} analyses lack provenance",
+                    self.analyses.len() - provenance_count,
+                    self.analyses.len()
+                ));
+            }
+            Some(ProjectRunProvenanceMode::LegacyUnattributed)
+            | Some(ProjectRunProvenanceMode::LegacyPreparedUnclassified)
+            | Some(ProjectRunProvenanceMode::PreparedTaskBound) => {}
+        }
+        match (
+            self.provenance_mode.as_ref().copied(),
+            self.prepared_receipt.as_ref(),
+        ) {
+            (Some(ProjectRunProvenanceMode::PreparedTaskBound), Some(receipt)) => {
+                receipt.validate()?;
+            }
+            (Some(ProjectRunProvenanceMode::PreparedTaskBound), None) => {
+                return Err(format!(
+                    "runs[{run_idx}] is prepared_task_bound but has no authenticated run receipt"
+                ));
+            }
+            (
+                Some(
+                    ProjectRunProvenanceMode::LegacyUnattributed
+                    | ProjectRunProvenanceMode::LegacyPreparedUnclassified,
+                ),
+                Some(_),
+            ) => {
+                return Err(format!(
+                    "runs[{run_idx}] is legacy but carries a current prepared run receipt"
+                ));
+            }
+            _ => {}
+        }
+
+        let mut source_instance_ids = HashSet::new();
+        let mut prepared_snapshot_digest = None;
+        let mut source_revision = None;
+        let mut source_domain = None;
         for (analysis_idx, analysis) in self.analyses.iter().enumerate() {
             if analysis.id == 0 {
                 return Err(format!(
@@ -867,6 +1662,65 @@ impl ProjectSimulationRun {
                 ));
             }
             analysis.validate(run_idx, analysis_idx)?;
+
+            if let Some(provenance) = &analysis.provenance {
+                let prefix = format!("runs[{run_idx}].analyses[{analysis_idx}].provenance");
+                if !source_instance_ids.insert(provenance.source_instance_id) {
+                    return Err(format!(
+                        "{prefix}.source_instance_id duplicates prepared analysis instance {}",
+                        provenance.source_instance_id
+                    ));
+                }
+                match source_domain {
+                    Some(expected) if Some(&expected) != provenance.source_domain.as_ref() => {
+                        return Err(format!(
+                            "{prefix}.source_domain mixes prepared source domains within one run"
+                        ));
+                    }
+                    None => {
+                        source_domain =
+                            Some(*provenance.source_domain.as_ref().ok_or_else(|| {
+                                format!("{prefix}.source_domain is required by schema v5")
+                            })?)
+                    }
+                    Some(_) => {}
+                }
+                match prepared_snapshot_digest {
+                    Some(expected) if expected != provenance.prepared_snapshot_digest => {
+                        return Err(format!(
+                            "{prefix}.prepared_snapshot_digest does not match the run's frozen snapshot"
+                        ));
+                    }
+                    None => prepared_snapshot_digest = Some(provenance.prepared_snapshot_digest),
+                    Some(_) => {}
+                }
+                match source_revision {
+                    Some(expected) if expected != provenance.source_revision => {
+                        return Err(format!(
+                            "{prefix}.source_revision does not match the run's frozen plan revision"
+                        ));
+                    }
+                    None => source_revision = Some(provenance.source_revision),
+                    Some(_) => {}
+                }
+                for dependency_id in &provenance.dependency_ids {
+                    if !source_instance_ids.contains(dependency_id) {
+                        return Err(format!(
+                            "{prefix}.dependency_ids references {dependency_id} before that result appears in the frozen execution order"
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(receipt) = self.prepared_receipt.as_ref() {
+            let receipt = receipt.clone().into_receipt()?;
+            let analyses = self
+                .analyses
+                .iter()
+                .cloned()
+                .map(ProjectAnalysisResult::into_analysis)
+                .collect::<Result<Vec<_>, _>>()?;
+            receipt.validate_result_prefix(&analyses)?;
         }
         Ok(())
     }
@@ -874,6 +1728,21 @@ impl ProjectSimulationRun {
 
 impl From<&SimulationRun> for ProjectSimulationRun {
     fn from(run: &SimulationRun) -> Self {
+        let (provenance_mode, prepared_receipt) = match run.provenance() {
+            None => (PersistedField::Missing, PersistedField::Missing),
+            Some(SimulationRunProvenance::LegacyUnattributed) => (
+                PersistedField::Value(ProjectRunProvenanceMode::LegacyUnattributed),
+                PersistedField::Missing,
+            ),
+            Some(SimulationRunProvenance::LegacyPreparedUnclassified) => (
+                PersistedField::Value(ProjectRunProvenanceMode::LegacyPreparedUnclassified),
+                PersistedField::Missing,
+            ),
+            Some(SimulationRunProvenance::Prepared(receipt)) => (
+                PersistedField::Value(ProjectRunProvenanceMode::PreparedTaskBound),
+                PersistedField::Value(ProjectPreparedRunReceipt::from(receipt)),
+            ),
+        };
         Self {
             run_id: Some(run.run_id),
             dataset_id: Some(run.dataset_id),
@@ -885,6 +1754,8 @@ impl From<&SimulationRun> for ProjectSimulationRun {
                 .iter()
                 .map(ProjectAnalysisResult::from)
                 .collect(),
+            provenance_mode,
+            prepared_receipt,
             elapsed_time: run.elapsed_time,
             success: run.success,
         }
@@ -912,14 +1783,76 @@ pub struct ProjectAnalysisResult {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// Complete source identity for prepared-task results. `None` is retained only
+    /// when loading result history written by v1/v2 projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ProjectAnalysisResultProvenance>,
+}
+
+/// Project-file representation of one frozen prepared analysis task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAnalysisResultProvenance {
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub source_domain: PersistedField<AnalysisResultSourceDomain>,
+    pub source_instance_id: AnalysisInstanceId,
+    pub source_revision: ObjectRevision,
+    pub prepared_snapshot_digest: ContentDigest,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependency_ids: Vec<AnalysisInstanceId>,
+}
+
+impl ProjectAnalysisResultProvenance {
+    fn into_provenance(self) -> Result<AnalysisResultProvenance, String> {
+        AnalysisResultProvenance::new_with_source_domain(
+            self.source_domain
+                .into_value()
+                .ok_or_else(|| "prepared result source_domain is missing or null".to_owned())?,
+            self.source_instance_id,
+            self.source_revision,
+            self.prepared_snapshot_digest,
+            self.dependency_ids,
+        )
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        AnalysisResultProvenance::new_with_source_domain(
+            self.source_domain
+                .as_ref()
+                .copied()
+                .ok_or_else(|| "prepared result source_domain is missing or null".to_owned())?,
+            self.source_instance_id,
+            self.source_revision,
+            self.prepared_snapshot_digest,
+            self.dependency_ids.clone(),
+        )
+        .map(|_| ())
+    }
+}
+
+impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
+    fn from(provenance: &AnalysisResultProvenance) -> Self {
+        Self {
+            source_domain: PersistedField::Value(provenance.source_domain()),
+            source_instance_id: provenance.source_instance_id(),
+            source_revision: provenance.source_revision(),
+            prepared_snapshot_digest: provenance.prepared_snapshot_digest(),
+            dependency_ids: provenance.dependency_ids().to_vec(),
+        }
+    }
 }
 
 impl ProjectAnalysisResult {
-    fn into_analysis(self) -> AnalysisResult {
-        AnalysisResult {
+    fn into_analysis(self) -> Result<AnalysisResult, String> {
+        let analysis_type = analysis_type_from_key(&self.analysis_type)
+            .ok_or_else(|| format!("unknown persisted analysis type '{}'", self.analysis_type))?;
+        let provenance = self
+            .provenance
+            .map(ProjectAnalysisResultProvenance::into_provenance)
+            .transpose()?;
+        Ok(AnalysisResult {
             id: self.id,
-            analysis_type: analysis_type_from_key(&self.analysis_type)
-                .unwrap_or(AnalysisType::Transient),
+            analysis_type,
             label: self.label,
             timestamp: self.timestamp,
             waveforms: self
@@ -939,7 +1872,8 @@ impl ProjectAnalysisResult {
                 .collect(),
             success: self.success,
             error_message: self.error_message,
-        }
+            provenance,
+        })
     }
 
     fn validate(&self, run_idx: usize, analysis_idx: usize) -> Result<(), String> {
@@ -973,6 +1907,11 @@ impl ProjectAnalysisResult {
         for (measurement_idx, measurement) in self.measurements.iter().enumerate() {
             measurement.validate(&format!("{prefix}.measurements[{measurement_idx}]"))?;
         }
+        if let Some(provenance) = &self.provenance {
+            provenance
+                .validate()
+                .map_err(|error| format!("{prefix}.provenance is invalid: {error}"))?;
+        }
         Ok(())
     }
 }
@@ -1002,6 +1941,10 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
                 .collect(),
             success: analysis.success,
             error_message: analysis.error_message.clone(),
+            provenance: analysis
+                .provenance
+                .as_ref()
+                .map(ProjectAnalysisResultProvenance::from),
         }
     }
 }
@@ -1663,6 +2606,9 @@ pub(crate) fn serialize_project_file(project: &ProjectFile) -> Result<String, Pr
         .simulation_results
         .validate()
         .map_err(ProjectIoError::InvalidData)?;
+    project
+        .validate_result_plan_references()
+        .map_err(ProjectIoError::InvalidData)?;
     let mut contents = serde_json::to_string_pretty(project)
         .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
     contents.push('\n');
@@ -1679,19 +2625,38 @@ pub(crate) fn load_project_text(
     contents: &str,
     source_path: Option<&Path>,
 ) -> Result<ProjectFile, ProjectIoError> {
-    let mut project: ProjectFile =
+    let mut value: serde_json::Value =
         serde_json::from_str(contents).map_err(|e| ProjectIoError::ParseError(e.to_string()))?;
+    if let Some(descriptor) = value
+        .get_mut("workspace")
+        .and_then(|workspace| workspace.get_mut("project"))
+        .and_then(serde_json::Value::as_object_mut)
+        && !descriptor.contains_key("schema_version")
+        && !descriptor.contains_key("id")
+    {
+        let legacy_id = ProjectId::from_namespace(LEGACY_PROJECT_ID_NAMESPACE, contents.as_bytes());
+        descriptor.insert(
+            "id".to_owned(),
+            serde_json::Value::String(legacy_id.to_string()),
+        );
+    }
+    let mut project: ProjectFile =
+        serde_json::from_value(value).map_err(|e| ProjectIoError::ParseError(e.to_string()))?;
+    let project_id = project.workspace.project.id();
     if let Some(context) = &mut project.execution_context {
-        context.migrate_to_current().map_err(|error| {
+        context.migrate_to_current(project_id).map_err(|error| {
             ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))
         })?;
     }
     project.validate()?;
-    let simulation_results_error = project
+    let mut simulation_results_error = project
         .simulation_results
-        .migrate_to_current()
+        .migrate_to_current(project_id)
         .err()
         .or_else(|| project.simulation_results.validate().err());
+    if simulation_results_error.is_none() {
+        simulation_results_error = project.validate_result_plan_references().err();
+    }
     if let Some(error) = simulation_results_error {
         project.simulation_results = ProjectSimulationResults::default();
         project.simulation_results_warning = Some(format!(
@@ -1788,8 +2753,61 @@ mod tests {
     use super::*;
     use crate::state::{
         AnalysisResult, AnalysisType, CellViewRef, OpenCellView, OperatingPointValue,
-        SimulationRun, SimulationState, WaveformData,
+        PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRun,
+        SimulationRunProvenance, SimulationState, WaveformData,
     };
+
+    fn seal_legacy_unattributed(run: &mut SimulationRun) {
+        run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+            .expect("legacy fixture seals explicitly");
+    }
+
+    fn seal_prepared_run(
+        run: &mut SimulationRun,
+        source_domain: AnalysisResultSourceDomain,
+        simulation_plan_id: Option<SimulationPlanId>,
+        project_revision: ObjectRevision,
+        source_content_digest: ContentDigest,
+        source_check_receipt: PreparedSourceCheckReceipt,
+        analysis_kind_tags: &[u8],
+    ) {
+        assert_eq!(run.analyses.len(), analysis_kind_tags.len());
+        let prepared_snapshot_digest = run
+            .analyses
+            .first()
+            .and_then(|analysis| analysis.provenance.as_ref())
+            .expect("prepared fixture has provenance")
+            .prepared_snapshot_digest();
+        let tasks = run
+            .analyses
+            .iter()
+            .zip(analysis_kind_tags)
+            .enumerate()
+            .map(|(index, (analysis, kind_tag))| {
+                let provenance = analysis.provenance.as_ref().expect("prepared provenance");
+                PreparedRunTaskReceipt::new(
+                    provenance.source_instance_id(),
+                    provenance.source_revision(),
+                    provenance.dependency_ids().to_vec(),
+                    *kind_tag,
+                    ContentDigest::from_bytes([0xc0_u8.wrapping_add(index as u8); 32]),
+                )
+                .expect("prepared task receipt")
+            })
+            .collect::<Vec<_>>();
+        let receipt = PreparedRunReceipt::new(
+            source_domain,
+            simulation_plan_id,
+            project_revision,
+            prepared_snapshot_digest,
+            source_content_digest,
+            source_check_receipt,
+            tasks,
+        )
+        .expect("prepared run receipt");
+        run.restore_provenance(SimulationRunProvenance::Prepared(receipt))
+            .expect("prepared fixture seals explicitly");
+    }
 
     fn project_with_execution_context() -> ProjectFile {
         use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
@@ -1862,15 +2880,36 @@ mod tests {
         model_library.add_model(model);
         model_manager.add_library(model_library);
 
-        let execution_context =
-            crate::io::ProjectExecutionContext::from_state(&setup, &model_manager)
-                .expect("execution fixture validates");
+        // Exercise the deterministic singleton-to-instance migration while
+        // retaining every legacy fixture edit above.
+        setup.analysis_plan = None;
+        setup
+            .migrate_legacy_analysis_plan(workspace.project.id())
+            .expect("legacy execution fixture migrates at the load boundary");
+        let execution_context = crate::io::ProjectExecutionContext::from_state(
+            workspace.project.id(),
+            &setup,
+            &model_manager,
+        )
+        .expect("execution fixture validates");
         ProjectFile::new_with_execution_context(
             workspace,
             design_libraries,
             ProjectSimulationResults::default(),
             execution_context,
         )
+    }
+
+    fn serialized_analysis_instance_mut<'a>(
+        project: &'a mut serde_json::Value,
+        kind: &str,
+    ) -> &'a mut serde_json::Value {
+        project["execution_context"]["simulation_plan"]["analysis_plan"]["instances"]
+            .as_array_mut()
+            .expect("stable analysis instances serialize as an array")
+            .iter_mut()
+            .find(|instance| instance["kind"] == kind)
+            .unwrap_or_else(|| panic!("fixture contains {kind} analysis"))
     }
 
     #[test]
@@ -1956,10 +2995,33 @@ mod tests {
 
         assert_eq!(actual, expected);
         let plan = &actual["simulation_plan"];
-        assert_eq!(plan["analysis_order"], serde_json::json!([4, 1, 2]));
+        for retired in [
+            "enabled",
+            "analysis_order",
+            "listed",
+            "op",
+            "tran",
+            "ac",
+            "noise",
+        ] {
+            assert!(
+                plan.get(retired).is_none(),
+                "retired field {retired} leaked"
+            );
+        }
+        let instances = plan["analysis_plan"]["instances"]
+            .as_array()
+            .expect("stable instances serialize");
+        assert_eq!(instances[0]["kind"], "noise");
+        assert_eq!(instances[1]["kind"], "tran");
+        assert_eq!(instances[2]["kind"], "ac");
+        assert!(
+            instances[..3]
+                .iter()
+                .all(|instance| instance["enabled"] == true)
+        );
         assert!(plan.get("options_draft").is_none());
         assert!(plan.get("options_open").is_none());
-        assert!(plan["op"].get("initialized").is_none());
         assert_eq!(actual["model_libraries"][0]["name"], "fixture_models");
         assert!(actual["model_libraries"][0].get("expanded").is_none());
     }
@@ -1985,10 +3047,11 @@ mod tests {
             .as_object_mut()
             .expect("execution object");
         context.remove("schema_version");
-        context["simulation_plan"]
+        let simulation_plan = context["simulation_plan"]
             .as_object_mut()
-            .expect("simulation plan")
-            .remove("analysis_order");
+            .expect("simulation plan");
+        simulation_plan.remove("analysis_plan");
+        simulation_plan.insert("enabled".to_owned(), serde_json::json!([4, 1, 2]));
 
         let loaded = load_project_text(
             &serde_json::to_string(&value).expect("fixture serializes"),
@@ -2001,7 +3064,23 @@ mod tests {
             context.schema_version,
             crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
         );
-        assert_eq!(context.simulation_plan.analysis_order, vec![1, 2, 4]);
+        let enabled = context
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("legacy singleton plan migrates")
+            .instances()
+            .iter()
+            .filter(|instance| instance.enabled())
+            .map(|instance| instance.kind())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            enabled,
+            vec![
+                crate::simulation::plan::AnalysisKind::Transient,
+                crate::simulation::plan::AnalysisKind::Ac,
+                crate::simulation::plan::AnalysisKind::Noise,
+            ]
+        );
     }
 
     #[test]
@@ -2017,31 +3096,36 @@ mod tests {
             .to_string();
         assert!(error.contains("unsupported execution-context schema version 999"));
 
-        let mut duplicate_order = valid.clone();
-        duplicate_order["execution_context"]["simulation_plan"]["analysis_order"] =
-            serde_json::json!([4, 1, 1, 2]);
-        let error = load_project_text(&duplicate_order.to_string(), None)
-            .expect_err("duplicate order must fail")
+        let mut duplicate_identity = valid.clone();
+        let instances = duplicate_identity["execution_context"]["simulation_plan"]["analysis_plan"]
+            ["instances"]
+            .as_array_mut()
+            .expect("stable instances");
+        let first_id = instances[0]["id"].clone();
+        instances[1]["id"] = first_id;
+        let error = load_project_text(&duplicate_identity.to_string(), None)
+            .expect_err("duplicate stable identity must fail")
             .to_string();
-        assert!(error.contains("duplicate analysis index 1"));
+        assert!(error.contains("appears more than once"), "{error}");
 
-        let mut duplicate_enabled = valid.clone();
-        duplicate_enabled["execution_context"]["simulation_plan"]["enabled"] =
-            serde_json::json!([1, 1, 2, 4]);
-        let error = load_project_text(&duplicate_enabled.to_string(), None)
-            .expect_err("duplicate membership must fail")
+        let mut mismatched_draft = valid.clone();
+        serialized_analysis_instance_mut(&mut mismatched_draft, "noise")["kind"] =
+            serde_json::json!("ac");
+        let error = load_project_text(&mismatched_draft.to_string(), None)
+            .expect_err("declared kind and draft kind must agree")
             .to_string();
-        assert!(error.contains("duplicate analysis index 1"));
+        assert!(error.contains("declared as ac"), "{error}");
 
         let mut unsupported = valid.clone();
-        unsupported["execution_context"]["simulation_plan"]["enabled"] =
-            serde_json::json!([1, 2, 4, 99]);
-        unsupported["execution_context"]["simulation_plan"]["analysis_order"] =
-            serde_json::json!([4, 1, 2, 99]);
+        serialized_analysis_instance_mut(&mut unsupported, "tran")["kind"] =
+            serde_json::json!("future-analysis");
         let error = load_project_text(&unsupported.to_string(), None)
-            .expect_err("unsupported analysis must fail")
+            .expect_err("unsupported stable analysis kind must fail")
             .to_string();
-        assert!(error.contains("unsupported analysis index 99"));
+        assert!(
+            error.contains("unknown variant `future-analysis`"),
+            "{error}"
+        );
 
         let mut mismatched_pvt = valid.clone();
         mismatched_pvt["execution_context"]["simulation_plan"]["options"]["temp"] =
@@ -2052,7 +3136,7 @@ mod tests {
         assert!(error.contains("disagrees with solver option temp"));
 
         let mut unknown_input = valid.clone();
-        unknown_input["execution_context"]["simulation_plan"]["tran"]["future_mode"] =
+        serialized_analysis_instance_mut(&mut unknown_input, "tran")["draft"]["draft"]["future_mode"] =
             serde_json::json!(true);
         let error = load_project_text(&unknown_input.to_string(), None)
             .expect_err("unknown execution input must not be ignored")
@@ -2098,9 +3182,9 @@ mod tests {
         let project = project_with_execution_context();
         let json = serialize_project_file(&project).expect("project serializes");
         let mut value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-        value["execution_context"]["simulation_plan"]["tran"]["stop"] =
+        serialized_analysis_instance_mut(&mut value, "tran")["draft"]["draft"]["stop"] =
             serde_json::json!("unfinished(");
-        value["execution_context"]["simulation_plan"]["mc"]["seed"] =
+        serialized_analysis_instance_mut(&mut value, "mc")["draft"]["draft"]["seed"] =
             serde_json::json!("not-an-integer-yet");
 
         let loaded = load_project_text(&value.to_string(), None)
@@ -2110,15 +3194,37 @@ mod tests {
             .expect("context retained")
             .simulation_plan;
 
-        assert_eq!(plan.tran.stop, "unfinished(");
-        assert_eq!(plan.mc.seed, "not-an-integer-yet");
+        let stable = plan.stable_analysis_plan().expect("stable plan restored");
+        let transient = stable
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == crate::simulation::plan::AnalysisKind::Transient)
+            .expect("transient instance");
+        let crate::simulation::plan::AnalysisDraft::Transient(transient) = transient.draft() else {
+            panic!("transient instance owns transient draft");
+        };
+        assert_eq!(transient.stop, "unfinished(");
+        let monte_carlo = stable
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == crate::simulation::plan::AnalysisKind::MonteCarlo)
+            .expect("Monte Carlo instance");
+        let crate::simulation::plan::AnalysisDraft::MonteCarlo(monte_carlo) = monte_carlo.draft()
+        else {
+            panic!("Monte Carlo instance owns Monte Carlo draft");
+        };
+        assert_eq!(monte_carlo.seed, "not-an-integer-yet");
         assert!(
-            plan.validation_error(crate::common::simulation_analysis_tabs::TAB_TRANSIENT)
-                .is_some()
+            plan.analysis_draft_validation_error(
+                &crate::simulation::plan::AnalysisDraft::Transient(transient.clone(),)
+            )
+            .is_some()
         );
         assert!(
-            plan.validation_error(crate::common::simulation_analysis_tabs::TAB_MONTE_CARLO)
-                .is_some()
+            plan.analysis_draft_validation_error(
+                &crate::simulation::plan::AnalysisDraft::MonteCarlo(monte_carlo.clone()),
+            )
+            .is_some()
         );
     }
 
@@ -2152,6 +3258,7 @@ mod tests {
                 })
                 .with_measurements(vec![rspice_core::MeasureResult::success("gain", 3.0)]),
         );
+        seal_legacy_unattributed(&mut run);
         let expected_run_id = run.run_id;
         let expected_dataset_id = run.dataset_id;
         simulation.runs = vec![run];
@@ -2195,25 +3302,843 @@ mod tests {
 
         let mut unversioned_value: serde_json::Value =
             serde_json::from_str(&json).expect("current project parses as JSON");
-        unversioned_value["simulation_results"]
+        let legacy_results = unversioned_value["simulation_results"]
             .as_object_mut()
-            .expect("simulation result object")
-            .remove("schema_version");
+            .expect("simulation result object");
+        legacy_results.remove("schema_version");
+        legacy_results.remove("active_run_stable_id");
+        legacy_results.remove("active_dataset_id");
+        legacy_results.remove("active_analysis_sequence");
+        legacy_results.insert("active_run_id".to_owned(), serde_json::json!(12));
+        legacy_results.insert("active_analysis_id".to_owned(), serde_json::json!(7));
+        let legacy_run = legacy_results["runs"][0]
+            .as_object_mut()
+            .expect("legacy run object");
+        legacy_run.remove("run_id");
+        legacy_run.remove("dataset_id");
+        legacy_run.remove("provenance_mode");
         let unversioned_json =
             serde_json::to_string(&unversioned_value).expect("unversioned project serializes");
         let unversioned =
             load_project_text(&unversioned_json, None).expect("unversioned project migrates");
+        let migrated_run = &unversioned.simulation_results.runs[0];
         assert_eq!(
             unversioned.simulation_results.active_run_stable_id,
-            Some(expected_run_id)
+            migrated_run.run_id
         );
         assert_eq!(
             unversioned.simulation_results.active_dataset_id,
-            Some(expected_dataset_id)
+            migrated_run.dataset_id
         );
+        assert_ne!(migrated_run.run_id, Some(expected_run_id));
+        assert_ne!(migrated_run.dataset_id, Some(expected_dataset_id));
         assert_eq!(
             unversioned.simulation_results.active_analysis_sequence,
             Some(7)
+        );
+    }
+
+    #[test]
+    fn prepared_result_provenance_round_trips_two_same_kind_analyses_exactly() {
+        let first_id = AnalysisInstanceId::new();
+        let second_id = AnalysisInstanceId::new();
+        let snapshot = ContentDigest::from_bytes([0xa7; 32]);
+        let revision = ObjectRevision::new(12).expect("fixture revision");
+        let mut run = SimulationRun::new(21);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC low band").with_provenance(
+                AnalysisResultProvenance::new(first_id, revision, snapshot, Vec::new())
+                    .expect("first provenance"),
+            ),
+        );
+        run.add_analysis(
+            AnalysisResult::new(2, AnalysisType::Ac, "AC high band").with_provenance(
+                AnalysisResultProvenance::new(second_id, revision, snapshot, vec![first_id])
+                    .expect("second provenance"),
+            ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0xa6; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xa5; 32])),
+            &[2, 2],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 21;
+
+        let persisted = ProjectSimulationResults::from_state(&simulation);
+        let json = serde_json::to_string(&persisted).expect("results serialize");
+        let decoded: ProjectSimulationResults =
+            serde_json::from_str(&json).expect("results deserialize");
+        let restored = decoded
+            .into_simulation_state()
+            .expect("provenance validates and restores");
+        let restored_run = &restored.runs[0];
+
+        assert_eq!(restored_run.analyses.len(), 2);
+        assert_eq!(
+            restored_run
+                .find_analysis_by_source_instance(first_id)
+                .expect("first exact source")
+                .label,
+            "AC low band"
+        );
+        let second = restored_run
+            .find_analysis_by_source_instance(second_id)
+            .expect("second exact source");
+        let second_provenance = second.provenance.as_ref().expect("current provenance");
+        assert_eq!(second.label, "AC high band");
+        assert_eq!(second_provenance.source_revision(), revision);
+        assert_eq!(second_provenance.prepared_snapshot_digest(), snapshot);
+        assert_eq!(second_provenance.dependency_ids(), &[first_id]);
+    }
+
+    #[test]
+    fn manual_deck_result_provenance_round_trips_without_a_simulation_plan() {
+        let source_content_digest = ContentDigest::from_bytes([0x8c; 32]);
+        let source_id = crate::simulation::execution::manual_deck_analysis_instance_id_from_tag(
+            source_content_digest,
+            5,
+            0,
+        );
+        let snapshot = ContentDigest::from_bytes([0x8d; 32]);
+        let mut run = SimulationRun::new(29);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Manual TRAN").with_provenance(
+                AnalysisResultProvenance::new_with_source_domain(
+                    AnalysisResultSourceDomain::ManualDeck,
+                    source_id,
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    Vec::new(),
+                )
+                .expect("manual-deck provenance"),
+            ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::ManualDeck,
+            None,
+            ObjectRevision::INITIAL,
+            source_content_digest,
+            PreparedSourceCheckReceipt::ManualSourceCheck(ContentDigest::from_bytes([0x8b; 32])),
+            &[5],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 29;
+
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new_with_simulation_results(
+            workspace,
+            libraries,
+            ProjectSimulationResults::from_state(&simulation),
+        );
+
+        let json = serialize_project_file(&project)
+            .expect("manual-deck result does not require a simulation-plan owner");
+        let loaded = load_project_text(&json, None).expect("manual-deck project reloads");
+        let restored = loaded
+            .simulation_results
+            .into_simulation_state()
+            .expect("manual-deck result history restores");
+        let provenance = restored.runs[0].analyses[0]
+            .provenance
+            .as_ref()
+            .expect("provenance retained");
+
+        assert_eq!(
+            provenance.source_domain(),
+            AnalysisResultSourceDomain::ManualDeck
+        );
+        assert_eq!(provenance.source_instance_id(), source_id);
+        assert_eq!(provenance.prepared_snapshot_digest(), snapshot);
+    }
+
+    #[test]
+    fn schema_v4_provenance_migrates_without_guessing_its_source_domain() {
+        let source_id = AnalysisInstanceId::new();
+        let mut run = SimulationRun::new(30);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "Legacy prepared AC").with_provenance(
+                AnalysisResultProvenance::new(
+                    source_id,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0x94; 32]),
+                    Vec::new(),
+                )
+                .expect("legacy prepared provenance fixture"),
+            ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x93; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x92; 32])),
+            &[2],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 30;
+        let mut persisted = ProjectSimulationResults::from_state(&simulation);
+        persisted.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+        persisted.runs[0].prepared_receipt = PersistedField::Missing;
+        for provenance in persisted.runs[0]
+            .analyses
+            .iter_mut()
+            .filter_map(|analysis| analysis.provenance.as_mut())
+        {
+            provenance.source_domain = PersistedField::Missing;
+        }
+        let v4_json = serde_json::to_string(&persisted).expect("schema-v4 fixture serializes");
+        assert!(!v4_json.contains("source_domain"));
+        let mut persisted: ProjectSimulationResults =
+            serde_json::from_str(&v4_json).expect("schema-v4 fixture deserializes");
+
+        persisted
+            .migrate_to_current(ProjectId::new())
+            .expect("schema v4 migrates");
+        persisted.validate().expect("migrated schema validates");
+
+        assert_eq!(
+            persisted.runs[0].provenance_mode,
+            PersistedField::Value(ProjectRunProvenanceMode::LegacyPreparedUnclassified)
+        );
+        assert_eq!(
+            persisted.runs[0].analyses[0]
+                .provenance
+                .as_ref()
+                .expect("provenance retained")
+                .source_domain,
+            PersistedField::Value(AnalysisResultSourceDomain::LegacyUnclassified)
+        );
+    }
+
+    #[test]
+    fn legacy_result_schema_truth_cannot_be_repaired_or_downgraded() {
+        let source_id = AnalysisInstanceId::new();
+        let mut run = SimulationRun::new(33);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "Prepared AC").with_provenance(
+                AnalysisResultProvenance::new(
+                    source_id,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0xa3; 32]),
+                    Vec::new(),
+                )
+                .expect("prepared provenance fixture"),
+            ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0xa2; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xa1; 32])),
+            &[2],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 33;
+        let mut v4 = ProjectSimulationResults::from_state(&simulation);
+        v4.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+        v4.runs[0].prepared_receipt = PersistedField::Missing;
+        v4.runs[0].provenance_mode =
+            PersistedField::Value(ProjectRunProvenanceMode::PreparedTaskBound);
+        v4.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .source_domain = PersistedField::Missing;
+
+        let mut stripped = v4.clone();
+        stripped.runs[0].analyses[0].provenance = None;
+        assert!(
+            stripped
+                .migrate_to_current(ProjectId::new())
+                .expect_err("v4 prepared mode cannot be laundered after provenance stripping")
+                .contains("complete provenance is missing")
+        );
+
+        let mut contradictory = v4.clone();
+        contradictory.runs[0].provenance_mode =
+            PersistedField::Value(ProjectRunProvenanceMode::LegacyUnattributed);
+        assert!(
+            contradictory
+                .migrate_to_current(ProjectId::new())
+                .expect_err("v4 legacy mode cannot contain prepared provenance")
+                .contains("legacy_unattributed")
+        );
+
+        let mut missing_mode = v4.clone();
+        missing_mode.runs[0].provenance_mode = PersistedField::Missing;
+        assert!(
+            missing_mode
+                .migrate_to_current(ProjectId::new())
+                .expect_err("v4 mode is authoritative and required")
+                .contains("provenance_mode is required")
+        );
+
+        let mut downgraded = v4.clone();
+        downgraded.schema_version = PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION;
+        downgraded.runs[0].provenance_mode = PersistedField::Missing;
+        downgraded.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .source_domain = PersistedField::Value(AnalysisResultSourceDomain::SimulationPlan);
+        assert!(
+            downgraded
+                .migrate_to_current(ProjectId::new())
+                .expect_err("new source-domain data cannot masquerade as schema v3")
+                .contains("introduced after schema v3")
+        );
+
+        for schema_version in [
+            LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION,
+            STABLE_DATASET_RESULTS_SCHEMA_VERSION,
+        ] {
+            let mut impossible = v4.clone();
+            impossible.schema_version = schema_version;
+            impossible.runs[0].provenance_mode = PersistedField::Missing;
+            impossible.runs[0].analyses[0]
+                .provenance
+                .as_mut()
+                .expect("provenance")
+                .source_domain = PersistedField::Missing;
+            if schema_version == LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION {
+                impossible.runs[0].run_id = None;
+                impossible.runs[0].dataset_id = None;
+                impossible.active_run_stable_id = None;
+                impossible.active_dataset_id = None;
+                impossible.active_analysis_sequence = None;
+            }
+            assert!(
+                impossible
+                    .migrate_to_current(ProjectId::new())
+                    .expect_err("v1/v2 cannot contain prepared provenance")
+                    .contains("prepared provenance introduced after")
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_result_schema_rejects_present_or_null_later_era_fields() {
+        let mut run = SimulationRun::new(34);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "Prepared AC").with_provenance(
+                AnalysisResultProvenance::new(
+                    AnalysisInstanceId::new(),
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0xb3; 32]),
+                    Vec::new(),
+                )
+                .expect("prepared provenance fixture"),
+            ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0xb2; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xb1; 32])),
+            &[2],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 34;
+        let current = ProjectSimulationResults::from_state(&simulation);
+
+        for schema_version in [
+            LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION,
+            STABLE_DATASET_RESULTS_SCHEMA_VERSION,
+            PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION,
+            EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION,
+        ] {
+            let mut with_receipt = current.clone();
+            with_receipt.schema_version = schema_version;
+            assert!(
+                with_receipt
+                    .migrate_to_current(ProjectId::new())
+                    .expect_err("schemas v1-v4 cannot carry a v5 prepared receipt")
+                    .contains("prepared run receipt introduced after")
+            );
+
+            let mut null_receipt_json =
+                serde_json::to_value(&current).expect("current result document serializes");
+            null_receipt_json["schema_version"] = serde_json::json!(schema_version);
+            null_receipt_json["runs"][0]["prepared_receipt"] = serde_json::Value::Null;
+            let mut with_null_receipt: ProjectSimulationResults =
+                serde_json::from_value(null_receipt_json)
+                    .expect("explicit null receipt remains parseable evidence");
+            assert!(with_null_receipt.runs[0].prepared_receipt.is_null());
+            assert!(
+                with_null_receipt
+                    .migrate_to_current(ProjectId::new())
+                    .expect_err("an explicit null receipt is still an anachronistic field")
+                    .contains("prepared run receipt introduced after")
+            );
+        }
+
+        let mut null_v3_mode_json =
+            serde_json::to_value(&current).expect("current result document serializes");
+        null_v3_mode_json["schema_version"] =
+            serde_json::json!(PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION);
+        null_v3_mode_json["runs"][0]["provenance_mode"] = serde_json::Value::Null;
+        let mut null_v3_mode: ProjectSimulationResults =
+            serde_json::from_value(null_v3_mode_json).expect("null mode evidence deserializes");
+        null_v3_mode.runs[0].prepared_receipt = PersistedField::Missing;
+        assert!(null_v3_mode.runs[0].provenance_mode.is_null());
+        null_v3_mode.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .source_domain = PersistedField::Missing;
+        assert!(
+            null_v3_mode
+                .migrate_to_current(ProjectId::new())
+                .expect_err("an explicit null mode is present in schema v3")
+                .contains("provenance_mode introduced after schema v3")
+        );
+
+        let mut null_v4_mode = current.clone();
+        null_v4_mode.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+        null_v4_mode.runs[0].prepared_receipt = PersistedField::Missing;
+        null_v4_mode.runs[0].provenance_mode = PersistedField::Null;
+        null_v4_mode.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .source_domain = PersistedField::Missing;
+        assert!(
+            null_v4_mode
+                .migrate_to_current(ProjectId::new())
+                .expect_err("schema v4 requires a non-null authoritative mode")
+                .contains("provenance_mode is required by schema v4")
+        );
+
+        let mut null_v4_source_json =
+            serde_json::to_value(&current).expect("current result document serializes");
+        null_v4_source_json["schema_version"] =
+            serde_json::json!(EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION);
+        null_v4_source_json["runs"][0]["analyses"][0]["provenance"]["source_domain"] =
+            serde_json::Value::Null;
+        let mut null_v4_source_domain: ProjectSimulationResults =
+            serde_json::from_value(null_v4_source_json)
+                .expect("null source-domain evidence deserializes");
+        null_v4_source_domain.runs[0].prepared_receipt = PersistedField::Missing;
+        assert!(
+            null_v4_source_domain.runs[0].analyses[0]
+                .provenance
+                .as_ref()
+                .expect("provenance")
+                .source_domain
+                .is_null()
+        );
+        assert!(
+            null_v4_source_domain
+                .migrate_to_current(ProjectId::new())
+                .expect_err("an explicit null source domain is still a v5 field")
+                .contains("source_domain was introduced after schema v4")
+        );
+    }
+
+    #[test]
+    fn failed_legacy_result_migration_is_transactional() {
+        let mut run = SimulationRun::new(35);
+        run.add_analysis(AnalysisResult::new(
+            1,
+            AnalysisType::Transient,
+            "Legacy TRAN",
+        ));
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 35;
+        let mut legacy = ProjectSimulationResults::from_state(&simulation);
+        legacy.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
+        legacy.runs[0].run_id = None;
+        legacy.runs[0].dataset_id = None;
+        legacy.runs[0].provenance_mode = PersistedField::Missing;
+        legacy.active_run_stable_id = None;
+        legacy.active_dataset_id = None;
+        legacy.active_analysis_sequence = None;
+        legacy.active_run_id = Some(999);
+        legacy.active_analysis_id = Some(1);
+        let before = legacy.clone();
+
+        let error = legacy
+            .migrate_to_current(ProjectId::new())
+            .expect_err("invalid late selection reference must abort migration");
+
+        assert!(error.contains("run sequence 999 does not exist"));
+        assert_eq!(legacy, before, "failed migration must not mutate any field");
+    }
+
+    #[test]
+    fn schema_v1_result_identity_migration_is_reproducible() {
+        let mut run = SimulationRun::new(18);
+        run.add_analysis(AnalysisResult::new(
+            1,
+            AnalysisType::Transient,
+            "Legacy TRAN",
+        ));
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 18;
+        let mut first = ProjectSimulationResults::from_state(&simulation);
+        first.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
+        first.runs[0].provenance_mode = PersistedField::Missing;
+        first.runs[0].run_id = None;
+        first.runs[0].dataset_id = None;
+        first.active_run_stable_id = None;
+        first.active_dataset_id = None;
+        first.active_analysis_sequence = None;
+        first.active_run_id = Some(18);
+        first.active_analysis_id = Some(1);
+        let mut second = first.clone();
+        let mut other_project = first.clone();
+
+        let project_id = ProjectId::new();
+        first
+            .migrate_to_current(project_id)
+            .expect("first migration succeeds");
+        second
+            .migrate_to_current(project_id)
+            .expect("identical migration succeeds");
+        other_project
+            .migrate_to_current(ProjectId::new())
+            .expect("other project migration succeeds");
+
+        assert_eq!(first.runs[0].run_id, second.runs[0].run_id);
+        assert_eq!(first.runs[0].dataset_id, second.runs[0].dataset_id);
+        assert_eq!(first.active_run_stable_id, second.active_run_stable_id);
+        assert_eq!(first.active_dataset_id, second.active_dataset_id);
+        assert_ne!(first.runs[0].run_id, other_project.runs[0].run_id);
+        assert_ne!(first.runs[0].dataset_id, other_project.runs[0].dataset_id);
+    }
+
+    #[test]
+    fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones() {
+        let mut project = project_with_execution_context();
+        let plan = project
+            .execution_context
+            .as_ref()
+            .expect("execution context")
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("stable plan");
+        let source = plan
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == AnalysisKind::Ac)
+            .expect("AC fixture instance");
+        let source_id = source.id();
+        let source_revision = plan.revision();
+        let snapshot = ContentDigest::from_bytes([0x5c; 32]);
+
+        let mut run = SimulationRun::new(31);
+        let run_id = run.run_id;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_provenance(
+                AnalysisResultProvenance::new(source_id, source_revision, snapshot, Vec::new())
+                    .expect("prepared provenance"),
+            ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan.id()),
+            project.workspace.project.revision(),
+            ContentDigest::from_bytes([0x5b; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x5a; 32])),
+            &[2],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 31;
+        project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+
+        serialize_project_file(&project).expect("current plan owns result source");
+
+        let mut future_revision = project.clone();
+        let future_source_revision =
+            ObjectRevision::new(source_revision.get() + 1).expect("future fixture revision");
+        future_revision.simulation_results.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .source_revision = future_source_revision;
+        future_revision.simulation_results.runs[0]
+            .prepared_receipt
+            .as_mut()
+            .expect("receipt")
+            .tasks[0]
+            .source_revision = future_source_revision;
+        assert!(
+            serialize_project_file(&future_revision)
+                .expect_err("result revision beyond the retained plan must block save")
+                .to_string()
+                .contains("outside the retained analysis revision interval")
+        );
+
+        let mut missing = project.clone();
+        let orphaned_source_id = AnalysisInstanceId::new();
+        missing.simulation_results.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .source_instance_id = orphaned_source_id;
+        missing.simulation_results.runs[0]
+            .prepared_receipt
+            .as_mut()
+            .expect("receipt")
+            .tasks[0]
+            .source_instance_id = orphaned_source_id;
+        assert!(
+            serialize_project_file(&missing)
+                .expect_err("orphaned prepared result must block save")
+                .to_string()
+                .contains("absent from the persisted plan and its tombstones")
+        );
+
+        let mut retained = project.clone();
+        retained
+            .execution_context
+            .as_mut()
+            .expect("execution context")
+            .simulation_plan
+            .stable_analysis_plan_mut()
+            .expect("stable plan")
+            .remove(source_id, vec![run_id])
+            .expect("remove with exact retained run");
+        serialize_project_file(&retained).expect("tombstone closes retained result reference");
+
+        let removed_revision = retained
+            .execution_context
+            .as_ref()
+            .expect("execution context")
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .tombstones()
+            .iter()
+            .find(|tombstone| tombstone.id() == source_id)
+            .expect("source tombstone")
+            .removed_revision();
+        let mut at_removal = retained.clone();
+        at_removal.simulation_results.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .source_revision = removed_revision;
+        at_removal.simulation_results.runs[0]
+            .prepared_receipt
+            .as_mut()
+            .expect("receipt")
+            .tasks[0]
+            .source_revision = removed_revision;
+        assert!(
+            serialize_project_file(&at_removal)
+                .expect_err("a result cannot be produced at the removal revision")
+                .to_string()
+                .contains("outside the retained analysis revision interval")
+        );
+
+        let mut unretained = project;
+        unretained
+            .execution_context
+            .as_mut()
+            .expect("execution context")
+            .simulation_plan
+            .stable_analysis_plan_mut()
+            .expect("stable plan")
+            .remove(source_id, Vec::new())
+            .expect("remove without retained run");
+        assert!(
+            serialize_project_file(&unretained)
+                .expect_err("tombstone must retain the exact historical run")
+                .to_string()
+                .contains("is not retained by its tombstone")
+        );
+    }
+
+    #[test]
+    fn project_save_rejects_result_revision_before_source_creation() {
+        let mut project = project_with_execution_context();
+        let (source_id, plan_id, created_revision) = {
+            let plan = project
+                .execution_context
+                .as_mut()
+                .expect("execution context")
+                .simulation_plan
+                .stable_analysis_plan_mut()
+                .expect("stable plan");
+            let (source_id, _) = plan
+                .insert(AnalysisKind::Ac)
+                .expect("independent AC source inserts");
+            let source = plan.instance(source_id).expect("inserted source");
+            (source_id, plan.id(), source.created_revision())
+        };
+        assert!(created_revision.get() > ObjectRevision::INITIAL.get());
+        let before_creation = ObjectRevision::new(created_revision.get() - 1)
+            .expect("revision immediately before creation exists");
+        let snapshot = ContentDigest::from_bytes([0xc3; 32]);
+        let mut run = SimulationRun::new(36);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "Premature AC").with_provenance(
+                AnalysisResultProvenance::new(source_id, before_creation, snapshot, Vec::new())
+                    .expect("prepared provenance"),
+            ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan_id),
+            project.workspace.project.revision(),
+            ContentDigest::from_bytes([0xc2; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xc1; 32])),
+            &[2],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 36;
+        project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+
+        let error = serialize_project_file(&project)
+            .expect_err("source cannot own results from before it existed")
+            .to_string();
+        assert!(
+            error.contains("outside the retained analysis revision interval"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn v2_same_kind_results_migrate_without_guessing_source_identity() {
+        let mut run = SimulationRun::new(22);
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC low band"));
+        run.add_analysis(AnalysisResult::new(2, AnalysisType::Ac, "AC high band"));
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 22;
+        let mut persisted = ProjectSimulationResults::from_state(&simulation);
+        persisted.schema_version = STABLE_DATASET_RESULTS_SCHEMA_VERSION;
+        persisted.runs[0].provenance_mode = PersistedField::Missing;
+
+        persisted
+            .migrate_to_current(ProjectId::new())
+            .expect("v2 migrates");
+
+        assert_eq!(
+            persisted.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        assert!(
+            persisted.runs[0]
+                .analyses
+                .iter()
+                .all(|analysis| analysis.provenance.is_none())
+        );
+        let restored = persisted
+            .into_simulation_state()
+            .expect("legacy absence remains valid");
+        assert!(
+            restored.runs[0]
+                .analyses
+                .iter()
+                .all(|analysis| analysis.provenance.is_none())
+        );
+    }
+
+    #[test]
+    fn prepared_result_provenance_validation_rejects_aliases_and_partial_history() {
+        let first_id = AnalysisInstanceId::new();
+        let second_id = AnalysisInstanceId::new();
+        let snapshot = ContentDigest::from_bytes([0x61; 32]);
+        let mut run = SimulationRun::new(23);
+        for (sequence, source_id, label) in [(1, first_id, "AC one"), (2, second_id, "AC two")] {
+            run.add_analysis(
+                AnalysisResult::new(sequence, AnalysisType::Ac, label).with_provenance(
+                    AnalysisResultProvenance::new(
+                        source_id,
+                        ObjectRevision::INITIAL,
+                        snapshot,
+                        Vec::new(),
+                    )
+                    .expect("fixture provenance"),
+                ),
+            );
+        }
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x60; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x5f; 32])),
+            &[2, 2],
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 23;
+        let baseline = ProjectSimulationResults::from_state(&simulation);
+
+        let mut aliased = baseline.clone();
+        aliased.runs[0].analyses[1]
+            .provenance
+            .as_mut()
+            .expect("second provenance")
+            .source_instance_id = first_id;
+        assert!(
+            aliased
+                .validate()
+                .expect_err("source aliases fail closed")
+                .contains("duplicates prepared analysis instance")
+        );
+
+        let mut forward_dependency = baseline.clone();
+        forward_dependency.runs[0].analyses[0]
+            .provenance
+            .as_mut()
+            .expect("first provenance")
+            .dependency_ids = vec![second_id];
+        assert!(
+            forward_dependency
+                .validate()
+                .expect_err("dependencies must follow frozen execution order")
+                .contains("before that result appears")
+        );
+
+        let mut partial = baseline.clone();
+        partial.runs[0].analyses[1].provenance = None;
+        assert!(
+            partial
+                .validate()
+                .expect_err("legacy/current mixing fails closed")
+                .contains("is prepared_task_bound")
+        );
+
+        let mut stripped = baseline;
+        for analysis in &mut stripped.runs[0].analyses {
+            analysis.provenance = None;
+        }
+        assert!(
+            stripped
+                .validate()
+                .expect_err("current-schema provenance cannot disappear wholesale")
+                .contains("is prepared_task_bound")
         );
     }
 
@@ -2267,6 +4192,7 @@ mod tests {
         let mut simulation = SimulationState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
+        seal_legacy_unattributed(&mut run);
         simulation.runs = vec![run];
         simulation.next_run_id = 1;
         simulation.active_run_idx = Some(0);
@@ -2297,8 +4223,10 @@ mod tests {
 
     #[test]
     fn project_results_restore_rejects_invalid_overlay_references() {
-        let run_one = SimulationRun::new(1);
-        let run_two = SimulationRun::new(2);
+        let mut run_one = SimulationRun::new(1);
+        let mut run_two = SimulationRun::new(2);
+        seal_legacy_unattributed(&mut run_one);
+        seal_legacy_unattributed(&mut run_two);
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![
@@ -2329,8 +4257,10 @@ mod tests {
 
     #[test]
     fn project_results_validation_rejects_duplicate_run_ids() {
-        let run_one = SimulationRun::new(1);
-        let run_duplicate = SimulationRun::new(1);
+        let mut run_one = SimulationRun::new(1);
+        let mut run_duplicate = SimulationRun::new(1);
+        seal_legacy_unattributed(&mut run_one);
+        seal_legacy_unattributed(&mut run_duplicate);
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![
@@ -2358,6 +4288,8 @@ mod tests {
         run_one.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN one"));
         let mut run_two = SimulationRun::new(2);
         run_two.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN two"));
+        seal_legacy_unattributed(&mut run_one);
+        seal_legacy_unattributed(&mut run_two);
         let mut simulation = SimulationState::default();
         simulation.runs = vec![run_one, run_two];
         simulation.next_run_id = 2;
@@ -2400,6 +4332,8 @@ mod tests {
         run_one.add_analysis(AnalysisResult::new(3, AnalysisType::Transient, "TRAN one"));
         let mut run_two = SimulationRun::new(2);
         run_two.add_analysis(AnalysisResult::new(8, AnalysisType::Ac, "AC two"));
+        seal_legacy_unattributed(&mut run_one);
+        seal_legacy_unattributed(&mut run_two);
         let run_one_dataset_id = run_one.dataset_id;
         let run_two_dataset_id = run_two.dataset_id;
         let mut simulation = SimulationState::default();
@@ -2474,6 +4408,7 @@ mod tests {
             let run = run.as_object_mut().expect("legacy run object");
             run.remove("run_id");
             run.remove("dataset_id");
+            run.remove("provenance_mode");
         }
 
         let mut unversioned_value = value.clone();
@@ -2596,7 +4531,12 @@ mod tests {
                     measurements: Vec::new(),
                     success: true,
                     error_message: None,
+                    provenance: None,
                 }],
+                provenance_mode: PersistedField::Value(
+                    ProjectRunProvenanceMode::LegacyUnattributed,
+                ),
+                prepared_receipt: PersistedField::Missing,
                 elapsed_time: 0.1,
                 success: true,
             }],
@@ -2649,7 +4589,12 @@ mod tests {
                     measurements: Vec::new(),
                     success: true,
                     error_message: None,
+                    provenance: None,
                 }],
+                provenance_mode: PersistedField::Value(
+                    ProjectRunProvenanceMode::LegacyUnattributed,
+                ),
+                prepared_receipt: PersistedField::Missing,
                 elapsed_time: 0.1,
                 success: true,
             }],
@@ -2712,7 +4657,12 @@ mod tests {
                     measurements: Vec::new(),
                     success: true,
                     error_message: None,
+                    provenance: None,
                 }],
+                provenance_mode: PersistedField::Value(
+                    ProjectRunProvenanceMode::LegacyUnattributed,
+                ),
+                prepared_receipt: PersistedField::Missing,
                 elapsed_time: 0.1,
                 success: true,
             }],
@@ -2782,9 +4732,7 @@ mod tests {
 
     #[test]
     fn legacy_project_migration_assigns_stable_identity_metadata() {
-        let mut libraries = LibraryManager::with_primitives();
-        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-        let project = ProjectFile::new(workspace, libraries);
+        let project = project_with_execution_context();
         let mut value = serde_json::to_value(project).expect("project converts to JSON");
         let descriptor = value["workspace"]["project"]
             .as_object_mut()
@@ -2792,9 +4740,18 @@ mod tests {
         descriptor.remove("id");
         descriptor.remove("schema_version");
         descriptor.remove("revision");
+        value["execution_context"]["schema_version"] = serde_json::Value::from(3_u32);
+        let legacy_plan = value["execution_context"]["simulation_plan"]
+            .as_object_mut()
+            .expect("simulation plan is an object");
+        legacy_plan.remove("analysis_plan");
+        legacy_plan.insert("enabled".to_owned(), serde_json::json!([1]));
+        legacy_plan.insert("analysis_order".to_owned(), serde_json::json!([1]));
         let legacy = serde_json::to_string_pretty(&value).expect("legacy fixture serializes");
 
         let migrated = load_project_text(&legacy, None).expect("legacy project migrates");
+        let replay =
+            load_project_text(&legacy, None).expect("identical legacy bytes migrate again");
 
         assert!(!migrated.workspace.project.id().as_uuid().is_nil());
         assert_eq!(
@@ -2802,6 +4759,37 @@ mod tests {
             crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION
         );
         assert_eq!(migrated.workspace.project.revision().get(), 1);
+        assert_eq!(
+            migrated.workspace.project.id(),
+            replay.workspace.project.id()
+        );
+        let migrated_plan = migrated
+            .execution_context
+            .as_ref()
+            .expect("migrated execution context")
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("migrated stable plan");
+        let replay_plan = replay
+            .execution_context
+            .as_ref()
+            .expect("replayed execution context")
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("replayed stable plan");
+        assert_eq!(migrated_plan.id(), replay_plan.id());
+        assert_eq!(
+            migrated_plan
+                .instances()
+                .iter()
+                .map(|instance| instance.id())
+                .collect::<Vec<_>>(),
+            replay_plan
+                .instances()
+                .iter()
+                .map(|instance| instance.id())
+                .collect::<Vec<_>>()
+        );
 
         let migrated_json =
             serialize_project_file(&migrated).expect("migrated identity persists on save");
@@ -2831,6 +4819,61 @@ mod tests {
 
         assert!(matches!(error, ProjectIoError::InvalidData(_)));
         assert!(error.to_string().contains("project schema version"));
+    }
+
+    #[test]
+    fn project_load_rejects_missing_or_null_identity_on_a_versioned_descriptor() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new(workspace, libraries);
+        let value = serde_json::to_value(project).expect("project converts to JSON");
+
+        let mut missing = value.clone();
+        missing["workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor object")
+            .remove("id");
+        let missing_error = load_project_text(&missing.to_string(), None)
+            .expect_err("versioned descriptor cannot lose its identity");
+        assert!(
+            missing_error
+                .to_string()
+                .contains("missing its stable identity")
+        );
+
+        let mut null = value.clone();
+        null["workspace"]["project"]["id"] = serde_json::Value::Null;
+        let null_error = load_project_text(&null.to_string(), None)
+            .expect_err("explicit null identity is never a legacy migration");
+        assert!(
+            null_error
+                .to_string()
+                .contains("must not be explicitly null")
+        );
+
+        let mut unversioned_null_id = value.clone();
+        unversioned_null_id["workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor object")
+            .remove("schema_version");
+        unversioned_null_id["workspace"]["project"]["id"] = serde_json::Value::Null;
+        let unversioned_null_error = load_project_text(&unversioned_null_id.to_string(), None)
+            .expect_err("unversioned explicit null identity is not legacy absence");
+        assert!(
+            unversioned_null_error
+                .to_string()
+                .contains("must not be explicitly null")
+        );
+
+        let mut null_schema = value;
+        null_schema["workspace"]["project"]["schema_version"] = serde_json::Value::Null;
+        let null_schema_error = load_project_text(&null_schema.to_string(), None)
+            .expect_err("explicit null schema cannot trigger legacy migration");
+        assert!(
+            null_schema_error
+                .to_string()
+                .contains("schema version must not be explicitly null")
+        );
     }
 
     #[test]

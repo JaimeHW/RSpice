@@ -1,5 +1,5 @@
 use super::*;
-use crate::product::{DatasetId, RunId};
+use crate::product::{AnalysisInstanceId, DatasetId, RunId};
 
 /// A simulation run containing multiple analysis results.
 ///
@@ -30,6 +30,9 @@ pub struct SimulationRun {
     pub timestamp: f64,
     /// All analysis results from this run
     pub analyses: Vec<AnalysisResult>,
+    /// Durable run-level authority. `None` is a transient, unsealed run and
+    /// must never be persisted as a legacy classification.
+    provenance: Option<SimulationRunProvenance>,
     /// Total simulation time in seconds
     pub elapsed_time: f64,
     /// Whether all analyses in this run succeeded
@@ -48,9 +51,100 @@ impl SimulationRun {
             label: format!("Run {} ({})", run_number, time_str),
             timestamp,
             analyses: Vec::new(),
+            provenance: None,
             elapsed_time: 0.0,
             success: true,
         }
+    }
+
+    pub(crate) fn new_prepared(run_number: u64, receipt: PreparedRunReceipt) -> Self {
+        let mut run = Self::new(run_number);
+        run.provenance = Some(SimulationRunProvenance::Prepared(receipt));
+        run
+    }
+
+    /// Authoritative persisted classification for this run. Fresh fixture or
+    /// UI-only runs remain `None` until dispatch or migration seals them.
+    #[must_use]
+    pub fn provenance(&self) -> Option<&SimulationRunProvenance> {
+        self.provenance.as_ref()
+    }
+
+    /// Exact consumed-snapshot receipt for a current prepared run.
+    #[must_use]
+    pub fn prepared_receipt(&self) -> Option<&PreparedRunReceipt> {
+        match self.provenance.as_ref() {
+            Some(SimulationRunProvenance::Prepared(receipt)) => Some(receipt),
+            None
+            | Some(
+                SimulationRunProvenance::LegacyUnattributed
+                | SimulationRunProvenance::LegacyPreparedUnclassified,
+            ) => None,
+        }
+    }
+
+    /// Restore an explicit persisted classification without inferring it from
+    /// the current result vector. Reserved for versioned project migration.
+    pub(crate) fn restore_provenance(
+        &mut self,
+        provenance: SimulationRunProvenance,
+    ) -> Result<(), String> {
+        if self.provenance.is_some() {
+            return Err(format!(
+                "simulation run {} already has authoritative provenance",
+                self.id
+            ));
+        }
+        Self::validate_provenance_against_results(&provenance, &self.analyses)?;
+        self.provenance = Some(provenance);
+        Ok(())
+    }
+
+    /// Validate that retained results are an exact ordered prefix of the
+    /// authoritative receipt. Aborted and partial runs may omit the remaining
+    /// suffix; they may not rewrite or reorder completed task identity.
+    pub fn validate_provenance(&self) -> Result<(), String> {
+        let provenance = self.provenance.as_ref().ok_or_else(|| {
+            format!(
+                "simulation run {} is unsealed and has no authoritative provenance",
+                self.id
+            )
+        })?;
+        Self::validate_provenance_against_results(provenance, &self.analyses)
+    }
+
+    fn validate_provenance_against_results(
+        provenance: &SimulationRunProvenance,
+        analyses: &[AnalysisResult],
+    ) -> Result<(), String> {
+        match provenance {
+            SimulationRunProvenance::LegacyUnattributed => {
+                if analyses
+                    .iter()
+                    .any(|analysis| analysis.provenance.is_some())
+                {
+                    return Err(
+                        "legacy-unattributed run contains prepared analysis provenance".to_owned(),
+                    );
+                }
+            }
+            SimulationRunProvenance::LegacyPreparedUnclassified => {
+                if analyses.iter().any(|analysis| {
+                    analysis.provenance.as_ref().is_none_or(|provenance| {
+                        provenance.source_domain() != AnalysisResultSourceDomain::LegacyUnclassified
+                    })
+                }) {
+                    return Err(
+                        "legacy prepared-unclassified run has missing or classified analysis provenance"
+                            .to_owned(),
+                    );
+                }
+            }
+            SimulationRunProvenance::Prepared(receipt) => {
+                receipt.validate_result_prefix(analyses)?;
+            }
+        }
+        Ok(())
     }
 
     /// Add an analysis result to this run
@@ -101,6 +195,21 @@ impl SimulationRun {
             .find(|a| a.analysis_type == analysis_type)
     }
 
+    /// Find the result produced by one exact prepared analysis instance.
+    /// Unlike [`Self::find_analysis`], this remains unambiguous when a run has
+    /// multiple analyses of the same kind.
+    pub fn find_analysis_by_source_instance(
+        &self,
+        source_instance_id: AnalysisInstanceId,
+    ) -> Option<&AnalysisResult> {
+        self.analyses.iter().find(|analysis| {
+            analysis
+                .provenance
+                .as_ref()
+                .is_some_and(|provenance| provenance.source_instance_id() == source_instance_id)
+        })
+    }
+
     /// Get current timestamp as Unix epoch seconds
     fn current_timestamp() -> f64 {
         crate::common::time_compat::unix_epoch().as_secs_f64()
@@ -131,6 +240,7 @@ impl SimulationRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::product::{ContentDigest, ObjectRevision};
 
     #[test]
     fn add_analysis_assigns_unique_ids_when_converters_reuse_placeholder() {
@@ -145,5 +255,62 @@ mod tests {
         assert_eq!(ids, vec![1, 2]);
         assert_eq!(run.run_id, stable_id);
         assert_eq!(run.dataset_id, dataset_id);
+    }
+
+    #[test]
+    fn same_kind_results_remain_attributable_to_exact_source_instances() {
+        let first_id = AnalysisInstanceId::new();
+        let second_id = AnalysisInstanceId::new();
+        let snapshot = ContentDigest::from_bytes([0x5a; 32]);
+        let mut run = SimulationRun::new(8);
+
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC low band").with_provenance(
+                AnalysisResultProvenance::new(
+                    first_id,
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    Vec::new(),
+                )
+                .expect("first provenance is valid"),
+            ),
+        );
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC high band").with_provenance(
+                AnalysisResultProvenance::new(
+                    second_id,
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    vec![first_id],
+                )
+                .expect("second provenance is valid"),
+            ),
+        );
+
+        assert_eq!(
+            run.find_analysis(AnalysisType::Ac).unwrap().label,
+            "AC low band"
+        );
+        assert_eq!(
+            run.find_analysis_by_source_instance(first_id)
+                .unwrap()
+                .label,
+            "AC low band"
+        );
+        assert_eq!(
+            run.find_analysis_by_source_instance(second_id)
+                .unwrap()
+                .label,
+            "AC high band"
+        );
+        assert_eq!(
+            run.find_analysis_by_source_instance(second_id)
+                .unwrap()
+                .provenance
+                .as_ref()
+                .unwrap()
+                .dependency_ids(),
+            &[first_id]
+        );
     }
 }

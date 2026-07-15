@@ -335,6 +335,7 @@ mod tests {
     use crate::common::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
     use crate::common::file_workflow::FileWorkflowIo;
     use crate::io::{SchematicIoError, WaveformDataset};
+    use crate::simulation::plan::AnalysisKind;
     use crate::state::{Component, ComponentType, Point, SchematicState};
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
@@ -417,6 +418,28 @@ mod tests {
             file_workflow_io: Box::new(file_io),
             export_workflow_io: Box::new(TestExportWorkflowIo),
         }
+    }
+
+    fn insert_ac_analysis(
+        state: &mut crate::common::app::AppState,
+    ) -> crate::product::AnalysisInstanceId {
+        state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan")
+            .insert(AnalysisKind::Ac)
+            .expect("AC analysis inserts")
+            .0
+    }
+
+    fn has_ac_analysis(setup: &crate::common::app::SimSetupState) -> bool {
+        setup
+            .stable_analysis_plan()
+            .expect("current project owns a stable plan")
+            .instances()
+            .iter()
+            .any(|instance| instance.kind() == AnalysisKind::Ac)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -576,7 +599,6 @@ mod tests {
     #[test]
     fn recent_kind_is_preserved_and_selects_project_or_schematic_save_scope() {
         use crate::common::project_lifecycle::{DestinationAuthority, SaveScope};
-        use crate::common::simulation_analysis_tabs::TAB_AC;
 
         let source = unique_temp_path("rspice-recent-source", "rspiceproj");
         let target_project = unique_temp_path("rspice-recent-target", "rspiceproj");
@@ -609,8 +631,7 @@ mod tests {
         project_source
             .schematic
             .add_component(ComponentType::Resistor, Point::new(7, 3));
-        project_source.sim_setup.enabled.insert(TAB_AC);
-        project_source.sim_setup.normalize_analysis_order();
+        let project_ac_id = insert_ac_analysis(&mut project_source);
         project_source
             .remember_recent_file(crate::common::app::RecentKind::Project, &target_project);
         let project_recent = project_source
@@ -649,13 +670,17 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
+        assert_eq!(
             saved_source
                 .execution_context
                 .expect("saved project execution context")
                 .simulation_plan
-                .enabled
-                .contains(&TAB_AC),
+                .stable_analysis_plan()
+                .expect("saved project owns a stable plan")
+                .instance(project_ac_id)
+                .expect("Save All retains the exact AC identity")
+                .kind(),
+            AnalysisKind::Ac,
             "opening a recent project must Save All before replacement"
         );
         assert_eq!(
@@ -677,8 +702,7 @@ mod tests {
         schematic_source
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(8, 4));
-        schematic_source.sim_setup.enabled.insert(TAB_AC);
-        schematic_source.sim_setup.normalize_analysis_order();
+        let schematic_ac_id = insert_ac_analysis(&mut schematic_source);
         schematic_source
             .remember_recent_file(crate::common::app::RecentKind::Schematic, &target_schematic);
         let schematic_recent = schematic_source
@@ -718,15 +742,25 @@ mod tests {
             1
         );
         assert!(
-            !active_only
-                .execution_context
-                .expect("active-save execution context")
-                .simulation_plan
-                .enabled
-                .contains(&TAB_AC),
+            !has_ac_analysis(
+                &active_only
+                    .execution_context
+                    .expect("active-save execution context")
+                    .simulation_plan
+            ),
             "opening a recent schematic saves only the active design document"
         );
-        assert!(schematic_app.state.sim_setup.enabled.contains(&TAB_AC));
+        assert_eq!(
+            schematic_app
+                .state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("live plan retained")
+                .instance(schematic_ac_id)
+                .expect("AC identity retained")
+                .kind(),
+            AnalysisKind::Ac
+        );
 
         remove_project_artifacts(&source);
         remove_project_artifacts(&target_project);
@@ -737,7 +771,6 @@ mod tests {
     #[test]
     fn close_project_review_counts_documents_and_active_run_blocks_discard() {
         use crate::common::project_lifecycle::{DestinationAuthority, SaveScope};
-        use crate::common::simulation_analysis_tabs::TAB_AC;
 
         let path = unique_temp_path("rspice-close-review", "rspiceproj");
         let mut state = crate::common::app::AppState::default();
@@ -764,8 +797,7 @@ mod tests {
         state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(2, 4));
-        state.sim_setup.enabled.insert(TAB_AC);
-        state.sim_setup.normalize_analysis_order();
+        insert_ac_analysis(&mut state);
         assert_eq!(
             crate::common::project_lifecycle::dirty_document_count(&state),
             2
@@ -805,7 +837,6 @@ mod tests {
     #[test]
     fn save_all_and_close_publishes_every_dirty_document_before_closing() {
         use crate::common::project_lifecycle::{DestinationAuthority, SaveScope};
-        use crate::common::simulation_analysis_tabs::TAB_AC;
 
         let path = unique_temp_path("rspice-save-all-close", "rspiceproj");
         let saved_paths = Rc::new(RefCell::new(Vec::new()));
@@ -821,8 +852,7 @@ mod tests {
         state
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(3, 8));
-        state.sim_setup.enabled.insert(TAB_AC);
-        state.sim_setup.normalize_analysis_order();
+        let close_ac_id = insert_ac_analysis(&mut state);
         crate::common::project_workflow::request_close_project(&mut state);
         let mut app = test_app_with_file_io(
             state,
@@ -848,13 +878,17 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
+        assert_eq!(
             persisted
                 .execution_context
                 .expect("saved execution context")
                 .simulation_plan
-                .enabled
-                .contains(&TAB_AC)
+                .stable_analysis_plan()
+                .expect("saved project owns a stable plan")
+                .instance(close_ac_id)
+                .expect("save-and-close retains the exact AC identity")
+                .kind(),
+            AnalysisKind::Ac
         );
         remove_project_artifacts(&path);
     }

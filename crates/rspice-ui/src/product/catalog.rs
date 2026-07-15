@@ -12,6 +12,8 @@ pub enum ProductObjectKind {
     Testbench,
     #[serde(rename = "simulation-plan")]
     SimulationPlan,
+    #[serde(rename = "analysis-instance")]
+    AnalysisInstance,
     #[serde(rename = "run-set")]
     RunSet,
     #[serde(rename = "job")]
@@ -35,11 +37,12 @@ pub enum ProductObjectKind {
 }
 
 impl ProductObjectKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Project,
         Self::Design,
         Self::Testbench,
         Self::SimulationPlan,
+        Self::AnalysisInstance,
         Self::RunSet,
         Self::Job,
         Self::Run,
@@ -64,6 +67,7 @@ impl ProductObjectKind {
             Self::Design => &DESIGN,
             Self::Testbench => &TESTBENCH,
             Self::SimulationPlan => &SIMULATION_PLAN,
+            Self::AnalysisInstance => &ANALYSIS_INSTANCE,
             Self::RunSet => &RUN_SET,
             Self::Job => &JOB,
             Self::Run => &RUN,
@@ -186,7 +190,7 @@ const SIMULATION_PLAN: ProductObjectContract = ProductObjectContract {
     mutability: Mutability::Versioned,
     identity: "plan UUID + revision",
     contains: &[
-        "analysis",
+        "analysis-instance",
         "variable",
         "output",
         "measurement",
@@ -195,6 +199,17 @@ const SIMULATION_PLAN: ProductObjectContract = ProductObjectContract {
         "solver-policy",
         "save-policy",
     ],
+};
+
+const ANALYSIS_INSTANCE: ProductObjectContract = ProductObjectContract {
+    kind: ProductObjectKind::AnalysisInstance,
+    stable_id: "analysis-instance",
+    label: "Analysis instance",
+    parent: Some(ProductObjectKind::SimulationPlan),
+    owner: WorkflowOwner::SimulationSetup,
+    mutability: Mutability::Versioned,
+    identity: "analysis-instance UUID + owning plan revision",
+    contains: &[],
 };
 
 const RUN_SET: ProductObjectContract = ProductObjectContract {
@@ -388,7 +403,7 @@ mod tests {
             .map(|kind| kind.stable_id())
             .collect();
         assert_eq!(ids.len(), ProductObjectKind::ALL.len());
-        assert_eq!(ProductObjectKind::ALL.len(), 14);
+        assert_eq!(ProductObjectKind::ALL.len(), 15);
 
         for kind in ProductObjectKind::ALL {
             let contract = kind.contract();

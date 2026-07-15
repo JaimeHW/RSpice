@@ -15,6 +15,7 @@ pub mod netlist_gen;
 pub mod netlist_viewer;
 pub mod optimizer;
 pub mod options_translator;
+pub mod plan;
 pub mod reliability_engine;
 pub mod results;
 pub mod runner;

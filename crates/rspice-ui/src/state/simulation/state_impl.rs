@@ -166,8 +166,23 @@ impl SimulationState {
     /// This creates a new SimulationRun with an auto-incremented ID and
     /// prepares it for receiving analysis results.
     pub fn start_run(&mut self) -> &mut SimulationRun {
+        self.start_run_with_receipt(None)
+    }
+
+    /// Start a run already sealed by the exact consumed prepared snapshot.
+    pub(crate) fn start_prepared_run(&mut self, receipt: PreparedRunReceipt) -> &mut SimulationRun {
+        self.start_run_with_receipt(Some(receipt))
+    }
+
+    fn start_run_with_receipt(
+        &mut self,
+        receipt: Option<PreparedRunReceipt>,
+    ) -> &mut SimulationRun {
         self.next_run_id += 1;
-        let run = SimulationRun::new(self.next_run_id);
+        let run = match receipt {
+            Some(receipt) => SimulationRun::new_prepared(self.next_run_id, receipt),
+            None => SimulationRun::new(self.next_run_id),
+        };
 
         // Insert at front (newest first)
         self.runs.insert(0, run);

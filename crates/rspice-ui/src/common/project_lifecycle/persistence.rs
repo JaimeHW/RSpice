@@ -2603,7 +2603,7 @@ mod tests {
 
     fn browser_receipt(project_id: &str, digest: ContentDigest) -> BrowserBindingReceipt {
         BrowserBindingReceipt {
-            binding_id: uuid::Uuid::from_u128(0x7d9a_1db3_55f2_4da2_82e1_992f6e650f42),
+            binding_id: uuid::Uuid::from_u128(0x7d9a_1db3_55f2_4da2_82e1_992f_6e65_0f42),
             project_id: project_id.to_owned(),
             accepted_generation: 7,
             accepted_digest: digest,

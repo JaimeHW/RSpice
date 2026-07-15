@@ -10,7 +10,7 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::common::AppState;
-use crate::state::{SharedWaveformValues, ac_bode_summary_for_run};
+use crate::state::{SharedWaveformValues, ac_bode_summary_for_selection};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -36,7 +36,7 @@ struct BodeModel {
 fn build_model(state: &mut AppState) -> Option<BodeModel> {
     let simulation = &state.simulation;
     let run = simulation.active_run()?;
-    let summary = ac_bode_summary_for_run(run)?;
+    let summary = ac_bode_summary_for_selection(run, simulation.active_analysis_idx)?;
     let analysis = &run.analyses[summary.analysis_index];
     let mag = &analysis.waveforms[summary.mag_index];
     let phase = summary
@@ -342,5 +342,61 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ui,
             "Margins measured on the simulated curves; the plot markers show the same values.",
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::state::{
+        AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, WaveformData,
+    };
+
+    fn ac_result(
+        source_id: AnalysisInstanceId,
+        signal: &str,
+        magnitude: [f64; 2],
+    ) -> AnalysisResult {
+        AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_waveforms(vec![WaveformData::new(
+                format!("|{signal}|"),
+                vec![1.0, 10.0],
+                magnitude.to_vec(),
+                "#fff",
+            )])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    source_id,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0x73; 32]),
+                    Vec::new(),
+                )
+                .expect("valid AC provenance"),
+            )
+    }
+
+    #[test]
+    fn bode_model_follows_the_selected_same_kind_ac_instance() {
+        let first_id = AnalysisInstanceId::new();
+        let second_id = AnalysisInstanceId::new();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(ac_result(first_id, "V(first)", [10.0, 1.0]));
+        run.add_analysis(ac_result(second_id, "V(second)", [100.0, 10.0]));
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        assert!(state.simulation.select_analysis(0));
+        assert_eq!(
+            build_model(&mut state).expect("first model").signal,
+            "V(first)"
+        );
+
+        assert!(state.simulation.select_analysis(1));
+        let second = build_model(&mut state).expect("second model");
+        assert_eq!(second.signal, "V(second)");
+        assert_eq!(second.gain_db.as_slice(), &[40.0, 20.0]);
     }
 }

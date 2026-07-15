@@ -197,14 +197,58 @@ fn design(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
-    let index = app.state.workbench.active_analysis;
-    let name = analysis_name(index);
+    let selected = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| {
+            let legacy_kind = crate::simulation::plan::AnalysisKind::from_legacy_index(
+                app.state.workbench.active_analysis,
+            );
+            plan.instances()
+                .iter()
+                .find(|instance| {
+                    Some(instance.id()) == app.state.workbench.active_analysis_instance
+                })
+                .or_else(|| {
+                    legacy_kind.and_then(|kind| {
+                        plan.instances()
+                            .iter()
+                            .find(|instance| instance.kind() == kind)
+                    })
+                })
+                .or_else(|| plan.instances().first())
+                .map(|instance| {
+                    (
+                        instance.id(),
+                        instance.kind(),
+                        instance.draft().clone(),
+                        instance.enabled(),
+                        instance.dependencies().len(),
+                        instance.modified_revision(),
+                    )
+                })
+        });
+
     section_header(ui, "Selected analysis", None);
-    property_row(ui, "Type", name);
-    property_row(ui, "Configuration", &app.state.sim_setup.summary(index));
-    let enabled = app.state.sim_setup.enabled.contains(&index);
+    let Some((id, kind, draft, enabled, dependency_count, revision)) = selected else {
+        property_row(ui, "Selection", "No analysis instances in this plan");
+        return;
+    };
+    app.state.workbench.active_analysis_instance = Some(id);
+    app.state.workbench.active_analysis = kind.legacy_index();
+    property_row(ui, "Type", kind.label());
+    property_row(ui, "Instance", &id.to_string());
+    property_row(
+        ui,
+        "Configuration",
+        &app.state.sim_setup.analysis_draft_summary(&draft),
+    );
     property_row(ui, "Run set", if enabled { "Enabled" } else { "Excluded" });
-    if let Some(error) = app.state.sim_setup.validation_error(index) {
+    property_row(ui, "Revision", &revision.get().to_string());
+    property_row(ui, "Prerequisites", &dependency_count.to_string());
+    if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(&draft) {
         validation(ui, &error);
     } else {
         status_dot(ui, Tokens::get(ui.ctx()).color.ok, "Configuration valid");
@@ -226,7 +270,10 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(
         ui,
         "Enabled analyses",
-        &app.state.sim_setup.enabled.len().to_string(),
+        &app.state
+            .sim_setup
+            .enabled_analysis_instance_count()
+            .to_string(),
     );
     property_row(
         ui,
@@ -272,6 +319,30 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         property_row(ui, "Type", &format!("{:?}", analysis.analysis_type));
         property_row(ui, "Waveforms", &analysis.waveforms.len().to_string());
         property_row(ui, "Measurements", &analysis.measurements.len().to_string());
+        if let Some(provenance) = &analysis.provenance {
+            property_row(
+                ui,
+                "Source instance",
+                &provenance.source_instance_id().to_string(),
+            );
+            property_row(
+                ui,
+                "Source revision",
+                &provenance.source_revision().get().to_string(),
+            );
+            property_row(
+                ui,
+                "Prepared snapshot",
+                &provenance.prepared_snapshot_digest().to_string(),
+            );
+            property_row(
+                ui,
+                "Dependencies",
+                &provenance.dependency_ids().len().to_string(),
+            );
+        } else {
+            property_row(ui, "Source identity", "Legacy result · unavailable");
+        }
     }
     ui.add_space(8.0);
     crate::workbench::result_document::right_panel(ui, &mut app.state);
@@ -475,12 +546,4 @@ fn validation(ui: &mut Ui, message: &str) {
             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(t.color.err),
     );
-}
-
-fn analysis_name(index: usize) -> &'static str {
-    crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES
-        .iter()
-        .flat_map(|(_, analyses)| analyses.iter())
-        .find_map(|(candidate, label)| (*candidate == index).then_some(*label))
-        .unwrap_or("Unknown analysis")
 }

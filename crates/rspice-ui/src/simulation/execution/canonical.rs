@@ -6,7 +6,7 @@
 
 use sha2::{Digest as _, Sha256};
 
-use crate::product::ContentDigest;
+use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::services::simulation_runner::{
     CornerBaseMode, CornerFrequencySweep, CornerProcess, PacFrequencySweep, PnoiseFrequencySweep,
@@ -18,7 +18,6 @@ use crate::simulation::multi_run::{
     AnalysisSpec, FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
 };
 use crate::simulation::runner::SpecExecutionOptions;
-use crate::state::SimulationRunIntent;
 
 const CANONICAL_MAGIC: &[u8] = b"RSPICE-CANONICAL";
 const CANONICAL_VERSION: u16 = 1;
@@ -88,6 +87,11 @@ impl CanonicalWriter {
         self.raw(value.as_bytes());
     }
 
+    pub(super) fn uuid(&mut self, value: uuid::Uuid) {
+        self.raw(&[0x0c]);
+        self.raw(value.as_bytes());
+    }
+
     pub(super) fn sequence(&mut self, len: usize) {
         self.raw(&[0x0a]);
         self.length(len);
@@ -130,19 +134,43 @@ pub(in crate::simulation) fn content_digest(domain: &str, bytes: &[u8]) -> Conte
     writer.finish()
 }
 
-pub(in crate::simulation) fn analysis_instance_id(
-    intent: SimulationRunIntent,
+/// Stable manual-deck task identity derived from the exact expanded source.
+///
+/// Manual decks do not own durable [`SimulationPlan`](crate::simulation::plan::SimulationPlan)
+/// instances. Their task identities therefore live in a dedicated UUID-v5
+/// namespace and are reproducible only for an identical expanded source,
+/// analysis kind, and same-kind occurrence. Simulation-plan runs must use the
+/// instance IDs carried by their frozen plan and must never call this helper.
+pub(in crate::simulation) fn manual_deck_analysis_instance_id(
+    expanded_source_identity: ContentDigest,
     spec: &AnalysisSpec,
     kind_occurrence: usize,
-) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.analysis-instance/v1");
-    writer.domain("intent");
-    writer.u8(run_intent_tag(intent));
-    writer.domain("analysis-kind");
-    writer.u8(analysis_kind_tag(spec));
-    writer.domain("kind-occurrence");
-    writer.usize(kind_occurrence);
-    writer.finish()
+) -> AnalysisInstanceId {
+    manual_deck_analysis_instance_id_from_tag(
+        expanded_source_identity,
+        analysis_kind_tag(spec),
+        kind_occurrence,
+    )
+}
+
+/// Rebuild a manual-deck task identity from durable receipt fields.
+/// Persistence uses this to verify that a restored manual task ID is the exact
+/// UUID-v5 projection of its authenticated source, kind, and occurrence.
+pub(crate) fn manual_deck_analysis_instance_id_from_tag(
+    expanded_source_identity: ContentDigest,
+    analysis_kind_tag: u8,
+    kind_occurrence: usize,
+) -> AnalysisInstanceId {
+    const MANUAL_DECK_TASK_NAMESPACE: uuid::Uuid =
+        uuid::Uuid::from_u128(0x8bf4_d214_5bc4_5c44_9e1a_9f5b_8f98_4d2a);
+
+    let occurrence =
+        u64::try_from(kind_occurrence).expect("supported Rust targets use at most 64-bit usize");
+    let mut name = Vec::with_capacity(41);
+    name.extend_from_slice(expanded_source_identity.as_bytes());
+    name.push(analysis_kind_tag);
+    name.extend_from_slice(&occurrence.to_be_bytes());
+    AnalysisInstanceId::from_namespace(MANUAL_DECK_TASK_NAMESPACE, &name)
 }
 
 pub(in crate::simulation) fn analysis_config_digest(
@@ -824,13 +852,6 @@ pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
     }
 }
 
-fn run_intent_tag(intent: SimulationRunIntent) -> u8 {
-    match intent {
-        SimulationRunIntent::SimulateRunSet => 0,
-        SimulationRunIntent::ManualDeck => 1,
-    }
-}
-
 fn corner_process_tag(process: CornerProcess) -> u8 {
     match process {
         CornerProcess::TT => 0,
@@ -925,6 +946,51 @@ mod tests {
         assert_ne!(
             content_digest("source/v1", b"same"),
             content_digest("model/v1", b"same")
+        );
+    }
+
+    #[test]
+    fn manual_task_ids_are_reproducible_and_bound_to_source_kind_and_occurrence() {
+        let source = content_digest("manual-expanded-source/v1", b"deck\n.op\n.end\n");
+        let changed_source = content_digest(
+            "manual-expanded-source/v1",
+            b"deck\nR1 out 0 1k\n.op\n.end\n",
+        );
+        let first = manual_deck_analysis_instance_id(source, &AnalysisSpec::DcOp, 0);
+
+        assert_eq!(
+            first,
+            manual_deck_analysis_instance_id(source, &AnalysisSpec::DcOp, 0)
+        );
+        assert_eq!(
+            first,
+            manual_deck_analysis_instance_id_from_tag(
+                source,
+                analysis_kind_tag(&AnalysisSpec::DcOp),
+                0,
+            )
+        );
+        assert_ne!(
+            first,
+            manual_deck_analysis_instance_id(changed_source, &AnalysisSpec::DcOp, 0)
+        );
+        assert_ne!(
+            first,
+            manual_deck_analysis_instance_id(source, &AnalysisSpec::DcOp, 1)
+        );
+        assert_ne!(
+            first,
+            manual_deck_analysis_instance_id(
+                source,
+                &AnalysisSpec::Transient {
+                    stop_time: 1.0,
+                    step_time: 0.1,
+                    start_time: 0.0,
+                    max_timestep: None,
+                    uic: false,
+                },
+                0,
+            )
         );
     }
 

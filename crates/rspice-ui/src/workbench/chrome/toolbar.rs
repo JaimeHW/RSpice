@@ -558,7 +558,7 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp) {
 fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp) {
     const WIDTH: f32 = 190.0;
     let t = Tokens::get(ui.ctx());
-    let analysis_count = app.state.sim_setup.enabled.len();
+    let analysis_count = app.state.sim_setup.enabled_analysis_instance_count();
     let pvt_count = configured_pvt_count(app);
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(WIDTH, 31.0),
@@ -631,32 +631,29 @@ fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp) {
 }
 
 fn configured_pvt_count(app: &RSpiceApp) -> usize {
-    use crate::common::simulation_analysis_tabs::{TAB_CORNER, TAB_TEMPERATURE};
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     let mut count = usize::from(
         app.state
             .sim_setup
-            .enabled
-            .iter()
-            .any(|analysis| !matches!(*analysis, TAB_CORNER | TAB_TEMPERATURE)),
+            .enabled_analysis_instances()
+            .any(|instance| {
+                !matches!(
+                    instance.kind(),
+                    AnalysisKind::Corner | AnalysisKind::Temperature
+                )
+            }),
     );
-    if app.state.sim_setup.enabled.contains(&TAB_CORNER) {
-        count = count.saturating_add(
-            app.state
-                .sim_setup
-                .corner
-                .to_config()
-                .map_or(0, |config| config.num_corners()),
-        );
-    }
-    if app.state.sim_setup.enabled.contains(&TAB_TEMPERATURE) {
-        count = count.saturating_add(
-            app.state
-                .sim_setup
-                .temp
-                .to_config()
-                .map_or(0, |config| config.num_temps()),
-        );
+    for instance in app.state.sim_setup.enabled_analysis_instances() {
+        count = count.saturating_add(match instance.draft() {
+            AnalysisDraft::Corner(draft) => {
+                draft.to_config().map_or(0, |config| config.num_corners())
+            }
+            AnalysisDraft::Temperature(draft) => {
+                draft.to_config().map_or(0, |config| config.num_temps())
+            }
+            _ => 0,
+        });
     }
     count.max(1)
 }

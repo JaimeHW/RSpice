@@ -13,7 +13,7 @@
 //!
 //! Call `SimulationController::update()` once per frame in the app update loop.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 #[cfg(test)]
 use std::path::PathBuf;
 
@@ -27,14 +27,15 @@ use crate::simulation::config::{
 };
 use crate::simulation::execution::TouchstoneExportPolicy;
 use crate::simulation::multi_run::{
-    AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
+    AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
     OptimizationGoal, OptimizationVariable, SpPort,
 };
 use crate::simulation::runner::SimulationError;
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
-    AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue, SimulationRunIntent,
+    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType, DcOpResult,
+    OperatingPointValue, SimulationRunIntent,
 };
 
 mod analysis_commands;
@@ -80,6 +81,12 @@ pub struct SimulationController {
     current_config: Option<AnalysisConfig>,
     /// Current strongly-typed analysis spec (always set while running)
     current_spec: Option<AnalysisSpec>,
+    /// Frozen identity of the prepared task currently owned by the runner.
+    /// Captured before the authorized dispatch token is moved into the runner.
+    current_provenance: Option<AnalysisResultProvenance>,
+    /// Source domain authenticated by the active run dispatch. Manual-deck
+    /// task IDs are deterministic source projections, not plan-owned IDs.
+    current_source_domain: AnalysisResultSourceDomain,
     /// Stable run ID that owns the in-flight batch.
     current_run_id: Option<u64>,
 
@@ -88,6 +95,10 @@ pub struct SimulationController {
     // =========================================================================
     /// Queue of pending analyses to run in current simulation batch
     pending_analyses: VecDeque<crate::simulation::execution::AuthorizedTaskDispatch>,
+    /// Exact prepared instances that completed successfully in this batch.
+    /// A dependent task is dispatchable only when every frozen prerequisite
+    /// appears here; failed and skipped tasks never grant dependency authority.
+    successful_analysis_instances: HashSet<crate::product::AnalysisInstanceId>,
     /// Current analysis index (1-based for display: "Analysis 2/4")
     current_analysis_idx: usize,
     /// Total number of analyses in current batch
@@ -120,8 +131,11 @@ impl SimulationController {
             yield_manager: YieldAnalysisManager::new(),
             current_config: None,
             current_spec: None,
+            current_provenance: None,
+            current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
             pending_analyses: VecDeque::new(),
+            successful_analysis_instances: HashSet::new(),
             current_analysis_idx: 0,
             total_analyses: 0,
             cached_netlist: None,
@@ -147,7 +161,7 @@ impl SimulationController {
         if state.simulation.trigger_simulation {
             log::info!(
                 "Simulation triggered ({} analyses enabled)",
-                state.sim_setup.enabled.len()
+                state.sim_setup.enabled_analysis_instance_count()
             );
             state.simulation.trigger_simulation = false;
             self.start_simulation(state);
@@ -160,10 +174,13 @@ impl SimulationController {
             self.runner.abort();
             // Clear pending analyses since we're stopping
             self.pending_analyses.clear();
+            self.successful_analysis_instances.clear();
             self.cached_netlist = None;
             self.clear_prepared_run();
             self.current_config = None;
             self.current_spec = None;
+            self.current_provenance = None;
+            self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
             self.current_run_id = None;
             self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
             state.ui.netlist.pending_manual_run_id = None;
@@ -219,8 +236,22 @@ impl SimulationController {
                 return;
             }
         };
+        let source_domain = match dispatch.intent() {
+            SimulationRunIntent::SimulateRunSet => AnalysisResultSourceDomain::SimulationPlan,
+            SimulationRunIntent::ManualDeck => AnalysisResultSourceDomain::ManualDeck,
+        };
+        let run_receipt = match dispatch.prepared_run_receipt(source_domain) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                state.push_sim_message(ConsoleMessage::error(error.to_string()));
+                state.simulation.status = "Run blocked".to_owned();
+                return;
+            }
+        };
 
         self.pending_analyses.clear();
+        self.successful_analysis_instances.clear();
+        self.current_source_domain = source_domain;
         self.total_analyses = dispatch.task_count();
         self.current_analysis_idx = 0;
         self.cached_netlist = Some(dispatch.executable_netlist().to_owned());
@@ -228,14 +259,14 @@ impl SimulationController {
         if let Some(cross_probe) = dispatch.take_cross_probe() {
             cross_probe.apply(state);
         }
-        self.touchstone_export_policy = dispatch.take_touchstone_export_policy();
+        self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         for advisory in dispatch.advisories() {
             state.push_sim_message(ConsoleMessage::warning(advisory.clone()));
         }
 
         let queued_names = dispatch
             .tasks()
-            .map(|entry| self.analysis_name_for_spec(entry.spec()))
+            .map(|entry| entry.label())
             .collect::<Vec<_>>();
         log::info!(
             "Dispatching prepared snapshot {} with {} ordered task(s): {:?}",
@@ -244,7 +275,7 @@ impl SimulationController {
             queued_names
         );
 
-        let run_id = state.simulation.start_run().id;
+        let run_id = state.simulation.start_prepared_run(run_receipt).id;
         self.current_run_id = Some(run_id);
         if dispatch.intent() == SimulationRunIntent::ManualDeck {
             let manual_source = dispatch.manual_source().unwrap_or_default().to_owned();
@@ -274,6 +305,7 @@ impl SimulationController {
         self.current_run_id.is_some()
             || self.current_spec.is_some()
             || self.current_config.is_some()
+            || self.current_provenance.is_some()
             || self.total_analyses != 0
             || !self.pending_analyses.is_empty()
             || !self.runner.can_accept_prepared_task()
@@ -299,10 +331,13 @@ impl SimulationController {
     fn reset_for_design_replacement(&mut self) {
         self.runner.reset_for_design_replacement();
         self.pending_analyses.clear();
+        self.successful_analysis_instances.clear();
         self.cached_netlist = None;
         self.clear_prepared_run();
         self.current_config = None;
         self.current_spec = None;
+        self.current_provenance = None;
+        self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;
@@ -327,22 +362,125 @@ impl SimulationController {
             );
             return;
         }
-        let Some(next_analysis) = self.pending_analyses.pop_front() else {
-            // Queue exhausted - should not happen if called correctly
-            log::warn!("start_next_analysis called with empty queue");
-            return;
+        self.current_config = None;
+        self.current_spec = None;
+        self.current_provenance = None;
+        self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
+
+        let mut skipped_blocked_task = false;
+        let next_analysis = loop {
+            let Some(candidate) = self.pending_analyses.pop_front() else {
+                if skipped_blocked_task {
+                    self.finish_simulation_batch(state);
+                } else {
+                    log::warn!("start_next_analysis called with empty queue");
+                }
+                return;
+            };
+            let unavailable_dependencies = candidate
+                .dependencies()
+                .iter()
+                .copied()
+                .filter(|dependency| !self.successful_analysis_instances.contains(dependency))
+                .collect::<Vec<_>>();
+            if unavailable_dependencies.is_empty() {
+                break candidate;
+            }
+
+            skipped_blocked_task = true;
+            self.current_analysis_idx += 1;
+            let analysis_name = candidate.label().to_owned();
+            let unavailable = unavailable_dependencies
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let message = format!(
+                "Skipped {analysis_name}: prerequisite analysis result(s) {unavailable} did not complete successfully"
+            );
+            let provenance = match AnalysisResultProvenance::new_with_source_domain(
+                self.current_source_domain,
+                candidate.instance_id(),
+                candidate.source_revision(),
+                candidate.snapshot_digest(),
+                candidate.dependencies().to_vec(),
+            ) {
+                Ok(provenance) => provenance,
+                Err(error) => {
+                    let internal = format!(
+                        "Prepared dependent analysis '{analysis_name}' has invalid provenance: {error}"
+                    );
+                    log::error!("{internal}");
+                    state.push_sim_message(ConsoleMessage::error(internal));
+                    if let Some(run_id) = self.target_run_id(state)
+                        && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+                    {
+                        run.success = false;
+                    }
+                    self.pending_analyses.clear();
+                    self.finish_simulation_batch(state);
+                    return;
+                }
+            };
+            let failed = AnalysisResult::failed(
+                1,
+                self.spec_to_analysis_type(candidate.spec()),
+                analysis_name,
+                message.clone(),
+            )
+            .with_provenance(provenance);
+            if let Some(run_id) = self.target_run_id(state)
+                && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+            {
+                run.add_analysis(failed);
+                run.success = false;
+            }
+            state.push_sim_message(ConsoleMessage::warning(message));
         };
         log::info!(
-            "Starting queued analysis: {:?}",
-            next_analysis.spec().run_type()
+            "Starting queued analysis {} ({:?}, instance {}, source revision {}, {} dependencies, config {}, snapshot {})",
+            next_analysis.label(),
+            next_analysis.spec().run_type(),
+            next_analysis.instance_id(),
+            next_analysis.source_revision().get(),
+            next_analysis.dependencies().len(),
+            next_analysis.config_digest(),
+            next_analysis.snapshot_digest(),
         );
         let spec = next_analysis.spec().clone();
         let config = next_analysis.config().cloned();
-        let analysis_name = self.analysis_name_for_spec(&spec);
+        let analysis_name = next_analysis.label().to_owned();
+        self.touchstone_export_policy = next_analysis.touchstone_export_policy().clone();
+        let provenance = match AnalysisResultProvenance::new_with_source_domain(
+            self.current_source_domain,
+            next_analysis.instance_id(),
+            next_analysis.source_revision(),
+            next_analysis.snapshot_digest(),
+            next_analysis.dependencies().to_vec(),
+        ) {
+            Ok(provenance) => provenance,
+            Err(error) => {
+                let message = format!(
+                    "Prepared analysis '{}' has invalid result provenance: {error}",
+                    analysis_name
+                );
+                log::error!("{message}");
+                state.push_sim_message(ConsoleMessage::error(message));
+                if let Some(run_id) = self.target_run_id(state)
+                    && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+                {
+                    run.success = false;
+                }
+                self.pending_analyses.clear();
+                self.finish_simulation_batch(state);
+                return;
+            }
+        };
 
         self.current_analysis_idx += 1;
         self.current_config = config.clone();
         self.current_spec = Some(spec.clone());
+        self.current_provenance = Some(provenance);
 
         // Update status with multi-analysis progress
         let status_msg = if self.total_analyses > 1 {
@@ -351,7 +489,7 @@ impl SimulationController {
                 self.current_analysis_idx, self.total_analyses, analysis_name
             )
         } else {
-            analysis_name.to_string()
+            analysis_name.clone()
         };
         state.simulation.status = status_msg.clone();
 
@@ -364,7 +502,7 @@ impl SimulationController {
                     analysis_name, self.current_analysis_idx, self.total_analyses
                 )
             } else {
-                analysis_name.to_string()
+                analysis_name.clone()
             }
         )));
 
@@ -376,11 +514,18 @@ impl SimulationController {
                 analysis_name
             );
             log::error!("{}", message);
-            state.push_sim_message(ConsoleMessage::error(message));
+            state.push_sim_message(ConsoleMessage::error(message.clone()));
             let target_run_id = self.target_run_id(state);
+            let failed_analysis = self.current_provenance.take().map(|provenance| {
+                AnalysisResult::failed(1, self.spec_to_analysis_type(&spec), analysis_name, message)
+                    .with_provenance(provenance)
+            });
             if let Some(run_id) = target_run_id
                 && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
             {
+                if let Some(failed_analysis) = failed_analysis {
+                    run.add_analysis(failed_analysis);
+                }
                 run.success = false;
             }
             self.pending_analyses.clear();
@@ -399,15 +544,28 @@ impl SimulationController {
             ),
             Err(e) => {
                 log::error!("Failed to start simulation: {}", e);
+                let error_message = format!("Failed to start simulation: {e}");
                 state.push_sim_message(ConsoleMessage::error(format!(
                     "Failed to start simulation: {}",
                     e
                 )));
                 // Mark run as failed but continue with remaining analyses
                 let target_run_id = self.target_run_id(state);
+                let failed_analysis = self.current_provenance.take().map(|provenance| {
+                    AnalysisResult::failed(
+                        1,
+                        self.spec_to_analysis_type(&spec),
+                        analysis_name,
+                        error_message,
+                    )
+                    .with_provenance(provenance)
+                });
                 if let Some(run_id) = target_run_id
                     && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                 {
+                    if let Some(failed_analysis) = failed_analysis {
+                        run.add_analysis(failed_analysis);
+                    }
                     run.success = false;
                 }
                 // Try to start next analysis if any remain
@@ -445,8 +603,11 @@ impl SimulationController {
 
         // Clear cached netlist
         self.cached_netlist = None;
+        self.successful_analysis_instances.clear();
         self.current_config = None;
         self.current_spec = None;
+        self.current_provenance = None;
+        self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;
@@ -777,15 +938,33 @@ impl SimulationController {
                             current_label,
                         )
                     };
-                    if let Some(run_id) = target_run_id
-                        && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
-                    {
-                        run.add_analysis(analysis_result);
-                        log::info!(
-                            "Added analysis to run {} (now has {} analyses)",
-                            run.id,
-                            run.analyses.len()
+                    if let Some(provenance) = self.current_provenance.take() {
+                        let completed_instance = provenance.source_instance_id();
+                        let analysis_result = analysis_result.with_provenance(provenance);
+                        if let Some(run_id) = target_run_id
+                            && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+                        {
+                            run.add_analysis(analysis_result);
+                            self.successful_analysis_instances
+                                .insert(completed_instance);
+                            log::info!(
+                                "Added analysis to run {} (now has {} analyses)",
+                                run.id,
+                                run.analyses.len()
+                            );
+                        }
+                    } else {
+                        let message = format!(
+                            "Internal error: completed {} has no prepared-task provenance",
+                            current_label
                         );
+                        log::error!("{message}");
+                        state.push_sim_message(ConsoleMessage::error(message));
+                        if let Some(run_id) = target_run_id
+                            && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+                        {
+                            run.success = false;
+                        }
                     }
 
                     // Display the just-completed analysis without rebuilding waveform buffers.
@@ -820,9 +999,12 @@ impl SimulationController {
                 Err(SimulationError::Aborted) => {
                     log::info!("Analysis aborted; discarding cancellation completion result");
                     self.pending_analyses.clear();
+                    self.successful_analysis_instances.clear();
                     self.cached_netlist = None;
                     self.current_config = None;
                     self.current_spec = None;
+                    self.current_provenance = None;
+                    self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
                     self.current_run_id = None;
                     self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
                     state.ui.netlist.pending_manual_run_id = None;
@@ -855,13 +1037,25 @@ impl SimulationController {
                                 .map(|cfg| self.config_to_analysis_type(cfg))
                         })
                         .unwrap_or(AnalysisType::DcOp);
-                    let failed_analysis =
-                        AnalysisResult::failed(1, failed_type, failed_label, e.to_string());
                     let target_run_id = self.target_run_id(state);
+                    let failed_analysis = if let Some(provenance) = self.current_provenance.take() {
+                        Some(
+                            AnalysisResult::failed(1, failed_type, failed_label, e.to_string())
+                                .with_provenance(provenance),
+                        )
+                    } else {
+                        let message =
+                            "Internal error: failed analysis has no prepared-task provenance";
+                        log::error!("{message}");
+                        state.push_sim_message(ConsoleMessage::error(message.to_owned()));
+                        None
+                    };
                     if let Some(run_id) = target_run_id
                         && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                     {
-                        run.add_analysis(failed_analysis);
+                        if let Some(failed_analysis) = failed_analysis {
+                            run.add_analysis(failed_analysis);
+                        }
                         run.success = false;
                     }
 
@@ -907,9 +1101,9 @@ impl SimulationController {
 mod tests {
     use super::*;
     use crate::common::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-    use crate::common::simulation_analysis_tabs::TAB_DC_OP;
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
-    use crate::state::{ComponentType, Point};
+    use crate::simulation::plan::AnalysisKind;
+    use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};
     use std::cell::RefCell;
     use std::path::Path;
 
@@ -969,6 +1163,18 @@ mod tests {
         state
     }
 
+    fn state_with_current_clean_drc() -> AppState {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        let mut result = DrcResult::new();
+        result.completed = true;
+        state.dialogs.drc_results = Some(result);
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        state
+    }
+
     fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
         let frequencies = vec![1.0e6, 2.0e6];
         let mut waveforms = std::collections::HashMap::new();
@@ -1002,6 +1208,16 @@ mod tests {
         crate::simulation::SimulationResult::DcOp(result)
     }
 
+    fn synthetic_result_provenance() -> AnalysisResultProvenance {
+        AnalysisResultProvenance::new(
+            crate::product::AnalysisInstanceId::new(),
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([0x39; 32]),
+            Vec::new(),
+        )
+        .expect("synthetic prepared-task provenance is valid")
+    }
+
     fn exact_vec(values: &[f64]) -> Vec<f64> {
         let mut result = Vec::with_capacity(values.len());
         result.extend_from_slice(values);
@@ -1025,6 +1241,121 @@ mod tests {
         assert!(!state.simulation.trigger_simulation);
         assert!(!state.simulation.is_running);
         assert_eq!(state.simulation.status, "Run blocked");
+    }
+
+    #[test]
+    fn controller_plan_run_is_sealed_with_exact_prepared_receipt_before_results() {
+        let mut state = state_with_current_clean_drc();
+        let plan = state.sim_setup.analysis_plan.as_ref().expect("stable plan");
+        let plan_id = plan.id();
+        let plan_revision = plan.revision();
+        let task_id = plan
+            .instances()
+            .iter()
+            .find(|instance| instance.enabled())
+            .expect("enabled plan task")
+            .id();
+        let project_revision = state.workspace.project.revision();
+        let mut controller = SimulationController::new();
+        let metadata = controller
+            .prepare_run_set_for_preflight(&state)
+            .expect("clean plan preflight");
+
+        state.simulation.request_simulate_run_set();
+        controller.start_simulation(&mut state);
+
+        let run = state.simulation.active_run().expect("prepared run starts");
+        let receipt = run
+            .prepared_receipt()
+            .expect("run is sealed before results");
+        assert_eq!(
+            receipt.source_domain(),
+            AnalysisResultSourceDomain::SimulationPlan
+        );
+        assert_eq!(receipt.simulation_plan_id(), Some(plan_id));
+        assert_eq!(receipt.project_revision(), project_revision);
+        assert_eq!(receipt.prepared_snapshot_digest(), metadata.snapshot_digest);
+        assert_eq!(receipt.source_content_digest(), metadata.source_digest);
+        assert_eq!(
+            receipt.source_check_receipt(),
+            PreparedSourceCheckReceipt::SchematicDrc(metadata.receipt_digest)
+        );
+        assert_eq!(receipt.tasks().len(), 1);
+        let task = &receipt.tasks()[0];
+        assert_eq!(task.instance_id(), task_id);
+        assert_eq!(task.source_revision(), plan_revision);
+        assert_eq!(task.analysis_kind_tag(), 5);
+        assert!(task.dependencies().is_empty());
+        assert_ne!(
+            task.config_digest(),
+            crate::product::ContentDigest::from_bytes([0; 32])
+        );
+        assert!(run.analyses.is_empty());
+        assert!(run.validate_provenance().is_ok());
+
+        controller.abort();
+    }
+
+    #[test]
+    fn controller_plan_run_receipt_survives_production_project_round_trip() {
+        let mut state = state_with_current_clean_drc();
+        let mut controller = SimulationController::new();
+        controller
+            .prepare_run_set_for_preflight(&state)
+            .expect("clean plan preflight");
+        state.simulation.request_simulate_run_set();
+        controller.start_simulation(&mut state);
+        let task_provenance = controller
+            .current_provenance
+            .clone()
+            .expect("controller owns the first prepared plan task");
+        let expected_source_id = task_provenance.source_instance_id();
+        state
+            .simulation
+            .active_run_mut()
+            .expect("prepared plan run")
+            .add_analysis(
+                AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+                    .with_provenance(task_provenance),
+            );
+        controller.abort();
+
+        let project = crate::common::project_lifecycle::snapshot(&state)
+            .expect("production snapshot accepts controller run");
+        let json = crate::io::project_io::serialize_project_file(&project)
+            .expect("controller plan run serializes");
+        let loaded = crate::io::project_io::load_project_text(&json, None)
+            .expect("controller plan run reloads");
+        let loaded_plan_id = loaded
+            .execution_context
+            .as_ref()
+            .expect("execution context retained")
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("stable plan retained")
+            .id();
+        let restored = loaded
+            .simulation_results
+            .into_simulation_state()
+            .expect("controller plan history restores");
+        let run = &restored.runs[0];
+        let receipt = run.prepared_receipt().expect("prepared receipt retained");
+        let result_provenance = run.analyses[0]
+            .provenance
+            .as_ref()
+            .expect("result provenance retained");
+
+        assert_eq!(
+            receipt.source_domain(),
+            AnalysisResultSourceDomain::SimulationPlan
+        );
+        assert_eq!(receipt.simulation_plan_id(), Some(loaded_plan_id));
+        assert_eq!(receipt.tasks()[0].instance_id(), expected_source_id);
+        assert_eq!(result_provenance.source_instance_id(), expected_source_id);
+        assert_eq!(
+            result_provenance.prepared_snapshot_digest(),
+            receipt.prepared_snapshot_digest()
+        );
     }
 
     #[test]
@@ -1121,6 +1452,9 @@ mod tests {
             "user can inspect an older run while a newer run is in flight"
         );
         controller.current_spec = Some(AnalysisSpec::DcOp);
+        let provenance = synthetic_result_provenance();
+        let expected_source_id = provenance.source_instance_id();
+        controller.current_provenance = Some(provenance);
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
         controller
@@ -1144,6 +1478,14 @@ mod tests {
         );
         assert_eq!(started_run.analyses.len(), 1);
         assert_eq!(
+            started_run.analyses[0]
+                .provenance
+                .as_ref()
+                .expect("completed result has prepared provenance")
+                .source_instance_id(),
+            expected_source_id
+        );
+        assert_eq!(
             state.simulation.active_run().map(|run| run.id),
             Some(started_run_id)
         );
@@ -1162,6 +1504,7 @@ mod tests {
             max_timestep: None,
             uic: false,
         });
+        controller.current_provenance = Some(synthetic_result_provenance());
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
 
@@ -1232,6 +1575,7 @@ mod tests {
             stop2: None,
             step2: None,
         });
+        controller.current_provenance = Some(synthetic_result_provenance());
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
 
@@ -1285,6 +1629,155 @@ mod tests {
             values_ptr,
             "sweep samples should move into run history instead of being copied"
         );
+    }
+
+    #[test]
+    fn failed_completion_retains_exact_prepared_task_provenance() {
+        let mut state = AppState::default();
+        let mut controller = SimulationController::new();
+        let export_io = MockExportWorkflowIo::default();
+        state.simulation.start_run();
+        controller.current_spec = Some(AnalysisSpec::DcOp);
+        let provenance = synthetic_result_provenance();
+        let expected_source_id = provenance.source_instance_id();
+        let expected_snapshot = provenance.prepared_snapshot_digest();
+        controller.current_provenance = Some(provenance);
+        controller.current_analysis_idx = 1;
+        controller.total_analyses = 1;
+        controller
+            .runner
+            .store_pending_result(Err(SimulationError::SolverError(
+                "singular matrix".to_owned(),
+            )))
+            .expect("seed failed result");
+
+        controller.update(&mut state, &export_io);
+
+        let analysis = &state.simulation.active_run().expect("run remains").analyses[0];
+        let restored = analysis
+            .provenance
+            .as_ref()
+            .expect("failed result has prepared provenance");
+        assert!(!analysis.success);
+        assert_eq!(restored.source_instance_id(), expected_source_id);
+        assert_eq!(restored.prepared_snapshot_digest(), expected_snapshot);
+    }
+
+    #[test]
+    fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
+        use crate::product::{ContentDigest, ObjectRevision};
+        use crate::simulation::dialog::corner::ProcessCorner;
+        use crate::simulation::execution::{
+            ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
+            RunSourceReceipt, SavePolicy, SnapshotParts,
+        };
+
+        let prerequisite_id = crate::product::AnalysisInstanceId::new();
+        let dependent_id = crate::product::AnalysisInstanceId::new();
+        let task = |spec, line: &str| QueuedAnalysis {
+            spec,
+            config: None,
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: line.to_owned(),
+        };
+        let snapshot = PreparedRunSnapshot::new(SnapshotParts {
+            intent: SimulationRunIntent::SimulateRunSet,
+            simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
+            project_revision: 3,
+            topology_revision: 4,
+            source_digest: ContentDigest::from_bytes([0x71; 32]),
+            reference_process: ProcessCorner::TT,
+            reference_temperature_celsius: 27.0,
+            tasks: vec![
+                PreparedTask::new(
+                    prerequisite_id,
+                    ObjectRevision::INITIAL,
+                    Vec::new(),
+                    "Prerequisite",
+                    task(AnalysisSpec::DcOp, ".op"),
+                ),
+                PreparedTask::new(
+                    dependent_id,
+                    ObjectRevision::INITIAL,
+                    vec![prerequisite_id],
+                    "Dependent",
+                    task(AnalysisSpec::Pac, ".pac"),
+                ),
+            ],
+            executable_netlist: "deck\n.op\n.end\n".to_owned(),
+            save_policy: SavePolicy::RetainEngineProducedResults,
+            model_identities: Vec::new(),
+            target: ExecutionTargetCapabilities::current(),
+            receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([0x72; 32])),
+            advisories: Vec::new(),
+            manual_source: None,
+            cross_probe: None,
+            touchstone_export: TouchstoneExportPolicy::disabled(),
+        })
+        .expect("dependency-ordered snapshot validates");
+        let digest = snapshot.digest();
+        let issuer = ExecutionPermitIssuer::default();
+        let proof = issuer
+            .issue(digest)
+            .expect("permit issues")
+            .consume(digest, digest)
+            .expect("permit consumes");
+        let mut tasks = snapshot
+            .authorize_dispatch(proof)
+            .expect("snapshot authorizes")
+            .into_tasks();
+        let failed_task = tasks.pop_front().expect("prerequisite task");
+
+        let mut state = AppState::default();
+        let run_sequence = state.simulation.start_run().id;
+        let failed_provenance = AnalysisResultProvenance::new(
+            failed_task.instance_id(),
+            failed_task.source_revision(),
+            failed_task.snapshot_digest(),
+            failed_task.dependencies().to_vec(),
+        )
+        .expect("failed prerequisite provenance");
+        state
+            .simulation
+            .run_by_sequence_mut(run_sequence)
+            .expect("active run")
+            .add_analysis(
+                AnalysisResult::failed(1, AnalysisType::DcOp, "Prerequisite", "solver failed")
+                    .with_provenance(failed_provenance),
+            );
+
+        let mut controller = SimulationController::new();
+        controller.current_run_id = Some(run_sequence);
+        controller.current_analysis_idx = 1;
+        controller.total_analyses = 2;
+        controller.pending_analyses = tasks;
+        controller.start_next_analysis(&mut state);
+
+        let run = state
+            .simulation
+            .run_by_sequence(run_sequence)
+            .expect("completed run remains");
+        assert_eq!(run.analyses.len(), 2);
+        let skipped = run
+            .find_analysis_by_source_instance(dependent_id)
+            .expect("dependent receives a retained skipped result");
+        assert!(!skipped.success);
+        assert!(
+            skipped
+                .error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("prerequisite analysis result"))
+        );
+        assert_eq!(
+            skipped
+                .provenance
+                .as_ref()
+                .expect("skipped provenance")
+                .dependency_ids(),
+            &[prerequisite_id]
+        );
+        assert_eq!(state.simulation.status, "Completed with errors");
+        assert!(!controller.is_running());
     }
 
     #[test]
@@ -1478,7 +1971,14 @@ mod tests {
     #[test]
     fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
         let mut state = AppState::default();
-        state.sim_setup.enabled.clear();
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan");
+        let transient_id = plan.instances()[0].id();
+        plan.set_enabled(transient_id, false)
+            .expect("the sole run-set analysis disables");
         state.workspace.netlist_source =
             Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
         state.simulation.request_manual_deck_run();
@@ -1487,6 +1987,10 @@ mod tests {
         controller.start_simulation(&mut state);
         let total_analyses = controller.total_analyses;
         let current_spec = controller.current_spec.clone();
+        let source_domain = controller
+            .current_provenance
+            .as_ref()
+            .map(AnalysisResultProvenance::source_domain);
         let cached_netlist = controller.cached_netlist.clone().unwrap_or_default();
         let run_count = state.simulation.runs.len();
         let status = state.simulation.status.clone();
@@ -1494,15 +1998,152 @@ mod tests {
 
         assert_eq!(total_analyses, 1);
         assert!(matches!(current_spec, Some(AnalysisSpec::DcOp)));
+        assert_eq!(source_domain, Some(AnalysisResultSourceDomain::ManualDeck));
         assert!(cached_netlist.contains(".op\n.end"));
         assert_eq!(run_count, 1);
         assert_eq!(status, "DC Operating Point");
     }
 
     #[test]
+    fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_stripped() {
+        let mut state = AppState::default();
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan");
+        let transient_id = plan.instances()[0].id();
+        plan.set_enabled(transient_id, false)
+            .expect("run-set analysis disables");
+        state.workspace.netlist_source =
+            Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+        let project_revision = state.workspace.project.revision();
+        state.simulation.request_manual_deck_run();
+        let mut controller = SimulationController::new();
+
+        controller.start_simulation(&mut state);
+
+        let task_provenance = controller
+            .current_provenance
+            .clone()
+            .expect("manual task owns exact provenance");
+        let expanded = controller
+            .cached_netlist
+            .as_deref()
+            .expect("sealed manual deck");
+        let expected_source_digest = crate::simulation::execution::content_digest(
+            "rspice.manual-executable-source/v1",
+            expanded.as_bytes(),
+        );
+        {
+            let run = state.simulation.active_run().expect("manual run starts");
+            let receipt = run.prepared_receipt().expect("manual run is sealed");
+            assert_eq!(
+                receipt.source_domain(),
+                AnalysisResultSourceDomain::ManualDeck
+            );
+            assert_eq!(receipt.simulation_plan_id(), None);
+            assert_eq!(receipt.project_revision(), project_revision);
+            assert_eq!(
+                receipt.prepared_snapshot_digest(),
+                task_provenance.prepared_snapshot_digest()
+            );
+            assert_eq!(receipt.source_content_digest(), expected_source_digest);
+            assert!(receipt.source_check_receipt().is_manual_source_check());
+            assert_eq!(receipt.tasks().len(), 1);
+            let task = &receipt.tasks()[0];
+            assert_eq!(task.instance_id(), task_provenance.source_instance_id());
+            assert_eq!(task.source_revision(), project_revision);
+            assert_eq!(task.analysis_kind_tag(), 0);
+            assert!(task.dependencies().is_empty());
+        }
+
+        let run = state
+            .simulation
+            .active_run_mut()
+            .expect("manual run remains active");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_provenance(task_provenance),
+        );
+        assert!(run.validate_provenance().is_ok());
+        run.analyses[0].provenance = None;
+        assert!(matches!(
+            run.provenance(),
+            Some(SimulationRunProvenance::Prepared(_))
+        ));
+        assert!(run.validate_provenance().is_err());
+
+        controller.abort();
+    }
+
+    #[test]
+    fn controller_manual_run_receipt_survives_production_project_round_trip() {
+        let mut state = AppState::default();
+        state.workspace.netlist_source =
+            Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+        state.simulation.request_manual_deck_run();
+        let mut controller = SimulationController::new();
+        controller.start_simulation(&mut state);
+        let task_provenance = controller
+            .current_provenance
+            .clone()
+            .expect("controller owns the prepared manual task");
+        let expected_source_id = task_provenance.source_instance_id();
+        state
+            .simulation
+            .active_run_mut()
+            .expect("prepared manual run")
+            .add_analysis(
+                AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_provenance(task_provenance),
+            );
+        controller.abort();
+
+        let project = crate::common::project_lifecycle::snapshot(&state)
+            .expect("production snapshot accepts controller manual run");
+        let json = crate::io::project_io::serialize_project_file(&project)
+            .expect("controller manual run serializes");
+        let loaded = crate::io::project_io::load_project_text(&json, None)
+            .expect("controller manual run reloads");
+        assert!(
+            loaded.execution_context.is_some(),
+            "manual receipt must remain independent of the unrelated retained plan"
+        );
+        let restored = loaded
+            .simulation_results
+            .into_simulation_state()
+            .expect("controller manual history restores");
+        let run = &restored.runs[0];
+        let receipt = run.prepared_receipt().expect("manual receipt retained");
+        let result_provenance = run.analyses[0]
+            .provenance
+            .as_ref()
+            .expect("manual result provenance retained");
+
+        assert_eq!(
+            receipt.source_domain(),
+            AnalysisResultSourceDomain::ManualDeck
+        );
+        assert_eq!(receipt.simulation_plan_id(), None);
+        assert!(receipt.source_check_receipt().is_manual_source_check());
+        assert_eq!(receipt.tasks()[0].instance_id(), expected_source_id);
+        assert_eq!(result_provenance.source_instance_id(), expected_source_id);
+        assert_eq!(
+            result_provenance.prepared_snapshot_digest(),
+            receipt.prepared_snapshot_digest()
+        );
+    }
+
+    #[test]
     fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
         let mut state = AppState::default();
-        state.sim_setup.enabled.clear();
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan");
+        let transient_id = plan.instances()[0].id();
+        plan.set_enabled(transient_id, false)
+            .expect("the sole run-set analysis disables");
         state.sim_setup.options.reltol = 1.0e-4;
         state.workspace.netlist_source =
             Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
@@ -1549,8 +2190,18 @@ mod tests {
     #[test]
     fn simulate_run_set_does_not_run_manual_deck_source() {
         let mut state = AppState::default();
-        state.sim_setup.enabled.clear();
-        state.sim_setup.enabled.insert(TAB_DC_OP);
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan");
+        let transient_id = plan.instances()[0].id();
+        plan.set_enabled(transient_id, false)
+            .expect("default transient disables");
+        let (op_id, _) = plan
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("OP inserts as the sole enabled analysis");
+        assert_eq!(plan.instances()[0].id(), op_id);
         state.workspace.netlist_source =
             Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
         state.simulation.request_simulate_run_set();

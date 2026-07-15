@@ -475,18 +475,67 @@ fn canonical_execution_context(
         .map_err(|error| format!("simulation/model state could not be compared: {error}"))
 }
 
-fn pristine_execution_context() -> Result<ProjectExecutionContext, String> {
+fn matches_documented_pristine_plan(
+    candidate: &crate::simulation::plan::SimulationPlan,
+    documented: &crate::simulation::plan::SimulationPlan,
+) -> bool {
+    if candidate.revision() != documented.revision()
+        || !candidate.receipts().is_empty()
+        || !candidate.tombstones().is_empty()
+    {
+        return false;
+    }
+    let ([candidate], [documented]) = (candidate.instances(), documented.instances()) else {
+        return false;
+    };
+    let drafts_match = match (
+        serde_json::to_value(candidate.draft()),
+        serde_json::to_value(documented.draft()),
+    ) {
+        (Ok(candidate), Ok(documented)) => candidate == documented,
+        _ => false,
+    };
+    candidate.kind() == documented.kind()
+        && candidate.enabled() == documented.enabled()
+        && candidate.lifecycle() == documented.lifecycle()
+        && candidate.dependencies() == documented.dependencies()
+        && candidate.created_revision() == documented.created_revision()
+        && candidate.modified_revision() == documented.modified_revision()
+        && drafts_match
+}
+
+fn pristine_execution_context(
+    project_id: crate::product::ProjectId,
+    identity_source: &crate::common::app::SimSetupState,
+) -> Result<ProjectExecutionContext, String> {
+    let mut pristine = crate::common::app::SimSetupState::new();
+    let source_plan = identity_source.stable_analysis_plan().ok();
+    let documented_plan = pristine.stable_analysis_plan().ok();
+    if source_plan
+        .zip(documented_plan)
+        .is_some_and(|(source, documented)| matches_documented_pristine_plan(source, documented))
+    {
+        // Fresh plan identities are intentionally random. Preserve only the
+        // exact documented default draft and lifecycle under the source's
+        // untouched identity, so UUID generation itself is not user work.
+        pristine.analysis_plan = source_plan.cloned();
+    }
     ProjectExecutionContext::from_state(
-        &crate::common::app::SimSetupState::new(),
+        project_id,
+        &pristine,
         &crate::common::app::default_model_library_manager(),
     )
     .map_err(|error| format!("pristine simulation/model state is invalid: {error}"))
 }
 
 fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences, String> {
-    let current_execution =
-        ProjectExecutionContext::from_state(&state.sim_setup, &state.model_library_manager)
-            .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
+    let project_id = state.workspace.project.id();
+    let current_execution = ProjectExecutionContext::from_state(
+        project_id,
+        &state.sim_setup,
+        &state.model_library_manager,
+    )
+    .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
     let current_execution = canonical_execution_context(&current_execution)?;
 
     let current_results = ProjectSimulationResults::from_state(&state.simulation);
@@ -509,12 +558,18 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
             }
             let execution = match project.execution_context.as_ref() {
                 Some(context) => canonical_execution_context(context)?,
-                None => canonical_execution_context(&pristine_execution_context()?)?,
+                None => canonical_execution_context(&pristine_execution_context(
+                    project_id,
+                    &state.sim_setup,
+                )?)?,
             };
             (execution, project.simulation_results)
         } else {
             (
-                canonical_execution_context(&pristine_execution_context()?)?,
+                canonical_execution_context(&pristine_execution_context(
+                    project_id,
+                    &state.sim_setup,
+                )?)?,
                 ProjectSimulationResults::default(),
             )
         };
@@ -801,7 +856,7 @@ mod tests {
     use super::*;
     use crate::state::{
         AnalysisResult, AnalysisType, Component, ComponentType, Junction, NetLabel, Point,
-        SimulationRun, Wire,
+        SimulationRun, SimulationRunProvenance, Wire,
     };
 
     #[test]
@@ -878,7 +933,23 @@ mod tests {
         assert_eq!(recovery_replacement_block_reason(&pristine), None);
 
         let mut changed_plan = pristine.clone();
-        changed_plan.sim_setup.tran.stop = "25u".to_owned();
+        let transient = changed_plan
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default stable plan")
+            .instances()[0]
+            .id();
+        changed_plan
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("default stable plan")
+            .edit(transient, |draft| {
+                let crate::simulation::plan::AnalysisDraft::Transient(draft) = draft else {
+                    panic!("default instance is transient");
+                };
+                draft.stop = "25u".to_owned();
+            })
+            .expect("transient edit commits");
         let reason = recovery_replacement_block_reason(&changed_plan)
             .expect("changed unsaved simulation plan must block replacement");
         assert!(reason.contains("simulation plan or model-library bindings"));
@@ -891,11 +962,38 @@ mod tests {
             AnalysisType::Transient,
             "TRAN recovery guard",
         ));
+        run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+            .expect("synthetic historical result has valid unattributed legacy provenance");
         changed_results.simulation.runs.push(run);
         changed_results.simulation.next_run_id = 1;
         let reason = recovery_replacement_block_reason(&changed_results)
             .expect("unsaved result history must block replacement");
         assert!(reason.contains("simulation result history or selection"));
+    }
+
+    #[test]
+    fn replacement_guard_compares_initial_plan_draft_to_the_documented_default() {
+        let state = AppState::default();
+        let mut session = serde_json::to_value(&state).expect("session serializes");
+        session["execution_context"]["simulation_plan"]["analysis_plan"]["instances"][0]["draft"]
+            ["draft"]["stop"] = serde_json::json!("41u");
+        let restored: AppState = serde_json::from_value(session).expect("current session restores");
+        let plan = restored
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan restored");
+        assert_eq!(plan.revision(), crate::product::ObjectRevision::INITIAL);
+        assert!(plan.receipts().is_empty());
+        let crate::simulation::plan::AnalysisDraft::Transient(draft) = plan.instances()[0].draft()
+        else {
+            panic!("default instance remains transient");
+        };
+        assert_eq!(draft.stop, "41u");
+
+        let reason = recovery_replacement_block_reason(&restored)
+            .expect("a nondefault initial draft must block destructive replacement");
+        assert!(reason.contains("simulation plan or model-library bindings"));
+        assert!(reason.contains("pristine unsaved-project defaults"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -910,7 +1008,23 @@ mod tests {
         ));
         assert_eq!(recovery_replacement_block_reason(&state), None);
 
-        state.sim_setup.tran.stop = "17u".to_owned();
+        let transient = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("saved stable plan")
+            .instances()[0]
+            .id();
+        state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("saved stable plan")
+            .edit(transient, |draft| {
+                let crate::simulation::plan::AnalysisDraft::Transient(draft) = draft else {
+                    panic!("default instance is transient");
+                };
+                draft.stop = "17u".to_owned();
+            })
+            .expect("transient edit commits");
         let reason = recovery_replacement_block_reason(&state)
             .expect("execution state changed after save must block replacement");
         assert!(reason.contains("last saved project snapshot"));

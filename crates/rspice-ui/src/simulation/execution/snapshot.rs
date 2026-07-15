@@ -3,15 +3,17 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::product::ContentDigest;
+use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::simulation::controller::QueuedAnalysis;
 use crate::simulation::dialog::corner::ProcessCorner;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::state::{Point, SimulationRunIntent};
+use crate::state::{
+    AnalysisResultSourceDomain, Point, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, SimulationRunIntent,
+};
 
 use super::canonical::{
-    CanonicalWriter, analysis_config_digest, analysis_instance_id, analysis_kind_tag,
-    content_digest,
+    CanonicalWriter, analysis_config_digest, analysis_kind_tag, content_digest,
 };
 use super::permit::ConsumedExecutionPermit;
 
@@ -290,6 +292,15 @@ impl RunSourceReceipt {
         }
     }
 
+    const fn durable(self) -> PreparedSourceCheckReceipt {
+        match self {
+            Self::SchematicDrc(digest) => PreparedSourceCheckReceipt::SchematicDrc(digest),
+            Self::ManualSourceCheck(digest) => {
+                PreparedSourceCheckReceipt::ManualSourceCheck(digest)
+            }
+        }
+    }
+
     fn encode(self, writer: &mut CanonicalWriter) {
         writer.domain("source-check-receipt");
         match self {
@@ -305,11 +316,96 @@ impl RunSourceReceipt {
     }
 }
 
+/// One immutable analysis task frozen before snapshot authorization.
+///
+/// Identity, source revision, graph edges, display label, authenticated engine
+/// payload, and payload digest deliberately live in one record. Keeping these
+/// fields together prevents parallel-vector drift and makes it impossible for
+/// dispatch authorization to shed graph provenance accidentally.
 #[derive(Debug, Clone)]
-struct PreparedAnalysisIdentity {
-    instance_id: ContentDigest,
-    config_digest: ContentDigest,
+pub(in crate::simulation) struct PreparedTask {
+    instance_id: AnalysisInstanceId,
+    source_revision: ObjectRevision,
+    dependencies: Vec<AnalysisInstanceId>,
     label: String,
+    config_digest: ContentDigest,
+    task: QueuedAnalysis,
+    /// Explicit per-instance override. Stable plan tasks always set this for
+    /// S-parameter analyses; manual-deck tasks inherit the run-level policy.
+    touchstone_export: Option<TouchstoneExportPolicy>,
+}
+
+impl PreparedTask {
+    pub(in crate::simulation) fn new(
+        instance_id: AnalysisInstanceId,
+        source_revision: ObjectRevision,
+        dependencies: Vec<AnalysisInstanceId>,
+        label: impl Into<String>,
+        task: QueuedAnalysis,
+    ) -> Self {
+        let config_digest = analysis_config_digest(
+            &task.analysis_line,
+            &task.spec,
+            task.config.as_ref(),
+            &task.spec_options,
+        );
+        Self {
+            instance_id,
+            source_revision,
+            dependencies,
+            label: label.into(),
+            config_digest,
+            task,
+            touchstone_export: None,
+        }
+    }
+
+    pub(in crate::simulation) fn with_touchstone_export_policy(
+        mut self,
+        policy: TouchstoneExportPolicy,
+    ) -> Self {
+        self.touchstone_export = Some(policy);
+        self
+    }
+
+    #[cfg(test)]
+    pub(in crate::simulation) const fn instance_id(&self) -> AnalysisInstanceId {
+        self.instance_id
+    }
+
+    #[cfg(test)]
+    pub(in crate::simulation) const fn source_revision(&self) -> ObjectRevision {
+        self.source_revision
+    }
+
+    #[cfg(test)]
+    pub(in crate::simulation) fn dependencies(&self) -> &[AnalysisInstanceId] {
+        &self.dependencies
+    }
+
+    #[cfg(test)]
+    pub(in crate::simulation) fn touchstone_export_policy(
+        &self,
+    ) -> Option<&TouchstoneExportPolicy> {
+        self.touchstone_export.as_ref()
+    }
+
+    pub(in crate::simulation) const fn config_digest(&self) -> ContentDigest {
+        self.config_digest
+    }
+
+    pub(in crate::simulation) const fn queued_analysis(&self) -> &QueuedAnalysis {
+        &self.task
+    }
+
+    fn payload_digest(&self) -> ContentDigest {
+        analysis_config_digest(
+            &self.task.analysis_line,
+            &self.task.spec,
+            self.task.config.as_ref(),
+            &self.task.spec_options,
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -317,13 +413,6 @@ struct PreparedPvtPoint {
     process: ProcessCorner,
     voltage: Option<f64>,
     temperature_celsius: f64,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedTaskNode {
-    instance_id: ContentDigest,
-    config_digest: ContentDigest,
-    dependencies: Vec<ContentDigest>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -379,20 +468,30 @@ pub(crate) struct PreparedRunMetadata {
 pub(in crate::simulation) struct AuthorizedRunDispatch {
     digest: ContentDigest,
     intent: SimulationRunIntent,
+    simulation_plan_id: Option<SimulationPlanId>,
+    project_revision: u64,
+    source_digest: ContentDigest,
+    source_receipt: RunSourceReceipt,
     tasks: VecDeque<AuthorizedTaskDispatch>,
     executable_netlist: Arc<str>,
     advisories: Vec<String>,
     manual_source: Option<String>,
     cross_probe: Option<CrossProbeSnapshot>,
-    touchstone_export: TouchstoneExportPolicy,
 }
 
 /// Opaque task/netlist pair accepted by the runner's sole production start.
 /// Its constructor and fields are private to the execution boundary.
 #[derive(Debug)]
 pub(in crate::simulation) struct AuthorizedTaskDispatch {
+    snapshot_digest: ContentDigest,
+    instance_id: AnalysisInstanceId,
+    source_revision: ObjectRevision,
+    dependencies: Vec<AnalysisInstanceId>,
+    label: String,
+    config_digest: ContentDigest,
     task: QueuedAnalysis,
     executable_netlist: Arc<str>,
+    touchstone_export: TouchstoneExportPolicy,
 }
 
 impl AuthorizedRunDispatch {
@@ -402,6 +501,42 @@ impl AuthorizedRunDispatch {
 
     pub(in crate::simulation) const fn intent(&self) -> SimulationRunIntent {
         self.intent
+    }
+
+    pub(in crate::simulation) fn prepared_run_receipt(
+        &self,
+        source_domain: AnalysisResultSourceDomain,
+    ) -> Result<PreparedRunReceipt, PreparationError> {
+        let project_revision = ObjectRevision::new(self.project_revision).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::Authorization,
+                format!("Authorized run has invalid project revision: {error}"),
+            )
+        })?;
+        let tasks = self
+            .tasks
+            .iter()
+            .map(|task| {
+                PreparedRunTaskReceipt::new(
+                    task.instance_id,
+                    task.source_revision,
+                    task.dependencies.clone(),
+                    analysis_kind_tag(&task.task.spec),
+                    task.config_digest,
+                )
+                .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        PreparedRunReceipt::new(
+            source_domain,
+            self.simulation_plan_id,
+            project_revision,
+            self.digest,
+            self.source_digest,
+            self.source_receipt.durable(),
+            tasks,
+        )
+        .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
     }
 
     pub(in crate::simulation) fn task_count(&self) -> usize {
@@ -431,18 +566,37 @@ impl AuthorizedRunDispatch {
     pub(in crate::simulation) fn take_cross_probe(&mut self) -> Option<CrossProbeSnapshot> {
         self.cross_probe.take()
     }
-
-    pub(in crate::simulation) fn take_touchstone_export_policy(
-        &mut self,
-    ) -> TouchstoneExportPolicy {
-        std::mem::replace(
-            &mut self.touchstone_export,
-            TouchstoneExportPolicy::disabled(),
-        )
-    }
 }
 
 impl AuthorizedTaskDispatch {
+    pub(in crate::simulation) const fn snapshot_digest(&self) -> ContentDigest {
+        self.snapshot_digest
+    }
+
+    pub(in crate::simulation) const fn instance_id(&self) -> AnalysisInstanceId {
+        self.instance_id
+    }
+
+    pub(in crate::simulation) const fn source_revision(&self) -> ObjectRevision {
+        self.source_revision
+    }
+
+    pub(in crate::simulation) fn dependencies(&self) -> &[AnalysisInstanceId] {
+        &self.dependencies
+    }
+
+    pub(in crate::simulation) fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub(in crate::simulation) const fn config_digest(&self) -> ContentDigest {
+        self.config_digest
+    }
+
+    pub(in crate::simulation) fn touchstone_export_policy(&self) -> &TouchstoneExportPolicy {
+        &self.touchstone_export
+    }
+
     pub(in crate::simulation) fn spec(&self) -> &crate::simulation::multi_run::AnalysisSpec {
         &self.task.spec
     }
@@ -460,15 +614,13 @@ impl AuthorizedTaskDispatch {
 /// remain private after construction.
 pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) intent: SimulationRunIntent,
+    pub(in crate::simulation) simulation_plan_id: Option<SimulationPlanId>,
     pub(in crate::simulation) project_revision: u64,
     pub(in crate::simulation) topology_revision: u64,
     pub(in crate::simulation) source_digest: ContentDigest,
     pub(in crate::simulation) reference_process: ProcessCorner,
     pub(in crate::simulation) reference_temperature_celsius: f64,
-    pub(in crate::simulation) analysis_instance_ids: Vec<ContentDigest>,
-    pub(in crate::simulation) analysis_config_digests: Vec<ContentDigest>,
-    pub(in crate::simulation) analysis_labels: Vec<String>,
-    pub(in crate::simulation) tasks: Vec<QueuedAnalysis>,
+    pub(in crate::simulation) tasks: Vec<PreparedTask>,
     pub(in crate::simulation) executable_netlist: String,
     pub(in crate::simulation) save_policy: SavePolicy,
     pub(in crate::simulation) model_identities: Vec<ModelSourceIdentity>,
@@ -488,13 +640,12 @@ pub(in crate::simulation) struct SnapshotParts {
 pub(in crate::simulation) struct PreparedRunSnapshot {
     digest: ContentDigest,
     intent: SimulationRunIntent,
+    simulation_plan_id: Option<SimulationPlanId>,
     project_revision: u64,
     topology_revision: u64,
     source_digest: ContentDigest,
     pvt_points: Vec<PreparedPvtPoint>,
-    analyses: Vec<PreparedAnalysisIdentity>,
-    task_graph: Vec<PreparedTaskNode>,
-    tasks: Vec<QueuedAnalysis>,
+    tasks: Vec<PreparedTask>,
     executable_netlist: String,
     save_policy: SavePolicy,
     model_identities: Vec<ModelSourceIdentity>,
@@ -512,10 +663,10 @@ impl std::fmt::Debug for PreparedRunSnapshot {
             .debug_struct("PreparedRunSnapshot")
             .field("digest", &self.digest)
             .field("intent", &self.intent)
+            .field("simulation_plan_id", &self.simulation_plan_id)
             .field("project_revision", &self.project_revision)
             .field("topology_revision", &self.topology_revision)
             .field("source_digest", &self.source_digest)
-            .field("analyses", &self.analyses.len())
             .field("tasks", &self.tasks.len())
             .field("executable_netlist_bytes", &self.executable_netlist.len())
             .finish_non_exhaustive()
@@ -524,15 +675,26 @@ impl std::fmt::Debug for PreparedRunSnapshot {
 
 impl PreparedRunSnapshot {
     pub(in crate::simulation) fn new(mut parts: SnapshotParts) -> Result<Self, PreparationError> {
-        let count = parts.tasks.len();
-        if count == 0
-            || parts.analysis_instance_ids.len() != count
-            || parts.analysis_config_digests.len() != count
-            || parts.analysis_labels.len() != count
-        {
+        ObjectRevision::new(parts.project_revision).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::Authorization,
+                format!("Prepared run has invalid project revision: {error}"),
+            )
+        })?;
+        match (parts.intent, parts.simulation_plan_id, parts.receipt) {
+            (SimulationRunIntent::SimulateRunSet, Some(_), RunSourceReceipt::SchematicDrc(_))
+            | (SimulationRunIntent::ManualDeck, None, RunSourceReceipt::ManualSourceCheck(_)) => {}
+            _ => {
+                return Err(PreparationError::new(
+                    PreparationStage::Authorization,
+                    "Prepared run intent, simulation plan identity, and source-check receipt disagree",
+                ));
+            }
+        }
+        if parts.tasks.is_empty() {
             return Err(PreparationError::new(
                 PreparationStage::AnalysisPlan,
-                "Prepared analysis identities, configurations, labels, and tasks must be non-empty and have identical lengths",
+                "Prepared task graph must contain at least one analysis",
             ));
         }
         if parts.executable_netlist.trim().is_empty() {
@@ -541,29 +703,90 @@ impl PreparedRunSnapshot {
                 "Prepared executable netlist is empty",
             ));
         }
+        let source_revision = parts.tasks[0].source_revision;
+        if parts
+            .tasks
+            .iter()
+            .any(|task| task.source_revision != source_revision)
+        {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                "Prepared task graph cannot mix source revisions in one frozen run",
+            ));
+        }
 
-        let mut kind_occurrences = [0usize; 26];
+        let mut positions = HashMap::with_capacity(parts.tasks.len());
         for (index, task) in parts.tasks.iter().enumerate() {
-            let kind = usize::from(analysis_kind_tag(&task.spec));
-            let occurrence = kind_occurrences[kind];
-            kind_occurrences[kind] += 1;
-            let expected_instance = analysis_instance_id(parts.intent, &task.spec, occurrence);
-            let expected_config = analysis_config_digest(
-                &task.analysis_line,
-                &task.spec,
-                task.config.as_ref(),
-                &task.spec_options,
-            );
-            if parts.analysis_instance_ids[index] != expected_instance
-                || parts.analysis_config_digests[index] != expected_config
-            {
+            if positions.insert(task.instance_id, index).is_some() {
                 return Err(PreparationError::new(
                     PreparationStage::AnalysisPlan,
                     format!(
-                        "Prepared task {} identity/configuration digest does not authenticate its actual dispatch payload",
+                        "Prepared task graph contains duplicate analysis instance identity {}",
+                        task.instance_id
+                    ),
+                ));
+            }
+            if task.config_digest != task.payload_digest() {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Prepared task {} configuration digest does not authenticate its actual dispatch payload",
                         index + 1
                     ),
                 ));
+            }
+        }
+
+        for task in &parts.tasks {
+            let mut dependencies = HashSet::with_capacity(task.dependencies.len());
+            for dependency in &task.dependencies {
+                if !dependencies.insert(*dependency) {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared analysis {} contains duplicate dependency {}",
+                            task.instance_id, dependency
+                        ),
+                    ));
+                }
+                if *dependency == task.instance_id {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared analysis {} cannot depend on itself",
+                            task.instance_id
+                        ),
+                    ));
+                }
+                if !positions.contains_key(dependency) {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared analysis {} references missing dependency {}",
+                            task.instance_id, dependency
+                        ),
+                    ));
+                }
+            }
+        }
+
+        if let Some(cycle) = dependency_cycle(&parts.tasks, &positions) {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("Prepared task graph contains a dependency cycle involving {cycle:?}"),
+            ));
+        }
+        for (index, task) in parts.tasks.iter().enumerate() {
+            for dependency in &task.dependencies {
+                if positions[dependency] >= index {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared analysis {} dependency {} must appear earlier in the frozen task order",
+                            task.instance_id, dependency
+                        ),
+                    ));
+                }
             }
         }
 
@@ -573,32 +796,6 @@ impl PreparedRunSnapshot {
         parts.model_identities.sort_unstable();
         parts.model_identities.dedup();
 
-        let analyses = parts
-            .analysis_instance_ids
-            .iter()
-            .copied()
-            .zip(parts.analysis_config_digests.iter().copied())
-            .zip(parts.analysis_labels.iter().cloned())
-            .map(
-                |((instance_id, config_digest), label)| PreparedAnalysisIdentity {
-                    instance_id,
-                    config_digest,
-                    label,
-                },
-            )
-            .collect::<Vec<_>>();
-        let task_graph = analyses
-            .iter()
-            .enumerate()
-            .map(|(index, analysis)| PreparedTaskNode {
-                instance_id: analysis.instance_id,
-                config_digest: analysis.config_digest,
-                dependencies: index
-                    .checked_sub(1)
-                    .map(|previous| vec![analyses[previous].instance_id])
-                    .unwrap_or_default(),
-            })
-            .collect::<Vec<_>>();
         let pvt_points = derive_pvt_points(
             &parts.tasks,
             parts.reference_process,
@@ -607,12 +804,12 @@ impl PreparedRunSnapshot {
 
         let digest = snapshot_digest(
             parts.intent,
+            parts.simulation_plan_id,
             parts.project_revision,
             parts.topology_revision,
             parts.source_digest,
             &pvt_points,
-            &analyses,
-            &task_graph,
+            &parts.tasks,
             parts.save_policy,
             &parts.model_identities,
             &parts.target,
@@ -624,12 +821,11 @@ impl PreparedRunSnapshot {
         Ok(Self {
             digest,
             intent: parts.intent,
+            simulation_plan_id: parts.simulation_plan_id,
             project_revision: parts.project_revision,
             topology_revision: parts.topology_revision,
             source_digest: parts.source_digest,
             pvt_points,
-            analyses,
-            task_graph,
             tasks: parts.tasks,
             executable_netlist: parts.executable_netlist,
             save_policy: parts.save_policy,
@@ -660,11 +856,11 @@ impl PreparedRunSnapshot {
             project_revision: self.project_revision,
             topology_revision: self.topology_revision,
             analysis_ids: self
-                .analyses
+                .tasks
                 .iter()
-                .map(|analysis| analysis.instance_id)
+                .map(|task| analysis_id_metadata_digest(task.instance_id))
                 .collect(),
-            task_count: self.task_graph.len(),
+            task_count: self.tasks.len(),
             pvt_point_count: self.pvt_points.len(),
             target: self.target.label(),
             save_policy: self.save_policy.label(),
@@ -686,29 +882,100 @@ impl PreparedRunSnapshot {
             ));
         }
         let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
+        let default_touchstone_export = self.touchstone_export.clone();
         let tasks = self
             .tasks
             .into_iter()
-            .map(|task| AuthorizedTaskDispatch {
-                task,
-                executable_netlist: Arc::clone(&executable_netlist),
+            .map(|prepared| {
+                let touchstone_export = if matches!(
+                    &prepared.task.spec,
+                    crate::simulation::multi_run::AnalysisSpec::SParameter { .. }
+                ) {
+                    prepared
+                        .touchstone_export
+                        .unwrap_or_else(|| default_touchstone_export.clone())
+                } else {
+                    TouchstoneExportPolicy::disabled()
+                };
+                AuthorizedTaskDispatch {
+                    snapshot_digest: self.digest,
+                    instance_id: prepared.instance_id,
+                    source_revision: prepared.source_revision,
+                    dependencies: prepared.dependencies,
+                    label: prepared.label,
+                    config_digest: prepared.config_digest,
+                    task: prepared.task,
+                    executable_netlist: Arc::clone(&executable_netlist),
+                    touchstone_export,
+                }
             })
             .collect();
         Ok(AuthorizedRunDispatch {
             digest: self.digest,
             intent: self.intent,
+            simulation_plan_id: self.simulation_plan_id,
+            project_revision: self.project_revision,
+            source_digest: self.source_digest,
+            source_receipt: self.receipt,
             tasks,
             executable_netlist,
             advisories: self.advisories,
             manual_source: self.manual_source,
             cross_probe: self.cross_probe,
-            touchstone_export: self.touchstone_export,
         })
     }
 }
 
+fn dependency_cycle(
+    tasks: &[PreparedTask],
+    positions: &HashMap<AnalysisInstanceId, usize>,
+) -> Option<Vec<AnalysisInstanceId>> {
+    let mut indegree = tasks
+        .iter()
+        .map(|task| task.dependencies.len())
+        .collect::<Vec<_>>();
+    let mut dependents = vec![Vec::new(); tasks.len()];
+    for (dependent_index, task) in tasks.iter().enumerate() {
+        for dependency in &task.dependencies {
+            dependents[positions[dependency]].push(dependent_index);
+        }
+    }
+    let mut ready = VecDeque::new();
+    for (index, degree) in indegree.iter().enumerate() {
+        if *degree == 0 {
+            ready.push_back(index);
+        }
+    }
+    let mut visited = 0usize;
+    while let Some(index) = ready.pop_front() {
+        visited += 1;
+        for dependent in &dependents[index] {
+            indegree[*dependent] -= 1;
+            if indegree[*dependent] == 0 {
+                ready.push_back(*dependent);
+            }
+        }
+    }
+    if visited == tasks.len() {
+        return None;
+    }
+    Some(
+        tasks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, task)| (indegree[index] != 0).then_some(task.instance_id))
+            .collect(),
+    )
+}
+
+fn analysis_id_metadata_digest(instance_id: AnalysisInstanceId) -> ContentDigest {
+    let mut writer = CanonicalWriter::new("rspice.analysis-instance-metadata-id/v1");
+    writer.uuid(instance_id.as_uuid());
+    writer.finish()
+}
+
 fn derive_pvt_points(
-    tasks: &[QueuedAnalysis],
+    tasks: &[PreparedTask],
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
 ) -> Result<Vec<PreparedPvtPoint>, PreparationError> {
@@ -720,7 +987,8 @@ fn derive_pvt_points(
     }
 
     let mut expanded = Vec::new();
-    for task in tasks {
+    for prepared in tasks {
+        let task = prepared.queued_analysis();
         match &task.spec {
             AnalysisSpec::Corner => {
                 let default_corner;
@@ -834,12 +1102,12 @@ fn process_from_corner_runner(
 #[allow(clippy::too_many_arguments)]
 fn snapshot_digest(
     intent: SimulationRunIntent,
+    simulation_plan_id: Option<SimulationPlanId>,
     project_revision: u64,
     topology_revision: u64,
     source_digest: ContentDigest,
     pvt_points: &[PreparedPvtPoint],
-    analyses: &[PreparedAnalysisIdentity],
-    task_graph: &[PreparedTaskNode],
+    tasks: &[PreparedTask],
     save_policy: SavePolicy,
     model_identities: &[ModelSourceIdentity],
     target: &ExecutionTargetCapabilities,
@@ -847,11 +1115,15 @@ fn snapshot_digest(
     touchstone_export: &TouchstoneExportPolicy,
     executable_netlist: &str,
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v2");
+    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v5");
     writer.domain("run-intent");
     writer.u8(match intent {
         SimulationRunIntent::SimulateRunSet => 0,
         SimulationRunIntent::ManualDeck => 1,
+    });
+    writer.domain("owning-simulation-plan");
+    writer.option(simulation_plan_id.as_ref(), |writer, plan_id| {
+        writer.uuid(plan_id.as_uuid());
     });
     writer.domain("project-revision");
     writer.u64(project_revision);
@@ -870,22 +1142,19 @@ fn snapshot_digest(
         writer.f64(point.temperature_celsius);
     }
 
-    writer.domain("analysis-instances-and-configurations");
-    writer.sequence(analyses.len());
-    for analysis in analyses {
-        writer.digest(analysis.instance_id);
-        writer.digest(analysis.config_digest);
-        writer.string(&analysis.label);
-    }
-
-    writer.domain("ordered-task-graph");
-    writer.sequence(task_graph.len());
-    for task in task_graph {
-        writer.digest(task.instance_id);
+    writer.domain("ordered-prepared-task-graph");
+    writer.sequence(tasks.len());
+    for task in tasks {
+        writer.uuid(task.instance_id.as_uuid());
+        writer.u64(task.source_revision.get());
         writer.digest(task.config_digest);
+        writer.option(task.touchstone_export.as_ref(), |writer, policy| {
+            policy.encode(writer);
+        });
+        writer.string(&task.label);
         writer.sequence(task.dependencies.len());
         for dependency in &task.dependencies {
-            writer.digest(*dependency);
+            writer.uuid(dependency.as_uuid());
         }
     }
 
@@ -993,40 +1262,47 @@ mod tests {
         }
     }
 
-    fn authenticate_tasks(parts: &mut SnapshotParts) {
-        let mut kind_occurrences = [0usize; 26];
-        parts.analysis_instance_ids.clear();
-        parts.analysis_config_digests.clear();
-        for task in &parts.tasks {
-            let kind = usize::from(analysis_kind_tag(&task.spec));
-            let occurrence = kind_occurrences[kind];
-            kind_occurrences[kind] += 1;
-            parts.analysis_instance_ids.push(analysis_instance_id(
-                parts.intent,
-                &task.spec,
-                occurrence,
-            ));
-            parts.analysis_config_digests.push(analysis_config_digest(
-                &task.analysis_line,
-                &task.spec,
-                task.config.as_ref(),
-                &task.spec_options,
-            ));
-        }
+    fn instance_id(name: &str) -> AnalysisInstanceId {
+        const TEST_NAMESPACE: uuid::Uuid =
+            uuid::Uuid::from_u128(0x3ce2_b258_0c75_55f0_96d4_8fc1_cadf_1384);
+        AnalysisInstanceId::from_namespace(TEST_NAMESPACE, name.as_bytes())
+    }
+
+    fn prepared(name: &str, label: &str, task: QueuedAnalysis) -> PreparedTask {
+        PreparedTask::new(
+            instance_id(name),
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            label,
+            task,
+        )
+    }
+
+    fn prepared_with(
+        name: &str,
+        revision: ObjectRevision,
+        dependencies: Vec<AnalysisInstanceId>,
+        label: &str,
+        task: QueuedAnalysis,
+    ) -> PreparedTask {
+        PreparedTask::new(instance_id(name), revision, dependencies, label, task)
     }
 
     fn parts() -> SnapshotParts {
-        let mut parts = SnapshotParts {
+        const TEST_NAMESPACE: uuid::Uuid =
+            uuid::Uuid::from_u128(0xe6bc_c27a_6103_5327_b2ec_c759_b58a_8598);
+        SnapshotParts {
             intent: SimulationRunIntent::SimulateRunSet,
+            simulation_plan_id: Some(SimulationPlanId::from_namespace(
+                TEST_NAMESPACE,
+                b"snapshot-test-plan",
+            )),
             project_revision: 3,
             topology_revision: 4,
             source_digest: ContentDigest::from_bytes([1; 32]),
             reference_process: ProcessCorner::TT,
             reference_temperature_celsius: 27.0,
-            analysis_instance_ids: Vec::new(),
-            analysis_config_digests: Vec::new(),
-            analysis_labels: vec!["DC Operating Point".to_owned()],
-            tasks: vec![task()],
+            tasks: vec![prepared("op", "DC Operating Point", task())],
             executable_netlist: "deck\n.op\n.end\n".to_owned(),
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities: Vec::new(),
@@ -1036,26 +1312,167 @@ mod tests {
             manual_source: None,
             cross_probe: None,
             touchstone_export: TouchstoneExportPolicy::disabled(),
-        };
-        authenticate_tasks(&mut parts);
-        parts
+        }
     }
 
     #[test]
     fn task_order_changes_snapshot_identity() {
         let mut two = parts();
-        two.analysis_labels.push("Transient".to_owned());
-        two.tasks.push(transient_task());
-        authenticate_tasks(&mut two);
+        two.tasks
+            .push(prepared("tran", "Transient", transient_task()));
         let ordered = PreparedRunSnapshot::new(two).expect("ordered snapshot");
 
         let mut reversed = parts();
-        reversed.analysis_labels = vec!["Transient".to_owned(), "DC Operating Point".to_owned()];
-        reversed.tasks = vec![transient_task(), task()];
-        authenticate_tasks(&mut reversed);
+        reversed.tasks = vec![
+            prepared("tran", "Transient", transient_task()),
+            prepared("op", "DC Operating Point", task()),
+        ];
         let reversed = PreparedRunSnapshot::new(reversed).expect("reversed snapshot");
 
         assert_ne!(ordered.digest(), reversed.digest());
+    }
+
+    #[test]
+    fn owning_plan_identity_is_authenticated_and_required_for_plan_dispatch() {
+        const OTHER_PLAN_NAMESPACE: uuid::Uuid =
+            uuid::Uuid::from_u128(0xb77a_31fd_d31e_54f4_9507_1b1a_26ce_53fa);
+        let first = PreparedRunSnapshot::new(parts()).expect("first plan snapshot");
+        let mut changed = parts();
+        changed.simulation_plan_id = Some(SimulationPlanId::from_namespace(
+            OTHER_PLAN_NAMESPACE,
+            b"other-plan",
+        ));
+        let changed = PreparedRunSnapshot::new(changed).expect("changed plan snapshot");
+        assert_ne!(first.digest(), changed.digest());
+
+        let mut missing = parts();
+        missing.simulation_plan_id = None;
+        let error = PreparedRunSnapshot::new(missing)
+            .expect_err("plan dispatch without an owning plan must fail closed");
+        assert_eq!(error.stage(), PreparationStage::Authorization);
+        assert!(error.message().contains("simulation plan identity"));
+    }
+
+    #[test]
+    fn task_revision_and_exact_dependency_graph_change_snapshot_identity() {
+        let mut independent = parts();
+        independent
+            .tasks
+            .push(prepared("tran", "Transient", transient_task()));
+        let independent = PreparedRunSnapshot::new(independent).expect("independent task snapshot");
+
+        let mut dependent = parts();
+        dependent.tasks.push(prepared_with(
+            "tran",
+            ObjectRevision::INITIAL,
+            vec![instance_id("op")],
+            "Transient",
+            transient_task(),
+        ));
+        let dependent = PreparedRunSnapshot::new(dependent).expect("dependent task snapshot");
+        assert_ne!(independent.digest(), dependent.digest());
+
+        let base_revision = PreparedRunSnapshot::new(parts()).expect("base revision snapshot");
+        let mut revised = parts();
+        revised.tasks[0] = prepared_with(
+            "op",
+            ObjectRevision::new(2).expect("revision two"),
+            Vec::new(),
+            "DC Operating Point",
+            task(),
+        );
+        let revised = PreparedRunSnapshot::new(revised).expect("revised task snapshot");
+        assert_ne!(base_revision.digest(), revised.digest());
+    }
+
+    #[test]
+    fn snapshot_rejects_mixed_task_source_revisions() {
+        let mut mixed = parts();
+        mixed.tasks.push(prepared_with(
+            "tran",
+            ObjectRevision::new(2).expect("revision two"),
+            Vec::new(),
+            "Transient",
+            transient_task(),
+        ));
+
+        let error = PreparedRunSnapshot::new(mixed)
+            .expect_err("one frozen run cannot mix source revisions");
+        assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
+        assert!(error.message().contains("cannot mix source revisions"));
+    }
+
+    #[test]
+    fn snapshot_rejects_duplicate_ids_and_duplicate_dependency_edges() {
+        let mut empty = parts();
+        empty.tasks.clear();
+        let error = PreparedRunSnapshot::new(empty).expect_err("empty graph must fail");
+        assert!(error.message().contains("at least one analysis"));
+
+        let mut duplicate_id = parts();
+        duplicate_id
+            .tasks
+            .push(prepared("op", "Duplicate OP", task()));
+        let error = PreparedRunSnapshot::new(duplicate_id).expect_err("duplicate ID must fail");
+        assert!(error.message().contains("duplicate analysis instance"));
+
+        let mut duplicate_edge = parts();
+        duplicate_edge.tasks.push(prepared_with(
+            "tran",
+            ObjectRevision::INITIAL,
+            vec![instance_id("op"), instance_id("op")],
+            "Transient",
+            transient_task(),
+        ));
+        let error = PreparedRunSnapshot::new(duplicate_edge).expect_err("duplicate edge must fail");
+        assert!(error.message().contains("duplicate dependency"));
+    }
+
+    #[test]
+    fn snapshot_rejects_self_dangling_later_and_cyclic_dependencies() {
+        let mut self_edge = parts();
+        self_edge.tasks[0].dependencies = vec![instance_id("op")];
+        let error = PreparedRunSnapshot::new(self_edge).expect_err("self edge must fail");
+        assert!(error.message().contains("depend on itself"));
+
+        let mut dangling = parts();
+        dangling.tasks[0].dependencies = vec![instance_id("missing")];
+        let error = PreparedRunSnapshot::new(dangling).expect_err("dangling edge must fail");
+        assert!(error.message().contains("missing dependency"));
+
+        let mut later = parts();
+        later.tasks = vec![
+            prepared_with(
+                "tran",
+                ObjectRevision::INITIAL,
+                vec![instance_id("op")],
+                "Transient",
+                transient_task(),
+            ),
+            prepared("op", "DC Operating Point", task()),
+        ];
+        let error = PreparedRunSnapshot::new(later).expect_err("later edge must fail");
+        assert!(error.message().contains("must appear earlier"));
+
+        let mut cycle = parts();
+        cycle.tasks = vec![
+            prepared_with(
+                "op",
+                ObjectRevision::INITIAL,
+                vec![instance_id("tran")],
+                "DC Operating Point",
+                task(),
+            ),
+            prepared_with(
+                "tran",
+                ObjectRevision::INITIAL,
+                vec![instance_id("op")],
+                "Transient",
+                transient_task(),
+            ),
+        ];
+        let error = PreparedRunSnapshot::new(cycle).expect_err("cycle must fail");
+        assert!(error.message().contains("dependency cycle"));
     }
 
     #[test]
@@ -1152,18 +1569,20 @@ mod tests {
     fn pvt_metadata_counts_the_exact_full_corner_matrix_inside_one_task() {
         use crate::services::simulation_runner::CornerProcess;
         let mut matrix = parts();
-        matrix.tasks = vec![corner_task(
-            vec![CornerProcess::TT, CornerProcess::FF],
-            vec![0.9, 1.1],
-            vec![-40.0, 125.0],
-            true,
+        matrix.tasks = vec![prepared(
+            "corner",
+            "Corner",
+            corner_task(
+                vec![CornerProcess::TT, CornerProcess::FF],
+                vec![0.9, 1.1],
+                vec![-40.0, 125.0],
+                true,
+            ),
         )];
-        matrix.analysis_labels = vec!["Corner".to_owned()];
-        authenticate_tasks(&mut matrix);
 
         let snapshot = PreparedRunSnapshot::new(matrix).expect("full corner matrix snapshot");
         assert_eq!(snapshot.pvt_points.len(), 8);
-        assert_eq!(snapshot.task_graph.len(), 1);
+        assert_eq!(snapshot.tasks.len(), 1);
         assert_eq!(snapshot.metadata().pvt_point_count, 8);
     }
 
@@ -1171,14 +1590,16 @@ mod tests {
     fn pvt_metadata_uses_the_runners_diagonal_corner_expansion_order() {
         use crate::services::simulation_runner::CornerProcess;
         let mut diagonal = parts();
-        diagonal.tasks = vec![corner_task(
-            vec![CornerProcess::SS, CornerProcess::FF],
-            vec![0.9, 1.0, 1.1],
-            vec![-40.0, 125.0],
-            false,
+        diagonal.tasks = vec![prepared(
+            "corner",
+            "Corner",
+            corner_task(
+                vec![CornerProcess::SS, CornerProcess::FF],
+                vec![0.9, 1.0, 1.1],
+                vec![-40.0, 125.0],
+                false,
+            ),
         )];
-        diagonal.analysis_labels = vec!["Corner".to_owned()];
-        authenticate_tasks(&mut diagonal);
 
         let snapshot = PreparedRunSnapshot::new(diagonal).expect("diagonal corner snapshot");
         assert_eq!(snapshot.pvt_points.len(), 3);
@@ -1193,15 +1614,20 @@ mod tests {
     #[test]
     fn pvt_point_set_is_ordered_and_deduplicated_across_tasks() {
         let mut swept = parts();
-        swept.tasks = vec![task(), temperature_task(vec![27.0, 85.0, 85.0])];
-        swept.analysis_labels = vec!["DC Operating Point".to_owned(), "Temperature".to_owned()];
-        authenticate_tasks(&mut swept);
+        swept.tasks = vec![
+            prepared("op", "DC Operating Point", task()),
+            prepared(
+                "temperature",
+                "Temperature",
+                temperature_task(vec![27.0, 85.0, 85.0]),
+            ),
+        ];
 
         let snapshot = PreparedRunSnapshot::new(swept).expect("temperature snapshot");
         assert_eq!(snapshot.pvt_points.len(), 2);
         assert_eq!(snapshot.pvt_points[0].temperature_celsius, 27.0);
         assert_eq!(snapshot.pvt_points[1].temperature_celsius, 85.0);
-        assert_eq!(snapshot.task_graph.len(), 2);
+        assert_eq!(snapshot.tasks.len(), 2);
         assert_eq!(snapshot.metadata().pvt_point_count, 2);
     }
 
@@ -1230,20 +1656,55 @@ mod tests {
         assert_eq!(dispatch.executable_netlist(), "deck\n.op\n.end\n");
         assert_eq!(dispatch.task_count(), 1);
         let mut tasks = dispatch.into_tasks();
-        let (_, netlist) = tasks
-            .pop_front()
-            .expect("authorized task")
-            .into_runner_parts();
+        let authorized = tasks.pop_front().expect("authorized task");
+        assert_eq!(authorized.snapshot_digest(), digest);
+        assert_eq!(authorized.instance_id(), instance_id("op"));
+        assert_eq!(authorized.source_revision(), ObjectRevision::INITIAL);
+        assert!(authorized.dependencies().is_empty());
+        assert_eq!(authorized.label(), "DC Operating Point");
+        assert_eq!(authorized.config_digest(), parts().tasks[0].config_digest());
+        let (_, netlist) = authorized.into_runner_parts();
         assert_eq!(&*netlist, "deck\n.op\n.end\n");
         assert!(tasks.is_empty());
     }
 
     #[test]
-    fn snapshot_rejects_parallel_digest_that_does_not_match_actual_task() {
+    fn authorization_preserves_exact_task_graph_and_source_revision() {
+        let revision = ObjectRevision::new(7).expect("revision seven");
+        let mut frozen = parts();
+        frozen.tasks[0] = prepared_with("op", revision, Vec::new(), "DC Operating Point", task());
+        frozen.tasks.push(prepared_with(
+            "tran",
+            revision,
+            vec![instance_id("op")],
+            "Transient",
+            transient_task(),
+        ));
+        let snapshot = PreparedRunSnapshot::new(frozen).expect("prepared graph");
+        let digest = snapshot.digest();
+        let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
+        let proof = issuer
+            .issue(digest)
+            .expect("issue permit")
+            .consume(digest, digest)
+            .expect("consume permit");
+        let dispatch = snapshot.authorize_dispatch(proof).expect("authorize graph");
+        let tasks = dispatch.tasks().collect::<Vec<_>>();
+
+        assert_eq!(tasks[0].instance_id(), instance_id("op"));
+        assert!(tasks[0].dependencies().is_empty());
+        assert_eq!(tasks[1].instance_id(), instance_id("tran"));
+        assert_eq!(tasks[1].dependencies(), &[instance_id("op")]);
+        assert_eq!(tasks[1].source_revision(), revision);
+        assert_eq!(tasks[1].snapshot_digest(), digest);
+    }
+
+    #[test]
+    fn snapshot_rejects_digest_that_does_not_match_actual_task() {
         let mut mismatched = parts();
-        mismatched.analysis_config_digests[0] = ContentDigest::from_bytes([0xff; 32]);
+        mismatched.tasks[0].config_digest = ContentDigest::from_bytes([0xff; 32]);
         let error = PreparedRunSnapshot::new(mismatched)
-            .expect_err("parallel digest cannot authenticate a different task");
+            .expect_err("digest cannot authenticate a different task");
         assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
         assert!(error.message().contains("actual dispatch payload"));
     }

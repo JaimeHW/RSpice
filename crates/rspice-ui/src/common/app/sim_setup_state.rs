@@ -158,66 +158,97 @@ impl Default for NoiseSetup {
 pub struct SimSetupState {
     /// Authoritative reference PVT point used by nominal analyses.
     pub reference_pvt: ReferencePvtPoint,
+    /// Stable, revisioned analysis-instance plan. `None` is accepted only
+    /// while reading schema-3 projects/sessions and must be deterministically
+    /// migrated before validation, editing, or execution.
+    #[serde(default)]
+    pub analysis_plan: Option<crate::simulation::plan::SimulationPlan>,
     /// Enabled analysis indices.
     #[serde(
-        serialize_with = "serialize_analysis_set",
+        default,
+        skip_serializing,
         deserialize_with = "deserialize_analysis_set"
     )]
     pub enabled: HashSet<usize>,
     /// Stable execution order. Enabled analyses absent from this vector are
     /// appended deterministically; disabled entries are ignored and removed
     /// from the persisted normalized plan.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub analysis_order: Vec<usize>,
     /// Transient sweep.
+    #[serde(default, skip_serializing)]
     pub tran: TranSetup,
     /// AC sweep.
+    #[serde(default, skip_serializing)]
     pub ac: AcSetup,
     /// DISTO secondary tone ratio f2/f1 (empty = single-tone HD).
+    #[serde(default, skip_serializing)]
     pub disto_f2_over_f1: String,
     /// DC transfer sweep.
+    #[serde(default, skip_serializing)]
     pub dc: DcSetup,
     /// Noise analysis.
+    #[serde(default, skip_serializing)]
     pub noise: NoiseSetup,
     /// DC operating point.
+    #[serde(default, skip_serializing)]
     pub op: crate::simulation::dialog::op::OpDialogState,
     /// Pole-zero extraction.
+    #[serde(default, skip_serializing)]
     pub pz: crate::simulation::dialog::pz::PzDialogState,
     /// Sensitivity.
+    #[serde(default, skip_serializing)]
     pub sens: crate::simulation::dialog::sens::SensDialogState,
     /// Monte Carlo.
+    #[serde(default, skip_serializing)]
     pub mc: crate::simulation::dialog::mc::McDialogState,
     /// Periodic steady state.
+    #[serde(default, skip_serializing)]
     pub pss: crate::simulation::dialog::pss::PssDialogState,
     /// Loop stability.
+    #[serde(default, skip_serializing)]
     pub stb: crate::simulation::dialog::stb::StbDialogState,
     /// Temperature sweep.
+    #[serde(default, skip_serializing)]
     pub temp: crate::simulation::dialog::temp::TempDialogState,
     /// Harmonic balance.
+    #[serde(default, skip_serializing)]
     pub hb: crate::simulation::dialog::hb::HbDialogState,
     /// S-parameters.
+    #[serde(default, skip_serializing)]
     pub sp: crate::simulation::dialog::sp::SpDialogState,
     /// Periodic AC.
+    #[serde(default, skip_serializing)]
     pub pac: crate::simulation::dialog::pac::PacDialogState,
     /// Periodic noise.
+    #[serde(default, skip_serializing)]
     pub pnoise: crate::simulation::dialog::pnoise::PnoiseDialogState,
     /// Periodic transfer.
+    #[serde(default, skip_serializing)]
     pub pxf: crate::simulation::dialog::pxf::PxfDialogState,
     /// Periodic stability.
+    #[serde(default, skip_serializing)]
     pub pstb: crate::simulation::dialog::pstb::PstbDialogState,
     /// Transfer function.
+    #[serde(default, skip_serializing)]
     pub xf: crate::simulation::dialog::xf::XfDialogState,
     /// Process corners.
+    #[serde(default, skip_serializing)]
     pub corner: crate::simulation::dialog::corner::CornerDialogState,
     /// Envelope transient.
+    #[serde(default, skip_serializing)]
     pub envelope: crate::simulation::dialog::envelope::EnvelopeDialogState,
     /// Fourier.
+    #[serde(default, skip_serializing)]
     pub fourier: crate::simulation::dialog::fourier::FourierDialogState,
     /// Reliability / aging.
+    #[serde(default, skip_serializing)]
     pub reliability: crate::simulation::dialog::reliability::ReliabilityDialogState,
     /// Optimization.
+    #[serde(default, skip_serializing)]
     pub optimization: crate::simulation::dialog::optimization::OptimizationDialogState,
     /// Safe operating area.
+    #[serde(default, skip_serializing)]
     pub soa: crate::simulation::dialog::soa::SoaDialogState,
     /// Effective engine options (validated).
     pub options: crate::simulation::dialog::SimulationOptions,
@@ -233,7 +264,8 @@ pub struct SimSetupState {
     /// Analyses listed in the run-set card beyond the always-listed core —
     /// exotics stay listed (dimmed) when unticked, until removed.
     #[serde(
-        serialize_with = "serialize_analysis_set",
+        default,
+        skip_serializing,
         deserialize_with = "deserialize_analysis_set"
     )]
     pub listed: HashSet<usize>,
@@ -253,7 +285,10 @@ impl SimSetupState {
     /// so a new project's Run button works out of the box (the engine no
     /// longer falls back to the selected row on an empty set).
     pub fn new() -> Self {
-        let mut setup = Self::default();
+        let mut setup = Self {
+            analysis_plan: Some(crate::simulation::plan::SimulationPlan::new()),
+            ..Self::default()
+        };
         setup
             .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::TT, 27.0)
             .expect("the built-in reference PVT point is valid");
@@ -298,6 +333,9 @@ impl SimSetupState {
 
     /// Rebuild transient editing state after a persisted plan is restored.
     pub(crate) fn prepare_after_restore(&mut self) {
+        if let Some(plan) = &mut self.analysis_plan {
+            plan.prepare_after_restore();
+        }
         self.op.initialized = true;
         self.pz.initialized = true;
         self.sens.initialized = true;
@@ -325,7 +363,7 @@ impl SimSetupState {
         self.palette_open = false;
         self.palette_query.clear();
         self.palette_active = 0;
-        self.normalize_analysis_order();
+        self.refresh_legacy_analysis_projections();
     }
 
     /// Select the nominal/reference PVT point consumed by subsequent runs.
@@ -892,15 +930,6 @@ fn format_temperature(value: f64) -> String {
             .trim_end_matches('.')
             .to_owned()
     }
-}
-
-fn serialize_analysis_set<S>(indices: &HashSet<usize>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    let mut sorted: Vec<_> = indices.iter().copied().collect();
-    sorted.sort_unstable();
-    serde::Serialize::serialize(&sorted, serializer)
 }
 
 fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<HashSet<usize>, D::Error>

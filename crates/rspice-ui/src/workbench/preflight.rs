@@ -170,23 +170,40 @@ fn collect_report(state: &AppState) -> PreflightReport {
         }),
     }
 
-    let ordered = state.sim_setup.ordered_enabled_indices();
-    if ordered.is_empty() {
-        blockers.push(PreflightIssue {
-            check: "Run set".to_owned(),
-            observed: "No analyses are enabled.".to_owned(),
-            required: "At least one validated analysis".to_owned(),
+    match state.sim_setup.stable_analysis_plan() {
+        Err(error) => blockers.push(PreflightIssue {
+            check: "Analysis-instance plan".to_owned(),
+            observed: error,
+            required: "A migrated, structurally valid simulation plan".to_owned(),
             remediation: PreflightRemediation::SimulationPlan,
-        });
-    }
-    for index in &ordered {
-        if let Some(error) = state.sim_setup.validation_error(*index) {
-            blockers.push(PreflightIssue {
-                check: format!("{} configuration", analysis_name(*index)),
-                observed: error,
-                required: "A complete, numerically valid analysis configuration".to_owned(),
-                remediation: PreflightRemediation::SimulationPlan,
-            });
+        }),
+        Ok(plan) => {
+            for issue in plan.validation_issues() {
+                blockers.push(PreflightIssue {
+                    check: "Analysis-instance graph".to_owned(),
+                    observed: issue.to_string(),
+                    required: "Stable enabled identities with resolved, ordered prerequisites"
+                        .to_owned(),
+                    remediation: PreflightRemediation::SimulationPlan,
+                });
+            }
+            for instance in plan
+                .instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+            {
+                if let Some(error) = state
+                    .sim_setup
+                    .analysis_draft_validation_error(instance.draft())
+                {
+                    blockers.push(PreflightIssue {
+                        check: format!("{} configuration", instance.kind().label()),
+                        observed: format!("{}: {error}", instance.id()),
+                        required: "A complete, numerically valid analysis configuration".to_owned(),
+                        remediation: PreflightRemediation::SimulationPlan,
+                    });
+                }
+            }
         }
     }
 
@@ -251,14 +268,6 @@ fn preparation_remediation(
         | PreparationStage::SourceChecks
         | PreparationStage::Netlist => PreflightRemediation::DesignChecks,
     }
-}
-
-fn analysis_name(index: usize) -> &'static str {
-    crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES
-        .iter()
-        .flat_map(|(_, analyses)| analyses.iter())
-        .find_map(|(candidate, name)| (*candidate == index).then_some(*name))
-        .unwrap_or("Analysis")
 }
 
 /// Render the retained report above the workbench. This function also turns
@@ -653,8 +662,14 @@ mod tests {
     fn report_collects_all_independent_blocker_classes() {
         let mut state = AppState::default();
         state.schematic = crate::state::SchematicState::default();
-        state.sim_setup.enabled.clear();
-        state.sim_setup.analysis_order.clear();
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan");
+        let transient_id = plan.instances()[0].id();
+        plan.set_enabled(transient_id, false)
+            .expect("the sole analysis disables");
         crate::common::menu_bar::run_design_rule_check(&mut state);
 
         let report = collect_report(&state);
@@ -666,7 +681,11 @@ mod tests {
                 .iter()
                 .any(|issue| issue.check == "Design topology")
         );
-        assert!(report.blockers.iter().any(|issue| issue.check == "Run set"));
+        assert!(report.blockers.iter().any(|issue| {
+            issue.check == "Analysis-instance graph"
+                && issue.observed == "Enable at least one analysis instance."
+                && issue.remediation == PreflightRemediation::SimulationPlan
+        }));
     }
 
     #[test]

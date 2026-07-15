@@ -333,8 +333,40 @@ fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         if ui.button("Configure reliability analysis…").clicked() {
             app.state.workbench.workspace = super::super::state::Workspace::Simulate;
-            app.state.workbench.active_analysis =
-                crate::common::simulation_analysis_tabs::TAB_RELIABILITY;
+            let kind = crate::simulation::plan::AnalysisKind::Reliability;
+            let existing = app
+                .state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .and_then(|plan| {
+                    plan.instances()
+                        .iter()
+                        .find(|instance| instance.kind() == kind)
+                        .map(|instance| instance.id())
+                });
+            let selected = if let Some(id) = existing {
+                Some(id)
+            } else {
+                match app
+                    .state
+                    .sim_setup
+                    .stable_analysis_plan_mut()
+                    .and_then(|plan| plan.insert(kind).map_err(|error| error.to_string()))
+                {
+                    Ok((id, receipt)) => {
+                        app.state.workbench.analysis_lifecycle_status = receipt.detail().to_owned();
+                        app.state.sim_setup.refresh_legacy_analysis_projections();
+                        Some(id)
+                    }
+                    Err(error) => {
+                        app.state.workbench.analysis_lifecycle_status = error;
+                        None
+                    }
+                }
+            };
+            app.state.workbench.active_analysis = kind.legacy_index();
+            app.state.workbench.active_analysis_instance = selected;
         }
     });
 }

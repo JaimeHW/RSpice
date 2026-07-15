@@ -212,9 +212,12 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
     let mut libraries = state.library_manager.clone();
     sanitize_library_view_runtime_state(&mut libraries);
     let simulation_results = ProjectSimulationResults::from_state(&state.simulation);
-    let execution_context =
-        ProjectExecutionContext::from_state(&state.sim_setup, &state.model_library_manager)
-            .map_err(ProjectLifecycleError::InvalidState)?;
+    let execution_context = ProjectExecutionContext::from_state(
+        workspace.project.id(),
+        &state.sim_setup,
+        &state.model_library_manager,
+    )
+    .map_err(ProjectLifecycleError::InvalidState)?;
     let project = ProjectFile::new_with_execution_context(
         workspace,
         libraries,
@@ -1407,6 +1410,7 @@ fn revert_document(
         .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
         .baseline
         .clone();
+    let baseline_project_id = baseline.workspace.project.id();
 
     match id {
         ProjectDocumentId::ProjectConfiguration => {
@@ -1430,7 +1434,7 @@ fn revert_document(
                 )
             })?;
             let (_, manager, warnings) = context
-                .into_state()
+                .into_state(baseline_project_id)
                 .map_err(ProjectLifecycleError::InvalidState)?;
             state.model_library_manager = manager;
             for warning in warnings {
@@ -1900,14 +1904,36 @@ fn strip_schematic_runtime_state(schematic: &mut crate::state::SchematicState) {
 mod tests {
     use super::*;
     #[cfg(not(target_arch = "wasm32"))]
-    use crate::common::simulation_analysis_tabs::TAB_AC;
+    use crate::simulation::plan::AnalysisKind;
     use crate::state::{ComponentType, Point};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceId {
+        state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current project owns a stable plan")
+            .insert(AnalysisKind::Ac)
+            .expect("AC analysis inserts")
+            .0
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn has_ac_analysis(setup: &crate::common::app::SimSetupState) -> bool {
+        setup
+            .stable_analysis_plan()
+            .expect("current project owns a stable plan")
+            .instances()
+            .iter()
+            .any(|instance| instance.kind() == AnalysisKind::Ac)
+    }
 
     #[test]
     fn browser_completion_context_rejects_every_authority_change() {
         let digest = persistence::digest_bytes(b"accepted browser bytes");
         let receipt = BrowserBindingReceipt {
-            binding_id: uuid::Uuid::from_u128(0xf20c_f308_17a1_4fc4_8b0d_8f09eab735c2),
+            binding_id: uuid::Uuid::from_u128(0xf20c_f308_17a1_4fc4_8b0d_8f09_eab7_35c2),
             project_id: "logical-project".to_owned(),
             accepted_generation: 4,
             accepted_digest: digest,
@@ -2153,8 +2179,7 @@ mod tests {
         state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(4, 8));
-        state.sim_setup.enabled.insert(TAB_AC);
-        state.sim_setup.normalize_analysis_order();
+        let ac_id = insert_ac_analysis(&mut state);
         assert!(
             save_native(
                 &mut state,
@@ -2178,8 +2203,18 @@ mod tests {
             1
         );
         assert!(
-            !persisted_context.simulation_plan.enabled.contains(&TAB_AC),
+            !has_ac_analysis(&persisted_context.simulation_plan),
             "unrelated plan draft must remain outside an active-design save"
+        );
+        assert_eq!(
+            state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("live project owns a stable plan")
+                .instance(ac_id)
+                .expect("active-design save retains the exact live AC identity")
+                .kind(),
+            AnalysisKind::Ac
         );
         assert!(has_unsaved_changes(&state));
         assert!(!active_document_is_dirty(&state));
@@ -2320,8 +2355,7 @@ mod tests {
             DestinationAuthority::UserSelected,
         )
         .expect("first save");
-        state.sim_setup.enabled.insert(TAB_AC);
-        state.sim_setup.normalize_analysis_order();
+        let ac_id = insert_ac_analysis(&mut state);
 
         save_native(
             &mut state,
@@ -2332,13 +2366,16 @@ mod tests {
         .expect("save all");
 
         let persisted = crate::io::load_project_file(&path).expect("reload");
-        assert!(
-            persisted
-                .execution_context
-                .expect("context")
+        let persisted_context = persisted.execution_context.expect("context");
+        assert_eq!(
+            persisted_context
                 .simulation_plan
-                .enabled
-                .contains(&TAB_AC)
+                .stable_analysis_plan()
+                .expect("saved project owns a stable plan")
+                .instance(ac_id)
+                .expect("saved plan retains the exact AC identity")
+                .kind(),
+            AnalysisKind::Ac
         );
         assert!(!has_unsaved_changes(&state));
         remove_project_artifacts(&path);
@@ -2627,12 +2664,20 @@ mod tests {
         state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(2, 2));
-        state.sim_setup.enabled.insert(TAB_AC);
-        state.sim_setup.normalize_analysis_order();
+        let ac_id = insert_ac_analysis(&mut state);
         let scoped = prepare_revert_active_document(&state).expect("prepare scoped revert");
         confirm_revert_active_document(&mut state, &scoped).expect("confirm scoped revert");
         assert!(state.schematic.components.is_empty());
-        assert!(state.sim_setup.enabled.contains(&TAB_AC));
+        assert_eq!(
+            state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("live plan retained")
+                .instance(ac_id)
+                .expect("AC identity retained")
+                .kind(),
+            AnalysisKind::Ac
+        );
         assert!(has_unsaved_changes(&state));
 
         state

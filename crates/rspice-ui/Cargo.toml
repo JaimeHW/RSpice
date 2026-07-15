@@ -59,7 +59,7 @@ base64 = "0.22"
 once_cell = "1.19"
 
 # UUID for document identification
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 unicode-segmentation = "1.12"
 
 # Blocking executor
@@ -132,7 +132,7 @@ tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown
-uuid = { version = "1", features = ["v4", "js", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console"] }
 js-sys = "0.3"

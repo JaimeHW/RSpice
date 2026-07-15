@@ -466,23 +466,59 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
+    let label_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_1, FontWeight::Medium);
+    let label_width = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), label_font.clone(), t.color.text_dim)
+        .size()
+        .x;
+    let value_width = ui
+        .painter()
+        .layout_no_wrap(value.to_owned(), value_font.clone(), t.color.text)
+        .size()
+        .x;
+    let stacked = label_width + value_width + 48.0 > ui.available_width();
+    let height = if stacked { 42.0 } else { 25.0 };
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 25.0), Sense::hover());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
     ui.painter().text(
-        Pos2::new(rect.left() + 12.0, rect.center().y),
+        Pos2::new(
+            rect.left() + 12.0,
+            if stacked {
+                rect.top() + 11.0
+            } else {
+                rect.center().y
+            },
+        ),
         Align2::LEFT_CENTER,
         label,
-        theme::sans(tokens::FS_1, FontWeight::Regular),
+        label_font,
         t.color.text_dim,
     );
     ui.painter().text(
-        Pos2::new(rect.right() - 12.0, rect.center().y),
-        Align2::RIGHT_CENTER,
+        Pos2::new(
+            if stacked {
+                rect.left() + 12.0
+            } else {
+                rect.right() - 12.0
+            },
+            if stacked {
+                rect.bottom() - 11.0
+            } else {
+                rect.center().y
+            },
+        ),
+        if stacked {
+            Align2::LEFT_CENTER
+        } else {
+            Align2::RIGHT_CENTER
+        },
         value,
-        theme::mono(tokens::FS_1, FontWeight::Medium),
+        value_font,
         t.color.text,
     );
     response
@@ -514,13 +550,16 @@ pub fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
 
 pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
+    ui.horizontal_top(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
         ui.painter().circle_filled(rect.center(), 3.0, color);
-        ui.label(
-            egui::RichText::new(text)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            )
+            .wrap(),
         );
     });
 }

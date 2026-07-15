@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::common::app::SimSetupState;
+use crate::product::ProjectId;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
@@ -18,23 +19,90 @@ use crate::state::model_library::{
     ProcessCorner as LibraryProcessCorner, first_unreachable_source, is_portable_absolute_path,
 };
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 3;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 4;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
+const SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 3;
+const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
+    "enabled",
+    "analysis_order",
+    "tran",
+    "ac",
+    "disto_f2_over_f1",
+    "dc",
+    "noise",
+    "op",
+    "pz",
+    "sens",
+    "mc",
+    "pss",
+    "stb",
+    "temp",
+    "hb",
+    "sp",
+    "pac",
+    "pnoise",
+    "pxf",
+    "pstb",
+    "xf",
+    "corner",
+    "envelope",
+    "fourier",
+    "reliability",
+    "optimization",
+    "soa",
+    "listed",
+];
 
 fn legacy_execution_context_schema_version() -> u32 {
     LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION
 }
 
 /// Versioned, project-owned inputs required to reproduce a simulation plan.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProjectExecutionContext {
-    #[serde(default = "legacy_execution_context_schema_version")]
     pub schema_version: u32,
     pub simulation_plan: SimSetupState,
     pub model_libraries: Vec<ProjectModelLibrary>,
+}
+
+impl<'de> Deserialize<'de> for ProjectExecutionContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct PersistedExecutionContext {
+            #[serde(default = "legacy_execution_context_schema_version")]
+            schema_version: u32,
+            simulation_plan: serde_json::Value,
+            model_libraries: Vec<ProjectModelLibrary>,
+        }
+
+        let persisted = PersistedExecutionContext::deserialize(deserializer)?;
+        if persisted.schema_version == PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION {
+            let fields = persisted.simulation_plan.as_object().ok_or_else(|| {
+                serde::de::Error::custom("schema-4 simulation_plan must be a JSON object")
+            })?;
+            if let Some(retired) = RETIRED_SINGLETON_ANALYSIS_FIELDS
+                .iter()
+                .find(|&&field| fields.contains_key(field))
+            {
+                return Err(serde::de::Error::custom(format!(
+                    "schema-4 simulation_plan contains retired singleton field `{retired}`"
+                )));
+            }
+        }
+        let simulation_plan =
+            serde_json::from_value(persisted.simulation_plan).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            schema_version: persisted.schema_version,
+            simulation_plan,
+            model_libraries: persisted.model_libraries,
+        })
+    }
 }
 
 /// Serializable model-library data that affects model and section bindings.
@@ -65,12 +133,16 @@ pub struct ProjectModelLibrary {
 
 impl ProjectExecutionContext {
     pub fn from_state(
+        _project_id: ProjectId,
         simulation_plan: &SimSetupState,
         model_libraries: &ModelLibraryManager,
     ) -> Result<Self, String> {
         let mut simulation_plan = simulation_plan.clone();
-        simulation_plan.ensure_initialized();
-        simulation_plan.normalize_analysis_order();
+        let stable_plan = simulation_plan.analysis_plan.as_mut().ok_or_else(|| {
+            "current simulation state has no stable analysis plan; legacy singleton migration is load-only"
+                .to_owned()
+        })?;
+        stable_plan.prepare_after_restore();
 
         let context = Self {
             schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
@@ -87,14 +159,14 @@ impl ProjectExecutionContext {
 
     /// Apply explicit migrations for execution-context schemas that shipped
     /// before stable analysis ordering. No future schema is guessed.
-    pub fn migrate_to_current(&mut self) -> Result<(), String> {
+    pub fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         match self.schema_version {
             LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION => {
                 let mut order: Vec<_> = self.simulation_plan.enabled.iter().copied().collect();
                 order.sort_unstable();
                 self.simulation_plan.analysis_order = order;
                 self.schema_version = UNPINNED_MODEL_SOURCE_SCHEMA_VERSION;
-                self.migrate_to_current()
+                self.migrate_to_current(project_id)
             }
             UNPINNED_MODEL_SOURCE_SCHEMA_VERSION => {
                 // Schema 1 did not pin external model bytes. Never infer or
@@ -106,7 +178,7 @@ impl ProjectExecutionContext {
                     library.source_edges.clear();
                 }
                 self.schema_version = PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION;
-                self.migrate_to_current()
+                self.migrate_to_current(project_id)
             }
             PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION => {
                 // Schema 2 pinned canonical member bytes but did not retain
@@ -117,10 +189,21 @@ impl ProjectExecutionContext {
                 for library in &mut self.model_libraries {
                     library.source_edges.clear();
                 }
+                self.schema_version = SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION => {
+                self.simulation_plan
+                    .migrate_legacy_analysis_plan(project_id)?;
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
-            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION => Ok(()),
+            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION => {
+                if let Some(plan) = &mut self.simulation_plan.analysis_plan {
+                    plan.prepare_after_restore();
+                }
+                Ok(())
+            }
             version => Err(format!(
                 "unsupported execution-context schema version {version}; this build supports version {PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION}"
             )),
@@ -142,8 +225,9 @@ impl ProjectExecutionContext {
     /// source problems without substituting another source or section.
     pub fn into_state(
         mut self,
+        project_id: ProjectId,
     ) -> Result<(SimSetupState, ModelLibraryManager, Vec<String>), String> {
-        self.migrate_to_current()?;
+        self.migrate_to_current(project_id)?;
         self.validate()?;
         let warnings = model_source_warnings(&self.model_libraries);
         let mut manager = ModelLibraryManager::new();
@@ -191,58 +275,23 @@ impl ProjectModelLibrary {
 }
 
 fn validate_simulation_plan(plan: &SimSetupState) -> Result<(), String> {
-    let analysis_count = crate::common::simulation_analysis_tabs::ANALYSIS_COUNT;
-    validate_analysis_set("simulation_plan.enabled", &plan.enabled, analysis_count)?;
-    validate_analysis_set("simulation_plan.listed", &plan.listed, analysis_count)?;
-
-    let mut order_seen = HashSet::with_capacity(plan.analysis_order.len());
-    for (position, index) in plan.analysis_order.iter().copied().enumerate() {
-        if index >= analysis_count {
-            return Err(format!(
-                "simulation_plan.analysis_order[{position}] contains unsupported analysis index {index}; supported indices are 0..{}",
-                analysis_count - 1
-            ));
-        }
-        if !order_seen.insert(index) {
-            return Err(format!(
-                "simulation_plan.analysis_order contains duplicate analysis index {index}"
-            ));
-        }
-        if !plan.enabled.contains(&index) {
-            return Err(format!(
-                "simulation_plan.analysis_order contains disabled analysis index {index}"
-            ));
-        }
-    }
-    if order_seen != plan.enabled {
-        let mut missing: Vec<_> = plan.enabled.difference(&order_seen).copied().collect();
-        missing.sort_unstable();
-        return Err(format!(
-            "simulation_plan.analysis_order is missing enabled analysis indices {}",
-            format_indices(&missing)
-        ));
-    }
+    let stable_plan = plan.stable_analysis_plan()?;
+    stable_plan
+        .validate_structure()
+        .map_err(|error| format!("simulation_plan.analysis_plan is invalid: {error}"))?;
 
     validate_reference_pvt(plan)?;
     validate_solver_options(plan)?;
-    validate_choice_indices(plan)?;
-    Ok(())
-}
-
-fn validate_analysis_set(
-    field: &str,
-    indices: &HashSet<usize>,
-    analysis_count: usize,
-) -> Result<(), String> {
-    if let Some(index) = indices
-        .iter()
-        .copied()
-        .find(|index| *index >= analysis_count)
-    {
-        return Err(format!(
-            "{field} contains unsupported analysis index {index}; supported indices are 0..{}",
-            analysis_count - 1
-        ));
+    for instance in stable_plan.instances() {
+        let mut projection = plan.clone();
+        projection.apply_analysis_draft_projection(instance.draft());
+        validate_choice_indices(&projection).map_err(|error| {
+            format!(
+                "simulation_plan.analysis_plan instance {} ({}) is invalid: {error}",
+                instance.id(),
+                instance.kind().stable_id()
+            )
+        })?;
     }
     Ok(())
 }
@@ -688,17 +737,24 @@ fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
         .collect()
 }
 
-fn format_indices(indices: &[usize]) -> String {
-    indices
-        .iter()
-        .map(usize::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
+
+    fn project_id() -> ProjectId {
+        ProjectId::from_namespace(
+            uuid::Uuid::from_u128(0xe707_36ed_7eef_5205_b51e_9608_f55e_bd35),
+            b"project-execution-tests",
+        )
+    }
+
+    fn context_from_state(
+        plan: &SimSetupState,
+        manager: &ModelLibraryManager,
+    ) -> Result<ProjectExecutionContext, String> {
+        ProjectExecutionContext::from_state(project_id(), plan, manager)
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
@@ -732,8 +788,8 @@ mod tests {
         plan.options_errors.push("not project data".to_owned());
         plan.palette_open = true;
         plan.palette_query = "noise".to_owned();
-        let context = ProjectExecutionContext::from_state(&plan, &ModelLibraryManager::new())
-            .expect("valid context");
+        let context =
+            context_from_state(&plan, &ModelLibraryManager::new()).expect("valid context");
 
         let value = serde_json::to_value(context).expect("serialize context");
         let plan = &value["simulation_plan"];
@@ -742,63 +798,222 @@ mod tests {
         assert!(plan.get("options_draft").is_none());
         assert!(plan.get("palette_open").is_none());
         assert!(plan.get("palette_query").is_none());
-        assert!(plan["op"].get("initialized").is_none());
+        for retired in [
+            "enabled",
+            "analysis_order",
+            "listed",
+            "tran",
+            "ac",
+            "dc",
+            "noise",
+            "op",
+            "pss",
+            "disto_f2_over_f1",
+        ] {
+            assert!(
+                plan.get(retired).is_none(),
+                "v4 must omit retired singleton field {retired}"
+            );
+        }
+        assert!(plan.get("analysis_plan").is_some());
+    }
+
+    #[test]
+    fn current_schema_rejects_every_retired_singleton_analysis_field() {
+        let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
+            .expect("baseline context validates");
+        let baseline = serde_json::to_value(context).expect("context serializes");
+
+        for field in RETIRED_SINGLETON_ANALYSIS_FIELDS {
+            let mut value = baseline.clone();
+            value["simulation_plan"]
+                .as_object_mut()
+                .expect("simulation plan is an object")
+                .insert((*field).to_owned(), serde_json::Value::Null);
+            let error = serde_json::from_value::<ProjectExecutionContext>(value)
+                .expect_err("schema 4 must reject retired singleton input")
+                .to_string();
+            assert!(
+                error.contains(&format!("retired singleton field `{field}`")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_three_still_accepts_singletons_only_for_load_time_migration() {
+        let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
+            .expect("baseline context validates");
+        let mut value = serde_json::to_value(context).expect("context serializes");
+        value["schema_version"] = serde_json::json!(SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION);
+        let persisted_plan = value["simulation_plan"]
+            .as_object_mut()
+            .expect("simulation plan is an object");
+        persisted_plan.remove("analysis_plan");
+        persisted_plan.insert("enabled".to_owned(), serde_json::json!([1]));
+        persisted_plan.insert("analysis_order".to_owned(), serde_json::json!([1]));
+        persisted_plan.insert("listed".to_owned(), serde_json::json!([1]));
+        persisted_plan.insert(
+            "tran".to_owned(),
+            serde_json::to_value(crate::common::app::TranSetup::default())
+                .expect("legacy draft serializes"),
+        );
+
+        let mut restored: ProjectExecutionContext =
+            serde_json::from_value(value).expect("schema 3 accepts its legacy fields");
+        restored
+            .migrate_to_current(project_id())
+            .expect("schema 3 migrates at the load boundary");
+
+        assert_eq!(
+            restored.schema_version,
+            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+        );
+        assert!(restored.simulation_plan.stable_analysis_plan().is_ok());
+        restored.validate().expect("migrated context validates");
+    }
+
+    #[test]
+    fn current_state_save_fails_closed_without_a_stable_plan() {
+        let mut plan = SimSetupState::new();
+        plan.analysis_plan = None;
+
+        let error = context_from_state(&plan, &ModelLibraryManager::new())
+            .expect_err("current-state persistence must never invoke legacy migration");
+
+        assert!(error.contains("legacy singleton migration is load-only"));
+        assert!(plan.analysis_plan.is_none());
+    }
+
+    #[test]
+    fn restored_execution_lifecycle_never_retains_runner_authority() {
+        let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
+            .expect("baseline context validates");
+        let baseline = serde_json::to_value(context).expect("context serializes");
+
+        for lifecycle in ["queued", "running", "paused"] {
+            let mut value = baseline.clone();
+            value["simulation_plan"]["analysis_plan"]["instances"][0]["lifecycle"] =
+                serde_json::json!(lifecycle);
+            let mut restored: ProjectExecutionContext =
+                serde_json::from_value(value).expect("persisted lifecycle deserializes");
+            restored
+                .migrate_to_current(project_id())
+                .expect("current context restores");
+            let instance = &restored
+                .simulation_plan
+                .stable_analysis_plan()
+                .expect("stable plan restored")
+                .instances()[0];
+            let id = instance.id();
+            assert_eq!(instance.lifecycle(), AnalysisLifecycleState::Draft);
+            restored.validate().expect("normalized context validates");
+
+            let (mut setup, _, _) = restored
+                .into_state(project_id())
+                .expect("normalized context enters application state");
+            setup
+                .stable_analysis_plan_mut()
+                .expect("stable plan remains present")
+                .edit(id, |_| ())
+                .expect("stale runner lifecycle cannot lock the restored draft");
+        }
     }
 
     #[test]
     fn incomplete_disabled_and_enabled_analysis_drafts_round_trip_losslessly() {
-        use crate::common::simulation_analysis_tabs::{TAB_PSS, TAB_TRANSIENT};
-
         let mut plan = SimSetupState::new();
-        plan.ensure_initialized();
-        plan.pss.fund_freq = "unfinished-expression(".to_owned();
-        plan.tran.stop = "also unfinished".to_owned();
-        plan.enabled.insert(TAB_PSS);
-        plan.analysis_order.push(TAB_PSS);
+        let stable = plan
+            .analysis_plan
+            .as_mut()
+            .expect("current setup owns a stable plan");
+        let transient_id = stable.instances()[0].id();
+        stable
+            .edit(transient_id, |draft| {
+                let AnalysisDraft::Transient(transient) = draft else {
+                    panic!("default instance must be transient");
+                };
+                transient.stop = "also unfinished".to_owned();
+            })
+            .expect("transient draft edit commits");
+        let (pss_id, _) = stable.insert(AnalysisKind::Pss).expect("PSS inserts");
+        stable
+            .edit(pss_id, |draft| {
+                let AnalysisDraft::Pss(pss) = draft else {
+                    panic!("inserted instance must be PSS");
+                };
+                pss.fund_freq = "unfinished-expression(".to_owned();
+            })
+            .expect("PSS draft edit commits");
         // PSS proves a disabled draft is retained; Transient proves an enabled
         // invalid draft is persistable but remains blocked by run validation.
-        plan.enabled.remove(&TAB_PSS);
-        plan.analysis_order.retain(|index| *index != TAB_PSS);
-        assert!(plan.enabled.contains(&TAB_TRANSIENT));
+        stable
+            .set_enabled(pss_id, false)
+            .expect("PSS disables without losing its position");
 
-        let context = ProjectExecutionContext::from_state(&plan, &ModelLibraryManager::new())
+        let context = context_from_state(&plan, &ModelLibraryManager::new())
             .expect("draft validity is a run concern, not a persistence concern");
         let serialized = serde_json::to_string(&context).expect("context serializes");
         let restored: ProjectExecutionContext =
             serde_json::from_str(&serialized).expect("context deserializes");
-        let (restored, _, _) = restored.into_state().expect("context restores");
-
-        assert_eq!(restored.pss.fund_freq, "unfinished-expression(");
-        assert_eq!(restored.tran.stop, "also unfinished");
-        assert!(restored.validation_error(TAB_PSS).is_some());
-        assert!(restored.validation_error(TAB_TRANSIENT).is_some());
+        let (restored, _, _) = restored.into_state(project_id()).expect("context restores");
+        let restored = restored
+            .stable_analysis_plan()
+            .expect("v4 restores a stable plan");
+        assert_eq!(
+            restored
+                .instances()
+                .iter()
+                .map(|instance| instance.id())
+                .collect::<Vec<_>>(),
+            vec![transient_id, pss_id]
+        );
+        let transient = restored.instance(transient_id).expect("transient retained");
+        let AnalysisDraft::Transient(transient_draft) = transient.draft() else {
+            panic!("transient identity must retain its kind");
+        };
+        assert_eq!(transient_draft.stop, "also unfinished");
+        assert!(transient.enabled());
+        let pss = restored.instance(pss_id).expect("PSS retained");
+        let AnalysisDraft::Pss(pss_draft) = pss.draft() else {
+            panic!("PSS identity must retain its kind");
+        };
+        assert_eq!(pss_draft.fund_freq, "unfinished-expression(");
+        assert!(!pss.enabled());
+        assert!(pss.dependencies().is_empty());
     }
 
     #[test]
-    fn duplicate_and_unsupported_order_entries_fail_precisely() {
-        let manager = ModelLibraryManager::new();
-        let mut plan = SimSetupState::new();
-        plan.analysis_order = vec![1, 1];
-        let duplicate = ProjectExecutionContext {
-            schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
-            simulation_plan: plan.clone(),
-            model_libraries: Vec::new(),
-        }
-        .validate()
-        .expect_err("duplicate must fail");
-        assert!(duplicate.contains("duplicate analysis index 1"));
+    fn duplicate_and_unknown_stable_analysis_data_fail_precisely() {
+        let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
+            .expect("baseline context validates");
+        let mut duplicate_value = serde_json::to_value(&context).expect("context serializes");
+        let instances = duplicate_value["simulation_plan"]["analysis_plan"]["instances"]
+            .as_array_mut()
+            .expect("v4 instances are an array");
+        let duplicate_instance = instances[0].clone();
+        instances.push(duplicate_instance);
+        let duplicate: ProjectExecutionContext =
+            serde_json::from_value(duplicate_value).expect("shape deserializes before validation");
+        let error = duplicate
+            .validate()
+            .expect_err("duplicate identity must fail");
+        assert!(error.contains("appears more than once"));
 
-        plan.enabled.insert(99);
-        plan.analysis_order = vec![1, 99];
-        let unsupported = ProjectExecutionContext::from_state(&plan, &manager)
-            .expect_err("unsupported analysis must fail");
-        assert!(unsupported.contains("unsupported analysis index 99"));
+        let mut unknown_value = serde_json::to_value(context).expect("context serializes");
+        unknown_value["simulation_plan"]["analysis_plan"]["instances"][0]["kind"] =
+            serde_json::Value::String("future-analysis".to_owned());
+        let error = serde_json::from_value::<ProjectExecutionContext>(unknown_value)
+            .expect_err("unknown stable analysis kind must fail closed")
+            .to_string();
+        assert!(error.contains("unknown variant `future-analysis`"));
     }
 
     #[test]
     fn legacy_context_migrates_to_sorted_execution_order() {
         let mut plan = SimSetupState::new();
         plan.ensure_initialized();
+        plan.analysis_plan = None;
         plan.enabled.extend([4, 0]);
         plan.analysis_order.clear();
         let mut context = ProjectExecutionContext {
@@ -807,9 +1022,40 @@ mod tests {
             model_libraries: Vec::new(),
         };
 
-        context.migrate_to_current().expect("legacy migration");
+        context
+            .migrate_to_current(project_id())
+            .expect("legacy migration");
 
-        assert_eq!(context.simulation_plan.analysis_order, vec![0, 1, 4]);
+        let migrated = context
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("legacy context migrates to stable identity");
+        assert_eq!(migrated.instances().len(), AnalysisKind::ALL.len());
+        assert_eq!(
+            migrated
+                .instances()
+                .iter()
+                .take(3)
+                .map(|instance| (instance.kind(), instance.enabled()))
+                .collect::<Vec<_>>(),
+            vec![
+                (AnalysisKind::OperatingPoint, true),
+                (AnalysisKind::Transient, true),
+                (AnalysisKind::Noise, true),
+            ]
+        );
+        let noise = migrated
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == AnalysisKind::Noise)
+            .expect("noise migrated");
+        let op = migrated
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == AnalysisKind::OperatingPoint)
+            .expect("OP migrated");
+        assert_eq!(noise.dependencies().len(), 1);
+        assert_eq!(noise.dependencies()[0].target(), op.id());
         context.validate().expect("migrated context validates");
     }
 
@@ -824,8 +1070,8 @@ mod tests {
         let expected = manager
             .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::FF)
             .expect("source FF binding");
-        let context = ProjectExecutionContext::from_state(&SimSetupState::new(), &manager)
-            .expect("context validates");
+        let context =
+            context_from_state(&SimSetupState::new(), &manager).expect("context validates");
         let canonical_root = context.model_libraries[0]
             .root_path
             .clone()
@@ -835,7 +1081,7 @@ mod tests {
             serde_json::from_str(&json).expect("context deserializes");
 
         let (_, restored_manager, warnings) = restored_context
-            .into_state()
+            .into_state(project_id())
             .expect("available source restores");
 
         assert!(warnings.is_empty());
@@ -893,13 +1139,13 @@ mod tests {
         manager
             .load_library_file(&path, Some("TT"))
             .expect("load source");
-        let mut context = ProjectExecutionContext::from_state(&SimSetupState::new(), &manager)
-            .expect("current context validates");
+        let mut context =
+            context_from_state(&SimSetupState::new(), &manager).expect("current context validates");
         context.schema_version = UNPINNED_MODEL_SOURCE_SCHEMA_VERSION;
         context.model_libraries[0].source_closure.clear();
 
         let (_, restored, warnings) = context
-            .into_state()
+            .into_state(project_id())
             .expect("legacy unpinned catalog remains recoverable");
 
         assert_eq!(warnings.len(), 1);
@@ -920,13 +1166,13 @@ mod tests {
         manager
             .load_library_file(&path, Some("TT"))
             .expect("load multifile source");
-        let mut context = ProjectExecutionContext::from_state(&SimSetupState::new(), &manager)
-            .expect("current context validates");
+        let mut context =
+            context_from_state(&SimSetupState::new(), &manager).expect("current context validates");
         context.schema_version = PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION;
         context.model_libraries[0].source_edges.clear();
 
         let (_, restored, warnings) = context
-            .into_state()
+            .into_state(project_id())
             .expect("schema-two catalog remains repairable");
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("no authenticated dependency-resolution graph"));
@@ -949,8 +1195,8 @@ mod tests {
         manager
             .load_library_file(&path, Some("TT"))
             .expect("load model source");
-        let context = ProjectExecutionContext::from_state(&SimSetupState::new(), &manager)
-            .expect("context validates");
+        let context =
+            context_from_state(&SimSetupState::new(), &manager).expect("context validates");
         let canonical_root = context.model_libraries[0]
             .root_path
             .clone()
@@ -959,7 +1205,7 @@ mod tests {
         std::fs::remove_file(&path).expect("remove source");
         let (_, retained, warnings) = context
             .clone()
-            .into_state()
+            .into_state(project_id())
             .expect("missing source is retained for repair");
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("is unavailable"));
@@ -982,7 +1228,7 @@ mod tests {
         )
         .expect("write changed source");
         let (_, retained, warnings) = context
-            .into_state()
+            .into_state(project_id())
             .expect("changed source must not discard persisted catalog");
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("differs from the explicitly accepted SHA-256"));
@@ -1029,7 +1275,7 @@ mod tests {
             .validate()
             .expect("foreign desktop syntax remains valid project metadata");
         let (_, manager, warnings) = context
-            .into_state()
+            .into_state(project_id())
             .expect("foreign binding remains retained for repair");
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("foreign-platform"), "{:?}", warnings);

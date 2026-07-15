@@ -555,15 +555,14 @@ mod tests {
     }
 
     fn focus_underlying_editor(ctx: &Context, underlying: &mut String) {
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _output = ctx.run(raw_input(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let _ = ui
-                    .add(
-                        egui::TextEdit::singleline(underlying)
-                            .id(underlying_id())
-                            .desired_width(240.0),
-                    )
-                    .request_focus();
+                ui.add(
+                    egui::TextEdit::singleline(underlying)
+                        .id(underlying_id())
+                        .desired_width(240.0),
+                )
+                .request_focus();
             });
         });
     }

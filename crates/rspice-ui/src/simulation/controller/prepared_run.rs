@@ -7,9 +7,9 @@ use super::*;
 use crate::simulation::execution::{
     AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionPermit, ExecutionTargetCapabilities,
     ModelSourceIdentity, PreparationError, PreparationStage, PreparedRunMetadata,
-    PreparedRunSnapshot, RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
-    analysis_config_digest, analysis_instance_id, analysis_kind_tag, content_digest,
-    drc_receipt_digest, manual_source_receipt_digest,
+    PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy, SnapshotParts,
+    TouchstoneExportPolicy, analysis_kind_tag, content_digest, drc_receipt_digest,
+    manual_deck_analysis_instance_id, manual_source_receipt_digest,
 };
 
 pub(super) struct PendingPreparedRun {
@@ -179,11 +179,11 @@ impl SimulationController {
                 "No runnable analyses were selected",
             ));
         }
-        reject_deferred_corner_model_sources(&tasks)?;
+        reject_deferred_corner_model_sources(tasks.iter().map(PreparedTask::queued_analysis))?;
 
         let analysis_lines = tasks
             .iter()
-            .map(|task| task.analysis_line.clone())
+            .map(|task| task.queued_analysis().analysis_line.clone())
             .collect::<Vec<_>>();
         let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
             &state.library_manager,
@@ -209,8 +209,6 @@ impl SimulationController {
         netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
         reject_deferred_external_sources(&netlist)?;
 
-        let (analysis_instance_ids, analysis_config_digests, analysis_labels) =
-            self.task_identities(SimulationRunIntent::SimulateRunSet, &tasks);
         let source_digest =
             content_digest("rspice.generated-executable-source/v1", netlist.as_bytes());
         let receipt = RunSourceReceipt::SchematicDrc(drc_receipt_digest(
@@ -227,7 +225,10 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
-        append_corner_model_identities(&tasks, &mut model_identities);
+        append_corner_model_identities(
+            tasks.iter().map(PreparedTask::queued_analysis),
+            &mut model_identities,
+        );
 
         let mut advisories = generated.warnings;
         advisories.extend(
@@ -235,19 +236,20 @@ impl SimulationController {
                 format!("{} · {}", violation.message, violation.location.display())
             }),
         );
-        let touchstone_export =
-            touchstone_export_policy(state, &tasks, state.schematic.current_file.as_deref())?;
+        let touchstone_export = touchstone_export_policy(
+            state,
+            tasks.iter().map(PreparedTask::queued_analysis),
+            state.schematic.current_file.as_deref(),
+        )?;
 
         PreparedRunSnapshot::new(SnapshotParts {
             intent: SimulationRunIntent::SimulateRunSet,
+            simulation_plan_id: Some(plan.plan_id()),
             project_revision: state.workspace.project.revision().get(),
             topology_revision: state.schematic.topology_version(),
             source_digest,
             reference_process: state.sim_setup.reference_pvt.process,
             reference_temperature_celsius: state.sim_setup.reference_pvt.temperature_celsius,
-            analysis_instance_ids,
-            analysis_config_digests,
-            analysis_labels,
             tasks,
             executable_netlist: netlist,
             save_policy: SavePolicy::RetainEngineProducedResults,
@@ -291,38 +293,47 @@ impl SimulationController {
         }
         let (expanded, canonical_origin) = expand_manual_dependencies(&composed, origin)?;
         reject_deferred_external_sources(&expanded)?;
-        let tasks = manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
-            PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
-        })?;
-        reject_deferred_corner_model_sources(&tasks)?;
-        let (analysis_instance_ids, analysis_config_digests, analysis_labels) =
-            self.task_identities(SimulationRunIntent::ManualDeck, &tasks);
+        let queued_tasks =
+            manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
+                PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
+            })?;
+        let source_digest =
+            content_digest("rspice.manual-executable-source/v1", expanded.as_bytes());
+        let tasks = self.prepare_manual_tasks(
+            source_digest,
+            state.workspace.project.revision(),
+            queued_tasks,
+        );
+        reject_deferred_corner_model_sources(tasks.iter().map(PreparedTask::queued_analysis))?;
+        let analysis_config_digests = tasks
+            .iter()
+            .map(PreparedTask::config_digest)
+            .collect::<Vec<_>>();
         let receipt_digest = manual_source_receipt_digest(
             source,
             &expanded,
             canonical_origin.as_deref(),
             &analysis_config_digests,
         );
-        let source_digest =
-            content_digest("rspice.manual-executable-source/v1", expanded.as_bytes());
         let mut model_identities = Vec::new();
-        append_corner_model_identities(&tasks, &mut model_identities);
+        append_corner_model_identities(
+            tasks.iter().map(PreparedTask::queued_analysis),
+            &mut model_identities,
+        );
         let touchstone_export = touchstone_export_policy(
             state,
-            &tasks,
+            tasks.iter().map(PreparedTask::queued_analysis),
             state.workspace.netlist_source_path.as_deref(),
         )?;
 
         PreparedRunSnapshot::new(SnapshotParts {
             intent: SimulationRunIntent::ManualDeck,
+            simulation_plan_id: None,
             project_revision: state.workspace.project.revision().get(),
             topology_revision: state.schematic.topology_version(),
             source_digest,
             reference_process: state.sim_setup.reference_pvt.process,
             reference_temperature_celsius: state.sim_setup.reference_pvt.temperature_celsius,
-            analysis_instance_ids,
-            analysis_config_digests,
-            analysis_labels,
             tasks,
             executable_netlist: expanded,
             save_policy: SavePolicy::RetainEngineProducedResults,
@@ -336,33 +347,30 @@ impl SimulationController {
         })
     }
 
-    fn task_identities(
+    fn prepare_manual_tasks(
         &self,
-        intent: SimulationRunIntent,
-        tasks: &[QueuedAnalysis],
-    ) -> (
-        Vec<crate::product::ContentDigest>,
-        Vec<crate::product::ContentDigest>,
-        Vec<String>,
-    ) {
-        let mut kind_occurrences = [0usize; 26];
-        let mut instance_ids = Vec::with_capacity(tasks.len());
-        let mut config_digests = Vec::with_capacity(tasks.len());
-        let mut labels = Vec::with_capacity(tasks.len());
-        for task in tasks {
-            let kind = usize::from(analysis_kind_tag(&task.spec));
-            let occurrence = kind_occurrences[kind];
-            kind_occurrences[kind] += 1;
-            instance_ids.push(analysis_instance_id(intent, &task.spec, occurrence));
-            config_digests.push(analysis_config_digest(
-                &task.analysis_line,
-                &task.spec,
-                task.config.as_ref(),
-                &task.spec_options,
-            ));
-            labels.push(self.analysis_name_for_spec(&task.spec).to_owned());
-        }
-        (instance_ids, config_digests, labels)
+        expanded_source_identity: crate::product::ContentDigest,
+        source_revision: crate::product::ObjectRevision,
+        tasks: Vec<QueuedAnalysis>,
+    ) -> Vec<PreparedTask> {
+        let mut kind_occurrences = std::collections::HashMap::<u8, usize>::new();
+        tasks
+            .into_iter()
+            .map(|task| {
+                let occurrence = kind_occurrences
+                    .entry(analysis_kind_tag(&task.spec))
+                    .or_default();
+                let current_occurrence = *occurrence;
+                *occurrence += 1;
+                let instance_id = manual_deck_analysis_instance_id(
+                    expanded_source_identity,
+                    &task.spec,
+                    current_occurrence,
+                );
+                let label = self.analysis_name_for_spec(&task.spec);
+                PreparedTask::new(instance_id, source_revision, Vec::new(), label, task)
+            })
+            .collect()
     }
 }
 
@@ -404,19 +412,26 @@ fn path_identity(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn touchstone_export_policy(
+fn touchstone_export_policy<'a>(
     state: &AppState,
-    tasks: &[QueuedAnalysis],
+    tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
     source_path: Option<&Path>,
 ) -> Result<TouchstoneExportPolicy, PreparationError> {
     if !tasks
-        .iter()
+        .into_iter()
         .any(|task| matches!(&task.spec, AnalysisSpec::SParameter { .. }))
     {
         return Ok(TouchstoneExportPolicy::disabled());
     }
 
-    let mut dialog = state.sim_setup.sp.clone();
+    touchstone_export_policy_for_dialog(&state.sim_setup.sp, source_path)
+}
+
+pub(super) fn touchstone_export_policy_for_dialog(
+    dialog: &crate::simulation::dialog::SpDialogState,
+    source_path: Option<&Path>,
+) -> Result<TouchstoneExportPolicy, PreparationError> {
+    let mut dialog = dialog.clone();
     dialog.ensure_initialized();
     let config = dialog.to_config().map_err(|error| {
         PreparationError::new(
@@ -525,7 +540,9 @@ fn executable_logical_lines(source: &str) -> Vec<(usize, String)> {
     logical_lines
 }
 
-fn reject_deferred_corner_model_sources(tasks: &[QueuedAnalysis]) -> Result<(), PreparationError> {
+fn reject_deferred_corner_model_sources<'a>(
+    tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
+) -> Result<(), PreparationError> {
     for task in tasks {
         let Some(corner) = task.spec_options.corner.as_ref() else {
             continue;
@@ -681,8 +698,8 @@ fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
     })
 }
 
-fn append_corner_model_identities(
-    tasks: &[QueuedAnalysis],
+fn append_corner_model_identities<'a>(
+    tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
     identities: &mut Vec<ModelSourceIdentity>,
 ) {
     for task in tasks {
@@ -734,6 +751,30 @@ mod tests {
         state
     }
 
+    fn edit_frozen_transient_stop(state: &mut AppState, stop: &str) {
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("test state owns a stable plan");
+        let transient = plan
+            .instances()
+            .iter()
+            .find(|instance| {
+                instance.kind() == crate::simulation::plan::AnalysisKind::Transient
+                    && instance.enabled()
+            })
+            .expect("enabled transient instance")
+            .id();
+        plan.edit(transient, |draft| {
+            let crate::simulation::plan::AnalysisDraft::Transient(draft) = draft else {
+                panic!("expected transient draft");
+            };
+            draft.stop = stop.to_owned();
+        })
+        .expect("transient edit commits");
+    }
+
     #[test]
     fn prepared_snapshot_detects_analysis_mutation_without_revision_change() {
         let mut state = runnable_state();
@@ -742,7 +783,7 @@ mod tests {
             .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("prepare first snapshot");
         let revision = state.workspace.project.revision().get();
-        state.sim_setup.tran.stop = "2m".to_owned();
+        edit_frozen_transient_stop(&mut state, "2m");
         let changed = controller
             .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("prepare changed snapshot");
@@ -830,10 +871,14 @@ mod tests {
         controller
             .authorize_snapshot(snapshot)
             .expect("authorize imported RF deck");
-        let mut dispatch = controller
+        let dispatch = controller
             .consume_snapshot_for_dispatch(&mut state)
             .expect("dispatch imported RF deck");
-        let policy = dispatch.take_touchstone_export_policy();
+        let policy = dispatch
+            .tasks()
+            .next()
+            .expect("manual S-parameter task")
+            .touchstone_export_policy();
 
         let path = policy.output_path(4, 1, 2).expect("export is enabled");
         assert!(path.ends_with("imported/rf_fixture_run0004_sp01.s2p"));
@@ -847,7 +892,7 @@ mod tests {
         controller
             .prepare_run_set_for_preflight(&state)
             .expect("preflight");
-        state.sim_setup.tran.stop = "3m".to_owned();
+        edit_frozen_transient_stop(&mut state, "3m");
         let error = controller
             .consume_snapshot_for_dispatch(&mut state)
             .expect_err("changed input must fail closed");

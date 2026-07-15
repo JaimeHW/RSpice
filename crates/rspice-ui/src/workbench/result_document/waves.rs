@@ -12,7 +12,9 @@ use egui::Ui;
 
 use crate::analysis::calculator;
 use crate::common::AppState;
-use crate::state::{AnalysisType, SharedWaveformValues, SimulationState};
+use crate::state::{
+    AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
+};
 use crate::ui::plot::{self, Axis, CursorPair, PlotSpec, Trace, XScale, fmt_si, sample_at};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -95,6 +97,13 @@ fn models_fingerprint(simulation: &SimulationState, phase_continuous: bool, t: &
     for run in simulation.display_runs() {
         run.id.hash(&mut h);
         for analysis in &run.analyses {
+            analysis.analysis_type.hash(&mut h);
+            analysis.label.hash(&mut h);
+            analysis
+                .provenance
+                .as_ref()
+                .map(|provenance| provenance.source_instance_id())
+                .hash(&mut h);
             analysis.waveforms.len().hash(&mut h);
             for waveform in &analysis.waveforms {
                 waveform.visible.hash(&mut h);
@@ -136,6 +145,39 @@ fn run_mixed_key(base: u64, run_id: u64, overlay: bool) -> u64 {
     } else {
         base
     }
+}
+
+fn unique_analysis<'a>(
+    mut candidates: impl Iterator<Item = &'a AnalysisResult>,
+) -> Option<&'a AnalysisResult> {
+    let candidate = candidates.next()?;
+    candidates.next().is_none().then_some(candidate)
+}
+
+/// Resolve the result in an overlay run that was produced by the same
+/// prepared analysis instance. Kind/label inference is permitted only for
+/// unambiguous legacy history, where neither side has prepared provenance.
+fn matching_overlay_analysis<'a>(
+    analysis: &AnalysisResult,
+    overlay_run: &'a SimulationRun,
+) -> Option<&'a AnalysisResult> {
+    if let Some(source_instance_id) = analysis
+        .provenance
+        .as_ref()
+        .map(|provenance| provenance.source_instance_id())
+    {
+        return overlay_run
+            .find_analysis_by_source_instance(source_instance_id)
+            .filter(|candidate| candidate.analysis_type == analysis.analysis_type);
+    }
+
+    let legacy_candidates = || {
+        overlay_run.analyses.iter().filter(|candidate| {
+            candidate.provenance.is_none() && candidate.analysis_type == analysis.analysis_type
+        })
+    };
+    unique_analysis(legacy_candidates().filter(|candidate| candidate.label == analysis.label))
+        .or_else(|| unique_analysis(legacy_candidates()))
 }
 
 impl StripModel {
@@ -238,25 +280,13 @@ pub(super) fn build_models(
         }
         let signal_trace_count = traces.len();
 
-        // Overlay runs: match the same analysis (type, then label when it
-        // disambiguates) and merge traces by signal name. Signal owns hue —
+        // Overlay runs: match the exact prepared analysis instance and merge
+        // traces by signal name. Signal owns hue —
         // overlay traces reuse the active trace's color and visibility —
         // run owns weight (applied at draw time).
         let mut overlaid_run_count = 0usize;
         for overlay_run in overlay_runs {
-            let overlay_analysis = overlay_run
-                .analyses
-                .iter()
-                .find(|candidate| {
-                    candidate.analysis_type == analysis.analysis_type
-                        && candidate.label == analysis.label
-                })
-                .or_else(|| {
-                    overlay_run
-                        .analyses
-                        .iter()
-                        .find(|candidate| candidate.analysis_type == analysis.analysis_type)
-                });
+            let overlay_analysis = matching_overlay_analysis(analysis, overlay_run);
             let Some(overlay_analysis) = overlay_analysis else {
                 continue;
             };
@@ -1313,7 +1343,8 @@ fn measurement_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, WaveformData};
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::state::{AnalysisResult, AnalysisResultProvenance, SimulationRun, WaveformData};
 
     #[test]
     fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
@@ -1331,5 +1362,66 @@ mod tests {
         assert_eq!(models[0].y_unit, "V^2/Hz");
         assert!(matches!(models[0].traces[0].kind, TraceKind::Value));
         assert_eq!(models[0].traces[0].y.as_slice(), &[1.0e-18, 2.0e-18]);
+    }
+
+    fn ac_result(
+        source_id: AnalysisInstanceId,
+        values: [f64; 2],
+        snapshot_byte: u8,
+    ) -> AnalysisResult {
+        AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_waveforms(vec![WaveformData::new(
+                "V(out)",
+                vec![1.0, 10.0],
+                values.to_vec(),
+                "#fff",
+            )])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    source_id,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([snapshot_byte; 32]),
+                    Vec::new(),
+                )
+                .expect("valid AC provenance"),
+            )
+    }
+
+    #[test]
+    fn overlays_pair_two_same_kind_results_by_exact_source_instance() {
+        let first_id = AnalysisInstanceId::new();
+        let second_id = AnalysisInstanceId::new();
+
+        let mut active = SimulationRun::new(2);
+        active.add_analysis(ac_result(first_id, [1.0, 2.0], 0x11));
+        active.add_analysis(ac_result(second_id, [3.0, 4.0], 0x11));
+
+        let mut overlay = SimulationRun::new(1);
+        // Reverse the same-kind result order: kind/label matching would alias
+        // the first overlay result onto both active strips.
+        overlay.add_analysis(ac_result(second_id, [201.0, 202.0], 0x22));
+        overlay.add_analysis(ac_result(first_id, [101.0, 102.0], 0x22));
+        let overlay_dataset_id = overlay.dataset_id;
+
+        let mut simulation = SimulationState {
+            runs: vec![active, overlay],
+            active_run_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset_id],
+            ..SimulationState::default()
+        };
+        assert!(simulation.select_analysis(0));
+        let mut derived = DerivedSeries::default();
+
+        let models = build_models(&simulation, &mut derived, &Tokens::default(), false);
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].signal_trace_count, 1);
+        assert_eq!(models[0].traces.len(), 2);
+        assert!(models[0].traces[1].overlay);
+        assert_eq!(models[0].traces[1].y.as_slice(), &[101.0, 102.0]);
+        assert_eq!(models[1].signal_trace_count, 1);
+        assert_eq!(models[1].traces.len(), 2);
+        assert!(models[1].traces[1].overlay);
+        assert_eq!(models[1].traces[1].y.as_slice(), &[201.0, 202.0]);
     }
 }

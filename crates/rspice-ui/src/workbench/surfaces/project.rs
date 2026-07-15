@@ -95,14 +95,23 @@ fn engineering_status(ui: &mut Ui, app: &mut RSpiceApp) {
                 .map(|result| result.summary())
         })
         .flatten();
+    let enabled_analyses = app.state.sim_setup.enabled_analysis_instance_count();
     let valid_analyses = app
         .state
         .sim_setup
-        .enabled
-        .iter()
-        .filter(|index| app.state.sim_setup.validation_error(**index).is_none())
+        .enabled_analysis_instances()
+        .filter(|instance| {
+            app.state
+                .sim_setup
+                .analysis_draft_validation_error(instance.draft())
+                .is_none()
+        })
         .count();
-    let enabled_analyses = app.state.sim_setup.enabled.len();
+    let graph_valid = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .is_ok_and(|plan| plan.validation_issues().is_empty());
     let model_files = app.state.pdk_config.discovered_files.len();
     let model_errors = app.state.pdk_config.scan_errors.len();
 
@@ -126,7 +135,7 @@ fn engineering_status(ui: &mut Ui, app: &mut RSpiceApp) {
             "Simulation plan",
             &format!("{enabled_analyses} analyses"),
             &format!("{valid_analyses} validated"),
-            enabled_analyses > 0 && valid_analyses == enabled_analyses,
+            enabled_analyses > 0 && valid_analyses == enabled_analyses && graph_valid,
             || Command::OpenWorkspace(Workspace::Simulate).execute(app),
         );
         let spec_count = app.state.workspace.specs.len();
@@ -238,7 +247,7 @@ fn design_entry_points(ui: &mut Ui, app: &mut RSpiceApp) {
         if ui
             .button(format!(
                 "Simulation plan · {} enabled",
-                app.state.sim_setup.enabled.len()
+                app.state.sim_setup.enabled_analysis_instance_count()
             ))
             .clicked()
         {
@@ -395,7 +404,10 @@ fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(
                 ui,
                 "Enabled analyses",
-                &app.state.sim_setup.enabled.len().to_string(),
+                &app.state
+                    .sim_setup
+                    .enabled_analysis_instance_count()
+                    .to_string(),
             );
         });
     });

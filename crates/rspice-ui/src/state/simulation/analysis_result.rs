@@ -1,4 +1,113 @@
 use super::*;
+use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+use std::collections::HashSet;
+
+/// Durable source domain for a prepared analysis identity.
+///
+/// Simulation-plan IDs are owned by the project's stable plan/tombstones.
+/// Manual-deck IDs are deterministic projections of an imported source deck
+/// and intentionally have no plan object. `LegacyUnclassified` is reserved
+/// for truthful migration of result schemas that persisted an ID but not its
+/// domain; current execution must never create it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisResultSourceDomain {
+    SimulationPlan,
+    ManualDeck,
+    #[default]
+    LegacyUnclassified,
+}
+
+/// Immutable identity of the prepared analysis task that produced a result.
+///
+/// A result created by the current execution pipeline always carries this
+/// record. `AnalysisResult::provenance == None` is reserved exclusively for
+/// result history migrated from project formats that predate prepared-task
+/// identities; callers must never infer an identity from analysis kind or
+/// display order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisResultProvenance {
+    source_domain: AnalysisResultSourceDomain,
+    source_instance_id: AnalysisInstanceId,
+    source_revision: ObjectRevision,
+    prepared_snapshot_digest: ContentDigest,
+    dependency_ids: Vec<AnalysisInstanceId>,
+}
+
+impl AnalysisResultProvenance {
+    /// Build a complete, internally consistent prepared-task provenance
+    /// record. Dependency order is retained exactly as it appeared in the
+    /// frozen prepared snapshot.
+    pub fn new(
+        source_instance_id: AnalysisInstanceId,
+        source_revision: ObjectRevision,
+        prepared_snapshot_digest: ContentDigest,
+        dependency_ids: Vec<AnalysisInstanceId>,
+    ) -> Result<Self, String> {
+        Self::new_with_source_domain(
+            AnalysisResultSourceDomain::SimulationPlan,
+            source_instance_id,
+            source_revision,
+            prepared_snapshot_digest,
+            dependency_ids,
+        )
+    }
+
+    pub fn new_with_source_domain(
+        source_domain: AnalysisResultSourceDomain,
+        source_instance_id: AnalysisInstanceId,
+        source_revision: ObjectRevision,
+        prepared_snapshot_digest: ContentDigest,
+        dependency_ids: Vec<AnalysisInstanceId>,
+    ) -> Result<Self, String> {
+        let mut unique_dependencies = HashSet::with_capacity(dependency_ids.len());
+        for dependency_id in &dependency_ids {
+            if *dependency_id == source_instance_id {
+                return Err(format!(
+                    "analysis instance {source_instance_id} cannot depend on itself"
+                ));
+            }
+            if !unique_dependencies.insert(*dependency_id) {
+                return Err(format!(
+                    "analysis instance {source_instance_id} repeats dependency {dependency_id}"
+                ));
+            }
+        }
+
+        Ok(Self {
+            source_domain,
+            source_instance_id,
+            source_revision,
+            prepared_snapshot_digest,
+            dependency_ids,
+        })
+    }
+
+    #[must_use]
+    pub const fn source_domain(&self) -> AnalysisResultSourceDomain {
+        self.source_domain
+    }
+
+    #[must_use]
+    pub const fn source_instance_id(&self) -> AnalysisInstanceId {
+        self.source_instance_id
+    }
+
+    #[must_use]
+    pub const fn source_revision(&self) -> ObjectRevision {
+        self.source_revision
+    }
+
+    #[must_use]
+    pub const fn prepared_snapshot_digest(&self) -> ContentDigest {
+        self.prepared_snapshot_digest
+    }
+
+    #[must_use]
+    pub fn dependency_ids(&self) -> &[AnalysisInstanceId] {
+        &self.dependency_ids
+    }
+}
 
 /// Operating point data for a single node or device terminal
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +186,9 @@ pub struct AnalysisResult {
     pub success: bool,
     /// Error message if analysis failed
     pub error_message: Option<String>,
+    /// Exact prepared-task identity. Missing only for migrated legacy result
+    /// history that was written before source instance IDs existed.
+    pub provenance: Option<AnalysisResultProvenance>,
 }
 
 impl AnalysisResult {
@@ -94,6 +206,7 @@ impl AnalysisResult {
             measurements: Vec::new(),
             success: true,
             error_message: None,
+            provenance: None,
         }
     }
 
@@ -116,6 +229,7 @@ impl AnalysisResult {
             measurements: Vec::new(),
             success: false,
             error_message: Some(error.into()),
+            provenance: None,
         }
     }
 
@@ -150,6 +264,13 @@ impl AnalysisResult {
     /// Attach evaluated `.MEAS` results.
     pub fn with_measurements(mut self, measurements: Vec<rspice_core::MeasureResult>) -> Self {
         self.measurements = measurements;
+        self
+    }
+
+    /// Attach the exact prepared task that produced this result.
+    #[must_use]
+    pub fn with_provenance(mut self, provenance: AnalysisResultProvenance) -> Self {
+        self.provenance = Some(provenance);
         self
     }
 

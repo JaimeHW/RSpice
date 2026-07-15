@@ -1026,7 +1026,12 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         }
         ResultViewer::Bode => {
             if active_run
-                .and_then(crate::state::ac_bode_summary_for_run)
+                .and_then(|run| {
+                    crate::state::ac_bode_summary_for_selection(
+                        run,
+                        state.simulation.active_analysis_idx,
+                    )
+                })
                 .is_some()
             {
                 ViewerAvailability::available("AC magnitude response is available")

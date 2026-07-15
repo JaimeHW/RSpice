@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use crate::product::AnalysisInstanceId;
+
 use super::{AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, WaveformData};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -33,6 +35,51 @@ pub fn ac_bode_summary_for_run(run: &SimulationRun) -> Option<AcBodeSummary> {
         analysis.analysis_type == AnalysisType::Ac && !analysis.waveforms.is_empty()
     })?;
     ac_bode_summary_for_analysis(analysis, analysis_index)
+}
+
+/// Resolve the AC response produced by one exact prepared analysis instance.
+///
+/// Analysis kind and display label are deliberately not used as identity:
+/// both can be identical when a run contains multiple AC configurations.
+pub fn ac_bode_summary_for_source_instance(
+    run: &SimulationRun,
+    source_instance_id: AnalysisInstanceId,
+) -> Option<AcBodeSummary> {
+    let (analysis_index, analysis) = run.analyses.iter().enumerate().find(|(_, analysis)| {
+        analysis
+            .provenance
+            .as_ref()
+            .is_some_and(|provenance| provenance.source_instance_id() == source_instance_id)
+    })?;
+    ac_bode_summary_for_analysis(analysis, analysis_index)
+}
+
+/// Resolve the AC response selected in a result browser.
+///
+/// A selected AC result with current provenance is re-resolved through its
+/// stable prepared-instance identity. Legacy results, which predate that
+/// identity, remain addressable by their run-local index. When the current
+/// selection is not an AC result, the run's normal AC fallback is retained.
+pub fn ac_bode_summary_for_selection(
+    run: &SimulationRun,
+    selected_analysis_index: Option<usize>,
+) -> Option<AcBodeSummary> {
+    let Some(analysis_index) = selected_analysis_index else {
+        return ac_bode_summary_for_run(run);
+    };
+    let Some(analysis) = run.analyses.get(analysis_index) else {
+        return ac_bode_summary_for_run(run);
+    };
+    if analysis.analysis_type != AnalysisType::Ac {
+        return ac_bode_summary_for_run(run);
+    }
+
+    match analysis.provenance.as_ref() {
+        Some(provenance) => {
+            ac_bode_summary_for_source_instance(run, provenance.source_instance_id())
+        }
+        None => ac_bode_summary_for_analysis(analysis, analysis_index),
+    }
 }
 
 pub fn ac_bode_summary_for_analysis(
@@ -179,6 +226,7 @@ fn sample_at(x: &[f64], y: &[f64], xq: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::product::{ContentDigest, ObjectRevision};
 
     fn ac_analysis(waveforms: Vec<WaveformData>) -> AnalysisResult {
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(waveforms)
@@ -310,5 +358,67 @@ mod tests {
         )]));
 
         assert_eq!(ac_bode_summary_for_run(&run), None);
+    }
+
+    #[test]
+    fn ac_selection_resolves_two_same_kind_results_by_source_instance() {
+        let first_id = AnalysisInstanceId::new();
+        let second_id = AnalysisInstanceId::new();
+        let snapshot = ContentDigest::from_bytes([0x42; 32]);
+        let frequency = [1.0, 10.0];
+        let mut run = SimulationRun::new(9);
+        run.add_analysis(
+            ac_analysis(vec![wave("|V(low_band)|", &frequency, &[10.0, 1.0], true)])
+                .with_provenance(
+                    super::super::AnalysisResultProvenance::new(
+                        first_id,
+                        ObjectRevision::INITIAL,
+                        snapshot,
+                        Vec::new(),
+                    )
+                    .expect("first provenance"),
+                ),
+        );
+        run.add_analysis(
+            ac_analysis(vec![wave(
+                "|V(high_band)|",
+                &frequency,
+                &[100.0, 10.0],
+                true,
+            )])
+            .with_provenance(
+                super::super::AnalysisResultProvenance::new(
+                    second_id,
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    Vec::new(),
+                )
+                .expect("second provenance"),
+            ),
+        );
+
+        let first = ac_bode_summary_for_source_instance(&run, first_id).expect("first AC");
+        let second = ac_bode_summary_for_source_instance(&run, second_id).expect("second AC");
+        assert_eq!(
+            (first.analysis_index, first.signal.as_str()),
+            (0, "V(low_band)")
+        );
+        assert_eq!(
+            (second.analysis_index, second.signal.as_str()),
+            (1, "V(high_band)")
+        );
+
+        assert_eq!(
+            ac_bode_summary_for_selection(&run, Some(0))
+                .expect("selected first AC")
+                .signal,
+            "V(low_band)"
+        );
+        assert_eq!(
+            ac_bode_summary_for_selection(&run, Some(1))
+                .expect("selected second AC")
+                .signal,
+            "V(high_band)"
+        );
     }
 }

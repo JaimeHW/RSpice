@@ -210,56 +210,83 @@ fn library_tree(ui: &mut Ui, app: &mut RSpiceApp, open_documents: bool) {
 }
 
 fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
-    use crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES;
-    section_header(
-        ui,
-        "Run set",
-        Some(&format!("{} enabled", app.state.sim_setup.enabled.len())),
-    );
+    use crate::simulation::plan::AnalysisKind;
+
+    let enabled = app.state.sim_setup.enabled_analysis_instance_count();
+    let total = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map_or(0, |plan| plan.instances().len());
+    let query = app.state.workbench.navigator_query.trim().to_lowercase();
+    section_header(ui, "Lab characterization", Some(&format!("{enabled} on")));
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
         .show(ui, |ui| {
-            let query = app.state.workbench.navigator_query.trim().to_lowercase();
-            for (category, analyses) in SIMULATION_ANALYSIS_CATEGORIES {
-                let filtered: Vec<_> = analyses
-                    .iter()
-                    .copied()
-                    .filter(|(_, name)| query.is_empty() || name.to_lowercase().contains(&query))
-                    .collect();
-                if filtered.is_empty() {
-                    continue;
-                }
-                section_header(ui, category, None);
-                for (index, name) in filtered {
-                    let mut enabled = app.state.sim_setup.enabled.contains(&index);
-                    let error = app.state.sim_setup.validation_error(index);
-                    ui.horizontal(|ui| {
-                        ui.add_space(7.0);
-                        if ui.checkbox(&mut enabled, "").changed() {
-                            if enabled {
-                                app.state.sim_setup.enabled.insert(index);
-                                app.state.sim_setup.listed.insert(index);
-                            } else {
-                                app.state.sim_setup.enabled.remove(&index);
-                            }
-                        }
-                        if nav_row(
-                            ui,
-                            if error.is_some() {
-                                WorkbenchIcon::Warning
-                            } else {
-                                WorkbenchIcon::Simulate
-                            },
-                            name,
-                            app.state.workbench.active_analysis == index,
-                            Some(&app.state.sim_setup.summary(index)),
-                        ) {
-                            app.state.workbench.active_analysis = index;
-                        }
-                    });
-                }
+            if query.is_empty() || "analyses".contains(&query) {
+                let meta = format!("{total} active · {enabled} enabled");
+                let _ = nav_row(
+                    ui,
+                    WorkbenchIcon::Results,
+                    "Analyses",
+                    true,
+                    Some(&meta),
+                );
             }
+            section_header(ui, "Run set", Some("Reference point"));
+            nav_property(ui, "Process", app.state.sim_setup.reference_pvt.process.short_name());
+            nav_property(
+                ui,
+                "Temperature",
+                &format!("{} °C", app.state.sim_setup.reference_pvt.temperature_celsius),
+            );
+            nav_property(
+                ui,
+                "Variation",
+                if app
+                    .state
+                    .sim_setup
+                    .has_enabled_analysis_kind(AnalysisKind::MonteCarlo)
+                {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+            );
+            ui.add_space(6.0);
+            if ui.button("+ Add analysis…").clicked() {
+                app.state.sim_setup.palette_open = true;
+                app.state.sim_setup.palette_query.clear();
+                app.state.sim_setup.palette_active = 0;
+            }
+            section_header(ui, "Capability policy", None);
+            ui.label(
+                egui::RichText::new(
+                    "Every analysis declares production, preview, or compatibility status before insertion.",
+                )
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
         });
+}
+
+fn nav_property(ui: &mut Ui, label: &str, value: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(value)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(t.color.text),
+            );
+        });
+    });
 }
 
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {

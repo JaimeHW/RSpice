@@ -1,120 +1,131 @@
 use super::*;
+use crate::simulation::execution::PreparedTask;
+use crate::simulation::plan::FrozenSimulationPlan;
 
 impl SimulationController {
-    pub(super) fn enabled_analysis_indices(state: &AppState) -> Vec<usize> {
-        // The run set is the single source of truth: no silent fallback to
-        // the selected row — start_simulation refuses an empty set instead.
-        state.sim_setup.ordered_enabled_indices()
-    }
-
-    pub(super) fn analysis_label_for_index(idx: usize) -> &'static str {
-        match idx {
-            0 => "DC Operating Point",
-            1 => "Transient",
-            2 => "AC",
-            24 => "DISTO",
-            3 => "DC Sweep",
-            4 => "Noise",
-            5 => "Pole-Zero",
-            6 => "Sensitivity",
-            7 => "Monte Carlo",
-            8 => "PSS",
-            9 => "STB",
-            10 => "Temperature Sweep",
-            11 => "Harmonic Balance",
-            12 => "S-Parameter",
-            13 => "PAC",
-            14 => "PNoise",
-            15 => "PXF",
-            16 => "PSTB",
-            17 => "Transfer Function",
-            18 => "Corner",
-            19 => "Envelope",
-            20 => "Fourier",
-            21 => "Reliability",
-            22 => "Optimization",
-            23 => "Safety (SOA)",
-            _ => "Unknown",
-        }
-    }
-
     pub(super) fn build_analysis_plan(
         &self,
         state: &AppState,
-    ) -> Result<AnalysisPlan, Vec<String>> {
-        let mut plan = AnalysisPlan::new();
-        plan.stop_on_error = false;
-
-        let mut errors = Vec::new();
-        for idx in Self::enabled_analysis_indices(state) {
-            match self.build_analysis_spec_for_index(state, idx) {
-                Ok(spec) => plan.analyses.push(spec),
-                Err(e) => errors.push(format!("{}: {}", Self::analysis_label_for_index(idx), e)),
-            }
-        }
-
-        if !errors.is_empty() {
-            return Err(errors);
-        }
-        plan.validate()?;
-        Ok(plan)
+    ) -> Result<FrozenSimulationPlan, Vec<String>> {
+        let plan = state.sim_setup.analysis_plan.as_ref().ok_or_else(|| {
+            vec![
+                "The simulation plan has not been migrated to stable analysis instances".to_owned(),
+            ]
+        })?;
+        plan.freeze().map_err(|error| vec![error.to_string()])
     }
 
     pub(super) fn build_queue_from_plan(
         &self,
         state: &AppState,
-        plan: &AnalysisPlan,
+        plan: &FrozenSimulationPlan,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
-    ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
-        let mut queue = Vec::with_capacity(plan.analyses.len());
+    ) -> Result<Vec<PreparedTask>, Vec<String>> {
+        let mut queue = Vec::with_capacity(plan.instances().len());
         let mut errors = Vec::new();
+        // The existing engine configuration builders still read the retired
+        // singleton setup view. Clone once, then project each frozen instance
+        // (and its exact bound prerequisites) into that short-lived view.
+        // The live state and frozen plan remain untouched.
+        let mut projected_state = state.clone();
 
-        for spec in &plan.analyses {
-            let analysis_line = match self.analysis_spec_to_spice_line(state, spec) {
-                Ok(line) => line,
-                Err(e) => {
-                    errors.push(format!("{}: {}", spec.run_type().display_name(), e));
-                    continue;
-                }
-            };
-            let spec_options =
-                match self.analysis_spec_execution_options(state, spec, sealed_model_sources) {
-                    Ok(opts) => opts,
-                    Err(e) => {
-                        errors.push(format!("{}: {}", spec.run_type().display_name(), e));
+        for instance in plan.instances() {
+            projected_state.sim_setup =
+                match state.sim_setup.frozen_instance_projection(plan, instance) {
+                    Ok(projection) => projection,
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", instance.kind().label()));
                         continue;
                     }
                 };
+            let dependency_ids = instance
+                .dependencies()
+                .iter()
+                .map(|dependency| dependency.target())
+                .collect();
 
-            if Self::executes_via_spec(spec) {
-                queue.push(QueuedAnalysis {
-                    spec: spec.clone(),
+            let spec = match self
+                .build_analysis_spec_for_index(&projected_state, instance.kind().legacy_index())
+            {
+                Ok(spec) => spec,
+                Err(error) => {
+                    errors.push(format!("{}: {error}", instance.kind().label()));
+                    continue;
+                }
+            };
+            let analysis_line = match self.analysis_spec_to_spice_line(&projected_state, &spec) {
+                Ok(line) => line,
+                Err(e) => {
+                    errors.push(format!("{}: {}", instance.kind().label(), e));
+                    continue;
+                }
+            };
+            let spec_options = match self.analysis_spec_execution_options(
+                &projected_state,
+                &spec,
+                sealed_model_sources,
+            ) {
+                Ok(opts) => opts,
+                Err(e) => {
+                    errors.push(format!("{}: {}", instance.kind().label(), e));
+                    continue;
+                }
+            };
+
+            let task = if Self::executes_via_spec(&spec) {
+                QueuedAnalysis {
+                    spec,
                     config: None,
                     spec_options,
                     analysis_line,
-                });
-                continue;
-            }
-
-            match self.analysis_spec_to_config(state, spec) {
-                Ok(config) => {
-                    if let Err(errs) = config.validate() {
-                        errors.push(format!(
-                            "{} config is invalid: {}",
-                            spec.run_type().display_name(),
-                            errs.join(", ")
-                        ));
-                    } else {
-                        queue.push(QueuedAnalysis {
-                            spec: spec.clone(),
-                            config: Some(config),
-                            spec_options,
-                            analysis_line,
-                        });
+                }
+            } else {
+                match self.analysis_spec_to_config(&projected_state, &spec) {
+                    Ok(config) => {
+                        if let Err(errs) = config.validate() {
+                            errors.push(format!(
+                                "{} config is invalid: {}",
+                                instance.kind().label(),
+                                errs.join(", ")
+                            ));
+                            continue;
+                        } else {
+                            QueuedAnalysis {
+                                spec,
+                                config: Some(config),
+                                spec_options,
+                                analysis_line,
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        errors.push(format!("{}: {}", instance.kind().label(), e));
+                        continue;
                     }
                 }
-                Err(e) => errors.push(format!("{}: {}", spec.run_type().display_name(), e)),
+            };
+            let mut prepared = PreparedTask::new(
+                instance.id(),
+                plan.revision(),
+                dependency_ids,
+                instance.kind().label(),
+                task,
+            );
+            if instance.kind() == crate::simulation::plan::AnalysisKind::SParameter {
+                match prepared_run::touchstone_export_policy_for_dialog(
+                    &projected_state.sim_setup.sp,
+                    state.schematic.current_file.as_deref(),
+                ) {
+                    Ok(policy) => {
+                        prepared = prepared.with_touchstone_export_policy(policy);
+                    }
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", instance.kind().label()));
+                        continue;
+                    }
+                }
             }
+            queue.push(prepared);
         }
 
         if errors.is_empty() {
@@ -252,35 +263,136 @@ impl SimulationController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     #[test]
-    fn controller_consumes_authoritative_analysis_order() {
+    fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks() {
         let mut state = AppState::default();
-        state.sim_setup.enabled.extend([TAB_AC, TAB_NOISE]);
-        state.sim_setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("new state owns a stable plan");
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let (first_pss, _) = plan.insert(AnalysisKind::Pss).expect("first PSS inserts");
+        let (second_pss, _) = plan.insert(AnalysisKind::Pss).expect("second PSS inserts");
+        plan.edit(first_pss, |draft| {
+            let AnalysisDraft::Pss(draft) = draft else {
+                panic!("expected PSS draft");
+            };
+            draft.fund_freq = "1Meg".to_owned();
+        })
+        .expect("first PSS edits");
+        plan.edit(second_pss, |draft| {
+            let AnalysisDraft::Pss(draft) = draft else {
+                panic!("expected PSS draft");
+            };
+            draft.fund_freq = "2Meg".to_owned();
+        })
+        .expect("second PSS edits");
+        plan.bind_dependency(first_pss, AnalysisKind::OperatingPoint, op)
+            .expect("first PSS binds OP");
+        plan.bind_dependency(second_pss, AnalysisKind::OperatingPoint, op)
+            .expect("second PSS binds OP");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.bind_dependency(pac, AnalysisKind::Pss, first_pss)
+            .expect("PAC binds exact first PSS");
+        let expected_revision = plan.revision();
 
-        assert_eq!(
-            SimulationController::enabled_analysis_indices(&state),
-            vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC]
-        );
+        let controller = SimulationController::new();
+        let frozen = controller
+            .build_analysis_plan(&state)
+            .expect("plan freezes");
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources()
+            .expect("default model sources seal");
+        let tasks = controller
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .expect("frozen plan compiles");
+        let pac_task = tasks
+            .iter()
+            .find(|task| task.instance_id() == pac)
+            .expect("PAC task is present");
+
+        assert_eq!(pac_task.source_revision(), expected_revision);
+        assert_eq!(pac_task.dependencies(), &[first_pss]);
+        let pac_options = pac_task
+            .queued_analysis()
+            .spec_options
+            .pac
+            .as_ref()
+            .expect("PAC options compile");
+        assert!((pac_options.pss_fundamental_freq - 1.0e6).abs() < 1.0e-6);
+        assert!((pac_options.pss_fundamental_freq - 2.0e6).abs() > 1.0);
     }
 
     #[test]
-    fn normalization_removes_disabled_and_appends_newly_enabled_analyses() {
+    fn same_kind_sparameter_instances_freeze_independent_export_policies() {
         let mut state = AppState::default();
-        state.sim_setup.enabled.extend([TAB_AC, TAB_NOISE]);
-        state.sim_setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
+        state.schematic.current_file = Some(std::path::PathBuf::from("rf/duplexer.rsch"));
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("new state owns a stable plan");
+        let (op_id, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("operating-point prerequisite inserts");
+        let (v1_id, _) = plan
+            .insert(AnalysisKind::SParameter)
+            .expect("first S-parameter analysis inserts");
+        let (disabled_id, _) = plan
+            .insert(AnalysisKind::SParameter)
+            .expect("second S-parameter analysis inserts");
+        plan.bind_dependency(v1_id, AnalysisKind::OperatingPoint, op_id)
+            .expect("first S-parameter analysis binds OP");
+        plan.bind_dependency(disabled_id, AnalysisKind::OperatingPoint, op_id)
+            .expect("second S-parameter analysis binds OP");
+        plan.edit(v1_id, |draft| {
+            let AnalysisDraft::SParameter(draft) = draft else {
+                panic!("expected S-parameter draft");
+            };
+            draft.touchstone_export = true;
+            draft.touchstone_version = 1;
+        })
+        .expect("first policy edits");
+        plan.edit(disabled_id, |draft| {
+            let AnalysisDraft::SParameter(draft) = draft else {
+                panic!("expected S-parameter draft");
+            };
+            draft.touchstone_export = false;
+            draft.touchstone_version = 2;
+        })
+        .expect("second policy edits");
 
-        state.sim_setup.enabled.remove(&TAB_NOISE);
-        state.sim_setup.normalize_analysis_order();
-        assert_eq!(state.sim_setup.analysis_order, vec![TAB_TRANSIENT, TAB_AC]);
+        let controller = SimulationController::new();
+        let frozen = controller
+            .build_analysis_plan(&state)
+            .expect("plan freezes");
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources()
+            .expect("default model sources seal");
+        let tasks = controller
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .expect("same-kind S-parameter tasks compile");
+        let first_policy = tasks
+            .iter()
+            .find(|task| task.instance_id() == v1_id)
+            .and_then(|task| task.touchstone_export_policy())
+            .expect("first task freezes an explicit policy");
+        let second_policy = tasks
+            .iter()
+            .find(|task| task.instance_id() == disabled_id)
+            .and_then(|task| task.touchstone_export_policy())
+            .expect("second task freezes an explicit policy");
 
-        state.sim_setup.enabled.insert(TAB_NOISE);
-        state.sim_setup.normalize_analysis_order();
-        assert_eq!(
-            state.sim_setup.analysis_order,
-            vec![TAB_TRANSIENT, TAB_AC, TAB_NOISE]
-        );
+        assert_eq!(first_policy.version(), Some(1));
+        assert!(first_policy.output_path(4, 1, 2).is_some());
+        assert_eq!(second_policy.version(), None);
+        assert!(second_policy.output_path(4, 2, 2).is_none());
     }
 }

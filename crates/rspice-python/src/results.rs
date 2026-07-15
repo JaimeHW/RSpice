@@ -2143,7 +2143,7 @@ impl PyNoiseResult {
             .contributions
             .iter()
             .map(|c| PyNoiseContribution {
-                device_name: c.device_name.clone(),
+                device_name: c.identity.device.clone(),
                 noise_type: format!("{:?}", c.noise_type),
                 output_contribution: c.output_contribution,
                 percentage: c.percentage,

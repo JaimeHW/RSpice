@@ -1,5 +1,8 @@
 use super::{AppState, ConsoleMessage};
-use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
+use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
+
+const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
+    uuid::Uuid::from_u128(0x655d_ae12_6cdd_5971_b7d8_aafe_02b6_b367);
 
 impl serde::Serialize for AppState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -27,13 +30,25 @@ impl serde::Serialize for AppState {
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }
-        let execution_context =
-            ProjectExecutionContext::from_state(&self.sim_setup, &self.model_library_manager)
-                .map_err(|error| {
-                    <S::Error as serde::ser::Error>::custom(format!(
-                        "session execution context is structurally invalid: {error}"
-                    ))
-                })?;
+        let execution_context = ProjectExecutionContext::from_state(
+            self.workspace.project.id(),
+            &self.sim_setup,
+            &self.model_library_manager,
+        )
+        .map_err(|error| {
+            <S::Error as serde::ser::Error>::custom(format!(
+                "session execution context is structurally invalid: {error}"
+            ))
+        })?;
+        if ProjectFile::validate_result_plan_references_for(
+            &simulation_results,
+            Some(&execution_context.simulation_plan),
+            self.workspace.project.revision(),
+        )
+        .is_err()
+        {
+            simulation_results = ProjectSimulationResults::default();
+        }
         let field_count = if simulation_results.is_empty() { 9 } else { 10 };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
@@ -103,10 +118,18 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt: Option<serde_json::Value>,
         }
 
+        // Capture the complete session artifact before nested defaults run.
+        // Genuine legacy sessions did not persist a project identity; scoping
+        // their migration to the whole session prevents distinct unsaved
+        // workspaces with identical project labels from aliasing each other.
+        let mut session = serde_json::Value::deserialize(deserializer)?;
+        inject_legacy_session_project_identity(&mut session).map_err(serde::de::Error::custom)?;
+
         // Deserialize minimal persisted data and use defaults for the rest.
-        let de = AppStateDe::deserialize(deserializer)?;
+        let de = AppStateDe::deserialize(session).map_err(serde::de::Error::custom)?;
         let mut library_manager = de.library_manager;
         let mut project_workspace = de.project_workspace;
+        let project_id = project_workspace.project.id();
         project_workspace.ensure_library_model(&mut library_manager);
         let schematic = project_workspace
             .active_context_schematic()
@@ -142,7 +165,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             Some(value) => {
                 let restored = serde_json::from_value::<ProjectExecutionContext>(value)
                     .map_err(|error| error.to_string())
-                    .and_then(ProjectExecutionContext::into_state);
+                    .and_then(|context| context.into_state(project_id));
                 match restored {
                     Ok((simulation_plan, model_library_manager, warnings)) => {
                         state.sim_setup = simulation_plan;
@@ -159,9 +182,18 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     .to_owned(),
             ],
         };
-        let simulation_results_warning = de
-            .simulation_results
-            .apply_to_state(&mut state.simulation)
+        let mut simulation_results = de.simulation_results;
+        let simulation_results_warning = simulation_results
+            .migrate_to_current(project_id)
+            .and_then(|()| simulation_results.validate())
+            .and_then(|()| {
+                ProjectFile::validate_result_plan_references_for(
+                    &simulation_results,
+                    Some(&state.sim_setup),
+                    state.workspace.project.revision(),
+                )
+            })
+            .and_then(|()| simulation_results.apply_to_state(&mut state.simulation))
             .err()
             .map(|error| {
                 format!(
@@ -210,9 +242,71 @@ fn default_library_manager() -> crate::state::LibraryManager {
     crate::state::LibraryManager::with_primitives()
 }
 
+fn inject_legacy_session_project_identity(session: &mut serde_json::Value) -> Result<(), String> {
+    let canonical_material = canonical_session_identity_value(session);
+    let canonical_bytes = serde_json::to_vec(&canonical_material)
+        .map_err(|error| format!("legacy session identity could not be encoded: {error}"))?;
+    let migrated_id = crate::product::ProjectId::from_namespace(
+        LEGACY_SESSION_PROJECT_ID_NAMESPACE,
+        &canonical_bytes,
+    );
+
+    let session_object = session
+        .as_object_mut()
+        .ok_or_else(|| "persisted application session must be a JSON object".to_owned())?;
+    if !session_object.contains_key("project_workspace") {
+        let mut workspace = serde_json::to_value(crate::state::ProjectWorkspace::default())
+            .map_err(|error| format!("default project workspace could not be encoded: {error}"))?;
+        workspace["project"]["id"] = serde_json::Value::String(migrated_id.to_string());
+        session_object.insert("project_workspace".to_owned(), workspace);
+        return Ok(());
+    }
+
+    let Some(descriptor) = session_object
+        .get_mut("project_workspace")
+        .and_then(|workspace| workspace.get_mut("project"))
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    if !descriptor.contains_key("schema_version") && !descriptor.contains_key("id") {
+        descriptor.insert(
+            "id".to_owned(),
+            serde_json::Value::String(migrated_id.to_string()),
+        );
+    }
+    Ok(())
+}
+
+fn canonical_session_identity_value(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values
+                .iter()
+                .map(canonical_session_identity_value)
+                .collect(),
+        ),
+        serde_json::Value::Object(values) => {
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            let mut canonical = serde_json::Map::new();
+            for (key, value) in entries {
+                canonical.insert(key.clone(), canonical_session_identity_value(value));
+            }
+            serde_json::Value::Object(canonical)
+        }
+        scalar => scalar.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
+        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+            .expect("legacy fixture provenance seals");
+    }
 
     #[test]
     fn app_state_session_round_trip_restores_results_but_not_runtime_flags() {
@@ -229,6 +323,7 @@ mod tests {
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![waveform]),
         );
+        seal_legacy_unattributed(&mut run);
         state.simulation.runs = vec![run];
         state.simulation.next_run_id = 3;
         state.simulation.active_run_idx = Some(0);
@@ -258,7 +353,7 @@ mod tests {
     fn session_round_trip_preserves_exact_browser_binding_receipt() {
         let mut state = AppState::default();
         let receipt = crate::common::project_lifecycle::BrowserBindingReceipt {
-            binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb111b3ce1),
+            binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
             project_id: state.workspace.project.id().to_string(),
             accepted_generation: 23,
             accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
@@ -375,16 +470,133 @@ mod tests {
     }
 
     #[test]
+    fn legacy_session_without_project_id_restores_a_reproducible_identity() {
+        let state = AppState::default();
+        let original_id = state.workspace.project.id();
+        let mut session = serde_json::to_value(&state).expect("session serializes");
+        session["project_workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor object")
+            .remove("id");
+        session["project_workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor object")
+            .remove("schema_version");
+        session["project_workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor object")
+            .remove("revision");
+        session
+            .as_object_mut()
+            .expect("session object")
+            .remove("execution_context");
+        let legacy_json = serde_json::to_string(&session).expect("legacy session serializes");
+
+        let first: AppState = serde_json::from_str(&legacy_json).expect("legacy session restores");
+        let second: AppState =
+            serde_json::from_str(&legacy_json).expect("identical legacy session restores");
+
+        assert_eq!(first.workspace.project.id(), second.workspace.project.id());
+        assert_ne!(first.workspace.project.id(), original_id);
+        assert!(!first.workspace.project.id().as_uuid().is_nil());
+    }
+
+    #[test]
+    fn distinct_legacy_session_workspaces_do_not_alias_project_identity() {
+        fn legacy_value(mut state: AppState) -> serde_json::Value {
+            state.workspace.save_active_schematic(&state.schematic);
+            let mut value = serde_json::to_value(state).expect("session serializes");
+            let descriptor = value["project_workspace"]["project"]
+                .as_object_mut()
+                .expect("project descriptor object");
+            descriptor.remove("id");
+            descriptor.remove("schema_version");
+            descriptor.remove("revision");
+            value
+                .as_object_mut()
+                .expect("session object")
+                .remove("execution_context");
+            value
+        }
+
+        let first = AppState::default();
+        let mut second = AppState::default();
+        second.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(40, 40),
+        );
+        let first_value = legacy_value(first);
+        let second_value = legacy_value(second);
+
+        let first_restored: AppState =
+            serde_json::from_value(first_value.clone()).expect("first legacy session restores");
+        let first_replay: AppState =
+            serde_json::from_value(first_value).expect("identical legacy session replays");
+        let second_restored: AppState =
+            serde_json::from_value(second_value).expect("second legacy session restores");
+
+        assert_eq!(
+            first_restored.workspace.project.id(),
+            first_replay.workspace.project.id()
+        );
+        assert_ne!(
+            first_restored.workspace.project.id(),
+            second_restored.workspace.project.id()
+        );
+    }
+
+    #[test]
+    fn unversioned_session_with_explicitly_null_project_identity_is_rejected() {
+        let state = AppState::default();
+        let mut session = serde_json::to_value(state).expect("session serializes");
+        let descriptor = session["project_workspace"]["project"]
+            .as_object_mut()
+            .expect("project descriptor object");
+        descriptor.remove("schema_version");
+        descriptor.insert("id".to_owned(), serde_json::Value::Null);
+
+        let error = match serde_json::from_value::<AppState>(session) {
+            Ok(_) => panic!("explicit null project identity must not migrate as legacy absence"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("must not be explicitly null"));
+    }
+
+    #[test]
     fn session_round_trip_preserves_unsaved_plan_drafts_and_model_catalog() {
-        use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_TRANSIENT};
+        use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
         use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 
         let mut state = AppState::default();
-        state.sim_setup.ensure_initialized();
-        state.sim_setup.enabled.insert(TAB_AC);
-        state.sim_setup.analysis_order = vec![TAB_AC, TAB_TRANSIENT];
-        state.sim_setup.tran.stop = "unfinished(".to_owned();
-        state.sim_setup.ac.points = "also unfinished".to_owned();
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("current session owns a stable plan");
+        let transient_id = plan.instances()[0].id();
+        plan.edit(transient_id, |draft| {
+            let AnalysisDraft::Transient(transient) = draft else {
+                panic!("default instance must be transient");
+            };
+            transient.stop = "unfinished(".to_owned();
+        })
+        .expect("transient draft edit commits");
+        let (op_id, _) = plan
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("OP inserts before dependent analyses");
+        let (ac_id, _) = plan
+            .insert_at(AnalysisKind::Ac, 1)
+            .expect("AC inserts in explicit order");
+        plan.edit(ac_id, |draft| {
+            let AnalysisDraft::Ac(ac) = draft else {
+                panic!("inserted instance must be AC");
+            };
+            ac.points = "also unfinished".to_owned();
+        })
+        .expect("AC draft edit commits");
+        plan.bind_dependency(ac_id, AnalysisKind::OperatingPoint, op_id)
+            .expect("AC binds the exact OP identity");
         state.model_library_manager.clear();
         let mut library = ModelLibrary::new("unsaved_session_models");
         let mut model = DeviceModel::new("nch_session", ModelType::Nmos);
@@ -394,15 +606,40 @@ mod tests {
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
-
+        let restored_plan = restored
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("session restores stable plan");
         assert_eq!(
-            restored.sim_setup.analysis_order,
-            vec![TAB_AC, TAB_TRANSIENT]
+            restored_plan
+                .instances()
+                .iter()
+                .map(|instance| instance.id())
+                .collect::<Vec<_>>(),
+            vec![op_id, ac_id, transient_id]
         );
-        assert_eq!(restored.sim_setup.tran.stop, "unfinished(");
-        assert_eq!(restored.sim_setup.ac.points, "also unfinished");
-        assert!(restored.sim_setup.validation_error(TAB_TRANSIENT).is_some());
-        assert!(restored.sim_setup.validation_error(TAB_AC).is_some());
+        let ac = restored_plan.instance(ac_id).expect("AC identity retained");
+        let AnalysisDraft::Ac(ac_draft) = ac.draft() else {
+            panic!("AC identity must retain its draft kind");
+        };
+        assert_eq!(ac_draft.points, "also unfinished");
+        assert_eq!(ac.dependencies().len(), 1);
+        assert_eq!(ac.dependencies()[0].target(), op_id);
+        let transient = restored_plan
+            .instance(transient_id)
+            .expect("transient identity retained");
+        let AnalysisDraft::Transient(transient_draft) = transient.draft() else {
+            panic!("transient identity must retain its draft kind");
+        };
+        assert_eq!(transient_draft.stop, "unfinished(");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("session JSON parses");
+        let persisted = &value["execution_context"]["simulation_plan"];
+        for retired in ["enabled", "analysis_order", "listed", "tran", "ac", "op"] {
+            assert!(
+                persisted.get(retired).is_none(),
+                "v4 session must omit retired singleton field {retired}"
+            );
+        }
         assert!(
             restored
                 .model_library_manager
@@ -468,6 +705,7 @@ mod tests {
             crate::state::AnalysisType::Transient,
             "TRAN legacy session",
         ));
+        seal_legacy_unattributed(&mut run);
         state.simulation.runs = vec![run];
         state.simulation.next_run_id = 3;
         state.simulation.active_run_idx = Some(0);
@@ -487,6 +725,7 @@ mod tests {
             .expect("persisted run object");
         persisted_run.remove("run_id");
         persisted_run.remove("dataset_id");
+        persisted_run.remove("provenance_mode");
 
         let restored: AppState = serde_json::from_value(value).expect("legacy session migrates");
 
@@ -604,6 +843,80 @@ mod tests {
             entry
                 .message
                 .contains("Simulation results were not restored")
+        }));
+    }
+
+    #[test]
+    fn app_state_session_drops_plan_result_with_an_orphaned_source_identity() {
+        let mut state = AppState::default();
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default session has a stable plan");
+        let transient = plan.instances().first().expect("default transient");
+        let plan_id = plan.id();
+        let source_instance_id = transient.id();
+        let source_revision = plan.revision();
+        let project_revision = state.workspace.project.revision();
+        let prepared_snapshot_digest = crate::product::ContentDigest::from_bytes([0x73; 32]);
+        let mut run = crate::state::SimulationRun::new(4);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::Transient,
+                "Prepared TRAN",
+            )
+            .with_provenance(
+                crate::state::AnalysisResultProvenance::new(
+                    source_instance_id,
+                    source_revision,
+                    prepared_snapshot_digest,
+                    Vec::new(),
+                )
+                .expect("prepared provenance"),
+            ),
+        );
+        let task_receipt = crate::state::PreparedRunTaskReceipt::new(
+            source_instance_id,
+            source_revision,
+            Vec::new(),
+            5,
+            crate::product::ContentDigest::from_bytes([0x74; 32]),
+        )
+        .expect("prepared transient task receipt");
+        let run_receipt = crate::state::PreparedRunReceipt::new(
+            crate::state::AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan_id),
+            project_revision,
+            prepared_snapshot_digest,
+            crate::product::ContentDigest::from_bytes([0x75; 32]),
+            crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+                crate::product::ContentDigest::from_bytes([0x76; 32]),
+            ),
+            vec![task_receipt],
+        )
+        .expect("prepared plan run receipt");
+        run.restore_provenance(crate::state::SimulationRunProvenance::Prepared(run_receipt))
+            .expect("prepared run fixture seals");
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 4;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        let mut session = serde_json::to_value(&state).expect("session serializes");
+        let orphaned_identity = crate::product::AnalysisInstanceId::new();
+        session["simulation_results"]["runs"][0]["analyses"][0]["provenance"]["source_instance_id"] =
+            serde_json::to_value(orphaned_identity).expect("orphan identity serializes");
+        session["simulation_results"]["runs"][0]["prepared_receipt"]["tasks"][0]["source_instance_id"] =
+            serde_json::to_value(orphaned_identity).expect("orphan identity serializes");
+
+        let restored: AppState =
+            serde_json::from_value(session).expect("orphaned result is recoverable");
+
+        assert_eq!(restored.simulation.run_count(), 0);
+        assert!(restored.log_buffer.entries().any(|entry| {
+            entry
+                .message
+                .contains("absent from the persisted plan and its tombstones")
         }));
     }
 }

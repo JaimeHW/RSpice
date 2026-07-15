@@ -49,7 +49,7 @@ impl Workspace {
         match self {
             Self::Project => "Project",
             Self::Design => "Design",
-            Self::Simulate => "Simulation plan",
+            Self::Simulate => "Simulation Studio",
             Self::Results => "Result document",
             Self::Verify => "Verification evidence",
             Self::Models => "Model binding",
@@ -513,8 +513,15 @@ pub struct WorkbenchState {
     #[serde(default)]
     pub models_page: ModelsPage,
     /// Analysis row whose configuration is shown in the simulation plan.
+    /// Retained only to migrate pre-instance session selection.
     #[serde(default = "default_analysis_index")]
     pub active_analysis: usize,
+    /// Stable analysis instance whose configuration is shown in the plan.
+    #[serde(default)]
+    pub active_analysis_instance: Option<crate::product::AnalysisInstanceId>,
+    /// Last analysis lifecycle outcome announced by the transaction owner.
+    #[serde(skip)]
+    pub analysis_lifecycle_status: String,
     /// Selected specification row in the verification matrix.
     #[serde(default)]
     pub selected_spec: Option<usize>,
@@ -607,6 +614,9 @@ impl Default for WorkbenchState {
             verification_page: VerificationPage::Cockpit,
             models_page: ModelsPage::Catalog,
             active_analysis: default_analysis_index(),
+            active_analysis_instance: None,
+            analysis_lifecycle_status: "No lifecycle command has been committed this session."
+                .to_owned(),
             selected_spec: None,
             selected_model: None,
             analysis_query: String::new(),

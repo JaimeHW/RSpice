@@ -20,10 +20,10 @@ pub use command::{
     TransactionReceipt, ValidationCode, ValidationIssue, ValidationSeverity,
 };
 pub use identity::{
-    AutomationPipelineId, ContentDigest, DatasetId, DesignId, DigestError, JobId, ModelBindingId,
-    ObjectRef, ObjectRevision, ProjectId, ReleaseCandidateId, ResultDocumentId, RevisionError,
-    RunId, RunSetId, SimulationPlanId, TestbenchId, UuidIdError, UuidIdParseError,
-    VerificationEvidenceId, VerificationPlanId,
+    AnalysisInstanceId, AutomationPipelineId, ContentDigest, DatasetId, DesignId, DigestError,
+    JobId, ModelBindingId, ObjectRef, ObjectRevision, ProjectId, ReleaseCandidateId,
+    ResultDocumentId, RevisionError, RunId, RunSetId, SimulationPlanId, TestbenchId, UuidIdError,
+    UuidIdParseError, VerificationEvidenceId, VerificationPlanId,
 };
 pub use lifecycle::{
     DatasetBinding, DatasetManifest, DatasetProvenance, JobEvent, JobState, LifecycleError,
@@ -33,4 +33,4 @@ pub use lifecycle::{
 };
 
 /// Version of the implemented product-contract vocabulary.
-pub const PRODUCT_CONTRACT_SCHEMA_VERSION: &str = "1.1.0";
+pub const PRODUCT_CONTRACT_SCHEMA_VERSION: &str = "1.2.0";

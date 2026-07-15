@@ -24,6 +24,15 @@ macro_rules! define_uuid_id {
                     .ok_or(UuidIdError::Nil)
             }
 
+            /// Deterministically derive an identity within an explicitly
+            /// versioned namespace. This is reserved for reproducible
+            /// migrations and immutable source projections; ordinary object
+            /// creation must use [`Self::new`].
+            #[must_use]
+            pub fn from_namespace(namespace: Uuid, name: &[u8]) -> Self {
+                Self(Uuid::new_v5(&namespace, name))
+            }
+
             #[must_use]
             pub const fn as_uuid(self) -> Uuid {
                 self.0
@@ -81,6 +90,7 @@ define_uuid_id!(ProjectId);
 define_uuid_id!(DesignId);
 define_uuid_id!(TestbenchId);
 define_uuid_id!(SimulationPlanId);
+define_uuid_id!(AnalysisInstanceId);
 define_uuid_id!(RunSetId);
 define_uuid_id!(JobId);
 define_uuid_id!(RunId);
@@ -292,6 +302,18 @@ mod tests {
                 .parse::<ProjectId>()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn namespaced_ids_are_reproducible_and_domain_typed() {
+        let namespace = Uuid::from_u128(0x3d4a_52cc_27ac_5fef_9c54_087d_e8a4_f57d);
+        let first = AnalysisInstanceId::from_namespace(namespace, b"project-a/ac/legacy-0");
+        let second = AnalysisInstanceId::from_namespace(namespace, b"project-a/ac/legacy-0");
+        let other = AnalysisInstanceId::from_namespace(namespace, b"project-a/ac/legacy-1");
+
+        assert_eq!(first, second);
+        assert_ne!(first, other);
+        assert!(!first.as_uuid().is_nil());
     }
 
     #[test]
