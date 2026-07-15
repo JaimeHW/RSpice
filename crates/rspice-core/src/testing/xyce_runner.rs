@@ -689,6 +689,33 @@ struct XyceDiodeModelAliasFamilyContract {
     role: XyceDiodeModelAliasFamilyRole,
 }
 
+#[derive(Debug, Clone)]
+struct XyceNestedIncludeIdentityFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    role: XyceNestedIncludeIdentityFamilyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceNestedIncludeIdentityFamilyRole {
+    Anchor,
+    RepeatedTargetBaseline,
+    SplitIdenticalTargetsMember,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceNestedIncludeIdentityRepresentation {
+    RepeatedCanonicalTarget,
+    SplitIdenticalTargets,
+}
+
+#[derive(Debug, Clone)]
+struct XyceNestedIncludeProvenance {
+    representation: XyceNestedIncludeIdentityRepresentation,
+    canonical_source: String,
+    expanded_source: String,
+    support_paths: BTreeSet<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceDiodeModelAliasFamilyRole {
     Anchor,
@@ -956,6 +983,22 @@ enum XyceStrictDcFamilySnapshot {
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     SubcktParameterPrecedence(XyceSubcktParameterPrecedenceSnapshot),
     SubcktParameterResolution(XyceSubcktParameterResolutionSnapshot),
+    NestedIncludeIdentity(XyceNestedIncludeIdentityFamilySnapshot),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceNestedIncludeIdentityFamilySnapshot {
+    title: String,
+    hierarchy: Vec<XyceNestedIncludeSubcircuitFingerprint>,
+    flattened_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct XyceNestedIncludeSubcircuitFingerprint {
+    name: String,
+    ports: Vec<String>,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    nested_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1096,6 +1139,7 @@ enum XyceBaselineFamilyKind {
     ScopedModel,
     SubcktParameterPrecedence,
     SubcktParameterResolution,
+    NestedIncludeIdentity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1180,6 +1224,7 @@ impl XyceBaselineFamilyKind {
             Self::ScopedModel => "SCOPED_MODEL",
             Self::SubcktParameterPrecedence => "SUBCKT_PARAMETER_PRECEDENCE",
             Self::SubcktParameterResolution => "SUBCKT_PARAMETER_RESOLUTION",
+            Self::NestedIncludeIdentity => "NESTED_INCLUDE_IDENTITY",
         }
     }
 
@@ -1203,6 +1248,7 @@ impl XyceBaselineFamilyKind {
             Self::ScopedModel => "scoped_model_family_wrapper",
             Self::SubcktParameterPrecedence => "subckt_parameter_precedence_wrapper",
             Self::SubcktParameterResolution => "subckt_parameter_resolution_family_wrapper",
+            Self::NestedIncludeIdentity => "nested_include_identity_family_anchor",
         }
     }
 
@@ -1226,6 +1272,9 @@ impl XyceBaselineFamilyKind {
             Self::ScopedModel => "scoped_model_family_baseline",
             Self::SubcktParameterPrecedence => "subckt_parameter_precedence_baseline",
             Self::SubcktParameterResolution => "subckt_parameter_resolution_family_baseline",
+            Self::NestedIncludeIdentity => {
+                "nested_include_identity_family_repeated_target_baseline"
+            }
         }
     }
 
@@ -1256,6 +1305,7 @@ impl XyceBaselineFamilyKind {
             | Self::Supernode
             | Self::SubcktParameterPrecedence
             | Self::SubcktParameterResolution => XyceStaticTranPlanPurpose::RelationalFamily,
+            Self::NestedIncludeIdentity => XyceStaticTranPlanPurpose::RelationalFamily,
             Self::SwitchStateCase => XyceStaticTranPlanPurpose::RelationalFamily,
         }
     }
@@ -2454,6 +2504,19 @@ impl XyceTestRunner {
 
         if let Some(contract) = self.diode_model_alias_family_contract(deck) {
             let result = self.run_diode_model_alias_family_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.nested_include_identity_family_contract(deck) {
+            let result = self.run_nested_include_identity_family_contract(deck, contract, start);
             if self.config.verbose {
                 println!(
                     "{} [{}] {}",
@@ -10454,6 +10517,7 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::BjtExternalNode
             | XyceBaselineFamilyKind::DcAnalysisExpression
             | XyceBaselineFamilyKind::DelimitedExpression
+            | XyceBaselineFamilyKind::NestedIncludeIdentity
             | XyceBaselineFamilyKind::PassiveResPrimaryValue
             | XyceBaselineFamilyKind::SubcktParameterPrecedence
             | XyceBaselineFamilyKind::SubcktParameterResolution => false,
@@ -11825,6 +11889,30 @@ impl XyceTestRunner {
         result
     }
 
+    fn run_nested_include_identity_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceNestedIncludeIdentityFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
+        if result.passed && !result.expected_unsupported {
+            result.contract = match contract.role {
+                XyceNestedIncludeIdentityFamilyRole::Anchor => {
+                    "nested_include_identity_family_anchor"
+                }
+                XyceNestedIncludeIdentityFamilyRole::RepeatedTargetBaseline => {
+                    "nested_include_identity_family_repeated_target_baseline"
+                }
+                XyceNestedIncludeIdentityFamilyRole::SplitIdenticalTargetsMember => {
+                    "nested_include_identity_family_split_targets_member"
+                }
+            }
+            .to_string();
+        }
+        result
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -11870,6 +11958,7 @@ impl XyceTestRunner {
                 | XyceBaselineFamilyKind::DelimitedExpression
                 | XyceBaselineFamilyKind::PassiveResPrimaryValue
                 | XyceBaselineFamilyKind::SubcktParameterResolution
+                | XyceBaselineFamilyKind::NestedIncludeIdentity
         ) && analysis != XyceBaselineFamilyAnalysis::Dc
         {
             return self.failure_result(
@@ -12687,6 +12776,9 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::SubcktParameterResolution => {
                 Self::validate_subckt_parameter_resolution_dc_plan(plan)
             }
+            XyceBaselineFamilyKind::NestedIncludeIdentity => {
+                Self::validate_nested_include_identity_dc_plan(plan)
+            }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC plan contract",
                 other.name()
@@ -12723,6 +12815,10 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::SubcktParameterResolution => {
                 Self::subckt_parameter_resolution_snapshot(netlist, &plan.print, &plan.dc.source)
                     .map(XyceStrictDcFamilySnapshot::SubcktParameterResolution)
+            }
+            XyceBaselineFamilyKind::NestedIncludeIdentity => {
+                Self::nested_include_identity_family_snapshot(netlist, plan)
+                    .map(XyceStrictDcFamilySnapshot::NestedIncludeIdentity)
             }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC semantic snapshot",
@@ -12782,6 +12878,16 @@ impl XyceTestRunner {
                     Ok(())
                 } else {
                     Err("flattened subcircuit parameter-resolution semantics differ".to_string())
+                }
+            }
+            (
+                XyceStrictDcFamilySnapshot::NestedIncludeIdentity(baseline),
+                XyceStrictDcFamilySnapshot::NestedIncludeIdentity(target),
+            ) => {
+                if baseline == target {
+                    Ok(())
+                } else {
+                    Err("scope-qualified nested include semantics differ".to_string())
                 }
             }
             _ => Err("baseline and target use different exact-DC snapshot kinds".to_string()),
@@ -38634,6 +38740,999 @@ impl XyceTestRunner {
             .or_else(|| self.supernode_family_contract(deck))
     }
 
+    fn validate_nested_include_identity_dc_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        if plan.execution_dir.is_some()
+            || plan.print_format.is_some()
+            || plan.dc_data.is_some()
+            || !plan.steps.is_empty()
+            || !plan.diagnostics.is_empty()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+        {
+            return Err("nested-include identity requires one diagnostic-free, one-dimensional linear .DC analysis with ordinary default PRN output".to_string());
+        }
+        let points = plan.dc.primary_spec().points();
+        if points.len() != 3
+            || points.iter().any(|point| !point.is_finite())
+            || !plan.dc.start.is_finite()
+            || !plan.dc.stop.is_finite()
+            || !plan.dc.step.is_finite()
+            || plan.dc.step == 0.0
+            || plan.print.probes.len() != 2
+        {
+            return Err("nested-include identity requires one finite three-point linear sweep and exactly two ordered DC probes".to_string());
+        }
+        for line in Self::logical_netlist_lines(&plan.source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            if stripped.is_empty() {
+                continue;
+            }
+            let head = stripped.split_whitespace().next().unwrap_or("");
+            if !(head.eq_ignore_ascii_case(".subckt")
+                || head.eq_ignore_ascii_case(".ends")
+                || head.eq_ignore_ascii_case(".include")
+                || head.eq_ignore_ascii_case(".inc")
+                || head.eq_ignore_ascii_case(".incl")
+                || head.eq_ignore_ascii_case(".dc")
+                || head.eq_ignore_ascii_case(".print")
+                || head.eq_ignore_ascii_case(".end")
+                || matches!(
+                    head.chars().next().map(|ch| ch.to_ascii_uppercase()),
+                    Some('R' | 'V' | 'X')
+                ))
+            {
+                return Err(format!(
+                    "nested-include identity does not admit source statement '{stripped}'"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn nested_include_identity_family_snapshot(
+        netlist: &Netlist,
+        plan: &XyceStaticDcPlan,
+    ) -> Result<XyceNestedIncludeIdentityFamilySnapshot, String> {
+        if !netlist.models.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || netlist.subcircuits.len() != 4
+            || netlist.elements.len() != 3
+        {
+            return Err("nested-include identity requires a diagnostic-free two-parent/two-local-subcircuit R/V circuit without auxiliary state".to_string());
+        }
+
+        let mut definition_names = BTreeSet::new();
+        for subcircuit in &netlist.subcircuits {
+            if !definition_names.insert(subcircuit.name.to_ascii_lowercase()) {
+                return Err(format!(
+                    "duplicate fully-qualified subcircuit definition '{}'",
+                    subcircuit.name
+                ));
+            }
+        }
+        let parents = netlist
+            .subcircuits
+            .iter()
+            .filter(|subcircuit| !subcircuit.nested_subcircuits.is_empty())
+            .collect::<Vec<_>>();
+        let leaves = netlist
+            .subcircuits
+            .iter()
+            .filter(|subcircuit| subcircuit.nested_subcircuits.is_empty())
+            .collect::<Vec<_>>();
+        if parents.len() != 2 || leaves.len() != 2 {
+            return Err("nested-include identity requires exactly two parent and two qualified local definitions".to_string());
+        }
+
+        let mut hierarchy = Vec::new();
+        let mut local_names = BTreeSet::new();
+        for parent in &parents {
+            Self::validate_nested_include_subcircuit_auxiliary_state(parent)?;
+            let [nested] = parent.nested_subcircuits.as_slice() else {
+                return Err(format!(
+                    "parent subcircuit '{}' must own exactly one local definition",
+                    parent.name
+                ));
+            };
+            Self::validate_nested_include_subcircuit_auxiliary_state(nested)?;
+            let expected_prefix = format!("{}.", parent.name);
+            let local_name = nested.name.strip_prefix(&expected_prefix).ok_or_else(|| {
+                format!(
+                    "local definition '{}' is not qualified beneath parent '{}'",
+                    nested.name, parent.name
+                )
+            })?;
+            if local_name.is_empty() || local_name.contains('.') {
+                return Err(format!(
+                    "local definition '{}' has a non-local qualified suffix",
+                    nested.name
+                ));
+            }
+            local_names.insert(local_name.to_ascii_lowercase());
+            if !leaves
+                .iter()
+                .any(|candidate| candidate.name.eq_ignore_ascii_case(&nested.name))
+            {
+                return Err(format!(
+                    "parent '{}' local definition '{}' is absent from the executable definition table",
+                    parent.name, nested.name
+                ));
+            }
+            if parent.ports.len() != 2 || nested.ports.len() != 2 || nested.elements.len() != 1 {
+                return Err("nested-include parent and local definitions must be two-terminal series-resistor blocks".to_string());
+            }
+            let nested_resistor = &nested.elements[0];
+            Self::strict_nested_include_resistor_fingerprint(nested_resistor)?;
+            if nested_resistor.nodes.len() != 2
+                || !nested_resistor.nodes[0].eq_ignore_ascii_case(&nested.ports[0])
+                || !nested_resistor.nodes[1].eq_ignore_ascii_case(&nested.ports[1])
+            {
+                return Err(format!(
+                    "local definition '{}' must connect one direct resistor across its ordered ports",
+                    nested.name
+                ));
+            }
+
+            let mut child = None;
+            let mut resistor = None;
+            for element in &parent.elements {
+                match &element.kind {
+                    ElementKind::Subcircuit {
+                        subckt_name,
+                        params,
+                    } if params.is_empty()
+                        && subckt_name.eq_ignore_ascii_case(&nested.name)
+                        && element.nodes.len() == 2 =>
+                    {
+                        if child.replace(element).is_some() {
+                            return Err(format!(
+                                "parent '{}' has multiple local subcircuit instances",
+                                parent.name
+                            ));
+                        }
+                    }
+                    ElementKind::Resistor { .. } => {
+                        Self::strict_nested_include_resistor_fingerprint(element)?;
+                        if resistor.replace(element).is_some() {
+                            return Err(format!(
+                                "parent '{}' has multiple direct resistors",
+                                parent.name
+                            ));
+                        }
+                    }
+                    _ => {
+                        return Err(format!(
+                            "parent '{}' contains unqualified element '{}'",
+                            parent.name, element.name
+                        ));
+                    }
+                }
+            }
+            let child = child.ok_or_else(|| {
+                format!(
+                    "parent '{}' does not bind its local definition",
+                    parent.name
+                )
+            })?;
+            let resistor = resistor
+                .ok_or_else(|| format!("parent '{}' has no direct series resistor", parent.name))?;
+            let internal = child
+                .nodes
+                .iter()
+                .find(|node| {
+                    !parent
+                        .ports
+                        .iter()
+                        .any(|port| port.eq_ignore_ascii_case(node))
+                })
+                .ok_or_else(|| format!("parent '{}' has no private series node", parent.name))?;
+            if child
+                .nodes
+                .iter()
+                .filter(|node| node.eq_ignore_ascii_case(internal))
+                .count()
+                != 1
+                || resistor
+                    .nodes
+                    .iter()
+                    .filter(|node| node.eq_ignore_ascii_case(internal))
+                    .count()
+                    != 1
+                || !parent.ports.iter().all(|port| {
+                    child
+                        .nodes
+                        .iter()
+                        .any(|node| node.eq_ignore_ascii_case(port))
+                        || resistor
+                            .nodes
+                            .iter()
+                            .any(|node| node.eq_ignore_ascii_case(port))
+                })
+            {
+                return Err(format!(
+                    "parent '{}' does not form a simple local-block/resistor series path",
+                    parent.name
+                ));
+            }
+
+            hierarchy.push(Self::nested_include_subcircuit_fingerprint(parent)?);
+            hierarchy.push(Self::nested_include_subcircuit_fingerprint(nested)?);
+        }
+        if local_names.len() != 1 {
+            return Err(
+                "qualified local definitions do not share one lexical local name".to_string(),
+            );
+        }
+        hierarchy.sort();
+
+        let mut voltage_source = None;
+        let mut top_instances = Vec::new();
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if value.is_finite() && element.nodes.len() == 2 =>
+                {
+                    if voltage_source.replace(element).is_some() {
+                        return Err(
+                            "nested-include identity contains multiple voltage sources".to_string()
+                        );
+                    }
+                }
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } if params.is_empty()
+                    && element.nodes.len() == 2
+                    && parents
+                        .iter()
+                        .any(|parent| parent.name.eq_ignore_ascii_case(subckt_name)) =>
+                {
+                    top_instances.push(element);
+                }
+                _ => {
+                    return Err(format!(
+                        "nested-include top level contains unqualified element '{}'",
+                        element.name
+                    ));
+                }
+            }
+        }
+        let source = voltage_source.ok_or_else(|| {
+            "nested-include identity requires one finite DC voltage source".to_string()
+        })?;
+        let instantiated_parents = top_instances
+            .iter()
+            .filter_map(|instance| match &instance.kind {
+                ElementKind::Subcircuit { subckt_name, .. } => {
+                    Some(subckt_name.to_ascii_lowercase())
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        if top_instances.len() != 2
+            || instantiated_parents.len() != 2
+            || parents
+                .iter()
+                .any(|parent| !instantiated_parents.contains(&parent.name.to_ascii_lowercase()))
+            || !source.name.eq_ignore_ascii_case(&plan.dc.source)
+        {
+            return Err("nested-include identity requires two parent instances swept by its sole voltage source".to_string());
+        }
+        let source_ground = source
+            .nodes
+            .iter()
+            .position(|node| Self::node_name_is_ground(node))
+            .ok_or_else(|| "nested-include source must have one grounded terminal".to_string())?;
+        if source
+            .nodes
+            .iter()
+            .filter(|node| Self::node_name_is_ground(node))
+            .count()
+            != 1
+        {
+            return Err(
+                "nested-include source must have exactly one grounded terminal".to_string(),
+            );
+        }
+        let driven = source.nodes[1 - source_ground].to_ascii_lowercase();
+        let mut degree = BTreeMap::<String, usize>::new();
+        for instance in &top_instances {
+            for node in &instance.nodes {
+                *degree.entry(node.to_ascii_lowercase()).or_default() += 1;
+            }
+        }
+        let ground = degree
+            .keys()
+            .find(|node| Self::node_name_is_ground(node))
+            .cloned()
+            .ok_or_else(|| "parent instance chain is not grounded".to_string())?;
+        let middle = degree
+            .iter()
+            .find_map(|(node, count)| (*count == 2).then_some(node.clone()))
+            .ok_or_else(|| "parent instances do not form a two-block series chain".to_string())?;
+        if degree.len() != 3
+            || degree.get(&driven) != Some(&1)
+            || degree.get(&ground) != Some(&1)
+            || degree.get(&middle) != Some(&2)
+        {
+            return Err(
+                "parent instances do not connect the driven node through one shared node to ground"
+                    .to_string(),
+            );
+        }
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if probes
+            != [
+                format!("v({middle})"),
+                format!("i({})", source.name.to_ascii_lowercase()),
+            ]
+        {
+            return Err("nested-include identity requires ordered shared-node voltage and swept-source current probes".to_string());
+        }
+
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|err| format!("nested-include hierarchy did not flatten: {err}"))?;
+        if !flattened.scoped_models.is_empty()
+            || !flattened.scoped_initial_conditions.is_empty()
+            || !flattened.scoped_node_sets.is_empty()
+            || flattened.elements.len() != 5
+        {
+            return Err(
+                "nested-include flattening produced unexpected scoped or element state".to_string(),
+            );
+        }
+        let mut flattened_elements = BTreeMap::new();
+        for element in &flattened.elements {
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor { .. } => {
+                    Self::strict_nested_include_resistor_fingerprint(element)?
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if value.is_finite() && element.nodes.len() == 2 =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes: element
+                            .nodes
+                            .iter()
+                            .map(|node| node.to_ascii_lowercase())
+                            .collect(),
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "flattened nested-include circuit contains unqualified element '{}'",
+                        element.name
+                    ));
+                }
+            };
+            if flattened_elements
+                .insert(element.name.to_ascii_lowercase(), fingerprint)
+                .is_some()
+            {
+                return Err(format!(
+                    "flattened nested-include circuit has duplicate element '{}'",
+                    element.name
+                ));
+            }
+        }
+        Ok(XyceNestedIncludeIdentityFamilySnapshot {
+            title: netlist.title.trim().to_string(),
+            hierarchy,
+            flattened_elements,
+        })
+    }
+
+    fn validate_nested_include_subcircuit_auxiliary_state(
+        subcircuit: &SubcircuitDef,
+    ) -> Result<(), String> {
+        if !subcircuit.initial_conditions.is_empty()
+            || !subcircuit.node_sets.is_empty()
+            || !subcircuit.params.is_empty()
+            || !subcircuit.expr_params.is_empty()
+            || !subcircuit.string_params.is_empty()
+            || !subcircuit.body_params.is_empty()
+            || !subcircuit.body_expr_params.is_empty()
+            || !subcircuit.body_string_params.is_empty()
+            || !subcircuit.body_functions.is_empty()
+            || !subcircuit.local_options.is_empty()
+            || subcircuit.library_ref.is_some()
+        {
+            return Err(format!(
+                "subcircuit '{}' contains auxiliary scoped state",
+                subcircuit.name
+            ));
+        }
+        Ok(())
+    }
+
+    fn strict_nested_include_resistor_fingerprint(
+        element: &crate::netlist::Element,
+    ) -> Result<XyceRelationalElementFingerprint, String> {
+        let ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return Err(format!("element '{}' is not a resistor", element.name));
+        };
+        if element.nodes.len() != 2
+            || !value.is_finite()
+            || *value <= 0.0
+            || value_expr.is_some()
+            || model.is_some()
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+        {
+            return Err(format!(
+                "resistor '{}' is not one direct finite positive two-terminal resistor",
+                element.name
+            ));
+        }
+        Ok(XyceRelationalElementFingerprint {
+            kind: "R".to_string(),
+            nodes: element
+                .nodes
+                .iter()
+                .map(|node| node.to_ascii_lowercase())
+                .collect(),
+            numeric_bits: vec![value.to_bits()],
+            text: Vec::new(),
+        })
+    }
+
+    fn nested_include_subcircuit_fingerprint(
+        subcircuit: &SubcircuitDef,
+    ) -> Result<XyceNestedIncludeSubcircuitFingerprint, String> {
+        let mut elements = BTreeMap::new();
+        for element in &subcircuit.elements {
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor { .. } => {
+                    Self::strict_nested_include_resistor_fingerprint(element)?
+                }
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } if params.is_empty() && element.nodes.len() == 2 => {
+                    XyceRelationalElementFingerprint {
+                        kind: "X".to_string(),
+                        nodes: element
+                            .nodes
+                            .iter()
+                            .map(|node| node.to_ascii_lowercase())
+                            .collect(),
+                        numeric_bits: Vec::new(),
+                        text: vec![subckt_name.to_ascii_lowercase()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "subcircuit '{}' contains unqualified element '{}'",
+                        subcircuit.name, element.name
+                    ));
+                }
+            };
+            if elements
+                .insert(element.name.to_ascii_lowercase(), fingerprint)
+                .is_some()
+            {
+                return Err(format!(
+                    "subcircuit '{}' contains duplicate element '{}'",
+                    subcircuit.name, element.name
+                ));
+            }
+        }
+        let mut nested_names = subcircuit
+            .nested_subcircuits
+            .iter()
+            .map(|nested| nested.name.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        nested_names.sort();
+        Ok(XyceNestedIncludeSubcircuitFingerprint {
+            name: subcircuit.name.to_ascii_lowercase(),
+            ports: subcircuit
+                .ports
+                .iter()
+                .map(|port| port.to_ascii_lowercase())
+                .collect(),
+            elements,
+            nested_names,
+        })
+    }
+
+    fn nested_include_identity_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceNestedIncludeIdentityFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let entries = fs::read_dir(parent)
+            .ok()?
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        if entries.iter().any(|entry| {
+            entry
+                .file_type()
+                .map_or(true, |file_type| !file_type.is_file())
+        }) {
+            return None;
+        }
+        let circuit_paths = entries
+            .iter()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            })
+            .collect::<Vec<_>>();
+        if circuit_paths.len() != 3
+            || !circuit_paths
+                .iter()
+                .any(|path| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+
+        let mut anchor = None;
+        let mut workers = Vec::new();
+        for path in &circuit_paths {
+            let source = fs::read_to_string(path).ok()?;
+            let wrapper = self.requires_upstream_wrapper(&self.relative_key(path));
+            if source.is_empty() {
+                if !wrapper || anchor.replace(path.clone()).is_some() {
+                    return None;
+                }
+                continue;
+            }
+            if wrapper {
+                return None;
+            }
+            let provenance = Self::nested_include_identity_provenance(&source, path).ok()?;
+            let plan = self
+                .static_dc_plan_for_path(path, ExpressionDialect::Xyce)
+                .ok()?;
+            Self::validate_nested_include_identity_dc_plan(&plan).ok()?;
+            let netlist = Self::parse_xyce_netlist(&plan.source, path).ok()?;
+            let snapshot = Self::nested_include_identity_family_snapshot(&netlist, &plan).ok()?;
+            workers.push((path.clone(), provenance, plan, snapshot));
+        }
+        let anchor = anchor?;
+        if workers.len() != 2 {
+            return None;
+        }
+        let repeated = workers.iter().find(|(_, provenance, _, _)| {
+            provenance.representation
+                == XyceNestedIncludeIdentityRepresentation::RepeatedCanonicalTarget
+        })?;
+        let split = workers.iter().find(|(_, provenance, _, _)| {
+            provenance.representation
+                == XyceNestedIncludeIdentityRepresentation::SplitIdenticalTargets
+        })?;
+        if Self::same_path(&repeated.0, &split.0)
+            || repeated.1.canonical_source != split.1.canonical_source
+            || repeated.1.expanded_source != split.1.expanded_source
+            || repeated.2.print.probes != split.2.print.probes
+            || !Self::dc_sweeps_match_exactly(&repeated.2.dc, &split.2.dc)
+            || repeated.3 != split.3
+        {
+            return None;
+        }
+        let all_support_paths = repeated
+            .1
+            .support_paths
+            .union(&split.1.support_paths)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if all_support_paths.len() != 2
+            || repeated.1.support_paths.len() != 1
+            || split.1.support_paths.len() != 2
+        {
+            return None;
+        }
+        let expected_paths = circuit_paths
+            .iter()
+            .cloned()
+            .chain(all_support_paths.iter().cloned())
+            .map(|path| path.canonicalize().unwrap_or(path))
+            .collect::<BTreeSet<_>>();
+        let actual_paths = entries
+            .iter()
+            .map(|entry| {
+                let path = entry.path();
+                path.canonicalize().unwrap_or(path)
+            })
+            .collect::<BTreeSet<_>>();
+        if actual_paths != expected_paths {
+            return None;
+        }
+
+        let artifact_dir = self
+            .static_output_reference_path(&repeated.0, "artifact")?
+            .parent()?
+            .to_path_buf();
+        if artifact_dir.try_exists().ok()? {
+            if !fs::metadata(&artifact_dir).ok()?.is_dir()
+                || fs::read_dir(&artifact_dir).ok()?.next().is_some()
+            {
+                return None;
+            }
+        }
+
+        let role = if Self::same_path(&deck.path, &anchor) {
+            XyceNestedIncludeIdentityFamilyRole::Anchor
+        } else if Self::same_path(&deck.path, &repeated.0) {
+            XyceNestedIncludeIdentityFamilyRole::RepeatedTargetBaseline
+        } else if Self::same_path(&deck.path, &split.0) {
+            XyceNestedIncludeIdentityFamilyRole::SplitIdenticalTargetsMember
+        } else {
+            return None;
+        };
+        let target_path = match role {
+            XyceNestedIncludeIdentityFamilyRole::Anchor => None,
+            XyceNestedIncludeIdentityFamilyRole::RepeatedTargetBaseline => Some(repeated.0.clone()),
+            XyceNestedIncludeIdentityFamilyRole::SplitIdenticalTargetsMember => {
+                Some(split.0.clone())
+            }
+        };
+        Some(XyceNestedIncludeIdentityFamilyContract {
+            relational: XyceBaselineFamilyContract {
+                kind: XyceBaselineFamilyKind::NestedIncludeIdentity,
+                comparison: XyceBaselineFamilyComparison::ExactPrn,
+                family: parent.file_name()?.to_str()?.to_string(),
+                baseline_path: repeated.0.clone(),
+                member_paths: vec![repeated.0.clone(), split.0.clone()],
+                target_path,
+            },
+            role,
+        })
+    }
+
+    fn nested_include_identity_provenance(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceNestedIncludeProvenance, String> {
+        let parent_dir = deck_path
+            .parent()
+            .ok_or_else(|| "nested-include deck has no parent directory".to_string())?;
+        let canonical_parent = parent_dir
+            .canonicalize()
+            .unwrap_or_else(|_| parent_dir.to_path_buf());
+        let (canonical_source, occurrences) =
+            Self::nested_include_identity_raw_provenance(source, parent_dir, &canonical_parent)?;
+        let support_paths = occurrences
+            .iter()
+            .map(|(_, path)| path.clone())
+            .collect::<BTreeSet<_>>();
+        let representation = match support_paths.len() {
+            1 => XyceNestedIncludeIdentityRepresentation::RepeatedCanonicalTarget,
+            2 => XyceNestedIncludeIdentityRepresentation::SplitIdenticalTargets,
+            _ => return Err("include target identity is ambiguous".to_string()),
+        };
+        let mut support_source = None::<String>;
+        for path in &support_paths {
+            let content = fs::read_to_string(path).map_err(|err| {
+                format!("failed to read support source {}: {err}", path.display())
+            })?;
+            Self::validate_nested_include_support_source(&content)?;
+            if support_source
+                .as_ref()
+                .is_some_and(|expected| expected != &content)
+            {
+                return Err("split include targets are not byte-identical".to_string());
+            }
+            support_source = Some(content);
+        }
+        let expanded_source = Netlist::preprocess_includes(source, deck_path)
+            .map_err(|err| format!("include expansion failed: {err}"))?;
+        Ok(XyceNestedIncludeProvenance {
+            representation,
+            canonical_source,
+            expanded_source,
+            support_paths,
+        })
+    }
+
+    fn nested_include_identity_raw_provenance(
+        source: &str,
+        parent_dir: &Path,
+        canonical_parent: &Path,
+    ) -> Result<(String, Vec<(String, PathBuf)>), String> {
+        const INCLUDE_SENTINEL: &str = "<RSPICE_NESTED_INCLUDE_TARGET>";
+
+        let mut open_parent = None::<String>;
+        let mut parent_names = BTreeSet::new();
+        let mut subckt_count = 0usize;
+        let mut ends_count = 0usize;
+        let mut dc_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        let mut occurrences = Vec::<(String, PathBuf)>::new();
+        let mut operand_spans = Vec::<(usize, usize)>::new();
+        let mut source_offset = 0usize;
+
+        for physical_line in source.split_inclusive('\n') {
+            let line_start = source_offset;
+            source_offset += physical_line.len();
+            let line = physical_line.strip_suffix('\n').unwrap_or(physical_line);
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            let uncommented = line.split_once(';').map_or(line, |(head, _)| head);
+            let stripped = uncommented.trim();
+            if stripped.is_empty() || stripped.starts_with('*') || stripped.starts_with("//") {
+                continue;
+            }
+            let tokens = stripped.split_whitespace().collect::<Vec<_>>();
+            let head = tokens.first().copied().unwrap_or("");
+            if head.eq_ignore_ascii_case(".subckt") {
+                subckt_count += 1;
+                if open_parent.is_some() {
+                    return Err("worker source contains a lexically nested .SUBCKT before include expansion".to_string());
+                }
+                let name = tokens
+                    .get(1)
+                    .ok_or_else(|| ".SUBCKT has no name".to_string())?
+                    .to_ascii_lowercase();
+                if !parent_names.insert(name.clone()) {
+                    return Err(format!(
+                        "duplicate top-level subcircuit definition '{name}'"
+                    ));
+                }
+                open_parent = Some(name);
+                continue;
+            }
+            if head.eq_ignore_ascii_case(".ends") {
+                ends_count += 1;
+                let owner = open_parent
+                    .take()
+                    .ok_or_else(|| ".ENDS appears outside a parent subcircuit".to_string())?;
+                if tokens.len() > 2
+                    || tokens
+                        .get(1)
+                        .is_some_and(|name| !name.eq_ignore_ascii_case(&owner))
+                {
+                    return Err(format!(
+                        ".ENDS does not close its lexical parent subcircuit '{owner}'"
+                    ));
+                }
+                continue;
+            }
+            if head.eq_ignore_ascii_case(".lib") || head.eq_ignore_ascii_case(".endl") {
+                return Err("nested-include identity does not admit .LIB sections".to_string());
+            }
+            if matches!(
+                head.to_ascii_lowercase().as_str(),
+                ".include" | ".inc" | ".incl"
+            ) {
+                let owner = open_parent.clone().ok_or_else(|| {
+                    "nested-include identity requires every include inside a parent subcircuit"
+                        .to_string()
+                })?;
+                let (requested, operand_start, operand_end) =
+                    Self::nested_include_identity_operand_span(line)?;
+                let relative = crate::netlist::source_path_literal_to_host_path(&requested);
+                if requested.contains(['/', '\\'])
+                    || requested == "."
+                    || requested == ".."
+                    || relative.is_absolute()
+                    || relative.components().count() != 1
+                {
+                    return Err(
+                        "nested-include identity requires one bare local include filename"
+                            .to_string(),
+                    );
+                }
+                let target = parent_dir.join(relative);
+                let canonical = target.canonicalize().map_err(|err| {
+                    format!("could not resolve include '{}': {err}", target.display())
+                })?;
+                if canonical.parent() != Some(canonical_parent) || !canonical.is_file() {
+                    return Err(format!(
+                        "include target '{}' escapes the family directory or is not a file",
+                        canonical.display()
+                    ));
+                }
+                let exact_directory_name = fs::read_dir(parent_dir)
+                    .map_err(|err| {
+                        format!(
+                            "could not inspect include directory '{}': {err}",
+                            parent_dir.display()
+                        )
+                    })?
+                    .filter_map(Result::ok)
+                    .any(|entry| {
+                        entry.file_name().to_str() == Some(requested.as_str())
+                            && entry.path().canonicalize().ok().as_ref() == Some(&canonical)
+                    });
+                if !exact_directory_name {
+                    return Err(
+                        "nested-include operand does not exactly spell its directory entry"
+                            .to_string(),
+                    );
+                }
+                occurrences.push((owner, canonical));
+                operand_spans.push((line_start + operand_start, line_start + operand_end));
+                continue;
+            }
+            if head.eq_ignore_ascii_case(".dc") {
+                if open_parent.is_some() {
+                    return Err("nested-include .DC analysis must be top-level".to_string());
+                }
+                dc_count += 1;
+                continue;
+            }
+            if head.eq_ignore_ascii_case(".print") {
+                if open_parent.is_some() {
+                    return Err("nested-include .PRINT directive must be top-level".to_string());
+                }
+                print_count += 1;
+                if tokens.len() != 4
+                    || !tokens
+                        .get(1)
+                        .is_some_and(|analysis| analysis.eq_ignore_ascii_case("dc"))
+                    || tokens.iter().skip(2).any(|token| {
+                        let option = token.to_ascii_lowercase();
+                        option == "file"
+                            || option.starts_with("file=")
+                            || option == "format"
+                            || option.starts_with("format=")
+                            || option == "noindex"
+                            || option.starts_with("noindex=")
+                    })
+                {
+                    return Err("nested-include identity requires default-PRN .PRINT DC without FILE, FORMAT, NOINDEX, or side-output options".to_string());
+                }
+                continue;
+            }
+            if head.eq_ignore_ascii_case(".end") {
+                if open_parent.is_some() || tokens.len() != 1 || line.contains(';') {
+                    return Err(
+                        "nested-include identity requires one exact top-level .END card"
+                            .to_string(),
+                    );
+                }
+                end_count += 1;
+                if source_offset != source.len() {
+                    return Err(
+                        "nested-include identity does not admit content after .END".to_string()
+                    );
+                }
+            }
+        }
+
+        let include_owners = occurrences
+            .iter()
+            .map(|(owner, _)| owner.clone())
+            .collect::<BTreeSet<_>>();
+        if open_parent.is_some()
+            || subckt_count != 2
+            || ends_count != 2
+            || occurrences.len() != 2
+            || include_owners != parent_names
+            || dc_count != 1
+            || print_count != 1
+            || end_count != 1
+        {
+            return Err("nested-include identity requires exactly two matched parent .SUBCKT/.ENDS pairs with one include each, one .DC, one default .PRINT DC, and one terminal .END".to_string());
+        }
+
+        let mut canonical_source = source.to_string();
+        for (start, end) in operand_spans.into_iter().rev() {
+            canonical_source.replace_range(start..end, INCLUDE_SENTINEL);
+        }
+        Ok((canonical_source, occurrences))
+    }
+
+    fn nested_include_identity_operand_span(line: &str) -> Result<(String, usize, usize), String> {
+        let statement_end = line.find(';').unwrap_or(line.len());
+        let statement = &line[..statement_end];
+        let bytes = statement.as_bytes();
+        let mut cursor = 0usize;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        while bytes
+            .get(cursor)
+            .is_some_and(|byte| !byte.is_ascii_whitespace())
+        {
+            cursor += 1;
+        }
+        if !bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            return Err("include directive has no separated operand".to_string());
+        }
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        let operand_start = cursor;
+        if bytes
+            .get(cursor)
+            .is_some_and(|byte| matches!(*byte, b'\'' | b'\"'))
+        {
+            return Err("nested-include identity requires an unquoted include operand".to_string());
+        }
+        while bytes
+            .get(cursor)
+            .is_some_and(|byte| !byte.is_ascii_whitespace())
+        {
+            cursor += 1;
+        }
+        let operand_end = cursor;
+        if operand_start == operand_end || !statement[cursor..].trim().is_empty() {
+            return Err("include directive must contain exactly one bare operand".to_string());
+        }
+        let requested = crate::netlist::parse_include_directive(statement)
+            .ok_or_else(|| format!("malformed include directive '{}'", statement.trim()))?;
+        if requested != statement[operand_start..operand_end] {
+            return Err("include operand span does not match the parsed path".to_string());
+        }
+        Ok((requested, operand_start, operand_end))
+    }
+
+    fn validate_nested_include_support_source(source: &str) -> Result<(), String> {
+        let mut subckt_count = 0usize;
+        let mut ends_count = 0usize;
+        let mut resistor_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            if stripped.is_empty() {
+                continue;
+            }
+            let head = stripped.split_whitespace().next().unwrap_or("");
+            if head.eq_ignore_ascii_case(".subckt") {
+                subckt_count += 1;
+            } else if head.eq_ignore_ascii_case(".ends") {
+                ends_count += 1;
+            } else if head
+                .chars()
+                .next()
+                .is_some_and(|character| character.eq_ignore_ascii_case(&'R'))
+            {
+                resistor_count += 1;
+            } else {
+                return Err(format!(
+                    "nested-include support source contains unqualified statement '{stripped}'"
+                ));
+            }
+        }
+        if subckt_count != 1 || ends_count != 1 || resistor_count != 1 {
+            return Err("nested-include support source must contain exactly one resistor-only subcircuit definition".to_string());
+        }
+        // Standalone include fragments intentionally begin with .SUBCKT and have no
+        // circuit-title record. Supply a validation-only title so the ordinary
+        // top-level parser does not consume the first directive as SPICE's title.
+        let validation_source = format!("nested include support validation\n{source}");
+        let parsed = Netlist::parse(&validation_source)
+            .map_err(|err| format!("support source parse failed: {err}"))?;
+        if parsed.subcircuits.len() != 1
+            || parsed.subcircuits[0].ports.len() != 2
+            || parsed.subcircuits[0].elements.len() != 1
+        {
+            return Err("support source is not one two-terminal local subcircuit".to_string());
+        }
+        Self::validate_nested_include_subcircuit_auxiliary_state(&parsed.subcircuits[0])?;
+        Self::strict_nested_include_resistor_fingerprint(&parsed.subcircuits[0].elements[0])?;
+        Ok(())
+    }
+
     fn age_cap_family_contract(&self, deck: &XyceDeck) -> Option<XyceAgeCapFamilyContract> {
         let relative_path = Self::normalize_manifest_key(&deck.relative_path);
         if !relative_path.starts_with("netlists/") {
@@ -51890,5 +52989,316 @@ R2 2 0 1
             "the canonical zero-artifact directory rejects every output artifact"
         );
         fs::remove_dir_all(&temp_root).expect("remove diode-alias fixture");
+    }
+
+    #[test]
+    fn nested_include_identity_family_is_strict_and_fail_closed() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_family = workspace_root.join("tests/xyce/Netlists/Certification_Tests/BUG_1686");
+        let repeated_source = fs::read_to_string(corpus_family.join("bug_1686a.cir"))
+            .expect("read repeated-target worker")
+            .replace("\r\n", "\n");
+        let split_source = fs::read_to_string(corpus_family.join("bug_1686_dup.cir"))
+            .expect("read split-target worker")
+            .replace("\r\n", "\n");
+        let support_source = fs::read_to_string(corpus_family.join("inc1.sub"))
+            .expect("read support source")
+            .replace("\r\n", "\n");
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!(
+            "rspice-xyce-nested-include-identity-{}-{nonce}",
+            std::process::id()
+        ));
+        let family = temp_root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_NESTED_INCLUDE_IDENTITY");
+        fs::create_dir_all(&family).expect("create nested-include fixture");
+        let anchor_path = family.join("owner.cir");
+        let repeated_path = family.join("repeated.cir");
+        let split_path = family.join("split.cir");
+        let inc1_path = family.join("inc1.sub");
+        let inc2_path = family.join("inc2.sub");
+        fs::write(&anchor_path, []).expect("write zero-byte anchor");
+        fs::write(&repeated_path, &repeated_source).expect("write repeated-target worker");
+        fs::write(&split_path, &split_source).expect("write split-target worker");
+        fs::write(&inc1_path, &support_source).expect("write first support source");
+        fs::write(&inc2_path, &support_source).expect("write second support source");
+        let anchor_relative =
+            "Netlists/Certification_Tests/GENERIC_NESTED_INCLUDE_IDENTITY/owner.cir";
+        fs::write(
+            temp_root.join(HARNESS_MANIFEST_FILE),
+            format!("{anchor_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper provenance");
+
+        let runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        let deck = |path: &Path, name: &str| XyceDeck {
+            path: path.to_path_buf(),
+            relative_path: format!(
+                "Netlists/Certification_Tests/GENERIC_NESTED_INCLUDE_IDENTITY/{name}"
+            ),
+            section: XyceDeckSection::Netlists,
+        };
+        let anchor_deck = deck(&anchor_path, "owner.cir");
+        let repeated_deck = deck(&repeated_path, "repeated.cir");
+        let split_deck = deck(&split_path, "split.cir");
+        let repeated_provenance =
+            XyceTestRunner::nested_include_identity_provenance(&repeated_source, &repeated_path)
+                .expect("repeated-target provenance");
+        let split_provenance =
+            XyceTestRunner::nested_include_identity_provenance(&split_source, &split_path)
+                .expect("split-target provenance");
+        assert_eq!(
+            repeated_provenance.canonical_source, split_provenance.canonical_source,
+            "only parsed include operand spans may differ between workers"
+        );
+        assert_eq!(
+            repeated_provenance.expanded_source, split_provenance.expanded_source,
+            "byte-identical include targets must expand identically"
+        );
+        for path in [&repeated_path, &split_path] {
+            let plan = runner
+                .static_dc_plan_for_path(path, ExpressionDialect::Xyce)
+                .expect("nested-include DC plan");
+            XyceTestRunner::validate_nested_include_identity_dc_plan(&plan)
+                .expect("valid nested-include DC plan");
+            let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, path)
+                .expect("parse nested-include worker");
+            XyceTestRunner::nested_include_identity_family_snapshot(&netlist, &plan)
+                .expect("valid nested-include semantic snapshot");
+        }
+        assert_eq!(
+            runner
+                .nested_include_identity_family_contract(&anchor_deck)
+                .expect("complete generic directory qualifies")
+                .role,
+            XyceNestedIncludeIdentityFamilyRole::Anchor
+        );
+        assert_eq!(
+            runner
+                .nested_include_identity_family_contract(&repeated_deck)
+                .expect("repeated canonical target qualifies")
+                .role,
+            XyceNestedIncludeIdentityFamilyRole::RepeatedTargetBaseline
+        );
+        assert_eq!(
+            runner
+                .nested_include_identity_family_contract(&split_deck)
+                .expect("split identical targets qualify")
+                .role,
+            XyceNestedIncludeIdentityFamilyRole::SplitIdenticalTargetsMember
+        );
+
+        let assert_rejected = |reason: &str| {
+            assert!(
+                runner
+                    .nested_include_identity_family_contract(&anchor_deck)
+                    .is_none(),
+                "{reason} must invalidate the complete family"
+            );
+        };
+
+        fs::write(&inc2_path, format!("{support_source}* byte mismatch\n"))
+            .expect("mutate support bytes");
+        assert_rejected("non-identical split support bytes");
+        fs::write(&inc2_path, &support_source).expect("restore support bytes");
+
+        let extra_support = family.join("unclaimed.sub");
+        fs::write(&extra_support, &support_source).expect("write extra support file");
+        assert_rejected("unclaimed support file");
+        fs::remove_file(&extra_support).expect("remove extra support file");
+
+        let extra_circuit = family.join("fourth.cir");
+        fs::write(&extra_circuit, &split_source).expect("write extra circuit");
+        assert_rejected("fourth circuit");
+        fs::remove_file(&extra_circuit).expect("remove extra circuit");
+        fs::remove_file(&split_path).expect("remove required circuit");
+        assert_rejected("missing circuit");
+        fs::write(&split_path, &split_source).expect("restore required circuit");
+
+        let output_dir = temp_root
+            .join("OutputData")
+            .join("Certification_Tests")
+            .join("GENERIC_NESTED_INCLUDE_IDENTITY");
+        fs::create_dir_all(&output_dir).expect("create mirrored output directory");
+        fs::write(output_dir.join("unexpected.prn"), "artifact")
+            .expect("write unexpected artifact");
+        assert_rejected("unexpected output artifact");
+        fs::remove_dir_all(temp_root.join("OutputData")).expect("remove output artifacts");
+
+        fs::write(&anchor_path, "\n").expect("mutate anchor size");
+        assert_rejected("non-zero-byte wrapper");
+        fs::write(&anchor_path, []).expect("restore zero-byte anchor");
+
+        for (mutated, reason) in [
+            (
+                split_source.replacen(".include inc2.sub", ".inc inc2.sub", 1),
+                "include directive spelling mismatch",
+            ),
+            (
+                split_source.replacen(".include inc2.sub", ".include inc2.sub  ", 1),
+                "include trailing whitespace mismatch",
+            ),
+            (
+                split_source.replacen(
+                    ".include inc2.sub",
+                    ".include inc2.sub ; unmatched comment",
+                    1,
+                ),
+                "include trailing comment mismatch",
+            ),
+        ] {
+            assert_ne!(mutated, split_source, "mutation fixture must change source");
+            let provenance =
+                XyceTestRunner::nested_include_identity_provenance(&mutated, &split_path)
+                    .expect("raw include mutation remains individually parseable");
+            assert_ne!(
+                provenance.canonical_source, repeated_provenance.canonical_source,
+                "{reason} must remain visible outside the replaced operand span"
+            );
+            fs::write(&split_path, mutated).expect("write raw-source parity mutation");
+            assert_rejected(reason);
+        }
+        fs::write(&split_path, &split_source).expect("restore split worker");
+
+        for (mutated, reason) in [
+            (
+                split_source.replacen(".include inc2.sub", ".include ./inc2.sub", 1),
+                "non-canonical include path spelling",
+            ),
+            (
+                split_source.replacen(".include inc2.sub", ".include INC2.SUB", 1),
+                "case-variant include path spelling",
+            ),
+            (
+                split_source.replacen(".end\n", "", 1),
+                "missing terminal .END",
+            ),
+            (
+                split_source.replacen(".end\n", ".end\n.end\n", 1),
+                "duplicate .END",
+            ),
+            (
+                split_source.replacen(".print dc v(2) I(v1)", ".print dc v(2) I(v1) FILE=foo", 1),
+                "FILE output on the sole .PRINT DC",
+            ),
+            (
+                split_source.replacen(".end\n", ".print ac v(2)\n.end\n", 1),
+                "extra .PRINT AC",
+            ),
+            (
+                split_source.replacen(".end\n", ".print dc v(2) I(v1) FILE=foo\n.end\n", 1),
+                "extra default .PRINT DC side output",
+            ),
+        ] {
+            assert_ne!(mutated, split_source, "mutation fixture must change source");
+            if reason.starts_with("extra .PRINT") {
+                assert_eq!(
+                    mutated.matches(".ends\n").count(),
+                    split_source.matches(".ends\n").count(),
+                    "extra PRINT mutation must preserve both parent terminators"
+                );
+                assert!(
+                    mutated.ends_with(".end\n"),
+                    "extra PRINT mutation must preserve the terminal .END"
+                );
+            }
+            assert!(
+                XyceTestRunner::nested_include_identity_provenance(&mutated, &split_path).is_err(),
+                "{reason} must fail raw provenance qualification"
+            );
+            fs::write(&split_path, mutated).expect("write raw grammar mutation");
+            assert_rejected(reason);
+        }
+        fs::write(&split_path, &split_source).expect("restore split worker");
+
+        let top_level_include = repeated_source.replacen(
+            ".subckt fubar 1 2\n.include inc1.sub",
+            ".include inc1.sub\n.subckt fubar 1 2",
+            1,
+        );
+        assert_ne!(top_level_include, repeated_source);
+        fs::write(&repeated_path, top_level_include).expect("move include outside parent");
+        assert_rejected("include outside its parent scope");
+        fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+
+        let duplicate_parent =
+            repeated_source.replacen(".subckt trashed 1 2", ".subckt fubar 1 2", 1);
+        assert_ne!(duplicate_parent, repeated_source);
+        fs::write(&repeated_path, duplicate_parent).expect("duplicate parent scope name");
+        assert_rejected("same-qualified-name parent collision");
+        fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+
+        let repeated_parent_twice = repeated_source.replacen("X2 2 0 trashed", "X2 2 0 fubar", 1);
+        let split_parent_twice = split_source.replacen("X2 2 0 trashed", "X2 2 0 fubar", 1);
+        assert_ne!(repeated_parent_twice, repeated_source);
+        assert_ne!(split_parent_twice, split_source);
+        fs::write(&repeated_path, repeated_parent_twice)
+            .expect("duplicate top-level parent binding");
+        fs::write(&split_path, split_parent_twice).expect("duplicate top-level parent binding");
+        assert_rejected("one parent definition left unused");
+        fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+        fs::write(&split_path, &split_source).expect("restore split worker");
+
+        let outside_support = temp_root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("outside.sub");
+        fs::write(&outside_support, &support_source).expect("write escaping support source");
+        let escaping_include =
+            repeated_source.replacen(".include inc1.sub", ".include ../outside.sub", 1);
+        assert_ne!(escaping_include, repeated_source);
+        fs::write(&repeated_path, escaping_include).expect("write escaping include");
+        assert_rejected("include escaping the family directory");
+        fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+
+        for (mutated, reason) in [
+            (
+                split_source.replacen("R1 2a 2 10k", "R1 2a 2 11k", 1),
+                "changed parent resistance",
+            ),
+            (
+                split_source.replacen("X2 2 0 trashed", "X2 1 0 trashed", 1),
+                "changed top-level topology",
+            ),
+            (
+                split_source.replacen(".dc v1 0 1 .5", ".dc v1 0 1 .25", 1),
+                "changed DC point set",
+            ),
+            (
+                split_source.replacen(".print dc v(2) I(v1)", ".print dc I(v1) v(2)", 1),
+                "reordered probes",
+            ),
+            (
+                split_source.replacen(".end", ".model unexpected D\n.end", 1),
+                "unadmitted auxiliary directive",
+            ),
+        ] {
+            assert_ne!(mutated, split_source, "mutation fixture must change source");
+            fs::write(&split_path, mutated).expect("write semantic mutation");
+            assert_rejected(reason);
+        }
+        fs::write(&split_path, &split_source).expect("restore split worker");
+
+        fs::write(temp_root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+        let missing_provenance_runner =
+            XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        assert!(
+            missing_provenance_runner
+                .nested_include_identity_family_contract(&anchor_deck)
+                .is_none(),
+            "zero-byte owner without wrapper provenance is not a family"
+        );
+
+        fs::remove_dir_all(&temp_root).expect("remove nested-include fixture");
     }
 }
