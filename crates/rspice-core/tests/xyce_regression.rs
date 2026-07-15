@@ -7096,6 +7096,49 @@ fn test_xyce_transient_analysis_expression_relational_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_dc_analysis_expression_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/ISSUE_536/dcBaseline1.cir",
+        "Netlists/Certification_Tests/ISSUE_536/dcDecBaseline.cir",
+        "Netlists/Certification_Tests/ISSUE_536/dcListBaseline.cir",
+        "Netlists/Certification_Tests/ISSUE_536/dcOctBaseline.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass as the independently simulated numeric member of its DC-analysis expression family, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "dc_analysis_expression_family_baseline",
+            "{relative} should report the strict baseline-family contract"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+
+    for relative in [
+        "Netlists/Certification_Tests/ISSUE_536/dcExpr1.cir",
+        "Netlists/Certification_Tests/ISSUE_536/dcDecExpr.cir",
+        "Netlists/Certification_Tests/ISSUE_536/dcListExpr.cir",
+        "Netlists/Certification_Tests/ISSUE_536/dcOctExpr.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should reproduce its independently simulated numeric counterpart through parameterized .DC fields, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "dc_analysis_expression_family_wrapper",
+            "{relative} should report the strict wrapper-family contract"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
