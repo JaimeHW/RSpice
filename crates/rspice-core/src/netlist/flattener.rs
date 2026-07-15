@@ -2084,8 +2084,12 @@ fn resolve_parametric_value(
             // calls gauss/agauss/unif/aunif/limit advances one shared,
             // reproducible sequence instead of replaying the same draws.
             ctx.adopt_random(random);
-            super::expr::eval_expression(expr, &ctx)
-                .map_err(|e| ParseError::InvalidValue(e.to_string()))
+            super::expr::eval_expression(expr, &ctx).map_err(|error| match error {
+                super::expr::ExprError::UndefinedParam(name) => {
+                    ParseError::UndefinedParameter(name)
+                }
+                other => ParseError::InvalidValue(other.to_string()),
+            })
         }
         ParametricValue::String(value) => Err(ParseError::InvalidValue(format!(
             "string parameter value '{}' cannot be used as a numeric value",
@@ -2859,6 +2863,26 @@ mod tests {
             .collect::<Vec<_>>();
         resistances.sort_by(f64::total_cmp);
         assert_eq!(resistances, vec![1.0, 10.0]);
+    }
+
+    #[test]
+    fn unresolved_subcircuit_values_preserve_typed_parameter_identity() {
+        let netlist = Netlist::parse(
+            "typed undefined subcircuit parameter\n\
+             X1 out 0 CELL\n\
+             V1 out 0 1\n\
+             .subckt CELL p n\n\
+             R1 p n {missing_value}\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("deck parses before hierarchical parameter resolution");
+
+        assert!(matches!(
+            flatten_netlist_with_models(&netlist),
+            Err(ParseError::UndefinedParameter(name))
+                if name.eq_ignore_ascii_case("missing_value")
+        ));
     }
 
     #[test]

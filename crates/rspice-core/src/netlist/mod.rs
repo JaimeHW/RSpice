@@ -75,6 +75,9 @@ pub enum ParseError {
     #[error("Missing required parameter: {0}")]
     MissingParameter(String),
 
+    #[error("Undefined parameter: {0}")]
+    UndefinedParameter(String),
+
     #[error("Invalid value: {0}")]
     InvalidValue(String),
 

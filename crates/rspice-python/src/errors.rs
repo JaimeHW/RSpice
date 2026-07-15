@@ -74,6 +74,9 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::MissingParameter(value) => {
             ("missing_parameter", None, Some(value.as_str()))
         }
+        CoreParseError::UndefinedParameter(value) => {
+            ("undefined_parameter", None, Some(value.as_str()))
+        }
         CoreParseError::InvalidValue(value) => ("invalid_value", None, Some(value.as_str())),
         CoreParseError::Io(_) => ("io", None, None),
     };
