@@ -7216,6 +7216,36 @@ fn test_xyce_age_cap_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_switch_initial_state_case_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_1376/bug_1376.cir",
+            "switch_state_case_family_anchor",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1376/upper_case.cir",
+            "switch_state_case_family_uppercase_baseline",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1376/lower_case.cir",
+            "switch_state_case_family_lowercase_member",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should reproduce its initial-state case counterpart through independently simulated exact default PRN output, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_subcircuit_parameter_resolution_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
