@@ -5811,6 +5811,88 @@ mod tests {
     }
 
     #[test]
+    fn step_logarithmic_integer_point_counts_parse_for_supported_target_forms() {
+        let cases = [
+            (
+                ".step dec param rval 1 100 5",
+                StepTarget::Param,
+                "rval",
+                5,
+                true,
+            ),
+            (".step oct rval 1 8 3", StepTarget::Param, "rval", 3, false),
+        ];
+
+        for (command, expected_target, expected_name, expected_points, is_decade) in cases {
+            let deck = format!(
+                "logarithmic parameter step\n\
+                 .param rval=1\n\
+                 {command}\n\
+                 .end\n"
+            );
+            let netlist = Netlist::parse(&deck)
+                .unwrap_or_else(|error| panic!("{command} should parse: {error}"));
+            let step = netlist
+                .analyses
+                .iter()
+                .find_map(|analysis| match analysis {
+                    AnalysisCommand::Step(step) => Some(step),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{command} should be retained"));
+
+            assert_eq!(step.target, expected_target, "{command}");
+            assert!(step.name.eq_ignore_ascii_case(expected_name), "{command}");
+            match (&step.sweep, is_decade) {
+                (
+                    StepSweep::Decade {
+                        points_per_decade, ..
+                    },
+                    true,
+                ) => {
+                    assert_eq!(*points_per_decade, expected_points, "{command}");
+                }
+                (
+                    StepSweep::Octave {
+                        points_per_octave, ..
+                    },
+                    false,
+                ) => {
+                    assert_eq!(*points_per_octave, expected_points, "{command}");
+                }
+                (other, _) => panic!("unexpected sweep for {command}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn step_logarithmic_invalid_point_counts_are_rejected() {
+        let cases = [
+            ("DEC", "PARAM rval", "5.9"),
+            ("OCT", "rval", "0"),
+            ("DEC", "PARAM rval", "-1"),
+            ("OCT", "rval", "1e309"),
+            ("DEC", "PARAM rval", "1e100"),
+        ];
+
+        for (sweep_type, target, points) in cases {
+            let deck = format!(
+                "invalid logarithmic step\n\
+                 .param rval=1\n\
+                 .step {sweep_type} {target} 1 100 {points}\n\
+                 .end\n"
+            );
+            let error = Netlist::parse(&deck).unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains(&format!(".STEP {sweep_type}"))
+                    && message.contains("positive integer representable as usize"),
+                "unexpected error for {sweep_type} points={points}: {message}"
+            );
+        }
+    }
+
+    #[test]
     fn unterminated_control_block_is_rejected() {
         let err = Netlist::parse(
             "unterminated control block\n\
