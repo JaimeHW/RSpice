@@ -726,11 +726,25 @@ struct XycePassivePrimaryValueSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XycePassiveTemperatureOverrideSnapshot {
+    title: String,
+    device_kind: XycePassiveTemperatureDeviceKind,
+    representation: XycePassiveTemperatureRepresentation,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    model_name: String,
+    model_type: String,
+    winning_tc_bits: [u64; 2],
+    effective_primary_bits: u64,
+    option_directives: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
     ParamExpression(XyceParamExpressionFamilySnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
+    PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -778,6 +792,18 @@ enum XycePassivePrimaryRepresentation {
     Positional,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XycePassiveTemperatureDeviceKind {
+    Capacitor,
+    Inductor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XycePassiveTemperatureRepresentation {
+    ModelCoefficients,
+    InstanceCoefficients,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct XyceRelationalElementFingerprint {
     kind: String,
@@ -807,6 +833,7 @@ enum XyceBaselineFamilyKind {
     ParamExpression,
     PassiveCapPrimaryValue,
     PassiveResPrimaryValue,
+    PassiveTemperatureOverride,
     Subckt,
     Supernode,
     ScopedModel,
@@ -865,6 +892,7 @@ impl XyceBaselineFamilyKind {
             Self::ParamExpression => "PARAM_EXPRESSION",
             Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
             Self::PassiveResPrimaryValue => "PASSIVE_RES_PRIMARY_VALUE",
+            Self::PassiveTemperatureOverride => "PASSIVE_TEMPERATURE_OVERRIDE",
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
@@ -879,6 +907,7 @@ impl XyceBaselineFamilyKind {
             Self::ParamExpression => "param_expression_family_wrapper",
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_wrapper",
+            Self::PassiveTemperatureOverride => "passive_temperature_override_family_wrapper",
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
@@ -893,6 +922,7 @@ impl XyceBaselineFamilyKind {
             Self::ParamExpression => "param_expression_family_baseline",
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_baseline",
+            Self::PassiveTemperatureOverride => "passive_temperature_override_family_baseline",
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
@@ -904,6 +934,10 @@ impl XyceBaselineFamilyKind {
         matches!(self, Self::Supernode)
     }
 
+    fn compares_transient_baseline_oracle(self) -> bool {
+        matches!(self, Self::PassiveTemperatureOverride)
+    }
+
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
@@ -911,6 +945,7 @@ impl XyceBaselineFamilyKind {
             | Self::SinExpression
             | Self::ParamExpression
             | Self::PassiveCapPrimaryValue
+            | Self::PassiveTemperatureOverride
             | Self::PassiveResPrimaryValue
             | Self::Subckt
             | Self::Supernode
@@ -9954,6 +9989,7 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
             | XyceBaselineFamilyKind::PassiveCapPrimaryValue
+            | XyceBaselineFamilyKind::PassiveTemperatureOverride
             | XyceBaselineFamilyKind::Subckt
             | XyceBaselineFamilyKind::Supernode => baseline == target,
         }
@@ -11202,6 +11238,7 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::SinExpression
                 | XyceBaselineFamilyKind::ParamExpression
                 | XyceBaselineFamilyKind::PassiveCapPrimaryValue
+                | XyceBaselineFamilyKind::PassiveTemperatureOverride
         ) && analysis != XyceBaselineFamilyAnalysis::Tran
         {
             return self.failure_result(
@@ -11976,6 +12013,21 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::PassiveTemperatureOverride
+            && let Err(err) =
+                Self::validate_passive_temperature_override_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
 
         let (baseline_netlist, baseline_result) = match self.run_transient_family_plan(
             &baseline_plan,
@@ -12062,6 +12114,82 @@ impl XyceTestRunner {
                 );
             }
         };
+        if contract.kind.compares_transient_baseline_oracle() {
+            let Some(reference_path) = self.static_prn_reference_path(&contract.baseline_path)
+            else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline has no canonical .prn oracle path",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            };
+            if !reference_path.is_file() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' canonical baseline oracle {} is missing",
+                        contract.family,
+                        self.display_path(&reference_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            let reference = match Self::parse_prn_file(&reference_path) {
+                Ok(reference) => reference,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' baseline oracle parse error: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mismatches = match self.compare_static_tran_primary_reference(
+                &reference,
+                &baseline_plan,
+                &baseline_netlist,
+                &baseline_result,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' baseline oracle comparison error: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if !mismatches.is_empty() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{} {kind_name} family '{}' baseline oracle mismatch(es)",
+                        mismatches.len(),
+                        contract.family
+                    ),
+                    mismatches,
+                );
+            }
+        }
         let baseline_time_scale = match Self::tran_print_time_scale_factor(&baseline_plan.source) {
             Ok(scale) => scale,
             Err(err) => {
@@ -12157,6 +12285,22 @@ impl XyceTestRunner {
             }
             if contract.kind == XyceBaselineFamilyKind::PassiveCapPrimaryValue
                 && let Err(err) = Self::validate_passive_cap_primary_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::PassiveTemperatureOverride
+                && let Err(err) =
+                    Self::validate_passive_temperature_override_transient_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,
@@ -15564,11 +15708,521 @@ impl XyceTestRunner {
                 Self::passive_cap_primary_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::PassivePrimaryValue)
             }
+            XyceBaselineFamilyKind::PassiveTemperatureOverride => {
+                Self::passive_temperature_override_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::PassiveTemperatureOverride)
+            }
             other => Err(format!(
                 "strict transient family kind {} has no semantic snapshot contract",
                 other.name()
             )),
         }
+    }
+
+    fn validate_passive_temperature_override_transient_plan(
+        plan: &XyceStaticTranPlan,
+    ) -> Result<(), String> {
+        const LABEL: &str = "passive temperature-coefficient override parity";
+        if plan.contract != XyceStaticTranContract::PlainStatic {
+            return Err(format!(
+                "{LABEL} requires ordinary primary .prn output, got {:?}",
+                plan.contract
+            ));
+        }
+        if !plan.steps.is_empty() || plan.output_override || plan.timeint_conststep {
+            return Err(format!(
+                "{LABEL} does not admit .STEP, output overrides, or constant-step output"
+            ));
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step < 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires a finite ordinary transient tuple with 0 <= step <= stop, positive stop, and no UIC"
+            ));
+        }
+        if plan.print.probes.is_empty() {
+            return Err(format!(
+                "{LABEL} requires at least one ordered .PRINT TRAN probe"
+            ));
+        }
+
+        let mut model_count = 0usize;
+        let mut tran_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        for line in Self::logical_netlist_lines(&plan.source) {
+            let stripped = Self::strip_netlist_comment(&line);
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".model" => model_count += 1,
+                ".tran" => tran_count += 1,
+                ".print" => print_count += 1,
+                ".options" => {}
+                ".end" => end_count += 1,
+                other => {
+                    return Err(format!("{LABEL} does not admit directive '{other}'"));
+                }
+            }
+        }
+        if (model_count, tran_count, print_count, end_count) != (1, 1, 1, 1) {
+            return Err(format!(
+                "{LABEL} requires exactly one .MODEL, .TRAN, .PRINT, and .END; found ({model_count}, {tran_count}, {print_count}, {end_count})"
+            ));
+        }
+        Ok(())
+    }
+
+    fn passive_temperature_override_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XycePassiveTemperatureOverrideSnapshot, String> {
+        const LABEL: &str = "passive temperature-coefficient override parity";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        if print.probes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }])
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free transient analysis without hierarchy, parameters, auxiliary analysis state, or external models"
+            ));
+        }
+        let [model] = netlist.models.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one passive model, found {}",
+                netlist.models.len()
+            ));
+        };
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} model '{}' must use only direct scalar numeric parameters",
+                model.name
+            ));
+        }
+        let model_tc = Self::passive_temperature_coefficient_pair(&model.params, "model")?;
+
+        let mut passive = None;
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = Self::normalize_device_instance_name(&element.name);
+            if name.is_empty() || elements.contains_key(&name) {
+                return Err(format!(
+                    "{LABEL} contains an empty or duplicate element name '{}'",
+                    element.name
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if nodes.iter().any(String::is_empty) {
+                return Err(format!(
+                    "{LABEL} element '{name}' contains an empty node name"
+                ));
+            }
+            let fingerprint = match &element.kind {
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model: element_model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    let details = XycePassiveTemperatureDeviceKind::Capacitor;
+                    if passive.is_some()
+                        || nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || initial_voltage.is_some_and(|value| !value.is_finite())
+                        || !deferred_params.is_empty()
+                        || !matches!(
+                            model.model_type.to_ascii_uppercase().as_str(),
+                            "C" | "CAP" | "CAPACITOR"
+                        )
+                    {
+                        return Err(format!(
+                            "{LABEL} requires one direct finite positive two-terminal capacitor with no deferred state"
+                        ));
+                    }
+                    let effective = Self::effective_capacitor_value(netlist, &element.name)
+                        .ok_or_else(|| {
+                            format!("{LABEL} could not resolve capacitor '{}'", element.name)
+                        })?;
+                    let (representation, winning_tc, temperature) =
+                        Self::passive_temperature_instance_state(instance_params, model_tc)?;
+                    Self::validate_passive_temperature_model_binding(
+                        element_model.as_deref(),
+                        model,
+                    )?;
+                    if !effective.is_finite() || effective <= 0.0 {
+                        return Err(format!(
+                            "{LABEL} capacitor '{}' resolved to invalid capacitance {effective}",
+                            element.name
+                        ));
+                    }
+                    let mut numeric_bits = vec![value.to_bits(), temperature.to_bits()];
+                    let initial_marker = if let Some(initial) = initial_voltage {
+                        numeric_bits.push(initial.to_bits());
+                        "IC"
+                    } else {
+                        "NO_IC"
+                    };
+                    numeric_bits.extend(winning_tc.map(Value::to_bits));
+                    numeric_bits.push(effective.to_bits());
+                    passive = Some((details, representation, winning_tc, effective));
+                    XyceRelationalElementFingerprint {
+                        kind: "C:TEMP_OVERRIDE".to_string(),
+                        nodes,
+                        numeric_bits,
+                        text: vec![model.name.to_ascii_lowercase(), initial_marker.to_string()],
+                    }
+                }
+                ElementKind::Inductor {
+                    value,
+                    value_expr,
+                    initial_current,
+                    model: element_model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    let details = XycePassiveTemperatureDeviceKind::Inductor;
+                    if passive.is_some()
+                        || nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || initial_current.is_some_and(|value| !value.is_finite())
+                        || !deferred_params.is_empty()
+                        || !matches!(
+                            model.model_type.to_ascii_uppercase().as_str(),
+                            "L" | "IND" | "INDUCTOR"
+                        )
+                    {
+                        return Err(format!(
+                            "{LABEL} requires one direct finite positive two-terminal inductor with no deferred state"
+                        ));
+                    }
+                    let effective = Self::effective_inductor_value(netlist, &element.name)
+                        .ok_or_else(|| {
+                            format!("{LABEL} could not resolve inductor '{}'", element.name)
+                        })?;
+                    let (representation, winning_tc, temperature) =
+                        Self::passive_temperature_instance_state(instance_params, model_tc)?;
+                    Self::validate_passive_temperature_model_binding(
+                        element_model.as_deref(),
+                        model,
+                    )?;
+                    if !effective.is_finite() || effective <= 0.0 {
+                        return Err(format!(
+                            "{LABEL} inductor '{}' resolved to invalid inductance {effective}",
+                            element.name
+                        ));
+                    }
+                    let mut numeric_bits = vec![value.to_bits(), temperature.to_bits()];
+                    let initial_marker = if let Some(initial) = initial_current {
+                        numeric_bits.push(initial.to_bits());
+                        "IC"
+                    } else {
+                        "NO_IC"
+                    };
+                    numeric_bits.extend(winning_tc.map(Value::to_bits));
+                    numeric_bits.push(effective.to_bits());
+                    passive = Some((details, representation, winning_tc, effective));
+                    XyceRelationalElementFingerprint {
+                        kind: "L:TEMP_OVERRIDE".to_string(),
+                        nodes,
+                        numeric_bits,
+                        text: vec![model.name.to_ascii_lowercase(), initial_marker.to_string()],
+                    }
+                }
+                _ => Self::passive_temperature_nonpassive_fingerprint(element, nodes)?,
+            };
+            elements.insert(name, fingerprint);
+        }
+        let Some((device_kind, representation, winning_tc, effective_primary)) = passive else {
+            return Err(format!("{LABEL} contains no qualified passive device"));
+        };
+        if representation == XycePassiveTemperatureRepresentation::InstanceCoefficients
+            && model_tc == winning_tc
+        {
+            return Err(format!(
+                "{LABEL} instance representation must shadow a different model TC1/TC2 pair"
+            ));
+        }
+
+        let option_directives = Self::logical_netlist_lines(source)
+            .into_iter()
+            .map(|line| Self::strip_netlist_comment(&line).trim().to_string())
+            .filter(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
+            })
+            .map(|line| {
+                line.split_whitespace()
+                    .map(str::to_ascii_lowercase)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+
+        Ok(XycePassiveTemperatureOverrideSnapshot {
+            title: netlist.title.trim().to_string(),
+            device_kind,
+            representation,
+            elements,
+            model_name: model.name.trim().to_ascii_lowercase(),
+            model_type: model.model_type.trim().to_ascii_lowercase(),
+            winning_tc_bits: winning_tc.map(Value::to_bits),
+            effective_primary_bits: effective_primary.to_bits(),
+            option_directives,
+        })
+    }
+
+    fn passive_temperature_coefficient_pair(
+        params: &[(String, Value)],
+        owner: &str,
+    ) -> Result<[Value; 2], String> {
+        if params.len() != 2 {
+            return Err(format!(
+                "passive temperature-coefficient override {owner} requires exactly TC1 and TC2"
+            ));
+        }
+        let tc1 = Self::instance_param(params, &["TC1"]);
+        let tc2 = Self::instance_param(params, &["TC2"]);
+        if tc1.is_none()
+            || tc2.is_none()
+            || params
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("TC1"))
+                .count()
+                != 1
+            || params
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("TC2"))
+                .count()
+                != 1
+        {
+            return Err(format!(
+                "passive temperature-coefficient override {owner} requires unique scalar TC1 and TC2"
+            ));
+        }
+        let pair = [tc1.unwrap(), tc2.unwrap()];
+        if pair.iter().any(|value| !value.is_finite()) {
+            return Err(format!(
+                "passive temperature-coefficient override {owner} TC1/TC2 must be finite"
+            ));
+        }
+        Ok(pair)
+    }
+
+    fn passive_temperature_instance_state(
+        params: &[(String, Value)],
+        model_tc: [Value; 2],
+    ) -> Result<(XycePassiveTemperatureRepresentation, [Value; 2], Value), String> {
+        let temperature_values = params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("TEMP"))
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>();
+        let [temperature] = temperature_values.as_slice() else {
+            return Err(
+                "passive temperature-coefficient override requires exactly one instance TEMP"
+                    .to_string(),
+            );
+        };
+        if !temperature.is_finite() {
+            return Err(
+                "passive temperature-coefficient override requires finite instance TEMP"
+                    .to_string(),
+            );
+        }
+        let tc_params = params
+            .iter()
+            .filter(|(name, _)| {
+                name.eq_ignore_ascii_case("TC1") || name.eq_ignore_ascii_case("TC2")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if params.len() == 1 && tc_params.is_empty() {
+            return Ok((
+                XycePassiveTemperatureRepresentation::ModelCoefficients,
+                model_tc,
+                *temperature,
+            ));
+        }
+        if params.len() == 3 && tc_params.len() == 2 {
+            let instance_tc = Self::passive_temperature_coefficient_pair(&tc_params, "instance")?;
+            return Ok((
+                XycePassiveTemperatureRepresentation::InstanceCoefficients,
+                instance_tc,
+                *temperature,
+            ));
+        }
+        Err(
+            "passive temperature-coefficient override instance admits only TEMP or TEMP plus scalar TC1 and TC2"
+                .to_string(),
+        )
+    }
+
+    fn validate_passive_temperature_model_binding(
+        element_model: Option<&str>,
+        model: &crate::netlist::ModelDef,
+    ) -> Result<(), String> {
+        if element_model.is_none_or(|name| !name.eq_ignore_ascii_case(&model.name)) {
+            return Err(format!(
+                "passive temperature-coefficient override device must bind the unique model '{}'",
+                model.name
+            ));
+        }
+        Ok(())
+    }
+
+    fn passive_temperature_nonpassive_fingerprint(
+        element: &crate::netlist::Element,
+        nodes: Vec<String>,
+    ) -> Result<XyceRelationalElementFingerprint, String> {
+        let (kind, numeric_bits, text) = match &element.kind {
+            ElementKind::Resistor {
+                value,
+                value_expr,
+                model,
+                instance_params,
+                deferred_params,
+            } if nodes.len() == 2
+                && value.is_finite()
+                && *value > 0.0
+                && value_expr.is_none()
+                && model.is_none()
+                && instance_params.is_empty()
+                && deferred_params.is_empty() =>
+            {
+                ("R".to_string(), vec![value.to_bits()], Vec::new())
+            }
+            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec)
+                if nodes.len() == 2 =>
+            {
+                let (waveform, values) = Self::scoped_model_source_fingerprint(spec)?;
+                let prefix = if matches!(&element.kind, ElementKind::VoltageSource(_)) {
+                    "V"
+                } else {
+                    "I"
+                };
+                (format!("{prefix}:{waveform}"), values, Vec::new())
+            }
+            ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            }
+            | ElementKind::BehavioralCurrent {
+                expression,
+                tc1,
+                tc2,
+            } if nodes.len() == 2
+                && tc1.to_bits() == 0.0f64.to_bits()
+                && tc2.to_bits() == 0.0f64.to_bits() =>
+            {
+                let prepared = crate::netlist::expr::prepare_behavioral_expression(
+                    expression,
+                    &crate::netlist::expr::ParamContext::new(),
+                )
+                .map_err(|err| {
+                    format!(
+                        "could not canonicalize passive temperature family source '{}': {err}",
+                        element.name
+                    )
+                })?;
+                let kind = if matches!(&element.kind, ElementKind::BehavioralVoltage { .. }) {
+                    "BV"
+                } else {
+                    "BI"
+                };
+                (
+                    kind.to_string(),
+                    vec![tc1.to_bits(), tc2.to_bits()],
+                    vec![prepared.trim().to_ascii_lowercase()],
+                )
+            }
+            _ => {
+                return Err(format!(
+                    "passive temperature-coefficient override family contains unqualified non-passive element '{}'",
+                    element.name
+                ));
+            }
+        };
+        Ok(XyceRelationalElementFingerprint {
+            kind,
+            nodes,
+            numeric_bits,
+            text,
+        })
+    }
+
+    fn compare_passive_temperature_override_snapshots(
+        baseline: &XycePassiveTemperatureOverrideSnapshot,
+        target: &XycePassiveTemperatureOverrideSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XycePassiveTemperatureRepresentation::ModelCoefficients
+            || target.representation != XycePassiveTemperatureRepresentation::InstanceCoefficients
+        {
+            return Err(
+                "family must compare model TC1/TC2 with scalar instance TC1/TC2 precedence"
+                    .to_string(),
+            );
+        }
+        if baseline.title != target.title
+            || baseline.device_kind != target.device_kind
+            || baseline.elements != target.elements
+            || baseline.model_name != target.model_name
+            || baseline.model_type != target.model_type
+            || baseline.option_directives != target.option_directives
+        {
+            return Err(
+                "circuit identity, topology, non-overridden values, model binding, or options differ"
+                    .to_string(),
+            );
+        }
+        if baseline.winning_tc_bits != target.winning_tc_bits {
+            return Err("winning scalar TC1/TC2 coefficients differ".to_string());
+        }
+        if baseline.effective_primary_bits != target.effective_primary_bits {
+            return Err("effective temperature-scaled passive values differ".to_string());
+        }
+        Ok(())
     }
 
     fn compare_strict_transient_family_snapshots(
@@ -15598,6 +16252,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictTransientFamilySnapshot::PassivePrimaryValue(target),
             ) => Self::compare_passive_primary_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::PassiveTemperatureOverride(baseline),
+                XyceStrictTransientFamilySnapshot::PassiveTemperatureOverride(target),
+            ) => Self::compare_passive_temperature_override_snapshots(baseline, target),
             _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
     }
@@ -32014,6 +32672,7 @@ impl XyceTestRunner {
         self.bjt_external_node_family_contract(deck)
             .or_else(|| self.sin_expression_family_contract(deck))
             .or_else(|| self.param_expression_family_contract(deck))
+            .or_else(|| self.passive_temperature_override_family_contract(deck))
             .or_else(|| self.subckt_parameter_precedence_family_contract(deck))
             .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
@@ -32387,6 +33046,68 @@ impl XyceTestRunner {
             return None;
         }
         self.param_expression_family_contract_for(parent, family, Some(deck.path.clone()))
+    }
+
+    fn passive_temperature_override_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/") || self.requires_upstream_wrapper(&relative_path)
+        {
+            return None;
+        }
+
+        let parent = deck.path.parent()?;
+        let target_stem = deck.path.file_stem()?.to_str()?;
+        const TARGET_SUFFIX: &str = "_instance";
+        if target_stem.len() <= TARGET_SUFFIX.len()
+            || !target_stem[target_stem.len() - TARGET_SUFFIX.len()..]
+                .eq_ignore_ascii_case(TARGET_SUFFIX)
+        {
+            return None;
+        }
+        let family = &target_stem[..target_stem.len() - TARGET_SUFFIX.len()];
+        if family.is_empty()
+            || !family
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return None;
+        }
+
+        let baseline_path = parent.join(format!("{family}.cir"));
+        let target_path = parent.join(format!("{family}_instance.cir"));
+        if !Self::same_path(&deck.path, &target_path)
+            || [&baseline_path, &target_path].iter().any(|path| {
+                fs::metadata(path)
+                    .ok()
+                    .is_none_or(|metadata| !metadata.is_file() || metadata.len() == 0)
+            })
+        {
+            return None;
+        }
+
+        let baseline_relative = self.relative_key(&baseline_path);
+        if self.requires_upstream_wrapper(&baseline_relative)
+            || self
+                .static_prn_reference_path(&baseline_path)
+                .is_none_or(|path| !path.is_file())
+            || self
+                .static_prn_reference_path(&target_path)
+                .is_some_and(|path| path.is_file())
+        {
+            return None;
+        }
+
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::PassiveTemperatureOverride,
+            comparison: XyceBaselineFamilyComparison::Exact,
+            family: family.to_string(),
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, target_path.clone()],
+            target_path: Some(target_path),
+        })
     }
 
     fn param_expression_family_contract_for(
@@ -40094,6 +40815,202 @@ RLOAD out 0 5\n\
         }
 
         fs::remove_dir_all(&root).expect("remove generic scoped-family fixture");
+    }
+
+    #[test]
+    fn passive_temperature_override_detection_is_structural_and_fail_closed() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-passive-temperature-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root.join("Netlists").join("GENERIC_PASSIVES");
+        let output_dir = root.join("OutputData").join("GENERIC_PASSIVES");
+        fs::create_dir_all(&family_dir).expect("create generic passive-temperature fixture");
+        fs::create_dir_all(&output_dir).expect("create generic passive-temperature oracle dir");
+        let baseline_path = family_dir.join("generic_temp.cir");
+        let target_path = family_dir.join("generic_temp_instance.cir");
+        let vector_path = family_dir.join("generic_temp_instance2.cir");
+        let oracle_path = output_dir.join("generic_temp.cir.prn");
+        let member = "generic passive temperature member\n.end\n";
+        for path in [&baseline_path, &target_path] {
+            fs::write(path, member).expect("write generic family member");
+        }
+        fs::write(
+            &oracle_path,
+            "Index TIME V(1)\n0 0 0\nEnd of Xyce(TM) Simulation\n",
+        )
+        .expect("write canonical baseline oracle fixture");
+
+        let deck = XyceDeck {
+            path: target_path.clone(),
+            relative_path: "Netlists/GENERIC_PASSIVES/generic_temp_instance.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let contract = runner
+            .passive_temperature_override_family_contract(&deck)
+            .expect("generic baseline/scalar pair with one baseline oracle qualifies");
+        assert_eq!(
+            contract.kind,
+            XyceBaselineFamilyKind::PassiveTemperatureOverride
+        );
+        assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+        assert!(XyceTestRunner::same_path(
+            &contract.baseline_path,
+            &baseline_path
+        ));
+        assert_eq!(contract.member_paths.len(), 2);
+
+        fs::write(&vector_path, member).expect("write unrelated vector-form sibling");
+        let vector_deck = XyceDeck {
+            path: vector_path.clone(),
+            relative_path: "Netlists/GENERIC_PASSIVES/generic_temp_instance2.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        assert!(
+            runner
+                .passive_temperature_override_family_contract(&vector_deck)
+                .is_none(),
+            "vector TC syntax is a different, not-yet-qualified representation"
+        );
+
+        let extra_path = family_dir.join("generic_temp_extra.cir");
+        fs::write(&extra_path, member).expect("write extra family member");
+        assert!(
+            runner
+                .passive_temperature_override_family_contract(&deck)
+                .is_some(),
+            "unrelated sibling decks must not fingerprint an otherwise strict scalar pair"
+        );
+        fs::remove_file(&extra_path).expect("remove extra family member");
+
+        fs::remove_file(&oracle_path).expect("remove baseline oracle");
+        assert!(
+            runner
+                .passive_temperature_override_family_contract(&deck)
+                .is_none(),
+            "a relational baseline without an independent checked oracle must fail closed"
+        );
+        fs::write(&oracle_path, "oracle\n").expect("restore baseline oracle");
+
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "{}\t{}\n",
+                deck.relative_path, REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+            ),
+        )
+        .expect("mark scalar target as wrapper-origin");
+        let wrapper_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            wrapper_runner
+                .passive_temperature_override_family_contract(&deck)
+                .is_none(),
+            "scalar override members must be ordinary executable decks"
+        );
+
+        fs::remove_dir_all(&root).expect("remove generic passive-temperature fixture");
+    }
+
+    #[test]
+    fn passive_temperature_override_snapshot_proves_scalar_precedence_and_identity() {
+        let print = XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        };
+        let baseline_source = "\
+generic passive temperature override
+C1 out 0 CM 1u IC=1 TEMP=100
+R1 out bias 1k
+V1 bias 0 0
+.MODEL CM C (TC1=1m TC2=2u)
+.TRAN 0 1m
+.PRINT TRAN V(out)
+.OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6
+.END
+";
+        let target_source = baseline_source
+            .replace("TEMP=100", "TEMP=100 TC1=1m TC2=2u")
+            .replace("(TC1=1m TC2=2u)", "(TC1=-1m TC2=-2u)");
+        let snapshot = |source: &str| {
+            let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+                .expect("passive temperature snapshot fixture parses");
+            XyceTestRunner::passive_temperature_override_snapshot(&netlist, &print)
+        };
+        let baseline = snapshot(baseline_source).expect("model-coefficient baseline qualifies");
+        let target = snapshot(&target_source).expect("scalar instance target qualifies");
+        XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &target)
+            .expect("only the location of the winning scalar TC pair differs");
+        assert_eq!(
+            baseline.representation,
+            XycePassiveTemperatureRepresentation::ModelCoefficients
+        );
+        assert_eq!(
+            target.representation,
+            XycePassiveTemperatureRepresentation::InstanceCoefficients
+        );
+
+        for invalid in [
+            target_source.replace(" TC2=2u", ""),
+            target_source.replace("TC1=1m TC2=2u", "TC=1m,2u"),
+            target_source.replace("TC1=-1m TC2=-2u", "TC1=1m TC2=2u"),
+            target_source.replace("TC1=-1m TC2=-2u", "TC1=-1m TC2=-2u TNOM=27"),
+            target_source.replace(".MODEL CM C", ".MODEL CM R"),
+            target_source.replace(".TRAN 0 1m", ".PARAM EXTRA=1\n.TRAN 0 1m"),
+        ] {
+            assert!(
+                snapshot(&invalid).is_err(),
+                "missing/vector/unexercised/extra/wrong-model/auxiliary state must fail closed: {invalid}"
+            );
+        }
+
+        for changed in [
+            target_source.replace("TEMP=100", "TEMP=101"),
+            target_source.replace("R1 out bias 1k", "R1 out bias 2k"),
+            target_source.replace("C1 out 0", "C1 changed 0"),
+            target_source.replace("generic passive temperature override", "changed title"),
+            target_source.replace("RELTOL=1e-6", "RELTOL=2e-6"),
+            target_source.replace("TC1=1m TC2=2u", "TC1=2m TC2=2u"),
+        ] {
+            let changed = snapshot(&changed).expect("semantic mutation remains individually valid");
+            assert!(
+                XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &changed)
+                    .is_err(),
+                "temperature, topology, title, options, and winning coefficients participate in parity"
+            );
+        }
+
+        let inductor_baseline = "\
+generic inductor temperature override
+B1 drive 0 I={10*TIME}
+VMON drive sense 0
+R1 sense out 1e-6
+L1 out 0 LM 10m TEMP=90
+.MODEL LM L (TC1=.01 TC2=.0001)
+.TRAN .1m 1m
+.PRINT TRAN I(VMON) V(out)
+.END
+";
+        let inductor_target = inductor_baseline
+            .replace("TEMP=90", "TEMP=90 TC1=.01 TC2=.0001")
+            .replace("(TC1=.01 TC2=.0001)", "(TC1=-.01 TC2=-.0001)");
+        let inductor_print = XycePrintRequest {
+            probes: vec!["I(VMON)".to_string(), "V(out)".to_string()],
+        };
+        let inductor_snapshot = |source: &str| {
+            let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+                .expect("inductor temperature snapshot fixture parses");
+            XyceTestRunner::passive_temperature_override_snapshot(&netlist, &inductor_print)
+                .expect("inductor temperature snapshot qualifies")
+        };
+        XyceTestRunner::compare_passive_temperature_override_snapshots(
+            &inductor_snapshot(inductor_baseline),
+            &inductor_snapshot(&inductor_target),
+        )
+        .expect("inductor scalar TC1/TC2 precedence has the same strict family semantics");
     }
 
     #[test]
