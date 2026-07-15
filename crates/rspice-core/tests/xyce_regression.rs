@@ -7007,6 +7007,54 @@ fn test_xyce_initial_condition_inverter_waveform_oracle() {
     assert!(result.mismatches.is_empty());
 }
 
+#[test]
+fn test_xyce_scalar_passive_temperature_coefficient_override_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/TEMPCAP/tempcap_instance.cir",
+        "Netlists/TEMPIND/tempind_instance.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should prove scalar instance TC1/TC2 precedence against its independently checked baseline, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "passive_temperature_override_family_wrapper",
+            "{relative} should report the strict relational contract"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+
+    for relative in [
+        "Netlists/TEMPCAP/tempcap.cir",
+        "Netlists/TEMPIND/tempind.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} must remain independently anchored to its checked .prn, got {result:?}"
+        );
+        assert_eq!(result.contract, "static_prn_tran");
+        assert!(result.mismatches.is_empty());
+    }
+
+    for relative in [
+        "Netlists/TEMPCAP/tempcap_instance2.cir",
+        "Netlists/TEMPIND/tempind_instance2.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} vector TC syntax must remain outside the scalar override contract, got {result:?}"
+        );
+        assert_eq!(result.contract, "unsupported_xyce_contract");
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
