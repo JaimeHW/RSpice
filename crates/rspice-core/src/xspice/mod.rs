@@ -58,6 +58,15 @@ mod traits;
 // Built-in code models
 pub mod models;
 
+/// Return registered virtual data-file contents for checkpoint provenance.
+/// Native files are hashed as bytes by the checkpoint layer itself.
+pub(crate) fn checkpoint_virtual_data_file_contents(path: &str) -> Option<std::sync::Arc<str>> {
+    data_file::read_to_string_with_stamp(path)
+        .ok()
+        .filter(|(_, stamp)| stamp.virtual_file)
+        .map(|(contents, _)| contents)
+}
+
 // Re-export primary types
 pub(crate) use context::CmContextCheckpoint;
 pub use context::{AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase};

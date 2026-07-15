@@ -63,6 +63,7 @@ mod truncation;
 mod vbic;
 
 pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
+use checkpoint::{netlist_checkpoint_identity, simulation_checkpoint_identity};
 
 mod history;
 pub(self) use history::*;
@@ -490,10 +491,11 @@ impl Engine {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => {
-                engine.run_tran_resolved_with_resume(&expanded, tstop, max_step, abort, None)
+            Some(expanded) => engine
+                .run_tran_resolved_with_resume(&expanded, netlist, tstop, max_step, abort, None),
+            None => {
+                engine.run_tran_resolved_with_resume(netlist, netlist, tstop, max_step, abort, None)
             }
-            None => engine.run_tran_resolved_with_resume(netlist, tstop, max_step, abort, None),
         }
     }
 
@@ -531,9 +533,6 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
-        checkpoint
-            .validate_for(netlist)
-            .map_err(SimulationError::Circuit)?;
         if !tstop.is_finite() || tstop <= checkpoint.time {
             return Err(SimulationError::Circuit(format!(
                 "resume stop time {tstop:e} must exceed the checkpoint time {:e}",
@@ -545,12 +544,14 @@ impl Engine {
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => engine.run_tran_resolved_with_resume(
                 &expanded,
+                netlist,
                 tstop,
                 max_step,
                 abort,
                 Some(checkpoint),
             ),
             None => engine.run_tran_resolved_with_resume(
+                netlist,
                 netlist,
                 tstop,
                 max_step,
@@ -591,7 +592,7 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
-        self.run_tran_resolved_with_resume(netlist, tstop, max_step, abort, None)
+        self.run_tran_resolved_with_resume(netlist, netlist, tstop, max_step, abort, None)
             .map(|(result, _)| result)
     }
 
@@ -603,6 +604,7 @@ impl Engine {
     fn run_tran_resolved_with_resume(
         &self,
         netlist: &Netlist,
+        checkpoint_netlist: &Netlist,
         tstop: Value,
         max_step: Value,
         abort: &dyn AbortSignal,
@@ -613,7 +615,14 @@ impl Engine {
                 "transient .FFT post-processing is parsed but not yet implemented".to_string(),
             ));
         }
-        let fingerprint = netlist_fingerprint(netlist);
+        let fingerprint = netlist_fingerprint(checkpoint_netlist);
+        let netlist_identity = netlist_checkpoint_identity(checkpoint_netlist);
+        let simulation_identity = simulation_checkpoint_identity(&self.config);
+        if let Some(checkpoint) = resume {
+            checkpoint
+                .validate_for_with_config(checkpoint_netlist, &self.config)
+                .map_err(SimulationError::Circuit)?;
+        }
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit(netlist)?;
@@ -629,7 +638,15 @@ impl Engine {
                 real_traces: Vec::new(),
                 device_op_traces: Vec::new(),
             };
-            let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit, None);
+            let checkpoint = TransientCheckpoint::capture(
+                fingerprint,
+                netlist_identity,
+                simulation_identity,
+                0.0,
+                &[],
+                &circuit,
+                None,
+            );
             return Ok((result, checkpoint));
         }
         Self::ensure_supported_transient_dynamic_charges(&circuit)?;
@@ -4068,8 +4085,15 @@ impl Engine {
             );
         }
 
-        let final_checkpoint =
-            TransientCheckpoint::capture(fingerprint, t, &solution, &circuit, Some(&lte_estimator));
+        let final_checkpoint = TransientCheckpoint::capture(
+            fingerprint,
+            netlist_identity,
+            simulation_identity,
+            t,
+            &solution,
+            &circuit,
+            Some(&lte_estimator),
+        );
         Ok((result, final_checkpoint))
     }
 

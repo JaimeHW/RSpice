@@ -190,7 +190,7 @@ impl RustTranspiler {
         &self,
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
-        match self.backend {
+        let mut report = match self.backend {
             RustBackendKind::Auto => self.transpile_auto(artifact),
             RustBackendKind::Legacy => Ok(GeneratedRustDeviceReport {
                 device: device::generate_device(artifact, &self.options)?,
@@ -212,7 +212,9 @@ impl RustTranspiler {
                 backend: RustBackendSelection::StructuredKernel,
                 fallback_reason: None,
             }),
-        }
+        }?;
+        device::finalize_checkpoint_identity(&mut report.device)?;
+        Ok(report)
     }
 
     fn transpile_auto(

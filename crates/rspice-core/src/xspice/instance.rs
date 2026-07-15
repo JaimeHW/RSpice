@@ -1237,8 +1237,8 @@ impl XspiceInstance {
     }
 
     /// Restore serializable state from a transient checkpoint.
-    pub(crate) fn restore_checkpoint_state(
-        &mut self,
+    pub(crate) fn validate_checkpoint_state(
+        &self,
         checkpoint: &XspiceInstanceCheckpoint,
     ) -> Result<(), String> {
         if self.name != checkpoint.name || self.model_name() != checkpoint.model {
@@ -1251,6 +1251,17 @@ impl XspiceInstance {
                 self.model_name()
             ));
         }
+        self.context
+            .validate_checkpoint_state(&checkpoint.context)
+            .map_err(|err| format!("{}({}): {err}", self.name, self.model_name()))
+    }
+
+    /// Restore serializable state from a transient checkpoint.
+    pub(crate) fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &XspiceInstanceCheckpoint,
+    ) -> Result<(), String> {
+        self.validate_checkpoint_state(checkpoint)?;
         self.context
             .restore_checkpoint_state(&checkpoint.context)
             .map_err(|err| format!("{}({}): {err}", self.name, self.model_name()))

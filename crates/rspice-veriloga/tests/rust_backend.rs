@@ -96,6 +96,58 @@ endmodule
 }
 
 #[test]
+fn scalar_backend_static_guard_materialization_is_byte_reproducible() {
+    const SOURCE: &str = r#"
+module reproducible_guards(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer npn = 0;
+    parameter integer pnp = 0;
+    parameter integer type = 1;
+    parameter real gain = 2.0;
+    real polarity, scale;
+    analog begin
+        @(initial_step) begin
+            if ($param_given(npn)) polarity = 1.0;
+            else if ($param_given(pnp)) polarity = -1.0;
+            else if ($param_given(type)) polarity = type;
+            else polarity = 1.0;
+            if (gain > 1.0) scale = gain;
+            else if (gain < -1.0) scale = -gain;
+            else scale = 1.0;
+        end
+        I(p, n) <+ polarity * scale * V(p, n);
+    end
+endmodule
+"#;
+
+    let mut expected: Option<Vec<(String, String)>> = None;
+    for _ in 0..24 {
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(SOURCE)
+            .expect("canonical guard IR");
+        let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+            runtime_path: "crate::runtime".to_string(),
+        })
+        .transpile(&artifact)
+        .expect("transpile reproducible guards");
+        let files = generated
+            .files
+            .iter()
+            .map(|file| (file.relative_path.clone(), file.contents.clone()))
+            .collect::<Vec<_>>();
+        if let Some(expected) = expected.as_ref() {
+            assert_eq!(
+                &files, expected,
+                "identical canonical input must be byte-stable"
+            );
+        } else {
+            expected = Some(files);
+        }
+    }
+}
+
+#[test]
 fn scalar_backend_compiles_stateful_typed_limiter_with_affine_correction() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
@@ -121,6 +173,7 @@ module typed_limiter(p, n);
         limited = $limit(V(p, n), "trunc_ev", "typed", -1.0, -0.7, 0.7);
         I(p, n) <+ limited;
         I(p, n) <+ ddt(c * limited);
+        I(p, n) <+ idt(1e-6 * limited, 0.0);
     end
 endmodule
 "#,
@@ -156,6 +209,18 @@ endmodule
     );
     assert!(
         state.contains("pub fn limiter_converged(&self) -> bool"),
+        "{state}"
+    );
+    assert!(
+        state.contains("pub const CHECKPOINT_MODEL_IDENTITY: &'static str"),
+        "{state}"
+    );
+    assert!(
+        state.contains("pub(crate) fn capture_persistent_state(&self)"),
+        "{state}"
+    );
+    assert!(
+        state.contains("pub(crate) fn restore_persistent_state(&mut self"),
         "{state}"
     );
     assert_eq!(
@@ -201,7 +266,7 @@ endmodule
 #[test]
 fn limiter_probe_modes_are_pure_and_newton_mode_tracks_convergence() {
     use generated_device::Instance;
-    use runtime::{GeneratedEvalContext, GeneratedStamper};
+    use runtime::{GeneratedDdtCoefficients, GeneratedEvalContext, GeneratedStamper};
 
     fn stamp(instance: &mut Instance, voltages: &[f64], limiting_enabled: bool) -> f64 {
         let context = GeneratedEvalContext::with_limiting_enabled(voltages, limiting_enabled);
@@ -235,6 +300,38 @@ fn limiter_probe_modes_are_pure_and_newton_mode_tracks_convergence() {
 
     stamp(&mut instance, &[0.7, 0.0], true);
     assert!(instance.limiter_converged());
+    instance.set_timepoint(0.1, 0.1, GeneratedDdtCoefficients {
+        active: true,
+        derivative_scale: 10.0,
+        previous_value_scale: -10.0,
+        older_value_scale: 0.0,
+        previous_derivative_scale: 0.0,
+    });
+    stamp(&mut instance, &[0.7, 0.0], true);
+    instance.accept_timestep();
+
+    let checkpoint = instance.capture_persistent_state();
+    assert_eq!(checkpoint.ddt_previous.len(), 1);
+    assert_eq!(checkpoint.idt_previous.len(), 1);
+    assert_eq!(checkpoint.limiter_anchor, vec![-0.7]);
+    assert_eq!(checkpoint.limiter_initialized, vec![true]);
+
+    stamp(&mut instance, &[-10.0, 0.0], true);
+    instance.accept_timestep();
+    assert_ne!(instance.capture_persistent_state(), checkpoint);
+    instance
+        .restore_persistent_state(&checkpoint)
+        .expect("valid generated persistent state restores");
+    assert_eq!(instance.capture_persistent_state(), checkpoint);
+    assert_eq!(instance.ddt_state_current.as_ref(), checkpoint.ddt_previous.as_slice());
+    assert_eq!(instance.ddt_derivative_current.as_ref(), checkpoint.ddt_derivative_previous.as_slice());
+    assert_eq!(instance.idt_state_current.as_ref(), checkpoint.idt_previous.as_slice());
+    assert!(!instance.scalar_limit_active);
+
+    let mut malformed = checkpoint.clone();
+    malformed.ddt_previous.push(1.0);
+    assert!(instance.restore_persistent_state(&malformed).is_err());
+    assert_eq!(instance.capture_persistent_state(), checkpoint);
 }
 "#,
     );
@@ -13916,6 +14013,18 @@ pub mod runtime {{
         }}
     }}
 
+    #[derive(Debug, Clone, Default, PartialEq)]
+    pub struct GeneratedVerilogAPersistentState {{
+        pub ddt_previous: Vec<f64>,
+        pub ddt_older: Vec<f64>,
+        pub ddt_derivative_previous: Vec<f64>,
+        pub ddt_initialized: Vec<bool>,
+        pub idt_previous: Vec<f64>,
+        pub idt_initialized: Vec<bool>,
+        pub limiter_anchor: Vec<f64>,
+        pub limiter_initialized: Vec<bool>,
+    }}
+
     #[derive(Debug, Clone, Copy)]
     pub enum GeneratedAnalysisKind {{
         Dc,
@@ -14762,6 +14871,18 @@ pub mod runtime {{
                 previous_derivative_scale: 0.0,
             }}
         }}
+    }}
+
+    #[derive(Debug, Clone, Default, PartialEq)]
+    pub struct GeneratedVerilogAPersistentState {{
+        pub ddt_previous: Vec<f64>,
+        pub ddt_older: Vec<f64>,
+        pub ddt_derivative_previous: Vec<f64>,
+        pub ddt_initialized: Vec<bool>,
+        pub idt_previous: Vec<f64>,
+        pub idt_initialized: Vec<bool>,
+        pub limiter_anchor: Vec<f64>,
+        pub limiter_initialized: Vec<bool>,
     }}
 
     #[derive(Debug, Clone, Copy)]

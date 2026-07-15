@@ -1599,7 +1599,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 .copied()
                 .filter(|variable| !matches!(self.variable_values.get(variable), Some(Some(_))))
                 .collect();
-            let candidates: Vec<_> = self
+            let mut candidates: Vec<_> = self
                 .assignments_by_variable
                 .iter()
                 .filter_map(|(variable, assignments)| {
@@ -1608,6 +1608,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                         .then_some((*variable, assignments[0].expr.id))
                 })
                 .collect();
+            candidates.sort_unstable_by_key(|(variable, expression)| (*variable, *expression));
             let mut progress = false;
             for (variable, expr) in candidates {
                 if matches!(self.variable_values.get(&variable), Some(Some(_)))

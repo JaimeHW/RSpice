@@ -1675,6 +1675,75 @@ impl CircuitData {
         self.generated_veriloga_devices.accept_timestep();
     }
 
+    pub(crate) fn generated_veriloga_checkpoint_states(
+        &self,
+    ) -> Vec<crate::device::veriloga_generated::GeneratedVerilogAInstanceCheckpoint> {
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            self.generated_veriloga_devices.checkpoint_states()
+        }
+        #[cfg(not(feature = "veriloga-builtins"))]
+        {
+            Vec::new()
+        }
+    }
+
+    pub(crate) fn restore_generated_veriloga_checkpoint_states(
+        &mut self,
+        states: &[crate::device::veriloga_generated::GeneratedVerilogAInstanceCheckpoint],
+        state_available: bool,
+    ) -> Result<(), String> {
+        self.validate_generated_veriloga_checkpoint_states(states, state_available)?;
+
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            self.generated_veriloga_devices
+                .restore_checkpoint_states(states)
+        }
+        #[cfg(not(feature = "veriloga-builtins"))]
+        {
+            debug_assert!(states.is_empty());
+            Ok(())
+        }
+    }
+
+    pub(crate) fn validate_generated_veriloga_checkpoint_states(
+        &self,
+        states: &[crate::device::veriloga_generated::GeneratedVerilogAInstanceCheckpoint],
+        state_available: bool,
+    ) -> Result<(), String> {
+        if !state_available {
+            if !states.is_empty() {
+                return Err(
+                    "generated Verilog-A checkpoint state is present without availability provenance"
+                        .to_string(),
+                );
+            }
+            #[cfg(feature = "veriloga-builtins")]
+            if !self.generated_veriloga_devices.is_empty() {
+                return Err(
+                    "legacy transient checkpoint does not contain generated Verilog-A persistent state"
+                        .to_string(),
+                );
+            }
+            return Ok(());
+        }
+
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            self.generated_veriloga_devices
+                .validate_checkpoint_states(states)
+        }
+        #[cfg(not(feature = "veriloga-builtins"))]
+        {
+            if states.is_empty() {
+                Ok(())
+            } else {
+                Err("this build cannot restore generated Verilog-A checkpoint state".to_string())
+            }
+        }
+    }
+
     /// Prepare Verilog-A devices for a transient timepoint evaluation
     ///
     /// Sets the simulation time, integration timestep, and analysis type so
@@ -1781,6 +1850,17 @@ impl CircuitData {
         &mut self,
         checkpoints: &[XspiceInstanceCheckpoint],
     ) -> Result<(), String> {
+        self.validate_xspice_checkpoint_instance_states(checkpoints)?;
+        for (instance, checkpoint) in self.xspice_instances.iter_mut().zip(checkpoints) {
+            instance.restore_checkpoint_state(checkpoint)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_xspice_checkpoint_instance_states(
+        &self,
+        checkpoints: &[XspiceInstanceCheckpoint],
+    ) -> Result<(), String> {
         if checkpoints.is_empty() && !self.xspice_instances.is_empty() {
             let blockers = self.xspice_checkpoint_resume_blockers();
             if !blockers.is_empty() {
@@ -1814,8 +1894,8 @@ impl CircuitData {
             ));
         }
 
-        for (instance, checkpoint) in self.xspice_instances.iter_mut().zip(checkpoints) {
-            instance.restore_checkpoint_state(checkpoint)?;
+        for (instance, checkpoint) in self.xspice_instances.iter().zip(checkpoints) {
+            instance.validate_checkpoint_state(checkpoint)?;
         }
         Ok(())
     }

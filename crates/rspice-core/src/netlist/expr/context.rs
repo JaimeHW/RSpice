@@ -415,6 +415,55 @@ impl ParamContext {
         values
     }
 
+    /// Deterministic semantic snapshot used to bind transient checkpoints to
+    /// the elaborated parameter environment. Map iteration order and runtime
+    /// allocation addresses are deliberately excluded.
+    pub(crate) fn checkpoint_semantic_snapshot(&self) -> String {
+        let mut numeric = self
+            .params
+            .iter()
+            .map(|(name, value)| (name.clone(), value.to_bits()))
+            .collect::<Vec<_>>();
+        numeric.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut complex = self
+            .complex_params
+            .iter()
+            .map(|(name, value)| (name.clone(), value.re.to_bits(), value.im.to_bits()))
+            .collect::<Vec<_>>();
+        complex.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut strings = self
+            .string_params
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        strings.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut globals = self
+            .global_expressions
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        globals.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut functions = self.functions.values().cloned().collect::<Vec<_>>();
+        functions.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+        format!(
+            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nglobals={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nexpression_dialect={:?}\n",
+            self.random.seed, self.statistical_mode, self.expression_dialect,
+        )
+    }
+
+    /// Clone this parameter environment without sharing its mutable random
+    /// draw counter. Checkpoint provenance may elaborate a circuit to discover
+    /// dependencies, but that read-only operation must not perturb the live
+    /// simulation's deterministic statistical stream.
+    pub(crate) fn checkpoint_isolated_clone(&self) -> Self {
+        let mut cloned = self.clone();
+        cloned.random = RandomState {
+            seed: self.random.seed,
+            counter: Arc::new(AtomicU64::new(self.random.counter.load(Ordering::Relaxed))),
+        };
+        cloned
+    }
+
     /// Number of user-defined functions in this scope. Behavioral lowering
     /// uses this to enable eager constant folding for large function graphs,
     /// preventing repeated argument substitution from multiplying static ASTs.

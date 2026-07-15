@@ -25,6 +25,10 @@ pub const REGENERATE_BUILTINS_COMMAND: &str = "cargo run -p rspice-veriloga --pr
 pub const REQUIRE_SCALAR_BUILTINS_ENV: &str = "RSPICE_RUST_BACKEND_REQUIRE_SCALAR_BUILTINS";
 
 const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
+    "../../Cargo.toml",
+    "../../Cargo.lock",
+    "build.rs",
+    "Cargo.toml",
     "src/lib.rs",
     "src/ast.rs",
     "src/canonical_ir",
@@ -296,10 +300,12 @@ fn generator_digest(generator_root: &Path, emit_cargo_rerun: bool) -> BuiltinRes
 
 fn file_digest(path: &Path) -> BuiltinResult<String> {
     let bytes = fs::read(path)?;
+    let text = String::from_utf8(bytes)?;
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let mut input = String::new();
-    input.push_str(&bytes.len().to_string());
+    input.push_str(&normalized.len().to_string());
     input.push('\0');
-    input.push_str(&String::from_utf8_lossy(&bytes));
+    input.push_str(&normalized);
     input.push('\0');
     Ok(StableDigest::from_text(&input).as_hex())
 }
@@ -1192,6 +1198,23 @@ mod tests {
             "{registry}"
         );
         assert!(
+            registry
+                .contains("Self::Device0(_) => first_model::Instance::CHECKPOINT_MODEL_IDENTITY"),
+            "{registry}"
+        );
+        assert!(
+            registry
+                .contains("Self::Device1(_) => second_model::Instance::CHECKPOINT_MODEL_IDENTITY"),
+            "{registry}"
+        );
+        for dispatch in [
+            "device.capture_persistent_state()",
+            "device.validate_persistent_state_shape(state)",
+            "device.restore_persistent_state(state)",
+        ] {
+            assert_eq!(registry.matches(dispatch).count(), 2, "{registry}");
+        }
+        assert!(
             registry.contains(
                 "pub fn noise_descriptors(&self) -> &'static [super::GeneratedNoiseDescriptor]"
             ),
@@ -1230,6 +1253,14 @@ mod tests {
         let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
 
         assert!(registry.contains("pub fn limiter_converged(&self) -> bool"));
+        assert!(
+            registry.contains("empty generated Verilog-A registry has no checkpoint identity"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("empty generated Verilog-A registry has no persistent state"),
+            "{registry}"
+        );
         assert!(registry.contains("        true\n"));
         assert!(registry.contains("        &[]"), "{registry}");
         assert!(
@@ -1285,6 +1316,70 @@ fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
             )?;
         }
         out.push_str("            (active, snapshot) => *active = snapshot,\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
+    out.push_str("    pub(crate) fn checkpoint_model_identity(&self) -> &'static str {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        unreachable!(\"empty generated Verilog-A registry has no checkpoint identity\")\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(_) => {}::Instance::CHECKPOINT_MODEL_IDENTITY,",
+                device.folder_name
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    pub(crate) fn capture_persistent_state(&self) -> super::GeneratedVerilogAPersistentState {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        unreachable!(\"empty generated Verilog-A registry has no persistent state\")\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.capture_persistent_state(),"
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str("    pub(crate) fn validate_persistent_state_shape(&self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, state);\n");
+        out.push_str("        Err(\"empty generated Verilog-A registry has no persistent state\".to_string())\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.validate_persistent_state_shape(state),"
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str("    pub(crate) fn restore_persistent_state(&mut self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, state);\n");
+        out.push_str("        Err(\"empty generated Verilog-A registry has no persistent state\".to_string())\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.restore_persistent_state(state),"
+            )?;
+        }
         out.push_str("        }\n");
     }
     out.push_str("    }\n");

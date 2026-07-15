@@ -5,6 +5,8 @@
 use std::sync::Arc;
 
 use rspice_core::analysis::IntegrationMethod;
+#[cfg(feature = "veriloga-builtins")]
+use rspice_core::engine::ConvergenceConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheckpoint};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{register_data_file, unregister_data_file};
@@ -589,5 +591,183 @@ rload out 0 1k
             && message.contains("event node values")
             && message.contains("Run XSPICE transient decks unsegmented"),
         "diagnostic should explain the unsupported checkpoint boundary: {message}"
+    );
+}
+
+#[cfg(feature = "veriloga-builtins")]
+#[test]
+fn generated_veriloga_checkpoint_preserves_reactive_history_and_provenance() {
+    use rspice_core::device::veriloga_generated::builtins;
+
+    const STEP: f64 = 250.0e-12;
+    const SPLIT_INDEX: usize = 80;
+    const STOP_INDEX: usize = 160;
+    const SPLIT: f64 = SPLIT_INDEX as f64 * STEP;
+    const STOP: f64 = STOP_INDEX as f64 * STEP;
+
+    assert!(
+        builtins::builtin_names()
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("DIODE_CMC")),
+        "the canonical generated CMC diode must be present"
+    );
+
+    let netlist = Netlist::parse(
+        "\
+* generated Verilog-A checkpoint bench: junction-charge history
+vin in 0 pulse(0 1 0 1n 1n 8n 20n)
+r1 in out 1k
+d1 out 0 dcmc
+.model dcmc d level=2002
+.tran 250p 40n
+.end
+",
+    )
+    .expect("generated CMC diode checkpoint deck parses");
+    let engine = Engine::new(SimulationConfig {
+        tolerance: 1.0e-13,
+        integration_method: IntegrationMethod::BackwardEuler,
+        transient_initial_timestep: Some(STEP),
+        convergence_config: ConvergenceConfig::default()
+            .with_voltage_tolerances(1.0e-12, 1.0e-14)
+            .with_current_tolerance(1.0e-15)
+            .with_residual_reltol(1.0e-12),
+        locked_time_grid: Some(Arc::new(
+            (0..=STOP_INDEX).map(|index| index as f64 * STEP).collect(),
+        )),
+        ..Default::default()
+    });
+
+    let full = engine
+        .run_tran(&netlist, STOP, STEP)
+        .expect("unsegmented generated CMC diode run completes");
+    let full_out = out_index(&full);
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, SPLIT, STEP)
+        .expect("generated CMC diode first segment completes");
+
+    let checkpoint_text = checkpoint.to_text();
+    assert!(
+        checkpoint_text.contains("generated_veriloga_state_available 1\n"),
+        "current checkpoints record generated-state availability"
+    );
+    assert!(
+        checkpoint_text.contains("generated_veriloga_states 1\n"),
+        "the generated diode instance is serialized"
+    );
+    assert!(
+        checkpoint_text.contains("ddt_state 5\n"),
+        "the CMC diode's five accepted ddt histories are serialized"
+    );
+    let ddt_rows = checkpoint_text
+        .lines()
+        .skip_while(|line| *line != "ddt_state 5")
+        .skip(1)
+        .take(5)
+        .collect::<Vec<_>>();
+    assert_eq!(ddt_rows.len(), 5);
+    assert!(
+        ddt_rows.iter().any(|row| {
+            let fields = row.split_whitespace().collect::<Vec<_>>();
+            fields.len() == 4
+                && fields[3] == "1"
+                && fields[..3]
+                    .iter()
+                    .any(|value| value.parse::<f64>().is_ok_and(|value| value != 0.0))
+        }),
+        "the accepted diode-charge history is initialized and nonzero at the checkpoint"
+    );
+
+    let checkpoint_path = std::env::temp_dir().join(format!(
+        "rspice_generated_veriloga_checkpoint_{}.ckpt",
+        std::process::id()
+    ));
+    checkpoint
+        .save(&checkpoint_path)
+        .expect("generated checkpoint saves");
+    let disk_checkpoint =
+        TransientCheckpoint::load(&checkpoint_path).expect("generated checkpoint loads");
+    let _ = std::fs::remove_file(&checkpoint_path);
+    assert_eq!(
+        checkpoint, disk_checkpoint,
+        "generated persistent state round-trips exactly through disk"
+    );
+
+    let (memory_resume, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, STOP, STEP)
+        .expect("generated checkpoint resumes from memory");
+    let (disk_resume, _) = engine
+        .run_tran_resume(&netlist, &disk_checkpoint, STOP, STEP)
+        .expect("generated checkpoint resumes from disk");
+    assert_eq!(memory_resume.time, disk_resume.time);
+    assert!(
+        memory_resume.voltages[out_index(&memory_resume)]
+            .iter()
+            .zip(&disk_resume.voltages[out_index(&disk_resume)])
+            .all(|(memory, disk)| memory.to_bits() == disk.to_bits()),
+        "disk and in-memory generated-state resumes are bit-identical"
+    );
+
+    let resumed_out = out_index(&memory_resume);
+    let mut worst = 0.0_f64;
+    for sample in 1..=20 {
+        let time = SPLIT + sample as f64 * 1.0e-9;
+        let expected = interpolate(&full.time, &full.voltages[full_out], time);
+        let actual = interpolate(
+            &memory_resume.time,
+            &memory_resume.voltages[resumed_out],
+            time,
+        );
+        worst = worst.max((expected - actual).abs());
+    }
+    assert!(
+        worst < 1.0e-12,
+        "generated checkpoint continuation tracks the unsegmented trajectory (worst |delta|={worst})"
+    );
+    assert_eq!(
+        first.voltages[out_index(&first)]
+            .last()
+            .expect("first segment has a seam sample")
+            .to_bits(),
+        memory_resume.voltages[resumed_out][0].to_bits(),
+        "generated checkpoint carries the seam solution bit-exactly"
+    );
+
+    let upgraded_legacy_text = checkpoint_text
+        .lines()
+        .take_while(|line| !line.starts_with("generated_veriloga_state_available "))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\ngenerated_veriloga_state_available 0\ngenerated_veriloga_states 0\n";
+    let legacy = TransientCheckpoint::from_text(&upgraded_legacy_text)
+        .expect("the upgraded legacy checkpoint parses with unavailable generated state");
+    let legacy_error = engine
+        .run_tran_resume(&netlist, &legacy, STOP, STEP)
+        .expect_err("legacy checkpoints cannot silently reset generated reactive history");
+    assert!(
+        legacy_error
+            .to_string()
+            .contains("does not contain generated Verilog-A persistent state"),
+        "legacy refusal identifies missing generated persistent state: {legacy_error}"
+    );
+
+    let generated_header = checkpoint_text
+        .lines()
+        .find(|line| line.starts_with("generated_veriloga_state "))
+        .expect("checkpoint contains generated instance provenance");
+    let identity = generated_header
+        .split_whitespace()
+        .nth(3)
+        .expect("generated checkpoint header contains a model identity");
+    assert_ne!(identity, "0".repeat(64));
+    let wrong_identity_text = checkpoint_text.replacen(identity, &"0".repeat(64), 1);
+    let wrong_identity = TransientCheckpoint::from_text(&wrong_identity_text)
+        .expect("syntactically valid checkpoint with stale model identity parses");
+    let identity_error = engine
+        .run_tran_resume(&netlist, &wrong_identity, STOP, STEP)
+        .expect_err("checkpoint state from a different generated artifact must be refused");
+    assert!(
+        identity_error.to_string().contains("model identity"),
+        "identity refusal identifies generated-model provenance: {identity_error}"
     );
 }

@@ -1786,6 +1786,15 @@ fn push_scalar_limit_state_fields(
         "            scalar_limit_previous,\n            scalar_limit_initialized,\n            scalar_limit_active,\n",
     );
     extensions.limiter_converged_expr = "!self.scalar_limit_active".to_string();
+    extensions.checkpoint_capture_fields =
+        "            limiter_anchor: self.scalar_limit_previous.to_vec(),\n            limiter_initialized: self.scalar_limit_initialized.to_vec(),\n"
+            .to_string();
+    extensions.checkpoint_shape_checks.push_str(&format!(
+        "        if state.limiter_anchor.len() != {count} || state.limiter_initialized.len() != {count} {{\n            return Err(format!(\"generated limiter checkpoint shape mismatch: expected {count}, found {{}} / {{}}\", state.limiter_anchor.len(), state.limiter_initialized.len()));\n        }}\n"
+    ));
+    extensions.checkpoint_restore_fields.push_str(
+        "        self.scalar_limit_previous.copy_from_slice(&state.limiter_anchor);\n        self.scalar_limit_initialized.copy_from_slice(&state.limiter_initialized);\n        self.scalar_limit_active = false;\n",
+    );
 }
 
 fn cached_values_need_param_given(artifact: &CanonicalIrArtifact, values: &[ValueId]) -> bool {

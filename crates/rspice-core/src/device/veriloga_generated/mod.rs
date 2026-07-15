@@ -77,6 +77,35 @@ impl Default for GeneratedDdtCoefficients {
     }
 }
 
+/// Accepted dynamic history needed to resume a generated Verilog-A instance.
+///
+/// Parameters, topology, static caches, and scratch buffers are deliberately
+/// excluded: a resumed circuit rebuilds those from the canonical model and
+/// validates their source digest before this state is restored.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct GeneratedVerilogAPersistentState {
+    pub ddt_previous: Vec<Value>,
+    pub ddt_older: Vec<Value>,
+    pub ddt_derivative_previous: Vec<Value>,
+    pub ddt_initialized: Vec<bool>,
+    pub idt_previous: Vec<Value>,
+    pub idt_initialized: Vec<bool>,
+    pub limiter_anchor: Vec<Value>,
+    pub limiter_initialized: Vec<bool>,
+}
+
+pub(crate) const GENERATED_PERSISTENT_STATE_VERSION: u32 = 1;
+
+/// Persistent state plus exact generated-model and instance provenance.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GeneratedVerilogAInstanceCheckpoint {
+    pub instance_name: String,
+    pub model_name: String,
+    pub model_identity: String,
+    pub state_version: u32,
+    pub state: GeneratedVerilogAPersistentState,
+}
+
 /// Canonical Verilog-A noise primitive represented by generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedNoiseKind {
@@ -416,6 +445,49 @@ impl BuiltinVerilogADevices {
         self.devices.iter()
     }
 
+    pub(crate) fn checkpoint_states(&self) -> Vec<GeneratedVerilogAInstanceCheckpoint> {
+        self.devices
+            .iter()
+            .map(BuiltinVerilogAInstance::checkpoint_state)
+            .collect()
+    }
+
+    pub(crate) fn validate_checkpoint_states(
+        &self,
+        states: &[GeneratedVerilogAInstanceCheckpoint],
+    ) -> Result<(), String> {
+        if states.len() != self.devices.len() {
+            return Err(format!(
+                "generated Verilog-A checkpoint instance count mismatch: captured {}, circuit has {}",
+                states.len(),
+                self.devices.len()
+            ));
+        }
+        for (index, (device, state)) in self.devices.iter().zip(states).enumerate() {
+            device.validate_checkpoint_state(state).map_err(|error| {
+                format!("generated Verilog-A checkpoint instance {index}: {error}")
+            })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint_states(
+        &mut self,
+        states: &[GeneratedVerilogAInstanceCheckpoint],
+    ) -> Result<(), String> {
+        self.validate_checkpoint_states(states)?;
+        let rollback = self.clone();
+        for (index, (device, state)) in self.devices.iter_mut().zip(states).enumerate() {
+            if let Err(error) = device.restore_checkpoint_state(state) {
+                self.restore_from_snapshot(rollback);
+                return Err(format!(
+                    "generated Verilog-A checkpoint instance {index} restore failed: {error}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     #[inline]
     pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self) {
         if self.devices.len() == snapshot.devices.len() {
@@ -544,6 +616,56 @@ impl BuiltinVerilogADevices {
 
 #[cfg(feature = "veriloga-builtins")]
 impl BuiltinVerilogAInstance {
+    fn checkpoint_state(&self) -> GeneratedVerilogAInstanceCheckpoint {
+        GeneratedVerilogAInstanceCheckpoint {
+            instance_name: self.instance_name.clone(),
+            model_name: self.model_name.to_string(),
+            model_identity: self.kind.checkpoint_model_identity().to_string(),
+            state_version: GENERATED_PERSISTENT_STATE_VERSION,
+            state: self.kind.capture_persistent_state(),
+        }
+    }
+
+    fn validate_checkpoint_state(
+        &self,
+        checkpoint: &GeneratedVerilogAInstanceCheckpoint,
+    ) -> Result<(), String> {
+        if checkpoint.instance_name != self.instance_name {
+            return Err(format!(
+                "instance name mismatch: captured '{}', circuit has '{}'",
+                checkpoint.instance_name, self.instance_name
+            ));
+        }
+        if checkpoint.model_name != self.model_name {
+            return Err(format!(
+                "model name mismatch for '{}': captured '{}', circuit has '{}'",
+                self.instance_name, checkpoint.model_name, self.model_name
+            ));
+        }
+        let model_identity = self.kind.checkpoint_model_identity();
+        if checkpoint.model_identity != model_identity {
+            return Err(format!(
+                "generated model identity mismatch for '{}' ({}): captured '{}', circuit has '{}'",
+                self.instance_name, self.model_name, checkpoint.model_identity, model_identity
+            ));
+        }
+        if checkpoint.state_version != GENERATED_PERSISTENT_STATE_VERSION {
+            return Err(format!(
+                "persistent-state version mismatch for '{}': captured {}, runtime requires {}",
+                self.instance_name, checkpoint.state_version, GENERATED_PERSISTENT_STATE_VERSION
+            ));
+        }
+        self.kind.validate_persistent_state_shape(&checkpoint.state)
+    }
+
+    fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &GeneratedVerilogAInstanceCheckpoint,
+    ) -> Result<(), String> {
+        self.validate_checkpoint_state(checkpoint)?;
+        self.kind.restore_persistent_state(&checkpoint.state)
+    }
+
     #[inline]
     pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self) {
         debug_assert_eq!(self.model_name, snapshot.model_name);
@@ -5636,6 +5758,85 @@ mod tests {
         GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseInjection,
         GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedSimulationParameters,
     };
+
+    #[cfg(feature = "veriloga-builtins")]
+    use super::{BuiltinVerilogADevices, instantiate_builtin};
+
+    #[cfg(feature = "veriloga-builtins")]
+    fn checkpoint_test_devices() -> BuiltinVerilogADevices {
+        let mut circuit = crate::CircuitData::new();
+        let mut devices = BuiltinVerilogADevices::new();
+        for (name, node) in [("d1", "n1"), ("d2", "n2")] {
+            let instance = instantiate_builtin(
+                "DIODE_CMC",
+                name,
+                &[node.to_string(), "0".to_string()],
+                &[],
+                &crate::netlist::ParamContext::new(),
+                &mut circuit,
+            )
+            .expect("generated diode instantiates")
+            .expect("DIODE_CMC is registered");
+            devices.add(instance);
+        }
+        devices
+    }
+
+    #[cfg(feature = "veriloga-builtins")]
+    #[test]
+    fn generated_checkpoint_restore_is_atomic_and_validates_provenance() {
+        let mut devices = checkpoint_test_devices();
+        let mut accepted = devices.checkpoint_states();
+        accepted[0].state.ddt_previous[0] = 1.25;
+        accepted[0].state.ddt_older[0] = -0.0;
+        accepted[0].state.ddt_derivative_previous[0] = f64::MIN_POSITIVE;
+        accepted[0].state.ddt_initialized[0] = true;
+        devices
+            .restore_checkpoint_states(&accepted)
+            .expect("valid persistent state restores");
+        assert_eq!(devices.checkpoint_states(), accepted);
+
+        let baseline = devices.checkpoint_states();
+        let mut invalid_cases = Vec::new();
+        invalid_cases.push(Vec::new());
+
+        let mut reordered = baseline.clone();
+        reordered.swap(0, 1);
+        invalid_cases.push(reordered);
+
+        let mut wrong_name = baseline.clone();
+        wrong_name[0].instance_name = "different".to_string();
+        invalid_cases.push(wrong_name);
+
+        let mut wrong_model = baseline.clone();
+        wrong_model[0].model_name = "different_model".to_string();
+        invalid_cases.push(wrong_model);
+
+        let mut wrong_identity = baseline.clone();
+        wrong_identity[0].model_identity.push('0');
+        invalid_cases.push(wrong_identity);
+
+        let mut wrong_version = baseline.clone();
+        wrong_version[0].state_version += 1;
+        invalid_cases.push(wrong_version);
+
+        let mut wrong_shape = baseline.clone();
+        wrong_shape[0].state.ddt_previous.push(0.0);
+        invalid_cases.push(wrong_shape);
+
+        let mut non_finite = baseline.clone();
+        non_finite[0].state.ddt_previous[0] = f64::INFINITY;
+        invalid_cases.push(non_finite);
+
+        for invalid in invalid_cases {
+            assert!(devices.restore_checkpoint_states(&invalid).is_err());
+            assert_eq!(
+                devices.checkpoint_states(),
+                baseline,
+                "failed restore must not partially mutate live generated devices"
+            );
+        }
+    }
 
     fn noise_descriptor(
         is_current: bool,

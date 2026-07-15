@@ -1,6 +1,6 @@
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
-use crate::device::veriloga_generated::GeneratedDdtCoefficients;
+use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -454,6 +454,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 432;
     pub const DDT_STATE_COUNT: usize = 3;
     pub const IDT_STATE_COUNT: usize = 0;
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "b4b74ed0cbfce456bcd1d6c199095746579e6aee903de6ba30f869cdbde0e751";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -539,6 +540,46 @@ impl Instance {
             scalar_temperature_static_temperature,
             scalar_temperature_static_thermal_voltage,
         };
+    }
+
+    pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {
+        GeneratedVerilogAPersistentState {
+            ddt_previous: self.ddt_state_previous.to_vec(),
+            ddt_older: self.ddt_state_older.to_vec(),
+            ddt_derivative_previous: self.ddt_derivative_previous.to_vec(),
+            ddt_initialized: self.ddt_state_initialized.to_vec(),
+            idt_previous: self.idt_state_previous.to_vec(),
+            idt_initialized: self.idt_state_initialized.to_vec(),
+            limiter_anchor: Vec::new(),
+            limiter_initialized: Vec::new(),
+        }
+    }
+
+    pub(crate) fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {
+        if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {
+            return Err(format!("generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));
+        }
+        if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {
+            return Err(format!("generated idt checkpoint shape mismatch: expected {}, found {} / {}", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_initialized.len()));
+        }
+        if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {
+            return Err("generated Verilog-A checkpoint contains non-finite persistent state".to_string());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {
+        self.validate_persistent_state_shape(state)?;
+        self.ddt_state_previous.copy_from_slice(&state.ddt_previous);
+        self.ddt_state_current.copy_from_slice(&state.ddt_previous);
+        self.ddt_state_older.copy_from_slice(&state.ddt_older);
+        self.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);
+        self.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);
+        self.ddt_state_initialized.copy_from_slice(&state.ddt_initialized);
+        self.idt_state_previous.copy_from_slice(&state.idt_previous);
+        self.idt_state_current.copy_from_slice(&state.idt_previous);
+        self.idt_state_initialized.copy_from_slice(&state.idt_initialized);
+        Ok(())
     }
 
     #[inline]

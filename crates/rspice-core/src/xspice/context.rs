@@ -1983,8 +1983,8 @@ impl CmContext {
     }
 
     /// Restore model-owned state arrays into an initialized context.
-    pub(crate) fn restore_checkpoint_state(
-        &mut self,
+    pub(crate) fn validate_checkpoint_state(
+        &self,
         checkpoint: &CmContextCheckpoint,
     ) -> CmResult<()> {
         if self.state.len() != checkpoint.state.len()
@@ -2002,6 +2002,15 @@ impl CmContext {
                 checkpoint.int_state.len()
             )));
         }
+        Ok(())
+    }
+
+    /// Restore model-owned state arrays into an initialized context.
+    pub(crate) fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &CmContextCheckpoint,
+    ) -> CmResult<()> {
+        self.validate_checkpoint_state(checkpoint)?;
 
         self.state.clone_from(&checkpoint.state);
         self.state_prev.clone_from(&checkpoint.state_prev);

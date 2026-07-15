@@ -15480,6 +15480,9 @@ pub(super) struct StateFileExtensions {
     pub set_parameter_hook: String,
     pub impl_methods: String,
     pub limiter_converged_expr: String,
+    pub checkpoint_capture_fields: String,
+    pub checkpoint_shape_checks: String,
+    pub checkpoint_restore_fields: String,
 }
 
 impl Default for StateFileExtensions {
@@ -15495,6 +15498,11 @@ impl Default for StateFileExtensions {
             set_parameter_hook: String::new(),
             impl_methods: String::new(),
             limiter_converged_expr: "true".to_string(),
+            checkpoint_capture_fields:
+                "            limiter_anchor: Vec::new(),\n            limiter_initialized: Vec::new(),\n"
+                    .to_string(),
+            checkpoint_shape_checks: String::new(),
+            checkpoint_restore_fields: String::new(),
         }
     }
 }
@@ -15560,10 +15568,11 @@ pub(super) fn generate_state_file_with_extensions(
     scratch_usage: StateScratchUsage,
     extensions: &StateFileExtensions,
 ) -> Result<String, RustBackendError> {
+    let checkpoint_model_identity = CHECKPOINT_IDENTITY_PLACEHOLDER;
     let mut out = String::new();
     out.push_str("#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n");
     out.push_str(&format!(
-        "use {}::GeneratedDdtCoefficients;\n",
+        "use {}::{{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState}};\n",
         options.runtime_path
     ));
     if scratch_usage.is_empty() {
@@ -15774,6 +15783,9 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&format!(
         "    pub const IDT_STATE_COUNT: usize = {idt_state_count};\n"
     ));
+    out.push_str(&format!(
+        "    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {checkpoint_model_identity:?};\n"
+    ));
     out.push_str("    pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;\n");
     out.push_str("    pub const DDT_EPSILON: f64 = 1.0e-20;\n\n");
     out.push_str("    pub fn new(nodes: &[usize]) -> Self {\n");
@@ -15893,6 +15905,56 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("            reactive_scratch,\n");
     }
     out.push_str("        };\n");
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
+    );
+    out.push_str("        GeneratedVerilogAPersistentState {\n");
+    out.push_str("            ddt_previous: self.ddt_state_previous.to_vec(),\n");
+    out.push_str("            ddt_older: self.ddt_state_older.to_vec(),\n");
+    out.push_str("            ddt_derivative_previous: self.ddt_derivative_previous.to_vec(),\n");
+    out.push_str("            ddt_initialized: self.ddt_state_initialized.to_vec(),\n");
+    out.push_str("            idt_previous: self.idt_state_previous.to_vec(),\n");
+    out.push_str("            idt_initialized: self.idt_state_initialized.to_vec(),\n");
+    out.push_str(&extensions.checkpoint_capture_fields);
+    out.push_str("        }\n");
+    out.push_str("    }\n\n");
+    out.push_str("    pub(crate) fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("        if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {\n");
+    out.push_str("            return Err(format!(\"generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}\", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));\n");
+    out.push_str("        }\n");
+    out.push_str("        if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {\n");
+    out.push_str("            return Err(format!(\"generated idt checkpoint shape mismatch: expected {}, found {} / {}\", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_initialized.len()));\n");
+    out.push_str("        }\n");
+    out.push_str("        if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {\n");
+    out.push_str("            return Err(\"generated Verilog-A checkpoint contains non-finite persistent state\".to_string());\n");
+    out.push_str("        }\n");
+    out.push_str(&extensions.checkpoint_shape_checks);
+    out.push_str("        Ok(())\n");
+    out.push_str("    }\n\n");
+    out.push_str("    pub(crate) fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("        self.validate_persistent_state_shape(state)?;\n");
+    out.push_str("        self.ddt_state_previous.copy_from_slice(&state.ddt_previous);\n");
+    out.push_str("        self.ddt_state_current.copy_from_slice(&state.ddt_previous);\n");
+    out.push_str("        self.ddt_state_older.copy_from_slice(&state.ddt_older);\n");
+    out.push_str(
+        "        self.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);\n",
+    );
+    out.push_str(
+        "        self.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);\n",
+    );
+    out.push_str("        self.ddt_state_initialized.copy_from_slice(&state.ddt_initialized);\n");
+    out.push_str("        self.idt_state_previous.copy_from_slice(&state.idt_previous);\n");
+    out.push_str("        self.idt_state_current.copy_from_slice(&state.idt_previous);\n");
+    out.push_str("        self.idt_state_initialized.copy_from_slice(&state.idt_initialized);\n");
+    out.push_str(&extensions.checkpoint_restore_fields);
+    if scratch_usage.uses_transient {
+        out.push_str("        self.scratch = None;\n");
+    }
+    if scratch_usage.uses_reactive {
+        out.push_str("        self.reactive_scratch = None;\n");
+    }
+    out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str("    pub fn set_branch_indices(&mut self, branches: &[usize]) {\n");
@@ -16080,6 +16142,106 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.impl_methods);
     out.push_str("}\n");
     Ok(out)
+}
+
+const CHECKPOINT_IDENTITY_PLACEHOLDER: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+fn hash_identity_field(hasher: &mut blake3::Hasher, field: &[u8]) {
+    hasher.update(&(field.len() as u64).to_le_bytes());
+    hasher.update(field);
+}
+
+pub(super) fn finalize_checkpoint_identity(
+    device: &mut GeneratedRustDevice,
+) -> Result<(), RustBackendError> {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-generated-persistent-state-v2\0");
+    hash_identity_field(
+        &mut hasher,
+        env!("RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST").as_bytes(),
+    );
+    hash_identity_field(&mut hasher, device.module_name.as_bytes());
+    hash_identity_field(&mut hasher, device.public_model_name.as_bytes());
+    hash_identity_field(&mut hasher, device.folder_name.as_bytes());
+    hash_identity_field(&mut hasher, device.source_digest.as_bytes());
+
+    let mut files = device.files.iter().collect::<Vec<_>>();
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    for file in files {
+        hash_identity_field(&mut hasher, file.relative_path.as_bytes());
+        hash_identity_field(&mut hasher, file.contents.as_bytes());
+    }
+    let identity = hasher.finalize().to_hex().to_string();
+    let declaration = format!(
+        "pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {CHECKPOINT_IDENTITY_PLACEHOLDER:?};"
+    );
+    let replacement = format!("pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {identity:?};");
+    let mut replacements = 0usize;
+    for file in &mut device.files {
+        if file.contents.contains(&declaration) {
+            file.contents = file.contents.replacen(&declaration, &replacement, 1);
+            replacements += 1;
+        }
+    }
+    if replacements != 1 {
+        return Err(RustBackendError::internal(
+            device.source_digest.clone(),
+            device.module_name.clone(),
+            format!(
+                "generated checkpoint identity placeholder count is {replacements}, expected 1"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod checkpoint_identity_tests {
+    use super::{CHECKPOINT_IDENTITY_PLACEHOLDER, finalize_checkpoint_identity};
+    use crate::rust_backend::{GeneratedRustDevice, GeneratedRustFile};
+
+    fn device(stamp: &str) -> GeneratedRustDevice {
+        GeneratedRustDevice {
+            module_name: "model".to_string(),
+            public_model_name: "MODEL".to_string(),
+            folder_name: "model__digest".to_string(),
+            source_digest: "source-digest".to_string(),
+            files: vec![
+                GeneratedRustFile {
+                    relative_path: "state.rs".to_string(),
+                    contents: format!(
+                        "pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {CHECKPOINT_IDENTITY_PLACEHOLDER:?};\n"
+                    ),
+                },
+                GeneratedRustFile {
+                    relative_path: "stamp.rs".to_string(),
+                    contents: stamp.to_string(),
+                },
+            ],
+        }
+    }
+
+    fn identity(device: &GeneratedRustDevice) -> &str {
+        device.files[0]
+            .contents
+            .split('"')
+            .nth(1)
+            .expect("generated checkpoint identity literal")
+    }
+
+    #[test]
+    fn checkpoint_identity_covers_same_shape_emitted_semantic_changes() {
+        let mut baseline = device("stamp_current(1.0);\n");
+        let mut changed = device("stamp_current(2.0);\n");
+        finalize_checkpoint_identity(&mut baseline).expect("baseline identity finalizes");
+        finalize_checkpoint_identity(&mut changed).expect("changed identity finalizes");
+        assert_ne!(
+            identity(&baseline),
+            identity(&changed),
+            "same-size generated semantic changes must invalidate persistent state"
+        );
+    }
 }
 
 fn emit_parameter_struct_fields(

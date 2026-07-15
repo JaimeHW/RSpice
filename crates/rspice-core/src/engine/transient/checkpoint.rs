@@ -7,13 +7,14 @@
 //! evaluation — the same numerical regime as a breakpoint restart, which
 //! the integrator already performs at every source discontinuity.
 //!
-//! Scope, stated precisely: accepted linear-reactive state and histories are
-//! captured bit-exactly. Nonlinear charge histories and accepted-step timing
-//! provenance are not serialized, so continuation deliberately takes one
-//! order-one breakpoint-restart step before higher-order integration resumes.
-//! Nonlinear iteration memories and transmission-line delay histories likewise
-//! re-derive from the restored solution. Decks dominated by transmission-line
-//! delays should prefer unsegmented runs (a warning is logged at capture).
+//! Scope, stated precisely: accepted linear-reactive histories, generated
+//! Verilog-A `ddt`/`idt` histories and limiter anchors, and XSPICE model-owned
+//! checkpoint state are captured bit-exactly. Continuation deliberately takes
+//! one order-one breakpoint-restart step before higher-order integration
+//! resumes. Other nonlinear iteration memories and transmission-line delay
+//! histories re-derive from the restored solution. Decks dominated by
+//! transmission-line delays should prefer unsegmented runs (a warning is
+//! logged at capture).
 //!
 //! The on-disk format is a versioned, line-oriented text format using
 //! Rust's shortest-round-trip float formatting, so save/load reproduces
@@ -23,11 +24,21 @@
 use crate::Value;
 use crate::analysis::LteEstimator;
 use crate::circuit::Circuit;
-use crate::netlist::{ElementKind, Netlist, TransientLteReference};
+use crate::device::veriloga_generated::{
+    GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
+    GeneratedVerilogAPersistentState,
+};
+use crate::engine::SimulationConfig;
+use crate::expr::{Expr, Function, parse_expression_strict};
+use crate::netlist::expr::prepare_behavioral_expression;
+use crate::netlist::{
+    Element, ElementKind, Netlist, ParamContext, SourceSpec, SubcircuitDef, TransientLteReference,
+    flatten_netlist_with_models,
+};
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 9;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +50,13 @@ pub struct TransientCheckpoint {
     /// Fingerprint of the netlist this state belongs to; restore refuses a
     /// mismatch rather than silently continuing a different circuit.
     pub netlist_fingerprint: u64,
+    /// Collision-resistant identity of the fully elaborated semantic netlist.
+    /// Legacy files have no safe identity and are refused for resume.
+    netlist_identity: Option<String>,
+    /// Identity of the resolved, state-affecting simulation configuration.
+    /// Kept optional solely so legacy checkpoint files can be parsed and
+    /// rejected with a precise diagnostic.
+    simulation_identity: Option<String>,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -55,10 +73,13 @@ pub struct TransientCheckpoint {
     xspice_instances: Vec<String>,
     xspice_resume_blockers: Vec<String>,
     xspice_instance_states: Vec<XspiceInstanceCheckpoint>,
+    generated_veriloga_state_available: bool,
+    generated_veriloga_instance_states: Vec<GeneratedVerilogAInstanceCheckpoint>,
 }
 
-/// Stable fingerprint of the netlist identity (FNV-1a over the source text
-/// when available, else over the flattened element signature).
+/// Stable legacy fingerprint of the netlist identity (FNV-1a over source text
+/// when available). Resume authorization additionally requires the complete
+/// collision-resistant semantic identity below.
 pub fn netlist_fingerprint(netlist: &Netlist) -> u64 {
     const OFFSET: u64 = 0xCBF2_9CE4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01B3;
@@ -81,6 +102,319 @@ pub fn netlist_fingerprint(netlist: &Netlist) -> u64 {
         }
     }
     hash
+}
+
+fn hash_field(hasher: &mut blake3::Hasher, name: &str, value: impl std::fmt::Debug) {
+    let value = format!("{value:?}");
+    hasher.update(&(name.len() as u64).to_le_bytes());
+    hasher.update(name.as_bytes());
+    hasher.update(&(value.len() as u64).to_le_bytes());
+    hasher.update(value.as_bytes());
+}
+
+fn hash_subcircuits(hasher: &mut blake3::Hasher, subcircuits: &[SubcircuitDef]) {
+    hasher.update(&(subcircuits.len() as u64).to_le_bytes());
+    for subcircuit in subcircuits {
+        hash_field(hasher, "name", &subcircuit.name);
+        hash_field(hasher, "ports", &subcircuit.ports);
+        hash_field(hasher, "elements", &subcircuit.elements);
+        hash_field(hasher, "initial_conditions", &subcircuit.initial_conditions);
+        hash_field(hasher, "node_sets", &subcircuit.node_sets);
+        hash_field(hasher, "params", &subcircuit.params);
+        hash_field(hasher, "expr_params", &subcircuit.expr_params);
+        hash_field(hasher, "string_params", &subcircuit.string_params);
+        hash_field(hasher, "body_params", &subcircuit.body_params);
+        hash_field(hasher, "body_expr_params", &subcircuit.body_expr_params);
+        hash_field(hasher, "body_string_params", &subcircuit.body_string_params);
+        hash_field(hasher, "body_functions", &subcircuit.body_functions);
+        let mut local_options = subcircuit
+            .local_options
+            .iter()
+            .map(|(name, value)| (name, value.to_bits()))
+            .collect::<Vec<_>>();
+        local_options.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        hash_field(hasher, "local_options", local_options);
+        hash_field(hasher, "library_ref", &subcircuit.library_ref);
+        hash_subcircuits(hasher, &subcircuit.nested_subcircuits);
+    }
+}
+
+fn resolved_dependency_path(
+    path: &str,
+    source_path: Option<&std::path::Path>,
+) -> std::path::PathBuf {
+    let candidate = std::path::Path::new(path);
+    if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else if let Some(parent) = source_path.and_then(std::path::Path::parent) {
+        parent.join(candidate)
+    } else {
+        candidate.to_path_buf()
+    }
+}
+
+fn hash_dependency(
+    hasher: &mut blake3::Hasher,
+    path: &str,
+    source_path: Option<&std::path::Path>,
+    xspice_virtual_aware: bool,
+) {
+    let resolved = resolved_dependency_path(path, source_path);
+    let resolved_text = resolved.to_string_lossy();
+    hash_field(hasher, "dependency_path", &resolved_text);
+    if xspice_virtual_aware
+        && let Some(contents) = crate::xspice::checkpoint_virtual_data_file_contents(&resolved_text)
+    {
+        hash_field(hasher, "dependency_kind", "virtual");
+        hasher.update(&(contents.len() as u64).to_le_bytes());
+        hasher.update(contents.as_bytes());
+    } else {
+        match std::fs::read(&resolved) {
+            Ok(contents) => {
+                hash_field(hasher, "dependency_kind", "native");
+                hasher.update(&(contents.len() as u64).to_le_bytes());
+                hasher.update(&contents);
+            }
+            Err(error) => {
+                hash_field(hasher, "dependency_kind", "unavailable");
+                hash_field(hasher, "dependency_error_kind", error.kind());
+            }
+        }
+    }
+}
+
+fn hash_source_dependencies(
+    hasher: &mut blake3::Hasher,
+    source: &SourceSpec,
+    source_path: Option<&std::path::Path>,
+) {
+    match source {
+        SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+            hash_source_dependencies(hasher, inner, source_path);
+        }
+        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+            hash_source_dependencies(hasher, transient, source_path);
+        }
+        SourceSpec::PwlFile { path, .. } => hash_dependency(hasher, path, source_path, false),
+        _ => {}
+    }
+}
+
+fn file_lookup_function(function: Function) -> bool {
+    matches!(
+        function,
+        Function::Table
+            | Function::TableFile
+            | Function::FastTable
+            | Function::FastTableFile
+            | Function::Cubic
+            | Function::CubicFile
+            | Function::Akima
+            | Function::AkimaFile
+            | Function::Wodicka
+            | Function::WodickaFile
+            | Function::Barycentric
+            | Function::BarycentricFile
+    )
+}
+
+fn hash_expression_dependencies(
+    hasher: &mut blake3::Hasher,
+    expression: &str,
+    params: &ParamContext,
+    source_path: Option<&std::path::Path>,
+) {
+    let Ok(prepared) = prepare_behavioral_expression(expression, params) else {
+        return;
+    };
+    let Ok(expression) = parse_expression_strict(&prepared) else {
+        return;
+    };
+    fn visit(
+        hasher: &mut blake3::Hasher,
+        expression: &Expr,
+        source_path: Option<&std::path::Path>,
+    ) {
+        match expression {
+            Expr::Function { func, args } => {
+                if file_lookup_function(*func)
+                    && let Some(Expr::StringLiteral(path)) = args.first()
+                {
+                    hash_dependency(hasher, path, source_path, false);
+                }
+                for argument in args {
+                    visit(hasher, argument, source_path);
+                }
+            }
+            Expr::Unary { operand, .. } => visit(hasher, operand, source_path),
+            Expr::Binary { left, right, .. } => {
+                visit(hasher, left, source_path);
+                visit(hasher, right, source_path);
+            }
+            _ => {}
+        }
+    }
+    visit(hasher, &expression, source_path);
+}
+
+fn hash_element_dependencies(
+    hasher: &mut blake3::Hasher,
+    elements: &[Element],
+    params: &ParamContext,
+    source_path: Option<&std::path::Path>,
+) {
+    for element in elements {
+        match &element.kind {
+            ElementKind::VoltageSource(source) | ElementKind::CurrentSource(source) => {
+                hash_source_dependencies(hasher, source, source_path);
+            }
+            ElementKind::BehavioralVoltage { expression, .. }
+            | ElementKind::BehavioralCurrent { expression, .. } => {
+                hash_expression_dependencies(hasher, expression, params, source_path);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn model_string_is_dependency(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    name == "simulation"
+        || name.ends_with("file")
+        || name.ends_with("_file")
+        || name.ends_with("path")
+}
+
+fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
+    let source_path = netlist.source_path.as_deref();
+    let mut isolated_netlist = netlist.clone();
+    isolated_netlist.params = netlist.params.checkpoint_isolated_clone();
+    let flattened = flatten_netlist_with_models(&isolated_netlist).ok();
+    let elements = flattened
+        .as_ref()
+        .map_or(netlist.elements.as_slice(), |flat| flat.elements.as_slice());
+    hash_element_dependencies(hasher, elements, &isolated_netlist.params, source_path);
+    let models = netlist.models.iter().chain(
+        flattened
+            .as_ref()
+            .into_iter()
+            .flat_map(|flat| flat.scoped_models.iter()),
+    );
+    for model in models {
+        for (name, path) in &model.string_params {
+            if model_string_is_dependency(name) {
+                let path = if name.eq_ignore_ascii_case("process_file") {
+                    path.trim_end_matches('|')
+                } else {
+                    path
+                };
+                let virtual_aware = !name.eq_ignore_ascii_case("process_file")
+                    && !name.eq_ignore_ascii_case("simulation");
+                hash_dependency(hasher, path, source_path, virtual_aware);
+            }
+        }
+    }
+    for include in &netlist.veriloga_includes {
+        hash_dependency(
+            hasher,
+            &include.file_path.to_string_lossy(),
+            source_path,
+            false,
+        );
+    }
+}
+
+/// Collision-resistant identity of the fully elaborated semantic netlist.
+/// Source paths, diagnostics, and original source spelling are excluded;
+/// expanded include/SPEF content and public post-parse AST edits are included.
+pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-transient-elaborated-netlist-v2\0");
+    hash_field(&mut hasher, "title", &netlist.title);
+    hash_field(&mut hasher, "elements", &netlist.elements);
+    hash_field(&mut hasher, "analyses", &netlist.analyses);
+    hash_field(&mut hasher, "fft_analyses", &netlist.fft_analyses);
+    hash_field(&mut hasher, "data_tables", &netlist.data_tables);
+    hash_field(&mut hasher, "models", &netlist.models);
+    hash_subcircuits(&mut hasher, &netlist.subcircuits);
+    hash_field(
+        &mut hasher,
+        "params",
+        netlist.params.checkpoint_semantic_snapshot(),
+    );
+    hash_field(
+        &mut hasher,
+        "initial_conditions",
+        &netlist.initial_conditions,
+    );
+    hash_field(&mut hasher, "node_sets", &netlist.node_sets);
+    let mut global_nodes = netlist.global_nodes.iter().collect::<Vec<_>>();
+    global_nodes.sort_unstable();
+    hash_field(&mut hasher, "global_nodes", global_nodes);
+    hash_field(&mut hasher, "measurements", &netlist.measurements);
+    hash_field(&mut hasher, "saves", &netlist.saves);
+    hash_field(&mut hasher, "options", &netlist.options);
+    hash_field(&mut hasher, "veriloga_includes", &netlist.veriloga_includes);
+    hash_field(&mut hasher, "spef_includes", &netlist.spef_includes);
+    hash_external_dependencies(&mut hasher, netlist);
+    Some(hasher.finalize().to_hex().to_string())
+}
+
+pub(super) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-transient-resolved-config-v1\0");
+    hash_field(&mut hasher, "temperature", config.temperature.to_bits());
+    hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
+    hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
+    hash_field(&mut hasher, "integration_method", config.integration_method);
+    hash_field(&mut hasher, "spice_dialect", config.spice_dialect);
+    hash_field(
+        &mut hasher,
+        "jfet_level2_model",
+        config.resolved_jfet_level2_model(),
+    );
+    hash_field(&mut hasher, "b3soi_gmin_scaling", config.b3soi_gmin_scaling);
+    hash_field(
+        &mut hasher,
+        "transient_trtol",
+        config.transient_trtol.to_bits(),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_lte_reltol",
+        config.transient_lte_reltol.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_lte_abstol",
+        config.transient_lte_abstol.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_lte_reference",
+        config.transient_lte_reference,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_new_bp_stepping",
+        config.transient_new_bp_stepping,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_node_activity_bound",
+        config.transient_node_activity_bound.to_bits(),
+    );
+    hash_field(
+        &mut hasher,
+        "gmin_target",
+        config.convergence_config.gmin_target.to_bits(),
+    );
+    hash_field(
+        &mut hasher,
+        "junction_gmin_target",
+        config.convergence_config.junction_gmin_target.to_bits(),
+    );
+    hasher.finalize().to_hex().to_string()
 }
 
 fn parse_count_header(line: &str, name: &str) -> Result<usize, String> {
@@ -329,10 +663,140 @@ fn read_xspice_instance_states(
     Ok(states)
 }
 
+fn parse_checkpoint_bool(field: &str, context: &str) -> Result<bool, String> {
+    match field {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(format!(
+            "{context}: checkpoint boolean must be 0 or 1, found '{field}'"
+        )),
+    }
+}
+
+fn read_generated_state_rows(
+    lines: &mut CheckpointLines<'_>,
+    name: &str,
+    value_columns: usize,
+) -> Result<(Vec<Vec<Value>>, Vec<bool>), String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| format!("missing '{name}' section"))?;
+    let count = parse_count_header(header, name)?;
+    let mut values = Vec::with_capacity(value_columns);
+    for _ in 0..value_columns {
+        values.push(allocate_checkpoint_rows(lines, count, name)?);
+    }
+    let mut initialized = allocate_checkpoint_rows(lines, count, name)?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'{name}' truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        for column in &mut values {
+            let field = fields
+                .next()
+                .ok_or_else(|| format!("'{name}' row {row} is short"))?;
+            let value = field
+                .parse::<Value>()
+                .map_err(|_| format!("'{name}' row {row}: bad value '{field}'"))?;
+            if !value.is_finite() {
+                return Err(format!("'{name}' row {row}: non-finite value '{field}'"));
+            }
+            column.push(value);
+        }
+        let boolean = fields
+            .next()
+            .ok_or_else(|| format!("'{name}' row {row} is missing initialized state"))?;
+        initialized.push(parse_checkpoint_bool(
+            boolean,
+            &format!("'{name}' row {row}"),
+        )?);
+        if let Some(extra) = fields.next() {
+            return Err(format!("'{name}' row {row}: extra field '{extra}'"));
+        }
+    }
+    Ok((values, initialized))
+}
+
+fn read_generated_veriloga_states(
+    lines: &mut CheckpointLines<'_>,
+) -> Result<Vec<GeneratedVerilogAInstanceCheckpoint>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing 'generated_veriloga_states' section".to_string())?;
+    let count = parse_count_header(header, "generated_veriloga_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "generated_veriloga_states")?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'generated_veriloga_states' truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("generated_veriloga_state") {
+            return Err(format!(
+                "malformed 'generated_veriloga_state' header: '{line}'"
+            ));
+        }
+        let instance_name = fields
+            .next()
+            .ok_or_else(|| format!("generated state row {row} is missing instance name"))?;
+        let model_name = fields
+            .next()
+            .ok_or_else(|| format!("generated state row {row} is missing model name"))?;
+        let model_identity = fields
+            .next()
+            .ok_or_else(|| format!("generated state row {row} is missing model identity"))?;
+        let state_version = fields
+            .next()
+            .ok_or_else(|| format!("generated state row {row} is missing state version"))?
+            .parse::<u32>()
+            .map_err(|_| format!("generated state row {row} has invalid state version"))?;
+        if state_version != GENERATED_PERSISTENT_STATE_VERSION {
+            return Err(format!(
+                "generated state row {row} uses unsupported persistent-state version {state_version}"
+            ));
+        }
+        if let Some(extra) = fields.next() {
+            return Err(format!("generated state row {row}: extra field '{extra}'"));
+        }
+
+        let (mut ddt, ddt_initialized) = read_generated_state_rows(lines, "ddt_state", 3)?;
+        let (mut idt, idt_initialized) = read_generated_state_rows(lines, "idt_state", 1)?;
+        let (mut limiter, limiter_initialized) =
+            read_generated_state_rows(lines, "limiter_state", 1)?;
+        states.push(GeneratedVerilogAInstanceCheckpoint {
+            instance_name: instance_name.to_string(),
+            model_name: model_name.to_string(),
+            model_identity: model_identity.to_string(),
+            state_version,
+            state: GeneratedVerilogAPersistentState {
+                ddt_previous: ddt.remove(0),
+                ddt_older: ddt.remove(0),
+                ddt_derivative_previous: ddt.remove(0),
+                ddt_initialized,
+                idt_previous: idt.remove(0),
+                idt_initialized,
+                limiter_anchor: limiter.remove(0),
+                limiter_initialized,
+            },
+        });
+    }
+    Ok(states)
+}
+
 impl TransientCheckpoint {
     fn validate_numeric_state(&self) -> Result<(), String> {
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
+        }
+        if self.netlist_identity.as_ref().is_some_and(|identity| {
+            identity.len() != 64
+                || !identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }) {
+            return Err(
+                "checkpoint netlist identity must be 64 lowercase hexadecimal digits".to_string(),
+            );
         }
         if self.solution.iter().any(|value| !value.is_finite()) {
             return Err("checkpoint solution values must be finite".to_string());
@@ -400,6 +864,60 @@ impl TransientCheckpoint {
         }) {
             return Err("checkpoint XSPICE floating-point state must be finite".to_string());
         }
+        if !self.generated_veriloga_state_available
+            && !self.generated_veriloga_instance_states.is_empty()
+        {
+            return Err(
+                "generated Verilog-A checkpoint state is present without availability provenance"
+                    .to_string(),
+            );
+        }
+        for (index, instance) in self.generated_veriloga_instance_states.iter().enumerate() {
+            if instance.instance_name.is_empty()
+                || instance.instance_name.chars().any(char::is_whitespace)
+                || instance.model_name.is_empty()
+                || instance.model_name.chars().any(char::is_whitespace)
+                || instance.model_identity.len() != 64
+                || !instance
+                    .model_identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(format!(
+                    "generated Verilog-A checkpoint instance {index} has invalid textual provenance"
+                ));
+            }
+            if instance.state_version != GENERATED_PERSISTENT_STATE_VERSION {
+                return Err(format!(
+                    "generated Verilog-A checkpoint instance {index} uses unsupported persistent-state version {}",
+                    instance.state_version
+                ));
+            }
+            let state = &instance.state;
+            if state.ddt_previous.len() != state.ddt_older.len()
+                || state.ddt_previous.len() != state.ddt_derivative_previous.len()
+                || state.ddt_previous.len() != state.ddt_initialized.len()
+                || state.idt_previous.len() != state.idt_initialized.len()
+                || state.limiter_anchor.len() != state.limiter_initialized.len()
+            {
+                return Err(format!(
+                    "generated Verilog-A checkpoint instance {index} has inconsistent persistent-state lengths"
+                ));
+            }
+            if state
+                .ddt_previous
+                .iter()
+                .chain(&state.ddt_older)
+                .chain(&state.ddt_derivative_previous)
+                .chain(&state.idt_previous)
+                .chain(&state.limiter_anchor)
+                .any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "generated Verilog-A checkpoint instance {index} contains non-finite persistent state"
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -407,6 +925,8 @@ impl TransientCheckpoint {
     /// current accepted `solution`.
     pub(crate) fn capture(
         fingerprint: u64,
+        netlist_identity: Option<String>,
+        simulation_identity: String,
         time: Value,
         solution: &[Value],
         circuit: &Circuit,
@@ -449,6 +969,8 @@ impl TransientCheckpoint {
             time,
             solution: solution.to_vec(),
             netlist_fingerprint: fingerprint,
+            netlist_identity,
+            simulation_identity: Some(simulation_identity),
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -464,6 +986,8 @@ impl TransientCheckpoint {
             xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
+            generated_veriloga_state_available: true,
+            generated_veriloga_instance_states: circuit.generated_veriloga_checkpoint_states(),
         }
     }
 
@@ -471,19 +995,65 @@ impl TransientCheckpoint {
     /// circuit. Lengths must match the capture exactly.
     pub(crate) fn inject(&self, circuit: &mut Circuit) -> Result<(), String> {
         self.validate_numeric_state()?;
-        if circuit.capacitors.v_prev.len() != self.cap_v_prev.len()
-            || circuit.inductors.i_prev.len() != self.ind_i_prev.len()
+        let target_lengths = [
+            (
+                "capacitor v_prev",
+                self.cap_v_prev.len(),
+                circuit.capacitors.v_prev.len(),
+            ),
+            (
+                "capacitor v_prev_prev",
+                self.cap_v_prev_prev.len(),
+                circuit.capacitors.v_prev_prev.len(),
+            ),
+            (
+                "capacitor v_prev_prev_prev",
+                self.cap_v_prev_prev_prev.len(),
+                circuit.capacitors.v_prev_prev_prev.len(),
+            ),
+            (
+                "capacitor i_prev",
+                self.cap_i_prev.len(),
+                circuit.capacitors.i_prev.len(),
+            ),
+            (
+                "capacitor i_eq",
+                self.cap_i_eq.len(),
+                circuit.capacitors.i_eq.len(),
+            ),
+            (
+                "inductor i_prev",
+                self.ind_i_prev.len(),
+                circuit.inductors.i_prev.len(),
+            ),
+            (
+                "inductor i_prev_prev",
+                self.ind_i_prev_prev.len(),
+                circuit.inductors.i_prev_prev.len(),
+            ),
+            (
+                "inductor v_prev",
+                self.ind_v_prev.len(),
+                circuit.inductors.v_prev.len(),
+            ),
+        ];
+        if let Some((name, captured, target)) = target_lengths
+            .into_iter()
+            .find(|(_, captured, target)| captured != target)
         {
             return Err(format!(
-                "checkpoint shape mismatch: {} capacitors / {} inductors captured, \
-                 circuit has {} / {}",
-                self.cap_v_prev.len(),
-                self.ind_i_prev.len(),
-                circuit.capacitors.v_prev.len(),
-                circuit.inductors.i_prev.len()
+                "checkpoint {name} shape mismatch: captured {captured}, circuit has {target}"
             ));
         }
+        circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
+        circuit.validate_generated_veriloga_checkpoint_states(
+            &self.generated_veriloga_instance_states,
+            self.generated_veriloga_state_available,
+        )?;
 
+        // All state families are validated before the first mutation. The
+        // restore calls below repeat their local validation defensively, but
+        // cannot fail after this point without a violated internal invariant.
         circuit.capacitors.v_prev.copy_from_slice(&self.cap_v_prev);
         circuit
             .capacitors
@@ -502,6 +1072,10 @@ impl TransientCheckpoint {
             .copy_from_slice(&self.ind_i_prev_prev);
         circuit.inductors.v_prev.copy_from_slice(&self.ind_v_prev);
         circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
+        circuit.restore_generated_veriloga_checkpoint_states(
+            &self.generated_veriloga_instance_states,
+            self.generated_veriloga_state_available,
+        )?;
         Ok(())
     }
 
@@ -534,6 +1108,19 @@ impl TransientCheckpoint {
     /// Validate this checkpoint against a netlist before resuming.
     pub fn validate_for(&self, netlist: &Netlist) -> Result<(), String> {
         self.validate_numeric_state()?;
+        let target_identity = netlist_checkpoint_identity(netlist)
+            .expect("semantic netlist identity is available for every elaborated AST");
+        let Some(captured_identity) = self.netlist_identity.as_deref() else {
+            return Err(
+                "legacy transient checkpoint does not contain a collision-resistant netlist identity"
+                    .to_string(),
+            );
+        };
+        if captured_identity != target_identity {
+            return Err(format!(
+                "checkpoint was captured from a different netlist (identity {captured_identity}, this deck is {target_identity}); refusing to resume mismatched state"
+            ));
+        }
         let fingerprint = netlist_fingerprint(netlist);
         if fingerprint != self.netlist_fingerprint {
             return Err(format!(
@@ -561,6 +1148,27 @@ impl TransientCheckpoint {
         Ok(())
     }
 
+    pub(crate) fn validate_for_with_config(
+        &self,
+        netlist: &Netlist,
+        config: &SimulationConfig,
+    ) -> Result<(), String> {
+        self.validate_for(netlist)?;
+        let Some(captured_identity) = self.simulation_identity.as_deref() else {
+            return Err(
+                "legacy transient checkpoint does not contain a collision-resistant simulation configuration identity"
+                    .to_string(),
+            );
+        };
+        let target_identity = simulation_checkpoint_identity(config);
+        if captured_identity != target_identity {
+            return Err(format!(
+                "checkpoint was captured with a different resolved simulation configuration (identity {captured_identity}, this run is {target_identity}); refusing to resume mismatched state"
+            ));
+        }
+        Ok(())
+    }
+
     //=========================================================================
     // Text serialization (versioned; exact f64 round-trip via shortest
     // round-trip Display formatting)
@@ -571,6 +1179,14 @@ impl TransientCheckpoint {
         let mut out = String::new();
         out.push_str(&format!("RSPICE-CHECKPOINT {FORMAT_VERSION}\n"));
         out.push_str(&format!("fingerprint {:#018x}\n", self.netlist_fingerprint));
+        out.push_str(&format!(
+            "netlist_identity {}\n",
+            self.netlist_identity.as_deref().unwrap_or("none")
+        ));
+        out.push_str(&format!(
+            "simulation_identity {}\n",
+            self.simulation_identity.as_deref().unwrap_or("none")
+        ));
         out.push_str(&format!("time {}\n", self.time));
 
         let section = |out: &mut String, name: &str, rows: &[&[Value]]| {
@@ -650,6 +1266,50 @@ impl TransientCheckpoint {
             write_value_vector(&mut out, "state_prev", &instance.context.state_prev);
             write_i64_vector(&mut out, "int_state", &instance.context.int_state);
         }
+        out.push_str(&format!(
+            "generated_veriloga_state_available {}\n",
+            u8::from(self.generated_veriloga_state_available)
+        ));
+        out.push_str(&format!(
+            "generated_veriloga_states {}\n",
+            self.generated_veriloga_instance_states.len()
+        ));
+        for instance in &self.generated_veriloga_instance_states {
+            out.push_str(&format!(
+                "generated_veriloga_state {} {} {} {}\n",
+                instance.instance_name,
+                instance.model_name,
+                instance.model_identity,
+                instance.state_version
+            ));
+            let state = &instance.state;
+            out.push_str(&format!("ddt_state {}\n", state.ddt_previous.len()));
+            for index in 0..state.ddt_previous.len() {
+                out.push_str(&format!(
+                    "{} {} {} {}\n",
+                    state.ddt_previous[index],
+                    state.ddt_older[index],
+                    state.ddt_derivative_previous[index],
+                    u8::from(state.ddt_initialized[index])
+                ));
+            }
+            out.push_str(&format!("idt_state {}\n", state.idt_previous.len()));
+            for index in 0..state.idt_previous.len() {
+                out.push_str(&format!(
+                    "{} {}\n",
+                    state.idt_previous[index],
+                    u8::from(state.idt_initialized[index])
+                ));
+            }
+            out.push_str(&format!("limiter_state {}\n", state.limiter_anchor.len()));
+            for index in 0..state.limiter_anchor.len() {
+                out.push_str(&format!(
+                    "{} {}\n",
+                    state.limiter_anchor[index],
+                    u8::from(state.limiter_initialized[index])
+                ));
+            }
+        }
         out
     }
 
@@ -675,6 +1335,52 @@ impl TransientCheckpoint {
             .and_then(|v| v.strip_prefix("0x"))
             .and_then(|v| u64::from_str_radix(v, 16).ok())
             .ok_or_else(|| format!("malformed fingerprint line: '{fingerprint_line}'"))?;
+
+        let netlist_identity = if version >= 8 {
+            let identity_line = lines.next().ok_or("missing netlist identity line")?;
+            let identity = identity_line
+                .strip_prefix("netlist_identity ")
+                .map(str::trim)
+                .ok_or_else(|| format!("malformed netlist identity line: '{identity_line}'"))?;
+            if identity == "none" {
+                None
+            } else if identity.len() == 64
+                && identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                Some(identity.to_string())
+            } else {
+                return Err(format!(
+                    "malformed netlist identity line: '{identity_line}'"
+                ));
+            }
+        } else {
+            None
+        };
+
+        let simulation_identity = if version >= 9 {
+            let identity_line = lines.next().ok_or("missing simulation identity line")?;
+            let identity = identity_line
+                .strip_prefix("simulation_identity ")
+                .map(str::trim)
+                .ok_or_else(|| format!("malformed simulation identity line: '{identity_line}'"))?;
+            if identity == "none" {
+                None
+            } else if identity.len() == 64
+                && identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                Some(identity.to_string())
+            } else {
+                return Err(format!(
+                    "malformed simulation identity line: '{identity_line}'"
+                ));
+            }
+        } else {
+            None
+        };
 
         let time_line = lines.next().ok_or("missing time line")?;
         let time: Value = time_line
@@ -747,6 +1453,34 @@ impl TransientCheckpoint {
         } else {
             Vec::new()
         };
+        let (generated_veriloga_state_available, generated_veriloga_instance_states) =
+            if version >= 7 {
+                let availability_line = lines.next().ok_or_else(|| {
+                    "missing 'generated_veriloga_state_available' line".to_string()
+                })?;
+                let mut fields = availability_line.split_whitespace();
+                if fields.next() != Some("generated_veriloga_state_available") {
+                    return Err(format!(
+                        "malformed generated Verilog-A availability line: '{availability_line}'"
+                    ));
+                }
+                let available = fields
+                    .next()
+                    .ok_or_else(|| {
+                        "generated Verilog-A availability line is missing its boolean".to_string()
+                    })
+                    .and_then(|field| {
+                        parse_checkpoint_bool(field, "generated Verilog-A availability")
+                    })?;
+                if let Some(extra) = fields.next() {
+                    return Err(format!(
+                        "generated Verilog-A availability line has extra field '{extra}'"
+                    ));
+                }
+                (available, read_generated_veriloga_states(&mut lines)?)
+            } else {
+                (false, Vec::new())
+            };
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -757,6 +1491,8 @@ impl TransientCheckpoint {
             time,
             solution: solution_cols.swap_remove(0),
             netlist_fingerprint,
+            netlist_identity,
+            simulation_identity,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -772,6 +1508,8 @@ impl TransientCheckpoint {
             xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
+            generated_veriloga_state_available,
+            generated_veriloga_instance_states,
         };
         checkpoint.validate_numeric_state()?;
         Ok(checkpoint)
@@ -808,6 +1546,8 @@ mod tests {
             time: 1.2345678901234567e-6,
             solution: vec![0.5, -3.25, 1.0e-15, f64::MIN_POSITIVE, -0.0],
             netlist_fingerprint: 0xDEAD_BEEF_0123_4567,
+            netlist_identity: Some("fedcba9876543210".repeat(4)),
+            simulation_identity: Some("abcdef0123456789".repeat(4)),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -823,6 +1563,23 @@ mod tests {
             xspice_instances: Vec::new(),
             xspice_resume_blockers: Vec::new(),
             xspice_instance_states: Vec::new(),
+            generated_veriloga_state_available: true,
+            generated_veriloga_instance_states: vec![GeneratedVerilogAInstanceCheckpoint {
+                instance_name: "xgen1".to_string(),
+                model_name: "generated_model".to_string(),
+                model_identity: "0123456789abcdef".repeat(4),
+                state_version: GENERATED_PERSISTENT_STATE_VERSION,
+                state: GeneratedVerilogAPersistentState {
+                    ddt_previous: vec![-0.0, f64::MIN_POSITIVE],
+                    ddt_older: vec![1.25, -2.5],
+                    ddt_derivative_previous: vec![3.0, -4.0],
+                    ddt_initialized: vec![true, false],
+                    idt_previous: vec![5.5],
+                    idt_initialized: vec![true],
+                    limiter_anchor: vec![-0.75],
+                    limiter_initialized: vec![true],
+                },
+            }],
         }
     }
 
@@ -834,10 +1591,21 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
-            if line.starts_with("lte_reference_mode ") {
+            if version < 8 && line.starts_with("netlist_identity ") {
                 continue;
             }
-            if line.starts_with("lte_signal_global ") || line.starts_with("lte_signal_local ") {
+            if version < 9 && line.starts_with("simulation_identity ") {
+                continue;
+            }
+            if version < 7 && line.starts_with("generated_veriloga_state_available ") {
+                break;
+            }
+            if version < 6 && line.starts_with("lte_reference_mode ") {
+                continue;
+            }
+            if version < 6
+                && (line.starts_with("lte_signal_global ") || line.starts_with("lte_signal_local "))
+            {
                 let count = line
                     .split_whitespace()
                     .nth(1)
@@ -862,6 +1630,18 @@ mod tests {
         assert_eq!(original, restored);
         // Bit-level check on the touchy values (subnormals, negative zero).
         for (a, b) in original.solution.iter().zip(&restored.solution) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        for (a, b) in original.generated_veriloga_instance_states[0]
+            .state
+            .ddt_previous
+            .iter()
+            .zip(
+                &restored.generated_veriloga_instance_states[0]
+                    .state
+                    .ddt_previous,
+            )
+        {
             assert_eq!(a.to_bits(), b.to_bits());
         }
     }
@@ -916,11 +1696,15 @@ mod tests {
         let legacy = TransientCheckpoint::from_text(&legacy_text(&sample(), 5))
             .expect("version-five checkpoint remains readable");
         assert!(!legacy.lte_reference_history_available);
+        assert!(!legacy.generated_veriloga_state_available);
+        assert!(legacy.generated_veriloga_instance_states.is_empty());
 
         let upgraded = TransientCheckpoint::from_text(&legacy.to_text())
             .expect("legacy checkpoint can be re-serialized in the current format");
         assert!(!upgraded.lte_reference_history_available);
         assert_eq!(upgraded.lte_reference_mode, None);
+        assert!(!upgraded.generated_veriloga_state_available);
+        assert!(upgraded.generated_veriloga_instance_states.is_empty());
 
         let mut estimator = LteEstimator::with_tolerances_and_reference(
             1.0e-3,
@@ -980,6 +1764,385 @@ mod tests {
         let err = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect_err("non-finite XSPICE state must fail closed");
         assert!(err.contains("XSPICE"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn generated_state_parser_rejects_invalid_provenance_shape_and_values() {
+        let text = sample().to_text();
+        let err = TransientCheckpoint::from_text(&text.replace(
+            "generated_veriloga_state_available 1",
+            "generated_veriloga_state_available 2",
+        ))
+        .expect_err("availability provenance must be a strict checkpoint boolean");
+        assert!(err.contains("must be 0 or 1"), "unexpected error: {err}");
+
+        let identity = "0123456789abcdef".repeat(4);
+        for invalid_identity in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
+            let malformed = text.replacen(&identity, &invalid_identity, 1);
+            let err = TransientCheckpoint::from_text(&malformed)
+                .expect_err("generated model identity must be lowercase BLAKE3 hex");
+            assert!(
+                err.contains("invalid textual provenance"),
+                "unexpected error for identity {invalid_identity}: {err}"
+            );
+        }
+
+        let err = TransientCheckpoint::from_text(&text.replace(
+            &format!("generated_veriloga_state xgen1 generated_model {identity} 1"),
+            &format!("generated_veriloga_state xgen1 generated_model {identity} 2"),
+        ))
+        .expect_err("unknown generated persistent-state versions must fail closed");
+        assert!(
+            err.contains("unsupported persistent-state version"),
+            "unexpected error: {err}"
+        );
+
+        let err = TransientCheckpoint::from_text(&text.replacen("-0 1.25 3 1", "-0 1.25 3 2", 1))
+            .expect_err("generated initialized state must be a strict boolean");
+        assert!(err.contains("must be 0 or 1"), "unexpected error: {err}");
+
+        let mut inconsistent = sample();
+        inconsistent.generated_veriloga_instance_states[0]
+            .state
+            .ddt_previous
+            .push(0.0);
+        let err = inconsistent
+            .validate_numeric_state()
+            .expect_err("inconsistent generated state lengths must fail closed");
+        assert!(
+            err.contains("inconsistent persistent-state lengths"),
+            "unexpected error: {err}"
+        );
+
+        let mut non_finite = sample();
+        non_finite.generated_veriloga_instance_states[0]
+            .state
+            .limiter_anchor[0] = Value::NAN;
+        let err = non_finite
+            .validate_numeric_state()
+            .expect_err("non-finite generated state must fail closed");
+        assert!(
+            err.contains("non-finite persistent state"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn generated_restore_rejection_leaves_all_reactive_histories_unchanged() {
+        let checkpoint = sample();
+        let mut circuit = Circuit::new();
+        circuit.capacitors.v_prev = vec![91.0, 92.0];
+        circuit.capacitors.v_prev_prev = vec![81.0, 82.0];
+        circuit.capacitors.v_prev_prev_prev = vec![71.0, 72.0];
+        circuit.capacitors.i_prev = vec![61.0, 62.0];
+        circuit.capacitors.i_eq = vec![51.0, 52.0];
+        circuit.inductors.i_prev = vec![41.0];
+        circuit.inductors.i_prev_prev = vec![31.0];
+        circuit.inductors.v_prev = vec![21.0];
+        let before = (
+            circuit.capacitors.v_prev.clone(),
+            circuit.capacitors.v_prev_prev.clone(),
+            circuit.capacitors.v_prev_prev_prev.clone(),
+            circuit.capacitors.i_prev.clone(),
+            circuit.capacitors.i_eq.clone(),
+            circuit.inductors.i_prev.clone(),
+            circuit.inductors.i_prev_prev.clone(),
+            circuit.inductors.v_prev.clone(),
+        );
+
+        let err = checkpoint
+            .inject(&mut circuit)
+            .expect_err("generated instance mismatch must reject the checkpoint");
+        assert!(err.contains("generated Verilog-A checkpoint"));
+        assert_eq!(
+            before,
+            (
+                circuit.capacitors.v_prev,
+                circuit.capacitors.v_prev_prev,
+                circuit.capacitors.v_prev_prev_prev,
+                circuit.capacitors.i_prev,
+                circuit.capacitors.i_eq,
+                circuit.inductors.i_prev,
+                circuit.inductors.i_prev_prev,
+                circuit.inductors.v_prev,
+            ),
+            "checkpoint rejection must occur before any circuit state mutation"
+        );
+    }
+
+    #[test]
+    fn programmatic_netlists_have_complete_semantic_identities() {
+        let netlist = Netlist::default();
+        let identity = netlist_checkpoint_identity(&netlist).expect("semantic identity");
+        let mut checkpoint = sample();
+        checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
+        checkpoint.netlist_identity = Some(identity);
+        checkpoint
+            .validate_for(&netlist)
+            .expect("programmatic AST identity authorizes its own checkpoint");
+    }
+
+    #[test]
+    fn netlist_identity_is_collision_resistant_and_legacy_v7_resume_fails_closed() {
+        let first = Netlist::parse("identity bench\nr1 1 0 1k\n.end\n").expect("first deck parses");
+        let second =
+            Netlist::parse("identity bench\nr1 1 0 2k\n.end\n").expect("second deck parses");
+        let first_identity = netlist_checkpoint_identity(&first).expect("source identity");
+        let second_identity = netlist_checkpoint_identity(&second).expect("source identity");
+        assert_eq!(first_identity.len(), 64);
+        assert_ne!(
+            first_identity, second_identity,
+            "same-shape semantic source changes must alter checkpoint identity"
+        );
+
+        let mut checkpoint = sample();
+        checkpoint.netlist_fingerprint = netlist_fingerprint(&first);
+        checkpoint.netlist_identity = Some(first_identity);
+        checkpoint
+            .validate_for(&first)
+            .expect("matching cryptographic netlist identity validates");
+        let err = checkpoint
+            .validate_for(&second)
+            .expect_err("changed canonical source must be refused");
+        assert!(err.contains("different netlist"), "unexpected error: {err}");
+
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 7))
+            .expect("version-7 checkpoint still parses");
+        let err = legacy
+            .validate_for(&first)
+            .expect_err("legacy FNV-only identity cannot authorize state restore");
+        assert!(
+            err.contains("collision-resistant netlist identity"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn netlist_identity_parser_requires_lowercase_blake3_hex() {
+        let text = sample().to_text();
+        let valid = "fedcba9876543210".repeat(4);
+        for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
+            let err = TransientCheckpoint::from_text(&text.replacen(&valid, &invalid, 1))
+                .expect_err("malformed netlist identity must fail during parsing");
+            assert!(
+                err.contains("malformed netlist identity"),
+                "unexpected error for identity {invalid}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn simulation_identity_parser_requires_lowercase_blake3_hex() {
+        let text = sample().to_text();
+        let valid = "abcdef0123456789".repeat(4);
+        for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
+            let err = TransientCheckpoint::from_text(&text.replacen(&valid, &invalid, 1))
+                .expect_err("malformed simulation identity must fail during parsing");
+            assert!(
+                err.contains("malformed simulation identity"),
+                "unexpected error for identity {invalid}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn elaborated_include_and_public_ast_mutations_change_identity() {
+        let unique = format!(
+            "rspice-checkpoint-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&directory).expect("create checkpoint test directory");
+        let root = directory.join("root.cir");
+        let include = directory.join("part.inc");
+        let source = "include identity\n.include \"part.inc\"\n.end\n";
+        std::fs::write(&include, "r1 1 0 1k\n").expect("write first include");
+        let first = Netlist::parse_with_path(source, &root).expect("first include parses");
+        std::fs::write(&include, "r1 1 0 2k\n").expect("write changed include");
+        let second = Netlist::parse_with_path(source, &root).expect("changed include parses");
+        std::fs::remove_dir_all(&directory).expect("remove checkpoint test directory");
+
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&second),
+            "same root text with changed elaborated include semantics must be rejected"
+        );
+
+        let mut mutated = first.clone();
+        let ElementKind::Resistor { value, .. } = &mut mutated.elements[0].kind else {
+            panic!("included element is a resistor");
+        };
+        *value = 3_000.0;
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&mutated),
+            "public post-parse semantic mutations must alter checkpoint identity"
+        );
+    }
+
+    #[test]
+    fn same_path_external_waveform_content_changes_identity() {
+        let unique = format!(
+            "rspice-checkpoint-pwl-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&directory).expect("create PWL checkpoint test directory");
+        let root = directory.join("root.cir");
+        let waveform = directory.join("wave.csv");
+        let source = "pwl dependency identity\nv1 1 0 pwl file=\"wave.csv\"\nr1 1 0 1k\n.end\n";
+        std::fs::write(&waveform, "0,0\n1e-9,1\n").expect("write first waveform");
+        let netlist = Netlist::parse_with_path(source, &root).expect("PWL deck parses");
+        let first = netlist_checkpoint_identity(&netlist);
+        std::fs::write(&waveform, "0,0\n1e-9,2\n").expect("replace waveform in place");
+        let second = netlist_checkpoint_identity(&netlist);
+        std::fs::remove_dir_all(&directory).expect("remove PWL checkpoint test directory");
+
+        assert_ne!(
+            first, second,
+            "same-path external waveform changes must invalidate checkpoint provenance"
+        );
+    }
+
+    #[test]
+    fn native_waveform_provenance_is_not_masked_by_xspice_virtual_files() {
+        let unique = format!(
+            "rspice-checkpoint-native-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&directory).expect("create native dependency test directory");
+        let root = directory.join("root.cir");
+        let waveform = directory.join("wave.csv");
+        let waveform_key = waveform.to_string_lossy().into_owned();
+        std::fs::write(&waveform, "0,0\n1e-9,1\n").expect("write native waveform");
+        crate::xspice::register_data_file(&waveform_key, "0,0\n1e-9,99\n")
+            .expect("register colliding virtual data file");
+        let netlist = Netlist::parse_with_path(
+            "native dependency identity\nv1 1 0 pwl file=\"wave.csv\"\nr1 1 0 1k\n.end\n",
+            &root,
+        )
+        .expect("PWL deck parses");
+        let first = netlist_checkpoint_identity(&netlist);
+        std::fs::write(&waveform, "0,0\n1e-9,2\n").expect("replace native waveform");
+        let second = netlist_checkpoint_identity(&netlist);
+        crate::xspice::unregister_data_file(&waveform_key)
+            .expect("unregister colliding virtual data file");
+        std::fs::remove_dir_all(&directory).expect("remove native dependency test directory");
+        assert_ne!(
+            first, second,
+            "PWL provenance must follow its native loader"
+        );
+    }
+
+    #[test]
+    fn prepared_behavioral_file_lookup_content_changes_identity() {
+        let unique = format!(
+            "rspice-checkpoint-table-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&directory).expect("create table dependency test directory");
+        let root = directory.join("root.cir");
+        let table = directory.join("wave.dat");
+        std::fs::write(&table, "0 0\n1e-9 1\n").expect("write behavioral table");
+        let mut netlist = Netlist::parse_with_path(
+            "prepared dependency identity\nb1 1 0 v=lookup\nr1 1 0 1k\n.end\n",
+            &root,
+        )
+        .expect("behavioral deck parses");
+        netlist
+            .params
+            .define_global_expression("lookup", "tablefile(\"wave.dat\")", None);
+        let first = netlist_checkpoint_identity(&netlist);
+        std::fs::write(&table, "0 0\n1e-9 2\n").expect("replace behavioral table");
+        let second = netlist_checkpoint_identity(&netlist);
+        std::fs::remove_dir_all(&directory).expect("remove table dependency test directory");
+        assert_ne!(
+            first, second,
+            "prepared parameter-expanded file lookups must bind file contents"
+        );
+    }
+
+    #[test]
+    fn semantic_identity_does_not_advance_live_statistical_stream() {
+        let deck = "statistical identity purity\n\
+                    .subckt sampled a b\n\
+                    r1 a b {aunif(1000,100)}\n\
+                    .ends sampled\n\
+                    x1 1 0 sampled\n\
+                    .end\n";
+        let first = Netlist::parse(deck).expect("first statistical deck parses");
+        let control = Netlist::parse(deck).expect("control statistical deck parses");
+        let _ = netlist_checkpoint_identity(&first).expect("identity computes");
+        assert_eq!(
+            first.params.random().next_uniform().to_bits(),
+            control.params.random().next_uniform().to_bits(),
+            "checkpoint identity calculation must not consume the live deck RNG"
+        );
+    }
+
+    #[test]
+    fn resolved_temperature_dialect_and_model_routing_are_bound() {
+        let netlist = Netlist::parse("config identity\nr1 1 0 1k\n.end\n").unwrap();
+        let base = SimulationConfig::default();
+        let mut checkpoint = sample();
+        checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
+        checkpoint.netlist_identity = netlist_checkpoint_identity(&netlist);
+        checkpoint.simulation_identity = Some(simulation_checkpoint_identity(&base));
+        checkpoint
+            .validate_for_with_config(&netlist, &base)
+            .expect("matching resolved config validates");
+
+        let mut changed_temperature = base.clone();
+        changed_temperature.temperature += 1.0;
+        let error = checkpoint
+            .validate_for_with_config(&netlist, &changed_temperature)
+            .expect_err("temperature mismatch must reject state");
+        assert!(error.contains("simulation configuration"));
+
+        let changed_dialect = base
+            .clone()
+            .with_spice_dialect(crate::engine::SpiceDialect::Xyce);
+        checkpoint
+            .validate_for_with_config(&netlist, &changed_dialect)
+            .expect_err("dialect mismatch must reject state");
+
+        let mut changed_model = base;
+        changed_model.jfet_level2_model = crate::engine::JfetLevel2Model::XyceModifiedShockley;
+        checkpoint
+            .validate_for_with_config(&netlist, &changed_model)
+            .expect_err("resolved model-routing mismatch must reject state");
+    }
+
+    #[test]
+    fn legacy_v8_configuration_identity_fails_closed() {
+        let netlist = Netlist::parse("legacy config\nr1 1 0 1k\n.end\n").unwrap();
+        let mut current = sample();
+        current.netlist_fingerprint = netlist_fingerprint(&netlist);
+        current.netlist_identity = netlist_checkpoint_identity(&netlist);
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&current, 8))
+            .expect("version-8 checkpoint parses");
+        let error = legacy
+            .validate_for_with_config(&netlist, &SimulationConfig::default())
+            .expect_err("v8 has no resolved configuration identity");
+        assert!(error.contains("simulation configuration identity"));
     }
 
     #[test]

@@ -4025,6 +4025,7 @@ dependencies = [
 name = "rspice-veriloga"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "indexmap",
  "libc",
  "log",

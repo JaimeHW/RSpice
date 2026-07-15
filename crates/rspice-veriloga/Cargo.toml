@@ -17,6 +17,7 @@ doctest = false
 thiserror.workspace = true
 log.workspace = true
 serde = { workspace = true, features = ["derive"] }
+blake3 = "1.5"
 
 # Parsing - using nom for professional-grade parsing
 nom.workspace = true
@@ -34,6 +35,7 @@ windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation
 libc = { version = "0.2", optional = true }
 
 [build-dependencies]
+blake3 = "1.5"
 
 [features]
 default = []

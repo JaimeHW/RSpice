@@ -1,5 +1,7 @@
 # Byte-level generation fingerprints must be stable across Windows and Unix checkouts.
 crates/rspice-core/build.rs text eol=lf
+crates/rspice-veriloga/build.rs text eol=lf
+crates/rspice-veriloga/Cargo.toml text eol=lf
 crates/rspice-veriloga/src/** text eol=lf
 models/veriloga/** -text
 
