@@ -7166,6 +7166,32 @@ fn test_xyce_ac_analysis_expression_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_delimited_expression_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_1358/bug_1358_braces.cir",
+            "delimited_expression_family_baseline",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1358/bug_1358_quotes.cir",
+            "delimited_expression_family_wrapper",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should reproduce its quote/braces counterpart through independently simulated exact default PRN output, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_subcircuit_parameter_resolution_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
