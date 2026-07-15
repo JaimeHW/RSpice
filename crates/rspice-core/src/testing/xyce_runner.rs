@@ -22611,7 +22611,7 @@ impl XyceTestRunner {
                         && Self::netlist_device_is_native_legacy_bjt(netlist, &element.name) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, single-device native MOSFET LEVEL=2/6, and native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -27829,60 +27829,81 @@ impl XyceTestRunner {
         netlist: &Netlist,
         instance_name: &str,
     ) -> bool {
-        let direct = Self::elements_native_ac_supported_bulk_mosfet_match_and_count(
-            &netlist.elements,
-            &netlist.models,
-            &[],
-            instance_name,
-        );
-        if direct == (true, 1) {
-            return true;
-        }
-
-        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
-            Self::elements_native_ac_supported_bulk_mosfet_match_and_count(
-                &flattened.elements,
-                &netlist.models,
-                &flattened.scoped_models,
-                instance_name,
-            ) == (true, 1)
-        })
-    }
-
-    fn elements_native_ac_supported_bulk_mosfet_match_and_count(
-        elements: &[crate::netlist::Element],
-        models: &[crate::netlist::ModelDef],
-        scoped_models: &[crate::netlist::ModelDef],
-        instance_name: &str,
-    ) -> (bool, usize) {
         let mut matched = false;
         let mut count = 0usize;
-        for element in elements {
-            let ElementKind::Mosfet { model, .. } = &element.kind else {
+        for element in &netlist.elements {
+            if !matches!(element.kind, ElementKind::Mosfet { .. }) {
                 continue;
-            };
-            let supported = Self::find_model(scoped_models, model)
-                .or_else(|| Self::find_model(models, model))
-                .is_some_and(Self::model_is_native_ac_supported_bulk_mosfet);
-            if !supported {
-                continue;
+            }
+            if !Self::netlist_element_is_native_ac_supported_bulk_mosfet(netlist, element) {
+                return false;
             }
             count += 1;
             matched |= Self::device_instance_names_match(&element.name, instance_name);
         }
-        (matched, count)
+        matched && count == 1
+    }
+
+    fn netlist_element_is_native_ac_supported_bulk_mosfet(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        if element.nodes.len() != 4
+            || *compact_syntax
+            || !deferred_params.is_empty()
+            || !Self::native_ac_classic_mos_instance_params_are_valid(instance_params)
+        {
+            return false;
+        }
+        Self::find_unique_model_in(&netlist.models, model)
+            .is_some_and(Self::model_is_native_ac_supported_bulk_mosfet)
+    }
+
+    fn native_ac_classic_mos_instance_params_are_valid(params: &[(String, Value)]) -> bool {
+        let mut names = BTreeSet::new();
+        params.iter().all(|(name, value)| {
+            value.is_finite()
+                && *value > 0.0
+                && matches!(name.to_ascii_uppercase().as_str(), "L" | "W")
+                && names.insert(name.to_ascii_uppercase())
+        }) && names.contains("L")
+            && names.contains("W")
     }
 
     fn model_is_native_ac_supported_bulk_mosfet(model: &crate::netlist::ModelDef) -> bool {
         if !matches!(
             model.model_type.to_ascii_uppercase().as_str(),
             "NMOS" | "PMOS"
-        ) {
+        ) || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
             return false;
         }
-        Self::numeric_param_value(&model.params, "LEVEL").is_some_and(|level| {
-            level.is_finite() && ((level - 2.0).abs() <= 1.0e-9 || (level - 6.0).abs() <= 1.0e-9)
-        })
+        let mut names = BTreeSet::new();
+        model.params.iter().all(|(name, value)| {
+            value.is_finite()
+                && match name.to_ascii_uppercase().as_str() {
+                    "LEVEL" => {
+                        [1.0, 2.0, 3.0, 6.0].contains(value) && names.insert("LEVEL".to_string())
+                    }
+                    "TOX" => *value > 0.0 && names.insert("TOX".to_string()),
+                    _ => false,
+                }
+        }) && names.contains("LEVEL")
     }
 
     fn elements_device_is_native_classic_jfet(
@@ -41404,6 +41425,269 @@ Q1 c b 0 QN
                 .is_err(),
             "a relational family name must not bypass the qualified nonlinear-device policy"
         );
+    }
+
+    #[test]
+    fn classic_mos_ac_admission_is_exact_and_fail_closed() {
+        fn source_for(level: f64, tox: bool) -> String {
+            format!(
+                "classic MOS AC admission fixture\n\
+                 VDD 1 0 5\n\
+                 VIN 2 0 DC 2 AC .1\n\
+                 R1 1 3 25k\n\
+                 R2 3 0 100k\n\
+                 M1 3 2 0 0 NM W=4u L=1u\n\
+                 .MODEL NM NMOS (LEVEL={level}{})\n\
+                 .AC DEC 10 100 1e9\n\
+                 .PRINT AC V(3)\n\
+                 .END\n",
+                if tox { " TOX=1e-7" } else { "" }
+            )
+        }
+
+        fn parses(level: f64, tox: bool) -> Netlist {
+            Netlist::parse(&source_for(level, tox)).expect("classic MOS AC fixture parses")
+        }
+
+        fn admitted(netlist: &Netlist) -> bool {
+            XyceTestRunner::netlist_device_is_single_native_ac_supported_bulk_mosfet(netlist, "M1")
+        }
+
+        for model_type in ["NMOS", "PMOS"] {
+            for level in [1.0, 2.0, 3.0, 6.0] {
+                for tox in [false, true] {
+                    let mut netlist = parses(level, tox);
+                    netlist.models[0].model_type = model_type.to_string();
+                    assert!(
+                        admitted(&netlist),
+                        "{model_type} LEVEL={level} TOX-present={tox} fixture"
+                    );
+                }
+            }
+        }
+
+        for level in [0.0, 1.000_000_000_5, 1.5, 4.0, 5.0, 9.0] {
+            assert!(!admitted(&parses(level, false)), "LEVEL={level}");
+        }
+
+        let baseline = parses(1.0, true);
+        let reject = |netlist: &Netlist, reason: &str| {
+            assert!(!admitted(netlist), "must reject {reason}");
+        };
+        assert!(
+            !XyceTestRunner::netlist_device_is_single_native_ac_supported_bulk_mosfet(
+                &baseline, "MISSING"
+            ),
+            "the requested instance must be the sole admitted MOSFET"
+        );
+
+        let mut no_mos = baseline.clone();
+        no_mos
+            .elements
+            .retain(|element| !matches!(element.kind, ElementKind::Mosfet { .. }));
+        reject(&no_mos, "a netlist without a MOSFET");
+
+        let mut missing_model = baseline.clone();
+        missing_model.models.clear();
+        reject(&missing_model, "missing model binding");
+
+        for invalid_level in [f64::NAN, f64::INFINITY] {
+            let mut mutated = baseline.clone();
+            mutated.models[0]
+                .params
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+                .expect("LEVEL exists")
+                .1 = invalid_level;
+            reject(&mutated, "non-finite LEVEL");
+        }
+
+        for unsupported in ["M", "NF", "AD", "OFF", "TEMP"] {
+            let mut mutated = baseline.clone();
+            let ElementKind::Mosfet {
+                instance_params, ..
+            } = &mut mutated
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case("M1"))
+                .expect("M1 exists")
+                .kind
+            else {
+                panic!("M1 remains a MOSFET");
+            };
+            instance_params.push((unsupported.to_string(), 1.0));
+            reject(&mutated, unsupported);
+        }
+
+        for invalid_geometry in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut mutated = baseline.clone();
+            let ElementKind::Mosfet {
+                instance_params, ..
+            } = &mut mutated
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case("M1"))
+                .expect("M1 exists")
+                .kind
+            else {
+                panic!("M1 remains a MOSFET");
+            };
+            instance_params
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case("L"))
+                .expect("L exists")
+                .1 = invalid_geometry;
+            reject(&mutated, "non-positive or non-finite geometry");
+        }
+
+        for missing in ["L", "W"] {
+            let mut mutated = baseline.clone();
+            let ElementKind::Mosfet {
+                instance_params, ..
+            } = &mut mutated
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case("M1"))
+                .expect("M1 exists")
+                .kind
+            else {
+                panic!("M1 remains a MOSFET");
+            };
+            instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case(missing));
+            reject(&mutated, "missing required geometry");
+        }
+
+        let mut duplicate_geometry = baseline.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut duplicate_geometry
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists")
+            .kind
+        else {
+            panic!("M1 remains a MOSFET");
+        };
+        instance_params.push(("l".to_string(), 2.0e-6));
+        reject(&duplicate_geometry, "duplicate geometry");
+
+        let mut deferred_geometry = baseline.clone();
+        let ElementKind::Mosfet {
+            deferred_params, ..
+        } = &mut deferred_geometry
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists")
+            .kind
+        else {
+            panic!("M1 remains a MOSFET");
+        };
+        deferred_params.push(("W".to_string(), "WIDTH".to_string()));
+        reject(&deferred_geometry, "deferred geometry");
+
+        let mut compact = baseline.clone();
+        let mos = compact
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists");
+        let ElementKind::Mosfet { compact_syntax, .. } = &mut mos.kind else {
+            panic!("M1 remains a MOSFET");
+        };
+        *compact_syntax = true;
+        reject(&compact, "compact MOS syntax");
+
+        for node_count in [3, 5] {
+            let mut mutated = baseline.clone();
+            let mos = mutated
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case("M1"))
+                .expect("M1 exists");
+            mos.nodes.resize(node_count, "extra".to_string());
+            reject(&mutated, "non-four-terminal topology");
+        }
+
+        let mut duplicate_model = baseline.clone();
+        let mut second_model = duplicate_model.models[0].clone();
+        second_model.name = second_model.name.to_ascii_lowercase();
+        duplicate_model.models.push(second_model);
+        reject(&duplicate_model, "ambiguous model binding");
+
+        let mut second_mos = baseline.clone();
+        let mut extra = second_mos
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists")
+            .clone();
+        extra.name = "M2".to_string();
+        second_mos.elements.push(extra);
+        reject(&second_mos, "multiple MOS instances");
+
+        for (name, value) in [("LEVEL", 1.0), ("TOX", 2.0e-7), ("BOGUS", 1.0)] {
+            let mut mutated = baseline.clone();
+            mutated.models[0].params.push((name.to_string(), value));
+            reject(&mutated, "duplicate or unknown model parameter");
+        }
+
+        for invalid_tox in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut mutated = baseline.clone();
+            mutated.models[0]
+                .params
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case("TOX"))
+                .expect("TOX exists")
+                .1 = invalid_tox;
+            reject(&mutated, "invalid TOX");
+        }
+
+        let mut missing_level = baseline.clone();
+        missing_level.models[0]
+            .params
+            .retain(|(name, _)| !name.eq_ignore_ascii_case("LEVEL"));
+        reject(&missing_level, "missing LEVEL");
+
+        let mut wrong_type = baseline.clone();
+        wrong_type.models[0].model_type = "NPN".to_string();
+        reject(&wrong_type, "wrong model type");
+
+        let mut nonnumeric_payloads = Vec::new();
+        let mut expression = baseline.clone();
+        expression.models[0]
+            .expr_params
+            .push(("KP".to_string(), "{K}".to_string()));
+        nonnumeric_payloads.push(expression);
+        let mut string = baseline.clone();
+        string.models[0]
+            .string_params
+            .push(("VERSION".to_string(), "classic".to_string()));
+        nonnumeric_payloads.push(string);
+        let mut string_vector = baseline.clone();
+        string_vector.models[0]
+            .string_vector_params
+            .push(("S".to_string(), vec!["x".to_string()]));
+        nonnumeric_payloads.push(string_vector);
+        let mut real_vector = baseline.clone();
+        real_vector.models[0]
+            .real_vector_params
+            .push(("R".to_string(), vec![1.0]));
+        nonnumeric_payloads.push(real_vector);
+        let mut real_vector_expr = baseline.clone();
+        real_vector_expr.models[0]
+            .real_vector_expr_params
+            .push(("RE".to_string(), vec!["{X}".to_string()]));
+        nonnumeric_payloads.push(real_vector_expr);
+        let mut integer_vector = baseline;
+        integer_vector.models[0]
+            .integer_vector_params
+            .push(("I".to_string(), vec![1]));
+        nonnumeric_payloads.push(integer_vector);
+        for payload in &nonnumeric_payloads {
+            reject(payload, "non-numeric model payload");
+        }
     }
 
     #[test]
