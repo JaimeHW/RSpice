@@ -6428,6 +6428,26 @@ fn test_xyce_level2_mos_gain_stage_ac_waveform_oracle() {
 }
 
 #[test]
+fn test_xyce_level1_and_level3_mos_gain_stage_ac_waveform_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, level) in [
+        ("Netlists/ACtests/mos/gain-stage1.cir", 1),
+        ("Netlists/ACtests/mos/gain-stage3.cir", 3),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should match the complete native Xyce LEVEL={level} MOS gain-stage AC waveform oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, "wrapper_static_fd_prn_ac");
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_level6_mos_gain_stage_ac_waveform_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
