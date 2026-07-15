@@ -688,6 +688,44 @@ struct XyceBaselineFamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceSharedSteppedDcFamilyContract {
+    family: String,
+    owner_path: PathBuf,
+    baseline_path: PathBuf,
+    member_paths: Vec<PathBuf>,
+    prn_reference_path: PathBuf,
+    res_reference_path: PathBuf,
+    role: XyceSharedSteppedDcFamilyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSharedSteppedDcFamilyRole {
+    Owner,
+    Baseline(XyceSharedSteppedDcRepresentation),
+    Member(XyceSharedSteppedDcRepresentation),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSharedSteppedDcRepresentation {
+    DirectIdentity,
+    HierarchicalIdentity,
+    DirectTransform,
+    TransformInSubcircuitBody,
+    FunctionCallInSubcircuitBody,
+    FunctionCallAtInstance,
+}
+
+impl XyceSharedSteppedDcFamilyRole {
+    fn contract(self) -> &'static str {
+        match self {
+            Self::Owner => "shared_stepped_dc_oracle_family_owner",
+            Self::Baseline(_) => "shared_stepped_dc_oracle_family_baseline",
+            Self::Member(_) => "shared_stepped_dc_oracle_family_member",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct XyceAgeCapFamilyContract {
     relational: XyceBaselineFamilyContract,
     role: XyceAgeCapFamilyRole,
@@ -1330,6 +1368,7 @@ impl XyceBaselineFamilyKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticDcContract {
     PlainStatic,
+    SharedStepOracle,
     PlainCsv,
     PlainCsd,
     WrapperDefault,
@@ -1350,6 +1389,8 @@ impl XyceStaticDcContract {
         match (self, stepped) {
             (Self::PlainStatic, false) => "static_prn_dc",
             (Self::PlainStatic, true) => "static_prn_step_dc",
+            (Self::SharedStepOracle, false) => "shared_step_oracle_prn_dc",
+            (Self::SharedStepOracle, true) => "shared_step_oracle_prn_step_dc",
             (Self::PlainCsv, false) => "static_csv_dc",
             (Self::PlainCsv, true) => "static_csv_step_dc",
             (Self::PlainCsd, false) => "static_csd_dc",
@@ -1382,7 +1423,10 @@ impl XyceStaticDcContract {
     }
 
     fn compares_step_res_reference(self) -> bool {
-        matches!(self, Self::WrapperDefault | Self::WrapperRaw)
+        matches!(
+            self,
+            Self::SharedStepOracle | Self::WrapperDefault | Self::WrapperRaw
+        )
     }
 
     fn reference_extension(self) -> &'static str {
@@ -2482,6 +2526,28 @@ impl XyceTestRunner {
 
         if let Some(contract) = self.stepped_ic_reference_contract(deck) {
             let result = self.run_stepped_ic_reference_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.shared_stepped_dc_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_shared_stepped_dc_family_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "shared_stepped_dc_oracle_family",
+                    format!("shared stepped-DC family qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
             if self.config.verbose {
                 println!(
                     "{} [{}] {}",
@@ -9939,6 +10005,85 @@ impl XyceTestRunner {
             .parent()
             .ok_or_else(|| "primary reference path has no parent directory".to_string())?;
         Ok(parent.join(side_path))
+    }
+
+    fn run_shared_stepped_dc_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSharedSteppedDcFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract_name = contract.role.contract();
+        if contract
+            .member_paths
+            .first()
+            .is_none_or(|path| !Self::same_path(path, &contract.baseline_path))
+            || contract.prn_reference_path.with_extension("res") != contract.res_reference_path
+            || !contract.owner_path.is_file()
+        {
+            return self.failure_result(
+                deck,
+                start,
+                contract_name,
+                "shared stepped-DC family contract lost its qualified owner/baseline/oracle invariants".to_string(),
+                Vec::new(),
+            );
+        }
+        let targets = if matches!(contract.role, XyceSharedSteppedDcFamilyRole::Owner) {
+            contract.member_paths.clone()
+        } else {
+            vec![deck.path.clone()]
+        };
+        for target in targets {
+            let static_plan = match self.static_dc_plan_for_path(&target, ExpressionDialect::Xyce) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "qualified family '{}' member '{}' no longer plans: {err}",
+                            contract.family,
+                            self.display_path(&target)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let plan = XyceExecutionPlan {
+                deck_path: static_plan.deck_path,
+                execution_dir: static_plan.execution_dir,
+                reference_path: contract.prn_reference_path.clone(),
+                measurement_reference_paths: Vec::new(),
+                continuous_measurement_reference_paths: Vec::new(),
+                measurement_tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                source: static_plan.source,
+                expression_dialect: static_plan.expression_dialect,
+                print: static_plan.print,
+                dc: static_plan.dc,
+                dc_data: static_plan.dc_data,
+                steps: static_plan.steps,
+                contract: XyceStaticDcContract::SharedStepOracle,
+            };
+            let mut result = self.run_static_prn_dc_plan(deck, plan, start);
+            if !result.passed || result.expected_unsupported {
+                result.passed = false;
+                result.expected_unsupported = false;
+                result.contract = contract_name.to_string();
+                result.error = Some(format!(
+                    "family '{}' member '{}' failed its direct shared .prn/.res oracle contract: {}",
+                    contract.family,
+                    self.display_path(&target),
+                    result
+                        .error
+                        .as_deref()
+                        .unwrap_or("unknown comparison failure")
+                ));
+                return result;
+            }
+        }
+        self.passed_result(deck, start, contract_name)
     }
 
     fn run_static_prn_step_dc_plan(
@@ -40330,6 +40475,980 @@ impl XyceTestRunner {
         })
     }
 
+    fn shared_stepped_dc_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceSharedSteppedDcFamilyContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative.starts_with("netlists/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let relative_parent = relative.rsplit_once('/')?.0;
+        let deck_stem = deck
+            .path
+            .file_stem()
+            .and_then(|stem| stem.to_str())?
+            .to_ascii_lowercase();
+        let manifest_anchor_files = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter_map(|path| {
+                let (candidate_parent, file_name) = path.rsplit_once('/')?;
+                (candidate_parent == relative_parent)
+                    .then(|| file_name.strip_suffix(".cir").map(|stem| (file_name, stem)))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        let manifest_named_candidate = manifest_anchor_files.len() == 2
+            && manifest_anchor_files.iter().any(|(_, anchor)| {
+                deck_stem == *anchor
+                    || deck_stem.strip_prefix(anchor).is_some_and(|suffix| {
+                        suffix.len() == 1 && suffix.as_bytes()[0].is_ascii_digit()
+                    })
+            });
+        let manifest_family_candidate = manifest_named_candidate
+            && (|| {
+                let expected = manifest_anchor_files
+                    .iter()
+                    .flat_map(|(file_name, _)| {
+                        [
+                            format!("{file_name}.prn").to_ascii_lowercase(),
+                            format!("{file_name}.res").to_ascii_lowercase(),
+                        ]
+                    })
+                    .collect::<BTreeSet<_>>();
+                let output_subdirectory = Path::new(&deck.relative_path)
+                    .parent()?
+                    .strip_prefix("Netlists")
+                    .ok()?;
+                let output_parent = self.root.join("OutputData").join(output_subdirectory);
+                let mut actual = BTreeSet::new();
+                for entry in fs::read_dir(output_parent).ok()? {
+                    let entry = entry.ok()?;
+                    if !entry.file_type().ok()?.is_file() {
+                        return None;
+                    }
+                    let name = entry.file_name().to_str()?.to_ascii_lowercase();
+                    if !actual.insert(name) {
+                        return None;
+                    }
+                }
+                (actual == expected).then_some(())
+            })()
+            .is_some();
+        let entries = match fs::read_dir(parent) {
+            Ok(entries) => entries,
+            Err(err) if manifest_family_candidate => {
+                return Some(Err(format!(
+                    "failed to read candidate shared stepped-DC family directory: {err}"
+                )));
+            }
+            Err(_) => return None,
+        };
+        let mut cir_paths = Vec::new();
+        let mut empty_cir_paths = BTreeSet::new();
+        let mut folded_names = BTreeSet::new();
+        let mut unexpected_entries = 0_usize;
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    unexpected_entries += 1;
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let is_circuit = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"));
+            let Ok(file_type) = entry.file_type() else {
+                unexpected_entries += 1;
+                continue;
+            };
+            if !file_type.is_file() || !is_circuit {
+                unexpected_entries += 1;
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                unexpected_entries += 1;
+                continue;
+            };
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    unexpected_entries += 1;
+                    continue;
+                }
+            };
+            if !folded_names.insert(name.to_ascii_lowercase()) {
+                return Some(Err(
+                    "case-colliding .cir names are not admissible".to_string()
+                ));
+            }
+            if metadata.len() == 0 {
+                empty_cir_paths.insert(path.clone());
+            }
+            cir_paths.push(path);
+        }
+        if !cir_paths
+            .iter()
+            .any(|path| Self::same_path(path, &deck.path))
+        {
+            if manifest_family_candidate {
+                return Some(Err(
+                    "candidate shared stepped-DC family does not contain its requested physical record"
+                        .to_string(),
+                ));
+            }
+            return None;
+        }
+        let manifest_anchors = cir_paths
+            .iter()
+            .filter(|path| {
+                empty_cir_paths.contains(*path)
+                    && self.requires_upstream_wrapper(&self.relative_key(path))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if manifest_anchors.len() != 2 {
+            if manifest_family_candidate {
+                return Some(Err(
+                    "candidate shared stepped-DC family must retain both zero-byte manifest anchors"
+                        .to_string(),
+                ));
+            }
+            return None;
+        }
+        let physical_family_candidate = cir_paths.len() == 8
+            && (|| {
+                let mut claimed = BTreeSet::new();
+                let mut sizes = Vec::new();
+                for owner_path in &manifest_anchors {
+                    let owner_stem = owner_path.file_stem()?.to_str()?.to_ascii_lowercase();
+                    let mut indices = BTreeSet::new();
+                    claimed.insert(owner_path.clone());
+                    for path in &cir_paths {
+                        if Self::same_path(path, owner_path) {
+                            continue;
+                        }
+                        let stem = path.file_stem()?.to_str()?.to_ascii_lowercase();
+                        let Some(suffix) = stem.strip_prefix(&owner_stem) else {
+                            continue;
+                        };
+                        if suffix.len() != 1 || !suffix.as_bytes()[0].is_ascii_digit() {
+                            continue;
+                        }
+                        let index = usize::from(suffix.as_bytes()[0] - b'0');
+                        if !indices.insert(index) || !claimed.insert(path.clone()) {
+                            return None;
+                        }
+                    }
+                    if !matches!(indices.len(), 2 | 4)
+                        || indices.iter().copied().ne(0..indices.len())
+                    {
+                        return None;
+                    }
+                    sizes.push(indices.len());
+                }
+                sizes.sort_unstable();
+                (sizes == [2, 4] && claimed.len() == cir_paths.len()).then_some(())
+            })()
+            .is_some();
+        if !manifest_family_candidate && !physical_family_candidate {
+            return None;
+        }
+
+        Some((|| {
+            if unexpected_entries > 0 {
+                return Err(format!(
+                    "shared stepped-DC family directory contains {unexpected_entries} unexpected, unreadable, non-.cir, or non-regular entries"
+                ));
+            }
+            if cir_paths.len() != 8 {
+                return Err(format!(
+                    "directory census requires exactly eight .cir files, found {}",
+                    cir_paths.len()
+                ));
+            }
+            if cir_paths.iter().any(|path| {
+                let empty = empty_cir_paths.contains(path);
+                let wrapper = self.requires_upstream_wrapper(&self.relative_key(path));
+                empty != wrapper
+            }) {
+                return Err(
+                    "only the two zero-byte family anchors may carry wrapper-manifest contracts"
+                        .to_string(),
+                );
+            }
+
+            let mut anchors = manifest_anchors;
+            anchors.sort_by_key(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_ascii_lowercase())
+            });
+            let mut groups = Vec::new();
+            let mut claimed = BTreeSet::new();
+            for owner_path in anchors {
+                let owner_stem = owner_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .ok_or_else(|| "family anchor has a non-UTF-8 stem".to_string())?;
+                let owner_folded = owner_stem.to_ascii_lowercase();
+                let mut numbered = BTreeMap::new();
+                for path in &cir_paths {
+                    if Self::same_path(path, &owner_path) {
+                        continue;
+                    }
+                    let stem = path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .ok_or_else(|| "family member has a non-UTF-8 stem".to_string())?;
+                    let stem_folded = stem.to_ascii_lowercase();
+                    let Some(suffix) = stem_folded.strip_prefix(&owner_folded) else {
+                        continue;
+                    };
+                    if suffix.len() != 1 || !suffix.as_bytes()[0].is_ascii_digit() {
+                        continue;
+                    }
+                    let index = usize::from(suffix.as_bytes()[0] - b'0');
+                    if numbered.insert(index, path.clone()).is_some() {
+                        return Err(format!(
+                            "family '{}' has duplicate numeric member index {index}",
+                            owner_stem
+                        ));
+                    }
+                }
+                if !matches!(numbered.len(), 2 | 4)
+                    || numbered.keys().copied().ne(0..numbered.len())
+                {
+                    return Err(format!(
+                        "family '{}' requires contiguous one-digit members 0..N with cardinality two or four",
+                        owner_stem
+                    ));
+                }
+                let members = numbered.into_values().collect::<Vec<_>>();
+                if !claimed.insert(owner_path.clone())
+                    || members.iter().any(|path| !claimed.insert(path.clone()))
+                {
+                    return Err("a .cir file is claimed by more than one family".to_string());
+                }
+                groups.push((owner_path, members));
+            }
+            if claimed.len() != cir_paths.len() {
+                return Err("every .cir file must be claimed by exactly one anchor".to_string());
+            }
+            let mut sizes = groups
+                .iter()
+                .map(|(_, members)| members.len())
+                .collect::<Vec<_>>();
+            sizes.sort_unstable();
+            if sizes != [2, 4] {
+                return Err(
+                    "directory must contain exactly one two-member and one four-member family"
+                        .to_string(),
+                );
+            }
+
+            let expected_artifacts = groups
+                .iter()
+                .flat_map(|(owner, _)| {
+                    let name = owner.file_name().unwrap().to_string_lossy();
+                    [
+                        format!("{name}.prn").to_ascii_lowercase(),
+                        format!("{name}.res").to_ascii_lowercase(),
+                    ]
+                })
+                .collect::<BTreeSet<_>>();
+            let first_output = self
+                .static_output_reference_path(&groups[0].0, "prn")
+                .ok_or_else(|| "cannot map anchor into OutputData".to_string())?;
+            let output_parent = first_output
+                .parent()
+                .ok_or_else(|| "anchor OutputData path has no parent".to_string())?;
+            let output_entries = fs::read_dir(output_parent)
+                .map_err(|err| format!("failed to read shared OutputData directory: {err}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| format!("failed to enumerate shared OutputData directory: {err}"))?;
+            let mut actual_artifacts = BTreeSet::new();
+            for entry in output_entries {
+                if !entry.file_type().map_err(|err| err.to_string())?.is_file() {
+                    return Err(
+                        "shared OutputData directory may contain only four anchor files"
+                            .to_string(),
+                    );
+                }
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                if !actual_artifacts.insert(name) {
+                    return Err(
+                        "case-colliding shared OutputData artifacts are not admissible".to_string(),
+                    );
+                }
+            }
+            if actual_artifacts != expected_artifacts {
+                return Err(
+                    "shared OutputData census must contain exactly each anchor's .prn and .res"
+                        .to_string(),
+                );
+            }
+
+            let mut selected = None;
+            for (owner_path, member_paths) in groups {
+                let belongs = Self::same_path(&deck.path, &owner_path)
+                    || member_paths
+                        .iter()
+                        .any(|path| Self::same_path(path, &deck.path));
+                let mut plans = Vec::with_capacity(member_paths.len());
+                let mut netlists = Vec::with_capacity(member_paths.len());
+                let mut topologies = Vec::with_capacity(member_paths.len());
+                for member_path in &member_paths {
+                    if fs::metadata(member_path)
+                        .map_err(|err| format!("failed to inspect family member: {err}"))?
+                        .len()
+                        == 0
+                        || self.requires_upstream_wrapper(&self.relative_key(member_path))
+                    {
+                        return Err("numbered family members must be nonempty non-wrapper decks"
+                            .to_string());
+                    }
+                    for extension in ["prn", "res"] {
+                        if self
+                            .static_output_reference_path(member_path, extension)
+                            .is_some_and(|path| path.exists())
+                        {
+                            return Err(format!(
+                                "numbered member '{}' must not own a .{extension} oracle",
+                                member_path.display()
+                            ));
+                        }
+                    }
+                    let plan =
+                        self.static_dc_plan_for_path(member_path, ExpressionDialect::Xyce)?;
+                    if plan.execution_dir.is_some()
+                        || plan.print_format.is_some()
+                        || plan.dc_data.is_some()
+                        || plan.steps.is_empty()
+                        || plan.print.probes.is_empty()
+                        || !plan.diagnostics.is_empty()
+                    {
+                        return Err(format!(
+                            "member '{}' is not a diagnostic-free default-PRN stepped-DC plan",
+                            member_path.display()
+                        ));
+                    }
+                    let netlist = Self::parse_xyce_netlist(&plan.source, member_path)
+                        .map_err(|err| format!("failed to parse family member: {err}"))?;
+                    topologies.push(Self::shared_stepped_dc_topology(&netlist)?);
+                    netlists.push(netlist);
+                    plans.push(plan);
+                }
+                let (representations, expected) = if member_paths.len() == 2 {
+                    let direct =
+                        Self::shared_stepped_dc_representation(&netlists[0], &plans[0], None)?;
+                    let hierarchical =
+                        Self::shared_stepped_dc_representation(&netlists[1], &plans[1], None)?;
+                    (
+                        vec![direct.0, hierarchical.0],
+                        vec![
+                            XyceSharedSteppedDcRepresentation::DirectIdentity,
+                            XyceSharedSteppedDcRepresentation::HierarchicalIdentity,
+                        ],
+                    )
+                } else {
+                    let direct =
+                        Self::shared_stepped_dc_representation(&netlists[0], &plans[0], None)?;
+                    let transform = direct.1.as_deref().ok_or_else(|| {
+                        "four-member family baseline does not define a non-identity transform"
+                            .to_string()
+                    })?;
+                    let mut found = vec![direct.0];
+                    for (netlist, plan) in netlists.iter().zip(&plans).skip(1) {
+                        found.push(
+                            Self::shared_stepped_dc_representation(netlist, plan, Some(transform))?
+                                .0,
+                        );
+                    }
+                    (
+                        found,
+                        vec![
+                            XyceSharedSteppedDcRepresentation::DirectTransform,
+                            XyceSharedSteppedDcRepresentation::TransformInSubcircuitBody,
+                            XyceSharedSteppedDcRepresentation::FunctionCallInSubcircuitBody,
+                            XyceSharedSteppedDcRepresentation::FunctionCallAtInstance,
+                        ],
+                    )
+                };
+                if representations != expected {
+                    return Err(format!(
+                        "family '{}' does not contain the required ordered semantic representations",
+                        owner_path.display()
+                    ));
+                }
+                if topologies.into_iter().collect::<BTreeSet<_>>().len() != 1 {
+                    return Err(format!(
+                        "family '{}' members do not share identical ordered source/load topology",
+                        owner_path.display()
+                    ));
+                }
+                let baseline_plan = &plans[0];
+                if plans.iter().skip(1).any(|plan| {
+                    plan.print.probes != baseline_plan.print.probes
+                        || !Self::dc_sweeps_match_exactly(&plan.dc, &baseline_plan.dc)
+                        || !Self::step_commands_match_exactly(&plan.steps, &baseline_plan.steps)
+                }) {
+                    return Err(format!(
+                        "family '{}' members do not share identical PRINT, DC, and STEP policies",
+                        owner_path.display()
+                    ));
+                }
+                let global_bits = netlists
+                    .iter()
+                    .zip(&plans)
+                    .map(|(netlist, plan)| {
+                        let step_name = &plan.steps[0].name;
+                        netlist
+                            .params
+                            .numeric_parameters()
+                            .into_iter()
+                            .find(|(name, _)| name.eq_ignore_ascii_case(step_name))
+                            .map(|(_, value)| value.to_bits())
+                    })
+                    .collect::<Option<BTreeSet<_>>>()
+                    .ok_or_else(|| {
+                        "every member must retain its stepped global's initial value".to_string()
+                    })?;
+                if global_bits.len() != 1 {
+                    return Err(
+                        "all members must share one identical stepped-global initial value"
+                            .to_string(),
+                    );
+                }
+                let formal_default_bits = netlists
+                    .iter()
+                    .filter_map(|netlist| netlist.subcircuits.first())
+                    .map(|subcircuit| subcircuit.params[0].1.to_bits())
+                    .collect::<BTreeSet<_>>();
+                if formal_default_bits.len() != 1 {
+                    return Err(
+                        "all hierarchical members must share one identical formal default"
+                            .to_string(),
+                    );
+                }
+                let source_bits = netlists
+                    .iter()
+                    .filter_map(|netlist| {
+                        netlist
+                            .elements
+                            .iter()
+                            .find_map(|element| match element.kind {
+                                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(
+                                    value,
+                                )) => Some(value.to_bits()),
+                                _ => None,
+                            })
+                    })
+                    .collect::<BTreeSet<_>>();
+                if source_bits.len() != 1 {
+                    return Err(
+                        "all members must share one identical finite DC source value".to_string(),
+                    );
+                }
+                let prn_reference_path = self
+                    .static_output_reference_path(&owner_path, "prn")
+                    .filter(|path| path.is_file())
+                    .ok_or_else(|| "family anchor is missing its shared .prn oracle".to_string())?;
+                let res_reference_path = self
+                    .static_output_reference_path(&owner_path, "res")
+                    .filter(|path| path.is_file())
+                    .ok_or_else(|| "family anchor is missing its shared .res oracle".to_string())?;
+                if belongs {
+                    let member_index = member_paths
+                        .iter()
+                        .position(|path| Self::same_path(path, &deck.path));
+                    let role = match member_index {
+                        None => XyceSharedSteppedDcFamilyRole::Owner,
+                        Some(0) => XyceSharedSteppedDcFamilyRole::Baseline(representations[0]),
+                        Some(index) => {
+                            XyceSharedSteppedDcFamilyRole::Member(representations[index])
+                        }
+                    };
+                    selected = Some(XyceSharedSteppedDcFamilyContract {
+                        family: owner_path
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string(),
+                        baseline_path: member_paths[0].clone(),
+                        owner_path,
+                        member_paths,
+                        prn_reference_path,
+                        res_reference_path,
+                        role,
+                    });
+                }
+            }
+            selected
+                .ok_or_else(|| "deck is not claimed by the qualified directory census".to_string())
+        })())
+    }
+
+    fn step_commands_match_exactly(left: &[StepCommand], right: &[StepCommand]) -> bool {
+        fn sweep_matches(left: &StepSweep, right: &StepSweep) -> bool {
+            match (left, right) {
+                (
+                    StepSweep::Linear {
+                        start: a,
+                        stop: b,
+                        step: c,
+                    },
+                    StepSweep::Linear {
+                        start: d,
+                        stop: e,
+                        step: f,
+                    },
+                ) => [a, b, c]
+                    .into_iter()
+                    .zip([d, e, f])
+                    .all(|(x, y)| x.to_bits() == y.to_bits()),
+                (
+                    StepSweep::Decade {
+                        points_per_decade: a,
+                        start: b,
+                        stop: c,
+                    },
+                    StepSweep::Decade {
+                        points_per_decade: d,
+                        start: e,
+                        stop: f,
+                    },
+                )
+                | (
+                    StepSweep::Octave {
+                        points_per_octave: a,
+                        start: b,
+                        stop: c,
+                    },
+                    StepSweep::Octave {
+                        points_per_octave: d,
+                        start: e,
+                        stop: f,
+                    },
+                ) => a == d && b.to_bits() == e.to_bits() && c.to_bits() == f.to_bits(),
+                (StepSweep::List(a), StepSweep::List(b)) => {
+                    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())
+                }
+                (StepSweep::Data { table_name: a }, StepSweep::Data { table_name: b }) => {
+                    a.eq_ignore_ascii_case(b)
+                }
+                _ => false,
+            }
+        }
+        left.len() == right.len()
+            && left.iter().zip(right).all(|(a, b)| {
+                a.target == b.target
+                    && a.name.eq_ignore_ascii_case(&b.name)
+                    && a.param_name.as_deref().map(str::to_ascii_lowercase)
+                        == b.param_name.as_deref().map(str::to_ascii_lowercase)
+                    && sweep_matches(&a.sweep, &b.sweep)
+            })
+    }
+
+    fn shared_stepped_dc_topology(netlist: &Netlist) -> Result<Vec<String>, String> {
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| {
+                matches!(
+                    &element.kind,
+                    ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(_))
+                )
+            })
+            .ok_or_else(|| "semantic member has no independent DC source".to_string())?;
+        let source_value = match &source.kind {
+            ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) => *value,
+            _ => unreachable!("source was selected by its element kind"),
+        };
+        let source_nodes = source
+            .nodes
+            .iter()
+            .map(|node| node.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        if !source_value.is_finite()
+            || source_nodes.len() != 2
+            || source_nodes.iter().any(String::is_empty)
+            || source_nodes[0] == "0"
+            || source_nodes[1] != "0"
+            || source_nodes[0] == source_nodes[1]
+        {
+            return Err(
+                "semantic member requires one finite, non-degenerate two-terminal DC source oriented from a non-ground node to ground".to_string(),
+            );
+        }
+
+        let load = netlist
+            .elements
+            .iter()
+            .find(|element| {
+                matches!(
+                    &element.kind,
+                    ElementKind::Resistor { .. } | ElementKind::Subcircuit { .. }
+                )
+            })
+            .ok_or_else(|| "semantic member has no resistor load or subcircuit load".to_string())?;
+        let load_nodes = load
+            .nodes
+            .iter()
+            .map(|node| node.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        if load_nodes != source_nodes {
+            return Err(
+                "semantic member load terminals must match the ordered DC-source terminals"
+                    .to_string(),
+            );
+        }
+
+        if let ElementKind::Subcircuit { subckt_name, .. } = &load.kind {
+            let [subcircuit] = netlist.subcircuits.as_slice() else {
+                return Err("semantic hierarchical member requires one subcircuit".to_string());
+            };
+            let [body_element] = subcircuit.elements.as_slice() else {
+                return Err(
+                    "semantic hierarchical member requires one subcircuit body element".to_string(),
+                );
+            };
+            let ports = subcircuit
+                .ports
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let body_nodes = body_element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if !subcircuit.name.eq_ignore_ascii_case(subckt_name)
+                || ports.len() != 2
+                || ports.iter().any(|port| port.is_empty() || port == "0")
+                || ports[0] == ports[1]
+                || !matches!(&body_element.kind, ElementKind::Resistor { .. })
+                || ports != body_nodes
+            {
+                return Err(
+                    "semantic subcircuit resistor terminals must match its ordered two-port interface"
+                        .to_string(),
+                );
+            }
+        }
+
+        Ok(source_nodes)
+    }
+
+    fn shared_stepped_dc_representation(
+        netlist: &Netlist,
+        plan: &XyceStaticDcPlan,
+        expected_transform: Option<&str>,
+    ) -> Result<(XyceSharedSteppedDcRepresentation, Option<String>), String> {
+        let [step] = plan.steps.as_slice() else {
+            return Err("semantic family member requires exactly one .STEP command".to_string());
+        };
+        if step.target != StepTarget::Param || step.name.trim().is_empty() {
+            return Err("semantic family .STEP must target one named global parameter".to_string());
+        }
+        let globals = netlist.params.numeric_parameters();
+        if globals.len() != 1
+            || !globals[0].0.eq_ignore_ascii_case(&step.name)
+            || !globals[0].1.is_finite()
+            || !Self::source_has_sole_global_parameter_definition(&plan.source, &step.name)
+            || !netlist.models.is_empty()
+            || netlist.elements.len() != 2
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(format!(
+                "semantic member must contain one true finite .GLOBAL_PARAM stepped definition and no auxiliary state outside its two-element DC harness (numeric={}, models={}, elements={}, data={}, ic={}, nodeset={}, measure={}, veriloga={}, spef={})",
+                globals.len(),
+                netlist.models.len(),
+                netlist.elements.len(),
+                netlist.data_tables.len(),
+                netlist.initial_conditions.len(),
+                netlist.node_sets.len(),
+                netlist.measurements.len(),
+                netlist.veriloga_includes.len(),
+                netlist.spef_includes.len()
+            ));
+        }
+        let top_resistor = netlist
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor {
+                    value_expr,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                    ..
+                } if instance_params.is_empty() && deferred_params.is_empty() => {
+                    Some((element, value_expr.as_deref()))
+                }
+                _ => None,
+            });
+        let top_instance = netlist
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } => Some((subckt_name, params)),
+                _ => None,
+            });
+        if netlist
+            .elements
+            .iter()
+            .filter(|element| {
+                matches!(
+                    element.kind,
+                    ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(_))
+                )
+            })
+            .count()
+            != 1
+        {
+            return Err(
+                "semantic member requires exactly one independent DC voltage source".to_string(),
+            );
+        }
+        let functions = netlist.params.all_functions();
+        if let Some((resistor, expression)) = top_resistor {
+            if top_instance.is_some() || !netlist.subcircuits.is_empty() || !functions.is_empty() {
+                return Err(
+                    "direct semantic baseline may not contain hierarchy or functions".to_string(),
+                );
+            }
+            if Self::source_has_bare_resistor_parameter_value(
+                &plan.source,
+                &resistor.name,
+                &step.name,
+            ) {
+                return Ok((XyceSharedSteppedDcRepresentation::DirectIdentity, None));
+            }
+            let expression = expression.ok_or_else(|| {
+                "direct transform baseline must retain a parameter expression".to_string()
+            })?;
+            let transform = Self::alpha_normalize_expression(expression, &[(&step.name, "$x")]);
+            if transform == "$x" || transform.is_empty() {
+                return Err("direct transform baseline must be non-identity".to_string());
+            }
+            return Ok((
+                XyceSharedSteppedDcRepresentation::DirectTransform,
+                Some(transform),
+            ));
+        }
+        let (subckt_name, instance_params) = top_instance.ok_or_else(|| {
+            "semantic member requires one resistor or subcircuit instance".to_string()
+        })?;
+        let [subckt] = netlist.subcircuits.as_slice() else {
+            return Err("hierarchical semantic member requires exactly one subcircuit".to_string());
+        };
+        if !subckt.name.eq_ignore_ascii_case(subckt_name)
+            || subckt.ports.len() != 2
+            || subckt.elements.len() != 1
+            || subckt.params.len() != 1
+            || !subckt.params[0].1.is_finite()
+            || !subckt.expr_params.is_empty()
+            || !subckt.string_params.is_empty()
+            || !subckt.body_params.is_empty()
+            || !subckt.body_expr_params.is_empty()
+            || !subckt.body_string_params.is_empty()
+            || !subckt.body_functions.is_empty()
+            || !subckt.local_options.is_empty()
+            || !subckt.initial_conditions.is_empty()
+            || !subckt.node_sets.is_empty()
+            || !subckt.nested_subcircuits.is_empty()
+        {
+            return Err(
+                "hierarchical semantic member has an unqualified subcircuit signature".to_string(),
+            );
+        }
+        let formal_name = &subckt.params[0].0;
+        let [(binding_name, ParametricValue::Expression(binding))] = instance_params.as_slice()
+        else {
+            return Err(
+                "subcircuit instance requires one deferred formal-parameter binding".to_string(),
+            );
+        };
+        if !binding_name.eq_ignore_ascii_case(formal_name) {
+            return Err(
+                "subcircuit instance binding must name its sole formal parameter".to_string(),
+            );
+        }
+        let resistor_expression = match &subckt.elements[0].kind {
+            ElementKind::Resistor {
+                value_expr: Some(expression),
+                model: None,
+                instance_params,
+                deferred_params,
+                ..
+            } if instance_params.is_empty() && deferred_params.is_empty() => expression.as_str(),
+            _ => return Err("subcircuit must contain one expression-valued resistor".to_string()),
+        };
+        let binding_to_global = Self::alpha_normalize_expression(binding, &[(&step.name, "$g")]);
+        let resistor_to_formal =
+            Self::alpha_normalize_expression(resistor_expression, &[(formal_name, "$f")]);
+        if functions.is_empty() {
+            if expected_transform.is_none()
+                && binding_to_global == "$g"
+                && resistor_to_formal == "$f"
+            {
+                return Ok((
+                    XyceSharedSteppedDcRepresentation::HierarchicalIdentity,
+                    None,
+                ));
+            }
+            if let Some(transform) = expected_transform {
+                let body =
+                    Self::alpha_normalize_expression(resistor_expression, &[(formal_name, "$x")]);
+                if binding_to_global == "$g" && body == transform {
+                    return Ok((
+                        XyceSharedSteppedDcRepresentation::TransformInSubcircuitBody,
+                        None,
+                    ));
+                }
+            }
+            return Err("unrecognized hierarchy-only transform representation".to_string());
+        }
+        let [function] = functions.as_slice() else {
+            return Err(
+                "function representation requires exactly one user-defined function".to_string(),
+            );
+        };
+        let [argument] = function.args.as_slice() else {
+            return Err("family transform function requires exactly one argument".to_string());
+        };
+        let transform = expected_transform.ok_or_else(|| {
+            "identity family may not introduce a user-defined transform".to_string()
+        })?;
+        if Self::alpha_normalize_expression(&function.body, &[(argument, "$x")]) != transform {
+            return Err(
+                "function body is not alpha-equivalent to the direct transform".to_string(),
+            );
+        }
+        let resistor_call = Self::alpha_normalize_expression(
+            resistor_expression,
+            &[(formal_name, "$f"), (&function.name, "$fn")],
+        );
+        let binding_call = Self::alpha_normalize_expression(
+            binding,
+            &[(&step.name, "$g"), (&function.name, "$fn")],
+        );
+        match (binding_call.as_str(), resistor_call.as_str()) {
+            ("$g", "$fn($f)") => Ok((
+                XyceSharedSteppedDcRepresentation::FunctionCallInSubcircuitBody,
+                None,
+            )),
+            ("$fn($g)", "$f") => Ok((
+                XyceSharedSteppedDcRepresentation::FunctionCallAtInstance,
+                None,
+            )),
+            _ => Err("unrecognized function placement in hierarchical transform".to_string()),
+        }
+    }
+
+    fn source_has_bare_resistor_parameter_value(
+        source: &str,
+        resistor_name: &str,
+        parameter_name: &str,
+    ) -> bool {
+        let mut matching_lines = source.lines().filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('*') {
+                return None;
+            }
+            let fields = line.split_ascii_whitespace().collect::<Vec<_>>();
+            fields
+                .first()
+                .is_some_and(|name| name.eq_ignore_ascii_case(resistor_name))
+                .then_some(fields)
+        });
+        let Some(fields) = matching_lines.next() else {
+            return false;
+        };
+        matching_lines.next().is_none() && {
+            fields.len() == 4
+                && fields[3]
+                    .trim_matches(['{', '}'])
+                    .eq_ignore_ascii_case(parameter_name)
+        }
+    }
+
+    fn source_has_sole_global_parameter_definition(source: &str, parameter_name: &str) -> bool {
+        let mut definitions = source.lines().filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('*') {
+                return None;
+            }
+            let compact = line
+                .chars()
+                .filter(|character| !character.is_ascii_whitespace())
+                .collect::<String>();
+            compact
+                .get(..13)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".global_param"))
+                .then_some(compact)
+        });
+        let Some(definition) = definitions.next() else {
+            return false;
+        };
+        if definitions.next().is_some() {
+            return false;
+        }
+        let Some(assignment) = definition.get(13..) else {
+            return false;
+        };
+        let Some((name, expression)) = assignment.split_once('=') else {
+            return false;
+        };
+        !expression.is_empty()
+            && !expression.contains(',')
+            && name.eq_ignore_ascii_case(parameter_name)
+    }
+
+    fn alpha_normalize_expression(text: &str, substitutions: &[(&str, &str)]) -> String {
+        let mut result = String::new();
+        let mut token = String::new();
+        let flush = |token: &mut String, result: &mut String| {
+            if token.is_empty() {
+                return;
+            }
+            if let Some((_, replacement)) = substitutions
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(token))
+            {
+                result.push_str(replacement);
+            } else {
+                result.push_str(&token.to_ascii_lowercase());
+            }
+            token.clear();
+        };
+        for character in text.chars() {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                token.push(character);
+            } else {
+                flush(&mut token, &mut result);
+                if !character.is_ascii_whitespace() && character != '{' && character != '}' {
+                    result.push(character.to_ascii_lowercase());
+                }
+            }
+        }
+        flush(&mut token, &mut result);
+        result
+    }
+
     fn stepped_ic_reference_contract(
         &self,
         deck: &XyceDeck,
@@ -53515,5 +54634,239 @@ R2 2 0 1
         );
 
         fs::remove_dir_all(&temp_root).expect("remove nested-include fixture");
+    }
+
+    #[test]
+    fn shared_stepped_dc_family_roles_and_mutations_are_fail_closed() {
+        let corpus_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("xyce");
+        let family_relative = Path::new("Certification_Tests").join("BUG_1801");
+        let family_dir = corpus_root.join("Netlists").join(&family_relative);
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let deck = |root: &Path, name: &str| XyceDeck {
+            path: root.join("Netlists").join(&family_relative).join(name),
+            relative_path: format!(
+                "Netlists/{}/{}",
+                family_relative.to_string_lossy().replace('\\', "/"),
+                name
+            ),
+            section: XyceDeckSection::Netlists,
+        };
+        let roles = [
+            ("bug_1801_A.cir", XyceSharedSteppedDcFamilyRole::Owner),
+            (
+                "bug_1801_A0.cir",
+                XyceSharedSteppedDcFamilyRole::Baseline(
+                    XyceSharedSteppedDcRepresentation::DirectIdentity,
+                ),
+            ),
+            (
+                "bug_1801_A1.cir",
+                XyceSharedSteppedDcFamilyRole::Member(
+                    XyceSharedSteppedDcRepresentation::HierarchicalIdentity,
+                ),
+            ),
+            ("bug_1801_B.cir", XyceSharedSteppedDcFamilyRole::Owner),
+            (
+                "bug_1801_B0.cir",
+                XyceSharedSteppedDcFamilyRole::Baseline(
+                    XyceSharedSteppedDcRepresentation::DirectTransform,
+                ),
+            ),
+            (
+                "bug_1801_B1.cir",
+                XyceSharedSteppedDcFamilyRole::Member(
+                    XyceSharedSteppedDcRepresentation::TransformInSubcircuitBody,
+                ),
+            ),
+            (
+                "bug_1801_B2.cir",
+                XyceSharedSteppedDcFamilyRole::Member(
+                    XyceSharedSteppedDcRepresentation::FunctionCallInSubcircuitBody,
+                ),
+            ),
+            (
+                "bug_1801_B3.cir",
+                XyceSharedSteppedDcFamilyRole::Member(
+                    XyceSharedSteppedDcRepresentation::FunctionCallAtInstance,
+                ),
+            ),
+        ];
+        for (name, role) in roles {
+            let candidate = deck(&corpus_root, name);
+            let contract = runner
+                .shared_stepped_dc_family_contract(&candidate)
+                .expect("family recognized")
+                .expect("family qualifies");
+            assert_eq!(contract.role, role, "unexpected role for {name}");
+            assert_eq!(contract.baseline_path, contract.member_paths[0]);
+            let result = runner.run_discovered_test(&candidate);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "{name}: {:?}",
+                result.error
+            );
+            assert!(
+                result.mismatches.is_empty(),
+                "{name}: unexpected mismatches"
+            );
+        }
+        for relative_path in [
+            "Netlists/Certification_Tests/BUG_1957/mutindlin_even.cir",
+            "Netlists/Certification_Tests/BUG_39_SON/agauss.cir",
+        ] {
+            let candidate = XyceDeck {
+                path: corpus_root.join(relative_path),
+                relative_path: relative_path.to_string(),
+                section: XyceDeckSection::Netlists,
+            };
+            assert!(
+                runner
+                    .shared_stepped_dc_family_contract(&candidate)
+                    .is_none(),
+                "unrelated two-anchor directory must not be claimed: {relative_path}"
+            );
+        }
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!(
+            "rspice-shared-step-dc-{}-{nonce}",
+            std::process::id()
+        ));
+        let temp_family = temp_root.join("Netlists").join(&family_relative);
+        let temp_output = temp_root.join("OutputData").join(&family_relative);
+        fs::create_dir_all(&temp_family).expect("create family fixture");
+        fs::create_dir_all(&temp_output).expect("create oracle fixture");
+        for entry in fs::read_dir(&family_dir).expect("read source family") {
+            let entry = entry.expect("read family entry");
+            fs::copy(entry.path(), temp_family.join(entry.file_name())).expect("copy family deck");
+        }
+        for entry in fs::read_dir(corpus_root.join("OutputData").join(&family_relative))
+            .expect("read source oracles")
+        {
+            let entry = entry.expect("read oracle entry");
+            fs::copy(entry.path(), temp_output.join(entry.file_name()))
+                .expect("copy family oracle");
+        }
+        fs::write(temp_root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_1801/bug_1801_A.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_1801/bug_1801_B.cir\trequires_upstream_wrapper\n")
+            .expect("write wrapper manifest");
+        let anchor = deck(&temp_root, "bug_1801_A.cir");
+        let assert_rejected = |reason: &str| {
+            let mutated = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+            assert!(
+                matches!(
+                    mutated.shared_stepped_dc_family_contract(&anchor),
+                    Some(Err(_))
+                ),
+                "mutation accepted: {reason}"
+            );
+        };
+
+        let unexpected_artifact = temp_family.join("unexpected.txt");
+        fs::write(&unexpected_artifact, "not part of the admitted family")
+            .expect("write unexpected family artifact");
+        assert_rejected("unexpected Netlists artifact");
+        fs::remove_file(unexpected_artifact).expect("remove unexpected family artifact");
+
+        let b3 = temp_family.join("bug_1801_B3.cir");
+        let b3_source = fs::read_to_string(&b3).expect("read B3");
+        fs::remove_file(&b3).expect("remove B3");
+        assert_rejected("non-contiguous members");
+        let missing_member = deck(&temp_root, "bug_1801_B3.cir");
+        let missing_member_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        assert!(
+            matches!(
+                missing_member_runner.shared_stepped_dc_family_contract(&missing_member),
+                Some(Err(_))
+            ),
+            "cleanly absent candidate member must fail closed"
+        );
+        fs::write(&b3, &b3_source).expect("restore B3");
+
+        let b_owner = temp_family.join("bug_1801_B.cir");
+        fs::remove_file(&b_owner).expect("remove B owner anchor");
+        assert_rejected("missing manifest anchor");
+        fs::write(&b_owner, "").expect("restore B owner anchor");
+
+        fs::write(&b_owner, "* anchor must remain empty\n").expect("make B owner nonempty");
+        assert_rejected("nonempty manifest anchor");
+        fs::write(&b_owner, "").expect("restore empty B owner anchor");
+
+        let b2 = temp_family.join("bug_1801_B2.cir");
+        let b2_source = fs::read_to_string(&b2).expect("read B2");
+        let ordinary = b2_source.replacen(".global_param", ".param", 1);
+        assert_ne!(ordinary, b2_source);
+        fs::write(&b2, ordinary).expect("mutate global kind");
+        assert_rejected("ordinary parameter");
+        fs::write(&b2, &b2_source).expect("restore B2");
+
+        let a0 = temp_family.join("bug_1801_A0.cir");
+        let a0_source = fs::read_to_string(&a0).expect("read A0");
+        let degenerate_source = a0_source
+            .replacen("R1 1 0", "R1 0 0", 1)
+            .replacen("V1 1 0", "V1 0 0", 1);
+        assert_ne!(degenerate_source, a0_source);
+        fs::write(&a0, degenerate_source).expect("mutate source and load to ground-ground");
+        assert_rejected("degenerate source and load topology");
+        fs::write(&a0, &a0_source).expect("restore A0 topology");
+
+        let default_mutation = b3_source.replacen("resistance=100k", "resistance=101k", 1);
+        assert_ne!(default_mutation, b3_source);
+        fs::write(&b3, default_mutation).expect("mutate formal default");
+        assert_rejected("formal-default mismatch");
+        fs::write(&b3, &b3_source).expect("restore B3 again");
+
+        let member_oracle = temp_output.join("bug_1801_A0.cir.prn");
+        fs::write(&member_oracle, "forbidden").expect("write member oracle");
+        assert_rejected("member oracle");
+        fs::remove_file(member_oracle).expect("remove member oracle");
+
+        let a1 = temp_family.join("bug_1801_A1.cir");
+        let a1_source = fs::read_to_string(&a1).expect("read A1");
+        let topology_mutation = a1_source.replacen("X1 1 0", "X1 2 0", 1);
+        assert_ne!(topology_mutation, a1_source);
+        fs::write(&a1, topology_mutation).expect("mutate top-level topology");
+        assert_rejected("top-level topology mismatch");
+        fs::write(&a1, &a1_source).expect("restore A1 topology");
+
+        let port_mutation = a1_source.replacen("R1 a b", "R1 b a", 1);
+        assert_ne!(port_mutation, a1_source);
+        fs::write(&a1, port_mutation).expect("mutate subcircuit port mapping");
+        assert_rejected("subcircuit port mapping mismatch");
+        fs::write(&a1, &a1_source).expect("restore A1 port mapping");
+
+        let duplicate_ports = a1_source
+            .replacen(".subckt ressub a b", ".subckt ressub a a", 1)
+            .replacen("R1 a b", "R1 a a", 1);
+        assert_ne!(duplicate_ports, a1_source);
+        fs::write(&a1, duplicate_ports).expect("mutate subcircuit to duplicate ports");
+        assert_rejected("duplicate subcircuit ports");
+        fs::write(&a1, &a1_source).expect("restore distinct A1 ports");
+
+        let non_finite_source = a1_source.replacen("V1 1 0 5V", "V1 1 0 1e309", 1);
+        assert_ne!(non_finite_source, a1_source);
+        fs::write(&a1, non_finite_source).expect("mutate source to infinity");
+        assert_rejected("non-finite source");
+        fs::write(&a1, &a1_source).expect("restore finite A1 source");
+
+        let print_mutation = a1_source.replacen(".print dc V(1) I(V1)", ".print dc V(1)", 1);
+        assert_ne!(print_mutation, a1_source);
+        fs::write(&a1, print_mutation).expect("mutate PRINT");
+        assert_rejected("PRINT mismatch");
+        fs::write(&a1, &a1_source).expect("restore A1 PRINT policy");
+
+        let hidden_family = temp_root.join("temporarily-unreadable-family");
+        fs::rename(&temp_family, &hidden_family).expect("hide candidate family directory");
+        assert_rejected("unreadable candidate family directory");
+        fs::rename(&hidden_family, &temp_family).expect("restore candidate family directory");
+
+        fs::remove_dir_all(&temp_root).expect("remove shared family fixture");
     }
 }
