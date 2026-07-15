@@ -7055,6 +7055,47 @@ fn test_xyce_scalar_passive_temperature_coefficient_override_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_transient_analysis_expression_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/ISSUE_160/baseline.cir",
+        "Netlists/Certification_Tests/ISSUE_160/baseline2.cir",
+        "Netlists/Certification_Tests/ISSUE_160/baseline3.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass as the independently simulated numeric member of its transient-analysis expression family, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "transient_analysis_expression_family_baseline",
+            "{relative} should report the strict baseline-family contract"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+
+    for relative in [
+        "Netlists/Certification_Tests/ISSUE_160/tranExpr.cir",
+        "Netlists/Certification_Tests/ISSUE_160/tranExpr2.cir",
+        "Netlists/Certification_Tests/ISSUE_160/tranExpr3.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should reproduce its independently simulated numeric counterpart through parameterized .TRAN fields, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "transient_analysis_expression_family_wrapper",
+            "{relative} should report the strict wrapper-family contract"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
