@@ -434,6 +434,14 @@ struct XyceStaticAcPlan {
 }
 
 #[derive(Debug, Clone)]
+struct XyceRelationalAcPlan {
+    deck_path: PathBuf,
+    source: String,
+    print: XycePrintRequest,
+    ac: XyceAcAnalysis,
+}
+
+#[derive(Debug, Clone)]
 struct XyceStaticNoisePlan {
     deck_path: PathBuf,
     source: String,
@@ -775,6 +783,14 @@ struct XyceDcAnalysisExpressionSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceAcAnalysisExpressionSnapshot {
+    representation: XyceAcAnalysisRepresentation,
+    parameter_bits: BTreeMap<String, u64>,
+    nonrepresentation_source: Vec<String>,
+    footer_suppressed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
@@ -791,6 +807,11 @@ enum XyceStrictDcFamilySnapshot {
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     SubcktParameterPrecedence(XyceSubcktParameterPrecedenceSnapshot),
     SubcktParameterResolution(XyceSubcktParameterResolutionSnapshot),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum XyceStrictAcFamilySnapshot {
+    AcAnalysisExpression(XyceAcAnalysisExpressionSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -872,6 +893,12 @@ enum XyceDcAnalysisRepresentation {
     ParameterExpression,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAcAnalysisRepresentation {
+    DirectNumeric,
+    ParameterExpression,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct XyceRelationalElementFingerprint {
     kind: String,
@@ -896,6 +923,7 @@ enum XyceBjtExternalNodeRepresentation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
+    AcAnalysisExpression,
     BjtExternalNode,
     DcAnalysisExpression,
     SinExpression,
@@ -913,12 +941,14 @@ enum XyceBaselineFamilyKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyAnalysis {
+    Ac,
     Dc,
     Tran,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyComparison {
+    AcComparator(XyceAcComparatorTolerance),
     Toleranced,
     TolerancedStrict,
     Exact,
@@ -942,6 +972,13 @@ impl XyceBaselineFamilyComparison {
         matches!(self, Self::Exact | Self::ExactPrn)
     }
 
+    fn ac_comparator_tolerance(self) -> Option<XyceAcComparatorTolerance> {
+        match self {
+            Self::AcComparator(tolerance) => Some(tolerance),
+            _ => None,
+        }
+    }
+
     fn compares_serialized_prn_exactly(self) -> bool {
         matches!(self, Self::ExactPrn)
     }
@@ -958,6 +995,7 @@ impl XyceBaselineFamilyComparison {
 impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
+            Self::AcAnalysisExpression => "AC_ANALYSIS_EXPRESSION",
             Self::BjtExternalNode => "BJT_EXTNODE",
             Self::DcAnalysisExpression => "DC_ANALYSIS_EXPRESSION",
             Self::SinExpression => "SIN_EXPRESSION",
@@ -976,6 +1014,7 @@ impl XyceBaselineFamilyKind {
 
     fn wrapper_contract(self) -> &'static str {
         match self {
+            Self::AcAnalysisExpression => "ac_analysis_expression_family_wrapper",
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
             Self::DcAnalysisExpression => "dc_analysis_expression_family_wrapper",
             Self::SinExpression => "sin_expression_family_wrapper",
@@ -994,6 +1033,7 @@ impl XyceBaselineFamilyKind {
 
     fn baseline_contract(self) -> &'static str {
         match self {
+            Self::AcAnalysisExpression => "ac_analysis_expression_family_baseline",
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
             Self::DcAnalysisExpression => "dc_analysis_expression_family_baseline",
             Self::SinExpression => "sin_expression_family_baseline",
@@ -1021,7 +1061,8 @@ impl XyceBaselineFamilyKind {
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
-            Self::BjtExternalNode
+            Self::AcAnalysisExpression
+            | Self::BjtExternalNode
             | Self::DcAnalysisExpression
             | Self::SinExpression
             | Self::ParamExpression
@@ -1225,6 +1266,55 @@ struct XyceComparisonTolerance {
     relative: f64,
     absolute: f64,
     zero: Option<f64>,
+}
+
+/// Point-wise tolerances used by Xyce 7.10's `ACComparator.pl`.  The values
+/// are stored as IEEE-754 bits so a relational family contract can carry an
+/// exact, validated sidecar policy while remaining `Eq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceAcComparatorTolerance {
+    absolute_bits: u64,
+    relative_bits: u64,
+    zero_bits: u64,
+    frequency_relative_bits: u64,
+}
+
+impl XyceAcComparatorTolerance {
+    fn new(
+        absolute: Value,
+        relative: Value,
+        zero: Value,
+        frequency_relative: Value,
+    ) -> Result<Self, String> {
+        if !absolute.is_finite()
+            || !relative.is_finite()
+            || !zero.is_finite()
+            || !frequency_relative.is_finite()
+            || absolute < 0.0
+            || relative < 0.0
+            || zero < 0.0
+            || frequency_relative < 0.0
+        {
+            return Err(format!(
+                "ACComparator tolerances must be finite and nonnegative, got abs={absolute}, rel={relative}, zero={zero}, freqrel={frequency_relative}"
+            ));
+        }
+        Ok(Self {
+            absolute_bits: absolute.to_bits(),
+            relative_bits: relative.to_bits(),
+            zero_bits: zero.to_bits(),
+            frequency_relative_bits: frequency_relative.to_bits(),
+        })
+    }
+
+    fn values(self) -> (Value, Value, Value, Value) {
+        (
+            Value::from_bits(self.absolute_bits),
+            Value::from_bits(self.relative_bits),
+            Value::from_bits(self.zero_bits),
+            Value::from_bits(self.frequency_relative_bits),
+        )
+    }
 }
 
 impl XyceComparisonTolerance {
@@ -3554,6 +3644,41 @@ impl XyceTestRunner {
             frequency_bound,
             steps,
             contract,
+        })
+    }
+
+    fn relational_ac_plan_for_path(&self, path: &Path) -> Result<XyceRelationalAcPlan, String> {
+        let source = fs::read_to_string(path)
+            .map_err(|err| format!("failed to read relational AC deck: {err}"))?;
+        if Self::contains_control_block(&source) {
+            return Err(
+                "relational AC comparison does not interpret simulator control blocks".to_string(),
+            );
+        }
+        Self::reject_unsupported_source_directives(&source)?;
+        let output = Self::canonical_print_output_request(&source, "AC", false)?
+            .ok_or_else(|| "deck has no .PRINT AC statement with static columns".to_string())?;
+        if output.format.is_some() || output.file.is_some() || output.probes.is_empty() {
+            return Err(
+                "relational AC comparison requires one nonempty primary .PRINT AC using default PRN output"
+                    .to_string(),
+            );
+        }
+        let print = XycePrintRequest {
+            probes: output.probes,
+        };
+        let netlist = Self::parse_xyce_netlist(&source, path)
+            .map_err(|err| format!("netlist parser rejected relational AC deck: {err}"))?;
+        let ac = Self::single_ac_analysis(&netlist)?;
+        if ac.data_points().is_some() || !Self::step_commands(&netlist)?.is_empty() {
+            return Err("relational AC comparison does not admit .AC DATA or .STEP".to_string());
+        }
+        Self::validate_static_ac_contract(&netlist, &ac, &print)?;
+        Ok(XyceRelationalAcPlan {
+            deck_path: path.to_path_buf(),
+            source,
+            print,
+            ac,
         })
     }
 
@@ -10025,6 +10150,10 @@ impl XyceTestRunner {
     ) -> Result<XyceBaselineFamilyAnalysis, String> {
         let source = fs::read_to_string(baseline_path)
             .map_err(|err| format!("failed to read baseline deck: {err}"))?;
+        let ac_outputs = Self::print_output_requests(&source, "AC")?
+            .into_iter()
+            .filter(|request| request.file.is_none())
+            .count();
         let dc_outputs = Self::print_output_requests(&source, "DC")?
             .into_iter()
             .filter(|request| request.file.is_none())
@@ -10034,15 +10163,16 @@ impl XyceTestRunner {
             .filter(|request| request.file.is_none())
             .count();
 
-        match (dc_outputs, tran_outputs) {
-            (1, 0) => Ok(XyceBaselineFamilyAnalysis::Dc),
-            (0, 1) => Ok(XyceBaselineFamilyAnalysis::Tran),
-            (0, 0) => Err(
-                "deck has neither one primary .PRINT DC nor one primary .PRINT TRAN output"
+        match (ac_outputs, dc_outputs, tran_outputs) {
+            (1, 0, 0) => Ok(XyceBaselineFamilyAnalysis::Ac),
+            (0, 1, 0) => Ok(XyceBaselineFamilyAnalysis::Dc),
+            (0, 0, 1) => Ok(XyceBaselineFamilyAnalysis::Tran),
+            (0, 0, 0) => Err(
+                "deck has neither one primary .PRINT AC, one primary .PRINT DC, nor one primary .PRINT TRAN output"
                     .to_string(),
             ),
-            (dc, tran) => Err(format!(
-                "deck has {dc} primary .PRINT DC output(s) and {tran} primary .PRINT TRAN output(s); family analysis selection requires exactly one unambiguous primary output"
+            (ac, dc, tran) => Err(format!(
+                "deck has {ac} primary .PRINT AC output(s), {dc} primary .PRINT DC output(s), and {tran} primary .PRINT TRAN output(s); family analysis selection requires exactly one unambiguous primary output"
             )),
         }
     }
@@ -10094,7 +10224,8 @@ impl XyceTestRunner {
                     XyceStaticTranContract::WrapperStatic
                 )
             ),
-            XyceBaselineFamilyKind::BjtExternalNode
+            XyceBaselineFamilyKind::AcAnalysisExpression
+            | XyceBaselineFamilyKind::BjtExternalNode
             | XyceBaselineFamilyKind::DcAnalysisExpression
             | XyceBaselineFamilyKind::PassiveResPrimaryValue
             | XyceBaselineFamilyKind::SubcktParameterPrecedence
@@ -10121,6 +10252,39 @@ impl XyceTestRunner {
             && baseline.start.map(Value::to_bits) == target.start.map(Value::to_bits)
             && baseline.max_step.map(Value::to_bits) == target.max_step.map(Value::to_bits)
             && baseline.uic == target.uic
+    }
+
+    fn ac_analyses_match_exactly(baseline: &Netlist, target: &Netlist) -> bool {
+        match (baseline.analyses.as_slice(), target.analyses.as_slice()) {
+            (
+                [
+                    AnalysisCommand::Ac {
+                        variation: baseline_variation,
+                        points: baseline_points,
+                        start_freq: baseline_start,
+                        stop_freq: baseline_stop,
+                    },
+                ],
+                [
+                    AnalysisCommand::Ac {
+                        variation: target_variation,
+                        points: target_points,
+                        start_freq: target_start,
+                        stop_freq: target_stop,
+                    },
+                ],
+            ) => {
+                baseline_variation == target_variation
+                    && baseline_points == target_points
+                    && baseline_start.is_finite()
+                    && baseline_stop.is_finite()
+                    && target_start.is_finite()
+                    && target_stop.is_finite()
+                    && baseline_start.to_bits() == target_start.to_bits()
+                    && baseline_stop.to_bits() == target_stop.to_bits()
+            }
+            _ => false,
+        }
     }
 
     fn baseline_family_qualification_result(
@@ -11393,6 +11557,20 @@ impl XyceTestRunner {
                 );
             }
         };
+        if contract.kind == XyceBaselineFamilyKind::AcAnalysisExpression
+            && analysis != XyceBaselineFamilyAnalysis::Ac
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' requires an AC analysis",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if matches!(
             contract.kind,
             XyceBaselineFamilyKind::BjtExternalNode
@@ -11431,6 +11609,9 @@ impl XyceTestRunner {
                 ),
                 Vec::new(),
             );
+        }
+        if analysis == XyceBaselineFamilyAnalysis::Ac {
+            return self.run_ac_baseline_family_contract(deck, contract, start);
         }
         if analysis == XyceBaselineFamilyAnalysis::Tran {
             let baseline_plan = match self.static_tran_family_plan_for_path(
@@ -11721,6 +11902,464 @@ impl XyceTestRunner {
                 wrapper_contract,
                 format!(
                     "{} {kind_name} family '{}' mismatch(es)",
+                    all_mismatches.len(),
+                    contract.family
+                ),
+                all_mismatches,
+            )
+        }
+    }
+
+    fn strict_ac_family_snapshot(
+        kind: XyceBaselineFamilyKind,
+        netlist: &Netlist,
+    ) -> Result<XyceStrictAcFamilySnapshot, String> {
+        match kind {
+            XyceBaselineFamilyKind::AcAnalysisExpression => {
+                Self::ac_analysis_expression_snapshot(netlist)
+                    .map(XyceStrictAcFamilySnapshot::AcAnalysisExpression)
+            }
+            other => Err(format!(
+                "family kind {} has no qualified AC semantic snapshot",
+                other.name()
+            )),
+        }
+    }
+
+    fn compare_strict_ac_family_snapshots(
+        baseline: &XyceStrictAcFamilySnapshot,
+        target: &XyceStrictAcFamilySnapshot,
+    ) -> Result<(), String> {
+        match (baseline, target) {
+            (
+                XyceStrictAcFamilySnapshot::AcAnalysisExpression(baseline),
+                XyceStrictAcFamilySnapshot::AcAnalysisExpression(target),
+            ) => Self::compare_ac_analysis_expression_snapshots(baseline, target),
+        }
+    }
+
+    fn ac_family_result_to_prn_table(
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        results: &[AcResult],
+    ) -> Result<XycePrnTable, String> {
+        let first = results
+            .first()
+            .ok_or_else(|| "relational AC simulation produced no points".to_string())?;
+        let mut expansions = Vec::with_capacity(print.probes.len());
+        let mut columns = vec!["Index".to_string(), "FREQ".to_string()];
+        for probe in &print.probes {
+            let normalized = Self::normalize_ac_expression_probe_key(probe);
+            let is_direct_complex = Self::parse_ac_voltage_probe(&normalized)
+                .is_some_and(|probe| probe.accessor == XyceVoltageAccessor::Value)
+                || Self::parse_ac_current_probe(&normalized)
+                    .is_some_and(|probe| probe.accessor == XyceCurrentAccessor::Value);
+            if is_direct_complex {
+                let value = Self::evaluate_ac_complex_probe(probe, netlist, first)?;
+                if !value.re.is_finite() || !value.im.is_finite() {
+                    return Err(format!(
+                        "relational AC probe '{probe}' produced a non-finite complex value"
+                    ));
+                }
+                expansions.push(XyceAcCsdColumnExpansion::Complex);
+                columns.push(format!("Re({probe})"));
+                columns.push(format!("Im({probe})"));
+                continue;
+            }
+            match Self::evaluate_ac_probe(probe, netlist, first, false) {
+                Ok(value) if value.is_finite() => {
+                    expansions.push(XyceAcCsdColumnExpansion::Scalar);
+                    columns.push(probe.clone());
+                }
+                Ok(value) => {
+                    return Err(format!(
+                        "relational AC probe '{probe}' produced non-finite scalar value {value}"
+                    ));
+                }
+                Err(_) => {
+                    let value = Self::evaluate_ac_complex_probe(probe, netlist, first)?;
+                    if !value.re.is_finite() || !value.im.is_finite() {
+                        return Err(format!(
+                            "relational AC probe '{probe}' produced a non-finite complex value"
+                        ));
+                    }
+                    expansions.push(XyceAcCsdColumnExpansion::Complex);
+                    columns.push(format!("Re({probe})"));
+                    columns.push(format!("Im({probe})"));
+                }
+            }
+        }
+
+        let mut rows = Vec::with_capacity(results.len());
+        for (row_index, result) in results.iter().enumerate() {
+            let mut row = Vec::with_capacity(columns.len());
+            row.push(row_index as Value);
+            row.push(
+                Self::xyce_default_prn_roundtrip(result.frequency).map_err(|err| {
+                    format!("could not serialize relational AC frequency at row {row_index}: {err}")
+                })?,
+            );
+            for (probe, expansion) in print.probes.iter().zip(&expansions) {
+                match expansion {
+                    XyceAcCsdColumnExpansion::Scalar => {
+                        let value = Self::evaluate_ac_probe(probe, netlist, result, false)?;
+                        row.push(Self::xyce_default_prn_roundtrip(value).map_err(|err| {
+                            format!(
+                                "could not serialize relational AC probe '{probe}' at row {row_index}: {err}"
+                            )
+                        })?);
+                    }
+                    XyceAcCsdColumnExpansion::Complex => {
+                        let value = Self::evaluate_ac_complex_probe(probe, netlist, result)?;
+                        row.push(Self::xyce_default_prn_roundtrip(value.re).map_err(|err| {
+                            format!(
+                                "could not serialize real relational AC probe '{probe}' at row {row_index}: {err}"
+                            )
+                        })?);
+                        row.push(Self::xyce_default_prn_roundtrip(value.im).map_err(|err| {
+                            format!(
+                                "could not serialize imaginary relational AC probe '{probe}' at row {row_index}: {err}"
+                            )
+                        })?);
+                    }
+                }
+            }
+            rows.push(row);
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn run_ac_baseline_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBaselineFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let kind_name = contract.kind.name();
+        let wrapper_contract = contract.kind.wrapper_contract();
+        let baseline_contract = contract.kind.baseline_contract();
+        let Some(tolerance) = contract.comparison.ac_comparator_tolerance() else {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' has no ACComparator tolerance contract",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        };
+        let baseline_plan = match self.relational_ac_plan_for_path(&contract.baseline_path) {
+            Ok(plan) => plan,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline is not supported by the relational AC adapter: {reason}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        if let Err(reason) = Self::validate_ac_analysis_expression_plan(&baseline_plan) {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline AC qualification failed: {reason}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        let baseline_netlist =
+            match Self::parse_xyce_netlist(&baseline_plan.source, &baseline_plan.deck_path) {
+                Ok(netlist) => netlist,
+                Err(err) => {
+                    return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline parse failed after qualification: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+                }
+            };
+        let baseline_snapshot =
+            match Self::strict_ac_family_snapshot(contract.kind, &baseline_netlist) {
+                Ok(snapshot) => snapshot,
+                Err(reason) => {
+                    return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline semantic qualification failed: {reason}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+                }
+            };
+        let engine = self.create_xyce_engine();
+        let baseline_results = match engine.run_ac(&baseline_netlist, &baseline_plan.ac.frequencies)
+        {
+            Ok(results) => results,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline error: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        let baseline_table = match Self::ac_family_result_to_prn_table(
+            &baseline_plan.print,
+            &baseline_netlist,
+            &baseline_results,
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline output conversion failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let (targets, baseline_record) = Self::baseline_family_targets(&contract);
+        if targets.is_empty() {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' has no non-baseline member to compare",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        let mut all_mismatches = Vec::new();
+        for target_path in targets {
+            let target_plan = match self.relational_ac_plan_for_path(&target_path) {
+                Ok(plan) => plan,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} is not supported by the relational AC adapter: {reason}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if let Err(reason) = Self::validate_ac_analysis_expression_plan(&target_plan) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} AC qualification failed: {reason}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if target_plan.print.probes != baseline_plan.print.probes
+                || target_plan.ac.frequencies.len() != baseline_plan.ac.frequencies.len()
+                || !target_plan
+                    .ac
+                    .frequencies
+                    .iter()
+                    .zip(&baseline_plan.ac.frequencies)
+                    .all(|(target, baseline)| target.to_bits() == baseline.to_bits())
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} changes the ordered .PRINT AC probes or resolved frequency grid",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            let target_netlist = match Self::parse_xyce_netlist(
+                &target_plan.source,
+                &target_plan.deck_path,
+            ) {
+                Ok(netlist) => netlist,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} parse failed after qualification: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if !Self::ac_analyses_match_exactly(&baseline_netlist, &target_netlist) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} changes the .AC analysis tuple",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            let target_snapshot = match Self::strict_ac_family_snapshot(
+                contract.kind,
+                &target_netlist,
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} semantic qualification failed: {reason}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if let Err(reason) =
+                Self::compare_strict_ac_family_snapshots(&baseline_snapshot, &target_snapshot)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} changes semantics outside its qualified representation pair: {reason}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            let target_results = match engine.run_ac(&target_netlist, &target_plan.ac.frequencies) {
+                Ok(results) => results,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let target_table = match Self::ac_family_result_to_prn_table(
+                &target_plan.print,
+                &target_netlist,
+                &target_results,
+            ) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} output conversion failed: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mut mismatches = match self.compare_ac_comparator_tables_with_tolerance(
+                &baseline_table,
+                &target_table,
+                tolerance,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} ACComparator error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{} {}", self.display_path(&target_path), mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if all_mismatches.is_empty() {
+            self.passed_result(
+                deck,
+                start,
+                if baseline_record {
+                    baseline_contract
+                } else {
+                    wrapper_contract
+                },
+            )
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{} {kind_name} family '{}' ACComparator mismatch(es)",
                     all_mismatches.len(),
                     contract.family
                 ),
@@ -16985,6 +17624,494 @@ impl XyceTestRunner {
         }
         if baseline.effective_primary_bits != target.effective_primary_bits {
             return Err("effective temperature-scaled passive values differ".to_string());
+        }
+        Ok(())
+    }
+
+    fn ac_analysis_value_fields(statement: &str) -> Result<Vec<String>, String> {
+        const LABEL: &str = "AC-analysis expression parity";
+        let fields = Self::split_grouped_whitespace_fields(statement, ".AC statement")?;
+        if fields.len() != 5
+            || fields
+                .first()
+                .is_none_or(|field| !field.eq_ignore_ascii_case(".AC"))
+            || fields.get(1).is_none_or(|field| {
+                !matches!(field.to_ascii_uppercase().as_str(), "DEC" | "OCT" | "LIN")
+            })
+        {
+            return Err(format!(
+                "{LABEL} requires '.AC DEC|OCT|LIN points start stop'"
+            ));
+        }
+        Ok(fields[2..].to_vec())
+    }
+
+    fn ac_analysis_output_option_is_footer_suppression(statement: &str) -> Result<bool, String> {
+        let fields = Self::split_grouped_whitespace_fields(statement, ".OPTIONS OUTPUT statement")?;
+        if fields.len() != 3
+            || !fields[0].eq_ignore_ascii_case(".OPTIONS")
+            || !fields[1].eq_ignore_ascii_case("OUTPUT")
+        {
+            return Ok(false);
+        }
+        let Some((name, value)) = fields[2].split_once('=') else {
+            return Ok(false);
+        };
+        Ok(name.eq_ignore_ascii_case("PRINTFOOTER")
+            && matches!(
+                value.to_ascii_lowercase().as_str(),
+                "false" | "0" | "no" | "off"
+            ))
+    }
+
+    fn ac_analysis_source_qualification(
+        source: &str,
+    ) -> Result<(XyceAcAnalysisRepresentation, BTreeMap<String, u64>), String> {
+        const LABEL: &str = "AC-analysis expression parity";
+        if Self::source_has_comp_directive(source) {
+            return Err(format!("{LABEL} does not admit *COMP directives"));
+        }
+        let lines = Self::logical_netlist_lines(source);
+        if lines.is_empty() {
+            return Err(format!("{LABEL} requires a nonempty source"));
+        }
+        let mut parameter_bits = BTreeMap::new();
+        let mut ac_fields = None;
+        let mut print_count = 0usize;
+        let mut option_count = 0usize;
+        let mut end_count = 0usize;
+        let mut element_count = 0usize;
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                match command.to_ascii_lowercase().as_str() {
+                    ".param" => {
+                        let fields = Self::split_grouped_whitespace_fields(
+                            stripped,
+                            "AC-analysis .PARAM statement",
+                        )?;
+                        let [_, assignment] = fields.as_slice() else {
+                            return Err(format!(
+                                "{LABEL} requires one direct '.PARAM name=value' assignment per statement"
+                            ));
+                        };
+                        let Some((name, value)) = assignment.split_once('=') else {
+                            return Err(format!(
+                                "{LABEL} requires canonical '.PARAM name=value' syntax"
+                            ));
+                        };
+                        let name = name.trim().to_ascii_lowercase();
+                        if name.is_empty()
+                            || value.trim().is_empty()
+                            || value.contains('=')
+                            || !name.chars().enumerate().all(|(index, ch)| {
+                                ch.is_ascii_alphanumeric()
+                                    || ch == '_'
+                                    || (index > 0 && matches!(ch, '.' | '$'))
+                            })
+                            || name.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+                        {
+                            return Err(format!(
+                                "{LABEL} contains invalid parameter assignment '{assignment}'"
+                            ));
+                        }
+                        let value = Self::single_spice_numeric_literal_value(value)?;
+                        if !value.is_finite()
+                            || parameter_bits
+                                .insert(name.clone(), value.to_bits())
+                                .is_some()
+                        {
+                            return Err(format!(
+                                "{LABEL} parameter '{name}' must be unique and finite"
+                            ));
+                        }
+                    }
+                    ".ac" => {
+                        if ac_fields.is_some() {
+                            return Err(format!("{LABEL} requires exactly one .AC"));
+                        }
+                        ac_fields = Some(Self::ac_analysis_value_fields(stripped)?);
+                    }
+                    ".print" => {
+                        let fields = Self::split_grouped_whitespace_fields(
+                            stripped,
+                            "AC-analysis .PRINT statement",
+                        )?;
+                        if fields.len() < 3
+                            || !fields[0].eq_ignore_ascii_case(".PRINT")
+                            || !fields[1].eq_ignore_ascii_case("AC")
+                        {
+                            return Err(format!(
+                                "{LABEL} requires one nonempty '.PRINT AC probe ...' statement"
+                            ));
+                        }
+                        if fields.iter().skip(2).any(|field| {
+                            field.contains('=') || field.eq_ignore_ascii_case("NOINDEX")
+                        }) {
+                            return Err(format!(
+                                "{LABEL} requires default indexed AC PRN formatting without .PRINT options"
+                            ));
+                        }
+                        print_count += 1;
+                    }
+                    ".options" => {
+                        option_count += 1;
+                        if !Self::ac_analysis_output_option_is_footer_suppression(stripped)? {
+                            return Err(format!(
+                                "{LABEL} admits only the data-neutral '.OPTIONS OUTPUT PRINTFOOTER=false' setting"
+                            ));
+                        }
+                    }
+                    ".end" => {
+                        end_count += 1;
+                        if !stripped.eq_ignore_ascii_case(".end") {
+                            return Err(format!("{LABEL} requires a bare .END statement"));
+                        }
+                    }
+                    other => return Err(format!("{LABEL} does not admit directive '{other}'")),
+                }
+                continue;
+            }
+
+            element_count += 1;
+            if stripped.contains('{') || stripped.contains('}') {
+                return Err(format!(
+                    "{LABEL} element statements must not consume analysis parameters"
+                ));
+            }
+            let fields =
+                Self::split_grouped_whitespace_fields(stripped, "AC-analysis element statement")?;
+            let designator = fields
+                .first()
+                .and_then(|field| field.chars().next())
+                .map(|ch| ch.to_ascii_uppercase())
+                .ok_or_else(|| format!("{LABEL} contains an empty element statement"))?;
+            match designator {
+                'R' | 'C'
+                    if fields.len() == 4 && Self::is_single_spice_numeric_literal(&fields[3]) => {}
+                'V' | 'I' if fields.len() >= 4 => {}
+                _ => {
+                    return Err(format!(
+                        "{LABEL} admits only direct R/C passives and independent V/I sources; got '{command}'"
+                    ));
+                }
+            }
+        }
+        if print_count != 1 || option_count > 1 || end_count != 1 || element_count == 0 {
+            return Err(format!(
+                "{LABEL} requires one .PRINT, at most one footer-only .OPTIONS, one .END, and at least one element; found ({print_count}, {option_count}, {end_count}, {element_count})"
+            ));
+        }
+        let ac_fields = ac_fields.ok_or_else(|| format!("{LABEL} contains no .AC"))?;
+        if parameter_bits.is_empty() {
+            if ac_fields
+                .iter()
+                .all(|field| Self::is_single_spice_numeric_literal(field))
+            {
+                return Ok((XyceAcAnalysisRepresentation::DirectNumeric, parameter_bits));
+            }
+            return Err(format!(
+                "{LABEL} numeric baseline requires only direct finite .AC literals"
+            ));
+        }
+
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let command = stripped.split_whitespace().next().unwrap_or_default();
+            if command.eq_ignore_ascii_case(".param") || command.eq_ignore_ascii_case(".ac") {
+                continue;
+            }
+            let identifiers = stripped
+                .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$')))
+                .filter(|field| {
+                    field
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+                });
+            if identifiers.into_iter().any(|identifier| {
+                parameter_bits
+                    .keys()
+                    .any(|name| identifier.eq_ignore_ascii_case(name))
+            }) {
+                return Err(format!(
+                    "{LABEL} analysis parameters may be referenced only by .AC fields"
+                ));
+            }
+        }
+        if ac_fields.len() != parameter_bits.len() {
+            return Err(format!(
+                "{LABEL} requires one unique scalar parameter per .AC value field"
+            ));
+        }
+        let mut field_parameters = BTreeSet::new();
+        for field in &ac_fields {
+            let Some(expression) = field
+                .strip_prefix('{')
+                .and_then(|value| value.strip_suffix('}'))
+            else {
+                return Err(format!(
+                    "{LABEL} parameterized .AC fields must each be one braced expression"
+                ));
+            };
+            let expression = crate::netlist::expr::parse_expression(expression)
+                .map_err(|err| format!("{LABEL} could not parse '{field}': {err}"))?;
+            let mut references = BTreeMap::new();
+            Self::collect_analysis_parameter_references(
+                &expression,
+                &parameter_bits,
+                &mut references,
+                ".AC",
+            )?;
+            let reference_entries = references.into_iter().collect::<Vec<_>>();
+            let [(reference, count)] = reference_entries.as_slice() else {
+                return Err(format!(
+                    "{LABEL} each .AC expression must exercise exactly one scalar parameter"
+                ));
+            };
+            if *count != 1 || !field_parameters.insert(reference.clone()) {
+                return Err(format!(
+                    "{LABEL} each scalar parameter must occur exactly once in exactly one .AC field"
+                ));
+            }
+        }
+        if field_parameters != parameter_bits.keys().cloned().collect() {
+            return Err(format!(
+                "{LABEL} every declared scalar parameter must feed exactly one .AC field"
+            ));
+        }
+        Ok((
+            XyceAcAnalysisRepresentation::ParameterExpression,
+            parameter_bits,
+        ))
+    }
+
+    fn validate_ac_analysis_expression_plan(plan: &XyceRelationalAcPlan) -> Result<(), String> {
+        const LABEL: &str = "AC-analysis expression parity";
+        if plan.print.probes.is_empty()
+            || plan.ac.frequencies.is_empty()
+            || plan
+                .ac
+                .frequencies
+                .iter()
+                .any(|frequency| !frequency.is_finite() || *frequency < 0.0)
+            || plan.ac.data_points().is_some()
+        {
+            return Err(format!(
+                "{LABEL} requires a finite nonempty ordinary AC sweep and at least one probe"
+            ));
+        }
+        let netlist = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
+            .map_err(|err| format!("{LABEL} parse failed during plan validation: {err}"))?;
+        Self::validate_ac_analysis_expression_probes(&netlist, &plan.print)?;
+        Self::ac_analysis_source_qualification(&plan.source).map(|_| ())
+    }
+
+    fn validate_ac_analysis_expression_probes(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<(), String> {
+        const LABEL: &str = "AC-analysis expression parity";
+        let mut probes = BTreeSet::new();
+        for probe in &print.probes {
+            if Self::print_expression_inner(probe).is_some() {
+                return Err(format!(
+                    "{LABEL} admits only direct atomic AC voltage/current probes, not braced expressions"
+                ));
+            }
+            let normalized = Self::normalize_probe(probe);
+            let atomic = Self::parse_ac_voltage_probe(&normalized)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(&normalized))
+                || Self::parse_ac_current_probe(&normalized)
+                    .is_some_and(|_| Self::probe_call_covers_entire_expression(&normalized));
+            if !atomic || !probes.insert(normalized.clone()) {
+                return Err(format!(
+                    "{LABEL} probe '{probe}' is not a unique direct atomic AC voltage/current probe"
+                ));
+            }
+            Self::validate_ac_probe(&normalized, netlist)?;
+        }
+        Ok(())
+    }
+
+    fn ac_analysis_expression_snapshot(
+        netlist: &Netlist,
+    ) -> Result<XyceAcAnalysisExpressionSnapshot, String> {
+        const LABEL: &str = "AC-analysis expression parity";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let (representation, parameter_bits) = Self::ac_analysis_source_qualification(source)?;
+        let footer_suppressed = Self::logical_netlist_lines(source)
+            .into_iter()
+            .skip(1)
+            .map(|line| Self::strip_netlist_comment(&line).trim().to_string())
+            .any(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
+                    && Self::ac_analysis_output_option_is_footer_suppression(&line).unwrap_or(false)
+            });
+        let parsed_parameter_bits = netlist
+            .params
+            .numeric_parameters()
+            .into_iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<BTreeMap<_, _>>();
+        if parsed_parameter_bits != parameter_bits
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} parsed scalar parameter state differs from the qualified direct assignments"
+            ));
+        }
+        let diagnostics_are_canonical_footer_only = footer_suppressed
+            && representation == XyceAcAnalysisRepresentation::DirectNumeric
+            && netlist.diagnostics.len() == 1;
+        if netlist.title.trim().is_empty()
+            || netlist.title.trim_start().starts_with('.')
+            || !netlist.models.is_empty()
+            || (!netlist.diagnostics.is_empty() && !diagnostics_are_canonical_footer_only)
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Ac { .. }])
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat diagnostic-free ordinary AC analysis without models, hierarchy, auxiliary state, or external devices (models={}, diagnostics={}, analyses={}, fft={}, data={}, subckts={}, ic={}, nodesets={}, globals={}, measures={}, veriloga={}, spef={})",
+                netlist.models.len(),
+                netlist.diagnostics.len(),
+                netlist.analyses.len(),
+                netlist.fft_analyses.len(),
+                netlist.data_tables.len(),
+                netlist.subcircuits.len(),
+                netlist.initial_conditions.len(),
+                netlist.node_sets.len(),
+                netlist.global_nodes.len(),
+                netlist.measurements.len(),
+                netlist.veriloga_includes.len(),
+                netlist.spef_includes.len(),
+            ));
+        }
+        for element in &netlist.elements {
+            if element
+                .nodes
+                .iter()
+                .any(|node| crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0")
+            {
+                return Err(format!(
+                    "{LABEL} element '{}' uses a ground alias; literal node 0 is required",
+                    element.name
+                ));
+            }
+            let valid = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    element.nodes.len() == 2
+                        && value.is_finite()
+                        && *value > 0.0
+                        && value_expr.is_none()
+                        && model.is_none()
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                }
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    element.nodes.len() == 2
+                        && value.is_finite()
+                        && *value > 0.0
+                        && value_expr.is_none()
+                        && initial_voltage.is_none()
+                        && model.is_none()
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                }
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    let (magnitude, phase) = extract_ac_value(spec);
+                    element.nodes.len() == 2 && magnitude.is_finite() && phase.is_finite()
+                }
+                _ => false,
+            };
+            if !valid {
+                return Err(format!(
+                    "{LABEL} contains unqualified element '{}'",
+                    element.name
+                ));
+            }
+        }
+
+        let mut nonrepresentation_source = Vec::new();
+        for line in Self::logical_netlist_lines(source).into_iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let command = stripped.split_whitespace().next().unwrap_or_default();
+            if command.eq_ignore_ascii_case(".param")
+                || (command.eq_ignore_ascii_case(".options")
+                    && Self::ac_analysis_output_option_is_footer_suppression(stripped)?)
+            {
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".ac") {
+                nonrepresentation_source.push(".ac <analysis-expression>".to_string());
+            } else {
+                nonrepresentation_source.push(
+                    stripped
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .to_ascii_lowercase(),
+                );
+            }
+        }
+        Ok(XyceAcAnalysisExpressionSnapshot {
+            representation,
+            parameter_bits,
+            nonrepresentation_source,
+            footer_suppressed,
+        })
+    }
+
+    fn compare_ac_analysis_expression_snapshots(
+        baseline: &XyceAcAnalysisExpressionSnapshot,
+        target: &XyceAcAnalysisExpressionSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceAcAnalysisRepresentation::DirectNumeric
+            || target.representation != XyceAcAnalysisRepresentation::ParameterExpression
+            || !baseline.parameter_bits.is_empty()
+            || target.parameter_bits.is_empty()
+            || !baseline.footer_suppressed
+            || target.footer_suppressed
+        {
+            return Err(
+                "family must compare a direct numeric .AC baseline with a parameter-expression .AC representation"
+                    .to_string(),
+            );
+        }
+        if baseline.nonrepresentation_source != target.nonrepresentation_source {
+            return Err(
+                "circuit, source, output, or non-analysis directive semantics differ".to_string(),
+            );
         }
         Ok(())
     }
@@ -27417,11 +28544,29 @@ impl XyceTestRunner {
         gold: &XycePrnTable,
         test: &XycePrnTable,
     ) -> Result<Vec<XyceValueMismatch>, String> {
-        const ABS_TOL: Value = 1.0e-6;
-        const REL_TOL: Value = 1.0e-3;
-        const ZERO_TOL: Value = 1.0e-10;
-        const FREQ_REL_TOL: Value = 1.0e-6;
+        self.compare_ac_comparator_tables_with_tolerance(
+            gold,
+            test,
+            XyceAcComparatorTolerance::new(1.0e-6, 1.0e-3, 1.0e-10, 1.0e-6)
+                .expect("built-in ACComparator tolerance is valid"),
+        )
+    }
 
+    fn compare_ac_comparator_tables_with_tolerance(
+        &self,
+        gold: &XycePrnTable,
+        test: &XycePrnTable,
+        tolerance: XyceAcComparatorTolerance,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let (absolute_tolerance, relative_tolerance, zero_tolerance, frequency_relative_tolerance) =
+            tolerance.values();
+
+        if gold.columns.len() < 2 || test.columns.len() < 2 {
+            return Err(format!(
+                "ACComparator tables require at least Index and FREQ columns, got gold={:?}, test={:?}",
+                gold.columns, test.columns
+            ));
+        }
         if gold.columns != test.columns {
             return Err(format!(
                 "ACComparator headers differ: gold {:?}, test {:?}",
@@ -27450,13 +28595,16 @@ impl XyceTestRunner {
                     actual: test_row[0],
                     relative_error: 1.0,
                 });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
             }
             if gold_row[1] != test_row[1] {
                 let difference = (test_row[1] - gold_row[1]).abs();
                 let failed = if gold_row[1] == 0.0 {
-                    test_row[1] > ABS_TOL
+                    test_row[1] > absolute_tolerance
                 } else {
-                    difference / gold_row[1] > FREQ_REL_TOL
+                    difference / gold_row[1] > frequency_relative_tolerance
                 };
                 if failed {
                     mismatches.push(XyceValueMismatch {
@@ -27464,19 +28612,26 @@ impl XyceTestRunner {
                         probe: gold.columns[1].clone(),
                         expected: gold_row[1],
                         actual: test_row[1],
-                        relative_error: difference / gold_row[1].abs().max(ABS_TOL),
+                        relative_error: difference / gold_row[1].abs().max(absolute_tolerance),
                     });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
                 }
             }
             for column in 2..gold.columns.len() {
                 let expected = gold_row[column];
                 let actual = test_row[column];
-                if expected == actual || (expected.abs() < ZERO_TOL && actual.abs() < ZERO_TOL) {
+                if expected == actual
+                    || (expected.abs() < zero_tolerance && actual.abs() < zero_tolerance)
+                {
                     continue;
                 }
                 let absolute_difference = (actual - expected).abs();
                 let relative_difference = absolute_difference / expected.abs();
-                if !(absolute_difference < ABS_TOL && relative_difference < REL_TOL) {
+                if !(absolute_difference < absolute_tolerance
+                    && relative_difference < relative_tolerance)
+                {
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
                         probe: gold.columns[column].clone(),
@@ -34712,7 +35867,8 @@ impl XyceTestRunner {
     }
 
     fn baseline_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
-        self.bjt_external_node_family_contract(deck)
+        self.ac_analysis_expression_family_contract(deck)
+            .or_else(|| self.bjt_external_node_family_contract(deck))
             .or_else(|| self.dc_analysis_expression_family_contract(deck))
             .or_else(|| self.sin_expression_family_contract(deck))
             .or_else(|| self.param_expression_family_contract(deck))
@@ -34722,6 +35878,108 @@ impl XyceTestRunner {
             .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
             .or_else(|| self.supernode_family_contract(deck))
+    }
+
+    fn ac_analysis_expression_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let mut records = Vec::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file()
+                || fs::metadata(&path)
+                    .ok()
+                    .is_none_or(|metadata| metadata.len() == 0)
+                || self
+                    .static_output_reference_path(&path, "FD.prn")
+                    .is_some_and(|reference| reference.is_file())
+            {
+                return None;
+            }
+            let source = fs::read_to_string(&path).ok()?;
+            let (representation, _) = Self::ac_analysis_source_qualification(&source).ok()?;
+            let wrapper = self.requires_upstream_wrapper(&self.relative_key(&path));
+            if wrapper != (representation == XyceAcAnalysisRepresentation::ParameterExpression) {
+                return None;
+            }
+            let plan = self.relational_ac_plan_for_path(&path).ok()?;
+            Self::validate_ac_analysis_expression_plan(&plan).ok()?;
+            let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
+            let snapshot = Self::ac_analysis_expression_snapshot(&netlist).ok()?;
+            records.push((path, wrapper, plan, netlist, snapshot));
+        }
+        if records.len() != 2
+            || !records
+                .iter()
+                .any(|(path, _, _, _, _)| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+        let baseline_index = records.iter().position(|(_, wrapper, _, _, _)| !wrapper)?;
+        let target_index = records.iter().position(|(_, wrapper, _, _, _)| *wrapper)?;
+        if baseline_index == target_index
+            || records
+                .iter()
+                .filter(|(_, wrapper, _, _, _)| !wrapper)
+                .count()
+                != 1
+            || records
+                .iter()
+                .filter(|(_, wrapper, _, _, _)| *wrapper)
+                .count()
+                != 1
+        {
+            return None;
+        }
+        let (baseline_path, _, baseline_plan, baseline_netlist, baseline_snapshot) =
+            &records[baseline_index];
+        let (target_path, _, target_plan, target_netlist, target_snapshot) = &records[target_index];
+        if baseline_plan.print.probes != target_plan.print.probes
+            || baseline_plan.ac.frequencies.len() != target_plan.ac.frequencies.len()
+            || !baseline_plan
+                .ac
+                .frequencies
+                .iter()
+                .zip(&target_plan.ac.frequencies)
+                .all(|(baseline, target)| {
+                    baseline.is_finite()
+                        && target.is_finite()
+                        && baseline.to_bits() == target.to_bits()
+                })
+            || !Self::ac_analyses_match_exactly(baseline_netlist, target_netlist)
+            || Self::compare_ac_analysis_expression_snapshots(baseline_snapshot, target_snapshot)
+                .is_err()
+        {
+            return None;
+        }
+        let tolerance = XyceAcComparatorTolerance::new(6.0e-5, 1.0e-4, 1.0e-6, 1.0e-6).ok()?;
+        let family = format!(
+            "{}:{}",
+            parent.file_name()?.to_str()?,
+            baseline_path.file_stem()?.to_str()?
+        );
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::AcAnalysisExpression,
+            comparison: XyceBaselineFamilyComparison::AcComparator(tolerance),
+            family,
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path.clone(), target_path.clone()],
+            target_path: Some(deck.path.clone()),
+        })
     }
 
     fn stepped_ic_reference_contract(
@@ -35011,6 +36269,7 @@ impl XyceTestRunner {
         let mut resistor_dc = None;
         for (analysis, pair_family, baseline_path, positional_path) in pair_contracts {
             let (kind, slot) = match analysis {
+                XyceBaselineFamilyAnalysis::Ac => return None,
                 XyceBaselineFamilyAnalysis::Tran => (
                     XyceBaselineFamilyKind::PassiveCapPrimaryValue,
                     &mut capacitor_tran,
@@ -43489,6 +44748,205 @@ L1 out 0 LM 10m TEMP=90
             &inductor_snapshot(&inductor_target),
         )
         .expect("inductor scalar TC1/TC2 precedence has the same strict family semantics");
+    }
+
+    #[test]
+    fn ac_analysis_expression_family_is_structural_and_fail_closed() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-ac-expression-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_AC_FORMS");
+        fs::create_dir_all(&family_dir).expect("create AC-expression family fixture");
+        let baseline_path = family_dir.join("numeric_sweep.cir");
+        let target_path = family_dir.join("parameter_sweep.cir");
+        let baseline = "\
+generic numeric AC form
+Iexc node 0 AC 2 30 SIN(0 1 1k)
+Rload node 0 2k
+Cload node 0 3u
+.AC DEC 4 2 200
+.PRINT AC V(node)
+.OPTIONS OUTPUT PRINTFOOTER=false
+.END
+";
+        let target = baseline
+            .replace("generic numeric AC form", "generic parameter AC form")
+            .replace(
+                ".AC DEC 4 2 200",
+                ".PARAM samples=4\n.PARAM low=2\n.PARAM high=200\n.AC DEC {samples+0} {low*1} {high/1}",
+            )
+            .replace(".OPTIONS OUTPUT PRINTFOOTER=false\n", "");
+        fs::write(&baseline_path, baseline).expect("write numeric AC member");
+        fs::write(&target_path, &target).expect("write parameter AC member");
+        let manifest = format!(
+            "Netlists/Certification_Tests/GENERIC_AC_FORMS/parameter_sweep.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest)
+            .expect("write AC-expression wrapper provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+        for path in [&baseline_path, &target_path] {
+            let source = fs::read_to_string(path).expect("read AC member for qualification audit");
+            XyceTestRunner::ac_analysis_source_qualification(&source).unwrap_or_else(|err| {
+                panic!("source qualification failed for {}: {err}", path.display())
+            });
+            let plan = runner
+                .relational_ac_plan_for_path(path)
+                .unwrap_or_else(|err| panic!("AC plan failed for {}: {err}", path.display()));
+            XyceTestRunner::validate_ac_analysis_expression_plan(&plan).unwrap_or_else(|err| {
+                panic!("plan qualification failed for {}: {err}", path.display())
+            });
+            let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, path)
+                .unwrap_or_else(|err| panic!("AC parse failed for {}: {err}", path.display()));
+            XyceTestRunner::ac_analysis_expression_snapshot(&netlist)
+                .unwrap_or_else(|err| panic!("snapshot failed for {}: {err}", path.display()));
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: runner.relative_key(path),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .ac_analysis_expression_family_contract(&deck)
+                .expect("structural AC expression pair qualifies");
+            assert_eq!(contract.kind, XyceBaselineFamilyKind::AcAnalysisExpression);
+            assert!(matches!(
+                contract.comparison,
+                XyceBaselineFamilyComparison::AcComparator(_)
+            ));
+            assert_eq!(contract.member_paths.len(), 2);
+            assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+        }
+
+        let deck = XyceDeck {
+            path: baseline_path.clone(),
+            relative_path: runner.relative_key(&baseline_path),
+            section: XyceDeckSection::Netlists,
+        };
+        for invalid in [
+            target.replace("{samples+0}", "{samples+samples}"),
+            target.replace("{low*1}", "{sqrt(low)}"),
+            target.replace("Rload node 0 2k", "Rload node 0 {low}"),
+            target.replace("{low*1}", "2"),
+            target.replace(".PARAM high=200", ".PARAM high=200\n.PARAM unused=1"),
+            target.replace(".END", ".OPTIONS NONLIN MAXSTEP=1\n.END"),
+            target.replace(".END", ".OPTIONS OUTPUT PRINTFOOTER=false\n.END"),
+            target.replace("Iexc node 0", "Iexc node GND"),
+            target.replace(".PRINT AC V(node)", ".PRINT AC PRECISION=12 V(node)"),
+            target.replace(".PRINT AC V(node)", ".PRINT AC {V(node)+1}"),
+        ] {
+            fs::write(&target_path, &invalid).expect("write invalid AC representation");
+            assert!(
+                runner
+                    .ac_analysis_expression_family_contract(&deck)
+                    .is_none(),
+                "invalid expression ownership or auxiliary state must fail closed: {invalid}"
+            );
+        }
+        fs::write(&target_path, &target).expect("restore parameter AC member");
+
+        fs::write(
+            &baseline_path,
+            baseline.replace(".OPTIONS OUTPUT PRINTFOOTER=false\n", ""),
+        )
+        .expect("remove canonical baseline footer suppression");
+        assert!(
+            runner
+                .ac_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "direct baseline must own the canonical footer suppression role"
+        );
+        fs::write(&baseline_path, baseline).expect("restore numeric AC member");
+
+        for changed in [
+            target.replace(".PARAM high=200", ".PARAM high=300"),
+            target.replace("Rload node 0 2k", "Rload node 0 3k"),
+            target.replace(".PRINT AC V(node)", ".PRINT AC VM(node)"),
+            target.replace(".AC DEC", ".AC OCT"),
+        ] {
+            fs::write(&target_path, &changed).expect("write semantic AC mutation");
+            assert!(
+                runner
+                    .ac_analysis_expression_family_contract(&deck)
+                    .is_none(),
+                "sweep, circuit, probe, and variation mutations must prevent pairing"
+            );
+        }
+        fs::write(&target_path, &target).expect("restore target after mutations");
+
+        let extra = family_dir.join("unpaired.cir");
+        fs::write(&extra, baseline).expect("write unpaired AC member");
+        assert!(
+            runner
+                .ac_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "an extra circuit prevents complete-directory inference"
+        );
+        fs::remove_file(&extra).expect("remove unpaired AC member");
+
+        let output_dir = root
+            .join("OutputData")
+            .join("Certification_Tests")
+            .join("GENERIC_AC_FORMS");
+        fs::create_dir_all(&output_dir).expect("create forbidden AC oracle directory");
+        fs::write(output_dir.join("numeric_sweep.cir.FD.prn"), "oracle\n")
+            .expect("write forbidden AC oracle");
+        assert!(
+            runner
+                .ac_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "generated-reference AC families must not mix static waveform ownership"
+        );
+        fs::remove_dir_all(&output_dir).expect("remove forbidden AC oracle");
+
+        fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+        let unowned_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            unowned_runner
+                .ac_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "parameter representation requires wrapper provenance"
+        );
+
+        fs::remove_dir_all(&root).expect("remove AC-expression family fixture");
+    }
+
+    #[test]
+    fn ac_relational_table_preserves_complex_voltage_columns() {
+        let source = "\
+complex AC projection
+I1 node 0 AC 1
+R1 node 0 1k
+.AC DEC 1 10 10
+.PRINT AC V(node)
+.END
+";
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("projection.cir"))
+            .expect("complex AC projection fixture parses");
+        let print = XycePrintRequest {
+            probes: vec!["V(node)".to_string()],
+        };
+        let results = vec![AcResult {
+            frequency: 10.0,
+            node_names: vec!["node".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![Complex64::new(1.25, -0.5)],
+            currents: Vec::new(),
+        }];
+        let table = XyceTestRunner::ac_family_result_to_prn_table(&print, &netlist, &results)
+            .expect("complex AC result projects to default PRN columns");
+        assert_eq!(
+            table.columns,
+            vec!["Index", "FREQ", "Re(V(node))", "Im(V(node))"]
+        );
+        assert_eq!(table.rows, vec![vec![0.0, 10.0, 1.25, -0.5]]);
     }
 
     #[test]
