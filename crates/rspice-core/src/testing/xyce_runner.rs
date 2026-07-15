@@ -739,12 +739,23 @@ struct XycePassiveTemperatureOverrideSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceTransientAnalysisExpressionSnapshot {
+    title: String,
+    representation: XyceTransientAnalysisRepresentation,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    option_directives: Vec<String>,
+    parameter_bits: BTreeMap<String, u64>,
+    nonrepresentation_source: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
     ParamExpression(XyceParamExpressionFamilySnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
+    TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -804,6 +815,12 @@ enum XycePassiveTemperatureRepresentation {
     InstanceCoefficients,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceTransientAnalysisRepresentation {
+    DirectNumeric,
+    ParameterExpression,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct XyceRelationalElementFingerprint {
     kind: String,
@@ -834,6 +851,7 @@ enum XyceBaselineFamilyKind {
     PassiveCapPrimaryValue,
     PassiveResPrimaryValue,
     PassiveTemperatureOverride,
+    TransientAnalysisExpression,
     Subckt,
     Supernode,
     ScopedModel,
@@ -893,6 +911,7 @@ impl XyceBaselineFamilyKind {
             Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
             Self::PassiveResPrimaryValue => "PASSIVE_RES_PRIMARY_VALUE",
             Self::PassiveTemperatureOverride => "PASSIVE_TEMPERATURE_OVERRIDE",
+            Self::TransientAnalysisExpression => "TRANSIENT_ANALYSIS_EXPRESSION",
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
@@ -908,6 +927,7 @@ impl XyceBaselineFamilyKind {
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_wrapper",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_wrapper",
+            Self::TransientAnalysisExpression => "transient_analysis_expression_family_wrapper",
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
@@ -923,6 +943,7 @@ impl XyceBaselineFamilyKind {
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
             Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_baseline",
             Self::PassiveTemperatureOverride => "passive_temperature_override_family_baseline",
+            Self::TransientAnalysisExpression => "transient_analysis_expression_family_baseline",
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
@@ -946,6 +967,7 @@ impl XyceBaselineFamilyKind {
             | Self::ParamExpression
             | Self::PassiveCapPrimaryValue
             | Self::PassiveTemperatureOverride
+            | Self::TransientAnalysisExpression
             | Self::PassiveResPrimaryValue
             | Self::Subckt
             | Self::Supernode
@@ -9970,6 +9992,20 @@ impl XyceTestRunner {
         (targets, baseline_record)
     }
 
+    fn transient_family_plan_purpose_for_path(
+        &self,
+        kind: XyceBaselineFamilyKind,
+        path: &Path,
+    ) -> XyceStaticTranPlanPurpose {
+        if kind == XyceBaselineFamilyKind::TransientAnalysisExpression
+            && self.requires_upstream_wrapper(&self.relative_key(path))
+        {
+            XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+        } else {
+            kind.transient_plan_purpose()
+        }
+    }
+
     fn baseline_family_tran_contracts_compatible(
         kind: XyceBaselineFamilyKind,
         baseline: XyceStaticTranContract,
@@ -9992,6 +10028,13 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::PassiveTemperatureOverride
             | XyceBaselineFamilyKind::Subckt
             | XyceBaselineFamilyKind::Supernode => baseline == target,
+            XyceBaselineFamilyKind::TransientAnalysisExpression => matches!(
+                (baseline, target),
+                (
+                    XyceStaticTranContract::PlainStatic,
+                    XyceStaticTranContract::WrapperStatic
+                )
+            ),
         }
     }
 
@@ -11239,6 +11282,7 @@ impl XyceTestRunner {
                 | XyceBaselineFamilyKind::ParamExpression
                 | XyceBaselineFamilyKind::PassiveCapPrimaryValue
                 | XyceBaselineFamilyKind::PassiveTemperatureOverride
+                | XyceBaselineFamilyKind::TransientAnalysisExpression
         ) && analysis != XyceBaselineFamilyAnalysis::Tran
         {
             return self.failure_result(
@@ -11255,7 +11299,7 @@ impl XyceTestRunner {
         if analysis == XyceBaselineFamilyAnalysis::Tran {
             let baseline_plan = match self.static_tran_family_plan_for_path(
                 &contract.baseline_path,
-                contract.kind.transient_plan_purpose(),
+                self.transient_family_plan_purpose_for_path(contract.kind, &contract.baseline_path),
             ) {
                 Ok(plan) => plan,
                 Err(reason) => {
@@ -12028,6 +12072,20 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::TransientAnalysisExpression
+            && let Err(err) = Self::validate_transient_analysis_expression_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
 
         let (baseline_netlist, baseline_result) = match self.run_transient_family_plan(
             &baseline_plan,
@@ -12223,7 +12281,7 @@ impl XyceTestRunner {
         for target_path in targets {
             let target_plan = match self.static_tran_family_plan_for_path(
                 &target_path,
-                contract.kind.transient_plan_purpose(),
+                self.transient_family_plan_purpose_for_path(contract.kind, &target_path),
             ) {
                 Ok(plan) => plan,
                 Err(reason) => {
@@ -12301,6 +12359,21 @@ impl XyceTestRunner {
             if contract.kind == XyceBaselineFamilyKind::PassiveTemperatureOverride
                 && let Err(err) =
                     Self::validate_passive_temperature_override_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::TransientAnalysisExpression
+                && let Err(err) = Self::validate_transient_analysis_expression_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,
@@ -15712,6 +15785,10 @@ impl XyceTestRunner {
                 Self::passive_temperature_override_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::PassiveTemperatureOverride)
             }
+            XyceBaselineFamilyKind::TransientAnalysisExpression => {
+                Self::transient_analysis_expression_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::TransientAnalysisExpression)
+            }
             other => Err(format!(
                 "strict transient family kind {} has no semantic snapshot contract",
                 other.name()
@@ -15732,6 +15809,11 @@ impl XyceTestRunner {
         if !plan.steps.is_empty() || plan.output_override || plan.timeint_conststep {
             return Err(format!(
                 "{LABEL} does not admit .STEP, output overrides, or constant-step output"
+            ));
+        }
+        if plan.wrapper_tolerance.is_some() || Self::source_has_comp_directive(&plan.source) {
+            return Err(format!(
+                "{LABEL} uses the canonical default xyce_verify tolerance and does not admit wrapper or *COMP overrides"
             ));
         }
         if !plan.tran.step.is_finite()
@@ -16225,6 +16307,647 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn validate_transient_analysis_expression_plan(
+        plan: &XyceStaticTranPlan,
+    ) -> Result<(), String> {
+        const LABEL: &str = "transient-analysis expression parity";
+        if !matches!(
+            plan.contract,
+            XyceStaticTranContract::PlainStatic | XyceStaticTranContract::WrapperStatic
+        ) {
+            return Err(format!(
+                "{LABEL} requires ordinary default .prn output, got {:?}",
+                plan.contract
+            ));
+        }
+        if !plan.steps.is_empty() || plan.output_override || plan.timeint_conststep {
+            return Err(format!(
+                "{LABEL} does not admit .STEP, output overrides, or constant-step output"
+            ));
+        }
+        if plan.wrapper_tolerance.is_some() {
+            return Err(format!(
+                "{LABEL} uses the canonical default xyce_verify tolerance and does not admit wrapper overrides"
+            ));
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step < 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan
+                .tran
+                .start
+                .is_some_and(|value| !value.is_finite() || value < 0.0 || value > plan.tran.stop)
+            || plan
+                .tran
+                .max_step
+                .is_some_and(|value| !value.is_finite() || value <= 0.0)
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires a finite nonnegative TSTEP, positive TSTOP, bounded optional TSTART, positive optional DTMAX, and no UIC"
+            ));
+        }
+        if plan.print.probes.is_empty() {
+            return Err(format!(
+                "{LABEL} requires at least one ordered .PRINT TRAN probe"
+            ));
+        }
+        Self::transient_analysis_source_qualification(&plan.source).map(|_| ())
+    }
+
+    fn transient_analysis_source_qualification(
+        source: &str,
+    ) -> Result<(XyceTransientAnalysisRepresentation, BTreeMap<String, u64>), String> {
+        const LABEL: &str = "transient-analysis expression parity";
+        if Self::source_has_comp_directive(source) {
+            return Err(format!(
+                "{LABEL} uses canonical default xyce_verify tolerances and does not admit *COMP"
+            ));
+        }
+        let lines = Self::logical_netlist_lines(source);
+        if lines.is_empty() {
+            return Err(format!("{LABEL} requires a nonempty source"));
+        }
+        let mut parameter_bits = BTreeMap::new();
+        let mut tran_fields = None;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        let mut element_count = 0usize;
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                match command.to_ascii_lowercase().as_str() {
+                    ".param" => {
+                        let fields = Self::split_grouped_whitespace_fields(
+                            stripped,
+                            "transient-analysis .PARAM statement",
+                        )?;
+                        let [_, assignment] = fields.as_slice() else {
+                            return Err(format!(
+                                "{LABEL} requires one direct '.PARAM name=value' assignment per statement"
+                            ));
+                        };
+                        let Some((name, value)) = assignment.split_once('=') else {
+                            return Err(format!(
+                                "{LABEL} requires canonical '.PARAM name=value' syntax"
+                            ));
+                        };
+                        let name = name.trim().to_ascii_lowercase();
+                        if name.is_empty()
+                            || value.trim().is_empty()
+                            || value.contains('=')
+                            || !name.chars().enumerate().all(|(index, ch)| {
+                                ch.is_ascii_alphanumeric()
+                                    || ch == '_'
+                                    || (index > 0 && matches!(ch, '.' | '$'))
+                            })
+                            || name.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+                        {
+                            return Err(format!(
+                                "{LABEL} contains invalid parameter assignment '{assignment}'"
+                            ));
+                        }
+                        let value = Self::single_spice_numeric_literal_value(value)?;
+                        if !value.is_finite()
+                            || parameter_bits
+                                .insert(name.clone(), value.to_bits())
+                                .is_some()
+                        {
+                            return Err(format!(
+                                "{LABEL} parameter '{name}' must be unique and finite"
+                            ));
+                        }
+                    }
+                    ".tran" => {
+                        if tran_fields.is_some() {
+                            return Err(format!("{LABEL} requires exactly one .TRAN"));
+                        }
+                        let fields = Self::split_grouped_whitespace_fields(
+                            stripped,
+                            "transient-analysis .TRAN statement",
+                        )?;
+                        if !(3..=5).contains(&fields.len()) {
+                            return Err(format!("{LABEL} requires two to four .TRAN value fields"));
+                        }
+                        tran_fields = Some(fields.into_iter().skip(1).collect::<Vec<_>>());
+                    }
+                    ".print" => print_count += 1,
+                    ".options" => {}
+                    ".end" => {
+                        end_count += 1;
+                        if !stripped.eq_ignore_ascii_case(".end") {
+                            return Err(format!("{LABEL} requires a bare .END statement"));
+                        }
+                    }
+                    other => {
+                        return Err(format!("{LABEL} does not admit directive '{other}'"));
+                    }
+                }
+                continue;
+            }
+
+            element_count += 1;
+            if stripped.contains('{') || stripped.contains('}') {
+                return Err(format!(
+                    "{LABEL} element statements must not consume analysis parameters"
+                ));
+            }
+            let fields = Self::split_grouped_whitespace_fields(
+                stripped,
+                "transient-analysis element statement",
+            )?;
+            let designator = fields
+                .first()
+                .and_then(|field| field.chars().next())
+                .map(|ch| ch.to_ascii_uppercase())
+                .ok_or_else(|| format!("{LABEL} contains an empty element statement"))?;
+            match designator {
+                'R' if fields.len() == 4 && Self::is_single_spice_numeric_literal(&fields[3]) => {}
+                'C' if (4..=5).contains(&fields.len())
+                    && Self::is_single_spice_numeric_literal(&fields[3]) =>
+                {
+                    if let Some(initial) = fields.get(4) {
+                        let Some((name, value)) = initial.split_once('=') else {
+                            return Err(format!(
+                                "{LABEL} capacitor optional field must be direct IC=value"
+                            ));
+                        };
+                        if !name.eq_ignore_ascii_case("IC")
+                            || !Self::is_single_spice_numeric_literal(value)
+                        {
+                            return Err(format!(
+                                "{LABEL} capacitor optional field must be direct finite IC=value"
+                            ));
+                        }
+                    }
+                }
+                'V' | 'I' if fields.len() == 4 => {}
+                _ => {
+                    return Err(format!(
+                        "{LABEL} admits only direct R/C and independent V/I element statements; got '{command}'"
+                    ));
+                }
+            }
+        }
+        if print_count != 1 || end_count != 1 || element_count == 0 {
+            return Err(format!(
+                "{LABEL} requires one .PRINT, one .END, and at least one element; found ({print_count}, {end_count}, {element_count})"
+            ));
+        }
+        let tran_fields = tran_fields.ok_or_else(|| format!("{LABEL} contains no .TRAN"))?;
+
+        if parameter_bits.is_empty() {
+            if tran_fields
+                .iter()
+                .all(|field| Self::is_single_spice_numeric_literal(field))
+            {
+                return Ok((
+                    XyceTransientAnalysisRepresentation::DirectNumeric,
+                    parameter_bits,
+                ));
+            }
+            return Err(format!(
+                "{LABEL} numeric baseline requires only direct finite .TRAN literals"
+            ));
+        }
+
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let command = stripped.split_whitespace().next().unwrap_or_default();
+            if command.eq_ignore_ascii_case(".param") || command.eq_ignore_ascii_case(".tran") {
+                continue;
+            }
+            let identifiers = stripped
+                .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$')))
+                .filter(|field| {
+                    field
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+                });
+            if identifiers.into_iter().any(|identifier| {
+                parameter_bits
+                    .keys()
+                    .any(|name| identifier.eq_ignore_ascii_case(name))
+            }) {
+                return Err(format!(
+                    "{LABEL} analysis parameters may be referenced only by .TRAN fields"
+                ));
+            }
+        }
+
+        if tran_fields.len() != parameter_bits.len() {
+            return Err(format!(
+                "{LABEL} requires one unique scalar parameter per .TRAN field"
+            ));
+        }
+        let mut field_parameters = BTreeSet::new();
+        for field in &tran_fields {
+            let Some(expression) = field
+                .strip_prefix('{')
+                .and_then(|value| value.strip_suffix('}'))
+            else {
+                return Err(format!(
+                    "{LABEL} parameterized .TRAN fields must each be one braced expression"
+                ));
+            };
+            let expression = crate::netlist::expr::parse_expression(expression)
+                .map_err(|err| format!("{LABEL} could not parse '{field}': {err}"))?;
+            let mut references = BTreeMap::new();
+            Self::collect_transient_analysis_parameter_references(
+                &expression,
+                &parameter_bits,
+                &mut references,
+            )?;
+            let reference_entries = references.into_iter().collect::<Vec<_>>();
+            let [(reference, count)] = reference_entries.as_slice() else {
+                return Err(format!(
+                    "{LABEL} each .TRAN expression must exercise exactly one scalar parameter"
+                ));
+            };
+            if *count != 1 {
+                return Err(format!(
+                    "{LABEL} each scalar parameter must occur exactly once in its .TRAN field"
+                ));
+            }
+            if !field_parameters.insert(reference.clone()) {
+                return Err(format!(
+                    "{LABEL} each scalar parameter must belong to exactly one .TRAN field"
+                ));
+            }
+        }
+        if field_parameters != parameter_bits.keys().cloned().collect() {
+            return Err(format!(
+                "{LABEL} every declared scalar parameter must feed exactly one .TRAN field"
+            ));
+        }
+        Ok((
+            XyceTransientAnalysisRepresentation::ParameterExpression,
+            parameter_bits,
+        ))
+    }
+
+    fn collect_transient_analysis_parameter_references(
+        expression: &crate::netlist::expr::Expr,
+        declared: &BTreeMap<String, u64>,
+        references: &mut BTreeMap<String, usize>,
+    ) -> Result<(), String> {
+        use crate::netlist::expr::{BinOpKind, Expr as NetExpr, UnaryOpKind};
+
+        match expression {
+            NetExpr::Number(value) if value.is_finite() => Ok(()),
+            NetExpr::Param(name) => {
+                let name = name.to_ascii_lowercase();
+                if !declared.contains_key(&name) {
+                    return Err(format!(
+                        "undeclared or runtime identifier '{name}' in .TRAN expression"
+                    ));
+                }
+                *references.entry(name).or_default() += 1;
+                Ok(())
+            }
+            NetExpr::BinOp { op, left, right }
+                if matches!(
+                    op,
+                    BinOpKind::Add
+                        | BinOpKind::Sub
+                        | BinOpKind::Mul
+                        | BinOpKind::Div
+                        | BinOpKind::Pow
+                ) =>
+            {
+                Self::collect_transient_analysis_parameter_references(
+                    left, declared, references,
+                )?;
+                Self::collect_transient_analysis_parameter_references(
+                    right, declared, references,
+                )
+            }
+            NetExpr::UnaryOp { op, operand }
+                if matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos) =>
+            {
+                Self::collect_transient_analysis_parameter_references(
+                    operand, declared, references,
+                )
+            }
+            _ => Err(
+                "only finite real arithmetic over direct scalar parameters is admitted in .TRAN expressions"
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn transient_analysis_expression_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceTransientAnalysisExpressionSnapshot, String> {
+        const LABEL: &str = "transient-analysis expression parity";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let (representation, parameter_bits) =
+            Self::transient_analysis_source_qualification(source)?;
+        if netlist.title.trim().is_empty()
+            || netlist.title.trim_start().starts_with('.')
+            || print.probes.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }])
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat diagnostic-free transient analysis without models, hierarchy, auxiliary state, or external devices"
+            ));
+        }
+        let parsed_parameter_bits = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<BTreeMap<_, _>>();
+        if parsed_parameter_bits != parameter_bits {
+            return Err(format!(
+                "{LABEL} parsed parameters differ from the direct source qualification"
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let key = Self::normalize_device_instance_name(&element.name);
+            if key.is_empty() || elements.contains_key(&key) {
+                return Err(format!(
+                    "{LABEL} contains an empty or duplicate element name"
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if nodes.len() != 2
+                || nodes.iter().any(String::is_empty)
+                || nodes
+                    .iter()
+                    .any(|node| crate::compat::ground::is_spice_ground_name(node) && node != "0")
+            {
+                return Err(format!(
+                    "{LABEL} element '{}' must have two explicit nodes and literal ground",
+                    element.name
+                ));
+            }
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_voltage.is_none_or(Value::is_finite)
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    let mut numeric_bits = vec![value.to_bits()];
+                    let marker = if let Some(initial) = initial_voltage {
+                        numeric_bits.push(initial.to_bits());
+                        "IC"
+                    } else {
+                        "NO_IC"
+                    };
+                    XyceRelationalElementFingerprint {
+                        kind: "C".to_string(),
+                        nodes,
+                        numeric_bits,
+                        text: vec![marker.to_string()],
+                    }
+                }
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Self::transient_analysis_source_fingerprint(element, spec, nodes)?
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} contains unqualified element '{}'",
+                        element.name
+                    ));
+                }
+            };
+            elements.insert(key, fingerprint);
+        }
+        if elements.is_empty() {
+            return Err(format!("{LABEL} requires at least one qualified element"));
+        }
+
+        let option_directives = Self::logical_netlist_lines(source)
+            .into_iter()
+            .map(|line| Self::strip_netlist_comment(&line).trim().to_string())
+            .filter(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
+            })
+            .map(|line| {
+                line.split_whitespace()
+                    .map(str::to_ascii_lowercase)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        let mut nonrepresentation_source = Vec::new();
+        for line in Self::logical_netlist_lines(source).into_iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".param") {
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".tran") {
+                let arity = Self::split_grouped_whitespace_fields(
+                    stripped,
+                    "transient-analysis .TRAN source signature",
+                )?
+                .len()
+                .saturating_sub(1);
+                nonrepresentation_source.push(format!(".tran$arity={arity}"));
+                continue;
+            }
+            nonrepresentation_source.push(
+                Self::split_grouped_whitespace_fields(
+                    stripped,
+                    "transient-analysis source signature",
+                )?
+                .into_iter()
+                .map(|field| field.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join(" "),
+            );
+        }
+
+        Ok(XyceTransientAnalysisExpressionSnapshot {
+            title: netlist.title.trim().to_string(),
+            representation,
+            elements,
+            option_directives,
+            parameter_bits,
+            nonrepresentation_source,
+        })
+    }
+
+    fn transient_analysis_source_fingerprint(
+        element: &crate::netlist::Element,
+        spec: &crate::netlist::SourceSpec,
+        nodes: Vec<String>,
+    ) -> Result<XyceRelationalElementFingerprint, String> {
+        let (waveform, numeric_bits) = match spec {
+            crate::netlist::SourceSpec::Dc(value) if value.is_finite() => {
+                ("DC", vec![value.to_bits()])
+            }
+            crate::netlist::SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                phase,
+                width_defaults_to_zero,
+            } if [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
+                .into_iter()
+                .all(Value::is_finite)
+                && *delay >= 0.0
+                && *rise >= 0.0
+                && *fall >= 0.0
+                && *width >= 0.0
+                && *period > 0.0 =>
+            {
+                (
+                    "PULSE",
+                    vec![
+                        v1.to_bits(),
+                        v2.to_bits(),
+                        delay.to_bits(),
+                        rise.to_bits(),
+                        fall.to_bits(),
+                        width.to_bits(),
+                        period.to_bits(),
+                        phase.to_bits(),
+                        u64::from(*width_defaults_to_zero),
+                    ],
+                )
+            }
+            crate::netlist::SourceSpec::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            } if [*offset, *amplitude, *frequency, *delay, *damping, *phase]
+                .into_iter()
+                .all(Value::is_finite)
+                && *frequency > 0.0
+                && *delay >= 0.0 =>
+            {
+                (
+                    "SIN",
+                    vec![
+                        offset.to_bits(),
+                        amplitude.to_bits(),
+                        frequency.to_bits(),
+                        delay.to_bits(),
+                        damping.to_bits(),
+                        phase.to_bits(),
+                    ],
+                )
+            }
+            _ => {
+                return Err(format!(
+                    "transient-analysis expression source '{}' must be a finite direct DC, PULSE, or SIN source",
+                    element.name
+                ));
+            }
+        };
+        let prefix = if matches!(&element.kind, ElementKind::VoltageSource(_)) {
+            "V"
+        } else {
+            "I"
+        };
+        Ok(XyceRelationalElementFingerprint {
+            kind: format!("{prefix}:{waveform}"),
+            nodes,
+            numeric_bits,
+            text: Vec::new(),
+        })
+    }
+
+    fn compare_transient_analysis_expression_snapshots(
+        baseline: &XyceTransientAnalysisExpressionSnapshot,
+        target: &XyceTransientAnalysisExpressionSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceTransientAnalysisRepresentation::DirectNumeric
+            || target.representation != XyceTransientAnalysisRepresentation::ParameterExpression
+            || !baseline.parameter_bits.is_empty()
+            || target.parameter_bits.is_empty()
+        {
+            return Err(
+                "family must compare a parameter-free numeric .TRAN baseline with a scalar parameter-expression .TRAN target"
+                    .to_string(),
+            );
+        }
+        if baseline.title != target.title
+            || baseline.elements != target.elements
+            || baseline.option_directives != target.option_directives
+            || baseline.nonrepresentation_source != target.nonrepresentation_source
+        {
+            return Err(
+                "circuit title, element identity/topology/state, source waveforms, or options differ"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     fn compare_strict_transient_family_snapshots(
         baseline: &XyceStrictTransientFamilySnapshot,
         target: &XyceStrictTransientFamilySnapshot,
@@ -16256,6 +16979,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::PassiveTemperatureOverride(baseline),
                 XyceStrictTransientFamilySnapshot::PassiveTemperatureOverride(target),
             ) => Self::compare_passive_temperature_override_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::TransientAnalysisExpression(baseline),
+                XyceStrictTransientFamilySnapshot::TransientAnalysisExpression(target),
+            ) => Self::compare_transient_analysis_expression_snapshots(baseline, target),
             _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
     }
@@ -32673,6 +33400,7 @@ impl XyceTestRunner {
             .or_else(|| self.sin_expression_family_contract(deck))
             .or_else(|| self.param_expression_family_contract(deck))
             .or_else(|| self.passive_temperature_override_family_contract(deck))
+            .or_else(|| self.transient_analysis_expression_family_contract(deck))
             .or_else(|| self.subckt_parameter_precedence_family_contract(deck))
             .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
@@ -33107,6 +33835,239 @@ impl XyceTestRunner {
             baseline_path: baseline_path.clone(),
             member_paths: vec![baseline_path, target_path.clone()],
             target_path: Some(target_path),
+        })
+    }
+
+    fn transient_analysis_expression_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let mut paths = Vec::new();
+        let mut baseline_count = 0usize;
+        let mut target_count = 0usize;
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file()
+                || fs::metadata(&path)
+                    .ok()
+                    .is_none_or(|metadata| metadata.len() == 0)
+                || self.has_static_tran_reference_oracle(&path)
+            {
+                return None;
+            }
+            let member_relative = self.relative_key(&path);
+            let wrapper = self.requires_upstream_wrapper(&member_relative);
+            let source = fs::read_to_string(&path).ok()?;
+            let (representation, _) =
+                Self::transient_analysis_source_qualification(&source).ok()?;
+            if wrapper
+                != (representation == XyceTransientAnalysisRepresentation::ParameterExpression)
+            {
+                return None;
+            }
+            if wrapper {
+                target_count += 1;
+            } else {
+                baseline_count += 1;
+            }
+            paths.push(path);
+        }
+        if baseline_count < 2 || baseline_count != target_count || paths.len() != 2 * baseline_count
+        {
+            return None;
+        }
+
+        let mut pair_counts = BTreeMap::<(String, String), usize>::new();
+        let mut selected = None;
+        for path in &paths {
+            let relative_path = self.relative_key(path);
+            let member = XyceDeck {
+                path: path.clone(),
+                relative_path,
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = self.transient_analysis_expression_candidate_contract(&member)?;
+            let pair = (
+                Self::normalize_manifest_key(&self.relative_key(&contract.baseline_path)),
+                Self::normalize_manifest_key(
+                    &self.relative_key(
+                        contract
+                            .member_paths
+                            .iter()
+                            .find(|member| !Self::same_path(member, &contract.baseline_path))?,
+                    ),
+                ),
+            );
+            *pair_counts.entry(pair).or_default() += 1;
+            if Self::same_path(path, &deck.path) {
+                selected = Some(contract);
+            }
+        }
+        if pair_counts.len() != baseline_count || pair_counts.values().any(|count| *count != 2) {
+            return None;
+        }
+        selected
+    }
+
+    fn transient_analysis_expression_candidate_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/")
+            || self.has_static_tran_reference_oracle(&deck.path)
+        {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let source = fs::read_to_string(&deck.path).ok()?;
+        let (representation, _) = Self::transient_analysis_source_qualification(&source).ok()?;
+        let is_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        if is_wrapper
+            != (representation == XyceTransientAnalysisRepresentation::ParameterExpression)
+        {
+            return None;
+        }
+
+        let purpose = if is_wrapper {
+            XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+        } else {
+            XyceStaticTranPlanPurpose::RelationalFamily
+        };
+        let plan = self
+            .static_tran_family_plan_for_path(&deck.path, purpose)
+            .ok()?;
+        Self::validate_transient_analysis_expression_plan(&plan).ok()?;
+        let netlist = Self::parse_xyce_netlist(&plan.source, &deck.path).ok()?;
+        let snapshot = Self::transient_analysis_expression_snapshot(&netlist, &plan.print).ok()?;
+        let time_scale = Self::tran_print_time_scale_factor(&plan.source).ok()?;
+
+        let mut matches = Vec::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let candidate = entry.path();
+            if !entry.file_type().ok()?.is_file()
+                || Self::same_path(&candidate, &deck.path)
+                || !candidate
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                || fs::metadata(&candidate)
+                    .ok()
+                    .is_none_or(|metadata| metadata.len() == 0)
+                || self.has_static_tran_reference_oracle(&candidate)
+            {
+                continue;
+            }
+            let candidate_relative = self.relative_key(&candidate);
+            let candidate_wrapper = self.requires_upstream_wrapper(&candidate_relative);
+            if candidate_wrapper == is_wrapper {
+                continue;
+            }
+            let candidate_source = fs::read_to_string(&candidate).ok()?;
+            let Ok((candidate_representation, _)) =
+                Self::transient_analysis_source_qualification(&candidate_source)
+            else {
+                continue;
+            };
+            if candidate_wrapper
+                != (candidate_representation
+                    == XyceTransientAnalysisRepresentation::ParameterExpression)
+            {
+                continue;
+            }
+            let candidate_purpose = if candidate_wrapper {
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+            } else {
+                XyceStaticTranPlanPurpose::RelationalFamily
+            };
+            let Ok(candidate_plan) =
+                self.static_tran_family_plan_for_path(&candidate, candidate_purpose)
+            else {
+                continue;
+            };
+            if Self::validate_transient_analysis_expression_plan(&candidate_plan).is_err()
+                || plan.print.probes != candidate_plan.print.probes
+                || !Self::tran_analyses_match_exactly(&plan.tran, &candidate_plan.tran)
+                || plan.timeint_conststep != candidate_plan.timeint_conststep
+                || !Self::baseline_family_tran_contracts_compatible(
+                    XyceBaselineFamilyKind::TransientAnalysisExpression,
+                    if is_wrapper {
+                        candidate_plan.contract
+                    } else {
+                        plan.contract
+                    },
+                    if is_wrapper {
+                        plan.contract
+                    } else {
+                        candidate_plan.contract
+                    },
+                )
+                || Self::tran_print_time_scale_factor(&candidate_plan.source)
+                    .ok()
+                    .is_none_or(|candidate_scale| candidate_scale.to_bits() != time_scale.to_bits())
+            {
+                continue;
+            }
+            let Ok(candidate_netlist) =
+                Self::parse_xyce_netlist(&candidate_plan.source, &candidate)
+            else {
+                continue;
+            };
+            let Ok(candidate_snapshot) = Self::transient_analysis_expression_snapshot(
+                &candidate_netlist,
+                &candidate_plan.print,
+            ) else {
+                continue;
+            };
+            let semantic_match = if is_wrapper {
+                Self::compare_transient_analysis_expression_snapshots(
+                    &candidate_snapshot,
+                    &snapshot,
+                )
+            } else {
+                Self::compare_transient_analysis_expression_snapshots(
+                    &snapshot,
+                    &candidate_snapshot,
+                )
+            };
+            if semantic_match.is_ok() {
+                matches.push(candidate);
+            }
+        }
+        let [counterpart] = matches.as_slice() else {
+            return None;
+        };
+        let (baseline_path, target_path) = if is_wrapper {
+            (counterpart.clone(), deck.path.clone())
+        } else {
+            (deck.path.clone(), counterpart.clone())
+        };
+        let family = format!(
+            "{}:{}",
+            parent.file_name()?.to_str()?,
+            baseline_path.file_stem()?.to_str()?
+        );
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::TransientAnalysisExpression,
+            comparison: XyceBaselineFamilyComparison::TolerancedStrict,
+            family,
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, target_path],
+            target_path: Some(deck.path.clone()),
         })
     }
 
@@ -41011,6 +41972,245 @@ L1 out 0 LM 10m TEMP=90
             &inductor_snapshot(&inductor_target),
         )
         .expect("inductor scalar TC1/TC2 precedence has the same strict family semantics");
+    }
+
+    #[test]
+    fn transient_analysis_expression_family_is_complete_bijective_and_fail_closed() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-tran-expression-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_ANALYSIS_FORMS");
+        fs::create_dir_all(&family_dir).expect("create transient-expression family fixture");
+        let literal_a = family_dir.join("literal_decay.cir");
+        let expression_a = family_dir.join("parameter_decay.cir");
+        let literal_b = family_dir.join("literal_sources.cir");
+        let expression_b = family_dir.join("parameter_sources.cir");
+        let direct_a = "\
+generic decay pair
+V1 out 0 0
+R1 out 0 1k
+.TRAN 0 1m
+.PRINT TRAN V(out)
+.END
+";
+        let parameter_a = direct_a.replace(
+            ".TRAN 0 1m",
+            ".PARAM first=0\n.PARAM last=1m\n.TRAN {first} {last}",
+        );
+        let direct_b = "\
+generic source pair
+V1 out 0 SIN(0 1 1k 0 0)
+R1 out 0 2k
+.TRAN 1u 2m 0 10u
+.PRINT TRAN V(out)
+.END
+";
+        let parameter_b = direct_b.replace(
+            ".TRAN 1u 2m 0 10u",
+            ".PARAM first=.5u\n.PARAM last=1m\n.PARAM start=0\n.PARAM ceiling=5u\n.TRAN {2*first} {2*last} {start} {2*ceiling}",
+        );
+        for (path, source) in [
+            (&literal_a, direct_a),
+            (&expression_a, parameter_a.as_str()),
+            (&literal_b, direct_b),
+            (&expression_b, parameter_b.as_str()),
+        ] {
+            fs::write(path, source).expect("write transient-expression family member");
+        }
+        let manifest = format!(
+            "Netlists/Certification_Tests/GENERIC_ANALYSIS_FORMS/parameter_decay.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/Certification_Tests/GENERIC_ANALYSIS_FORMS/parameter_sources.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest)
+            .expect("write transient-expression wrapper provenance");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for path in [&literal_a, &expression_a, &literal_b, &expression_b] {
+            let relative_path = runner.relative_key(path);
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path,
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .transient_analysis_expression_family_contract(&deck)
+                .expect("complete generic semantic family qualifies");
+            assert_eq!(
+                contract.kind,
+                XyceBaselineFamilyKind::TransientAnalysisExpression
+            );
+            assert_eq!(
+                contract.comparison,
+                XyceBaselineFamilyComparison::TolerancedStrict
+            );
+            assert_eq!(contract.member_paths.len(), 2);
+            assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+        }
+
+        let extra = family_dir.join("unrelated.cir");
+        fs::write(&extra, direct_a).expect("write unrelated family member");
+        let deck = XyceDeck {
+            path: literal_a.clone(),
+            relative_path: runner.relative_key(&literal_a),
+            section: XyceDeckSection::Netlists,
+        };
+        assert!(
+            runner
+                .transient_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "an unpaired circuit prevents complete-family inference"
+        );
+        fs::remove_file(&extra).expect("remove unrelated family member");
+
+        fs::write(&expression_b, "").expect("empty one wrapper member");
+        assert!(
+            runner
+                .transient_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "empty members fail closed"
+        );
+        fs::write(&expression_b, &parameter_b).expect("restore wrapper member");
+
+        let output_dir = root
+            .join("OutputData")
+            .join("Certification_Tests")
+            .join("GENERIC_ANALYSIS_FORMS");
+        fs::create_dir_all(&output_dir).expect("create forbidden static-oracle directory");
+        fs::write(output_dir.join("literal_decay.cir.prn"), "oracle\n")
+            .expect("write forbidden static oracle");
+        assert!(
+            runner
+                .transient_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "generated-reference families must not mix static waveform ownership"
+        );
+        fs::remove_dir_all(&output_dir).expect("remove forbidden oracle");
+
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/GENERIC_ANALYSIS_FORMS/parameter_decay.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("remove one wrapper provenance record");
+        let incomplete_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            incomplete_runner
+                .transient_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "wrapper/baseline imbalance fails closed"
+        );
+
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("restore manifest");
+        fs::remove_file(&literal_b).expect("remove second baseline");
+        fs::remove_file(&expression_b).expect("remove second wrapper");
+        let single_pair_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            single_pair_runner
+                .transient_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "one coincidental pair is insufficient generated-reference provenance"
+        );
+
+        fs::remove_dir_all(&root).expect("remove transient-expression family fixture");
+    }
+
+    #[test]
+    fn transient_analysis_expression_snapshot_proves_only_analysis_representation_changes() {
+        let direct = "\
+generic transient expression snapshot
+V1 out 0 SIN(0 1 1k 0 0)
+R1 out 0 1k
+.TRAN 2u 2m 0 10u
+.PRINT TRAN V(out)
+.OPTIONS TIMEINT RELTOL=1e-6
+.END
+";
+        let parameterized = direct.replace(
+            ".TRAN 2u 2m 0 10u",
+            ".PARAM first=1u\n.PARAM last=1m\n.PARAM start=0\n.PARAM ceiling=5u\n.TRAN {2*first} {2*last} {start} {2*ceiling}",
+        );
+        let print = XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        };
+        let snapshot = |source: &str| {
+            let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+                .expect("transient-expression snapshot fixture parses");
+            XyceTestRunner::transient_analysis_expression_snapshot(&netlist, &print)
+        };
+        let baseline = snapshot(direct).expect("direct numeric representation qualifies");
+        let target =
+            snapshot(&parameterized).expect("parameter expression representation qualifies");
+        XyceTestRunner::compare_transient_analysis_expression_snapshots(&baseline, &target)
+            .expect("only .PARAM/.TRAN representation differs");
+
+        let plan = XyceStaticTranPlan {
+            deck_path: PathBuf::from("member.cir"),
+            reference_path: PathBuf::new(),
+            source: direct.to_string(),
+            print: print.clone(),
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 2.0e-6,
+                stop: 2.0e-3,
+                start: Some(0.0),
+                max_step: Some(1.0e-5),
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::PlainStatic,
+            wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+        };
+        XyceTestRunner::validate_transient_analysis_expression_plan(&plan)
+            .expect("canonical default-tolerance plan qualifies");
+        let mut tolerance_override = plan;
+        tolerance_override.wrapper_tolerance = Some(XyceComparisonTolerance::from_config(
+            &XyceRunnerConfig::default(),
+        ));
+        assert!(
+            XyceTestRunner::validate_transient_analysis_expression_plan(&tolerance_override)
+                .is_err(),
+            "generated-reference analysis-expression parity must retain the canonical default verifier tolerance"
+        );
+
+        for invalid in [
+            parameterized.replace("{2*first}", "{first+first}"),
+            parameterized.replace("{2*first}", "{sqrt(first)}"),
+            parameterized.replace("R1 out 0 1k", "R1 out 0 first"),
+            parameterized.replace("{2*last}", "2m"),
+            parameterized.replace(".PARAM ceiling=5u", ".PARAM ceiling=5u\n.PARAM unused=1"),
+            parameterized.replace(".TRAN", "*COMP V(out) reltol=.1\n.TRAN"),
+        ] {
+            assert!(
+                snapshot(&invalid).is_err(),
+                "parameter reuse, functions, non-analysis use, mixed forms, extras, and comparator overrides fail closed: {invalid}"
+            );
+        }
+
+        for changed in [
+            parameterized.replace("generic transient expression snapshot", "changed title"),
+            parameterized.replace("R1 out 0 1k", "R1 out 0 2k"),
+            parameterized.replace("SIN(0 1 1k 0 0)", "SIN(0 2 1k 0 0)"),
+            parameterized.replace("V1 out 0", "V1 changed 0"),
+            parameterized.replace("RELTOL=1e-6", "RELTOL=2e-6"),
+            parameterized.replace(".PRINT TRAN V(out)", ".PRINT TRAN V(changed)"),
+        ] {
+            let changed = snapshot(&changed).expect("semantic mutation remains individually valid");
+            assert!(
+                XyceTestRunner::compare_transient_analysis_expression_snapshots(
+                    &baseline, &changed
+                )
+                .is_err(),
+                "title, topology, values, source waveforms, options, and nonrepresentation source participate in parity"
+            );
+        }
     }
 
     #[test]
