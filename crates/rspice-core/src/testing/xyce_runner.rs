@@ -749,6 +749,13 @@ struct XyceTransientAnalysisExpressionSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceDcAnalysisExpressionSnapshot {
+    representation: XyceDcAnalysisRepresentation,
+    parameter_bits: BTreeMap<String, u64>,
+    nonrepresentation_source: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
@@ -761,6 +768,7 @@ enum XyceStrictTransientFamilySnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictDcFamilySnapshot {
     BjtExternalNode(XyceBjtExternalNodeFamilySnapshot),
+    DcAnalysisExpression(XyceDcAnalysisExpressionSnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     SubcktParameterPrecedence(XyceSubcktParameterPrecedenceSnapshot),
 }
@@ -821,6 +829,12 @@ enum XyceTransientAnalysisRepresentation {
     ParameterExpression,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceDcAnalysisRepresentation {
+    DirectNumeric,
+    ParameterExpression,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct XyceRelationalElementFingerprint {
     kind: String,
@@ -846,6 +860,7 @@ enum XyceBjtExternalNodeRepresentation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
     BjtExternalNode,
+    DcAnalysisExpression,
     SinExpression,
     ParamExpression,
     PassiveCapPrimaryValue,
@@ -906,6 +921,7 @@ impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
             Self::BjtExternalNode => "BJT_EXTNODE",
+            Self::DcAnalysisExpression => "DC_ANALYSIS_EXPRESSION",
             Self::SinExpression => "SIN_EXPRESSION",
             Self::ParamExpression => "PARAM_EXPRESSION",
             Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
@@ -922,6 +938,7 @@ impl XyceBaselineFamilyKind {
     fn wrapper_contract(self) -> &'static str {
         match self {
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
+            Self::DcAnalysisExpression => "dc_analysis_expression_family_wrapper",
             Self::SinExpression => "sin_expression_family_wrapper",
             Self::ParamExpression => "param_expression_family_wrapper",
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
@@ -938,6 +955,7 @@ impl XyceBaselineFamilyKind {
     fn baseline_contract(self) -> &'static str {
         match self {
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
+            Self::DcAnalysisExpression => "dc_analysis_expression_family_baseline",
             Self::SinExpression => "sin_expression_family_baseline",
             Self::ParamExpression => "param_expression_family_baseline",
             Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
@@ -963,6 +981,7 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
             Self::BjtExternalNode
+            | Self::DcAnalysisExpression
             | Self::SinExpression
             | Self::ParamExpression
             | Self::PassiveCapPrimaryValue
@@ -10020,6 +10039,7 @@ impl XyceTestRunner {
                 )
             ),
             XyceBaselineFamilyKind::BjtExternalNode
+            | XyceBaselineFamilyKind::DcAnalysisExpression
             | XyceBaselineFamilyKind::PassiveResPrimaryValue
             | XyceBaselineFamilyKind::SubcktParameterPrecedence => false,
             XyceBaselineFamilyKind::SinExpression
@@ -11262,6 +11282,7 @@ impl XyceTestRunner {
         if matches!(
             contract.kind,
             XyceBaselineFamilyKind::BjtExternalNode
+                | XyceBaselineFamilyKind::DcAnalysisExpression
                 | XyceBaselineFamilyKind::PassiveResPrimaryValue
         ) && analysis != XyceBaselineFamilyAnalysis::Dc
         {
@@ -11601,6 +11622,9 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::BjtExternalNode => {
                 Self::validate_bjt_external_node_dc_plan(plan)
             }
+            XyceBaselineFamilyKind::DcAnalysisExpression => {
+                Self::validate_dc_analysis_expression_plan(plan)
+            }
             XyceBaselineFamilyKind::PassiveResPrimaryValue => {
                 Self::validate_passive_res_primary_dc_plan(plan)
             }
@@ -11624,6 +11648,10 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::BjtExternalNode => {
                 Self::bjt_external_node_family_snapshot(netlist, print)
                     .map(XyceStrictDcFamilySnapshot::BjtExternalNode)
+            }
+            XyceBaselineFamilyKind::DcAnalysisExpression => {
+                Self::dc_analysis_expression_snapshot(netlist)
+                    .map(XyceStrictDcFamilySnapshot::DcAnalysisExpression)
             }
             XyceBaselineFamilyKind::PassiveResPrimaryValue => {
                 Self::passive_res_primary_snapshot(netlist, print, sweep_source)
@@ -11649,6 +11677,10 @@ impl XyceTestRunner {
                 XyceStrictDcFamilySnapshot::BjtExternalNode(baseline),
                 XyceStrictDcFamilySnapshot::BjtExternalNode(target),
             ) => Self::compare_bjt_external_node_family_snapshots(baseline, target),
+            (
+                XyceStrictDcFamilySnapshot::DcAnalysisExpression(baseline),
+                XyceStrictDcFamilySnapshot::DcAnalysisExpression(target),
+            ) => Self::compare_dc_analysis_expression_snapshots(baseline, target),
             (
                 XyceStrictDcFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictDcFamilySnapshot::PassivePrimaryValue(target),
@@ -16307,6 +16339,480 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn validate_dc_analysis_expression_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        const LABEL: &str = "DC-analysis expression parity";
+        if !matches!(plan.expression_dialect, ExpressionDialect::Xyce)
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || !plan.steps.is_empty()
+            || !plan.diagnostics.is_empty()
+            || plan.print_format.is_some()
+            || plan.print.probes.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free native Xyce .DC sweep with default indexed PRN output, no execution-directory override, no .DATA, and no .STEP"
+            ));
+        }
+        if plan.dc.primary_spec().points().is_empty()
+            || plan
+                .dc
+                .sweep2
+                .as_ref()
+                .is_some_and(|sweep| sweep.spec().points().is_empty())
+        {
+            return Err(format!("{LABEL} requires finite nonempty DC sweep grids"));
+        }
+        Self::dc_analysis_source_qualification(&plan.source).map(|_| ())
+    }
+
+    fn dc_analysis_value_fields(statement: &str) -> Result<Vec<String>, String> {
+        const LABEL: &str = "DC-analysis expression parity";
+        let fields = Self::split_grouped_whitespace_fields(statement, ".DC statement")?;
+        if fields
+            .first()
+            .is_none_or(|field| !field.eq_ignore_ascii_case(".DC"))
+        {
+            return Err(format!("{LABEL} requires a .DC statement"));
+        }
+        if fields.get(1).is_some_and(|field| {
+            field.eq_ignore_ascii_case("DEC") || field.eq_ignore_ascii_case("OCT")
+        }) {
+            if fields.len() != 6 || !Self::is_single_spice_identifier(&fields[2]) {
+                return Err(format!(
+                    "{LABEL} DEC/OCT sweeps require '.DC mode source start stop points'"
+                ));
+            }
+            return Ok(fields[3..].to_vec());
+        }
+        if fields
+            .get(2)
+            .is_some_and(|field| field.eq_ignore_ascii_case("LIST"))
+        {
+            if fields.len() < 4 || !Self::is_single_spice_identifier(&fields[1]) {
+                return Err(format!(
+                    "{LABEL} LIST sweeps require '.DC source LIST value ...'"
+                ));
+            }
+            return Ok(fields[3..].to_vec());
+        }
+        if !matches!(fields.len(), 5 | 9)
+            || !Self::is_single_spice_identifier(&fields[1])
+            || (fields.len() == 9 && !Self::is_single_spice_identifier(&fields[5]))
+        {
+            return Err(format!(
+                "{LABEL} linear sweeps require one or two 'source start stop step' dimensions"
+            ));
+        }
+        let mut values = fields[2..5].to_vec();
+        if fields.len() == 9 {
+            values.extend_from_slice(&fields[6..9]);
+        }
+        Ok(values)
+    }
+
+    fn dc_analysis_source_qualification(
+        source: &str,
+    ) -> Result<(XyceDcAnalysisRepresentation, BTreeMap<String, u64>), String> {
+        const LABEL: &str = "DC-analysis expression parity";
+        if Self::source_has_comp_directive(source) {
+            return Err(format!(
+                "{LABEL} uses the canonical default verifier and does not admit *COMP"
+            ));
+        }
+        let lines = Self::logical_netlist_lines(source);
+        if lines.is_empty() {
+            return Err(format!("{LABEL} requires a nonempty source"));
+        }
+        let mut parameter_bits = BTreeMap::new();
+        let mut dc_fields = None;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        let mut model_count = 0usize;
+        let mut element_count = 0usize;
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                match command.to_ascii_lowercase().as_str() {
+                    ".param" => {
+                        let fields = Self::split_grouped_whitespace_fields(
+                            stripped,
+                            "DC-analysis .PARAM statement",
+                        )?;
+                        let [_, assignment] = fields.as_slice() else {
+                            return Err(format!(
+                                "{LABEL} requires one direct '.PARAM name=value' assignment per statement"
+                            ));
+                        };
+                        let Some((name, value)) = assignment.split_once('=') else {
+                            return Err(format!(
+                                "{LABEL} requires canonical '.PARAM name=value' syntax"
+                            ));
+                        };
+                        let name = name.trim().to_ascii_lowercase();
+                        if name.is_empty()
+                            || value.trim().is_empty()
+                            || value.contains('=')
+                            || !name.chars().enumerate().all(|(index, ch)| {
+                                ch.is_ascii_alphanumeric()
+                                    || ch == '_'
+                                    || (index > 0 && matches!(ch, '.' | '$'))
+                            })
+                            || name.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+                        {
+                            return Err(format!(
+                                "{LABEL} contains invalid parameter assignment '{assignment}'"
+                            ));
+                        }
+                        let value = Self::single_spice_numeric_literal_value(value)?;
+                        if !value.is_finite()
+                            || parameter_bits
+                                .insert(name.clone(), value.to_bits())
+                                .is_some()
+                        {
+                            return Err(format!(
+                                "{LABEL} parameter '{name}' must be unique and finite"
+                            ));
+                        }
+                    }
+                    ".dc" => {
+                        if dc_fields.is_some() {
+                            return Err(format!("{LABEL} requires exactly one .DC"));
+                        }
+                        dc_fields = Some(Self::dc_analysis_value_fields(stripped)?);
+                    }
+                    ".print" => {
+                        let fields = Self::split_grouped_whitespace_fields(
+                            stripped,
+                            "DC-analysis .PRINT statement",
+                        )?;
+                        if fields.len() < 3
+                            || !fields[0].eq_ignore_ascii_case(".PRINT")
+                            || !fields[1].eq_ignore_ascii_case("DC")
+                        {
+                            return Err(format!(
+                                "{LABEL} requires a nonempty '.PRINT DC probe ...' statement"
+                            ));
+                        }
+                        print_count += 1;
+                    }
+                    ".model" => model_count += 1,
+                    ".end" => {
+                        end_count += 1;
+                        if !stripped.eq_ignore_ascii_case(".end") {
+                            return Err(format!("{LABEL} requires a bare .END statement"));
+                        }
+                    }
+                    other => {
+                        return Err(format!("{LABEL} does not admit directive '{other}'"));
+                    }
+                }
+                continue;
+            }
+
+            element_count += 1;
+            if stripped.contains('{') || stripped.contains('}') {
+                return Err(format!(
+                    "{LABEL} element statements must not consume analysis parameters"
+                ));
+            }
+            let designator = command
+                .chars()
+                .next()
+                .map(|ch| ch.to_ascii_uppercase())
+                .ok_or_else(|| format!("{LABEL} contains an empty element statement"))?;
+            if !matches!(designator, 'R' | 'V' | 'M') {
+                return Err(format!(
+                    "{LABEL} admits only native resistors, independent voltage sources, and classic MOS elements; got '{command}'"
+                ));
+            }
+        }
+        if print_count != 1 || end_count != 1 || element_count == 0 || model_count > 1 {
+            return Err(format!(
+                "{LABEL} requires one .PRINT, one .END, at least one element, and at most one model; found ({print_count}, {end_count}, {element_count}, {model_count})"
+            ));
+        }
+        let dc_fields = dc_fields.ok_or_else(|| format!("{LABEL} contains no .DC"))?;
+
+        if parameter_bits.is_empty() {
+            if dc_fields
+                .iter()
+                .all(|field| Self::is_single_spice_numeric_literal(field))
+            {
+                return Ok((XyceDcAnalysisRepresentation::DirectNumeric, parameter_bits));
+            }
+            return Err(format!(
+                "{LABEL} numeric baseline requires only direct finite .DC literals"
+            ));
+        }
+
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let command = stripped.split_whitespace().next().unwrap_or_default();
+            if command.eq_ignore_ascii_case(".param") || command.eq_ignore_ascii_case(".dc") {
+                continue;
+            }
+            let identifiers = stripped
+                .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$')))
+                .filter(|field| {
+                    field
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+                });
+            if identifiers.into_iter().any(|identifier| {
+                parameter_bits
+                    .keys()
+                    .any(|name| identifier.eq_ignore_ascii_case(name))
+            }) {
+                return Err(format!(
+                    "{LABEL} analysis parameters may be referenced only by .DC fields"
+                ));
+            }
+        }
+
+        if dc_fields.len() != parameter_bits.len() {
+            return Err(format!(
+                "{LABEL} requires one unique scalar parameter per .DC value field"
+            ));
+        }
+        let mut field_parameters = BTreeSet::new();
+        for field in &dc_fields {
+            let Some(expression) = field
+                .strip_prefix('{')
+                .and_then(|value| value.strip_suffix('}'))
+            else {
+                return Err(format!(
+                    "{LABEL} parameterized .DC fields must each be one braced expression"
+                ));
+            };
+            let expression = crate::netlist::expr::parse_expression(expression)
+                .map_err(|err| format!("{LABEL} could not parse '{field}': {err}"))?;
+            let mut references = BTreeMap::new();
+            Self::collect_analysis_parameter_references(
+                &expression,
+                &parameter_bits,
+                &mut references,
+                ".DC",
+            )?;
+            let reference_entries = references.into_iter().collect::<Vec<_>>();
+            let [(reference, count)] = reference_entries.as_slice() else {
+                return Err(format!(
+                    "{LABEL} each .DC expression must exercise exactly one scalar parameter"
+                ));
+            };
+            if *count != 1 || !field_parameters.insert(reference.clone()) {
+                return Err(format!(
+                    "{LABEL} each scalar parameter must occur exactly once in exactly one .DC field"
+                ));
+            }
+        }
+        if field_parameters != parameter_bits.keys().cloned().collect() {
+            return Err(format!(
+                "{LABEL} every declared scalar parameter must feed exactly one .DC field"
+            ));
+        }
+        Ok((
+            XyceDcAnalysisRepresentation::ParameterExpression,
+            parameter_bits,
+        ))
+    }
+
+    fn dc_analysis_expression_snapshot(
+        netlist: &Netlist,
+    ) -> Result<XyceDcAnalysisExpressionSnapshot, String> {
+        const LABEL: &str = "DC-analysis expression parity";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let (representation, parameter_bits) = Self::dc_analysis_source_qualification(source)?;
+        let parsed_parameter_bits = netlist
+            .params
+            .numeric_parameters()
+            .into_iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<BTreeMap<_, _>>();
+        if parsed_parameter_bits != parameter_bits
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} parsed scalar parameter state differs from the qualified direct assignments"
+            ));
+        }
+        if !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Dc { .. }])
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires a flat diagnostic-free DC deck without auxiliary analyses or external model state"
+            ));
+        }
+        for model in &netlist.models {
+            if !Self::model_is_native_dc_analysis_expression_mos1(model) {
+                return Err(format!(
+                    "{LABEL} admits only direct native classic MOS LEVEL=1 models"
+                ));
+            }
+        }
+        for element in &netlist.elements {
+            if element
+                .nodes
+                .iter()
+                .any(|node| crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0")
+            {
+                return Err(format!(
+                    "{LABEL} element '{}' uses a ground alias; literal node 0 is required",
+                    element.name
+                ));
+            }
+            let valid = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    element.nodes.len() == 2
+                        && value.is_finite()
+                        && *value > 0.0
+                        && value_expr.is_none()
+                        && model.is_none()
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) => {
+                    element.nodes.len() == 2 && value.is_finite()
+                }
+                ElementKind::Mosfet {
+                    model,
+                    compact_syntax,
+                    instance_params,
+                    deferred_params,
+                    ..
+                } => {
+                    element.nodes.len() == 4
+                        && !compact_syntax
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                        && netlist.models.iter().any(|candidate| {
+                            candidate.name.eq_ignore_ascii_case(model)
+                                && matches!(
+                                    candidate.model_type.to_ascii_uppercase().as_str(),
+                                    "NMOS" | "PMOS"
+                                )
+                        })
+                }
+                _ => false,
+            };
+            if !valid {
+                return Err(format!(
+                    "{LABEL} contains unqualified element '{}'",
+                    element.name
+                ));
+            }
+        }
+
+        let mut nonrepresentation_source = Vec::new();
+        for line in Self::logical_netlist_lines(source).into_iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let command = stripped.split_whitespace().next().unwrap_or_default();
+            if command.eq_ignore_ascii_case(".param") {
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".dc") {
+                nonrepresentation_source.push(".dc <analysis-expression>".to_string());
+            } else {
+                nonrepresentation_source.push(
+                    stripped
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .to_ascii_lowercase(),
+                );
+            }
+        }
+        Ok(XyceDcAnalysisExpressionSnapshot {
+            representation,
+            parameter_bits,
+            nonrepresentation_source,
+        })
+    }
+
+    fn model_is_native_dc_analysis_expression_mos1(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+        let mut names = BTreeSet::new();
+        model.params.iter().all(|(name, value)| {
+            let normalized = name.to_ascii_uppercase();
+            names.insert(normalized.clone())
+                && Self::native_dc_analysis_expression_mos1_model_param(&normalized, *value)
+        })
+    }
+
+    fn native_dc_analysis_expression_mos1_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match name {
+            "LEVEL" => value.to_bits() == 1.0f64.to_bits(),
+            "VTO" | "VT0" | "VTH0" | "XTI" => true,
+            "KP" | "PHI" | "U0" | "UO" | "TOX" | "NSUB" | "L" | "W" | "PB" | "AF" => value > 0.0,
+            "GAMMA" | "LAMBDA" | "NSS" | "NFS" | "IS" | "JS" | "LD" | "RD" | "RS" | "RSH"
+            | "CBD" | "CAPBD" | "CBS" | "CAPBS" | "CJ" | "CJ0" | "CJSW" | "CGSO" | "CGDO"
+            | "CGBO" | "KF" => value >= 0.0,
+            "TPG" | "GATE" => matches!(value, -1.0 | 0.0 | 1.0),
+            "MJ" | "MJSW" => (0.0..=1.0).contains(&value),
+            "FC" => (0.0..1.0).contains(&value),
+            "TNOM" => value > -273.15,
+            _ => false,
+        }
+    }
+
+    fn compare_dc_analysis_expression_snapshots(
+        baseline: &XyceDcAnalysisExpressionSnapshot,
+        target: &XyceDcAnalysisExpressionSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceDcAnalysisRepresentation::DirectNumeric
+            || target.representation != XyceDcAnalysisRepresentation::ParameterExpression
+            || !baseline.parameter_bits.is_empty()
+            || target.parameter_bits.is_empty()
+        {
+            return Err(
+                "family must compare a direct numeric .DC baseline with a parameter-expression .DC representation"
+                    .to_string(),
+            );
+        }
+        if baseline.nonrepresentation_source != target.nonrepresentation_source {
+            return Err(
+                "circuit, model, output, or non-analysis directive semantics differ".to_string(),
+            );
+        }
+        Ok(())
+    }
+
     fn validate_transient_analysis_expression_plan(
         plan: &XyceStaticTranPlan,
     ) -> Result<(), String> {
@@ -16559,10 +17065,11 @@ impl XyceTestRunner {
             let expression = crate::netlist::expr::parse_expression(expression)
                 .map_err(|err| format!("{LABEL} could not parse '{field}': {err}"))?;
             let mut references = BTreeMap::new();
-            Self::collect_transient_analysis_parameter_references(
+            Self::collect_analysis_parameter_references(
                 &expression,
                 &parameter_bits,
                 &mut references,
+                ".TRAN",
             )?;
             let reference_entries = references.into_iter().collect::<Vec<_>>();
             let [(reference, count)] = reference_entries.as_slice() else {
@@ -16592,10 +17099,11 @@ impl XyceTestRunner {
         ))
     }
 
-    fn collect_transient_analysis_parameter_references(
+    fn collect_analysis_parameter_references(
         expression: &crate::netlist::expr::Expr,
         declared: &BTreeMap<String, u64>,
         references: &mut BTreeMap<String, usize>,
+        directive: &str,
     ) -> Result<(), String> {
         use crate::netlist::expr::{BinOpKind, Expr as NetExpr, UnaryOpKind};
 
@@ -16605,7 +17113,7 @@ impl XyceTestRunner {
                 let name = name.to_ascii_lowercase();
                 if !declared.contains_key(&name) {
                     return Err(format!(
-                        "undeclared or runtime identifier '{name}' in .TRAN expression"
+                        "undeclared or runtime identifier '{name}' in {directive} expression"
                     ));
                 }
                 *references.entry(name).or_default() += 1;
@@ -16621,24 +17129,19 @@ impl XyceTestRunner {
                         | BinOpKind::Pow
                 ) =>
             {
-                Self::collect_transient_analysis_parameter_references(
-                    left, declared, references,
-                )?;
-                Self::collect_transient_analysis_parameter_references(
-                    right, declared, references,
-                )
+                Self::collect_analysis_parameter_references(left, declared, references, directive)?;
+                Self::collect_analysis_parameter_references(right, declared, references, directive)
             }
             NetExpr::UnaryOp { op, operand }
                 if matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos) =>
             {
-                Self::collect_transient_analysis_parameter_references(
-                    operand, declared, references,
+                Self::collect_analysis_parameter_references(
+                    operand, declared, references, directive,
                 )
             }
-            _ => Err(
-                "only finite real arithmetic over direct scalar parameters is admitted in .TRAN expressions"
-                    .to_string(),
-            ),
+            _ => Err(format!(
+                "only finite real arithmetic over direct scalar parameters is admitted in {directive} expressions"
+            )),
         }
     }
 
@@ -33397,6 +33900,7 @@ impl XyceTestRunner {
 
     fn baseline_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
         self.bjt_external_node_family_contract(deck)
+            .or_else(|| self.dc_analysis_expression_family_contract(deck))
             .or_else(|| self.sin_expression_family_contract(deck))
             .or_else(|| self.param_expression_family_contract(deck))
             .or_else(|| self.passive_temperature_override_family_contract(deck))
@@ -33835,6 +34339,206 @@ impl XyceTestRunner {
             baseline_path: baseline_path.clone(),
             member_paths: vec![baseline_path, target_path.clone()],
             target_path: Some(target_path),
+        })
+    }
+
+    fn dc_analysis_expression_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let mut paths = Vec::new();
+        let mut baseline_count = 0usize;
+        let mut target_count = 0usize;
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file()
+                || fs::metadata(&path)
+                    .ok()
+                    .is_none_or(|metadata| metadata.len() == 0)
+                || self
+                    .static_prn_reference_path(&path)
+                    .is_some_and(|reference| reference.is_file())
+            {
+                return None;
+            }
+            let member_relative = self.relative_key(&path);
+            let wrapper = self.requires_upstream_wrapper(&member_relative);
+            let source = fs::read_to_string(&path).ok()?;
+            let (representation, _) = Self::dc_analysis_source_qualification(&source).ok()?;
+            if wrapper != (representation == XyceDcAnalysisRepresentation::ParameterExpression) {
+                return None;
+            }
+            if wrapper {
+                target_count += 1;
+            } else {
+                baseline_count += 1;
+            }
+            paths.push(path);
+        }
+        if baseline_count < 2 || baseline_count != target_count || paths.len() != 2 * baseline_count
+        {
+            return None;
+        }
+
+        let mut pair_counts = BTreeMap::<(String, String), usize>::new();
+        let mut selected = None;
+        for path in &paths {
+            let member = XyceDeck {
+                path: path.clone(),
+                relative_path: self.relative_key(path),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = self.dc_analysis_expression_candidate_contract(&member)?;
+            let pair = (
+                Self::normalize_manifest_key(&self.relative_key(&contract.baseline_path)),
+                Self::normalize_manifest_key(
+                    &self.relative_key(
+                        contract
+                            .member_paths
+                            .iter()
+                            .find(|member| !Self::same_path(member, &contract.baseline_path))?,
+                    ),
+                ),
+            );
+            *pair_counts.entry(pair).or_default() += 1;
+            if Self::same_path(path, &deck.path) {
+                selected = Some(contract);
+            }
+        }
+        if pair_counts.len() != baseline_count || pair_counts.values().any(|count| *count != 2) {
+            return None;
+        }
+        selected
+    }
+
+    fn dc_analysis_expression_candidate_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/")
+            || self
+                .static_prn_reference_path(&deck.path)
+                .is_some_and(|reference| reference.is_file())
+        {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let source = fs::read_to_string(&deck.path).ok()?;
+        let (representation, _) = Self::dc_analysis_source_qualification(&source).ok()?;
+        let is_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        if is_wrapper != (representation == XyceDcAnalysisRepresentation::ParameterExpression) {
+            return None;
+        }
+        let plan = self
+            .static_dc_plan_for_path(&deck.path, ExpressionDialect::Xyce)
+            .ok()?;
+        Self::validate_dc_analysis_expression_plan(&plan).ok()?;
+        let netlist = Self::parse_xyce_netlist(&plan.source, &deck.path).ok()?;
+        let snapshot = Self::dc_analysis_expression_snapshot(&netlist).ok()?;
+
+        let mut matches = Vec::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let candidate = entry.path();
+            if !entry.file_type().ok()?.is_file()
+                || Self::same_path(&candidate, &deck.path)
+                || !candidate
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                || fs::metadata(&candidate)
+                    .ok()
+                    .is_none_or(|metadata| metadata.len() == 0)
+                || self
+                    .static_prn_reference_path(&candidate)
+                    .is_some_and(|reference| reference.is_file())
+            {
+                continue;
+            }
+            let candidate_relative = self.relative_key(&candidate);
+            let candidate_wrapper = self.requires_upstream_wrapper(&candidate_relative);
+            if candidate_wrapper == is_wrapper {
+                continue;
+            }
+            let candidate_source = fs::read_to_string(&candidate).ok()?;
+            let Ok((candidate_representation, _)) =
+                Self::dc_analysis_source_qualification(&candidate_source)
+            else {
+                continue;
+            };
+            if candidate_wrapper
+                != (candidate_representation == XyceDcAnalysisRepresentation::ParameterExpression)
+            {
+                continue;
+            }
+            let Ok(candidate_plan) =
+                self.static_dc_plan_for_path(&candidate, ExpressionDialect::Xyce)
+            else {
+                continue;
+            };
+            if Self::validate_dc_analysis_expression_plan(&candidate_plan).is_err()
+                || plan.print.probes != candidate_plan.print.probes
+                || plan.print_format != candidate_plan.print_format
+                || !Self::dc_sweeps_match_exactly(&plan.dc, &candidate_plan.dc)
+            {
+                continue;
+            }
+            let Ok(candidate_netlist) =
+                Self::parse_xyce_netlist(&candidate_plan.source, &candidate)
+            else {
+                continue;
+            };
+            let Ok(candidate_snapshot) = Self::dc_analysis_expression_snapshot(&candidate_netlist)
+            else {
+                continue;
+            };
+            let semantic_match = if is_wrapper {
+                Self::compare_dc_analysis_expression_snapshots(&candidate_snapshot, &snapshot)
+            } else {
+                Self::compare_dc_analysis_expression_snapshots(&snapshot, &candidate_snapshot)
+            };
+            if semantic_match.is_ok() {
+                matches.push(candidate);
+            }
+        }
+        let [counterpart] = matches.as_slice() else {
+            return None;
+        };
+        let (baseline_path, target_path) = if is_wrapper {
+            (counterpart.clone(), deck.path.clone())
+        } else {
+            (deck.path.clone(), counterpart.clone())
+        };
+        let family = format!(
+            "{}:{}",
+            parent.file_name()?.to_str()?,
+            baseline_path.file_stem()?.to_str()?
+        );
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::DcAnalysisExpression,
+            // The canonical wrappers try a byte comparison before their DC
+            // RMS fallback. These independently simulated representations are
+            // deterministic and must serialize identically, so exact parity is
+            // the intentional fail-closed refinement for this family.
+            comparison: XyceBaselineFamilyComparison::ExactPrn,
+            family,
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, target_path],
+            target_path: Some(deck.path.clone()),
         })
     }
 
@@ -41972,6 +42676,285 @@ L1 out 0 LM 10m TEMP=90
             &inductor_snapshot(&inductor_target),
         )
         .expect("inductor scalar TC1/TC2 precedence has the same strict family semantics");
+    }
+
+    #[test]
+    fn dc_analysis_expression_family_is_complete_bijective_and_fail_closed() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-dc-expression-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_DC_FORMS");
+        fs::create_dir_all(&family_dir).expect("create DC-expression family fixture");
+        let literal_a = family_dir.join("numeric_nested.cir");
+        let expression_a = family_dir.join("parameter_nested.cir");
+        let literal_b = family_dir.join("numeric_list.cir");
+        let expression_b = family_dir.join("parameter_list.cir");
+        let direct_a = "\
+numeric nested DC form
+V1 a 0 0
+V2 b 0 0
+R1 a 0 1k
+R2 b 0 2k
+.DC V1 0 2 1 V2 0 1 1
+.PRINT DC V(a) V(b)
+.END
+";
+        let parameter_a = direct_a
+            .replace("numeric nested DC form", "parameterized nested DC form")
+            .replace(
+                ".DC V1 0 2 1 V2 0 1 1",
+                ".PARAM a0=0\n.PARAM a1=2\n.PARAM da=1\n.PARAM b0=0\n.PARAM b1=1\n.PARAM db=1\n.DC V1 {a0} {a1} {da} V2 {b0} {b1} {db}",
+            );
+        let direct_b = "\
+numeric LIST DC form
+V3 out 0 0
+R3 out 0 3k
+.DC V3 LIST -2 0 5
+.PRINT DC V(out)
+.END
+";
+        let parameter_b = direct_b
+            .replace("numeric LIST DC form", "parameterized LIST DC form")
+            .replace(
+                ".DC V3 LIST -2 0 5",
+                ".PARAM p0=-2\n.PARAM p1=0\n.PARAM p2=5\n.DC V3 LIST {p0} {p1} {p2}",
+            );
+        for (path, source) in [
+            (&literal_a, direct_a),
+            (&expression_a, parameter_a.as_str()),
+            (&literal_b, direct_b),
+            (&expression_b, parameter_b.as_str()),
+        ] {
+            fs::write(path, source).expect("write DC-expression family member");
+        }
+        let manifest = format!(
+            "Netlists/Certification_Tests/GENERIC_DC_FORMS/parameter_nested.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/Certification_Tests/GENERIC_DC_FORMS/parameter_list.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest)
+            .expect("write DC-expression wrapper provenance");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for path in [&literal_a, &expression_a, &literal_b, &expression_b] {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: runner.relative_key(path),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .dc_analysis_expression_family_contract(&deck)
+                .expect("complete generic semantic family qualifies");
+            assert_eq!(contract.kind, XyceBaselineFamilyKind::DcAnalysisExpression);
+            assert_eq!(contract.comparison, XyceBaselineFamilyComparison::ExactPrn);
+            assert_eq!(contract.member_paths.len(), 2);
+            assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+        }
+
+        let deck = XyceDeck {
+            path: literal_a.clone(),
+            relative_path: runner.relative_key(&literal_a),
+            section: XyceDeckSection::Netlists,
+        };
+        fs::write(
+            &expression_a,
+            parameter_a.replace(".PARAM a1=2", ".PARAM a1=3"),
+        )
+        .expect("change one resolved DC bound");
+        assert!(
+            runner
+                .dc_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "resolved sweep changes prevent semantic pairing"
+        );
+        fs::write(&expression_a, &parameter_a).expect("restore nested wrapper");
+
+        let extra = family_dir.join("unpaired.cir");
+        fs::write(&extra, direct_a).expect("write unpaired member");
+        assert!(
+            runner
+                .dc_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "an extra circuit prevents complete-family inference"
+        );
+        fs::remove_file(&extra).expect("remove unpaired member");
+
+        fs::write(&expression_b, "").expect("empty one wrapper member");
+        assert!(
+            runner
+                .dc_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "empty members fail closed"
+        );
+        fs::write(&expression_b, &parameter_b).expect("restore LIST wrapper");
+
+        let output_dir = root
+            .join("OutputData")
+            .join("Certification_Tests")
+            .join("GENERIC_DC_FORMS");
+        fs::create_dir_all(&output_dir).expect("create forbidden static-oracle directory");
+        fs::write(output_dir.join("numeric_nested.cir.prn"), "oracle\n")
+            .expect("write forbidden static oracle");
+        assert!(
+            runner
+                .dc_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "generated-reference families must not mix static waveform ownership"
+        );
+        fs::remove_dir_all(&output_dir).expect("remove forbidden oracle");
+
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "Netlists/Certification_Tests/GENERIC_DC_FORMS/parameter_nested.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("remove one wrapper provenance record");
+        let incomplete_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            incomplete_runner
+                .dc_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "wrapper/baseline imbalance fails closed"
+        );
+
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("restore manifest");
+        fs::remove_file(&literal_b).expect("remove second baseline");
+        fs::remove_file(&expression_b).expect("remove second wrapper");
+        let single_pair_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            single_pair_runner
+                .dc_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "one coincidental pair is insufficient generated-reference provenance"
+        );
+
+        fs::remove_dir_all(&root).expect("remove DC-expression family fixture");
+    }
+
+    #[test]
+    fn dc_analysis_expression_snapshot_and_grids_are_fail_closed() {
+        let direct = "\
+direct LIST title
+V1 out 0 0
+R1 out 0 1k
+.DC V1 LIST -2 0 5
+.PRINT DC V(out)
+.END
+";
+        let parameterized = direct
+            .replace("direct LIST title", "parameter expression title")
+            .replace(
+                ".DC V1 LIST -2 0 5",
+                ".PARAM p0=-2\n.PARAM p1=0\n.PARAM p2=5\n.DC V1 LIST {p0} {p1} {p2}",
+            );
+        let snapshot = |source: &str| {
+            let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+                .expect("DC-expression snapshot fixture parses");
+            XyceTestRunner::dc_analysis_expression_snapshot(&netlist)
+        };
+        let baseline = snapshot(direct).expect("direct numeric representation qualifies");
+        let target =
+            snapshot(&parameterized).expect("parameter expression representation qualifies");
+        XyceTestRunner::compare_dc_analysis_expression_snapshots(&baseline, &target)
+            .expect("title and .PARAM/.DC representation are the only differences");
+
+        for invalid in [
+            parameterized.replace("{p0}", "{p0+p0}"),
+            parameterized.replace("{p0}", "{sqrt(p0)}"),
+            parameterized.replace("R1 out 0 1k", "R1 out 0 {p0}"),
+            parameterized.replace("{p1}", "0"),
+            parameterized.replace(".PARAM p2=5", ".PARAM p2=5\n.PARAM unused=1"),
+            parameterized.replace(".DC", "*COMP V(out) reltol=.1\n.DC"),
+            parameterized.replace(".END", ".OPTIONS NONLIN MAXSTEP=1\n.END"),
+            parameterized.replace("V1 out 0 0", "V1 out GND 0"),
+            parameterized.replace(".PRINT DC", ".PRINT TRAN"),
+        ] {
+            assert!(
+                snapshot(&invalid).is_err(),
+                "parameter reuse, functions, non-analysis use, mixed forms, extras, comparators, and extra directives fail closed: {invalid}"
+            );
+        }
+
+        let opaque_model = "\
+opaque MOS model state
+V1 out 0 0
+V2 gate 0 1
+M1 out gate 0 0 NM
+.MODEL NM NMOS(LEVEL=1 KP=1m VTO=1 OPAQUE=2)
+.DC V1 LIST 0 1
+.PRINT DC V(out)
+.END
+";
+        assert!(
+            snapshot(opaque_model).is_err(),
+            "unknown classic-MOS model state must not enter the relational oracle"
+        );
+
+        for changed in [
+            parameterized.replace("R1 out 0 1k", "R1 out 0 2k"),
+            parameterized.replace("V1 out 0 0", "V1 changed 0 0"),
+            parameterized.replace(".PRINT DC V(out)", ".PRINT DC V(changed)"),
+        ] {
+            let changed = snapshot(&changed).expect("semantic mutation remains individually valid");
+            assert!(
+                XyceTestRunner::compare_dc_analysis_expression_snapshots(&baseline, &changed)
+                    .is_err(),
+                "topology, values, and output selection participate in parity"
+            );
+        }
+
+        let root = std::env::temp_dir();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = |source: &str| {
+            runner
+                .static_dc_plan_for_source_with_execution_dir(
+                    Path::new("grid.cir"),
+                    source.to_string(),
+                    ExpressionDialect::Xyce,
+                    None,
+                )
+                .expect("DC grid fixture plans")
+        };
+        let direct_plan = plan(direct);
+        let parameter_plan = plan(&parameterized);
+        assert!(XyceTestRunner::dc_sweeps_match_exactly(
+            &direct_plan.dc,
+            &parameter_plan.dc
+        ));
+        assert_eq!(direct_plan.dc.primary_spec().points(), vec![-2.0, 0.0, 5.0]);
+
+        let dec = plan(&direct.replace(".DC V1 LIST -2 0 5", ".DC DEC V1 .1 100 4"));
+        let dec_points = dec.dc.primary_spec().points();
+        assert_eq!(dec_points.len(), 13);
+        assert_eq!(dec_points.first().copied(), Some(0.1));
+        assert!((dec_points.last().copied().expect("DEC endpoint") - 100.0).abs() <= 1.0e-12);
+
+        let oct = plan(&direct.replace(".DC V1 LIST -2 0 5", ".DC OCT V1 .125 66 3"));
+        let oct_points = oct.dc.primary_spec().points();
+        assert_eq!(oct_points.len(), 28);
+        assert_eq!(oct_points.first().copied(), Some(0.125));
+        assert!((oct_points.last().copied().expect("OCT endpoint") - 64.0).abs() <= 1.0e-12);
+
+        let nested = plan(&direct.replace(".DC V1 LIST -2 0 5", ".DC V1 0 18 1 V1 0 18 1"));
+        assert_eq!(nested.dc.primary_spec().points().len(), 19);
+        assert_eq!(
+            nested
+                .dc
+                .sweep2
+                .as_ref()
+                .expect("secondary sweep")
+                .spec()
+                .points()
+                .len(),
+            19
+        );
     }
 
     #[test]
