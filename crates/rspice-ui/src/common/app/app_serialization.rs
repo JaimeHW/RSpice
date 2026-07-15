@@ -161,6 +161,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
+        state.workbench.reconcile_restored_navigation();
+        let navigation_warning = state.workbench.take_route_diagnostic();
         let execution_warnings = match de.execution_context {
             Some(value) => {
                 let restored = serde_json::from_value::<ProjectExecutionContext>(value)
@@ -210,6 +212,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .into_iter()
             .flatten()
         {
+            state.push_user_message(ConsoleMessage::warning(warning));
+        }
+        if let Some(warning) = navigation_warning {
             state.push_user_message(ConsoleMessage::warning(warning));
         }
         state.workspace.save_active_schematic(&state.schematic);
@@ -658,6 +663,39 @@ mod tests {
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
         assert!(restored.ui.browser_spoken_feedback);
+    }
+
+    #[test]
+    fn appearance_preferences_round_trip_through_the_application_session() {
+        let mut state = AppState::default();
+        state.ui.theme.mode = crate::ui::Mode::System;
+        state.ui.theme.density = crate::ui::Density::Relaxed;
+        state.ui.theme.colorblind_traces = true;
+        state.ui.theme.canvas_contrast = 84;
+        state.ui.theme.canvas_theme = crate::ui::EngineeringCanvasTheme::Light;
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert_eq!(restored.ui.theme.mode, crate::ui::Mode::System);
+        assert_eq!(restored.ui.theme.density, crate::ui::Density::Relaxed);
+        assert!(restored.ui.theme.colorblind_traces);
+        assert_eq!(restored.ui.theme.canvas_contrast, 84);
+        assert_eq!(
+            restored.ui.theme.canvas_theme,
+            crate::ui::EngineeringCanvasTheme::Light
+        );
+    }
+
+    #[test]
+    fn legacy_autosave_interval_is_migrated_before_the_session_is_rewritten() {
+        let mut state = AppState::default();
+        state.ui.autosave_minutes = 15;
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert_eq!(restored.ui.autosave_minutes, 10);
     }
 
     #[test]

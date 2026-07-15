@@ -40,6 +40,12 @@ pub struct InteractionState {
     /// re-renders from it for as long as egui keeps the popup open.
     #[serde(skip)]
     pub context_target: Option<(ContextTarget, (i32, i32))>,
+
+    /// Whether the schematic selection-deletion review owns modal keyboard
+    /// intent. The review payload remains in egui's temporary data, but this
+    /// retained flag is available before shortcut dispatch paints the dialog.
+    #[serde(skip)]
+    pub schematic_delete_confirmation_open: bool,
 }
 
 /// What sits under a canvas right-click.
@@ -73,6 +79,24 @@ impl InteractionState {
         self.vertex_drag_pos = None;
         self.hover_wire_vertex = None;
         self.context_target = None;
+        self.schematic_delete_confirmation_open = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clear_releases_schematic_delete_modal_ownership() {
+        let mut state = InteractionState {
+            schematic_delete_confirmation_open: true,
+            ..InteractionState::default()
+        };
+
+        state.clear();
+
+        assert!(!state.schematic_delete_confirmation_open);
     }
 }
 

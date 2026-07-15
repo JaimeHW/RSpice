@@ -275,9 +275,15 @@ fn preparation_remediation(
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if let Some(toast) = app.state.workbench.preflight.pending_toast.take() {
         if toast.warning {
-            app.state.ui.toasts.warn(ctx, toast.message);
+            app.state
+                .ui
+                .toasts
+                .warn_with_title(ctx, "Simulation preflight blocked", toast.message);
         } else {
-            app.state.ui.toasts.info(ctx, toast.message);
+            app.state
+                .ui
+                .toasts
+                .success(ctx, "Simulation preflight passed", toast.message);
         }
     }
 
@@ -294,8 +300,9 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         || report.topology_revision != app.state.schematic.topology_version()
     {
         app.state.workbench.preflight.open = false;
-        app.state.ui.toasts.warn(
+        app.state.ui.toasts.warn_with_title(
             ctx,
+            "Preflight report expired",
             "Preflight report expired because the design revision changed",
         );
         return;
@@ -319,7 +326,10 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     );
     let mut requested_fix = None;
     let choice = Dialog::new(&kicker, "Simulation preflight", primary)
-        .size(DialogSize::Lg)
+        .description(
+            "Review ordered blockers, advisories, and frozen run inputs before closing or queuing this validated simulation revision.",
+        )
+        .size(DialogSize::Manager)
         .hint(&hint)
         .show(ctx, |ui| {
             report_summary(ui, &report);

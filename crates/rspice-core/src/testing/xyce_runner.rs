@@ -3433,13 +3433,10 @@ impl XyceTestRunner {
             )
             .is_ok()
         {
-            match Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes) {
-                Ok(_) => {
-                    return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
-                        scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
-                    });
-                }
-                Err(_) => {}
+            if Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes).is_ok() {
+                return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                    scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                });
             }
         }
         if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
@@ -19853,26 +19850,21 @@ impl XyceTestRunner {
                 *references.entry(name).or_default() += 1;
                 Ok(())
             }
-            NetExpr::BinOp { op, left, right }
-                if matches!(
-                    op,
-                    BinOpKind::Add
-                        | BinOpKind::Sub
-                        | BinOpKind::Mul
-                        | BinOpKind::Div
-                        | BinOpKind::Pow
-                ) =>
-            {
+            NetExpr::BinOp {
+                op:
+                    BinOpKind::Add | BinOpKind::Sub | BinOpKind::Mul | BinOpKind::Div | BinOpKind::Pow,
+                left,
+                right,
+            } => {
                 Self::collect_analysis_parameter_references(left, declared, references, directive)?;
                 Self::collect_analysis_parameter_references(right, declared, references, directive)
             }
-            NetExpr::UnaryOp { op, operand }
-                if matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos) =>
-            {
-                Self::collect_analysis_parameter_references(
-                    operand, declared, references, directive,
-                )
-            }
+            NetExpr::UnaryOp {
+                op: UnaryOpKind::Neg | UnaryOpKind::Pos,
+                operand,
+            } => Self::collect_analysis_parameter_references(
+                operand, declared, references, directive,
+            ),
             _ => Err(format!(
                 "only finite real arithmetic over direct scalar parameters is admitted in {directive} expressions"
             )),
@@ -44151,7 +44143,7 @@ M1 d g s b nmod W=1u L=0.18u
     #[test]
     fn nested_step_shared_plan_fails_closed_on_limits_and_cancellation() {
         assert_eq!(XYCE_STEP_PLAN_MAX_RUNS, 4_096);
-        assert!(XYCE_STEP_PLAN_MAX_RUNS >= 21 * 195);
+        const { assert!(XYCE_STEP_PLAN_MAX_RUNS >= 21 * 195) };
         let harness_limits = xyce_step_plan_limits();
         assert_eq!(harness_limits.max_runs(), XYCE_STEP_PLAN_MAX_RUNS);
 

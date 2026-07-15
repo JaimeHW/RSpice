@@ -58,7 +58,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     const ROW_H: f32 = 25.0;
 
     egui::ScrollArea::vertical()
-        .id_salt("volta.results.noise-contrib")
+        .id_salt("rspice.results.noise-contrib")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(4.0);

@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_symbol_context_after_interactions_resolves_newly_placed_cell() {
+    fn second_refresh_resolves_cell_added_after_initial_interaction_refresh() {
         let mut state = AppState::default();
         let mut library = Library::new("work");
         let mut cell = Cell::new("amp");
@@ -382,16 +382,29 @@ mod tests {
         library.add_cell(cell);
         state.library_manager.add_library(library);
 
-        let before_topology = state.schematic.topology_version();
         let mut context = SchematicSymbolContext::from_state(&state);
+        let before_interactions_topology = state.schematic.topology_version();
+        assert!(!refresh_symbol_context_after_interactions(
+            &state,
+            &mut context,
+            before_interactions_topology,
+        ));
+
+        // The context-menu pass runs after the tool-interaction refresh. A
+        // duplicate/place action can therefore mutate topology between the
+        // first refresh and painting.
+        let before_context_menu_topology = state.schematic.topology_version();
         let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&[port("OUT", PortDirection::Out)]);
         let id = state
             .schematic
             .add_library_cell_component(Point::new(100, 50), binding);
 
-        let refreshed =
-            refresh_symbol_context_after_interactions(&state, &mut context, before_topology);
+        let refreshed = refresh_symbol_context_after_interactions(
+            &state,
+            &mut context,
+            before_context_menu_topology,
+        );
         let component = state
             .schematic
             .components
@@ -483,12 +496,18 @@ pub fn render_schematic_view(
         &mut symbol_context,
         before_interactions_topology,
     );
+    let before_context_menu_topology = state.schematic.topology_version();
     context_menu::handle_context_menu(
         &response,
         state,
         &viewport,
         wire_was_active,
         &symbol_context,
+    );
+    refresh_symbol_context_after_interactions(
+        state,
+        &mut symbol_context,
+        before_context_menu_topology,
     );
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover

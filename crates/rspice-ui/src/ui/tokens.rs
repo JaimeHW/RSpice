@@ -1,33 +1,39 @@
 //! Design tokens — the single source of truth for the visual system.
 //!
 //! A [`Tokens`] value bundles the active color [`Palette`] with the metric
-//! scales (spacing, type, control sizes, radii) for one combination of
-//! [`Direction`] × [`Mode`] × [`Density`]. The active tokens are installed
+//! scales (spacing, type, control sizes, radii) for the reviewed visual
+//! identity in one [`Mode`] × [`Density`] combination. The active tokens are installed
 //! into the egui [`Context`] by [`crate::ui::theme::Theme::apply`] and read
 //! back by widgets via [`Tokens::get`], so every part of the UI renders from
 //! the same token set with no per-callsite color or size literals.
 
 use std::sync::Arc;
 
-use egui::{Context, Id};
-use serde::{Deserialize, Serialize};
+use egui::{Color32, Context, Id};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::palette::{self, Palette};
 
 // ============================================================================
-// Spacing scale (4 px base — identical across directions and densities)
+// Exact mockup spacing scale — identical across modes and densities
 // ============================================================================
 
-/// 4 px — tightest gap (icon-to-text, chip padding).
-pub const SP_1: f32 = 4.0;
-/// 8 px — default gap between controls.
-pub const SP_2: f32 = 8.0;
+/// 2 px — optical/microcopy separation.
+pub const SP_1: f32 = 2.0;
+/// 4 px — tight icon-to-text and chip separation.
+pub const SP_2: f32 = 4.0;
+/// 6 px — compact control groups.
+pub const SP_3: f32 = 6.0;
+/// 8 px — default control gap.
+pub const SP_4: f32 = 8.0;
 /// 12 px — panel inner padding.
-pub const SP_3: f32 = 12.0;
+pub const SP_5: f32 = 12.0;
 /// 16 px — section padding.
-pub const SP_4: f32 = 16.0;
+pub const SP_6: f32 = 16.0;
 /// 24 px — large structural padding.
-pub const SP_5: f32 = 24.0;
+pub const SP_7: f32 = 24.0;
+/// 32 px — major surface separation.
+pub const SP_8: f32 = 32.0;
 
 // ============================================================================
 // Type scale (13 px UI base — dense professional tool)
@@ -49,58 +55,56 @@ pub const FS_4: f32 = 16.0;
 // ============================================================================
 
 /// Design direction: one coherent visual identity for the whole application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub enum Direction {
     /// "Instrument" — bench-instrument heritage: cool neutral grays, a single
-    /// phosphor-green accent, mono-forward numerics, 2 px radii, accent line
+    /// amber accent, mono-forward numerics, 3 px radii, accent line
     /// on the *top* edge of the active tab.
     #[default]
     Instrument,
-    /// "Meridian" — contemporary professional IDE: indigo accent, softer
-    /// surfaces, 5 px radii, accent underline on the active tab.
-    Meridian,
-    /// "Graphite" — drafting-table austerity: true monochrome, one amber
-    /// accent, 0 px radii, inverted active tab.
-    Graphite,
+}
+
+impl<'de> Deserialize<'de> for Direction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        enum PersistedDirection {
+            Instrument,
+            Meridian,
+            Graphite,
+        }
+
+        // Meridian and Graphite were emitted by the retired placeholder
+        // shell. Reading them is a migration operation, not a supported
+        // visual mode: every restored session uses the mockup-owned palette.
+        let _legacy_value = PersistedDirection::deserialize(deserializer)?;
+        Ok(Self::Instrument)
+    }
 }
 
 impl Direction {
     /// All directions, in presentation order.
-    pub const ALL: [Direction; 3] = [
-        Direction::Instrument,
-        Direction::Meridian,
-        Direction::Graphite,
-    ];
+    pub const ALL: [Direction; 1] = [Direction::Instrument];
 
     /// Human-readable name.
     pub fn label(self) -> &'static str {
-        match self {
-            Direction::Instrument => "Instrument",
-            Direction::Meridian => "Meridian",
-            Direction::Graphite => "Graphite",
-        }
+        "Instrument"
     }
 
     /// Control corner radius.
     pub fn radius(self) -> f32 {
-        match self {
-            Direction::Instrument => 2.0,
-            Direction::Meridian => 5.0,
-            Direction::Graphite => 0.0,
-        }
+        3.0
     }
 
     /// Large-surface corner radius (menus, cards, popovers).
     pub fn radius_lg(self) -> f32 {
-        match self {
-            Direction::Instrument => 3.0,
-            Direction::Meridian => 7.0,
-            Direction::Graphite => 0.0,
-        }
+        6.0
     }
 }
 
-/// Light or dark rendering of the active direction.
+/// User-selected color-mode policy for the active direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Mode {
     /// Dark surfaces (default for long bench sessions).
@@ -108,17 +112,31 @@ pub enum Mode {
     Dark,
     /// Light surfaces.
     Light,
+    /// Follow the host operating-system or browser color preference.
+    System,
 }
 
 impl Mode {
     /// All modes, in presentation order.
-    pub const ALL: [Mode; 2] = [Mode::Dark, Mode::Light];
+    pub const ALL: [Mode; 3] = [Mode::Dark, Mode::Light, Mode::System];
 
     /// Human-readable name.
     pub fn label(self) -> &'static str {
         match self {
             Mode::Dark => "Dark",
             Mode::Light => "Light",
+            Mode::System => "System",
+        }
+    }
+
+    /// Resolve a system-following preference against the current host.
+    pub fn effective(self, ctx: &Context) -> Self {
+        match self {
+            Self::System => match ctx.system_theme() {
+                Some(egui::Theme::Light) => Self::Light,
+                Some(egui::Theme::Dark) | None => Self::Dark,
+            },
+            explicit => explicit,
         }
     }
 }
@@ -127,10 +145,10 @@ impl Mode {
 /// interactive targets without changing the type scale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Density {
-    /// 24 px controls / 26 px rows.
+    /// Compact professional spacing (Instrument: 28 px controls / rows).
     #[default]
     Compact,
-    /// 28 px controls / 32 px rows.
+    /// Relaxed spacing (Instrument: 32 px controls / 33 px rows).
     Relaxed,
 }
 
@@ -151,7 +169,7 @@ impl Density {
 // Metrics
 // ============================================================================
 
-/// Density-dependent control metrics.
+/// Density-dependent control metrics for the reviewed Instrument direction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
     /// Height of inputs, selects and buttons.
@@ -163,16 +181,16 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    fn for_density(density: Density) -> Self {
+    fn for_selection(_direction: Direction, density: Density) -> Self {
         match density {
             Density::Compact => Metrics {
-                ctl_h: 24.0,
-                row_h: 26.0,
+                ctl_h: 28.0,
+                row_h: 28.0,
                 bar_pad: 6.0,
             },
             Density::Relaxed => Metrics {
-                ctl_h: 28.0,
-                row_h: 32.0,
+                ctl_h: 32.0,
+                row_h: 33.0,
                 bar_pad: 9.0,
             },
         }
@@ -193,6 +211,8 @@ pub struct Tokens {
     pub mode: Mode,
     /// Active density.
     pub density: Density,
+    /// Whether engineering traces use color, dash, and marker redundancy.
+    pub color_safe_traces: bool,
     /// Resolved color palette.
     pub color: Palette,
     /// Density-dependent control metrics.
@@ -213,26 +233,23 @@ impl Tokens {
     /// Resolve the token set for a theme selection.
     pub fn new(direction: Direction, mode: Mode, density: Density) -> Self {
         let color = match (direction, mode) {
-            (Direction::Instrument, Mode::Dark) => palette::INSTRUMENT_DARK,
+            (Direction::Instrument, Mode::Dark | Mode::System) => palette::INSTRUMENT_DARK,
             (Direction::Instrument, Mode::Light) => palette::INSTRUMENT_LIGHT,
-            (Direction::Meridian, Mode::Dark) => palette::MERIDIAN_DARK,
-            (Direction::Meridian, Mode::Light) => palette::MERIDIAN_LIGHT,
-            (Direction::Graphite, Mode::Dark) => palette::GRAPHITE_DARK,
-            (Direction::Graphite, Mode::Light) => palette::GRAPHITE_LIGHT,
         };
         Self {
             direction,
             mode,
             density,
+            color_safe_traces: false,
             color,
-            metrics: Metrics::for_density(density),
+            metrics: Metrics::for_selection(direction, density),
             radius: direction.radius(),
             radius_lg: direction.radius_lg(),
         }
     }
 
     fn ctx_key() -> Id {
-        Id::new("volta.design.tokens")
+        Id::new("rspice.design.tokens")
     }
 
     /// Install this token set into the egui context (done by `Theme::apply`).
@@ -266,10 +283,27 @@ impl Tokens {
     pub fn shadow(&self) -> egui::epaint::Shadow {
         let (offset_y, blur) = self.color.shadow_geom;
         egui::epaint::Shadow {
-            offset: [0, offset_y / 2],
-            blur: blur / 2,
+            offset: [0, offset_y],
+            blur,
             spread: 0,
             color: self.color.shadow_color,
+        }
+    }
+
+    /// Modal-workflow elevation from the mockup's `--shadow-dialog` token.
+    /// egui supports one shadow layer, so this preserves the exact dominant
+    /// layer rather than substituting the much smaller floating-menu shadow.
+    pub fn dialog_shadow(&self) -> egui::epaint::Shadow {
+        let color = if self.mode == Mode::Light {
+            Color32::from_rgba_premultiplied(11, 12, 13, 66)
+        } else {
+            Color32::from_rgba_premultiplied(0, 0, 0, 117)
+        };
+        egui::epaint::Shadow {
+            offset: [0, 18],
+            blur: 52,
+            spread: 0,
+            color,
         }
     }
 }
@@ -294,6 +328,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn spacing_scale_matches_the_workbench_mockup_exactly() {
+        assert_eq!(
+            [SP_1, SP_2, SP_3, SP_4, SP_5, SP_6, SP_7, SP_8],
+            [2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0]
+        );
+    }
+
+    #[test]
     fn tokens_resolve_every_direction_and_mode() {
         for direction in Direction::ALL {
             for mode in Mode::ALL {
@@ -309,10 +351,36 @@ mod tests {
 
     #[test]
     fn compact_is_denser_than_relaxed() {
-        let compact = Metrics::for_density(Density::Compact);
-        let relaxed = Metrics::for_density(Density::Relaxed);
-        assert!(compact.ctl_h < relaxed.ctl_h);
-        assert!(compact.row_h < relaxed.row_h);
-        assert!(compact.bar_pad < relaxed.bar_pad);
+        for direction in Direction::ALL {
+            let compact = Metrics::for_selection(direction, Density::Compact);
+            let relaxed = Metrics::for_selection(direction, Density::Relaxed);
+            assert!(compact.ctl_h < relaxed.ctl_h);
+            assert!(compact.row_h < relaxed.row_h);
+            assert!(compact.bar_pad < relaxed.bar_pad);
+        }
+    }
+
+    #[test]
+    fn instrument_metrics_and_radii_match_the_workbench_mockup() {
+        let compact = Tokens::new(Direction::Instrument, Mode::Dark, Density::Compact);
+        assert_eq!(compact.metrics.ctl_h, 28.0);
+        assert_eq!(compact.metrics.row_h, 28.0);
+        assert_eq!(compact.radius, 3.0);
+        assert_eq!(compact.radius_lg, 6.0);
+        assert_eq!(compact.shadow().offset, [0, 14]);
+        assert_eq!(compact.shadow().blur, 42);
+        assert_eq!(compact.dialog_shadow().offset, [0, 18]);
+        assert_eq!(compact.dialog_shadow().blur, 52);
+    }
+
+    #[test]
+    fn retired_placeholder_directions_deserialize_into_instrument() {
+        for persisted in ["Instrument", "Meridian", "Graphite"] {
+            let encoded = format!("\"{persisted}\"");
+            let restored: Direction =
+                serde_json::from_str(&encoded).expect("known persisted direction migrates");
+            assert_eq!(restored, Direction::Instrument);
+        }
+        assert!(serde_json::from_str::<Direction>("\"invented\"").is_err());
     }
 }

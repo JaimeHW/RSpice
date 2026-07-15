@@ -1101,8 +1101,7 @@ fn specialized_availability(state: &AppState, viewer: ActiveViewer) -> ViewerAva
 }
 
 /// One viewer tab, per the design: a 24 px chip with 11 px side padding,
-/// letterspaced mono label, hover fill, and an accent wash when active
-/// (inverted in the Graphite direction).
+/// letterspaced mono label, hover fill, and an accent wash when active.
 fn viewer_tab(
     ui: &mut Ui,
     viewer: ResultViewer,
@@ -1159,13 +1158,8 @@ fn viewer_tab(
         availability.available && !active && response.hovered(),
         0.16,
     );
-    let graphite = t.direction == crate::ui::Direction::Graphite;
     let (fill, text_color) = if active {
-        if graphite {
-            (c.text, c.bg_panel)
-        } else {
-            (c.accent_dim, c.accent)
-        }
+        (c.accent_dim, c.accent)
     } else if !availability.available {
         (egui::Color32::TRANSPARENT, c.text_faint)
     } else {

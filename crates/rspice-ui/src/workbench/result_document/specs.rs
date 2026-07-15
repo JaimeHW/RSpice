@@ -144,7 +144,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let table_w = NAME_W + RAIL_W + runs.len() as f32 * RUN_W + 16.0;
 
     egui::ScrollArea::both()
-        .id_salt("volta.results.specs")
+        .id_salt("rspice.results.specs")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(4.0);
@@ -451,7 +451,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
     let mut remove: Option<usize> = None;
 
     egui::ScrollArea::vertical()
-        .id_salt("volta.results.specs-edit")
+        .id_salt("rspice.results.specs-edit")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(8.0);

@@ -78,7 +78,7 @@ Other user-facing machinery, all verified in source:
 | `panels/` | Dialog-hosted components: properties panel, log panel, PDK settings, script console, Verilog-A compile dialog, calculator |
 | `properties/` | Property editing: engineering-notation value parsing/formatting, model browser, PWL editor, tabbed property dialog, property bridge |
 | `waveform/` | Waveform measurement utilities (min/max/RMS over sample slices) |
-| `ui/` | The VOLTA design system: design tokens, generated color palettes, theme (direction/mode/density), embedded IBM Plex fonts, vector icon set, the widget vocabulary (buttons, chips, dialogs, docbar, forms, pills, tables, toasts, trees…), and the strip-plot engine (axes, scales, traces, cursors, min/max decimation, SI formatting) |
+| `ui/` | The RSpice design system: mockup-governed semantic tokens and dark/light palettes, mode/density preferences, embedded IBM Plex fonts, vector icon set, the widget vocabulary (buttons, chips, dialogs, docbar, forms, pills, tables, toasts, trees…), and the strip-plot engine (axes, scales, traces, cursors, min/max decimation, SI formatting) |
 | `utils/` | Formatting, numeric, and layout helpers shared by UI surfaces |
 
 ## Engine integration

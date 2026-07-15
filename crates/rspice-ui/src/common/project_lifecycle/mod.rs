@@ -2226,7 +2226,9 @@ mod tests {
     fn save_active_design_preserves_unpublished_live_project_descriptor() {
         let path = unique_path("active-preserves-project-draft");
         let mut state = AppState::default();
-        state.workbench.workspace = crate::workbench::state::Workspace::Design;
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
         save_native(
             &mut state,
             SaveScope::AllDocuments,
@@ -2282,7 +2284,9 @@ mod tests {
     fn newer_edits_after_saved_snapshot_revoke_destructive_continuation() {
         let path = unique_path("continuation-guard");
         let mut state = AppState::default();
-        state.workbench.workspace = crate::workbench::state::Workspace::Design;
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
         save_native(
             &mut state,
             SaveScope::AllDocuments,
@@ -2737,7 +2741,9 @@ mod tests {
         state
             .schematic
             .add_component(ComponentType::Inductor, Point::new(3, 5));
-        state.workbench.workspace = crate::workbench::state::Workspace::Design;
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
 
         close_active_document(&mut state).expect("close presentation");
 

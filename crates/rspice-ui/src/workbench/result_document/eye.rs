@@ -82,7 +82,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let image = rasterize_density(data, ui_count, y0, y1, tex_size, trace_color);
         let handle =
             ui.ctx()
-                .load_texture("volta.eye.density", image, egui::TextureOptions::LINEAR);
+                .load_texture("rspice.eye.density", image, egui::TextureOptions::LINEAR);
         state.ui.results.eye_texture = Some(super::EyeTexture {
             revision,
             size: tex_size,

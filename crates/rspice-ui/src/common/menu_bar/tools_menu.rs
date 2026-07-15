@@ -1,5 +1,5 @@
 //! Design-check actions (Check menu). Rendering lives in
-//! `crate::workbench::menubar`.
+//! `crate::workbench::chrome::title_bar`.
 
 use crate::common::app::{AppState, ConsoleMessage};
 use crate::panels::{LogSeverity, LogSource};

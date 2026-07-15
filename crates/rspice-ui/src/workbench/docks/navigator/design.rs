@@ -551,12 +551,10 @@ fn metadata_ports(metadata: &std::collections::HashMap<String, String>) -> Optio
 fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
     app.state.schematic.pending_library_cell = None;
     app.state.schematic.tool = Tool::Place(kind);
-    app.state.ui.toasts.info(
+    app.state.ui.toasts.success(
         ctx,
-        format!(
-            "Component placement armed — {} will snap to the schematic grid",
-            kind.display_name()
-        ),
+        "Component placement armed",
+        format!("{} will snap to the schematic grid.", kind.display_name()),
     );
 }
 
@@ -564,9 +562,10 @@ fn arm_cell(app: &mut RSpiceApp, binding: LibraryCellInstance, ctx: &egui::Conte
     let label = format!("{}/{}", binding.library, binding.cell);
     app.state.schematic.pending_library_cell = Some(binding);
     app.state.schematic.tool = Tool::Place(ComponentType::CellInstance);
-    app.state.ui.toasts.info(
+    app.state.ui.toasts.success(
         ctx,
-        format!("Component placement armed — {label} will snap to the schematic grid"),
+        "Component placement armed",
+        format!("{label} will snap to the schematic grid."),
     );
 }
 

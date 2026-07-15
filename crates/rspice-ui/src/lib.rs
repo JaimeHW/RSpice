@@ -67,7 +67,7 @@ pub mod properties;
 /// Common UI components - Menu bar, status bar, theme, main app
 pub mod common;
 
-/// The VOLTA design system - tokens, palettes, fonts, icons, widgets
+/// The RSpice design system - tokens, palettes, fonts, icons, widgets
 pub mod ui;
 
 /// The contract-driven application workbench. This is the only owner of

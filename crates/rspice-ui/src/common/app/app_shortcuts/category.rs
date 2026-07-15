@@ -45,6 +45,7 @@ impl ShortcutCategory {
                 Command::SaveAll,
                 Command::CloseActiveDocument,
                 Command::CloseProject,
+                Command::Exit,
             ],
             Self::Edit => &[
                 Command::Undo,
@@ -89,8 +90,8 @@ impl ShortcutCategory {
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Project),
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Design),
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Simulate),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Results),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Verify),
+                Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+                Command::VerificationPage(crate::workbench::state::VerificationPage::Cockpit),
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Models),
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Netlist),
             ],

@@ -5,27 +5,6 @@
 
 use super::{ConfirmationDialogState, ProjectReviewDialogState};
 
-/// A library deletion awaiting user confirmation.
-#[derive(Debug, Clone)]
-pub enum LibraryDeleteTarget {
-    /// Delete a whole cell (with all its views).
-    Cell {
-        /// Owning library.
-        library: String,
-        /// Cell to delete.
-        cell: String,
-    },
-    /// Delete a single view.
-    View {
-        /// Owning library.
-        library: String,
-        /// Owning cell.
-        cell: String,
-        /// View to delete.
-        view: String,
-    },
-}
-
 /// Where the license-activation flow stands.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum LicensePhase {
@@ -113,8 +92,6 @@ pub struct DialogState {
     pub new_view_type: crate::state::ViewType,
     /// New View validation error message
     pub new_view_error: Option<String>,
-    /// Library deletion awaiting confirmation
-    pub library_delete_confirm: Option<LibraryDeleteTarget>,
     /// Copy Cell dialog
     pub copy_cell_dialog: bool,
     /// Copy Cell source library
@@ -182,4 +159,67 @@ pub struct DialogState {
     /// destructive ellipsis actions intentionally do not use the generic
     /// Save/Don't save confirmation grammar.
     pub(crate) project_review_dialog: ProjectReviewDialogState,
+}
+
+impl DialogState {
+    /// Whether an app-owned modal has exclusive keyboard intent.
+    ///
+    /// This is deliberately derived from the authoritative workflow states,
+    /// rather than from egui's previous-frame modal layer. Shortcut dispatch
+    /// runs before dialogs are painted, so retained state is the only value
+    /// that is both current and deterministic at that point in the frame.
+    pub(crate) fn application_modal_open(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        let autosave_restore_open = self.pending_autosave_restore.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let autosave_restore_open = false;
+
+        self.about
+            || self.shortcuts_help
+            || self.new_cell_dialog
+            || self.new_view_dialog
+            || self.copy_cell_dialog
+            || self.rename_cell_dialog
+            || self.waveform_calculator_dialog
+            || self.preferences_open
+            || self.license_dialog.open
+            || self.command_palette.open
+            || self.veriloga_dialog.open
+            || self.interaction.schematic_delete_confirmation_open
+            || self.confirmation_dialog.visible
+            || self.project_review_dialog.request.is_some()
+            || autosave_restore_open
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_blocks_shortcuts(configure: impl FnOnce(&mut DialogState)) {
+        let mut dialogs = DialogState::default();
+        assert!(!dialogs.application_modal_open());
+        configure(&mut dialogs);
+        assert!(dialogs.application_modal_open());
+    }
+
+    #[test]
+    fn every_retained_dialog_owner_blocks_background_shortcuts() {
+        assert_blocks_shortcuts(|dialogs| dialogs.about = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.shortcuts_help = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.new_cell_dialog = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.new_view_dialog = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.copy_cell_dialog = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.rename_cell_dialog = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.veriloga_dialog.open = true);
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs.interaction.schematic_delete_confirmation_open = true;
+        });
+        assert_blocks_shortcuts(|dialogs| dialogs.confirmation_dialog.visible = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.project_review_dialog.show_close_project());
+    }
 }

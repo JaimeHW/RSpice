@@ -15,8 +15,8 @@ fn trailing_shortcut(text: &str) -> Option<&str> {
 
 /// A labeled button: bordered by default, filled when [`Button::accent`].
 ///
-/// Matches the design's `.btn` / `.btn-accent`: control height, 12 px
-/// horizontal padding, 1 px strong border, medium-weight 12 px label, with an
+/// Matches the design's `.button` / `.button.primary`: control height, 10 px
+/// horizontal padding, 1 px border, 11 px label, with an
 /// optional 13 px leading icon and a dimmed trailing hint (e.g. a shortcut).
 pub struct Button<'a> {
     label: &'a str,
@@ -27,6 +27,9 @@ pub struct Button<'a> {
     destructive: bool,
     enabled: bool,
     min_width: f32,
+    min_height: f32,
+    max_width: Option<f32>,
+    accessible_label: Option<&'a str>,
 }
 
 impl<'a> Button<'a> {
@@ -41,6 +44,9 @@ impl<'a> Button<'a> {
             destructive: false,
             enabled: true,
             min_width: 0.0,
+            min_height: 0.0,
+            max_width: None,
+            accessible_label: None,
         }
     }
 
@@ -62,7 +68,7 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// Render borderless and dimmed until hovered (tertiary actions).
+    /// Keep the standard border while using a transparent resting fill.
     pub fn ghost(mut self) -> Self {
         self.ghost = true;
         self
@@ -87,27 +93,39 @@ impl<'a> Button<'a> {
         self
     }
 
+    /// Enforce a minimum height, used by responsive surfaces whose final
+    /// cascade raises interactive controls to the 44 px touch target.
+    pub fn min_height(mut self, min_height: f32) -> Self {
+        self.min_height = min_height;
+        self
+    }
+
+    /// Constrain the control to a responsive cell and wrap its visible label.
+    pub fn max_width(mut self, max_width: f32) -> Self {
+        self.max_width = Some(max_width.max(1.0));
+        self
+    }
+
+    /// Supply a contextual accessible name without changing visible copy.
+    pub fn accessible_label(mut self, accessible_label: &'a str) -> Self {
+        self.accessible_label = Some(accessible_label);
+        self
+    }
+
     /// Show the button.
     pub fn show(self, ui: &mut Ui) -> Response {
         let t = Tokens::get(ui.ctx());
         let c = &t.color;
 
-        // Instrument renders accent actions in uppercase letterspaced mono —
-        // a bench-instrument cue from the design spec.
-        let instrument_accent = self.accent && t.direction == tokens::Direction::Instrument;
-        let (text, font_id, letter_spacing) = if instrument_accent {
-            (
-                self.label.to_uppercase(),
-                theme::mono(tokens::FS_0, FontWeight::Medium),
-                0.07 * tokens::FS_0,
-            )
-        } else {
-            (
-                self.label.to_owned(),
-                theme::sans(tokens::FS_1, FontWeight::Medium),
-                0.0,
-            )
-        };
+        let text = self.label.to_owned();
+        let font_id = theme::sans(
+            tokens::FS_0,
+            if self.accent {
+                FontWeight::SemiBold
+            } else {
+                FontWeight::Regular
+            },
+        );
 
         let fg = if self.accent {
             if self.destructive {
@@ -116,20 +134,20 @@ impl<'a> Button<'a> {
             } else {
                 c.accent_ink
             }
-        } else if self.ghost {
-            c.text_dim
         } else {
             c.text
         };
         let galley = {
             let mut job = egui::text::LayoutJob::default();
+            if let Some(max_width) = self.max_width {
+                job.wrap.max_width = (max_width - 20.0).max(1.0);
+            }
             job.append(
                 &text,
                 0.0,
                 egui::TextFormat {
                     font_id: font_id.clone(),
                     color: fg,
-                    extra_letter_spacing: letter_spacing,
                     ..Default::default()
                 },
             );
@@ -143,9 +161,18 @@ impl<'a> Button<'a> {
 
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
         let hint_w = hint_galley.as_ref().map_or(0.0, |g| g.size().x + 5.0);
-        let width = (galley.size().x + icon_w + hint_w + 24.0).max(self.min_width);
+        let content_width = galley.size().x + icon_w + hint_w;
+        let unconstrained_width = (content_width + 20.0).max(self.min_width);
+        let width = self.max_width.map_or(unconstrained_width, |max_width| {
+            unconstrained_width.min(max_width)
+        });
+        let height = t
+            .metrics
+            .ctl_h
+            .max(galley.size().y + 8.0)
+            .max(self.min_height);
         let (rect, mut response) = ui.allocate_exact_size(
-            vec2(width, t.metrics.ctl_h),
+            vec2(width, height),
             if self.enabled {
                 Sense::click()
             } else {
@@ -157,7 +184,7 @@ impl<'a> Button<'a> {
             WidgetInfo::labeled(
                 WidgetType::Button,
                 self.enabled && ui.is_enabled(),
-                self.label,
+                self.accessible_label.unwrap_or(self.label),
             )
         });
         if let Some(shortcut) = self.hint {
@@ -185,20 +212,20 @@ impl<'a> Button<'a> {
             };
             (fill, fill)
         } else if self.ghost {
-            // Borderless; surfaces only on hover.
+            // Transparent at rest; the standard border remains visible.
             let fill = if pressed {
                 c.bg_active
             } else {
                 mix(egui::Color32::TRANSPARENT, c.bg_hover, hover)
             };
-            (fill, egui::Color32::TRANSPARENT)
+            (fill, mix(c.border, c.border_strong, hover))
         } else {
             let fill = if pressed {
                 c.bg_active
             } else {
-                mix(c.bg_panel, c.bg_hover, hover)
+                mix(c.bg_panel_2, c.bg_hover, hover)
             };
-            (fill, c.border_strong)
+            (fill, mix(c.border, c.border_strong, hover))
         };
 
         let opacity = if self.enabled { 1.0 } else { 0.4 };
@@ -211,7 +238,7 @@ impl<'a> Button<'a> {
             egui::StrokeKind::Inside,
         );
 
-        let mut x = rect.left() + 12.0;
+        let mut x = rect.center().x - content_width * 0.5;
         if let Some(icon) = self.icon {
             let icon_rect =
                 Rect::from_center_size(egui::pos2(x + 6.5, rect.center().y), vec2(13.0, 13.0));
@@ -251,7 +278,7 @@ pub struct IconButton<'a> {
     enabled: bool,
     tooltip: Option<&'a str>,
     toggle: bool,
-    side: f32,
+    size: egui::Vec2,
 }
 
 impl<'a> IconButton<'a> {
@@ -263,7 +290,7 @@ impl<'a> IconButton<'a> {
             enabled: true,
             tooltip: None,
             toggle: false,
-            side: 28.0,
+            size: vec2(28.0, 28.0),
         }
     }
 
@@ -288,7 +315,14 @@ impl<'a> IconButton<'a> {
 
     /// Override the square side length (default 28).
     pub fn side(mut self, side: f32) -> Self {
-        self.side = side;
+        self.size = vec2(side, side);
+        self
+    }
+
+    /// Override width and height independently for CSS contracts such as the
+    /// desktop title/dialog icon button (28 × 27 px).
+    pub fn size(mut self, width: f32, height: f32) -> Self {
+        self.size = vec2(width, height);
         self
     }
 
@@ -298,7 +332,7 @@ impl<'a> IconButton<'a> {
         let c = &t.color;
 
         let (rect, mut response) = ui.allocate_exact_size(
-            vec2(self.side, self.side),
+            self.size,
             if self.enabled {
                 Sense::click()
             } else {
@@ -421,5 +455,11 @@ mod tests {
             Some("Ctrl+Shift+Z")
         );
         assert_eq!(trailing_shortcut("Grid: dots - click for lines"), None);
+    }
+
+    #[test]
+    fn labeled_button_accepts_exact_responsive_minimum_height() {
+        let button = Button::new("Clear read").min_height(44.0);
+        assert_eq!(button.min_height, 44.0);
     }
 }

@@ -475,6 +475,15 @@ fn default_autosave_minutes() -> u8 {
     5
 }
 
+fn normalize_autosave_minutes(minutes: u8) -> u8 {
+    match minutes {
+        2 | 5 | 10 => minutes,
+        0..=3 => 2,
+        4..=7 => 5,
+        _ => 10,
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -491,7 +500,7 @@ impl From<&UiSessionState> for UiSessionStateSer {
             theme: session.theme,
             show_grid: session.grid.visible(),
             grid_style: Some(session.grid),
-            autosave_minutes: session.autosave_minutes,
+            autosave_minutes: normalize_autosave_minutes(session.autosave_minutes),
             browser_spoken_feedback: session.browser_spoken_feedback,
             result_viewer: session.results.viewer,
         }
@@ -508,7 +517,7 @@ impl From<UiSessionStateSer> for UiSessionState {
         let mut session = Self {
             theme: ser.theme,
             grid,
-            autosave_minutes: ser.autosave_minutes,
+            autosave_minutes: normalize_autosave_minutes(ser.autosave_minutes),
             browser_spoken_feedback: ser.browser_spoken_feedback,
             ..Self::new()
         };

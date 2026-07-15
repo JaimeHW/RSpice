@@ -25,7 +25,11 @@ pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     } else {
         panel.exact_width(layout.navigator_width).resizable(false)
     };
-    panel.show(ctx, |ui| navigator::show(ui, app));
+    let shown = panel.show(ctx, |ui| navigator::show(ui, app));
+    ctx.accesskit_node_builder(shown.response.id, |node| {
+        node.set_role(egui::accesskit::Role::Complementary);
+        node.set_label("Workspace navigator");
+    });
 }
 
 pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -36,7 +40,11 @@ pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         .resizable(layout.inspector_resizable)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true);
-    panel.show(ctx, |ui| inspector::show(ui, app));
+    let shown = panel.show(ctx, |ui| inspector::show(ui, app));
+    ctx.accesskit_node_builder(shown.response.id, |node| {
+        node.set_role(egui::accesskit::Role::Complementary);
+        node.set_label("Inspector");
+    });
 }
 
 pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -44,13 +52,17 @@ pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         return;
     }
     let t = Tokens::get(ctx);
-    TopBottomPanel::bottom("workbench.console")
+    let shown = TopBottomPanel::bottom("workbench.console")
         .default_height(layout.console_height)
         .height_range(layout.console_min_height..=layout.console_max_height)
         .resizable(layout.console_resizable)
-        .frame(Frame::new().fill(t.color.bg_inset))
+        .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
         .show(ctx, |ui| console::show(ui, app, layout));
+    ctx.accesskit_node_builder(shown.response.id, |node| {
+        node.set_role(egui::accesskit::Role::Region);
+        node.set_label("Console and diagnostics");
+    });
 }
 
 pub fn show_drawers(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {

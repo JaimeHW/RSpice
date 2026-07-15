@@ -225,8 +225,6 @@ mod tests {
             (Key::Num1, crate::workbench::state::Workspace::Project),
             (Key::Num2, crate::workbench::state::Workspace::Design),
             (Key::Num3, crate::workbench::state::Workspace::Simulate),
-            (Key::Num4, crate::workbench::state::Workspace::Results),
-            (Key::Num5, crate::workbench::state::Workspace::Verify),
             (Key::Num6, crate::workbench::state::Workspace::Models),
             (Key::Num7, crate::workbench::state::Workspace::Netlist),
         ] {
@@ -235,6 +233,30 @@ mod tests {
                 vec![Command::OpenWorkspace(workspace)]
             );
         }
+        assert_eq!(
+            resolve(
+                Key::Num4,
+                false,
+                true,
+                false,
+                false,
+                CommandPlatform::Desktop
+            ),
+            vec![Command::ResultViewer(crate::workbench::ResultViewer::Waves)]
+        );
+        assert_eq!(
+            resolve(
+                Key::Num5,
+                false,
+                true,
+                false,
+                false,
+                CommandPlatform::Desktop
+            ),
+            vec![Command::VerificationPage(
+                crate::workbench::state::VerificationPage::Cockpit
+            )]
+        );
 
         assert_eq!(
             resolve(

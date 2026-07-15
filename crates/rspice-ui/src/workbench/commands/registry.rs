@@ -9,7 +9,8 @@ use egui::Key;
 
 use super::Command;
 use crate::common::RSpiceApp;
-use crate::workbench::state::Workspace;
+use crate::workbench::ResultViewer;
+use crate::workbench::state::{VerificationPage, Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandPlatform {
@@ -222,6 +223,10 @@ const CLOSE_PROJECT: &[ShortcutBinding] = &[primary(
     chord(Key::W, true, false, true, "Ctrl+Shift+W"),
     DESKTOP,
 )];
+const EXIT: &[ShortcutBinding] = &[primary(
+    chord(Key::F4, false, true, false, "Alt+F4"),
+    DESKTOP,
+)];
 const COMMAND_PALETTE: &[ShortcutBinding] =
     &[primary(chord(Key::K, true, false, false, "Ctrl+K"), ALL)];
 const PREFERENCES: &[ShortcutBinding] = &[primary(
@@ -349,10 +354,11 @@ impl Command {
             self,
             Self::CommandPalette
                 | Self::Cancel
-                | Self::ResetActiveView
-                | Self::ResetLayout
                 | Self::PreviousWorkspace
                 | Self::NextWorkspace
+                | Self::ResetLayout
+                | Self::ToggleConsoleMaximized
+                | Self::ClearConsole
         )
     }
 
@@ -398,10 +404,10 @@ impl Command {
             Self::OpenWorkspace(Workspace::Project) => PROJECT_WORKSPACE,
             Self::OpenWorkspace(Workspace::Design) => DESIGN_WORKSPACE,
             Self::OpenWorkspace(Workspace::Simulate) => SIMULATION_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Results) => RESULTS_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Verify) => VERIFICATION_WORKSPACE,
             Self::OpenWorkspace(Workspace::Models) => MODELS_WORKSPACE,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
+            Self::ResultViewer(ResultViewer::Waves) => RESULTS_WORKSPACE,
+            Self::VerificationPage(VerificationPage::Cockpit) => VERIFICATION_WORKSPACE,
             Self::ProjectLauncher => PROJECT_LAUNCHER,
             Self::NewProject => NEW_PROJECT,
             Self::OpenProject => OPEN_PROJECT,
@@ -410,6 +416,7 @@ impl Command {
             Self::SaveAll => SAVE_ALL,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::CloseProject => CLOSE_PROJECT,
+            Self::Exit => EXIT,
             Self::Undo => UNDO,
             Self::Redo => REDO,
             Self::Cut => CUT,
@@ -461,13 +468,7 @@ impl Command {
     }
 
     pub fn availability(self, app: &RSpiceApp) -> CommandAvailability {
-        if matches!(
-            self,
-            Self::ResetActiveView
-                | Self::ResetLayout
-                | Self::PreviousWorkspace
-                | Self::NextWorkspace
-        ) {
+        if matches!(self, Self::PreviousWorkspace | Self::NextWorkspace) {
             return CommandAvailability::Hidden;
         }
         if crate::common::project_lifecycle::operation_in_progress(&app.state)
@@ -504,6 +505,7 @@ impl Command {
             }
             Self::StopSimulation => "no simulation is running",
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
+            Self::ResetActiveView => "active workspace has no resettable view state",
             _ => "command is unavailable in this context",
         };
         CommandAvailability::Disabled(reason)
@@ -523,5 +525,77 @@ impl Command {
                     | Self::GenerateNetlist
                     | Self::ToggleConsole
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
+        super::super::COMMAND_REGISTRY
+            .iter()
+            .copied()
+            .filter(|command| {
+                command
+                    .shortcut_bindings()
+                    .iter()
+                    .any(|binding| binding.chord == chord && binding.supports(platform))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn workspace_surface_shortcuts_have_one_canonical_owner() {
+        for platform in CommandPlatform::ALL {
+            assert_eq!(
+                binding_owners(RESULTS_WORKSPACE[0].chord, platform),
+                vec![Command::ResultViewer(ResultViewer::Waves)]
+            );
+            assert_eq!(
+                Command::ResultViewer(ResultViewer::Waves).shortcut_label(platform),
+                "Alt+4"
+            );
+            assert_eq!(
+                binding_owners(VERIFICATION_WORKSPACE[0].chord, platform),
+                vec![Command::VerificationPage(VerificationPage::Cockpit)]
+            );
+            assert_eq!(
+                Command::VerificationPage(VerificationPage::Cockpit).shortcut_label(platform),
+                "Alt+5"
+            );
+        }
+
+        assert!(
+            Command::OpenWorkspace(Workspace::Results)
+                .shortcut_bindings()
+                .is_empty()
+        );
+        assert!(
+            Command::OpenWorkspace(Workspace::Verify)
+                .shortcut_bindings()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn exit_shortcut_is_unambiguous_and_desktop_only() {
+        assert_eq!(
+            binding_owners(EXIT[0].chord, CommandPlatform::Desktop),
+            vec![Command::Exit]
+        );
+        assert_eq!(
+            Command::Exit.shortcut_label(CommandPlatform::Desktop),
+            "Alt+F4"
+        );
+
+        for platform in [
+            CommandPlatform::Browser,
+            CommandPlatform::Tablet,
+            CommandPlatform::Phone,
+        ] {
+            assert!(binding_owners(EXIT[0].chord, platform).is_empty());
+            assert_eq!(Command::Exit.shortcut_label(platform), "");
+        }
     }
 }

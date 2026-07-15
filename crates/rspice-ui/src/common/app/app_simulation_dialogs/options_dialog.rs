@@ -192,7 +192,10 @@ impl RSpiceApp {
         let choice = {
             let setup = &mut self.state.sim_setup;
             Dialog::new("Simulate", "Simulation options", "OK")
-                .size(DialogSize::Lg)
+                .description(
+                    "Review and validate accuracy, convergence, algorithm, limits, and temperature options applied to new simulation runs.",
+                )
+                .size(DialogSize::WideWorkflow)
                 .secondary("Apply")
                 .ghost("Revert")
                 .hint(&hint)

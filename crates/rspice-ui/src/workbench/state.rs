@@ -6,6 +6,13 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::{
+    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceId, SurfaceNavigation,
+    SurfaceRoute,
+};
+
+const NAVIGATION_SCHEMA_VERSION: u8 = 1;
+
 /// The seven canonical workspaces from the product contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum Workspace {
@@ -94,6 +101,78 @@ impl Workspace {
     }
 }
 
+/// Personal engineering-navigation profile from the governed mockup.
+///
+/// Profiles only reduce everyday discovery. They never change project data,
+/// route identity, entitlement, runtime availability, or qualification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EngineeringProfile {
+    #[default]
+    AnalogIc,
+    RfMicrowave,
+    SiPi,
+    Power,
+    Emerging,
+    All,
+}
+
+impl EngineeringProfile {
+    pub const ALL: [Self; 6] = [
+        Self::AnalogIc,
+        Self::RfMicrowave,
+        Self::SiPi,
+        Self::Power,
+        Self::Emerging,
+        Self::All,
+    ];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::AnalogIc => "analog-ic",
+            Self::RfMicrowave => "rf-microwave",
+            Self::SiPi => "si-pi",
+            Self::Power => "power",
+            Self::Emerging => "emerging",
+            Self::All => "all",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AnalogIc => "Analog & mixed-signal IC",
+            Self::RfMicrowave => "RF, microwave & wireless",
+            Self::SiPi => "SI, PI, package & PCB",
+            Self::Power => "Power electronics",
+            Self::Emerging => "Photonics & quantum",
+            Self::All => "All engineering domains",
+        }
+    }
+
+    pub const fn detail(self) -> &'static str {
+        match self {
+            Self::AnalogIc => {
+                "Schematic, custom layout, AMS, variation, reliability, PDK, model and sign-off workflows."
+            }
+            Self::RfMicrowave => {
+                "Periodic, network, load-pull, EM, RF display, measurement and application-design workflows."
+            }
+            Self::SiPi => {
+                "Channel, SerDes, PDN, package, board, EM, compliance and manufacturing workflows."
+            }
+            Self::Power => {
+                "Converters, devices, magnetics, controls, electrothermal, reliability and lab-correlation workflows."
+            }
+            Self::Emerging => {
+                "Electronic-photonic, field, heterogeneous integration and quantum electronics research workflows."
+            }
+            Self::All => {
+                "Expose every installed specialist workspace. Best for evaluators, administrators and cross-domain teams."
+            }
+        }
+    }
+}
+
 /// Width class used by layout composition.  Breakpoints are based on task
 /// density rather than an assumed device or operating system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +220,7 @@ pub enum Drawer {
     Workspaces,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ConsolePage {
     #[default]
     Console,
@@ -159,14 +238,14 @@ pub enum DesignPanel {
 }
 
 /// Sort order offered by the project launcher. The recent-files store is
-/// already maintained newest-first, so `LastOpened` preserves that durable
-/// ordering without fabricating timestamps that the application does not
-/// persist.
+/// maintained newest-first and records the last-opened timestamp, so
+/// `LastOpened` preserves its durable ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProjectLauncherSort {
     #[default]
     LastOpened,
     Name,
+    Owner,
 }
 
 impl ProjectLauncherSort {
@@ -174,6 +253,34 @@ impl ProjectLauncherSort {
         match self {
             Self::LastOpened => "Last opened",
             Self::Name => "Name",
+            Self::Owner => "Owner",
+        }
+    }
+}
+
+/// Project groups backed by durable recent-project metadata.
+///
+/// Recovery has its own complete launcher page and governed templates are not
+/// exposed until a template-package service exists, so neither is represented
+/// as a decorative filter here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectLauncherFilter {
+    #[default]
+    All,
+    Recent,
+    Pinned,
+    Shared,
+}
+
+impl ProjectLauncherFilter {
+    pub const ALL: [Self; 4] = [Self::All, Self::Recent, Self::Pinned, Self::Shared];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Recent => "Recent",
+            Self::Pinned => "Pinned",
+            Self::Shared => "Shared",
         }
     }
 }
@@ -436,6 +543,184 @@ pub enum NotificationFilter {
     System,
 }
 
+/// Read-only capability document section from the mockup's section picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CapabilityMatrixSection {
+    #[default]
+    Platforms,
+    PlannedDesigns,
+    Analyses,
+    Workspaces,
+}
+
+impl CapabilityMatrixSection {
+    pub const ALL: [Self; 4] = [
+        Self::Platforms,
+        Self::PlannedDesigns,
+        Self::Analyses,
+        Self::Workspaces,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Platforms => "Platforms",
+            Self::PlannedDesigns => "Planned designs",
+            Self::Analyses => "Analyses",
+            Self::Workspaces => "Workspaces",
+        }
+    }
+}
+
+/// Active section of the mockup-specified interoperability inspection
+/// document. This is local presentation state, never project configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum InteroperabilitySection {
+    #[default]
+    FormatMatrix,
+    RoundTripContract,
+    Qualification,
+}
+
+impl InteroperabilitySection {
+    pub const ALL: [Self; 3] = [
+        Self::FormatMatrix,
+        Self::RoundTripContract,
+        Self::Qualification,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FormatMatrix => "Format matrix",
+            Self::RoundTripContract => "Round-trip contract",
+            Self::Qualification => "Qualification",
+        }
+    }
+}
+
+/// Domain projection selected in the interoperability format matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum InteroperabilityDomain {
+    #[default]
+    All,
+    NetlistAndSimulation,
+    IcDesignAndLayout,
+    PcbAndManufacturing,
+    MechanicalExchange,
+    ResultsAndReports,
+}
+
+impl InteroperabilityDomain {
+    pub const ALL: [Self; 6] = [
+        Self::All,
+        Self::NetlistAndSimulation,
+        Self::IcDesignAndLayout,
+        Self::PcbAndManufacturing,
+        Self::MechanicalExchange,
+        Self::ResultsAndReports,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All domains",
+            Self::NetlistAndSimulation => "Netlist and simulation",
+            Self::IcDesignAndLayout => "IC design and layout",
+            Self::PcbAndManufacturing => "PCB and manufacturing",
+            Self::MechanicalExchange => "Mechanical exchange",
+            Self::ResultsAndReports => "Results and reports",
+        }
+    }
+}
+
+/// Versioned support-level projection selected in the interoperability matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum InteroperabilitySupportLevel {
+    #[default]
+    All,
+    Native,
+    Qualified,
+    ConnectorDependent,
+    Planned,
+}
+
+impl InteroperabilitySupportLevel {
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::Native,
+        Self::Qualified,
+        Self::ConnectorDependent,
+        Self::Planned,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All support levels",
+            Self::Native => "Native",
+            Self::Qualified => "Qualified",
+            Self::ConnectorDependent => "Connector-dependent",
+            Self::Planned => "Planned",
+        }
+    }
+}
+
+/// Transient subordinate-document projection shown by the capability manager.
+///
+/// Canonical workflow routes own browser/back-stack semantics; this enum owns
+/// only the retained presentation needed to render that route and is discarded
+/// when the manager task closes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CapabilityMatrixDrilldown {
+    PlannedWorkflow(String),
+    Interoperability,
+    TouchEditGuide,
+    PlatformLifecycle,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityMatrixState {
+    /// Presentation-only jump target. The governed field contract requires
+    /// Platforms on every open and forbids persistence of this selection.
+    #[serde(skip)]
+    pub section: CapabilityMatrixSection,
+    /// Scroll position belongs only to the currently open task document.
+    #[serde(skip)]
+    pub scroll_offset: f32,
+    /// Last responsive document class observed while the matrix body was
+    /// rendered. A class change re-anchors the selected section because a
+    /// numeric scroll offset cannot survive desktop/compact reflow reliably.
+    #[serde(skip)]
+    pub last_document_compact: Option<bool>,
+    /// Nested inspection document. It is never session or project state.
+    #[serde(skip)]
+    pub drilldown: Option<CapabilityMatrixDrilldown>,
+    /// Independent nested-document scroll position so returning to the matrix
+    /// restores the exact review path.
+    #[serde(skip)]
+    pub drilldown_scroll_offset: f32,
+    /// Local tab and filter state for the read-only interoperability document.
+    #[serde(skip)]
+    pub interoperability_section: InteroperabilitySection,
+    #[serde(skip)]
+    pub interoperability_domain: InteroperabilityDomain,
+    #[serde(skip)]
+    pub interoperability_support_level: InteroperabilitySupportLevel,
+}
+
+impl Default for CapabilityMatrixState {
+    fn default() -> Self {
+        Self {
+            section: CapabilityMatrixSection::Platforms,
+            scroll_offset: 0.0,
+            last_document_compact: None,
+            drilldown: None,
+            drilldown_scroll_offset: 0.0,
+            interoperability_section: InteroperabilitySection::default(),
+            interoperability_domain: InteroperabilityDomain::default(),
+            interoperability_support_level: InteroperabilitySupportLevel::default(),
+        }
+    }
+}
+
 impl NotificationFilter {
     pub const ALL: [Self; 4] = [Self::All, Self::Jobs, Self::Approvals, Self::System];
 
@@ -455,6 +740,19 @@ impl NotificationFilter {
 pub struct WorkbenchState {
     #[serde(default)]
     pub workspace: Workspace,
+    #[serde(default)]
+    pub engineering_profile: EngineeringProfile,
+    /// Version marker used to distinguish sessions that predate canonical
+    /// routes from sessions whose current route is intentionally Design.
+    #[serde(default)]
+    navigation_schema_version: u8,
+    /// Canonical current route plus bounded back/forward/recent task history.
+    #[serde(default)]
+    navigation: SurfaceNavigation,
+    /// Recovery or deep-link diagnostic awaiting presentation in the activity
+    /// stream. It is runtime state, never engineering or preference data.
+    #[serde(skip)]
+    route_diagnostic: Option<String>,
     #[serde(default = "default_true")]
     pub navigator_visible: bool,
     #[serde(default = "default_true")]
@@ -483,6 +781,8 @@ pub struct WorkbenchState {
     pub project_launcher_query: String,
     #[serde(skip)]
     pub project_launcher_sort: ProjectLauncherSort,
+    #[serde(skip)]
+    pub project_launcher_filter: ProjectLauncherFilter,
     /// Selected startup page and scanned native checkpoint catalog are
     /// application-modal runtime state, never project or user preferences.
     #[serde(skip)]
@@ -544,8 +844,6 @@ pub struct WorkbenchState {
     pub project_name_error: Option<String>,
     #[serde(skip)]
     pub drawer: Option<Drawer>,
-    #[serde(skip)]
-    pub workspace_history: Vec<Workspace>,
     /// One-frame request to focus the workspace navigator filter.
     #[serde(skip)]
     pub focus_navigator_search: bool,
@@ -565,6 +863,11 @@ pub struct WorkbenchState {
     pub notification_center_open: bool,
     #[serde(skip)]
     pub notification_filter: NotificationFilter,
+    /// Review filters plus transient presentation state for the canonical
+    /// application-session-owned capability matrix. Individual fields define
+    /// their own persistence boundary.
+    #[serde(default)]
+    pub capability_matrix: CapabilityMatrixState,
 }
 
 const fn default_true() -> bool {
@@ -591,6 +894,10 @@ impl Default for WorkbenchState {
     fn default() -> Self {
         Self {
             workspace: Workspace::Design,
+            engineering_profile: EngineeringProfile::AnalogIc,
+            navigation_schema_version: NAVIGATION_SCHEMA_VERSION,
+            navigation: SurfaceNavigation::default(),
+            route_diagnostic: None,
             navigator_visible: true,
             inspector_visible: true,
             console_visible: false,
@@ -601,6 +908,7 @@ impl Default for WorkbenchState {
             project_launcher_open: false,
             project_launcher_query: String::new(),
             project_launcher_sort: ProjectLauncherSort::LastOpened,
+            project_launcher_filter: ProjectLauncherFilter::All,
             project_launcher_page: ProjectLauncherPage::Projects,
             project_launcher_recovery: super::recovery::RecoveryCatalog::default(),
             safe_mode: LocalSafeModeState::default(),
@@ -625,13 +933,13 @@ impl Default for WorkbenchState {
             project_name_draft: String::new(),
             project_name_error: None,
             drawer: None,
-            workspace_history: vec![Workspace::Design],
             focus_navigator_search: false,
             placement_query: String::new(),
             focus_placement_search: false,
             preflight: PreflightDialogState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
+            capability_matrix: CapabilityMatrixState::default(),
         }
     }
 }
@@ -641,7 +949,13 @@ impl WorkbenchState {
     /// pointer intent. Global shortcuts must not mutate the document behind
     /// these surfaces.
     pub fn application_modal_open(&self) -> bool {
-        self.project_launcher_open || self.preflight.open || self.notification_center_open
+        self.project_launcher_open
+            || self.preflight.open
+            || self.notification_center_open
+            || matches!(
+                self.current_route().surface_id(),
+                SurfaceId::Preferences | SurfaceId::FeatureAvailability
+            )
     }
 
     pub fn open_project_launcher(&mut self) {
@@ -652,15 +966,223 @@ impl WorkbenchState {
     }
 
     pub fn activate(&mut self, workspace: Workspace) {
-        if self.workspace == workspace {
-            self.close_drawer();
+        if let Err(error) = self.navigate(
+            SurfaceRoute::surface(SurfaceId::from_workspace(workspace)),
+            RouteTransitionSource::User,
+        ) {
+            self.record_route_diagnostic(format!(
+                "The requested primary workspace could not be opened: {error}"
+            ));
+        }
+    }
+
+    /// Commit one canonical route transition and update the primary-workspace
+    /// rendering projection when the destination is a primary surface.
+    pub fn navigate(
+        &mut self,
+        route: SurfaceRoute,
+        source: RouteTransitionSource,
+    ) -> Result<RouteTransition, super::SurfaceRouteUnavailable> {
+        super::availability::require_available(route)?;
+        let transition = self.navigation.navigate(route, source);
+        self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        if let Some(workspace) = route.surface_id().workspace() {
+            self.workspace = workspace;
+        }
+        self.navigation_schema_version = NAVIGATION_SCHEMA_VERSION;
+        self.close_drawer();
+        Ok(transition)
+    }
+
+    /// Replace the current route during startup canonicalization without
+    /// creating a back entry.
+    pub fn replace_route(
+        &mut self,
+        route: SurfaceRoute,
+        source: RouteTransitionSource,
+    ) -> Result<(), super::SurfaceRouteUnavailable> {
+        super::availability::require_available(route)?;
+        let previous = self.navigation.current();
+        self.navigation.replace(route, source);
+        self.reconcile_capability_matrix_route(previous, route);
+        if let Some(workspace) = route.surface_id().workspace() {
+            self.workspace = workspace;
+        }
+        self.navigation_schema_version = NAVIGATION_SCHEMA_VERSION;
+        self.close_drawer();
+        Ok(())
+    }
+
+    /// Reconcile a restored session. Legacy sessions are migrated from the
+    /// persisted workspace; current sessions treat the canonical route as the
+    /// source of truth and keep the workspace only as a render projection.
+    pub fn reconcile_restored_navigation(&mut self) {
+        if self.navigation.recovered_invalid_routes() {
+            self.route_diagnostic = Some(
+                "Malformed routes were removed from restored task history; project and document state were preserved."
+                    .to_owned(),
+            );
+            self.navigation.acknowledge_recovery();
+        }
+        if self.navigation_schema_version != NAVIGATION_SCHEMA_VERSION {
+            self.navigation.replace(
+                SurfaceRoute::surface(SurfaceId::from_workspace(self.workspace)),
+                RouteTransitionSource::Restore,
+            );
+            self.navigation_schema_version = NAVIGATION_SCHEMA_VERSION;
+        } else {
+            let current = self.navigation.current();
+            if let Err(error) = super::availability::require_available(current) {
+                self.route_diagnostic = Some(format!(
+                    "The restored route was not opened because its executor is unavailable: {error}"
+                ));
+                self.navigation.replace(
+                    SurfaceRoute::surface(SurfaceId::from_workspace(self.workspace)),
+                    RouteTransitionSource::Restore,
+                );
+            } else if let Some(workspace) = current.surface_id().workspace() {
+                self.workspace = workspace;
+            }
+        }
+        let removed = self
+            .navigation
+            .retain_history(|route| super::availability::route_availability(route).can_open());
+        if removed && self.route_diagnostic.is_none() {
+            self.route_diagnostic = Some(
+                "Unavailable routes were removed from restored task history; project and document state were preserved."
+                    .to_owned(),
+            );
+        }
+    }
+
+    pub fn record_route_diagnostic(&mut self, diagnostic: impl Into<String>) {
+        self.route_diagnostic = Some(diagnostic.into());
+    }
+
+    pub fn take_route_diagnostic(&mut self) -> Option<String> {
+        self.route_diagnostic.take()
+    }
+
+    #[must_use]
+    pub const fn current_route(&self) -> SurfaceRoute {
+        self.navigation.current()
+    }
+
+    /// Immediate in-application return destination, if one exists. The
+    /// mutable navigation stacks remain session-owned so surfaces cannot
+    /// bypass route availability and reconciliation.
+    #[must_use]
+    pub fn previous_route(&self) -> Option<SurfaceRoute> {
+        self.navigation.back_entries().last().copied()
+    }
+
+    /// Number of known in-application predecessors. Surfaces may use this to
+    /// choose a fail-safe close strategy without gaining mutable stack access.
+    #[must_use]
+    pub fn back_route_count(&self) -> usize {
+        self.navigation.back_entries().len()
+    }
+
+    #[must_use]
+    pub fn forward_route_count(&self) -> usize {
+        self.navigation.forward_entries().len()
+    }
+
+    pub fn navigate_back(&mut self, source: RouteTransitionSource) -> Option<RouteTransition> {
+        let transition = self.navigation.go_back(source)?;
+        self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        if let Some(workspace) = transition.current.surface_id().workspace() {
+            self.workspace = workspace;
+        }
+        self.close_drawer();
+        Some(transition)
+    }
+
+    /// Atomically return across up to `count` known routes, reconciling the
+    /// foreground surface only once from the original route to the final
+    /// destination.
+    pub fn navigate_back_steps(
+        &mut self,
+        count: usize,
+        source: RouteTransitionSource,
+    ) -> Option<RouteTransition> {
+        let transition = self.navigation.go_back_steps(count, source)?;
+        self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        if let Some(workspace) = transition.current.surface_id().workspace() {
+            self.workspace = workspace;
+        }
+        self.close_drawer();
+        Some(transition)
+    }
+
+    pub fn navigate_forward(&mut self, source: RouteTransitionSource) -> Option<RouteTransition> {
+        self.navigate_forward_steps(1, source)
+    }
+
+    /// Atomically advance across up to `count` known routes, reconciling the
+    /// foreground surface only once from the original route to the final
+    /// destination.
+    pub fn navigate_forward_steps(
+        &mut self,
+        count: usize,
+        source: RouteTransitionSource,
+    ) -> Option<RouteTransition> {
+        let transition = self.navigation.go_forward_steps(count, source)?;
+        self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        if let Some(workspace) = transition.current.surface_id().workspace() {
+            self.workspace = workspace;
+        }
+        self.close_drawer();
+        Some(transition)
+    }
+
+    fn reconcile_capability_matrix_route(&mut self, previous: SurfaceRoute, current: SurfaceRoute) {
+        let manager = SurfaceId::FeatureAvailability;
+        if previous.surface_id() == current.surface_id()
+            || (previous.surface_id() != manager && current.surface_id() != manager)
+        {
             return;
         }
-        self.workspace = workspace;
-        self.close_drawer();
-        self.workspace_history.retain(|entry| *entry != workspace);
-        self.workspace_history.push(workspace);
-        self.workspace_history.truncate(16);
+
+        // The section picker and scroll position are local presentation state
+        // for a single open document. Closing or entering the manager creates
+        // a fresh Platforms-first reading position and dismisses drilldowns.
+        self.capability_matrix.section = CapabilityMatrixSection::Platforms;
+        self.capability_matrix.scroll_offset = 0.0;
+        self.capability_matrix.last_document_compact = None;
+        self.capability_matrix.drilldown = None;
+        self.capability_matrix.drilldown_scroll_offset = 0.0;
+        self.capability_matrix.interoperability_section = InteroperabilitySection::default();
+        self.capability_matrix.interoperability_domain = InteroperabilityDomain::default();
+        self.capability_matrix.interoperability_support_level =
+            InteroperabilitySupportLevel::default();
+    }
+
+    pub fn take_browser_history_effect(&mut self) -> Option<BrowserHistoryEffect> {
+        self.navigation.take_browser_effect()
+    }
+
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn has_pending_browser_history_effects(&self) -> bool {
+        self.navigation.has_pending_browser_effects()
+    }
+
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn clear_browser_history_effects(&mut self) {
+        self.navigation.clear_browser_effects();
+    }
+
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn take_browser_history_effect_queue_overflowed(&mut self) -> bool {
+        self.navigation.take_browser_effect_queue_overflowed()
+    }
+
+    /// Drop restored traversal stacks when a new browser process takes
+    /// ownership of the current URL. The active route and workspace remain
+    /// unchanged; only host-history authority is reset.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn reset_navigation_history_for_fresh_browser_session(&mut self) {
+        self.navigation.reset_history();
     }
 
     pub fn cycle_workspace(&mut self, backwards: bool) {
@@ -744,6 +1266,7 @@ impl WorkbenchState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::CapabilityWorkflowId;
 
     #[test]
     fn canonical_workspace_order_and_shortcuts_are_stable() {
@@ -764,16 +1287,147 @@ mod tests {
     }
 
     #[test]
-    fn workspace_history_is_deduplicated_and_bounded() {
+    fn workspace_activation_updates_canonical_route_and_recent_history() {
         let mut state = WorkbenchState::default();
         state.activate(Workspace::Results);
         state.activate(Workspace::Design);
 
         assert_eq!(state.workspace, Workspace::Design);
         assert_eq!(
-            state.workspace_history,
-            vec![Workspace::Results, Workspace::Design]
+            state.navigation.recent_entries(),
+            &[
+                SurfaceRoute::surface(SurfaceId::Results),
+                SurfaceRoute::surface(SurfaceId::Design),
+            ]
         );
+    }
+
+    #[test]
+    fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
+        let mut state = WorkbenchState::default();
+        state
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::Results),
+                RouteTransitionSource::User,
+            )
+            .expect("Results is available");
+        state
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::FeatureAvailability),
+                RouteTransitionSource::User,
+            )
+            .expect("capability matrix is available");
+        state
+            .navigate(
+                SurfaceRoute::capability_workflow(CapabilityWorkflowId::SourceLoadPullAnalysis),
+                RouteTransitionSource::User,
+            )
+            .expect("planned workflow inspection is available");
+        state.capability_matrix.section = CapabilityMatrixSection::PlannedDesigns;
+        state.capability_matrix.scroll_offset = 240.0;
+        state.clear_browser_history_effects();
+
+        let transition = state
+            .navigate_back_steps(2, RouteTransitionSource::User)
+            .expect("matrix and source routes exist");
+
+        assert_eq!(
+            transition.previous,
+            SurfaceRoute::capability_workflow(CapabilityWorkflowId::SourceLoadPullAnalysis)
+        );
+        assert_eq!(
+            transition.current,
+            SurfaceRoute::surface(SurfaceId::Results)
+        );
+        assert_eq!(state.workspace, Workspace::Results);
+        assert_eq!(
+            state.capability_matrix.section,
+            CapabilityMatrixSection::Platforms
+        );
+        assert_eq!(state.capability_matrix.scroll_offset, 0.0);
+        assert_eq!(
+            state.take_browser_history_effect(),
+            Some(BrowserHistoryEffect::Traverse {
+                delta: -2,
+                destination: SurfaceRoute::surface(SurfaceId::Results),
+            })
+        );
+    }
+
+    #[test]
+    fn touch_guide_history_roundtrips_through_its_platform_lifecycle_source() {
+        let mut state = WorkbenchState::default();
+        let matrix = SurfaceRoute::surface(SurfaceId::FeatureAvailability);
+        let lifecycle = SurfaceRoute::capability_workflow(CapabilityWorkflowId::PlatformLifecycle);
+        let touch_guide = SurfaceRoute::capability_workflow(CapabilityWorkflowId::TouchEditGuide);
+
+        for route in [matrix, lifecycle, touch_guide] {
+            state
+                .navigate(route, RouteTransitionSource::User)
+                .expect("the informational route has an explicit executor");
+        }
+
+        assert_eq!(state.current_route(), touch_guide);
+        assert_eq!(state.previous_route(), Some(lifecycle));
+        assert_eq!(
+            state
+                .navigate_back(RouteTransitionSource::User)
+                .expect("touch guide retains its lifecycle source")
+                .current,
+            lifecycle
+        );
+        assert_eq!(
+            state
+                .navigate_back(RouteTransitionSource::User)
+                .expect("lifecycle retains the capability matrix source")
+                .current,
+            matrix
+        );
+        assert_eq!(
+            state
+                .navigate_forward(RouteTransitionSource::User)
+                .expect("forward restores lifecycle")
+                .current,
+            lifecycle
+        );
+        assert_eq!(
+            state
+                .navigate_forward(RouteTransitionSource::User)
+                .expect("forward restores touch guidance")
+                .current,
+            touch_guide
+        );
+    }
+
+    #[test]
+    fn legacy_workspace_session_migrates_to_the_matching_primary_route() {
+        let mut state: WorkbenchState =
+            serde_json::from_str(r#"{"workspace":"Results"}"#).expect("legacy workbench restores");
+        assert_eq!(state.current_route().surface_id(), SurfaceId::Design);
+
+        state.reconcile_restored_navigation();
+        assert_eq!(state.workspace, Workspace::Results);
+        assert_eq!(state.current_route().surface_id(), SurfaceId::Results);
+        assert_eq!(
+            state.take_browser_history_effect(),
+            Some(BrowserHistoryEffect::Replace(SurfaceRoute::surface(
+                SurfaceId::Results
+            )))
+        );
+    }
+
+    #[test]
+    fn current_canonical_route_is_the_primary_workspace_source_of_truth() {
+        let mut state = WorkbenchState::default();
+        state.workspace = Workspace::Project;
+        state.navigation.replace(
+            SurfaceRoute::surface(SurfaceId::Results),
+            RouteTransitionSource::BrowserPop,
+        );
+
+        state.reconcile_restored_navigation();
+        assert_eq!(state.workspace, Workspace::Results);
+        assert_eq!(state.current_route().surface_id(), SurfaceId::Results);
     }
 
     #[test]
@@ -830,5 +1484,225 @@ mod tests {
         state.project_launcher_open = false;
         state.preflight.open = true;
         assert!(state.application_modal_open());
+        state.preflight.open = false;
+        state
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::Preferences),
+                RouteTransitionSource::User,
+            )
+            .expect("Preferences has a registered executor");
+        assert!(state.application_modal_open());
+        state
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::FeatureAvailability),
+                RouteTransitionSource::User,
+            )
+            .expect("capability manager has a registered executor");
+        assert!(state.application_modal_open());
+    }
+
+    #[test]
+    fn capability_matrix_persists_profile_but_not_local_presentation() {
+        let mut state = WorkbenchState::default();
+        state.engineering_profile = EngineeringProfile::RfMicrowave;
+        state.capability_matrix = CapabilityMatrixState {
+            section: CapabilityMatrixSection::Workspaces,
+            scroll_offset: 318.5,
+            last_document_compact: Some(false),
+            drilldown: Some(CapabilityMatrixDrilldown::PlannedWorkflow(
+                "transient-noise".to_owned(),
+            )),
+            drilldown_scroll_offset: 91.0,
+            interoperability_section: InteroperabilitySection::Qualification,
+            interoperability_domain: InteroperabilityDomain::MechanicalExchange,
+            interoperability_support_level: InteroperabilitySupportLevel::Planned,
+        };
+
+        let json = serde_json::to_string(&state).expect("workbench serializes");
+        let restored: WorkbenchState =
+            serde_json::from_str(&json).expect("workbench review context restores");
+        assert_eq!(
+            restored.engineering_profile,
+            EngineeringProfile::RfMicrowave
+        );
+        assert_eq!(
+            restored.capability_matrix.section,
+            CapabilityMatrixSection::Platforms
+        );
+        assert_eq!(restored.capability_matrix.scroll_offset, 0.0);
+        assert_eq!(restored.capability_matrix.last_document_compact, None);
+        assert_eq!(restored.capability_matrix.drilldown, None);
+        assert_eq!(restored.capability_matrix.drilldown_scroll_offset, 0.0);
+        assert_eq!(
+            restored.capability_matrix.interoperability_section,
+            InteroperabilitySection::FormatMatrix
+        );
+        assert_eq!(
+            restored.capability_matrix.interoperability_domain,
+            InteroperabilityDomain::All
+        );
+        assert_eq!(
+            restored.capability_matrix.interoperability_support_level,
+            InteroperabilitySupportLevel::All
+        );
+    }
+
+    #[test]
+    fn capability_matrix_reopens_at_platforms_and_dismisses_drilldowns() {
+        let mut state = WorkbenchState::default();
+        state.capability_matrix.section = CapabilityMatrixSection::Analyses;
+        state.capability_matrix.scroll_offset = 200.0;
+        state.capability_matrix.last_document_compact = Some(false);
+        state.capability_matrix.drilldown = Some(CapabilityMatrixDrilldown::PlannedWorkflow(
+            "transient-noise".to_owned(),
+        ));
+        state.capability_matrix.interoperability_section = InteroperabilitySection::Qualification;
+        state.capability_matrix.interoperability_domain =
+            InteroperabilityDomain::MechanicalExchange;
+        state.capability_matrix.interoperability_support_level =
+            InteroperabilitySupportLevel::ConnectorDependent;
+
+        state
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::FeatureAvailability),
+                RouteTransitionSource::User,
+            )
+            .expect("capability manager has an executor");
+        assert_eq!(
+            state.capability_matrix.section,
+            CapabilityMatrixSection::Platforms
+        );
+        assert_eq!(state.capability_matrix.scroll_offset, 0.0);
+        assert_eq!(state.capability_matrix.last_document_compact, None);
+        assert_eq!(state.capability_matrix.drilldown, None);
+        assert_eq!(
+            state.capability_matrix.interoperability_section,
+            InteroperabilitySection::FormatMatrix
+        );
+        assert_eq!(
+            state.capability_matrix.interoperability_domain,
+            InteroperabilityDomain::All
+        );
+        assert_eq!(
+            state.capability_matrix.interoperability_support_level,
+            InteroperabilitySupportLevel::All
+        );
+
+        state.capability_matrix.section = CapabilityMatrixSection::Workspaces;
+        state.capability_matrix.scroll_offset = 42.0;
+        state.capability_matrix.drilldown = Some(CapabilityMatrixDrilldown::PlannedWorkflow(
+            "transient-noise".to_owned(),
+        ));
+        state.capability_matrix.interoperability_section =
+            InteroperabilitySection::RoundTripContract;
+        state.capability_matrix.interoperability_domain = InteroperabilityDomain::IcDesignAndLayout;
+        state.capability_matrix.interoperability_support_level =
+            InteroperabilitySupportLevel::Qualified;
+        state.activate(Workspace::Design);
+        assert_eq!(
+            state.capability_matrix.section,
+            CapabilityMatrixSection::Platforms
+        );
+        assert_eq!(state.capability_matrix.scroll_offset, 0.0);
+        assert_eq!(state.capability_matrix.drilldown, None);
+        assert_eq!(
+            state.capability_matrix.interoperability_section,
+            InteroperabilitySection::FormatMatrix
+        );
+        assert_eq!(
+            state.capability_matrix.interoperability_domain,
+            InteroperabilityDomain::All
+        );
+        assert_eq!(
+            state.capability_matrix.interoperability_support_level,
+            InteroperabilitySupportLevel::All
+        );
+    }
+
+    #[test]
+    fn fresh_browser_session_keeps_route_but_drops_restored_traversal() {
+        let mut state = WorkbenchState::default();
+        state.activate(Workspace::Results);
+        assert!(state.previous_route().is_some());
+        assert!(state.has_pending_browser_history_effects());
+
+        state.reset_navigation_history_for_fresh_browser_session();
+
+        assert_eq!(
+            state.current_route(),
+            SurfaceRoute::surface(SurfaceId::Results)
+        );
+        assert_eq!(state.previous_route(), None);
+        assert_eq!(state.take_browser_history_effect(), None);
+        assert!(state.navigate_back(RouteTransitionSource::User).is_none());
+    }
+
+    #[test]
+    fn restored_route_reconciliation_is_idempotent_across_two_passes() {
+        let mut state = WorkbenchState::default();
+        state.navigation = serde_json::from_str(
+            r#"{
+                "current":"?view=design",
+                "back":["?surface=rf-workbench","?surface=not-a-surface"],
+                "forward":[],
+                "recent":[]
+            }"#,
+        )
+        .expect("navigation wire recovers malformed entries");
+
+        state.reconcile_restored_navigation();
+        let first = state
+            .take_route_diagnostic()
+            .expect("first pass reports malformed recovery");
+        assert!(first.contains("Malformed routes"));
+        assert!(state.navigation.back_entries().is_empty());
+        assert!(!state.navigation.recovered_invalid_routes());
+
+        state.reconcile_restored_navigation();
+        assert_eq!(state.take_route_diagnostic(), None);
+        assert!(!state.navigation.recovered_invalid_routes());
+    }
+
+    #[test]
+    fn unavailable_history_removal_is_reported_once_without_malformed_flag() {
+        let mut state = WorkbenchState::default();
+        state.navigation = serde_json::from_str(
+            r#"{
+                "current":"?view=design",
+                "back":["?surface=rf-workbench"],
+                "forward":[],
+                "recent":[]
+            }"#,
+        )
+        .expect("canonical unavailable history restores");
+
+        state.reconcile_restored_navigation();
+        let first = state
+            .take_route_diagnostic()
+            .expect("first pass reports unavailable removal");
+        assert!(first.contains("Unavailable routes"));
+        assert!(!state.navigation.recovered_invalid_routes());
+
+        state.reconcile_restored_navigation();
+        assert_eq!(state.take_route_diagnostic(), None);
+    }
+
+    #[test]
+    fn browser_effect_overflow_reaches_the_workbench_recovery_gate() {
+        let mut state = WorkbenchState::default();
+        for index in 0..65 {
+            state.activate(if index % 2 == 0 {
+                Workspace::Results
+            } else {
+                Workspace::Models
+            });
+        }
+
+        assert!(state.has_pending_browser_history_effects());
+        assert_eq!(state.take_browser_history_effect(), None);
+        assert!(state.take_browser_history_effect_queue_overflowed());
+        assert!(!state.take_browser_history_effect_queue_overflowed());
+        assert!(!state.has_pending_browser_history_effects());
+        assert_eq!(state.current_route().surface_id(), SurfaceId::Results);
     }
 }

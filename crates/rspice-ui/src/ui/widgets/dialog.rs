@@ -1,13 +1,14 @@
-//! The VOLTA modal primitive.
+//! The RSpice modal primitive.
 //!
 //! Every dialog in the application is the same three-part surface over a
 //! scrim:
 //!
 //! - **Scrim** — full-viewport canvas-black wash that blocks interaction
 //!   with everything underneath. Clicking it does not dismiss; `Esc` does.
-//! - **Surface** — `bg_panel`, 1 px `border_strong`, large radius, pop
-//!   shadow. Three widths (Sm 400 / Md 560 / Lg 780); the body scrolls
-//!   once the surface reaches 82 % of the viewport height.
+//! - **Surface** — each callsite declares a mockup-owned purpose: transaction,
+//!   manager, wide workflow, or capability review. Purpose controls exact
+//!   geometry, fill, corner radius, viewport gutter, and narrow behavior; no
+//!   retired generic small/medium/large shell remains.
 //! - **Header / footer** — mono uppercase kicker + semibold title + close
 //!   on top; footer is `[ghost] [secondary] [primary]` with the primary
 //!   always rightmost, always exactly one, accent-filled (or `err` when
@@ -25,31 +26,208 @@ use egui::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-/// Dialog surface width.
+/// Mockup-owned dialog surface purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogSize {
-    /// Confirmations, small forms (400 pt).
-    Sm,
-    /// Standard forms (560 pt).
-    Md,
-    /// Multi-pane surfaces — browsers, options (780 pt).
-    Lg,
+    /// Transactional edits and confirmations: 760 pt wide, content-height,
+    /// capped at 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
+    Transaction,
+    /// Browsers and settings managers: 760 × 530 pt, with the mockup's
+    /// 28/34 pt viewport gutters and 8 pt phone inset.
+    Manager,
+    /// Wide numerical/setup workflows: 980 pt wide, content-height capped at
+    /// 760 pt, and edge-to-edge at the mockup's 820 pt breakpoint.
+    WideWorkflow,
+    /// Governed capability matrices: 1040 pt wide, content-height capped at
+    /// 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
+    CapabilityReview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DialogSurfaceSpec {
+    width: f32,
+    max_height: f32,
+    horizontal_inset: f32,
+    vertical_inset: f32,
+    narrow_max_width: f32,
+    narrow_inset: f32,
+    edge_to_edge_narrow: bool,
+    fill_narrow_viewport: bool,
+    fill_height: bool,
+    app_background: bool,
+    radius: f32,
 }
 
 impl DialogSize {
-    fn width(self) -> f32 {
+    const fn spec(self) -> DialogSurfaceSpec {
         match self {
-            Self::Sm => 400.0,
-            Self::Md => 560.0,
-            Self::Lg => 780.0,
+            Self::Transaction => DialogSurfaceSpec {
+                width: 760.0,
+                max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 820.0,
+                narrow_inset: 0.0,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+            },
+            Self::Manager => DialogSurfaceSpec {
+                width: 760.0,
+                max_height: 530.0,
+                horizontal_inset: 28.0,
+                vertical_inset: 34.0,
+                narrow_max_width: 560.0,
+                narrow_inset: 8.0,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: true,
+                fill_height: true,
+                app_background: false,
+                radius: 8.0,
+            },
+            Self::WideWorkflow => DialogSurfaceSpec {
+                width: 980.0,
+                max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 820.0,
+                narrow_inset: 0.0,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+            },
+            Self::CapabilityReview => DialogSurfaceSpec {
+                width: 1040.0,
+                max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 820.0,
+                narrow_inset: 0.0,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+            },
+        }
+    }
+}
+
+const WORKFLOW_HEADER_MIN_HEIGHT: f32 = 57.0;
+const WORKFLOW_HEADER_HORIZONTAL_MARGIN: i8 = 15;
+const WORKFLOW_FOOTER_HORIZONTAL_MARGIN: i8 = 12;
+const WORKFLOW_FOOTER_VERTICAL_MARGIN: i8 = 10;
+const DIALOG_CLOSE_TARGET_WIDTH: f32 = 28.0;
+const DIALOG_CLOSE_TARGET_HEIGHT: f32 = 27.0;
+const TOUCH_TARGET_SIDE: f32 = 44.0;
+
+/// Geometry resolved before the dialog is painted. Keeping this calculation
+/// independent of egui's layout pass makes every mockup breakpoint and gutter
+/// explicit and testable.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DialogLayout {
+    surface_rect: Rect,
+    fill_height: bool,
+    app_background: bool,
+    radius: f32,
+    narrow: bool,
+}
+
+impl DialogLayout {
+    fn resolve(size: DialogSize, screen: Rect, measured_height: Option<f32>) -> Self {
+        let spec = size.spec();
+        let narrow = screen.width() <= spec.narrow_max_width;
+        let surface_rect = if narrow && spec.edge_to_edge_narrow {
+            screen
+        } else {
+            let horizontal_inset = if narrow {
+                spec.narrow_inset
+            } else {
+                spec.horizontal_inset
+            };
+            let vertical_inset = if narrow {
+                spec.narrow_inset
+            } else {
+                spec.vertical_inset
+            };
+            Rect::from_center_size(
+                screen.center(),
+                vec2(
+                    if narrow && spec.fill_narrow_viewport {
+                        (screen.width() - horizontal_inset).max(1.0)
+                    } else {
+                        spec.width.min((screen.width() - horizontal_inset).max(1.0))
+                    },
+                    if narrow && spec.fill_narrow_viewport {
+                        (screen.height() - vertical_inset).max(1.0)
+                    } else {
+                        measured_height
+                            .filter(|_| !spec.fill_height)
+                            .unwrap_or(spec.max_height)
+                            .min(spec.max_height)
+                            .min((screen.height() - vertical_inset).max(1.0))
+                    },
+                ),
+            )
+        };
+
+        Self {
+            surface_rect,
+            fill_height: spec.fill_height,
+            app_background: spec.app_background,
+            radius: if narrow && spec.edge_to_edge_narrow {
+                0.0
+            } else {
+                spec.radius
+            },
+            narrow,
+        }
+    }
+}
+
+/// Temporarily raises the design-system control height for coarse-pointer and
+/// narrow workflow compositions, then restores the caller's selected density.
+struct ControlHeightOverride {
+    ctx: Context,
+    original: Option<Tokens>,
+}
+
+impl ControlHeightOverride {
+    fn new(ctx: &Context, minimum: Option<f32>) -> Self {
+        let original = (*Tokens::get(ctx)).clone();
+        let Some(minimum) = minimum.filter(|minimum| original.metrics.ctl_h < *minimum) else {
+            return Self {
+                ctx: ctx.clone(),
+                original: None,
+            };
+        };
+        let mut adjusted = original.clone();
+        adjusted.metrics.ctl_h = minimum;
+        adjusted.install(ctx);
+        Self {
+            ctx: ctx.clone(),
+            original: Some(original),
+        }
+    }
+}
+
+impl Drop for ControlHeightOverride {
+    fn drop(&mut self) {
+        if let Some(original) = self.original.take() {
+            original.install(&self.ctx);
         }
     }
 }
 
 /// What the user chose this frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DialogChoice {
     /// Still open, nothing chosen.
+    #[default]
     None,
     /// The accent (or destructive) primary action.
     Primary,
@@ -61,16 +239,77 @@ pub enum DialogChoice {
     Cancelled,
 }
 
+/// Control that receives focus when a dialog first opens.
+///
+/// [`BodyControl`](Self::BodyControl) is resolved by
+/// [`Dialog::show_with_initial_body_focus`], after the body has returned the
+/// exact response id of its preferred control. Every unavailable target falls
+/// back to the modal container, so focus can never escape to the obscured
+/// workspace.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DialogInitialFocus {
+    /// Focus the modal container. This preserves the established default.
+    #[default]
+    Container,
+    /// Focus the body control returned by `show_with_initial_body_focus`.
+    BodyControl,
+    /// Focus the header close control.
+    Close,
+    /// Focus the primary footer action.
+    Primary,
+    /// Focus the optional secondary footer action.
+    Secondary,
+    /// Focus the optional ghost footer action.
+    Ghost,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct DialogFocusState {
     prior_focus: Option<Id>,
     last_seen_pass: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct DialogRenderedFocus {
+    close: Option<Id>,
+    primary: Option<Id>,
+    secondary: Option<Id>,
+    ghost: Option<Id>,
+    body: Option<Id>,
+}
+
+impl DialogRenderedFocus {
+    fn requested(self, target: DialogInitialFocus) -> Option<Id> {
+        match target {
+            DialogInitialFocus::Container => None,
+            DialogInitialFocus::BodyControl => self.body,
+            DialogInitialFocus::Close => self.close,
+            DialogInitialFocus::Primary => self.primary,
+            DialogInitialFocus::Secondary => self.secondary,
+            DialogInitialFocus::Ghost => self.ghost,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DialogHeaderOutput {
+    closed: bool,
+    close_id: Option<Id>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct DialogFooterOutput {
+    choice: DialogChoice,
+    primary_id: Option<Id>,
+    secondary_id: Option<Id>,
+    ghost_id: Option<Id>,
+}
+
 /// Declarative description of one modal frame.
 pub struct Dialog<'a> {
     kicker: &'a str,
     title: &'a str,
+    description: Option<&'a str>,
     size: DialogSize,
     primary: &'a str,
     primary_enabled: bool,
@@ -80,6 +319,9 @@ pub struct Dialog<'a> {
     ghost: Option<&'a str>,
     ghost_enabled: bool,
     hint: Option<&'a str>,
+    body_scroll_offset: Option<&'a mut f32>,
+    flush_body: bool,
+    initial_focus: DialogInitialFocus,
 }
 
 impl<'a> Dialog<'a> {
@@ -89,7 +331,8 @@ impl<'a> Dialog<'a> {
         Self {
             kicker,
             title,
-            size: DialogSize::Md,
+            description: None,
+            size: DialogSize::Transaction,
             primary,
             primary_enabled: true,
             primary_on_enter: true,
@@ -98,7 +341,22 @@ impl<'a> Dialog<'a> {
             ghost: None,
             ghost_enabled: true,
             hint: None,
+            body_scroll_offset: None,
+            flush_body: false,
+            initial_focus: DialogInitialFocus::Container,
         }
+    }
+
+    /// Describe the dialog's purpose and scope to assistive technology.
+    pub fn description(mut self, description: &'a str) -> Self {
+        self.description = Some(description);
+        self
+    }
+
+    /// Choose the control that receives focus when the dialog opens.
+    pub fn initial_focus(mut self, target: DialogInitialFocus) -> Self {
+        self.initial_focus = target;
+        self
     }
 
     /// Disable the Enter→primary mapping — for dialogs whose body owns the
@@ -151,14 +409,50 @@ impl<'a> Dialog<'a> {
         self
     }
 
+    /// Restore and retain the body's vertical scroll offset. Managers whose
+    /// route can be left and revisited use this to preserve review context.
+    pub fn body_scroll_offset(mut self, offset: &'a mut f32) -> Self {
+        self.body_scroll_offset = Some(offset);
+        self
+    }
+
+    /// Remove the standard body inset. Wide workflow managers use this when
+    /// their first child owns its own edge-to-edge grid and section padding.
+    pub fn flush_body(mut self) -> Self {
+        self.flush_body = true;
+        self
+    }
+
     /// Show the dialog and render `body` into the scrollable middle
     /// region. Returns what the user chose this frame; the caller owns
     /// open/close state and reacts to the choice.
     pub fn show(self, ctx: &Context, body: impl FnOnce(&mut Ui)) -> DialogChoice {
+        self.show_with_initial_body_focus(ctx, |ui| {
+            body(ui);
+            None
+        })
+    }
+
+    /// Show the dialog and let its body identify the exact control to focus on
+    /// first. The returned id is used only when
+    /// [`DialogInitialFocus::BodyControl`] is selected and only on the opening
+    /// pass; subsequent renders preserve the user's current focus.
+    pub fn show_with_initial_body_focus(
+        mut self,
+        ctx: &Context,
+        body: impl FnOnce(&mut Ui) -> Option<Id>,
+    ) -> DialogChoice {
         let t = Tokens::get(ctx);
         let c = t.color;
         let screen = ctx.screen_rect();
-        let id = Id::new(("volta.dialog", self.title));
+        let id = Id::new(("rspice.dialog", self.title));
+        let measured_height_id = id.with("measured-surface-height");
+        let measured_height = ctx.data(|data| data.get_temp::<f32>(measured_height_id));
+        let layout = DialogLayout::resolve(self.size, screen, measured_height);
+        let large_targets = layout.narrow || ctx.input(|input| input.has_touch_screen());
+        let hide_close_only_footer = self.size == DialogSize::CapabilityReview;
+        let _control_height_override =
+            ControlHeightOverride::new(ctx, large_targets.then_some(TOUCH_TARGET_SIDE));
         let focus_id = id.with("move");
         let focus_state_id = id.with("focus-state");
 
@@ -189,6 +483,8 @@ impl<'a> Dialog<'a> {
         }
 
         let mut choice = DialogChoice::None;
+        let mut rendered_focus = DialogRenderedFocus::default();
+        let mut rendered_surface_height = None;
         let area_response = area.show(ctx, |ui| {
             // Scrim: swallow pointer interaction with everything below.
             // accessibility-pointer-shim: the scrim consumes pointer
@@ -197,51 +493,108 @@ impl<'a> Dialog<'a> {
                 screen,
                 Sense::click_and_drag().difference(Sense::focusable_noninteractive()),
             );
-            ui.painter()
-                .rect_filled(screen, 0.0, c.canvas_bg.gamma_multiply(0.55));
+            let backdrop = if t.mode == tokens::Mode::Dark {
+                egui::Color32::from_rgba_unmultiplied(2, 6, 8, 158)
+            } else {
+                egui::Color32::from_rgba_unmultiplied(41, 46, 50, 97)
+            };
+            ui.painter().rect_filled(screen, 0.0, backdrop);
 
-            let width = self.size.width().min(screen.width() - 32.0);
-            let max_height = screen.height() * 0.82;
-            // Dialogs sit at a fixed optical position — top edge at 18 %
-            // of the viewport — so confirmations and browsers alike open
-            // in the same place.
-            let top_left = egui::pos2(
-                screen.center().x - width * 0.5,
-                screen.top() + screen.height() * 0.18,
-            );
-
+            let width = layout.surface_rect.width();
+            let max_height = layout.surface_rect.height();
             let mut surface = ui.new_child(
                 egui::UiBuilder::new()
-                    .max_rect(Rect::from_min_size(top_left, vec2(width, max_height)))
+                    .max_rect(layout.surface_rect)
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
             surface.set_width(width);
+            if layout.fill_height {
+                surface.set_min_height(max_height);
+            }
 
-            Frame::NONE
-                .fill(c.bg_panel)
+            let surface_output = Frame::NONE
+                .fill(if layout.app_background {
+                    c.bg_app
+                } else {
+                    c.bg_elevated
+                })
                 .stroke(Stroke::new(1.0, c.border_strong))
-                .rounding(t.radius_lg)
+                .rounding(layout.radius)
+                // Every currently implemented mockup dialog inherits
+                // `--shadow`. The stronger `--shadow-dialog` elevation is
+                // reserved for DRC workflows, which are not represented by
+                // this generic surface purpose.
                 .shadow(t.shadow())
                 .show(&mut surface, |ui| {
                     ui.set_width(width);
-                    if self.header(ui, &t) {
+                    if layout.fill_height {
+                        ui.set_min_height(max_height);
+                    }
+                    let header_top = ui.cursor().top();
+                    let header = self.header(ui, &t, large_targets);
+                    rendered_focus.close = header.close_id;
+                    if header.closed {
                         choice = DialogChoice::Cancelled;
                     }
-                    egui::ScrollArea::vertical()
+                    let header_height = ui.cursor().top() - header_top;
+                    let footer_height = self.footer_height(hide_close_only_footer, large_targets);
+                    let body_max_height = (max_height - header_height - footer_height).max(1.0);
+                    let initial_scroll_offset = self
+                        .body_scroll_offset
+                        .as_deref()
+                        .copied()
+                        .unwrap_or_default();
+                    let body_scroll = egui::ScrollArea::vertical()
                         .id_salt(id.with("body"))
-                        .max_height(max_height - 2.0 * 46.0)
-                        .auto_shrink([false, true])
-                        .show(ui, |ui| {
-                            Frame::NONE
-                                .inner_margin(Margin::symmetric(16, 14))
-                                .show(ui, body);
-                        });
-                    match self.footer(ui, &t) {
+                        .vertical_scroll_offset(initial_scroll_offset)
+                        .max_height(body_max_height)
+                        .min_scrolled_height(if layout.fill_height {
+                            body_max_height
+                        } else {
+                            64.0
+                        })
+                        .auto_shrink([false, !layout.fill_height]);
+                    let body_output = body_scroll.show(ui, |ui| {
+                        Frame::NONE
+                            .fill(if layout.app_background {
+                                c.bg_app
+                            } else {
+                                c.bg_elevated
+                            })
+                            .inner_margin(if self.flush_body {
+                                Margin::same(0)
+                            } else {
+                                Margin::same(12)
+                            })
+                            .show(ui, body)
+                            .inner
+                    });
+                    rendered_focus.body = body_output.inner;
+                    if let Some(offset) = self.body_scroll_offset.as_deref_mut() {
+                        *offset = body_output.state.offset.y;
+                    }
+                    let footer = self.footer(ui, &t, hide_close_only_footer, large_targets);
+                    rendered_focus.primary = footer.primary_id;
+                    rendered_focus.secondary = footer.secondary_id;
+                    rendered_focus.ghost = footer.ghost_id;
+                    match footer.choice {
                         DialogChoice::None => {}
                         chosen => choice = chosen,
                     }
                 });
+            rendered_surface_height = Some(surface_output.response.rect.height());
         });
+
+        if !layout.fill_height
+            && let Some(height) = rendered_surface_height
+        {
+            let maximum = self.size.spec().max_height.min(screen.height().max(1.0));
+            let height = height.clamp(1.0, maximum);
+            if measured_height.is_none_or(|previous| (previous - height).abs() > 0.5) {
+                ctx.data_mut(|data| data.insert_temp(measured_height_id, height));
+                ctx.request_repaint();
+            }
+        }
 
         let response = area_response.response;
         let enabled = response.enabled();
@@ -249,8 +602,18 @@ impl<'a> Dialog<'a> {
         ctx.accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Dialog);
             node.set_label(self.title);
+            if let Some(description) = self.description {
+                node.set_description(description);
+            }
             node.set_modal();
         });
+
+        if opened_this_pass && self.initial_focus != DialogInitialFocus::Container {
+            let target = rendered_focus
+                .requested(self.initial_focus)
+                .unwrap_or(focus_id);
+            ctx.memory_mut(|memory| memory.request_focus(target));
+        }
         if choice == DialogChoice::None && response.should_close() {
             choice = DialogChoice::Cancelled;
         }
@@ -273,6 +636,10 @@ impl<'a> Dialog<'a> {
         }
 
         if choice != DialogChoice::None {
+            // Re-measure content-height surfaces every time they are opened.
+            // Keeping a previous session's height could otherwise force a
+            // later workflow state into an unnecessarily short scroll area.
+            ctx.data_mut(|data| data.remove_temp::<f32>(measured_height_id));
             restore_dialog_focus(ctx, focus_state_id, focus_id, modal_layer);
         }
 
@@ -280,42 +647,65 @@ impl<'a> Dialog<'a> {
     }
 
     /// Header strip; returns `true` when the close control fired.
-    fn header(&self, ui: &mut Ui, t: &Tokens) -> bool {
+    fn header(&self, ui: &mut Ui, t: &Tokens, large_targets: bool) -> DialogHeaderOutput {
         let c = t.color;
         let mut closed = false;
+        let mut close_id = None;
         Frame::NONE
-            .inner_margin(Margin::symmetric(16, 11))
+            .fill(c.bg_panel)
+            .inner_margin(Margin::symmetric(WORKFLOW_HEADER_HORIZONTAL_MARGIN, 0))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    let mut kicker = egui::text::LayoutJob::default();
-                    kicker.append(
-                        &self.kicker.to_uppercase(),
-                        0.0,
-                        egui::TextFormat {
-                            font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
-                            color: if self.destructive { c.err } else { c.accent },
-                            extra_letter_spacing: 0.14 * tokens::FS_0,
-                            ..Default::default()
-                        },
-                    );
-                    ui.label(kicker);
-                    ui.label(
-                        egui::RichText::new(self.title)
-                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                            .color(c.text),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if crate::ui::widgets::IconButton::new(crate::ui::icons::Icon::Close)
-                            .side(24.0)
-                            .tooltip("Close (Esc)")
-                            .show(ui)
-                            .clicked()
-                        {
+                let header_width = ui.available_width();
+                ui.allocate_ui_with_layout(
+                    vec2(header_width, WORKFLOW_HEADER_MIN_HEIGHT),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        let close_size = if large_targets {
+                            vec2(TOUCH_TARGET_SIDE, TOUCH_TARGET_SIDE)
+                        } else {
+                            vec2(DIALOG_CLOSE_TARGET_WIDTH, DIALOG_CLOSE_TARGET_HEIGHT)
+                        };
+                        let text_width = (ui.available_width() - close_size.x - 10.0).max(1.0);
+                        let mut eyebrow = egui::text::LayoutJob::default();
+                        eyebrow.append(
+                            &self.kicker.to_uppercase(),
+                            0.0,
+                            egui::TextFormat {
+                                font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
+                                color: c.text_faint,
+                                extra_letter_spacing: 0.09 * tokens::FS_0,
+                                ..Default::default()
+                            },
+                        );
+                        ui.allocate_ui_with_layout(
+                            vec2(text_width, 0.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_width(text_width);
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                ui.add(egui::Label::new(eyebrow).wrap());
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(self.title)
+                                            .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                                            .color(c.text),
+                                    )
+                                    .wrap(),
+                                );
+                            },
+                        );
+                        let close_response =
+                            crate::ui::widgets::IconButton::new(crate::ui::icons::Icon::Close)
+                                .size(close_size.x, close_size.y)
+                                .tooltip("Close (Esc)")
+                                .show(ui);
+                        close_id = Some(close_response.id);
+                        if close_response.clicked() {
                             closed = true;
                         }
-                    });
-                });
+                    },
+                );
             });
         let line_y = ui.cursor().top();
         ui.painter().hline(
@@ -323,30 +713,47 @@ impl<'a> Dialog<'a> {
             line_y,
             Stroke::new(1.0, t.color.border),
         );
-        closed
+        DialogHeaderOutput { closed, close_id }
     }
 
     /// Footer strip with the canonical button order.
-    fn footer(&self, ui: &mut Ui, t: &Tokens) -> DialogChoice {
+    fn footer_height(&self, hide_close_only_footer: bool, _large_targets: bool) -> f32 {
+        if self.hides_close_only_footer(hide_close_only_footer) {
+            return 0.0;
+        }
+        48.0
+    }
+
+    fn footer(
+        &self,
+        ui: &mut Ui,
+        t: &Tokens,
+        hide_close_only_footer: bool,
+        large_targets: bool,
+    ) -> DialogFooterOutput {
+        if self.hides_close_only_footer(hide_close_only_footer) {
+            return DialogFooterOutput::default();
+        }
         let c = t.color;
         let mut choice = DialogChoice::None;
+        let mut primary_id = None;
+        let mut secondary_id = None;
+        let mut ghost_id = None;
         let line_y = ui.cursor().top();
         ui.painter()
             .hline(ui.max_rect().x_range(), line_y, Stroke::new(1.0, c.border));
+        let horizontal_margin = WORKFLOW_FOOTER_HORIZONTAL_MARGIN;
+        let vertical_margin = if large_targets {
+            2
+        } else {
+            WORKFLOW_FOOTER_VERTICAL_MARGIN
+        };
         Frame::NONE
-            .inner_margin(Margin::symmetric(16, 11))
+            .fill(c.bg_panel)
+            .inner_margin(Margin::symmetric(horizontal_margin, vertical_margin))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    if let Some(label) = self.ghost
-                        && crate::ui::widgets::Button::new(label)
-                            .ghost()
-                            .enabled(self.ghost_enabled)
-                            .show(ui)
-                            .clicked()
-                    {
-                        choice = DialogChoice::Ghost;
-                    }
+                    ui.spacing_mut().item_spacing.x = 6.0;
                     if let Some(hint) = self.hint {
                         ui.label(
                             egui::RichText::new(hint)
@@ -360,18 +767,44 @@ impl<'a> Dialog<'a> {
                             .destructive(self.destructive)
                             .enabled(self.primary_enabled)
                             .show(ui);
+                        primary_id = self.primary_enabled.then_some(primary.id);
                         if primary.clicked() {
                             choice = DialogChoice::Primary;
                         }
-                        if let Some(label) = self.secondary
-                            && crate::ui::widgets::Button::new(label).show(ui).clicked()
-                        {
-                            choice = DialogChoice::Secondary;
+                        if let Some(label) = self.secondary {
+                            let secondary = crate::ui::widgets::Button::new(label).show(ui);
+                            secondary_id = Some(secondary.id);
+                            if secondary.clicked() {
+                                choice = DialogChoice::Secondary;
+                            }
+                        }
+                        if let Some(label) = self.ghost {
+                            let ghost = crate::ui::widgets::Button::new(label)
+                                .ghost()
+                                .enabled(self.ghost_enabled)
+                                .show(ui);
+                            ghost_id = self.ghost_enabled.then_some(ghost.id);
+                            if ghost.clicked() {
+                                choice = DialogChoice::Ghost;
+                            }
                         }
                     });
                 });
             });
-        choice
+        DialogFooterOutput {
+            choice,
+            primary_id,
+            secondary_id,
+            ghost_id,
+        }
+    }
+
+    fn hides_close_only_footer(&self, hide_close_only_footer: bool) -> bool {
+        hide_close_only_footer
+            && self.primary == "Close"
+            && self.secondary.is_none()
+            && self.ghost.is_none()
+            && self.hint.is_none()
     }
 }
 
@@ -523,9 +956,10 @@ mod tests {
     use super::*;
 
     const TEST_TITLE: &str = "Modal behavior";
+    const TEST_DESCRIPTION: &str = "Review this modal operation and its available actions.";
 
     fn dialog_id() -> Id {
-        Id::new(("volta.dialog", TEST_TITLE))
+        Id::new(("rspice.dialog", TEST_TITLE))
     }
 
     fn dialog_focus_id() -> Id {
@@ -584,6 +1018,7 @@ mod tests {
                 );
             });
             choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
                 .primary_on_enter(primary_on_enter)
                 .show(ctx, |ui| body(ui));
         });
@@ -605,6 +1040,181 @@ mod tests {
     }
 
     #[test]
+    fn capability_review_phone_layout_is_full_viewport() {
+        let screen = Rect::from_min_size(egui::pos2(7.0, 11.0), vec2(390.0, 844.0));
+        let layout = DialogLayout::resolve(DialogSize::CapabilityReview, screen, None);
+
+        assert_eq!(layout.surface_rect, screen);
+        assert_eq!(layout.radius, 0.0);
+        assert!(layout.app_background);
+    }
+
+    #[test]
+    fn capability_review_desktop_layout_uses_mockup_caps_and_is_centered() {
+        let screen = Rect::from_min_size(egui::pos2(20.0, 30.0), vec2(1_440.0, 900.0));
+        let layout = DialogLayout::resolve(DialogSize::CapabilityReview, screen, None);
+
+        assert_eq!(layout.surface_rect.width(), 1_040.0);
+        assert_eq!(layout.surface_rect.height(), 760.0);
+        assert_eq!(layout.surface_rect.center(), screen.center());
+        assert_eq!(layout.surface_rect.left(), 220.0);
+        assert_eq!(layout.surface_rect.top(), 100.0);
+    }
+
+    #[test]
+    fn transaction_short_narrow_viewport_is_full_viewport() {
+        let screen = Rect::from_min_size(egui::pos2(3.0, 5.0), vec2(390.0, 300.0));
+        let layout = DialogLayout::resolve(DialogSize::Transaction, screen, None);
+
+        assert_eq!(layout.surface_rect, screen);
+    }
+
+    #[test]
+    fn manager_phone_layout_uses_the_mockup_four_point_gutter() {
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0));
+        let layout = DialogLayout::resolve(DialogSize::Manager, screen, None);
+
+        assert_eq!(layout.surface_rect.left(), 4.0);
+        assert_eq!(layout.surface_rect.width(), 382.0);
+        assert_eq!(layout.surface_rect.top(), 4.0);
+        assert_eq!(layout.surface_rect.height(), 836.0);
+        assert!(layout.fill_height);
+        assert!(!layout.app_background);
+    }
+
+    #[test]
+    fn manager_and_wide_workflow_desktop_geometry_match_the_mockup() {
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
+        let manager = DialogLayout::resolve(DialogSize::Manager, screen, None);
+        let workflow = DialogLayout::resolve(DialogSize::WideWorkflow, screen, Some(612.0));
+
+        assert_eq!(manager.surface_rect.size(), vec2(760.0, 530.0));
+        assert_eq!(manager.surface_rect.center(), screen.center());
+        assert_eq!(manager.radius, 8.0);
+        assert_eq!(workflow.surface_rect.size(), vec2(980.0, 612.0));
+        assert_eq!(workflow.surface_rect.center(), screen.center());
+        assert_eq!(workflow.radius, 4.0);
+        assert!(!workflow.fill_height);
+    }
+
+    #[test]
+    fn wide_workflow_becomes_edge_to_edge_at_the_mockup_breakpoint() {
+        let screen = Rect::from_min_size(egui::pos2(5.0, 7.0), vec2(820.0, 900.0));
+        let layout = DialogLayout::resolve(DialogSize::WideWorkflow, screen, Some(500.0));
+
+        assert_eq!(layout.surface_rect, screen);
+        assert_eq!(layout.radius, 0.0);
+    }
+
+    #[test]
+    fn flush_body_is_opt_in() {
+        let padded = Dialog::new("Test", TEST_TITLE, "Accept");
+        assert!(!padded.flush_body);
+        let flush = Dialog::new("Test", TEST_TITLE, "Accept").flush_body();
+        assert!(flush.flush_body);
+    }
+
+    #[test]
+    fn close_only_workflow_hides_redundant_footer() {
+        let dialog = Dialog::new("Test", TEST_TITLE, "Close").size(DialogSize::CapabilityReview);
+
+        assert_eq!(dialog.footer_height(true, false), 0.0);
+        assert!(dialog.hides_close_only_footer(true));
+    }
+
+    #[test]
+    fn capability_review_phone_footer_stays_horizontal_and_compact() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0))),
+            ..Default::default()
+        };
+
+        let output = ctx.run(input, |ctx| {
+            let _ = Dialog::new(
+                "A deliberately long governed workflow",
+                TEST_TITLE,
+                "Accept",
+            )
+            .size(DialogSize::CapabilityReview)
+            .ghost("Cancel")
+            .secondary("Later")
+            .show(ctx, |ui| {
+                ui.label("Dialog body");
+            });
+        });
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        let bounds = ["Cancel", "Later", "Accept"].map(|label| {
+            nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+                })
+                .and_then(|(_, node)| node.bounds())
+                .unwrap_or_else(|| panic!("missing bounds for {label}"))
+        });
+        for bounds in &bounds {
+            assert_eq!(bounds.y1 - bounds.y0, TOUCH_TARGET_SIDE as f64);
+        }
+        assert_eq!(bounds[0].y0, bounds[1].y0);
+        assert_eq!(bounds[1].y0, bounds[2].y0);
+        assert!(bounds[0].x0 < bounds[1].x0);
+        assert!(bounds[1].x0 < bounds[2].x0);
+        assert!(bounds[2].x1 >= 377.0, "actions must be trailing-grouped");
+
+        let close_bounds = nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Close (Esc)")
+            })
+            .and_then(|(_, node)| node.bounds())
+            .expect("missing workflow close control bounds");
+        assert_eq!(close_bounds.x1 - close_bounds.x0, TOUCH_TARGET_SIDE as f64);
+        assert_eq!(close_bounds.y1 - close_bounds.y0, TOUCH_TARGET_SIDE as f64);
+    }
+
+    #[test]
+    fn capability_review_desktop_close_control_uses_mockup_icon_button_target() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0))),
+            ..Default::default()
+        };
+
+        let output = ctx.run(input, |ctx| {
+            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .size(DialogSize::CapabilityReview)
+                .show(ctx, |ui| {
+                    ui.label("Dialog body");
+                });
+        });
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+        let bounds = nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Close (Esc)")
+            })
+            .and_then(|(_, node)| node.bounds())
+            .expect("missing workflow close control bounds");
+
+        assert_eq!(bounds.x1 - bounds.x0, DIALOG_CLOSE_TARGET_WIDTH as f64);
+        assert_eq!(bounds.y1 - bounds.y0, DIALOG_CLOSE_TARGET_HEIGHT as f64);
+    }
+
+    #[test]
     fn dialog_publishes_modal_accessibility_semantics() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
@@ -623,8 +1233,48 @@ mod tests {
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Dialog
                 && node.label() == Some(TEST_TITLE)
+                && node.description() == Some(TEST_DESCRIPTION)
                 && node.is_modal()
         }));
+    }
+
+    #[test]
+    fn requested_body_control_receives_initial_focus_once() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut preferred_id = None;
+
+        let _output = ctx.run(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .initial_focus(DialogInitialFocus::BodyControl)
+                .show_with_initial_body_focus(ctx, |ui| {
+                    let response = ui.button("Preferred body control");
+                    preferred_id = Some(response.id);
+                    Some(response.id)
+                });
+        });
+
+        assert_eq!(ctx.memory(|memory| memory.focused()), preferred_id);
+    }
+
+    #[test]
+    fn unavailable_initial_focus_target_falls_back_to_modal_container() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+
+        let _output = ctx.run(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .primary_enabled(false)
+                .initial_focus(DialogInitialFocus::Primary)
+                .show(ctx, |ui| {
+                    ui.label("Dialog body");
+                });
+        });
+
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(dialog_focus_id())
+        );
     }
 
     #[test]
@@ -795,5 +1445,82 @@ mod tests {
 
         assert_eq!(choice, DialogChoice::None);
         assert_eq!(body_text, "\n");
+    }
+
+    fn collect_rust_sources(directory: &std::path::Path, sources: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(directory).expect("read source directory") {
+            let path = entry.expect("read source entry").path();
+            if path.is_dir() {
+                collect_rust_sources(&path, sources);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                sources.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn every_production_dialog_callsite_supplies_a_description() {
+        let source_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources = Vec::new();
+        collect_rust_sources(&source_root, &mut sources);
+        sources.sort();
+
+        let mut audited = 0;
+        let mut missing = Vec::new();
+        for path in sources {
+            let relative = path
+                .strip_prefix(&source_root)
+                .expect("source beneath crate root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            // The primitive contains deliberately partial construction tests;
+            // feature-availability descriptions have their own route-specific
+            // source contract because their purpose text depends on the route.
+            if matches!(
+                relative.as_str(),
+                "ui/widgets/dialog.rs" | "workbench/feature_availability.rs"
+            ) {
+                continue;
+            }
+
+            let source = std::fs::read_to_string(&path).expect("read Rust source");
+            let production_source = source.split("\n#[cfg(test)]").next().unwrap_or(&source);
+            for (offset, _) in production_source.match_indices("Dialog::new(") {
+                if offset > 0
+                    && (production_source.as_bytes()[offset - 1].is_ascii_alphanumeric()
+                        || production_source.as_bytes()[offset - 1] == b'_')
+                {
+                    // Exclude other types whose names end in `Dialog`, such
+                    // as native `FileDialog` and persisted dialog-state data.
+                    continue;
+                }
+                audited += 1;
+                let tail = &production_source[offset..];
+                let chain_end = [
+                    tail.find(".show("),
+                    tail.find(".show_with_initial_body_focus("),
+                    tail.find(';'),
+                ]
+                .into_iter()
+                .flatten()
+                .min()
+                .unwrap_or(tail.len());
+                if !tail[..chain_end].contains(".description(") {
+                    let line = production_source[..offset]
+                        .bytes()
+                        .filter(|byte| *byte == b'\n')
+                        .count()
+                        + 1;
+                    missing.push(format!("{relative}:{line}"));
+                }
+            }
+        }
+
+        assert!(audited > 0, "source audit did not find a production dialog");
+        assert!(
+            missing.is_empty(),
+            "production dialogs must publish explicit purpose text:\n{}",
+            missing.join("\n")
+        );
     }
 }

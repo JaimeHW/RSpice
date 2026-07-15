@@ -58,10 +58,20 @@ pub enum WorkbenchIcon {
     Folder,
     Save,
     History,
+    Refresh,
+    Copy,
+    Trash,
+    ArrowLeft,
+    Component,
+    Code,
+    Terminal,
+    Compare,
+    Info,
     Warning,
     Success,
     File,
     Sliders,
+    Target,
     Export,
 }
 
@@ -87,13 +97,24 @@ impl WorkbenchIcon {
 
         match self {
             Self::Brand => {
-                painter.rect_filled(rect.shrink(side * 0.12), side * 0.18, color);
+                painter.rect_filled(rect, side * 21.0 / 96.0, color);
                 let ink = Tokens::get(painter.ctx()).color.accent_ink;
-                line_colored(
-                    painter,
-                    &[p(7.0, 8.0), p(17.0, 12.0), p(7.0, 16.0)],
-                    Stroke::new((2.0 * scale).max(1.2), ink),
-                );
+                let terminal_stroke = Stroke::new((2.0 * scale).max(1.2), ink);
+                line_colored(painter, &[p(6.05, 9.55), p(8.41, 9.55)], terminal_stroke);
+                line_colored(painter, &[p(6.05, 14.45), p(8.41, 14.45)], terminal_stroke);
+                line_colored(painter, &[p(15.76, 12.0), p(17.95, 12.0)], terminal_stroke);
+                for center in [p(5.0, 9.55), p(5.0, 14.45), p(19.0, 12.0)] {
+                    painter.circle_stroke(
+                        center,
+                        1.05 * scale,
+                        Stroke::new((1.0 * scale).max(0.8), ink),
+                    );
+                }
+                painter.add(Shape::convex_polygon(
+                    vec![p(8.06, 7.21), p(8.06, 16.79), p(15.94, 12.0)],
+                    ink,
+                    Stroke::new((1.4 * scale).max(1.0), ink),
+                ));
             }
             Self::Project => {
                 line(&[(4.0, 10.0), (12.0, 4.0), (20.0, 10.0)]);
@@ -156,7 +177,23 @@ impl WorkbenchIcon {
                 painter.circle_stroke(p(10.0, 10.0), 5.5 * scale, stroke);
                 line(&[(14.0, 14.0), (20.0, 20.0)]);
             }
-            Self::Settings | Self::Sliders => {
+            Self::Settings => {
+                painter.circle_stroke(p(12.0, 12.0), 3.0 * scale, stroke);
+                painter.circle_stroke(p(12.0, 12.0), 8.0 * scale, stroke);
+                for (from, to) in [
+                    ((12.0, 2.8), (12.0, 5.0)),
+                    ((12.0, 19.0), (12.0, 21.2)),
+                    ((2.8, 12.0), (5.0, 12.0)),
+                    ((19.0, 12.0), (21.2, 12.0)),
+                    ((5.5, 5.5), (7.0, 7.0)),
+                    ((17.0, 17.0), (18.5, 18.5)),
+                    ((18.5, 5.5), (17.0, 7.0)),
+                    ((7.0, 17.0), (5.5, 18.5)),
+                ] {
+                    line(&[from, to]);
+                }
+            }
+            Self::Sliders => {
                 for (y, x) in [(6.0, 9.0), (12.0, 15.0), (18.0, 11.0)] {
                     line(&[(4.0, y), (20.0, y)]);
                     painter.circle_filled(p(x, y), 2.0 * scale, color);
@@ -296,6 +333,79 @@ impl WorkbenchIcon {
                 painter.circle_stroke(p(12.0, 12.0), 8.0 * scale, stroke);
                 line(&[(12.0, 7.0), (12.0, 12.0), (16.0, 14.0)]);
             }
+            Self::Refresh => {
+                painter.add(Shape::line(
+                    (0..=12)
+                        .map(|index| {
+                            let angle = -2.7 + 4.15 * index as f32 / 12.0;
+                            p(12.0 + 8.0 * angle.cos(), 12.0 + 8.0 * angle.sin())
+                        })
+                        .collect(),
+                    stroke,
+                ));
+                line(&[(20.0, 7.0), (20.0, 12.0), (15.0, 12.0)]);
+                painter.add(Shape::line(
+                    (0..=12)
+                        .map(|index| {
+                            let angle = 0.45 + 4.15 * index as f32 / 12.0;
+                            p(12.0 + 8.0 * angle.cos(), 12.0 + 8.0 * angle.sin())
+                        })
+                        .collect(),
+                    stroke,
+                ));
+                line(&[(4.0, 17.0), (4.0, 12.0), (9.0, 12.0)]);
+            }
+            Self::Copy => {
+                painter.rect_stroke(
+                    Rect::from_min_max(p(8.0, 8.0), p(19.0, 20.0)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                line(&[
+                    (15.0, 5.0),
+                    (15.0, 4.0),
+                    (4.0, 4.0),
+                    (4.0, 16.0),
+                    (5.0, 16.0),
+                ]);
+            }
+            Self::Trash => {
+                line(&[(4.0, 7.0), (20.0, 7.0)]);
+                line(&[(9.0, 3.0), (15.0, 3.0), (16.0, 7.0), (8.0, 7.0)]);
+                closed(&[(6.0, 7.0), (7.0, 21.0), (17.0, 21.0), (18.0, 7.0)]);
+                line(&[(10.0, 11.0), (10.0, 17.0)]);
+                line(&[(14.0, 11.0), (14.0, 17.0)]);
+            }
+            Self::ArrowLeft => {
+                line(&[(15.0, 5.0), (8.0, 12.0), (15.0, 19.0)]);
+                line(&[(8.0, 12.0), (21.0, 12.0)]);
+            }
+            Self::Component => {
+                line(&[(2.0, 12.0), (6.0, 12.0)]);
+                line(&[(18.0, 12.0), (22.0, 12.0)]);
+                closed(&[(6.0, 7.0), (6.0, 17.0), (18.0, 12.0)]);
+            }
+            Self::Code => {
+                line(&[(8.0, 5.0), (2.0, 12.0), (8.0, 19.0)]);
+                line(&[(16.0, 5.0), (22.0, 12.0), (16.0, 19.0)]);
+                line(&[(14.0, 3.0), (10.0, 21.0)]);
+            }
+            Self::Terminal => {
+                line(&[(4.0, 6.0), (9.0, 11.0), (4.0, 16.0)]);
+                line(&[(11.0, 17.0), (19.0, 17.0)]);
+            }
+            Self::Compare => {
+                line(&[(8.0, 4.0), (8.0, 20.0)]);
+                line(&[(16.0, 4.0), (16.0, 20.0)]);
+                line(&[(4.0, 8.0), (8.0, 4.0), (12.0, 8.0)]);
+                line(&[(12.0, 16.0), (16.0, 20.0), (20.0, 16.0)]);
+            }
+            Self::Info => {
+                painter.circle_stroke(p(12.0, 12.0), 8.0 * scale, stroke);
+                painter.circle_filled(p(12.0, 7.5), 1.0 * scale, color);
+                line(&[(12.0, 11.0), (12.0, 17.0)]);
+            }
             Self::Warning => {
                 closed(&[(12.0, 3.0), (22.0, 20.0), (2.0, 20.0)]);
                 line(&[(12.0, 8.0), (12.0, 14.0)]);
@@ -310,6 +420,14 @@ impl WorkbenchIcon {
                     (6.0, 21.0),
                 ]);
                 line(&[(15.0, 3.0), (15.0, 8.0), (20.0, 8.0)]);
+            }
+            Self::Target => {
+                painter.circle_stroke(p(12.0, 12.0), 8.0 * scale, stroke);
+                painter.circle_stroke(p(12.0, 12.0), 4.0 * scale, stroke);
+                line(&[(12.0, 2.0), (12.0, 6.0)]);
+                line(&[(12.0, 18.0), (12.0, 22.0)]);
+                line(&[(2.0, 12.0), (6.0, 12.0)]);
+                line(&[(18.0, 12.0), (22.0, 12.0)]);
             }
             Self::Export => {
                 closed(&[(4.0, 10.0), (4.0, 20.0), (20.0, 20.0), (20.0, 10.0)]);
@@ -337,29 +455,40 @@ pub fn icon_button(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     if ui.is_rect_visible(rect) {
-        let fill = if selected {
-            t.color.accent_dim
-        } else if response.hovered() {
+        let enabled = ui.is_enabled();
+        let highlighted = enabled && (selected || response.hovered());
+        let fill = if highlighted {
             t.color.bg_hover
         } else {
             Color32::TRANSPARENT
         };
-        if fill != Color32::TRANSPARENT {
-            ui.painter().rect_filled(rect, t.radius, fill);
+        if highlighted {
+            ui.painter().rect(
+                rect,
+                t.radius,
+                fill,
+                Stroke::new(1.0, t.color.border),
+                egui::StrokeKind::Inside,
+            );
         }
         if selected {
             ui.painter().rect_filled(
-                Rect::from_min_max(rect.left_top(), Pos2::new(rect.left() + 2.0, rect.bottom())),
+                Rect::from_min_max(
+                    Pos2::new(rect.left() + 4.0, rect.bottom() - 4.0),
+                    Pos2::new(rect.right() - 4.0, rect.bottom() - 3.0),
+                ),
                 0.0,
                 t.color.accent,
             );
         }
-        let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
+        let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(16.0));
         icon.paint(
             ui.painter(),
             icon_rect,
-            if selected {
-                t.color.accent
+            if !enabled {
+                t.color.text_faint
+            } else if highlighted {
+                t.color.text
             } else {
                 t.color.text_dim
             },
@@ -394,9 +523,10 @@ pub fn labeled_icon_button_sized(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     if ui.is_rect_visible(rect) {
-        let fill = if selected {
+        let enabled = ui.is_enabled();
+        let fill = if enabled && selected {
             t.color.accent_dim
-        } else if response.hovered() {
+        } else if enabled && response.hovered() {
             t.color.bg_hover
         } else {
             Color32::TRANSPARENT
@@ -408,7 +538,9 @@ pub fn labeled_icon_button_sized(
                 Pos2::new(rect.left() + 15.0, rect.center().y),
                 Vec2::splat(16.0),
             ),
-            if selected {
+            if !enabled {
+                t.color.text_faint
+            } else if selected {
                 t.color.accent
             } else {
                 t.color.text_dim
@@ -419,14 +551,18 @@ pub fn labeled_icon_button_sized(
             Align2::LEFT_CENTER,
             label,
             theme::sans(
-                tokens::FS_1,
+                // `.tool-text-button` inherits the mockup's 13 px body type;
+                // compactness comes from its 29 px box, not smaller copy.
+                tokens::FS_2,
                 if selected {
                     FontWeight::SemiBold
                 } else {
                     FontWeight::Regular
                 },
             ),
-            if selected {
+            if !enabled {
+                t.color.text_faint
+            } else if selected {
                 t.color.text
             } else {
                 t.color.text_dim

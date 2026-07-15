@@ -1,28 +1,63 @@
 //! Unified console, problems, measurements, and task history.
 
-use egui::{Align, Layout, ScrollArea, Ui};
+use egui::{Align, Layout, ScrollArea, Sense, Ui, Vec2};
 
-use crate::common::{AppState, RSpiceApp};
+use crate::common::RSpiceApp;
 use crate::panels::{ConsoleHistoryItem, LogSeverity};
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::super::design_system::{WorkbenchIcon, icon_button};
+use super::super::commands::Command;
+use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::ConsolePage;
+
+const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
+const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
+const CONSOLE_ACTION_SIZE: f32 = 27.0;
+const CONSOLE_ACTION_MARGIN_RIGHT: f32 = 3.0;
+const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
+const CONSOLE_BODY_PADDING_X: f32 = 10.0;
+const CONSOLE_ROW_HEIGHT: f32 = 17.0;
+const CONSOLE_TIME_WIDTH: f32 = 58.0;
+const CONSOLE_SOURCE_WIDTH: f32 = 62.0;
+const CONSOLE_COLUMN_GAP: f32 = 9.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     header(ui, app, layout);
     if !layout.show_console_body {
         return;
     }
-    match app.state.workbench.console_page {
-        ConsolePage::Console => console(ui, app),
-        ConsolePage::Problems => problems(ui, app),
-        ConsolePage::Measurements => measurements(ui, app),
-        ConsolePage::TaskLog => task_log(ui, app),
-    }
+    let page = app.state.workbench.console_page;
+    let body_rect = ui.available_rect_before_wrap();
+    ui.painter()
+        .rect_filled(body_rect, 0.0, Tokens::get(ui.ctx()).color.bg_inset);
+    let content_rect = egui::Rect::from_min_max(
+        egui::pos2(
+            body_rect.left() + CONSOLE_BODY_PADDING_X,
+            body_rect.top() + CONSOLE_BODY_PADDING_TOP,
+        ),
+        egui::pos2(
+            body_rect.right() - CONSOLE_BODY_PADDING_X,
+            body_rect.bottom(),
+        ),
+    );
+    let body = ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(content_rect)
+            .layout(Layout::top_down(Align::Min)),
+        |ui| match page {
+            ConsolePage::Console => console(ui, app),
+            ConsolePage::Problems => problems(ui, app),
+            ConsolePage::Measurements => measurements(ui, app),
+            ConsolePage::TaskLog => task_log(ui, app),
+        },
+    );
+    ui.ctx().accesskit_node_builder(body.response.id, |node| {
+        node.set_role(egui::accesskit::Role::TabPanel);
+        node.set_label(page.label());
+    });
 }
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -35,132 +70,383 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         .map_or(0, |result| result.total_count())
         + app.state.log_buffer.count_by_severity(LogSeverity::Error)
         + app.state.log_buffer.count_by_severity(LogSeverity::Warning);
-    let measurements = active_measurement_count(app);
-    ui.horizontal(|ui| {
-        ui.add_space(6.0);
-        for page in ConsolePage::ALL {
-            let count = match page {
-                ConsolePage::Console => app.state.log_buffer.len(),
-                ConsolePage::Problems => problems,
-                ConsolePage::Measurements => measurements,
-                ConsolePage::TaskLog => app.state.simulation.runs.len(),
-            };
-            let label = if count > 0 {
-                format!("{}  {count}", page.label())
-            } else {
-                page.label().to_owned()
-            };
-            if ui
-                .selectable_label(app.state.workbench.console_page == page, label)
-                .clicked()
-            {
-                app.state.workbench.console_page = page;
-            }
-        }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let control_size = if layout.coarse_pointer { 44.0 } else { 28.0 };
-            if icon_button(
-                ui,
-                if layout.show_console_body {
-                    WorkbenchIcon::Close
+    let header_height = if layout.coarse_pointer {
+        CONSOLE_TOUCH_HEADER_HEIGHT
+    } else {
+        CONSOLE_HEADER_HEIGHT
+    };
+    let header = ui.allocate_ui_with_layout(
+        Vec2::new(ui.available_width(), header_height),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            let action_width =
+                console_trailing_actions_width(layout, app.state.workbench.console_page);
+            egui::ScrollArea::horizontal()
+                .id_salt("workbench.console.tabs.scroll")
+                .max_width((ui.available_width() - action_width).max(header_height))
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| console_tabs(ui, app, problems, header_height));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let control_size = if layout.coarse_pointer {
+                    CONSOLE_TOUCH_HEADER_HEIGHT
                 } else {
-                    WorkbenchIcon::Console
-                },
-                if layout.show_console_body {
-                    "Collapse console"
-                } else {
-                    "Expand console"
-                },
-                false,
-                egui::vec2(control_size, control_size),
-            )
-            .clicked()
-            {
-                if layout.show_console_body {
-                    app.state.workbench.console_visible = false;
-                    app.state.workbench.console_maximized = false;
-                } else if !app.state.workbench.focus_mode {
-                    app.state.workbench.console_visible = true;
-                }
-            }
-            if !layout.compact_shell
-                && !layout.coarse_pointer
-                && icon_button(
+                    CONSOLE_ACTION_SIZE
+                };
+                ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
+                if console_action(
                     ui,
-                    WorkbenchIcon::Focus,
-                    if app.state.workbench.console_maximized {
-                        "Restore console"
+                    ConsoleActionIcon::Workbench(WorkbenchIcon::ChevronDown),
+                    if layout.show_console_body {
+                        "Collapse console"
                     } else {
-                        "Maximize console"
+                        "Expand console"
                     },
-                    app.state.workbench.console_maximized,
-                    egui::vec2(control_size, control_size),
+                    false,
+                    control_size,
                 )
                 .clicked()
-            {
-                app.state.workbench.console_maximized = !app.state.workbench.console_maximized;
-                app.state.workbench.console_visible = true;
+                {
+                    if layout.show_console_body {
+                        app.state.workbench.console_maximized = false;
+                    }
+                    Command::ToggleConsole.execute(app);
+                }
+                if !layout.compact_shell {
+                    if !layout.coarse_pointer {
+                        ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
+                        if console_action(
+                            ui,
+                            ConsoleActionIcon::Workbench(WorkbenchIcon::Focus),
+                            if app.state.workbench.console_maximized {
+                                "Restore console"
+                            } else {
+                                "Maximize console"
+                            },
+                            app.state.workbench.console_maximized,
+                            control_size,
+                        )
+                        .clicked()
+                        {
+                            Command::ToggleConsoleMaximized.execute(app);
+                        }
+                    }
+                    if page_owns_clear_action(app.state.workbench.console_page) {
+                        let enabled = Command::ClearConsole.is_enabled(app);
+                        ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
+                        let response = ui
+                            .add_enabled_ui(enabled, |ui| {
+                                console_action(
+                                    ui,
+                                    ConsoleActionIcon::Clear,
+                                    "Clear console output",
+                                    false,
+                                    control_size,
+                                )
+                            })
+                            .inner;
+                        if response.clicked() {
+                            Command::ClearConsole.execute(app);
+                        }
+                    }
+                }
+                if !layout.compact_shell {
+                    console_context(ui, app);
+                }
+            });
+        },
+    );
+    if layout.show_console_body {
+        ui.painter().hline(
+            header.response.rect.x_range(),
+            header.response.rect.bottom(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
+}
+
+fn console_trailing_actions_width(layout: LayoutSpec, page: ConsolePage) -> f32 {
+    let control_size = if layout.coarse_pointer {
+        CONSOLE_TOUCH_HEADER_HEIGHT
+    } else {
+        CONSOLE_ACTION_SIZE
+    };
+    let mut actions = 1_usize;
+    if !layout.compact_shell {
+        actions += usize::from(!layout.coarse_pointer);
+        actions += usize::from(page_owns_clear_action(page));
+    }
+    actions as f32 * (control_size + CONSOLE_ACTION_MARGIN_RIGHT)
+}
+
+fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) {
+    let mut requested = None;
+    let mut focus = None;
+    let mut ids = Vec::with_capacity(ConsolePage::ALL.len());
+    let tabs = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
+            let count = match page {
+                ConsolePage::Problems => problems,
+                ConsolePage::TaskLog => app.state.simulation.runs.len(),
+                ConsolePage::Console | ConsolePage::Measurements => 0,
+            };
+            let count_tone = match page {
+                ConsolePage::Problems => ConsoleCountTone::Warning,
+                ConsolePage::TaskLog => ConsoleCountTone::Success,
+                ConsolePage::Console | ConsolePage::Measurements => ConsoleCountTone::Neutral,
+            };
+            let response = console_tab(
+                ui,
+                page,
+                app.state.workbench.console_page == page,
+                count,
+                count_tone,
+                height,
+            );
+            ids.push(response.id);
+            if response.clicked() {
+                requested = Some(page);
+                focus = Some(index);
             }
-            // Problems, Measurements, and Task log are projections of owned
-            // engineering records. A generic console action must never erase
-            // DRC evidence, immutable measurement data, or run history.
-            if !layout.compact_shell
-                && page_owns_clear_action(app.state.workbench.console_page)
-                && ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("Clear").color(t.color.text_dim))
-                            .frame(false),
-                    )
-                    .on_hover_text("Clear console output")
-                    .clicked()
-            {
-                clear_console_output(&mut app.state);
+            if response.has_focus() {
+                let key = ui.input_mut(|input| {
+                    if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+                        Some(-1_i32)
+                    } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+                        Some(1_i32)
+                    } else if input.consume_key(egui::Modifiers::NONE, egui::Key::Home) {
+                        Some(i32::MIN)
+                    } else if input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
+                        Some(i32::MAX)
+                    } else {
+                        None
+                    }
+                });
+                focus = key.map(|direction| {
+                    if direction == i32::MIN {
+                        0
+                    } else if direction == i32::MAX {
+                        ConsolePage::ALL.len() - 1
+                    } else {
+                        (index as i32 + direction).rem_euclid(ConsolePage::ALL.len() as i32)
+                            as usize
+                    }
+                });
             }
-        });
+        }
     });
-    ui.separator();
+    ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
+        node.set_role(egui::accesskit::Role::TabList);
+        node.set_label("Console pages");
+    });
+    if let Some(index) = focus {
+        requested = Some(ConsolePage::ALL[index]);
+        ui.memory_mut(|memory| memory.request_focus(ids[index]));
+    }
+    if let Some(page) = requested {
+        app.state.workbench.console_page = page;
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ConsoleCountTone {
+    Neutral,
+    Warning,
+    Success,
+}
+
+fn console_tab(
+    ui: &mut Ui,
+    page: ConsolePage,
+    selected: bool,
+    count: usize,
+    count_tone: ConsoleCountTone,
+    height: f32,
+) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(page.label().to_owned(), font, t.color.text_dim);
+    let count_width = if count > 0 {
+        let digits = count.to_string().len() as f32;
+        (digits * 6.5 + 8.0).max(15.0) + 4.0
+    } else {
+        0.0
+    };
+    let width = 20.0 + galley.size().x + count_width;
+    let sense = if selected {
+        Sense::click()
+    } else {
+        Sense::click().difference(Sense::focusable_noninteractive())
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            page.label(),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Tab);
+        node.set_selected(selected);
+        if count > 0 {
+            node.set_label(format!("{}, {count}", page.label()));
+        }
+    });
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    let text_color = if selected {
+        t.color.text
+    } else {
+        t.color.text_dim
+    };
+    ui.painter().galley(
+        egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y * 0.5),
+        galley,
+        text_color,
+    );
+    if count > 0 {
+        let digits = count.to_string();
+        let badge_width = (digits.len() as f32 * 6.5 + 8.0).max(15.0);
+        let badge = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 10.0 - badge_width * 0.5, rect.center().y),
+            Vec2::new(badge_width, 15.0),
+        );
+        let (ink, fill) = match count_tone {
+            ConsoleCountTone::Warning => (
+                t.color.warn,
+                theme::mix(t.color.bg_panel, t.color.warn, 0.11),
+            ),
+            ConsoleCountTone::Success => {
+                (t.color.ok, theme::mix(t.color.bg_panel, t.color.ok, 0.11))
+            }
+            ConsoleCountTone::Neutral => (t.color.text_dim, t.color.bg_active),
+        };
+        ui.painter().rect_filled(badge, 7.0, fill);
+        ui.painter().text(
+            badge.center(),
+            egui::Align2::CENTER_CENTER,
+            digits,
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            ink,
+        );
+    }
+    if selected {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() + 8.0, rect.bottom() - 2.0),
+                egui::pos2(rect.right() - 8.0, rect.bottom()),
+            ),
+            0.0,
+            t.color.accent,
+        );
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response
+}
+
+enum ConsoleActionIcon {
+    Clear,
+    Workbench(WorkbenchIcon),
+}
+
+fn console_action(
+    ui: &mut Ui,
+    icon: ConsoleActionIcon,
+    label: &str,
+    selected: bool,
+    size: f32,
+) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+    });
+    if selected {
+        ui.painter().rect_filled(rect, t.radius, t.color.accent_dim);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
+    }
+    let icon_rect = egui::Rect::from_center_size(rect.center(), Vec2::splat(16.0));
+    match icon {
+        ConsoleActionIcon::Workbench(icon) => {
+            icon.paint(ui.painter(), icon_rect, t.color.text_dim);
+        }
+        ConsoleActionIcon::Clear => paint_trash(ui.painter(), icon_rect, t.color.text_dim),
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response.on_hover_text(label)
+}
+
+fn paint_trash(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.2, color);
+    let body = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 4.0, rect.top() + 5.0),
+        egui::pos2(rect.right() - 4.0, rect.bottom() - 2.0),
+    );
+    painter.rect_stroke(body, 1.0, stroke, egui::StrokeKind::Inside);
+    painter.hline(
+        egui::Rangef::new(rect.left() + 2.0, rect.right() - 2.0),
+        rect.top() + 4.0,
+        stroke,
+    );
+    painter.hline(
+        egui::Rangef::new(rect.left() + 6.0, rect.right() - 6.0),
+        rect.top() + 2.0,
+        stroke,
+    );
+}
+
+fn console_context(ui: &mut Ui, app: &RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let text = if app.state.simulation.is_running {
+        format!(
+            "Active job · {}% · execution in progress",
+            simulation_progress_percent(app.state.simulation.progress)
+        )
+    } else if let Some(index) = app.state.simulation.active_run_idx {
+        app.state.simulation.runs.get(index).map_or_else(
+            || "No retained result selected".to_owned(),
+            |run| {
+                format!(
+                    "Latest result · {} · completed in {:.2} s",
+                    run.label, run.elapsed_time
+                )
+            },
+        )
+    } else {
+        "No retained result selected".to_owned()
+    };
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_faint),
+        )
+        .truncate(),
+    );
 }
 
 fn console(ui: &mut Ui, app: &mut RSpiceApp) {
-    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-        let response = ui.add_sized(
-            [ui.available_width(), 30.0],
-            egui::TextEdit::singleline(&mut app.state.script_console.input_buffer)
-                .font(egui::TextStyle::Monospace)
-                .hint_text("Automation: help · run tran · plot v(out)")
-                .margin(egui::Margin::symmetric(9, 5)),
-        );
-        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-            let command = app.state.script_console.input_buffer.trim().to_owned();
-            if !command.is_empty() {
-                let output = app
-                    .state
-                    .script_console
-                    .executor
-                    .execute_command(&command, &mut app.state.simulation);
-                app.state
-                    .script_console
-                    .history
-                    .push(ConsoleHistoryItem { command, output });
-                app.state.script_console.input_buffer.clear();
-                response.request_focus();
+    ScrollArea::vertical()
+        .id_salt("workbench.console.body")
+        .stick_to_bottom(true)
+        .show(ui, |ui| {
+            for entry in app.state.log_buffer.entries() {
+                log_row(ui, entry);
             }
-        }
-        ScrollArea::vertical()
-            .id_salt("workbench.console.body")
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                for entry in app.state.log_buffer.entries() {
-                    log_row(ui, entry);
-                }
-                for item in &app.state.script_console.history {
-                    automation_row(ui, item);
-                }
-                if app.state.log_buffer.is_empty() && app.state.script_console.history.is_empty() {
-                    muted(ui, "Engine and automation messages will appear here.");
-                }
-            });
-    });
+            for item in &app.state.script_console.history {
+                automation_row(ui, item);
+            }
+            if app.state.log_buffer.is_empty() && app.state.script_console.history.is_empty() {
+                muted(ui, "Engine and automation messages will appear here.");
+            }
+        });
 }
 
 fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -174,8 +460,8 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
                     issue_row(
                         ui,
                         violation.severity.display_name(),
-                        &violation.message,
                         &violation.location.display(),
+                        &violation.message,
                         drc_tone(violation.severity),
                     );
                 }
@@ -189,8 +475,8 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
                 issue_row(
                     ui,
                     entry.severity.name(),
-                    &entry.message,
                     entry.context.as_deref().unwrap_or(entry.source.name()),
+                    &entry.message,
                     log_tone(entry.severity),
                 );
             }
@@ -259,7 +545,13 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn log_row(ui: &mut Ui, entry: &crate::panels::LogEntry) {
     let t = Tokens::get(ui.ctx());
-    let color = tone_color(&t, log_tone(entry.severity));
+    let tone = log_tone(entry.severity);
+    let source_color = tone_color(&t, tone);
+    let message_color = match tone {
+        SemanticTone::Error | SemanticTone::Warning | SemanticTone::Success => source_color,
+        SemanticTone::Info | SemanticTone::Debug => t.color.text_dim,
+        SemanticTone::Trace => t.color.text_faint,
+    };
     let message = entry.context.as_ref().map_or_else(
         || entry.message.clone(),
         |context| format!("{} · {context}", entry.message),
@@ -269,13 +561,21 @@ fn log_row(ui: &mut Ui, entry: &crate::panels::LogEntry) {
         &entry.format_timestamp(),
         entry.source.name(),
         &message,
-        color,
+        source_color,
+        message_color,
     );
 }
 
 fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
     let t = Tokens::get(ui.ctx());
-    row(ui, ">", "AUTO", &item.command, t.color.text);
+    row(
+        ui,
+        ">",
+        "AUTO",
+        &item.command,
+        t.color.info,
+        t.color.text_dim,
+    );
     for line in item.output.message.lines() {
         row(
             ui,
@@ -287,46 +587,19 @@ fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
             } else {
                 t.color.err
             },
+            if item.output.success {
+                t.color.ok
+            } else {
+                t.color.err
+            },
         );
     }
 }
 
-fn issue_row(ui: &mut Ui, level: &str, message: &str, context: &str, tone: SemanticTone) {
+fn issue_row(ui: &mut Ui, status: &str, source: &str, message: &str, tone: SemanticTone) {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("{level}: {message}. {context}"),
-        )
-    });
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-    }
     let color = tone_color(&t, tone);
-    ui.painter().text(
-        egui::pos2(rect.left() + 10.0, rect.top() + 11.0),
-        egui::Align2::LEFT_CENTER,
-        level,
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        color,
-    );
-    ui.painter().text(
-        egui::pos2(rect.left() + 76.0, rect.top() + 11.0),
-        egui::Align2::LEFT_CENTER,
-        message,
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        t.color.text,
-    );
-    ui.painter().text(
-        egui::pos2(rect.left() + 76.0, rect.bottom() - 9.0),
-        egui::Align2::LEFT_CENTER,
-        context,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
+    row(ui, status, source, message, color, color);
 }
 
 /// Semantic row tones are kept independent of the active palette so severity
@@ -346,7 +619,7 @@ fn tone_color(tokens: &Tokens, tone: SemanticTone) -> egui::Color32 {
         SemanticTone::Error => tokens.color.err,
         SemanticTone::Warning => tokens.color.warn,
         SemanticTone::Success => tokens.color.ok,
-        SemanticTone::Info => tokens.color.accent,
+        SemanticTone::Info => tokens.color.info,
         SemanticTone::Debug => tokens.color.text_dim,
         SemanticTone::Trace => tokens.color.text_faint,
     }
@@ -438,56 +711,59 @@ fn format_measure_value(value: f64) -> String {
     fmt_si(value, "", 6).trim().to_owned()
 }
 
-/// Clear only the two output streams owned by the Console page. Diagnostic
-/// evidence and simulation result history live in other owners and are never
-/// touched by this action.
-fn clear_console_output(state: &mut AppState) {
-    state.clear_primary_log();
-    state.script_console.history.clear();
-}
-
 fn page_owns_clear_action(page: ConsolePage) -> bool {
     matches!(page, ConsolePage::Console)
 }
 
-fn row(ui: &mut Ui, time: &str, source: &str, message: &str, color: egui::Color32) {
+fn row(
+    ui: &mut Ui,
+    time: &str,
+    source: &str,
+    message: &str,
+    source_color: egui::Color32,
+    message_color: egui::Color32,
+) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
-    ui.painter().text(
-        egui::pos2(rect.left() + 10.0, rect.center().y),
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CONSOLE_ROW_HEIGHT),
+        egui::Sense::hover(),
+    );
+    let time_x = rect.left();
+    let source_x = time_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
+    let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
+    let time_clip = egui::Rect::from_min_max(
+        egui::pos2(time_x, rect.top()),
+        egui::pos2(time_x + CONSOLE_TIME_WIDTH, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(time_clip).text(
+        egui::pos2(time_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
         time,
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
-    ui.painter().text(
-        egui::pos2(rect.left() + 104.0, rect.center().y),
+    let source_clip = egui::Rect::from_min_max(
+        egui::pos2(source_x, rect.top()),
+        egui::pos2(source_x + CONSOLE_SOURCE_WIDTH, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(source_clip).text(
+        egui::pos2(source_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
         source,
         theme::mono(tokens::FS_0, FontWeight::Medium),
-        color,
+        source_color,
     );
     ui.painter().text(
-        egui::pos2(rect.left() + 148.0, rect.center().y),
+        egui::pos2(message_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
         message,
         theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text,
+        message_color,
     );
 }
 
-fn active_measurement_count(app: &RSpiceApp) -> usize {
-    app.state
-        .simulation
-        .active_run_idx
-        .and_then(|index| app.state.simulation.runs.get(index))
-        .map_or(0, |run| {
-            run.analyses
-                .iter()
-                .map(|analysis| analysis.measurements.len())
-                .sum()
-        })
+fn simulation_progress_percent(progress: f64) -> u8 {
+    (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
 fn muted(ui: &mut Ui, text: &str) {
@@ -499,9 +775,11 @@ fn muted(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::AppState;
     use crate::panels::LogSource;
     use crate::services::drc::{DrcResult, DrcSeverity};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+    use crate::workbench::state::WorkbenchState;
 
     #[test]
     fn severity_tones_preserve_warning_info_and_diagnostic_meaning() {
@@ -574,7 +852,8 @@ mod tests {
         run.add_analysis(analysis);
         state.simulation.runs.push(run);
 
-        clear_console_output(&mut state);
+        state.clear_primary_log();
+        state.script_console.history.clear();
 
         assert!(state.log_buffer.is_empty());
         assert!(state.script_console.history.is_empty());
@@ -582,5 +861,47 @@ mod tests {
         assert!(state.dialogs.drc_results.is_some());
         assert_eq!(state.simulation.runs.len(), 1);
         assert_eq!(state.simulation.runs[0].analyses[0].measurements.len(), 1);
+    }
+
+    #[test]
+    fn fractional_engine_progress_is_rendered_as_a_percentage() {
+        assert_eq!(simulation_progress_percent(0.0), 0);
+        assert_eq!(simulation_progress_percent(0.375), 38);
+        assert_eq!(simulation_progress_percent(1.0), 100);
+    }
+
+    #[test]
+    fn console_chrome_and_grid_geometry_match_the_mockup() {
+        assert_eq!(CONSOLE_HEADER_HEIGHT, 31.0);
+        assert_eq!(CONSOLE_TOUCH_HEADER_HEIGHT, 44.0);
+        assert_eq!(CONSOLE_ACTION_SIZE, 27.0);
+        assert_eq!(CONSOLE_ACTION_MARGIN_RIGHT, 3.0);
+        assert_eq!(CONSOLE_BODY_PADDING_TOP, 7.0);
+        assert_eq!(CONSOLE_BODY_PADDING_X, 10.0);
+        assert_eq!(CONSOLE_TIME_WIDTH, 58.0);
+        assert_eq!(CONSOLE_SOURCE_WIDTH, 62.0);
+        assert_eq!(CONSOLE_COLUMN_GAP, 9.0);
+        assert_eq!(CONSOLE_ROW_HEIGHT, 17.0);
+        assert_eq!(tokens::FS_0, 11.0);
+    }
+
+    #[test]
+    fn console_tab_lane_reserves_every_visible_trailing_action() {
+        let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+        assert_eq!(
+            console_trailing_actions_width(desktop, ConsolePage::Console),
+            90.0
+        );
+        assert_eq!(
+            console_trailing_actions_width(desktop, ConsolePage::Problems),
+            60.0
+        );
+
+        let phone =
+            LayoutSpec::resolve_with_pointer(390.0, 844.0, true, &WorkbenchState::default());
+        assert_eq!(
+            console_trailing_actions_width(phone, ConsolePage::Console),
+            47.0
+        );
     }
 }

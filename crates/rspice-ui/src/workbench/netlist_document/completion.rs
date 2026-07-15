@@ -337,7 +337,7 @@ fn draw_popover(
     let anchor = output.galley_pos + caret_rect.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
     let geometry = completion_popover_geometry(anchor, ui.ctx().screen_rect());
 
-    egui::Area::new(egui::Id::new("volta.netlist.completion"))
+    egui::Area::new(egui::Id::new("rspice.netlist.completion"))
         .order(egui::Order::Foreground)
         .fixed_pos(geometry.position)
         .show(ui.ctx(), |ui| {

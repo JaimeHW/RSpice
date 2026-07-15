@@ -27,7 +27,7 @@ const PARSE_DEBOUNCE: f64 = 0.35;
 
 /// Stable id so the completion accept can reposition the caret.
 fn editor_id() -> egui::Id {
-    egui::Id::new("volta.netlist.editor.text")
+    egui::Id::new("rspice.netlist.editor.text")
 }
 
 fn line_for_char_index(text: &str, char_index: usize) -> usize {
@@ -90,7 +90,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     ui.allocate_ui(egui::vec2(ui.available_width(), editor_h), |ui| {
         egui::ScrollArea::both()
-            .id_salt("volta.netlist.editor")
+            .id_salt("rspice.netlist.editor")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let mut show_text = |text: &mut dyn egui::TextBuffer| {

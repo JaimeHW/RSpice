@@ -619,7 +619,9 @@ mod tests {
         .expect("create recent target project");
 
         let mut project_source = crate::common::app::AppState::default();
-        project_source.workbench.workspace = crate::workbench::state::Workspace::Design;
+        project_source
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
         crate::common::project_lifecycle::save_native(
             &mut project_source,
             SaveScope::AllDocuments,
@@ -691,7 +693,9 @@ mod tests {
         std::fs::write(&target_schematic, b"placeholder for test I/O")
             .expect("create schematic recent path");
         let mut schematic_source = crate::common::app::AppState::default();
-        schematic_source.workbench.workspace = crate::workbench::state::Workspace::Design;
+        schematic_source
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
         crate::common::project_lifecycle::save_native(
             &mut schematic_source,
             SaveScope::AllDocuments,

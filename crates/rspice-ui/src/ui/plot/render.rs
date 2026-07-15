@@ -67,6 +67,159 @@ const MARGIN_BOTTOM: f32 = 26.0;
 const MARGIN_RIGHT_PLAIN: f32 = 16.0;
 const MARGIN_RIGHT_AXIS: f32 = 54.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum TraceMarkerShape {
+    Circle,
+    Square,
+    Diamond,
+    Triangle,
+    Cross,
+    Plus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TraceRedundancy {
+    dash: Option<(f32, f32)>,
+    marker: TraceMarkerShape,
+}
+
+fn color_safe_trace_style(index: usize, semantic_dashed: bool) -> TraceRedundancy {
+    let mut style = match index % 6 {
+        0 => TraceRedundancy {
+            dash: None,
+            marker: TraceMarkerShape::Circle,
+        },
+        1 => TraceRedundancy {
+            dash: Some((7.0, 4.0)),
+            marker: TraceMarkerShape::Square,
+        },
+        2 => TraceRedundancy {
+            dash: Some((2.0, 4.0)),
+            marker: TraceMarkerShape::Diamond,
+        },
+        3 => TraceRedundancy {
+            dash: Some((10.0, 4.0)),
+            marker: TraceMarkerShape::Triangle,
+        },
+        4 => TraceRedundancy {
+            dash: Some((5.0, 2.0)),
+            marker: TraceMarkerShape::Cross,
+        },
+        _ => TraceRedundancy {
+            dash: Some((12.0, 3.0)),
+            marker: TraceMarkerShape::Plus,
+        },
+    };
+    if semantic_dashed && style.dash.is_none() {
+        style.dash = Some((5.0, 4.0));
+    }
+    style
+}
+
+fn paint_trace_marker(
+    painter: &egui::Painter,
+    center: Pos2,
+    shape: TraceMarkerShape,
+    color: Color32,
+    background: Color32,
+) {
+    let radius = 3.4;
+    let stroke = Stroke::new(1.35, color);
+    match shape {
+        TraceMarkerShape::Circle => {
+            painter.circle(center, radius, background, stroke);
+        }
+        TraceMarkerShape::Square => {
+            painter.rect(
+                Rect::from_center_size(center, vec2(radius * 2.0, radius * 2.0)),
+                0.0,
+                background,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+        TraceMarkerShape::Diamond => {
+            painter.add(Shape::convex_polygon(
+                vec![
+                    pos2(center.x, center.y - radius - 0.5),
+                    pos2(center.x + radius + 0.5, center.y),
+                    pos2(center.x, center.y + radius + 0.5),
+                    pos2(center.x - radius - 0.5, center.y),
+                ],
+                background,
+                stroke,
+            ));
+        }
+        TraceMarkerShape::Triangle => {
+            painter.add(Shape::convex_polygon(
+                vec![
+                    pos2(center.x, center.y - radius - 0.8),
+                    pos2(center.x + radius + 0.8, center.y + radius),
+                    pos2(center.x - radius - 0.8, center.y + radius),
+                ],
+                background,
+                stroke,
+            ));
+        }
+        TraceMarkerShape::Cross | TraceMarkerShape::Plus => {
+            let diagonal = shape == TraceMarkerShape::Cross;
+            let segments = if diagonal {
+                [
+                    [
+                        pos2(center.x - radius, center.y - radius),
+                        pos2(center.x + radius, center.y + radius),
+                    ],
+                    [
+                        pos2(center.x - radius, center.y + radius),
+                        pos2(center.x + radius, center.y - radius),
+                    ],
+                ]
+            } else {
+                [
+                    [
+                        pos2(center.x - radius, center.y),
+                        pos2(center.x + radius, center.y),
+                    ],
+                    [
+                        pos2(center.x, center.y - radius),
+                        pos2(center.x, center.y + radius),
+                    ],
+                ]
+            };
+            for segment in segments {
+                painter.line_segment(segment, Stroke::new(3.4, background));
+                painter.line_segment(segment, stroke);
+            }
+        }
+    }
+}
+
+fn paint_trace_markers(
+    painter: &egui::Painter,
+    points: &[Pos2],
+    plot_rect: Rect,
+    shape: TraceMarkerShape,
+    color: Color32,
+    background: Color32,
+) {
+    if points.len() < 2 || plot_rect.width() < 72.0 {
+        return;
+    }
+
+    let mut point_index = 0;
+    let mut target_x = plot_rect.left() + 48.0;
+    while target_x < plot_rect.right() - 24.0 {
+        while point_index + 1 < points.len() && points[point_index].x < target_x {
+            point_index += 1;
+        }
+        let point = points[point_index];
+        if point.x.is_finite() && point.y.is_finite() && plot_rect.shrink(4.0).contains(point) {
+            paint_trace_marker(painter, point, shape, color, background);
+        }
+        target_x += 96.0;
+    }
+}
+
 fn right_margin(spec: &PlotSpec<'_>) -> f32 {
     if spec.y_right.is_some() {
         MARGIN_RIGHT_AXIS
@@ -318,7 +471,7 @@ pub fn show(
         // then reuses cached envelopes instead of re-decimating every trace
         // every frame (the envelope is always at least pixel-dense).
         let columns = (plot_rect.width().ceil() as usize).next_multiple_of(64);
-        for trace in &spec.traces {
+        for (trace_index, trace) in spec.traces.iter().enumerate() {
             if trace.x.is_empty() {
                 continue;
             }
@@ -347,13 +500,32 @@ pub fn show(
             if points.len() < 2 {
                 continue;
             }
+            let redundancy = t
+                .color_safe_traces
+                .then(|| color_safe_trace_style(trace_index, trace.dashed));
+            let dash = redundancy
+                .and_then(|style| style.dash)
+                .or_else(|| trace.dashed.then_some((5.0, 4.0)));
             // Dashing a dense min/max envelope would emit one shape per
             // dash along a path that zig-zags every column — thousands of
             // segments reading as noise. Sparse curves dash normally.
-            if trace.dashed && points.len() < columns {
-                clipped.extend(Shape::dashed_line(&points, stroke, 5.0, 4.0));
+            if let Some((dash_length, gap_length)) = dash.filter(|_| points.len() < columns) {
+                clipped.extend(Shape::dashed_line(&points, stroke, dash_length, gap_length));
+            } else if redundancy.is_some() {
+                clipped.add(Shape::line(points.clone(), stroke));
             } else {
                 clipped.add(Shape::line(points, stroke));
+                continue;
+            }
+            if let Some(redundancy) = redundancy {
+                paint_trace_markers(
+                    &clipped,
+                    &points,
+                    plot_rect,
+                    redundancy.marker,
+                    trace.color,
+                    c.canvas_bg,
+                );
             }
         }
     }
@@ -697,6 +869,23 @@ fn draw_readout(
 mod tests {
     use super::*;
     use crate::ui::plot::{Axis, Marker, Trace, XScale};
+
+    #[test]
+    fn color_safe_trace_cycle_has_six_marker_shapes_and_preserves_phase_dashing() {
+        let styles = (0..6)
+            .map(|index| color_safe_trace_style(index, false))
+            .collect::<Vec<_>>();
+        let marker_shapes = styles
+            .iter()
+            .map(|style| style.marker)
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(marker_shapes.len(), 6);
+        assert!(styles[0].dash.is_none());
+        assert!(styles[1..].iter().all(|style| style.dash.is_some()));
+        assert!(color_safe_trace_style(0, true).dash.is_some());
+        assert_eq!(color_safe_trace_style(6, false), styles[0]);
+    }
 
     #[test]
     fn accessibility_label_reports_axes_traces_markers_and_cursors() {

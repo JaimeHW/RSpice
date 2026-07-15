@@ -26,6 +26,9 @@ use egui::Context;
 
 use crate::state::{SchematicState, SimulationState};
 
+const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;
+const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
+
 #[cfg(target_arch = "wasm32")]
 const BROWSER_UNLOAD_WARNING: &str = "RSpice has unsaved changes.";
 
@@ -47,7 +50,7 @@ pub use app_confirmation_state::{
 pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
 
 mod app_dialog_state;
-pub use app_dialog_state::{DialogState, LibraryDeleteTarget, LicenseDialogState, LicensePhase};
+pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
 mod app_serialization;
 
@@ -253,6 +256,25 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Whether any retained application workflow owns exclusive keyboard and
+    /// pointer intent for this frame.
+    pub(crate) fn application_modal_open(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        let browser_file_operation_open =
+            crate::common::project_workflow::browser_file_operation_label(self).is_some();
+        #[cfg(not(target_arch = "wasm32"))]
+        let browser_file_operation_open = false;
+
+        self.workbench.application_modal_open()
+            || self.dialogs.application_modal_open()
+            || self.sim_setup.options_open
+            || self.sim_setup.palette_open
+            || self.tabbed_property_dialog.open
+            || self.pdk_settings_dialog.open
+            || self.model_browser_state.open
+            || browser_file_operation_open
+    }
+
     /// Whether a run can start. Every Run affordance (toolbar, run bar, menu,
     /// F5) gates on this so schematic preflight is consistent everywhere.
     pub fn can_run_simulation(&self) -> bool {
@@ -484,7 +506,34 @@ pub struct RSpiceApp {
     pub(crate) export_workflow_io: Box<dyn crate::common::export_workflow::ExportWorkflowIo>,
 }
 
+fn configure_platform_input_contract(ctx: &Context) {
+    ctx.options_mut(|options| {
+        // The mockup registers this gesture document-wide: a 560 ms press
+        // opens the contextual touch sheet unless movement exceeds 9 px.
+        options.input_options.max_click_duration = CONTEXT_LONG_PRESS_DURATION_SECONDS;
+        options.input_options.max_click_dist = CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS;
+
+        // Ctrl+± / Ctrl+0 zoom the schematic rather than the application UI.
+        options.zoom_with_keyboard = false;
+    });
+}
+
 impl RSpiceApp {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn test_instance() -> Self {
+        Self {
+            state: AppState::default(),
+            first_frame: false,
+            autosave_last: None,
+            applied_theme: None,
+            last_window_title: String::new(),
+            symbol_library: None,
+            simulation_controller: crate::simulation::SimulationController::new(),
+            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
+            export_workflow_io: Box::new(crate::common::export_workflow::NativeExportWorkflowIo),
+        }
+    }
+
     /// Create a new application instance
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Load persisted state if available
@@ -503,17 +552,15 @@ impl RSpiceApp {
         // drawn content to the user library and drop the placeholders.
         state.migrate_legacy_primitives();
 
-        // Ctrl+± / Ctrl+0 zoom the *schematic*, not the UI — disable egui's
-        // built-in keyboard zoom so the shortcuts don't double-fire.
-        cc.egui_ctx.options_mut(|options| {
-            options.zoom_with_keyboard = false;
-        });
+        configure_platform_input_contract(&cc.egui_ctx);
         cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
         restore_global_veriloga_library(&mut state.library_manager);
         state.restore_active_schematic_from_workspace();
         crate::common::project_lifecycle::initialize_from_session(&mut state);
+        #[cfg(target_arch = "wasm32")]
+        initialize_browser_surface_navigation(&mut state, &cc.egui_ctx);
 
         // A license file on disk wins over (or backfills) the session copy.
         #[cfg(not(target_arch = "wasm32"))]
@@ -560,12 +607,19 @@ impl RSpiceApp {
     fn prepare_frame(&mut self, ctx: &Context) {
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
-        if self.first_frame || self.applied_theme != Some(self.state.ui.theme) {
+        let system_mode_changed = self.state.ui.theme.mode == crate::ui::Mode::System
+            && crate::ui::tokens::Tokens::get(ctx).mode != self.state.ui.theme.mode.effective(ctx);
+        if self.first_frame
+            || self.applied_theme != Some(self.state.ui.theme)
+            || system_mode_changed
+        {
             self.state.ui.theme.apply(ctx);
             self.applied_theme = Some(self.state.ui.theme);
             self.first_frame = false;
         }
 
+        #[cfg(target_arch = "wasm32")]
+        synchronize_browser_surface_navigation(&mut self.state);
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
         crate::common::browser_file_import::register_text_import_repaint_context(ctx);
@@ -660,6 +714,278 @@ impl RSpiceApp {
         self.process_autosave_restore_dialog(ctx);
         self.process_pending_library_deletions();
         self.process_exit_request(ctx);
+        crate::workbench::show_route_overlays(ctx, self);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
+    use crate::workbench::RouteTransitionSource;
+    use crate::workbench::browser_navigation::{
+        current_location, install_popstate_listener, restart_history_session,
+    };
+
+    match current_location() {
+        Ok(location) => {
+            if let Some(route) = location.route()
+                && let Err(error) = state
+                    .workbench
+                    .navigate(route, RouteTransitionSource::BrowserPop)
+            {
+                state.push_user_message(ConsoleMessage::warning(format!(
+                    "The requested deep link was not opened: {error}"
+                )));
+            }
+        }
+        Err(error) => state.push_user_message(ConsoleMessage::warning(format!(
+            "The browser deep link is malformed and was rejected; the address was recovered to the active task: {error}"
+        ))),
+    }
+
+    // A restored native-style stack is not browser traversal authority. The
+    // new process starts with exactly its active route and takes ownership of
+    // the current host entry through one canonical replaceState transaction.
+    state
+        .workbench
+        .reset_navigation_history_for_fresh_browser_session();
+    let listener_ready = match install_popstate_listener(ctx) {
+        Ok(()) => true,
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "Browser route synchronization is disabled and listener installation will retry automatically: {error}"
+            )));
+            false
+        }
+    };
+    if listener_ready && let Err(error) = restart_history_session(state.workbench.current_route()) {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Browser route synchronization is disabled and will retry automatically; history could not be initialized at the active task: {error}"
+        )));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn synchronize_browser_surface_navigation(state: &mut AppState) {
+    use crate::workbench::browser_navigation::{
+        ensure_popstate_listener, history_session_ready, poll_popstate, push_route, replace_route,
+        traversal_in_flight, traversal_watchdog_expired, traverse_history,
+    };
+    use crate::workbench::{BrowserHistoryEffect, RouteTransitionSource};
+
+    while let Some(event) = poll_popstate() {
+        match event {
+            Ok(event) => {
+                let route = event.route();
+                let availability = crate::workbench::route_availability(route);
+                let pending_effects = state.workbench.has_pending_browser_history_effects();
+                let external_race = !event.initiated_by_app() && pending_effects;
+                let applied = if !availability.can_open() {
+                    Err(format!(
+                        "surface `{}` is unavailable: {}",
+                        route.surface_id(),
+                        availability
+                            .reason()
+                            .unwrap_or("no complete route executor is registered")
+                    ))
+                } else if external_race {
+                    Err(
+                        "an external browser traversal raced with newer in-app navigation"
+                            .to_owned(),
+                    )
+                } else if event.initiated_by_app() {
+                    (state.workbench.current_route() == route || pending_effects)
+                        .then_some(())
+                        .ok_or_else(|| {
+                            "the in-app traversal did not reach its authenticated browser entry"
+                                .to_owned()
+                        })
+                } else {
+                    apply_authenticated_browser_pop(state, event.delta(), route)
+                };
+
+                if let Err(error) = applied {
+                    state.push_user_message(ConsoleMessage::warning(format!(
+                        "Browser history could not restore the requested task and was recovered at a canonical route: {error}"
+                    )));
+                    if availability.can_open() && !external_race {
+                        // The browser entry is authenticated and available;
+                        // make it authoritative, then start a bounded session
+                        // rather than guessing from stale in-app stacks.
+                        if state.workbench.current_route() != route {
+                            let _ = state
+                                .workbench
+                                .navigate(route, RouteTransitionSource::BrowserPop);
+                        }
+                    }
+                    recover_browser_history_at_active_task(state);
+                    return;
+                }
+            }
+            Err(error) => {
+                state.push_user_message(ConsoleMessage::warning(format!(
+                    "An unauthenticated or malformed browser history entry was rejected and canonicalized to the active task: {error}"
+                )));
+                recover_browser_history_at_active_task(state);
+                return;
+            }
+        }
+    }
+
+    if state
+        .workbench
+        .take_browser_history_effect_queue_overflowed()
+    {
+        state.push_user_message(ConsoleMessage::warning(
+            "Browser synchronization commands exceeded the bounded queue; the address was recovered directly to the active task.",
+        ));
+        recover_browser_history_at_active_task(state);
+        return;
+    }
+
+    if traversal_watchdog_expired() {
+        state.push_user_message(ConsoleMessage::warning(
+            "Browser traversal did not produce an authenticated history event before the watchdog deadline; the address was recovered to the active task.",
+        ));
+        recover_browser_history_at_active_task(state);
+        return;
+    }
+
+    if !history_session_ready() {
+        state.workbench.clear_browser_history_effects();
+        if ensure_popstate_listener().is_err() {
+            return;
+        }
+        let canonical = state.workbench.current_route();
+        match crate::workbench::browser_navigation::restart_history_session(canonical) {
+            Ok(()) => {
+                state
+                    .workbench
+                    .reset_navigation_history_for_fresh_browser_session();
+                state.push_user_message(ConsoleMessage::info(
+                    "Browser route synchronization resumed at the active task; browser traversal history was restarted.",
+                ));
+            }
+            Err(_) => return,
+        }
+    }
+
+    // `history.go` is asynchronous. No later effect may observe or mutate the
+    // browser ledger until its exact destination is authenticated by popstate.
+    if traversal_in_flight() {
+        return;
+    }
+
+    while let Some(effect) = state.workbench.take_browser_history_effect() {
+        let (result, traversal_started) = match effect {
+            BrowserHistoryEffect::Push(route) => (push_route(route).map(|_| ()), false),
+            BrowserHistoryEffect::Replace(route) => (replace_route(route).map(|_| ()), false),
+            BrowserHistoryEffect::Traverse { delta, destination } => {
+                (traverse_history(delta, destination), true)
+            }
+        };
+        if let Err(error) = result {
+            rollback_browser_navigation_after_sync_failure(state, error);
+            return;
+        }
+        if traversal_started {
+            return;
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn recover_browser_history_at_active_task(state: &mut AppState) {
+    use crate::workbench::browser_navigation::{ensure_popstate_listener, restart_history_session};
+
+    state.workbench.clear_browser_history_effects();
+    let canonical = state.workbench.current_route();
+    if let Err(error) = ensure_popstate_listener() {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Browser route synchronization is disabled and listener installation will retry automatically: {error}"
+        )));
+        return;
+    }
+    match restart_history_session(canonical) {
+        Ok(()) => state
+            .workbench
+            .reset_navigation_history_for_fresh_browser_session(),
+        Err(error) => state.push_user_message(ConsoleMessage::warning(format!(
+            "Browser route synchronization is disabled and will retry automatically; the address could not be recovered to the active task: {error}"
+        ))),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rollback_browser_navigation_after_sync_failure(
+    state: &mut AppState,
+    error: crate::workbench::browser_navigation::BrowserNavigationError,
+) {
+    use crate::workbench::RouteTransitionSource;
+    use crate::workbench::browser_navigation::{active_browser_route, restart_history_session};
+
+    match active_browser_route() {
+        Ok(browser_route) => {
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "The browser address could not be synchronized; the active task was rolled back to the last committed browser route: {error}"
+            )));
+            if state.workbench.current_route() != browser_route {
+                let _ = state
+                    .workbench
+                    .navigate(browser_route, RouteTransitionSource::BrowserPop);
+            }
+            state.workbench.clear_browser_history_effects();
+            state
+                .workbench
+                .reset_navigation_history_for_fresh_browser_session();
+            if let Err(recovery_error) = restart_history_session(browser_route) {
+                state.push_user_message(ConsoleMessage::warning(format!(
+                    "Browser route synchronization is disabled and will retry automatically; the history session could not be restarted after rollback: {recovery_error}"
+                )));
+            }
+        }
+        Err(_) => {
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "The browser address could not be synchronized and no committed browser session was available for rollback: {error}"
+            )));
+            recover_browser_history_at_active_task(state);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_authenticated_browser_pop(
+    state: &mut AppState,
+    delta: i32,
+    route: crate::workbench::SurfaceRoute,
+) -> Result<(), String> {
+    use crate::workbench::RouteTransitionSource;
+
+    if delta < 0 {
+        let steps = usize::try_from(delta.unsigned_abs())
+            .map_err(|_| "browser back distance is not representable".to_owned())?;
+        if steps > state.workbench.back_route_count() {
+            return Err("browser back entry is outside the in-app task stack".to_owned());
+        }
+        state
+            .workbench
+            .navigate_back_steps(steps, RouteTransitionSource::BrowserPop)
+            .ok_or_else(|| "browser back entry is outside the in-app task stack".to_owned())?;
+    } else if delta > 0 {
+        let steps = usize::try_from(delta)
+            .map_err(|_| "browser forward distance is not representable".to_owned())?;
+        if steps > state.workbench.forward_route_count() {
+            return Err("browser forward entry is outside the in-app task stack".to_owned());
+        }
+        state
+            .workbench
+            .navigate_forward_steps(steps, RouteTransitionSource::BrowserPop)
+            .ok_or_else(|| "browser forward entry is outside the in-app task stack".to_owned())?;
+    }
+
+    if state.workbench.current_route() == route {
+        Ok(())
+    } else {
+        Err("authenticated browser entry and in-app task stack disagree".to_owned())
     }
 }
 
@@ -687,6 +1013,10 @@ impl eframe::App for RSpiceApp {
     /// Called by eframe when the application is shutting down.
     fn on_exit(&mut self) {
         log::info!("eframe on_exit — application shutting down");
+        #[cfg(target_arch = "wasm32")]
+        if let Err(error) = crate::workbench::browser_navigation::uninstall_popstate_listener() {
+            log::warn!("Failed to remove browser route listener: {error}");
+        }
     }
 
     /// Save state on exit
@@ -703,6 +1033,14 @@ impl eframe::App for RSpiceApp {
         log::debug!("save: serialize app state");
         eframe::set_value(storage, eframe::APP_KEY, &self.state);
         log::debug!("save: done");
+    }
+
+    /// Persist the complete recoverable working session on the same cadence
+    /// selected in Preferences. Native builds additionally publish their
+    /// path-bound exact-byte checkpoint; browser/mobile builds use eframe's
+    /// durable application storage as their device-local recovery owner.
+    fn auto_save_interval(&self) -> std::time::Duration {
+        configured_autosave_interval(self.state.ui.autosave_minutes)
     }
 }
 
@@ -725,6 +1063,13 @@ impl RSpiceApp {
 
 fn should_warn_before_browser_unload(schematic_dirty: bool, workspace_dirty: bool) -> bool {
     schematic_dirty || workspace_dirty
+}
+
+fn configured_autosave_interval(minutes: u8) -> std::time::Duration {
+    // Deserialization normalizes legacy values to 2/5/10. Keep this boundary
+    // defensive so a malformed in-memory integration can never request an
+    // every-frame persistence loop.
+    std::time::Duration::from_secs(u64::from(minutes.max(1)) * 60)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -799,6 +1144,19 @@ mod tests {
         result.add_violation(violation);
         result.completed = true;
         result
+    }
+
+    #[test]
+    fn platform_input_contract_matches_context_gesture_mockup() {
+        let ctx = Context::default();
+
+        configure_platform_input_contract(&ctx);
+
+        ctx.options(|options| {
+            assert_eq!(options.input_options.max_click_duration, 0.56);
+            assert_eq!(options.input_options.max_click_dist, 9.0);
+            assert!(!options.zoom_with_keyboard);
+        });
     }
 
     #[test]
@@ -878,6 +1236,59 @@ mod tests {
         assert!(should_warn_before_browser_unload(true, false));
         assert!(should_warn_before_browser_unload(false, true));
         assert!(should_warn_before_browser_unload(true, true));
+    }
+
+    #[test]
+    fn preference_autosave_cadence_drives_platform_session_persistence() {
+        assert_eq!(
+            configured_autosave_interval(2),
+            std::time::Duration::from_secs(120)
+        );
+        assert_eq!(
+            configured_autosave_interval(5),
+            std::time::Duration::from_secs(300)
+        );
+        assert_eq!(
+            configured_autosave_interval(10),
+            std::time::Duration::from_secs(600)
+        );
+        assert_eq!(
+            configured_autosave_interval(0),
+            std::time::Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn application_modal_gate_covers_every_app_level_modal_owner() {
+        let mut state = AppState::default();
+        assert!(!state.application_modal_open());
+
+        state.dialogs.preferences_open = true;
+        assert!(state.application_modal_open());
+        state.dialogs.preferences_open = false;
+
+        state.sim_setup.options_open = true;
+        assert!(state.application_modal_open());
+        state.sim_setup.options_open = false;
+
+        state.sim_setup.palette_open = true;
+        assert!(state.application_modal_open());
+        state.sim_setup.palette_open = false;
+
+        state.tabbed_property_dialog.open = true;
+        assert!(state.application_modal_open());
+        state.tabbed_property_dialog.open = false;
+
+        state.pdk_settings_dialog.open = true;
+        assert!(state.application_modal_open());
+        state.pdk_settings_dialog.open = false;
+
+        state.model_browser_state.open = true;
+        assert!(state.application_modal_open());
+        state.model_browser_state.open = false;
+
+        state.workbench.open_project_launcher();
+        assert!(state.application_modal_open());
     }
 
     #[test]

@@ -13,9 +13,14 @@ use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
 use super::activity_rail::workspace_icon;
 
+const PHONE_ACTIVE_EDGE: f32 = 2.0;
+const PHONE_ICON_SIZE: f32 = 17.0;
+const PHONE_ICON_CENTER_Y: f32 = 20.0;
+const PHONE_LABEL_CENTER_Y: f32 = 36.5;
+
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
-    TopBottomPanel::bottom("workbench.phone_navigation")
+    let shown = TopBottomPanel::bottom("workbench.phone_navigation")
         .exact_height(layout.phone_navigation_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
@@ -34,31 +39,48 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                     &Workspace::ALL
                 };
                 for workspace in workspaces.iter().copied() {
-                    if nav_item(
-                        ui,
-                        workspace_icon(workspace),
-                        workspace.label(),
-                        app.state.workbench.workspace == workspace,
-                        width,
-                        layout.phone_navigation_height,
-                    ) {
-                        Command::OpenWorkspace(workspace).execute(app);
+                    let command = Command::OpenWorkspace(workspace);
+                    let response = ui
+                        .add_enabled_ui(command.is_enabled(app), |ui| {
+                            nav_item(
+                                ui,
+                                workspace_icon(workspace),
+                                workspace.label(),
+                                app.state.workbench.workspace == workspace,
+                                width,
+                                layout.phone_navigation_height,
+                            )
+                        })
+                        .inner;
+                    if response.clicked() {
+                        command.execute(app);
                     }
                 }
-                if layout.workspaces_uses_drawer
-                    && nav_item(
+                if layout.workspaces_uses_drawer {
+                    let more = nav_item(
                         ui,
                         WorkbenchIcon::More,
                         "More",
                         app.state.workbench.drawer == Some(Drawer::Workspaces),
                         width,
                         layout.phone_navigation_height,
-                    )
-                {
-                    app.state.workbench.toggle_drawer(Drawer::Workspaces);
+                    );
+                    if more.clicked() {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(
+                                egui::Id::new("workbench.mobile_navigation.invoker"),
+                                more.id,
+                            );
+                        });
+                        app.state.workbench.toggle_drawer(Drawer::Workspaces);
+                    }
                 }
             });
         });
+    ctx.accesskit_node_builder(shown.response.id, |node| {
+        node.set_role(egui::accesskit::Role::Navigation);
+        node.set_label("Primary workspaces");
+    });
 }
 
 fn nav_item(
@@ -68,45 +90,45 @@ fn nav_item(
     active: bool,
     width: f32,
     height: f32,
-) -> bool {
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            active,
-            label,
-        )
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, label)
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Tab);
+        node.set_role(egui::accesskit::Role::Button);
+        node.set_selected(active);
     });
     if active {
         ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
         ui.painter().rect_filled(
             egui::Rect::from_min_max(
                 rect.left_top(),
-                egui::Pos2::new(rect.right(), rect.top() + 2.0),
+                egui::Pos2::new(rect.right(), rect.top() + PHONE_ACTIVE_EDGE),
             ),
             0.0,
             t.color.accent,
         );
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
     icon.paint(
         ui.painter(),
         egui::Rect::from_center_size(
-            egui::Pos2::new(rect.center().x, rect.top() + 20.0),
-            Vec2::splat(17.0),
+            egui::Pos2::new(rect.center().x, rect.top() + PHONE_ICON_CENTER_Y),
+            Vec2::splat(PHONE_ICON_SIZE),
         ),
-        if active {
+        if !ui.is_enabled() {
+            t.color.text_faint
+        } else if active {
             t.color.accent
         } else {
             t.color.text_dim
         },
     );
     ui.painter().text(
-        egui::Pos2::new(rect.center().x, rect.top() + 36.5),
+        egui::Pos2::new(rect.center().x, rect.top() + PHONE_LABEL_CENTER_Y),
         Align2::CENTER_CENTER,
         label,
         theme::sans(
@@ -117,12 +139,33 @@ fn nav_item(
                 FontWeight::Regular
             },
         ),
-        if active {
+        if !ui.is_enabled() {
+            t.color.text_faint
+        } else if active {
             t.color.text
         } else {
             t.color.text_dim
         },
     );
     theme::paint_focus_ring(ui, &response, rect);
-    response.clicked()
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_navigation_uses_the_mockup_five_and_seven_item_projections() {
+        assert_eq!(Workspace::PHONE_PRIMARY.len() + 1, 5);
+        assert_eq!(Workspace::ALL.len(), 7);
+    }
+
+    #[test]
+    fn compact_navigation_geometry_matches_the_mockup() {
+        assert_eq!(PHONE_ACTIVE_EDGE, 2.0);
+        assert_eq!(PHONE_ICON_SIZE, 17.0);
+        assert_eq!(PHONE_ICON_CENTER_Y, 20.0);
+        assert_eq!(PHONE_LABEL_CENTER_Y, 36.5);
+    }
 }

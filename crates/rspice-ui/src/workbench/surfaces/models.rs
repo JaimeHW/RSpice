@@ -203,7 +203,9 @@ fn libraries(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         if let Some(reference) = open {
             app.state.open_workspace_view(reference);
-            app.state.workbench.workspace = super::super::state::Workspace::Design;
+            app.state
+                .workbench
+                .activate(super::super::state::Workspace::Design);
         }
     });
 }

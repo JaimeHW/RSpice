@@ -23,7 +23,8 @@ impl RSpiceApp {
             && !dialogs.new_view_cell.is_empty();
 
         let choice = Dialog::new("Library", "New view", "Create")
-            .size(DialogSize::Sm)
+            .description("Create a named view of the selected type in this library cell.")
+            .size(DialogSize::Transaction)
             .ghost("Cancel")
             .primary_enabled(can_create)
             .show(ctx, |ui| {

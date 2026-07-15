@@ -117,7 +117,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 .color(c.text_dim),
         );
         let current = state.analysis.fft_state.window;
-        egui::ComboBox::from_id_salt("volta.fft.window")
+        egui::ComboBox::from_id_salt("rspice.fft.window")
             .selected_text(current.display_name())
             .show_ui(ui, |ui| {
                 for &window in crate::analysis::fft::WindowFunction::all() {

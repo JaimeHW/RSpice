@@ -94,7 +94,10 @@ impl RSpiceApp {
             dialogs.copy_cell_source_library, dialogs.copy_cell_source_cell
         );
         let choice = Dialog::new("Library", "Copy cell", "Copy")
-            .size(DialogSize::Sm)
+            .description(
+                "Copy every view and its content from the selected cell into a writable library under a new name.",
+            )
+            .size(DialogSize::Transaction)
             .ghost("Cancel")
             .hint(&hint)
             .primary_enabled(!dialogs.copy_cell_name.trim().is_empty())
@@ -203,7 +206,10 @@ impl RSpiceApp {
             dialogs.rename_cell_library, dialogs.rename_cell_current
         );
         let choice = Dialog::new("Library", "Rename cell", "Rename")
-            .size(DialogSize::Sm)
+            .description(
+                "Rename the selected cell and remap open buffers, tabs, and instance bindings that reference it.",
+            )
+            .size(DialogSize::Transaction)
             .ghost("Cancel")
             .hint("remaps buffers, tabs, and instance bindings")
             .primary_enabled(!dialogs.rename_cell_name.trim().is_empty())

@@ -59,10 +59,10 @@ impl LayoutSpec {
         let workspaces_uses_drawer = viewport_width <= 560.0 || short_landscape;
         let show_console_body =
             (state.console_visible || state.console_maximized) && !state.focus_mode;
-        // The canonical phone-landscape composition gives the constrained
-        // canvas the entire remaining height. The console re-enters the grid
-        // only when the user explicitly opens it.
-        let show_console_strip = show_console_body || !short_landscape;
+        // Explicit mobile/coarse-pointer landscape gives the constrained
+        // canvas the entire remaining height. A fine-pointer desktop/browser
+        // window at the same dimensions retains the mockup's 31 px strip.
+        let show_console_strip = show_console_body || !short_landscape || !coarse_pointer;
         let touch_console = compact_shell || coarse_pointer;
         let maximized = state.console_maximized && !touch_console;
         let metrics = ChromeMetrics::resolve(viewport_width, short_landscape, coarse_pointer);
@@ -170,8 +170,10 @@ impl ChromeMetrics {
         if width <= 820.0 {
             metrics.title = 42.0;
             metrics.toolbar = 47.0;
-            metrics.toolbar_control = 34.0;
-            metrics.run_control = 34.0;
+            // The late commercial/a11y cascade overrides the earlier compact
+            // 34 px declarations for every interactive toolbar target.
+            metrics.toolbar_control = 44.0;
+            metrics.run_control = 44.0;
             metrics.document = 36.0;
             metrics.status = 27.0;
         }
@@ -183,12 +185,17 @@ impl ChromeMetrics {
         if short_landscape {
             metrics.title = 44.0;
             metrics.toolbar = 48.0;
-            metrics.toolbar_control = 34.0;
-            metrics.run_control = 34.0;
+            // The short-landscape rule changes the chrome rows, but does not
+            // redefine tool targets. Fine-pointer 821-900 px windows retain
+            // the workstation 29/31 px controls; <=820 px and coarse-pointer
+            // rules continue to impose their later 44 px minimums.
             metrics.document = 34.0;
             metrics.status = 0.0;
         }
         if coarse_pointer {
+            // The final coarse-pointer contract is independent of viewport
+            // width: title, toolbar, and their primary controls all retain a
+            // 44 px minimum target on wide touch workstations too.
             metrics.title = 44.0;
             metrics.toolbar = 48.0;
             metrics.toolbar_control = 44.0;
@@ -258,6 +265,8 @@ mod tests {
         assert!(spec.inspector_uses_drawer);
         assert!(!spec.workspaces_uses_drawer);
         assert_eq!(spec.title_bar_height, 42.0);
+        assert_eq!(spec.toolbar_control_height, 44.0);
+        assert_eq!(spec.run_control_height, 44.0);
         assert_eq!(spec.status_bar_height, 27.0);
     }
 
@@ -318,6 +327,20 @@ mod tests {
     }
 
     #[test]
+    fn wide_coarse_pointer_keeps_the_mockup_touch_target_contract() {
+        let spec =
+            LayoutSpec::resolve_with_pointer(1_440.0, 900.0, true, &WorkbenchState::default());
+
+        assert_eq!(spec.title_bar_height, 44.0);
+        assert_eq!(spec.toolbar_height, 48.0);
+        assert_eq!(spec.toolbar_control_height, 44.0);
+        assert_eq!(spec.run_control_height, 44.0);
+        assert_eq!(spec.document_bar_height, 44.0);
+        assert_eq!(spec.status_bar_height, 25.0);
+        assert_eq!(spec.console_height, 44.0);
+    }
+
+    #[test]
     fn short_landscape_uses_the_mockup_compact_override() {
         let mut state = WorkbenchState::default();
         state.console_visible = true;
@@ -333,6 +356,8 @@ mod tests {
         assert!(!spec.show_status_bar);
         assert_eq!(spec.title_bar_height, 44.0);
         assert_eq!(spec.toolbar_height, 48.0);
+        assert_eq!(spec.toolbar_control_height, 29.0);
+        assert_eq!(spec.run_control_height, 31.0);
         assert_eq!(spec.document_bar_height, 34.0);
         assert!(!spec.toolbar_labels);
         assert_eq!(spec.console_height, 175.5);
@@ -343,11 +368,32 @@ mod tests {
 
     #[test]
     fn collapsed_phone_landscape_removes_the_console_row() {
-        let spec = LayoutSpec::resolve(844.0, 390.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve_with_pointer(844.0, 390.0, true, &WorkbenchState::default());
 
         assert!(spec.compact_shell);
         assert!(!spec.show_console_body);
         assert!(!spec.show_console_strip);
+        assert_eq!(spec.toolbar_control_height, 44.0);
+        assert_eq!(spec.run_control_height, 44.0);
+    }
+
+    #[test]
+    fn narrow_fine_pointer_landscape_keeps_the_late_44_px_target_rule() {
+        let spec = LayoutSpec::resolve(800.0, 390.0, &WorkbenchState::default());
+
+        assert!(spec.compact_shell);
+        assert_eq!(spec.toolbar_control_height, 44.0);
+        assert_eq!(spec.run_control_height, 44.0);
+    }
+
+    #[test]
+    fn fine_pointer_short_landscape_retains_the_collapsed_console_strip() {
+        let spec = LayoutSpec::resolve(844.0, 390.0, &WorkbenchState::default());
+
+        assert!(spec.compact_shell);
+        assert!(!spec.show_console_body);
+        assert!(spec.show_console_strip);
+        assert_eq!(spec.console_height, 31.0);
     }
 
     #[test]

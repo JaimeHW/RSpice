@@ -70,12 +70,19 @@ impl RSpiceApp {
         match result {
             Ok(()) => {
                 let message = format!("Exported window image: {}", path.display());
-                self.state.ui.toasts.info(ctx, &message);
+                self.state.ui.toasts.success(
+                    ctx,
+                    "Window image exported",
+                    format!("Saved to {}.", path.display()),
+                );
                 self.state.push_user_message(ConsoleMessage::info(message));
             }
             Err(error) => {
                 let message = format!("PNG export failed: {error}");
-                self.state.ui.toasts.error(ctx, &message);
+                self.state
+                    .ui
+                    .toasts
+                    .error_with_title(ctx, "PNG export failed", error.to_string());
                 self.state.push_user_message(ConsoleMessage::error(message));
             }
         }
@@ -91,13 +98,22 @@ impl RSpiceApp {
                 let message = format!(
                     "Viewer image download started: {filename} (confirm the browser accepted the download)"
                 );
-                self.state.ui.toasts.info(ctx, &message);
+                self.state.ui.toasts.success(
+                    ctx,
+                    "Viewer image download started",
+                    format!(
+                        "{filename} was handed to the browser. Confirm the download completed."
+                    ),
+                );
                 self.state
                     .push_user_message(super::ConsoleMessage::info(message));
             }
             Err(error) => {
                 let message = format!("PNG export failed: {error}");
-                self.state.ui.toasts.error(ctx, &message);
+                self.state
+                    .ui
+                    .toasts
+                    .error_with_title(ctx, "PNG export failed", error.to_string());
                 self.state
                     .push_user_message(super::ConsoleMessage::error(message));
             }

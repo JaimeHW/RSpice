@@ -80,7 +80,10 @@ pub fn render_pdk_settings_dialog(
     let mut should_rescan = false;
 
     let choice = Dialog::new("Models", "Model library paths", "Close")
-        .size(DialogSize::Lg)
+        .description(
+            "Manage model-library search paths and environment overrides, rescan sources, and inspect loaded models.",
+        )
+        .size(DialogSize::Manager)
         .secondary("Rescan")
         .hint("edits preview live · Close saves, Esc discards")
         .show(ctx, |ui| {
@@ -170,7 +173,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
 
     let mut action: Option<SourceAction> = None;
     egui::ScrollArea::vertical()
-        .id_salt("volta.pdk.sources")
+        .id_salt("rspice.pdk.sources")
         .max_height(sources_h)
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -216,7 +219,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
 
     let mut env_action: Option<EnvAction> = None;
     egui::ScrollArea::vertical()
-        .id_salt("volta.pdk.env")
+        .id_salt("rspice.pdk.env")
         .max_height(env_list_h)
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -311,7 +314,7 @@ fn source_row(
             let rect = ui.max_rect();
             // The whole-row interaction registers first; the checkbox, path
             // and remove zones added after it sit on top and win clicks.
-            let row_id = ui.id().with(("volta.pdk.source", idx));
+            let row_id = ui.id().with(("rspice.pdk.source", idx));
             let row_response = ui.interact(rect, row_id, Sense::click());
             row_response.widget_info(|| {
                 egui::WidgetInfo::selected(
@@ -557,7 +560,7 @@ fn env_row(
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             let rect = ui.max_rect();
-            let row_id = ui.id().with(("volta.pdk.env", index));
+            let row_id = ui.id().with(("rspice.pdk.env", index));
             let hovered = ui.rect_contains_pointer(rect);
             let hover = ui
                 .ctx()
@@ -818,7 +821,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
     let mut load: Option<PathBuf> = None;
     let scroll_h = PANE_HEIGHT - PANE_HEADER_H - FILE_ROW_H - PANE_FOOTER_H;
     egui::ScrollArea::vertical()
-        .id_salt("volta.pdk.files")
+        .id_salt("rspice.pdk.files")
         .max_height(scroll_h)
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -1085,13 +1088,13 @@ fn header_caption(ui: &mut Ui, text: &str) {
 // ---------------------------------------------------------------------------
 
 fn path_edit_id(idx: usize) -> egui::Id {
-    egui::Id::new(("volta.pdk.path_edit", idx))
+    egui::Id::new(("rspice.pdk.path_edit", idx))
 }
 
 fn add_path_id() -> egui::Id {
-    egui::Id::new("volta.pdk.add_path")
+    egui::Id::new("rspice.pdk.add_path")
 }
 
 fn env_name_id() -> egui::Id {
-    egui::Id::new("volta.pdk.env_name")
+    egui::Id::new("rspice.pdk.env_name")
 }

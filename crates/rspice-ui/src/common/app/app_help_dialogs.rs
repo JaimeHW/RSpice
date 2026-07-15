@@ -44,7 +44,10 @@ impl RSpiceApp {
 
         let license_for_body = license_line.clone();
         let choice = Dialog::new("RSpice", "About", "Close")
-            .size(DialogSize::Sm)
+            .description(
+                "Review the RSpice version, engine, matrix package, and local license status, or copy diagnostics.",
+            )
+            .size(DialogSize::Transaction)
             .ghost("Copy diagnostics")
             .show(ctx, |ui| {
                 let t = Tokens::get(ui.ctx());
@@ -89,7 +92,11 @@ impl RSpiceApp {
                     std::env::consts::ARCH,
                 );
                 ctx.copy_text(diagnostics);
-                self.state.ui.toasts.info(ctx, "Diagnostics copied");
+                self.state.ui.toasts.success(
+                    ctx,
+                    "Diagnostics copied",
+                    "Application and platform diagnostics were copied to the clipboard.",
+                );
             }
             _ => self.state.dialogs.about = false,
         }
@@ -107,7 +114,10 @@ impl RSpiceApp {
 
         let state = &mut self.state;
         let choice = Dialog::new("Results", "Waveform calculator", "Evaluate")
-            .size(DialogSize::Lg)
+            .description(
+                "Edit and evaluate a waveform expression against active simulation results, then plot or clear it.",
+            )
+            .size(DialogSize::Manager)
             .secondary("Plot result")
             .ghost("Clear")
             .hint(&hint)
@@ -179,7 +189,8 @@ impl RSpiceApp {
 
         let filter_text = &mut self.state.dialogs.shortcuts_filter;
         let choice = Dialog::new("Help", "Keyboard shortcuts", "Close")
-            .size(DialogSize::Md)
+            .description("Search available keyboard shortcuts grouped by command category.")
+            .size(DialogSize::Manager)
             .hint(&hint)
             .show(ctx, |ui| {
                 let t = Tokens::get(ui.ctx());

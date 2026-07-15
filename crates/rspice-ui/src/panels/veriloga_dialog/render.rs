@@ -59,7 +59,10 @@ pub fn render_veriloga_load_dialog(
     };
 
     let choice = Dialog::new("Library", "Compile Verilog-A", "Add to library")
-        .size(DialogSize::Md)
+        .description(
+            "Select or enter Verilog-A source, review compilation options and diagnostics, then add a successful module to the model library.",
+        )
+        .size(DialogSize::Transaction)
         .secondary(compile_label)
         .ghost("Cancel")
         .hint(&hint)

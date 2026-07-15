@@ -1,4 +1,4 @@
-use egui::Context;
+use egui::{Context, Popup};
 
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{Point, SymbolDocument, SymbolShape};
@@ -9,9 +9,13 @@ use crate::workbench::{
 };
 
 use super::{
-    ConsoleMessage, RSpiceApp,
+    AppState, ConsoleMessage, RSpiceApp,
     app_shortcuts::{ShortcutInputSnapshot, resolve_shortcuts},
 };
+
+fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
+    state.application_modal_open() || state.workbench.drawer.is_some() || Popup::is_any_open(ctx)
+}
 
 fn symbol_pin_is_contract(ports: &[crate::state::PortSpec], name: &str) -> bool {
     ports
@@ -77,7 +81,7 @@ fn symbol_shortcut_command_allowed(
 impl RSpiceApp {
     /// Handle keyboard shortcuts
     pub(super) fn handle_shortcuts(&mut self, ctx: &Context) {
-        if self.state.workbench.application_modal_open() || self.state.sim_setup.palette_open {
+        if shortcut_dispatch_blocked(&self.state, ctx) {
             return;
         }
         let has_focus = ctx.memory(|memory| memory.focused().is_some());
@@ -308,9 +312,6 @@ impl RSpiceApp {
                     .activate(crate::workbench::state::Workspace::Design);
                 self.state.workbench.navigator_visible = true;
                 self.state.workbench.focus_navigator_search = true;
-            }
-            ShortcutCommand::Preferences => {
-                self.state.dialogs.preferences_open = true;
             }
             ShortcutCommand::CommandPalette => {
                 self.state.dialogs.command_palette.open();
@@ -794,6 +795,31 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::MirrorSelectionVertical
             | ShortcutCommand::ObjectProperties
     )
+}
+
+#[cfg(test)]
+mod shortcut_ownership_tests {
+    use super::*;
+
+    #[test]
+    fn open_popup_blocks_application_shortcut_dispatch() {
+        let ctx = Context::default();
+        let state = AppState::default();
+        assert!(!shortcut_dispatch_blocked(&state, &ctx));
+
+        Popup::open_id(&ctx, egui::Id::new("shortcut-ownership-test"));
+
+        assert!(shortcut_dispatch_blocked(&state, &ctx));
+    }
+
+    #[test]
+    fn open_responsive_drawer_blocks_background_shortcut_dispatch() {
+        let ctx = Context::default();
+        let mut state = AppState::default();
+        state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+
+        assert!(shortcut_dispatch_blocked(&state, &ctx));
+    }
 }
 
 #[cfg(test)]

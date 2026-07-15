@@ -1,7 +1,7 @@
 //! License activation — the egui implementation of
 //! the product dialog pattern.
 //!
-//! Three phases on one VOLTA modal: Entry (textarea + field note),
+//! Three phases on one RSpice modal: Entry (textarea + field note),
 //! Error (same pane, note in `err`), Verified (summary card with the
 //! grant + feature chips + offline-storage note). Verification is fully
 //! offline; Activate stores the key locally and nothing phones home.
@@ -68,7 +68,8 @@ impl RSpiceApp {
 
         let state = &mut self.state;
         let choice = Dialog::new("License", "Enter license key", primary)
-            .size(DialogSize::Md)
+            .description("Paste, verify, and activate a license key locally on this machine.")
+            .size(DialogSize::Transaction)
             .secondary(secondary)
             .ghost("Cancel")
             .hint(&hint)
@@ -91,7 +92,7 @@ impl RSpiceApp {
                         .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                         .color(c.text_dim),
                 );
-                ui.add_space(tokens::SP_2);
+                ui.add_space(tokens::SP_4);
 
                 match state.dialogs.license_dialog.phase.clone() {
                     LicensePhase::Entry | LicensePhase::Error(_) => {
@@ -118,7 +119,7 @@ impl RSpiceApp {
                     }
                     LicensePhase::Verified(info) => {
                         summary_card(ui, &info);
-                        ui.add_space(tokens::SP_2);
+                        ui.add_space(tokens::SP_4);
                         ui.label(
                             egui::RichText::new(
                                 "key will be stored at %APPDATA%\\rspice\\license.key — yours to keep, works offline",
@@ -182,9 +183,16 @@ impl RSpiceApp {
             "License activated — {} until {}",
             info.tier, info.updates_until
         );
+        let toast_detail = format!(
+            "{} updates are available until {}.",
+            info.tier, info.updates_until
+        );
         self.state.license = Some(info);
         self.state.dialogs.license_dialog.open = false;
-        self.state.ui.toasts.info(ctx, &message);
+        self.state
+            .ui
+            .toasts
+            .success(ctx, "License activated", toast_detail);
         self.state.push_user_message(ConsoleMessage::info(message));
     }
 

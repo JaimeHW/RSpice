@@ -31,7 +31,10 @@ impl RSpiceApp {
 
         let dialogs = &mut self.state.dialogs;
         let choice = Dialog::new("Library", "New cell", "Create")
-            .size(DialogSize::Sm)
+            .description(
+                "Create a named cell in a writable library with the selected initial views.",
+            )
+            .size(DialogSize::Transaction)
             .ghost("Cancel")
             .primary_enabled(!dialogs.new_cell_name.trim().is_empty())
             .show(ctx, |ui| {

@@ -90,7 +90,10 @@ pub fn render_tabbed_property_dialog(
         .unwrap_or(0);
 
     let choice = Dialog::new("Schematic", &title, "OK")
-        .size(DialogSize::Md)
+        .description(
+            "Edit and validate this component's typed properties and optional PWL data before applying or reverting changes.",
+        )
+        .size(DialogSize::Transaction)
         .secondary("Apply")
         .ghost("Revert")
         .hint(&hint)

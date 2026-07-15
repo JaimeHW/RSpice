@@ -14,24 +14,96 @@ use super::super::commands::Command;
 use super::super::design_system::{card, heading, property_row, status_dot};
 use super::super::state::{ModelsPage, ProjectPage, Workspace};
 
+const PROJECT_RESPONSIVE_BREAKPOINT: f32 = 820.0;
+const PROJECT_CONTENT_MAX_WIDTH: f32 = 1180.0;
+const PROJECT_HORIZONTAL_GUTTER: f32 = 24.0;
+const PROJECT_GRID_GAP: f32 = 1.0;
+const PROJECT_HISTORY_MIN_WIDTH: f32 = 280.0;
+const PROJECT_PRIMARY_SHARE: f32 = 0.65;
+const STATUS_CARD_MIN_HEIGHT: f32 = 68.0;
+const STATUS_CARD_INNER_MARGIN: i8 = 12;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ProjectSurfaceLayout {
+    content_width: f32,
+    horizontal_inset: f32,
+}
+
+impl ProjectSurfaceLayout {
+    fn resolve(surface_width: f32) -> Self {
+        let surface_width = surface_width.max(0.0);
+        let content_width =
+            (surface_width - PROJECT_HORIZONTAL_GUTTER * 2.0).clamp(0.0, PROJECT_CONTENT_MAX_WIDTH);
+        Self {
+            content_width,
+            horizontal_inset: (surface_width - content_width) * 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DashboardLayout {
+    status_columns: usize,
+    status_card_width: f32,
+    project_columns: usize,
+    project_primary_width: f32,
+    project_history_width: f32,
+}
+
+impl DashboardLayout {
+    fn resolve(viewport_width: f32, content_width: f32) -> Self {
+        let content_width = content_width.max(0.0);
+        let compact = viewport_width <= PROJECT_RESPONSIVE_BREAKPOINT;
+        let status_columns = if compact { 2 } else { 4 };
+        let project_columns = if compact { 1 } else { 2 };
+        let status_card_width = content_width / status_columns as f32;
+
+        let (project_primary_width, project_history_width) = if compact {
+            (content_width, content_width)
+        } else {
+            let usable_width = (content_width - PROJECT_GRID_GAP).max(0.0);
+            let history_width = (usable_width * (1.0 - PROJECT_PRIMARY_SHARE))
+                .max(PROJECT_HISTORY_MIN_WIDTH.min(usable_width));
+            (usable_width - history_width, history_width)
+        };
+
+        Self {
+            status_columns,
+            status_card_width,
+            project_columns,
+            project_primary_width,
+            project_history_width,
+        }
+    }
+}
+
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
+        let surface = ProjectSurfaceLayout::resolve(ui.available_width());
         ScrollArea::vertical()
             .id_salt("workbench.project.surface")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.set_max_width(1180.0);
                 ui.add_space(22.0);
                 ui.horizontal(|ui| {
-                    ui.add_space(24.0);
-                    ui.vertical(|ui| match app.state.workbench.project_page {
-                        ProjectPage::Dashboard => dashboard(ui, app),
-                        ProjectPage::Configuration => configuration(ui, app),
-                        ProjectPage::Technology => technology(ui, app),
-                        ProjectPage::Dependencies => dependencies(ui, app),
-                        ProjectPage::Recovery => recovery(ui, app),
-                    });
-                    ui.add_space(24.0);
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.add_space(surface.horizontal_inset);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(surface.content_width, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(surface.content_width);
+                            match app.state.workbench.project_page {
+                                ProjectPage::Dashboard => dashboard(ui, app),
+                                ProjectPage::Configuration => configuration(ui, app),
+                                ProjectPage::Technology => technology(ui, app),
+                                ProjectPage::Dependencies => dependencies(ui, app),
+                                ProjectPage::Recovery => recovery(ui, app),
+                            }
+                        },
+                    );
+                    ui.add_space(surface.horizontal_inset);
                 });
                 ui.add_space(24.0);
             });
@@ -39,6 +111,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn dashboard(ui: &mut Ui, app: &mut RSpiceApp) {
+    let layout = DashboardLayout::resolve(ui.ctx().content_rect().width(), ui.available_width());
     let revision = app.state.workspace.project.revision().get();
     let project_name = app.state.workspace.project.display_name().to_owned();
     let sheet_count = app.state.workspace.schematic_buffers.len();
@@ -70,19 +143,21 @@ fn dashboard(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
     );
     ui.add_space(18.0);
-    engineering_status(ui, app);
+    engineering_status(ui, app, layout);
     ui.add_space(16.0);
 
-    let width = ((ui.available_width() - 16.0) / 2.0).max(300.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.set_width(width);
-        design_entry_points(ui, app);
-        ui.set_width(width);
-        recent_activity(ui, app);
-    });
+    project_grid(ui, app, layout);
 }
 
-fn engineering_status(ui: &mut Ui, app: &mut RSpiceApp) {
+struct StatusCardSpec {
+    label: &'static str,
+    value: String,
+    detail: String,
+    ok: bool,
+    command: Command,
+}
+
+fn engineering_status(ui: &mut Ui, app: &mut RSpiceApp, layout: DashboardLayout) {
     let t = Tokens::get(ui.ctx());
     let topology = app.state.schematic.topology_version();
     let checks_current = app.state.dialogs.drc_checked_version == topology;
@@ -114,56 +189,78 @@ fn engineering_status(ui: &mut Ui, app: &mut RSpiceApp) {
         .is_ok_and(|plan| plan.validation_issues().is_empty());
     let model_files = app.state.pdk_config.discovered_files.len();
     let model_errors = app.state.pdk_config.scan_errors.len();
-
-    ui.horizontal_wrapped(|ui| {
-        status_card(
-            ui,
-            "Schematic checks",
-            check_summary
+    let spec_count = app.state.workspace.specs.len();
+    let has_result_evidence = !app.state.simulation.runs.is_empty();
+    let cards = [
+        StatusCardSpec {
+            label: "Schematic checks",
+            value: check_summary
                 .map(|summary| format!("{} errors", summary.errors + summary.critical))
-                .as_deref()
-                .unwrap_or("stale"),
-            check_summary
+                .unwrap_or_else(|| "stale".to_owned()),
+            detail: check_summary
                 .map(|summary| format!("{} advisories", summary.warnings + summary.info))
-                .as_deref()
-                .unwrap_or("Run checks for this design revision"),
-            check_summary.is_some_and(|summary| summary.passed),
-            || Command::RunChecks.execute(app),
-        );
-        status_card(
-            ui,
-            "Simulation plan",
-            &format!("{enabled_analyses} analyses"),
-            &format!("{valid_analyses} validated"),
-            enabled_analyses > 0 && valid_analyses == enabled_analyses && graph_valid,
-            || Command::OpenWorkspace(Workspace::Simulate).execute(app),
-        );
-        let spec_count = app.state.workspace.specs.len();
-        status_card(
-            ui,
-            "Verification",
-            &format!("{spec_count} specifications"),
-            if app.state.simulation.runs.is_empty() {
-                "No result evidence yet"
+                .unwrap_or_else(|| "Run checks for this design revision".to_owned()),
+            ok: check_summary.is_some_and(|summary| summary.passed),
+            command: Command::RunChecks,
+        },
+        StatusCardSpec {
+            label: "Simulation plan",
+            value: format!("{enabled_analyses} analyses"),
+            detail: format!("{valid_analyses} validated"),
+            ok: enabled_analyses > 0 && valid_analyses == enabled_analyses && graph_valid,
+            command: Command::OpenWorkspace(Workspace::Simulate),
+        },
+        StatusCardSpec {
+            label: "Verification",
+            value: format!("{spec_count} specifications"),
+            detail: if has_result_evidence {
+                "Result evidence available".to_owned()
             } else {
-                "Result evidence available"
+                "No result evidence yet".to_owned()
             },
-            spec_count > 0 && !app.state.simulation.runs.is_empty(),
-            || Command::OpenWorkspace(Workspace::Verify).execute(app),
-        );
-        status_card(
-            ui,
-            "Model dependencies",
-            &format!("{model_files} files"),
-            if model_errors == 0 {
-                "Resolved"
+            ok: spec_count > 0 && has_result_evidence,
+            command: Command::OpenWorkspace(Workspace::Verify),
+        },
+        StatusCardSpec {
+            label: "Model dependencies",
+            value: format!("{model_files} files"),
+            detail: if model_errors == 0 {
+                "Resolved".to_owned()
             } else {
-                "Review scan diagnostics"
+                "Review scan diagnostics".to_owned()
             },
-            model_errors == 0,
-            || Command::ModelsPage(ModelsPage::Catalog).execute(app),
-        );
-    });
+            ok: model_errors == 0,
+            command: Command::ModelsPage(ModelsPage::Catalog),
+        },
+    ];
+    let mut requested_command = None;
+
+    egui::Grid::new("workbench.project.engineering-status")
+        .num_columns(layout.status_columns)
+        .spacing(egui::Vec2::ZERO)
+        .show(ui, |ui| {
+            for (index, card) in cards.iter().enumerate() {
+                let clicked = ui
+                    .allocate_ui_with_layout(
+                        egui::vec2(layout.status_card_width, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(layout.status_card_width);
+                            status_card(ui, card.label, &card.value, &card.detail, card.ok)
+                        },
+                    )
+                    .inner;
+                if clicked {
+                    requested_command = Some(card.command);
+                }
+                if (index + 1) % layout.status_columns == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+    if let Some(command) = requested_command {
+        command.execute(app);
+    }
     ui.painter().hline(
         ui.min_rect().x_range(),
         ui.cursor().top(),
@@ -171,37 +268,44 @@ fn engineering_status(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn status_card(
-    ui: &mut Ui,
-    label: &str,
-    value: &str,
-    detail: &str,
-    ok: bool,
-    action: impl FnOnce(),
-) {
+fn status_card(ui: &mut Ui, label: &str, value: &str, detail: &str, ok: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let response = egui::Frame::new()
         .fill(t.color.bg_panel)
         .stroke(egui::Stroke::new(1.0, t.color.border))
         .corner_radius(t.radius)
-        .inner_margin(egui::Margin::same(12))
+        .inner_margin(egui::Margin::same(STATUS_CARD_INNER_MARGIN))
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                ui.set_min_width(230.0);
-                ui.label(
-                    egui::RichText::new(label.to_uppercase())
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_dim),
+                let content_width = ui.available_width().max(0.0);
+                ui.set_min_width(content_width);
+                ui.set_max_width(content_width);
+                ui.set_min_height(
+                    STATUS_CARD_MIN_HEIGHT - f32::from(STATUS_CARD_INNER_MARGIN) * 2.0,
                 );
-                ui.label(
-                    egui::RichText::new(value)
-                        .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
-                        .color(if ok { t.color.ok } else { t.color.warn }),
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(label.to_uppercase())
+                            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                            .color(t.color.text_dim),
+                    )
+                    .truncate(),
                 );
-                ui.label(
-                    egui::RichText::new(detail)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(value)
+                            .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                            .color(if ok { t.color.ok } else { t.color.warn }),
+                    )
+                    .truncate(),
+                );
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(detail)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                    )
+                    .truncate(),
                 );
             });
         })
@@ -215,12 +319,52 @@ fn status_card(
         )
     });
     theme::paint_focus_ring(ui, &response, response.rect);
-    if response
+    response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
-    {
-        action();
+}
+
+fn project_grid(ui: &mut Ui, app: &mut RSpiceApp, layout: DashboardLayout) {
+    if layout.project_columns == 1 {
+        ui.allocate_ui_with_layout(
+            egui::vec2(layout.project_primary_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(layout.project_primary_width);
+                design_entry_points(ui, app);
+            },
+        );
+        ui.add_space(PROJECT_GRID_GAP);
+        ui.allocate_ui_with_layout(
+            egui::vec2(layout.project_history_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(layout.project_history_width);
+                recent_activity(ui, app);
+            },
+        );
+        return;
     }
+
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = PROJECT_GRID_GAP;
+        ui.allocate_ui_with_layout(
+            egui::vec2(layout.project_primary_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(layout.project_primary_width);
+                design_entry_points(ui, app);
+            },
+        );
+        ui.allocate_ui_with_layout(
+            egui::vec2(layout.project_history_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(layout.project_history_width);
+                recent_activity(ui, app);
+            },
+        );
+    });
 }
 
 fn design_entry_points(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -612,12 +756,24 @@ fn header_with_actions(
     actions: impl FnOnce(&mut Ui, &mut RSpiceApp),
     app: &mut RSpiceApp,
 ) {
+    if project_header_stacks(ui.ctx().content_rect().width()) {
+        ui.vertical(|ui| {
+            heading(ui, eyebrow, title, description);
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| actions(ui, app));
+        });
+        return;
+    }
     ui.horizontal_wrapped(|ui| {
         ui.vertical(|ui| heading(ui, eyebrow, title, description));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             actions(ui, app);
         });
     });
+}
+
+fn project_header_stacks(viewport_width: f32) -> bool {
+    viewport_width <= PROJECT_RESPONSIVE_BREAKPOINT
 }
 
 fn plural(count: usize) -> &'static str {
@@ -631,4 +787,71 @@ fn muted(ui: &mut Ui, text: &str) {
             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
             .color(t.color.text_faint),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!((actual - expected).abs() <= 0.001, "{actual} != {expected}");
+    }
+
+    #[test]
+    fn dashboard_columns_switch_at_the_exact_mockup_breakpoint() {
+        let compact = DashboardLayout::resolve(PROJECT_RESPONSIVE_BREAKPOINT, 772.0);
+        let wide = DashboardLayout::resolve(PROJECT_RESPONSIVE_BREAKPOINT + 0.01, 772.0);
+
+        assert_eq!(compact.status_columns, 2);
+        assert_eq!(compact.project_columns, 1);
+        assert_close(compact.status_card_width, 386.0);
+        assert_close(compact.project_primary_width, 772.0);
+        assert_close(compact.project_history_width, 772.0);
+
+        assert_eq!(wide.status_columns, 4);
+        assert_eq!(wide.project_columns, 2);
+        assert_close(wide.status_card_width, 193.0);
+        assert_close(
+            wide.project_primary_width + PROJECT_GRID_GAP + wide.project_history_width,
+            772.0,
+        );
+        assert_close(wide.project_history_width, PROJECT_HISTORY_MIN_WIDTH);
+        assert!(project_header_stacks(PROJECT_RESPONSIVE_BREAKPOINT));
+        assert!(!project_header_stacks(PROJECT_RESPONSIVE_BREAKPOINT + 0.01));
+    }
+
+    #[test]
+    fn responsive_geometry_never_requests_width_outside_the_surface() {
+        for surface_width in [0.0, 20.0, 820.0, 1600.0] {
+            let surface = ProjectSurfaceLayout::resolve(surface_width);
+            assert!(surface.content_width >= 0.0);
+            assert!(surface.horizontal_inset >= 0.0);
+            assert_close(
+                surface.horizontal_inset * 2.0 + surface.content_width,
+                surface_width,
+            );
+        }
+
+        for (viewport_width, content_width) in [
+            (390.0, 342.0),
+            (820.0, 772.0),
+            (821.0, 773.0),
+            (1440.0, 1180.0),
+        ] {
+            let layout = DashboardLayout::resolve(viewport_width, content_width);
+            assert_close(
+                layout.status_card_width * layout.status_columns as f32,
+                content_width,
+            );
+            if layout.project_columns == 1 {
+                assert_close(layout.project_primary_width, content_width);
+                assert_close(layout.project_history_width, content_width);
+            } else {
+                assert_close(
+                    layout.project_primary_width + PROJECT_GRID_GAP + layout.project_history_width,
+                    content_width,
+                );
+            }
+        }
+    }
 }

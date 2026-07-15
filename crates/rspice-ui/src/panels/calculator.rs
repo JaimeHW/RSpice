@@ -177,7 +177,7 @@ impl CalculatorPanel {
 
     /// Stable id for the expression editor (caret state lives in egui memory).
     fn editor_id(ui: &Ui) -> egui::Id {
-        ui.id().with("volta.calc.editor")
+        ui.id().with("rspice.calc.editor")
     }
 
     /// The dialog body. The footer (Evaluate / Plot result / Clear) is the
@@ -305,7 +305,7 @@ impl CalculatorPanel {
         });
 
         egui::ScrollArea::vertical()
-            .id_salt("volta.calc.signals")
+            .id_salt("rspice.calc.signals")
             .max_height(PANE_HEIGHT - PANE_HEADER_H - PANE_FOOTER_H)
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -384,7 +384,7 @@ impl CalculatorPanel {
         });
 
         egui::ScrollArea::vertical()
-            .id_salt("volta.calc.functions")
+            .id_salt("rspice.calc.functions")
             .max_height(PANE_HEIGHT - PANE_HEADER_H)
             .auto_shrink([false, false])
             .show(ui, |ui| {

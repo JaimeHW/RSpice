@@ -1,4 +1,4 @@
-//! Save-changes confirmation — the template instance of the VOLTA modal
+//! Save-changes confirmation — the template instance of the RSpice modal
 //! grammar: small surface, one sentence,
 //! three explicit verbs. Ghost = Cancel, secondary = Don't save,
 //! primary = Save.
@@ -37,7 +37,10 @@ impl RSpiceApp {
             "Browser file operation",
             "Cancel operation",
         )
-        .size(DialogSize::Sm)
+        .description(
+            "Review or cancel the pending browser file operation while protecting newer work from a late response.",
+        )
+        .size(DialogSize::Transaction)
         .show(ctx, |ui| {
             let t = Tokens::get(ui.ctx());
             ui.label(
@@ -75,7 +78,10 @@ impl RSpiceApp {
             );
 
         let choice = Dialog::new("Schematic", title, "Save")
-            .size(DialogSize::Sm)
+            .description(
+                "Choose whether to save the current schematic's unsaved changes before continuing.",
+            )
+            .size(DialogSize::Transaction)
             .secondary("Don't save")
             .ghost("Cancel")
             .show(ctx, |ui| {
@@ -112,7 +118,10 @@ impl RSpiceApp {
                     "Revert active document",
                     "Revert document",
                 )
-                .size(DialogSize::Sm)
+                .description(
+                    "Discard explicit working changes in the active document while leaving other documents unchanged.",
+                )
+                .size(DialogSize::Transaction)
                 .ghost("Cancel")
                 .show(ctx, |ui| {
                     let t = Tokens::get(ui.ctx());
@@ -152,7 +161,10 @@ impl RSpiceApp {
                     "Close project"
                 };
                 let mut dialog = Dialog::new("PROJECT · SAFE SHUTDOWN", "Close project", primary)
-                    .size(DialogSize::Sm)
+                    .description(
+                        "Review unsaved documents and active local simulation state before closing this project.",
+                    )
+                    .size(DialogSize::Transaction)
                     .ghost("Cancel")
                     .primary_enabled(!running);
                 if dirty > 0 && !running {

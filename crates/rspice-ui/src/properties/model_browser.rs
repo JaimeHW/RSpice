@@ -203,13 +203,19 @@ pub fn render_model_browser(
         manager.library_count(),
         manager.total_model_count()
     );
+    let description = if state.browse_only {
+        "Search loaded model libraries and inspect device-model details."
+    } else {
+        "Search loaded model libraries, inspect device-model details, and apply a compatible model to the selected device."
+    };
 
     let mut dialog = Dialog::new(
         "Library",
         "Model browser",
         if state.browse_only { "Close" } else { "Apply" },
     )
-    .size(DialogSize::Lg)
+    .description(description)
+    .size(DialogSize::Manager)
     .hint(&hint);
     if !state.browse_only {
         dialog = dialog

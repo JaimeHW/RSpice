@@ -93,7 +93,7 @@ pub enum Icon {
     ChevronDown,
     /// Close (×).
     Close,
-    /// Application brand mark (the VOLTA "V").
+    /// Application brand mark (the RSpice forward waveform).
     Brand,
 }
 
@@ -306,8 +306,7 @@ impl Icon {
                 Line(&[[6.0, 6.0], [18.0, 18.0]]),
                 Line(&[[18.0, 6.0], [6.0, 18.0]]),
             ],
-            // Authored on a 16-grid in the design; scaled up to the 24-grid.
-            Icon::Brand => &[Line(&[[3.0, 3.0], [12.0, 21.0], [21.0, 3.0]])],
+            Icon::Brand => &[Line(&[[7.0, 8.0], [17.0, 12.0], [7.0, 16.0]])],
         }
     }
 

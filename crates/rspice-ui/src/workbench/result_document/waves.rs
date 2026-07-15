@@ -469,7 +469,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let maximized = state.ui.results.maximized_strip.is_some();
 
     egui::ScrollArea::vertical()
-        .id_salt("volta.results.strips")
+        .id_salt("rspice.results.strips")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);

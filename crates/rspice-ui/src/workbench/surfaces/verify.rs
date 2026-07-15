@@ -332,7 +332,9 @@ fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
             });
         }
         if ui.button("Configure reliability analysis…").clicked() {
-            app.state.workbench.workspace = super::super::state::Workspace::Simulate;
+            app.state
+                .workbench
+                .activate(super::super::state::Workspace::Simulate);
             let kind = crate::simulation::plan::AnalysisKind::Reliability;
             let existing = app
                 .state

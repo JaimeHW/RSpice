@@ -1,14 +1,12 @@
 //! Context inspector with authoritative object and provenance details.
 
-use egui::{Align, Layout, ScrollArea, Ui};
+use egui::{ScrollArea, Ui};
 
 use crate::common::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::super::design_system::{
-    WorkbenchIcon, icon_button, property_row, section_header, status_dot,
-};
+use super::super::design_system::{property_row, section_header, status_dot};
 use super::super::state::Workspace;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -29,7 +27,6 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    let is_drawer = app.state.workbench.drawer == Some(super::super::state::Drawer::Inspector);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
         ui.label(
@@ -43,20 +40,6 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
             .color(t.color.text),
         );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if is_drawer
-                && icon_button(
-                    ui,
-                    WorkbenchIcon::Close,
-                    "Close inspector",
-                    false,
-                    egui::vec2(30.0, 30.0),
-                )
-                .clicked()
-            {
-                app.state.workbench.dismiss_inspector();
-            }
-        });
     });
     ui.add_space(4.0);
 }

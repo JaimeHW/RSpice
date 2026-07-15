@@ -314,16 +314,28 @@ fn waveform_visible(state: &AppState, name: &str) -> bool {
 fn toggle_probe_with_feedback(ui: &Ui, state: &mut AppState, name: &str, display: &str) {
     let toggled = state.simulation.toggle_waveform_visibility(name);
     if toggled {
-        let message = if waveform_visible(state, name) {
+        let visible = waveform_visible(state, name);
+        let message = if visible {
             format!("{display} added to plot")
         } else {
             format!("{display} removed from plot")
         };
-        state.ui.toasts.info(ui.ctx(), &message);
+        state.ui.toasts.success(
+            ui.ctx(),
+            if visible {
+                "Trace shown"
+            } else {
+                "Trace hidden"
+            },
+            format!("{message}."),
+        );
         state.push_user_message(ConsoleMessage::info(message));
     } else {
         let message = format!("No waveform for {display} — run the simulation first");
-        state.ui.toasts.warn(ui.ctx(), &message);
+        state
+            .ui
+            .toasts
+            .warn_with_title(ui.ctx(), "Waveform unavailable", format!("{message}."));
         state.push_user_message(ConsoleMessage::warning(message));
     }
 }
@@ -340,7 +352,11 @@ fn handle_probe_click(
             log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
             if net_name == "0" {
-                state.ui.toasts.info(ui.ctx(), "Ground — 0 V reference");
+                state.ui.toasts.success(
+                    ui.ctx(),
+                    "Ground reference selected",
+                    "Node 0 is the 0 V reference.",
+                );
                 state.push_user_message(ConsoleMessage::info(
                     "Ground node: 0V reference".to_string(),
                 ));
@@ -359,8 +375,9 @@ fn handle_probe_click(
                 "Probe: wire at {:?} not in netlist (regenerate netlist?)",
                 grid_pos
             );
-            state.ui.toasts.warn(
+            state.ui.toasts.warn_with_title(
                 ui.ctx(),
+                "Wire is not in the netlist",
                 "Wire not in the netlist — run the simulation to update",
             );
             state.push_user_message(ConsoleMessage::warning(

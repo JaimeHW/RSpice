@@ -6,16 +6,23 @@
 
 use std::time::Duration;
 
+pub mod availability;
+pub mod browser_navigation;
+pub mod capability_workflow;
 pub mod commands;
 pub mod design_system;
+mod feature_availability;
+pub mod feature_availability_data;
+pub mod navigation;
 pub mod netlist_document;
 pub mod result_document;
 pub mod state;
+pub mod surface_catalog;
+pub mod surface_route;
 
 mod chrome;
 mod docks;
 mod layout;
-pub(crate) mod menu;
 mod notification_center;
 mod preflight;
 mod project_launcher;
@@ -23,6 +30,15 @@ mod recovery;
 mod session;
 mod surfaces;
 
+pub use availability::{
+    SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
+};
+pub use capability_workflow::{
+    CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
+};
+pub use navigation::{
+    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
+};
 pub use result_document::{ResultViewer, ResultsState};
 pub use session::{
     GridStyle, InspectorEdit, SymbolClipboard, SymbolDocumentSnapshot, SymbolSelection, SymbolTool,
@@ -30,7 +46,12 @@ pub use session::{
     mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
     symbol_shape_bounds,
 };
-pub use state::WorkbenchState;
+pub use state::{EngineeringProfile, WorkbenchState};
+pub use surface_catalog::{
+    CanonicalTier, NonPrimarySurface, ReleaseStatus, SurfaceArchetype, SurfaceId,
+    SurfaceIdParseError, SurfaceMetadata,
+};
+pub use surface_route::{SurfaceRoute, SurfaceRouteParseError};
 
 use egui::{CentralPanel, Context, Frame};
 
@@ -96,7 +117,6 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     project_launcher::show(ctx, app);
     preflight::show(ctx, app);
     notification_center::show(ctx, app);
-
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
     if std::mem::take(&mut app.state.ui.export_csv_requested) {
@@ -110,8 +130,18 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
-    app.state.ui.toasts.show(ctx);
+    app.state
+        .ui
+        .toasts
+        .show(ctx, layout.title_bar_height, layout.toolbar_height);
     apply_platform_full_screen_request(ctx, app);
+}
+
+/// Render route-owned overlays after application dialogs so a workflow opened
+/// from Preferences is the top modal while the originating dialog remains
+/// retained underneath and can be restored on Close.
+pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
+    feature_availability::show(ctx, app);
 }
 
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {

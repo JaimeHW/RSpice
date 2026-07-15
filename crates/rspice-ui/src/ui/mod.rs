@@ -1,4 +1,4 @@
-//! The VOLTA design system.
+//! The RSpice design system.
 //!
 //! A self-contained visual foundation for the application: design tokens,
 //! color palettes, embedded fonts, vector icons, and the widget library.
@@ -7,7 +7,7 @@
 //!
 //! # Structure
 //!
-//! - [`palette`] — generated color tables (3 directions × dark/light)
+//! - [`palette`] — mockup-governed Instrument dark/light semantic colors
 //! - [`tokens`] — token resolution ([`tokens::Tokens`]) and metric scales
 //! - [`theme`] — user-facing theme selection + egui style mapping
 //! - [`fonts`] — embedded IBM Plex faces and weighted families
@@ -24,5 +24,5 @@ pub mod theme;
 pub mod tokens;
 pub mod widgets;
 
-pub use theme::{FontWeight, Theme};
+pub use theme::{EngineeringCanvasTheme, FontWeight, Theme};
 pub use tokens::{Density, Direction, Mode, Tokens};

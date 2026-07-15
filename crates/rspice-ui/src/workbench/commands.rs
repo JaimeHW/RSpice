@@ -8,7 +8,9 @@ use crate::common::RSpiceApp;
 use crate::common::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::state::{ComponentType, Tool};
 
-use super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
+use super::state::{
+    ModelsPage, ProjectLauncherFilter, ProjectPage, VerificationPage, WorkbenchState, Workspace,
+};
 
 mod registry;
 
@@ -84,6 +86,10 @@ pub enum Command {
     ToggleNavigator,
     ToggleInspector,
     ToggleConsole,
+    OpenConsole,
+    OpenProblems,
+    ToggleConsoleMaximized,
+    ClearConsole,
     ToggleFocusMode,
     ResetLayout,
     PreviousWorkspace,
@@ -124,6 +130,8 @@ pub enum Command {
     CommandPalette,
     KeyboardShortcuts,
     License,
+    FeatureAvailability,
+    InteroperabilityMatrix,
     About,
 }
 
@@ -237,6 +245,15 @@ impl Command {
                 spec("toggle-inspector", "Toggle inspector", "Ctrl+I", "Window")
             }
             Self::ToggleConsole => spec("console", "Toggle console", "Ctrl+J", "Window"),
+            Self::OpenConsole => spec("open-console", "Open console", "", "Window"),
+            Self::OpenProblems => spec("open-problems", "Open Problems", "", "Window"),
+            Self::ToggleConsoleMaximized => spec(
+                "console-maximize",
+                "Maximize or restore console",
+                "",
+                "Window",
+            ),
+            Self::ClearConsole => spec("console-clear", "Clear console output", "", "Window"),
             Self::ToggleFocusMode => spec(
                 "toggle-focus-mode",
                 "Focus workspace",
@@ -403,6 +420,18 @@ impl Command {
             }
             Self::KeyboardShortcuts => spec("command-reference", "Command reference", "", "Help"),
             Self::License => spec("license-activation", "License and activation…", "", "Help"),
+            Self::FeatureAvailability => spec(
+                "feature-availability",
+                "Product capability and platform matrix…",
+                "",
+                "Help",
+            ),
+            Self::InteroperabilityMatrix => spec(
+                "interoperability-matrix",
+                "Interoperability and format matrix…",
+                "",
+                "Help",
+            ),
             Self::About => spec("about", "About RSpice", "", "Help"),
         }
     }
@@ -415,6 +444,9 @@ impl Command {
             return false;
         }
         match self {
+            Self::OpenWorkspace(workspace) => {
+                workspace_available(state.project_lifecycle.project_open, workspace)
+            }
             Self::Save | Self::SaveAs => state.project_lifecycle.project_open,
             Self::SaveAll => {
                 state.project_lifecycle.project_open
@@ -486,9 +518,15 @@ impl Command {
                         && state.schematic.selection.single_component().is_some()
                 }
             }
-            Self::ZoomIn | Self::ZoomOut | Self::ZoomFit | Self::ZoomOneToOne => {
+            Self::ZoomFit => {
+                active_symbol_editor(app)
+                    || active_schematic_editor(app)
+                    || state.workbench.workspace == Workspace::Results
+            }
+            Self::ZoomIn | Self::ZoomOut | Self::ZoomOneToOne => {
                 active_symbol_editor(app) || active_schematic_editor(app)
             }
+            Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
             Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
             Self::PlaceInstance
@@ -516,6 +554,9 @@ impl Command {
             Self::StopSimulation => stop_simulation_enabled(state.simulation.is_running),
             Self::ClearResults => state.simulation.has_results(),
             Self::ExportWaveformsCsv => state.simulation.has_results(),
+            Self::ClearConsole => {
+                !state.log_buffer.is_empty() || !state.script_console.history.is_empty()
+            }
             _ => true,
         }
     }
@@ -531,10 +572,13 @@ impl Command {
             return;
         }
         match self {
-            Self::OpenWorkspace(workspace) => activate_workspace(app, workspace),
-            Self::ProjectLauncher | Self::RecentProjects => {
-                app.state.workbench.open_project_launcher()
+            Self::OpenWorkspace(workspace) => {
+                if workspace_available(app.state.project_lifecycle.project_open, workspace) {
+                    activate_workspace(app, workspace);
+                }
             }
+            Self::ProjectLauncher => app.state.workbench.open_project_launcher(),
+            Self::RecentProjects => open_recent_projects(&mut app.state.workbench),
             Self::NewProject => file_action(app, FileMenuAction::NewProject),
             Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
             Self::Save => file_action(app, FileMenuAction::Save),
@@ -660,7 +704,19 @@ impl Command {
                 app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
                 app.state.workbench.focus_navigator_search = true;
             }
-            Self::Preferences => app.state.dialogs.preferences_open = true,
+            Self::Preferences => {
+                let route = super::SurfaceRoute::surface(super::SurfaceId::Preferences);
+                if let Err(error) = app
+                    .state
+                    .workbench
+                    .navigate(route, super::RouteTransitionSource::User)
+                {
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            error.to_string(),
+                        ));
+                }
+            }
             Self::ZoomIn => {
                 if active_symbol_editor(app) {
                     app.state.ui.symbol.zoom = (app.state.ui.symbol.zoom * 1.25).min(16.0);
@@ -676,7 +732,10 @@ impl Command {
                 }
             }
             Self::ZoomFit => {
-                if active_symbol_editor(app) {
+                if app.state.workbench.workspace == Workspace::Results {
+                    let viewer = app.state.ui.results.viewer;
+                    app.state.ui.results.reset_plot_view(viewer, 0);
+                } else if active_symbol_editor(app) {
                     app.state.ui.symbol.needs_fit = true;
                 } else {
                     app.state.schematic.needs_fit = true;
@@ -695,7 +754,11 @@ impl Command {
                 app.state.workbench.full_screen = enabled;
                 app.state.ui.request_full_screen(enabled);
             }
-            Self::ResetActiveView => reset_active_view(app),
+            Self::ResetActiveView => {
+                if reset_active_view_available(app.state.workbench.workspace) {
+                    reset_active_view(app);
+                }
+            }
             Self::ToggleNavigator => {
                 if app.state.workbench.navigator_visible {
                     app.state.workbench.dismiss_navigator();
@@ -711,7 +774,35 @@ impl Command {
                 }
             }
             Self::ToggleConsole => {
-                app.state.workbench.console_visible = !app.state.workbench.console_visible
+                if app.state.workbench.focus_mode {
+                    app.state.workbench.focus_mode = false;
+                    app.state.workbench.console_visible = true;
+                } else {
+                    app.state.workbench.console_visible = !app.state.workbench.console_visible;
+                }
+                if !app.state.workbench.console_visible {
+                    app.state.workbench.console_maximized = false;
+                }
+            }
+            Self::OpenProblems => {
+                app.state.workbench.focus_mode = false;
+                app.state.workbench.console_visible = true;
+                app.state.workbench.console_maximized = false;
+                app.state.workbench.console_page = super::state::ConsolePage::Problems;
+            }
+            Self::OpenConsole => {
+                app.state.workbench.focus_mode = false;
+                app.state.workbench.console_visible = true;
+                app.state.workbench.console_maximized = false;
+            }
+            Self::ToggleConsoleMaximized => {
+                app.state.workbench.focus_mode = false;
+                app.state.workbench.console_maximized = !app.state.workbench.console_maximized;
+                app.state.workbench.console_visible = true;
+            }
+            Self::ClearConsole => {
+                app.state.clear_primary_log();
+                app.state.script_console.history.clear();
             }
             Self::ToggleFocusMode => {
                 app.state.workbench.focus_mode = !app.state.workbench.focus_mode;
@@ -864,6 +955,34 @@ impl Command {
             Self::CommandPalette => app.state.dialogs.command_palette.open(),
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
             Self::License => app.open_license_dialog(),
+            Self::FeatureAvailability => {
+                let route = super::SurfaceRoute::surface(super::SurfaceId::FeatureAvailability);
+                if let Err(error) = app
+                    .state
+                    .workbench
+                    .navigate(route, super::RouteTransitionSource::User)
+                {
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            error.to_string(),
+                        ));
+                }
+            }
+            Self::InteroperabilityMatrix => {
+                let route = super::SurfaceRoute::capability_workflow(
+                    super::CapabilityWorkflowId::InteroperabilityMatrix,
+                );
+                if let Err(error) = app
+                    .state
+                    .workbench
+                    .navigate(route, super::RouteTransitionSource::User)
+                {
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            error.to_string(),
+                        ));
+                }
+            }
             Self::About => app.state.dialogs.about = true,
         }
     }
@@ -880,6 +999,10 @@ const fn spec(
 
 fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
     app.state.workbench.activate(workspace);
+}
+
+const fn workspace_available(project_open: bool, workspace: Workspace) -> bool {
+    project_open || matches!(workspace, Workspace::Project)
 }
 
 fn active_symbol_editor(app: &RSpiceApp) -> bool {
@@ -900,6 +1023,15 @@ fn active_schematic_editor(app: &RSpiceApp) -> bool {
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     activate_workspace(app, Workspace::Design);
     app.state.schematic.tool = tool;
+}
+
+fn open_recent_projects(workbench: &mut WorkbenchState) {
+    workbench.open_project_launcher();
+    workbench.project_launcher_filter = ProjectLauncherFilter::Recent;
+}
+
+const fn reset_active_view_available(workspace: Workspace) -> bool {
+    !matches!(workspace, Workspace::Project)
 }
 
 fn reset_active_view(app: &mut RSpiceApp) {
@@ -967,6 +1099,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::RevertActiveDocument,
     Command::CloseActiveDocument,
     Command::CloseProject,
+    Command::ExportSchematicSvg,
+    Command::Exit,
     Command::Undo,
     Command::Redo,
     Command::Cut,
@@ -993,9 +1127,14 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomFit,
     Command::CycleGrid,
     Command::ToggleFullScreen,
+    Command::ResetActiveView,
     Command::ToggleNavigator,
     Command::ToggleInspector,
     Command::ToggleConsole,
+    Command::OpenConsole,
+    Command::OpenProblems,
+    Command::ToggleConsoleMaximized,
+    Command::ClearConsole,
     Command::ToggleFocusMode,
     Command::PlaceInstance,
     Command::PlaceWire,
@@ -1020,6 +1159,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AutomationConsole,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
+    Command::FeatureAvailability,
+    Command::InteroperabilityMatrix,
     Command::About,
     Command::Cancel,
 ];
@@ -1072,6 +1213,29 @@ mod tests {
         assert_eq!(Command::ToggleFullScreen.spec().id, "full-screen");
         assert_eq!(Command::GenerateNetlist.spec().id, "generated-netlist");
         assert_eq!(Command::ToggleConsole.spec().id, "console");
+        assert_eq!(Command::OpenConsole.spec().id, "open-console");
+        assert_eq!(Command::OpenProblems.spec().id, "open-problems");
+        assert_eq!(
+            Command::ToggleConsoleMaximized.spec().id,
+            "console-maximize"
+        );
+        assert_eq!(Command::ClearConsole.spec().id, "console-clear");
+        assert_eq!(
+            Command::FeatureAvailability.spec(),
+            CommandSpec {
+                id: "feature-availability",
+                label: "Product capability and platform matrix…",
+                group: "Help",
+            }
+        );
+        assert_eq!(
+            Command::InteroperabilityMatrix.spec(),
+            CommandSpec {
+                id: "interoperability-matrix",
+                label: "Interoperability and format matrix…",
+                group: "Help",
+            }
+        );
         assert_eq!(
             Command::OpenWorkspace(Workspace::Results).spec().id,
             "results"
@@ -1095,10 +1259,11 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_reset_and_document_cycle_actions_are_not_discoverable() {
+    fn only_exactly_implemented_reset_actions_are_discoverable() {
         let searchable = command_catalog().collect::<Vec<_>>();
+        assert!(COMMAND_REGISTRY.contains(&Command::ResetActiveView));
+        assert!(searchable.contains(&Command::ResetActiveView));
         for command in [
-            Command::ResetActiveView,
             Command::ResetLayout,
             Command::PreviousWorkspace,
             Command::NextWorkspace,
@@ -1143,5 +1308,50 @@ mod tests {
             stop_simulation_enabled(true),
             crate::simulation::execution::execution_target_supports_cancellation()
         );
+    }
+
+    #[test]
+    fn closed_projects_expose_only_the_project_workspace() {
+        assert!(workspace_available(false, Workspace::Project));
+        for workspace in Workspace::ALL {
+            if workspace != Workspace::Project {
+                assert!(!workspace_available(false, workspace));
+            }
+            assert!(workspace_available(true, workspace));
+        }
+    }
+
+    #[test]
+    fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
+        let mut workbench = WorkbenchState::default();
+        workbench.project_launcher_filter = ProjectLauncherFilter::Pinned;
+        workbench.project_launcher_open = false;
+        workbench.focus_project_launcher_search = false;
+
+        open_recent_projects(&mut workbench);
+
+        assert!(workbench.project_launcher_open);
+        assert!(workbench.focus_project_launcher_search);
+        assert_eq!(
+            workbench.project_launcher_page,
+            crate::workbench::state::ProjectLauncherPage::Projects
+        );
+        assert_eq!(
+            workbench.project_launcher_filter,
+            ProjectLauncherFilter::Recent
+        );
+    }
+
+    #[test]
+    fn reset_active_view_is_unavailable_only_for_the_no_op_project_workspace() {
+        assert!(!reset_active_view_available(Workspace::Project));
+        for workspace in Workspace::ALL {
+            if workspace != Workspace::Project {
+                assert!(
+                    reset_active_view_available(workspace),
+                    "{workspace:?} has implemented reset behavior"
+                );
+            }
+        }
     }
 }
