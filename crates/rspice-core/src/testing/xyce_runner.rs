@@ -20,8 +20,8 @@ use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    ParametricValue, ParseError, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
+    SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -661,6 +661,25 @@ struct XyceBaselineFamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceSubcktParameterResolutionFamilyContract {
+    family: String,
+    anchor_path: PathBuf,
+    error_path: PathBuf,
+    baseline_path: PathBuf,
+    valid_paths: Vec<PathBuf>,
+    role: XyceSubcktParameterResolutionRole,
+    target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSubcktParameterResolutionRole {
+    Anchor,
+    Baseline,
+    Member,
+    ExpectedError,
+}
+
+#[derive(Debug, Clone)]
 struct XyceSteppedIcReferenceContract {
     family: String,
     owner_path: PathBuf,
@@ -771,11 +790,29 @@ enum XyceStrictDcFamilySnapshot {
     DcAnalysisExpression(XyceDcAnalysisExpressionSnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     SubcktParameterPrecedence(XyceSubcktParameterPrecedenceSnapshot),
+    SubcktParameterResolution(XyceSubcktParameterResolutionSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceSubcktParameterPrecedenceSnapshot {
     elements: Vec<XyceRelationalElementFingerprint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceSubcktParameterResolutionSnapshot {
+    representation: XyceSubcktParameterResolutionRepresentation,
+    parameter_name: String,
+    flattened_elements: Vec<XyceRelationalElementFingerprint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum XyceSubcktParameterResolutionRepresentation {
+    FormalDefaultAndInstanceOverride,
+    ImplicitInstanceBinding,
+    GlobalBinding,
+    InstanceOverridesGlobal,
+    UnusedInstanceBinding,
+    UndefinedBinding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -871,6 +908,7 @@ enum XyceBaselineFamilyKind {
     Supernode,
     ScopedModel,
     SubcktParameterPrecedence,
+    SubcktParameterResolution,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -932,6 +970,7 @@ impl XyceBaselineFamilyKind {
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
             Self::SubcktParameterPrecedence => "SUBCKT_PARAMETER_PRECEDENCE",
+            Self::SubcktParameterResolution => "SUBCKT_PARAMETER_RESOLUTION",
         }
     }
 
@@ -949,6 +988,7 @@ impl XyceBaselineFamilyKind {
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
             Self::SubcktParameterPrecedence => "subckt_parameter_precedence_wrapper",
+            Self::SubcktParameterResolution => "subckt_parameter_resolution_family_wrapper",
         }
     }
 
@@ -966,6 +1006,7 @@ impl XyceBaselineFamilyKind {
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
             Self::SubcktParameterPrecedence => "subckt_parameter_precedence_baseline",
+            Self::SubcktParameterResolution => "subckt_parameter_resolution_family_baseline",
         }
     }
 
@@ -990,7 +1031,8 @@ impl XyceBaselineFamilyKind {
             | Self::PassiveResPrimaryValue
             | Self::Subckt
             | Self::Supernode
-            | Self::SubcktParameterPrecedence => XyceStaticTranPlanPurpose::RelationalFamily,
+            | Self::SubcktParameterPrecedence
+            | Self::SubcktParameterResolution => XyceStaticTranPlanPurpose::RelationalFamily,
         }
     }
 }
@@ -2113,6 +2155,20 @@ impl XyceTestRunner {
 
         if let Some(contract) = self.stepped_ic_reference_contract(deck) {
             let result = self.run_stepped_ic_reference_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.subckt_parameter_resolution_family_contract(deck) {
+            let result =
+                self.run_subckt_parameter_resolution_family_contract(deck, contract, start);
             if self.config.verbose {
                 println!(
                     "{} [{}] {}",
@@ -10041,7 +10097,8 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::BjtExternalNode
             | XyceBaselineFamilyKind::DcAnalysisExpression
             | XyceBaselineFamilyKind::PassiveResPrimaryValue
-            | XyceBaselineFamilyKind::SubcktParameterPrecedence => false,
+            | XyceBaselineFamilyKind::SubcktParameterPrecedence
+            | XyceBaselineFamilyKind::SubcktParameterResolution => false,
             XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
             | XyceBaselineFamilyKind::PassiveCapPrimaryValue
@@ -11255,6 +11312,63 @@ impl XyceTestRunner {
             && (stepped_value - independent_value).abs() <= 1.0e-12
     }
 
+    fn run_subckt_parameter_resolution_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSubcktParameterResolutionFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const MEMBER_CONTRACT: &str = "subckt_parameter_resolution_family_member";
+        const ERROR_CONTRACT: &str = "subckt_parameter_resolution_expected_error";
+        if !contract
+            .valid_paths
+            .iter()
+            .any(|path| Self::same_path(path, &contract.baseline_path))
+            || !contract.anchor_path.is_file()
+            || !contract.error_path.is_file()
+        {
+            return self.failure_result(
+                deck,
+                start,
+                XyceBaselineFamilyKind::SubcktParameterResolution.wrapper_contract(),
+                format!(
+                    "subcircuit-parameter resolution family '{}' lost a qualified anchor, error member, or baseline",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        let target_path = match contract.role {
+            XyceSubcktParameterResolutionRole::Baseline
+            | XyceSubcktParameterResolutionRole::Member => Some(contract.target_path.clone()),
+            XyceSubcktParameterResolutionRole::Anchor
+            | XyceSubcktParameterResolutionRole::ExpectedError => None,
+        };
+        let relational = XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::SubcktParameterResolution,
+            comparison: XyceBaselineFamilyComparison::ExactPrn,
+            family: contract.family,
+            baseline_path: contract.baseline_path,
+            member_paths: contract.valid_paths,
+            target_path,
+        };
+        let mut result = self.run_baseline_family_contract(deck, relational, start);
+        if result.passed && !result.expected_unsupported {
+            result.contract = match contract.role {
+                XyceSubcktParameterResolutionRole::Anchor => {
+                    XyceBaselineFamilyKind::SubcktParameterResolution.wrapper_contract()
+                }
+                XyceSubcktParameterResolutionRole::Baseline => {
+                    XyceBaselineFamilyKind::SubcktParameterResolution.baseline_contract()
+                }
+                XyceSubcktParameterResolutionRole::Member => MEMBER_CONTRACT,
+                XyceSubcktParameterResolutionRole::ExpectedError => ERROR_CONTRACT,
+            }
+            .to_string();
+        }
+        result
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -11284,6 +11398,7 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::BjtExternalNode
                 | XyceBaselineFamilyKind::DcAnalysisExpression
                 | XyceBaselineFamilyKind::PassiveResPrimaryValue
+                | XyceBaselineFamilyKind::SubcktParameterResolution
         ) && analysis != XyceBaselineFamilyAnalysis::Dc
         {
             return self.failure_result(
@@ -11631,6 +11746,9 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::SubcktParameterPrecedence => {
                 Self::validate_subckt_parameter_precedence_dc_plan(plan)
             }
+            XyceBaselineFamilyKind::SubcktParameterResolution => {
+                Self::validate_subckt_parameter_resolution_dc_plan(plan)
+            }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC plan contract",
                 other.name()
@@ -11660,6 +11778,10 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::SubcktParameterPrecedence => {
                 Self::subckt_parameter_precedence_snapshot(netlist, print, sweep_source)
                     .map(XyceStrictDcFamilySnapshot::SubcktParameterPrecedence)
+            }
+            XyceBaselineFamilyKind::SubcktParameterResolution => {
+                Self::subckt_parameter_resolution_snapshot(netlist, print, sweep_source)
+                    .map(XyceStrictDcFamilySnapshot::SubcktParameterResolution)
             }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC semantic snapshot",
@@ -11693,6 +11815,28 @@ impl XyceTestRunner {
                     Ok(())
                 } else {
                     Err("flattened resistor-divider semantics differ".to_string())
+                }
+            }
+            (
+                XyceStrictDcFamilySnapshot::SubcktParameterResolution(baseline),
+                XyceStrictDcFamilySnapshot::SubcktParameterResolution(target),
+            ) => {
+                if baseline.representation
+                    != XyceSubcktParameterResolutionRepresentation::FormalDefaultAndInstanceOverride
+                    || target.representation
+                        == XyceSubcktParameterResolutionRepresentation::UndefinedBinding
+                    || !baseline
+                        .parameter_name
+                        .eq_ignore_ascii_case(&target.parameter_name)
+                {
+                    Err(
+                        "subcircuit parameter-resolution roles or parameter identity differ"
+                            .to_string(),
+                    )
+                } else if baseline.flattened_elements == target.flattened_elements {
+                    Ok(())
+                } else {
+                    Err("flattened subcircuit parameter-resolution semantics differ".to_string())
                 }
             }
             _ => Err("baseline and target use different exact-DC snapshot kinds".to_string()),
@@ -15182,6 +15326,512 @@ impl XyceTestRunner {
             .collect::<Result<Vec<_>, String>>()?;
         elements.sort();
         Ok(XyceSubcktParameterPrecedenceSnapshot { elements })
+    }
+
+    fn validate_subckt_parameter_resolution_dc_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        const LABEL: &str = "subcircuit-parameter resolution";
+        if !matches!(plan.expression_dialect, ExpressionDialect::Xyce)
+            || plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || !plan.steps.is_empty()
+            || !plan.diagnostics.is_empty()
+            || plan.print_format.is_some()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+        {
+            return Err(format!(
+                "{LABEL} requires one diagnostic-free, unstepped, one-dimensional linear .DC analysis with default indexed PRN output"
+            ));
+        }
+        let span = plan.dc.stop - plan.dc.start;
+        let estimated_intervals = span / plan.dc.step;
+        if !plan.dc.start.is_finite()
+            || !plan.dc.stop.is_finite()
+            || !plan.dc.step.is_finite()
+            || plan.dc.step == 0.0
+            || !span.is_finite()
+            || span == 0.0
+            || span.signum() != plan.dc.step.signum()
+            || !estimated_intervals.is_finite()
+            || !(1.0..=1_000_000.0).contains(&estimated_intervals.abs())
+        {
+            return Err(format!(
+                "{LABEL} requires finite directed sweep bounds with at most 1,000,001 points"
+            ));
+        }
+        let points = plan.dc.primary_spec().points();
+        if points.len() < 2 || points.iter().any(|point| !point.is_finite()) {
+            return Err(format!(
+                "{LABEL} requires a finite DC grid with at least two points"
+            ));
+        }
+        let [voltage_text, current_text] = plan.print.probes.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one ordered voltage probe and one ordered branch-current probe"
+            ));
+        };
+        let voltage = Self::parse_voltage_probe(voltage_text)
+            .ok_or_else(|| format!("{LABEL} first output must be an ordinary voltage probe"))?;
+        if voltage.accessor != XyceVoltageAccessor::Value
+            || voltage.node_pos.trim().is_empty()
+            || voltage.node_neg.is_some()
+            || Self::parse_current_probe(current_text).is_none()
+        {
+            return Err(format!(
+                "{LABEL} requires '.PRINT DC V(node) I(source)' in that order"
+            ));
+        }
+        Self::validate_subckt_parameter_resolution_source_directives(&plan.source)
+    }
+
+    fn validate_subckt_parameter_resolution_source_directives(source: &str) -> Result<(), String> {
+        const LABEL: &str = "subcircuit-parameter resolution";
+        if source.trim().is_empty()
+            || Self::source_has_comp_directive(source)
+            || source
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .is_none_or(|line| !line.trim_start().starts_with('*'))
+        {
+            return Err(format!(
+                "{LABEL} requires a nonempty comment-titled source without *COMP"
+            ));
+        }
+        let mut directive_counts = BTreeMap::<String, usize>::new();
+        let mut element_counts = BTreeMap::<char, usize>::new();
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let command = stripped.split_whitespace().next().unwrap_or_default();
+            if command.starts_with('.') {
+                let normalized = command.to_ascii_lowercase();
+                if !matches!(
+                    normalized.as_str(),
+                    ".param" | ".dc" | ".print" | ".subckt" | ".ends" | ".end"
+                ) {
+                    return Err(format!("{LABEL} does not admit directive '{command}'"));
+                }
+                *directive_counts.entry(normalized).or_default() += 1;
+                continue;
+            }
+            let designator = command
+                .chars()
+                .next()
+                .map(|value| value.to_ascii_uppercase())
+                .ok_or_else(|| format!("{LABEL} contains an empty statement"))?;
+            if !matches!(designator, 'X' | 'V' | 'R') {
+                return Err(format!(
+                    "{LABEL} admits only one subcircuit instance, one independent voltage source, and one resistor body; got '{command}'"
+                ));
+            }
+            *element_counts.entry(designator).or_default() += 1;
+        }
+        for directive in [".dc", ".print", ".subckt", ".ends", ".end"] {
+            if directive_counts.get(directive).copied() != Some(1) {
+                return Err(format!(
+                    "{LABEL} requires exactly one {directive} statement"
+                ));
+            }
+        }
+        if directive_counts.get(".param").copied().unwrap_or(0) > 1
+            || element_counts.get(&'X').copied() != Some(1)
+            || element_counts.get(&'V').copied() != Some(1)
+            || element_counts.get(&'R').copied() != Some(1)
+            || element_counts.len() != 3
+        {
+            return Err(format!(
+                "{LABEL} requires at most one global .PARAM and exactly one X/V/R statement"
+            ));
+        }
+        Ok(())
+    }
+
+    fn bare_subckt_parameter_expression_name(expression: &str) -> Option<String> {
+        let trimmed = expression.trim();
+        let inner = trimmed
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .unwrap_or(trimmed)
+            .trim();
+        match crate::netlist::expr::parse_expression(inner).ok()? {
+            crate::netlist::expr::Expr::Param(name) if Self::is_single_spice_identifier(&name) => {
+                Some(name.to_ascii_lowercase())
+            }
+            _ => None,
+        }
+    }
+
+    fn subckt_parameter_resolution_qualification(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        sweep_source: &str,
+    ) -> Result<
+        (
+            XyceSubcktParameterResolutionRepresentation,
+            String,
+            Option<XyceSubcktParameterResolutionSnapshot>,
+        ),
+        String,
+    > {
+        const LABEL: &str = "subcircuit-parameter resolution";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        Self::validate_subckt_parameter_resolution_source_directives(source)?;
+        if !netlist.models.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Dc { .. }])
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || netlist.subcircuits.len() != 1
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat top-level DC harness, one subcircuit definition, and no auxiliary or external model state"
+            ));
+        }
+
+        let globals = netlist.params.numeric_parameters();
+        if globals.len() > 1 || globals.iter().any(|(_, value)| !value.is_finite()) {
+            return Err(format!(
+                "{LABEL} admits at most one finite global scalar parameter"
+            ));
+        }
+        let global = globals
+            .first()
+            .map(|(name, value)| (name.to_ascii_lowercase(), *value));
+
+        let [subcircuit] = netlist.subcircuits.as_slice() else {
+            return Err(format!("{LABEL} requires exactly one subcircuit"));
+        };
+        if subcircuit.ports.len() != 2
+            || subcircuit.elements.len() != 1
+            || subcircuit.params.len() > 1
+            || subcircuit
+                .params
+                .iter()
+                .any(|(_, value)| !value.is_finite())
+            || !subcircuit.expr_params.is_empty()
+            || !subcircuit.string_params.is_empty()
+            || !subcircuit.body_params.is_empty()
+            || !subcircuit.body_expr_params.is_empty()
+            || !subcircuit.body_string_params.is_empty()
+            || !subcircuit.body_functions.is_empty()
+            || !subcircuit.local_options.is_empty()
+            || !subcircuit.initial_conditions.is_empty()
+            || !subcircuit.node_sets.is_empty()
+            || !subcircuit.nested_subcircuits.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one two-port, one-resistor subcircuit with at most one finite formal parameter and no nested state"
+            ));
+        }
+        let formal = subcircuit
+            .params
+            .first()
+            .map(|(name, value)| (name.to_ascii_lowercase(), *value));
+
+        let mut top_instance = None;
+        let mut voltage_source = None;
+        for element in &netlist.elements {
+            if element.nodes.len() != 2
+                || element.nodes.iter().any(|node| node.trim().is_empty())
+                || element.nodes.iter().any(|node| {
+                    crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0"
+                })
+            {
+                return Err(format!(
+                    "{LABEL} top-level element '{}' must use two explicit nodes and literal ground",
+                    element.name
+                ));
+            }
+            match &element.kind {
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } if top_instance.is_none()
+                    && subckt_name.eq_ignore_ascii_case(&subcircuit.name)
+                    && params.len() <= 1 =>
+                {
+                    top_instance = Some((element, params));
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if voltage_source.is_none() && value.is_finite() =>
+                {
+                    voltage_source = Some(element);
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} contains unqualified top-level element '{}'",
+                        element.name
+                    ));
+                }
+            }
+        }
+        let (instance_element, instance_params) = top_instance
+            .ok_or_else(|| format!("{LABEL} contains no qualified subcircuit instance"))?;
+        let voltage_source = voltage_source
+            .ok_or_else(|| format!("{LABEL} contains no qualified independent DC source"))?;
+        if netlist.elements.len() != 2
+            || instance_element.nodes != voltage_source.nodes
+            || instance_element.nodes[1].trim() != "0"
+            || !voltage_source.name.eq_ignore_ascii_case(sweep_source)
+        {
+            return Err(format!(
+                "{LABEL} requires the swept source directly across the two-port instance"
+            ));
+        }
+        let instance = match instance_params.as_slice() {
+            [] => None,
+            [(name, ParametricValue::Resolved(value))] if value.is_finite() => {
+                Some((name.to_ascii_lowercase(), *value))
+            }
+            _ => {
+                return Err(format!(
+                    "{LABEL} instance parameter must be absent or one direct finite scalar"
+                ));
+            }
+        };
+
+        let [resistor] = subcircuit.elements.as_slice() else {
+            return Err(format!("{LABEL} subcircuit must contain one resistor"));
+        };
+        if resistor.nodes != subcircuit.ports
+            || resistor.nodes.iter().any(|node| node.trim().is_empty())
+        {
+            return Err(format!(
+                "{LABEL} resistor must connect the two formal ports in order"
+            ));
+        }
+        let (expression_name, literal_value) = match &resistor.kind {
+            ElementKind::Resistor {
+                value,
+                value_expr,
+                model,
+                instance_params,
+                deferred_params,
+            } if model.is_none() && instance_params.is_empty() && deferred_params.is_empty() => {
+                match value_expr {
+                    Some(expression) => (
+                        Some(
+                            Self::bare_subckt_parameter_expression_name(expression).ok_or_else(
+                                || {
+                                    format!(
+                                        "{LABEL} parameterized resistor must use one bare scalar reference"
+                                    )
+                                },
+                            )?,
+                        ),
+                        None,
+                    ),
+                    None if value.is_finite() && *value > 0.0 => (None, Some(*value)),
+                    _ => {
+                        return Err(format!(
+                            "{LABEL} resistor value must be one bare parameter reference or one positive finite literal"
+                        ));
+                    }
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "{LABEL} subcircuit body contains an unqualified resistor"
+                ));
+            }
+        };
+
+        let mut binding_names = Vec::new();
+        binding_names.extend(global.as_ref().map(|(name, _)| name.as_str()));
+        binding_names.extend(formal.as_ref().map(|(name, _)| name.as_str()));
+        binding_names.extend(instance.as_ref().map(|(name, _)| name.as_str()));
+        binding_names.extend(expression_name.as_deref());
+        let parameter_name = binding_names
+            .first()
+            .ok_or_else(|| format!("{LABEL} contains no parameter binding or reference"))?
+            .to_string();
+        if binding_names
+            .iter()
+            .any(|name| !name.eq_ignore_ascii_case(&parameter_name))
+        {
+            return Err(format!(
+                "{LABEL} formal, global, instance, and resistor names must identify one scalar parameter"
+            ));
+        }
+
+        let representation = match (
+            global.as_ref(),
+            formal.as_ref(),
+            instance.as_ref(),
+            expression_name.as_ref(),
+            literal_value,
+        ) {
+            (None, Some((_, default)), Some((_, override_value)), Some(_), None)
+                if default.to_bits() != override_value.to_bits() =>
+            {
+                XyceSubcktParameterResolutionRepresentation::FormalDefaultAndInstanceOverride
+            }
+            (None, None, Some(_), Some(_), None) => {
+                XyceSubcktParameterResolutionRepresentation::ImplicitInstanceBinding
+            }
+            (Some(_), None, None, Some(_), None) => {
+                XyceSubcktParameterResolutionRepresentation::GlobalBinding
+            }
+            (Some((_, global_value)), None, Some((_, instance_value)), Some(_), None)
+                if global_value.to_bits() != instance_value.to_bits() =>
+            {
+                XyceSubcktParameterResolutionRepresentation::InstanceOverridesGlobal
+            }
+            (Some((_, global_value)), None, Some((_, instance_value)), None, Some(literal))
+                if global_value.to_bits() != instance_value.to_bits()
+                    && literal.to_bits() == instance_value.to_bits() =>
+            {
+                XyceSubcktParameterResolutionRepresentation::UnusedInstanceBinding
+            }
+            (None, None, None, Some(_), None) => {
+                XyceSubcktParameterResolutionRepresentation::UndefinedBinding
+            }
+            _ => {
+                return Err(format!(
+                    "{LABEL} source does not exercise one recognized parameter-resolution precedence mode"
+                ));
+            }
+        };
+
+        let [voltage_probe_text, current_probe_text] = print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires exactly two ordered probes"));
+        };
+        let voltage_probe = Self::parse_voltage_probe(voltage_probe_text)
+            .ok_or_else(|| format!("{LABEL} first output is not a voltage probe"))?;
+        let current_probe = Self::parse_current_probe(current_probe_text)
+            .ok_or_else(|| format!("{LABEL} second output is not a branch-current probe"))?;
+        if voltage_probe.accessor != XyceVoltageAccessor::Value
+            || voltage_probe.node_neg.is_some()
+            || !voltage_probe
+                .node_pos
+                .eq_ignore_ascii_case(&instance_element.nodes[0])
+            || !current_probe.eq_ignore_ascii_case(&voltage_source.name)
+        {
+            return Err(format!(
+                "{LABEL} outputs must observe the driven two-port node and swept-source current"
+            ));
+        }
+
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist);
+        if representation == XyceSubcktParameterResolutionRepresentation::UndefinedBinding {
+            match flattened {
+                Err(ParseError::UndefinedParameter(name))
+                    if name.eq_ignore_ascii_case(&parameter_name) => {}
+                Err(other) => {
+                    return Err(format!(
+                        "{LABEL} undefined binding must fail with typed undefined parameter '{parameter_name}', got {other}"
+                    ));
+                }
+                Ok(_) => {
+                    return Err(format!(
+                        "{LABEL} undefined binding unexpectedly flattened without an error"
+                    ));
+                }
+            }
+            return Ok((representation, parameter_name, None));
+        }
+
+        let flattened = flattened.map_err(|error| {
+            format!("{LABEL} valid representation failed during flattening: {error}")
+        })?;
+        if !flattened.scoped_models.is_empty()
+            || !flattened.scoped_initial_conditions.is_empty()
+            || !flattened.scoped_node_sets.is_empty()
+            || !flattened.xspice_auto_bridge_node_hints.is_empty()
+            || flattened.elements.len() != 2
+        {
+            return Err(format!(
+                "{LABEL} valid representation must flatten to exactly one resistor and one source without scoped auxiliary state"
+            ));
+        }
+        let mut resistor_count = 0usize;
+        let mut source_count = 0usize;
+        let mut fingerprints = Vec::new();
+        for element in &flattened.elements {
+            if element.nodes.len() != 2
+                || element.nodes.iter().any(|node| node.trim().is_empty())
+                || element.nodes.iter().any(|node| {
+                    crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0"
+                })
+            {
+                return Err(format!(
+                    "{LABEL} flattened element '{}' has unqualified nodes",
+                    element.name
+                ));
+            }
+            match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    resistor_count += 1;
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if value.is_finite() =>
+                {
+                    source_count += 1;
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} flattened element '{}' is not a direct native resistor/source",
+                        element.name
+                    ));
+                }
+            }
+            let fingerprint = Self::scoped_model_element_fingerprint(element, &netlist.params)?;
+            fingerprints.push(fingerprint);
+        }
+        if resistor_count != 1 || source_count != 1 {
+            return Err(format!(
+                "{LABEL} must flatten to one resistor and one independent source"
+            ));
+        }
+        fingerprints.sort();
+        Ok((
+            representation,
+            parameter_name.clone(),
+            Some(XyceSubcktParameterResolutionSnapshot {
+                representation,
+                parameter_name,
+                flattened_elements: fingerprints,
+            }),
+        ))
+    }
+
+    fn subckt_parameter_resolution_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        sweep_source: &str,
+    ) -> Result<XyceSubcktParameterResolutionSnapshot, String> {
+        let (representation, _, snapshot) =
+            Self::subckt_parameter_resolution_qualification(netlist, print, sweep_source)?;
+        if representation == XyceSubcktParameterResolutionRepresentation::UndefinedBinding {
+            return Err(
+                "undefined-binding member cannot serve as a numeric family member".to_string(),
+            );
+        }
+        snapshot.ok_or_else(|| {
+            "numeric subcircuit-parameter member produced no semantic snapshot".to_string()
+        })
     }
 
     fn passive_primary_name_is_literal_ground(node: &str) -> bool {
@@ -33898,6 +34548,169 @@ impl XyceTestRunner {
         decks
     }
 
+    fn subckt_parameter_resolution_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceSubcktParameterResolutionFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let mut anchor_path = None;
+        let mut records = Vec::<(
+            PathBuf,
+            XyceSubcktParameterResolutionRepresentation,
+            XyceStaticDcPlan,
+            Option<XyceSubcktParameterResolutionSnapshot>,
+            String,
+        )>::new();
+        let mut all_paths = Vec::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file()
+                || self
+                    .static_prn_reference_path(&path)
+                    .is_some_and(|reference| reference.is_file())
+            {
+                return None;
+            }
+            all_paths.push(path.clone());
+            let member_relative = self.relative_key(&path);
+            let wrapper = self.requires_upstream_wrapper(&member_relative);
+            if fs::metadata(&path).ok()?.len() == 0 {
+                if !wrapper || anchor_path.replace(path).is_some() {
+                    return None;
+                }
+                continue;
+            }
+            let source = fs::read_to_string(&path).ok()?;
+            Self::validate_subckt_parameter_resolution_source_directives(&source).ok()?;
+            let plan = self
+                .static_dc_plan_for_path(&path, ExpressionDialect::Xyce)
+                .ok()?;
+            Self::validate_subckt_parameter_resolution_dc_plan(&plan).ok()?;
+            let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
+            let (representation, parameter_name, snapshot) =
+                Self::subckt_parameter_resolution_qualification(
+                    &netlist,
+                    &plan.print,
+                    &plan.dc.source,
+                )
+                .ok()?;
+            if wrapper
+                != (representation == XyceSubcktParameterResolutionRepresentation::UndefinedBinding)
+            {
+                return None;
+            }
+            records.push((path, representation, plan, snapshot, parameter_name));
+        }
+        let anchor_path = anchor_path?;
+        if all_paths.len() != records.len() + 1 || records.len() != 6 {
+            return None;
+        }
+
+        let mut representation_counts = BTreeMap::new();
+        let parameter_names = records
+            .iter()
+            .map(|(_, _, _, _, name)| name.to_ascii_lowercase())
+            .collect::<BTreeSet<_>>();
+        for (_, representation, _, _, _) in &records {
+            *representation_counts.entry(*representation).or_default() += 1usize;
+        }
+        let required = [
+            XyceSubcktParameterResolutionRepresentation::FormalDefaultAndInstanceOverride,
+            XyceSubcktParameterResolutionRepresentation::ImplicitInstanceBinding,
+            XyceSubcktParameterResolutionRepresentation::GlobalBinding,
+            XyceSubcktParameterResolutionRepresentation::InstanceOverridesGlobal,
+            XyceSubcktParameterResolutionRepresentation::UnusedInstanceBinding,
+            XyceSubcktParameterResolutionRepresentation::UndefinedBinding,
+        ];
+        if parameter_names.len() != 1
+            || required.iter().any(|representation| {
+                representation_counts
+                    .get(representation)
+                    .copied()
+                    .unwrap_or(0)
+                    != 1
+            })
+        {
+            return None;
+        }
+
+        let baseline_record = records.iter().find(|(_, representation, _, _, _)| {
+            *representation
+                == XyceSubcktParameterResolutionRepresentation::FormalDefaultAndInstanceOverride
+        })?;
+        let baseline_snapshot = baseline_record.3.as_ref()?;
+        for (_, representation, plan, snapshot, _) in &records {
+            if plan.print.probes != baseline_record.2.print.probes
+                || !Self::dc_sweeps_match_exactly(&baseline_record.2.dc, &plan.dc)
+            {
+                return None;
+            }
+            if *representation == XyceSubcktParameterResolutionRepresentation::UndefinedBinding {
+                if snapshot.is_some() {
+                    return None;
+                }
+            } else if snapshot
+                .as_ref()
+                .map(|snapshot| &snapshot.flattened_elements)
+                != Some(&baseline_snapshot.flattened_elements)
+            {
+                return None;
+            }
+        }
+
+        let baseline_path = baseline_record.0.clone();
+        let error_path = records
+            .iter()
+            .find(|(_, representation, _, _, _)| {
+                *representation == XyceSubcktParameterResolutionRepresentation::UndefinedBinding
+            })?
+            .0
+            .clone();
+        if !all_paths
+            .iter()
+            .any(|path| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+        let role = if Self::same_path(&deck.path, &anchor_path) {
+            XyceSubcktParameterResolutionRole::Anchor
+        } else if Self::same_path(&deck.path, &error_path) {
+            XyceSubcktParameterResolutionRole::ExpectedError
+        } else if Self::same_path(&deck.path, &baseline_path) {
+            XyceSubcktParameterResolutionRole::Baseline
+        } else {
+            XyceSubcktParameterResolutionRole::Member
+        };
+        let valid_paths = records
+            .into_iter()
+            .filter_map(|(path, representation, _, _, _)| {
+                (representation != XyceSubcktParameterResolutionRepresentation::UndefinedBinding)
+                    .then_some(path)
+            })
+            .collect::<Vec<_>>();
+        Some(XyceSubcktParameterResolutionFamilyContract {
+            family: parent.file_name()?.to_str()?.to_string(),
+            anchor_path,
+            error_path,
+            baseline_path,
+            valid_paths,
+            role,
+            target_path: deck.path.clone(),
+        })
+    }
+
     fn baseline_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
         self.bjt_external_node_family_contract(deck)
             .or_else(|| self.dc_analysis_expression_family_contract(deck))
@@ -42836,6 +43649,173 @@ R3 out 0 3k
         );
 
         fs::remove_dir_all(&root).expect("remove DC-expression family fixture");
+    }
+
+    #[test]
+    fn subckt_parameter_resolution_family_is_complete_typed_and_fail_closed() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-subckt-resolution-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_SCOPE_FORMS");
+        fs::create_dir_all(&family_dir).expect("create subcircuit-resolution fixture");
+        let anchor = family_dir.join("owner.cir");
+        let baseline = family_dir.join("formal.cir");
+        let implicit = family_dir.join("implicit.cir");
+        let global = family_dir.join("global.cir");
+        let overriding = family_dir.join("override.cir");
+        let unused = family_dir.join("unused.cir");
+        let error = family_dir.join("missing.cir");
+        let harness = |body: &str| {
+            format!(
+                "* generic subcircuit resolution fixture\n{body}\nVSWEEP out 0 DC 0\n.DC VSWEEP 0 2 1\n.PRINT DC V(out) I(VSWEEP)\n.SUBCKT cell p n\nRbody p n {{z}}\n.ENDS\n.END\n"
+            )
+        };
+        let formal_source = harness("Xscope out 0 cell PARAMS: z=20k")
+            .replace(".SUBCKT cell p n", ".SUBCKT cell p n PARAMS: z=10");
+        let implicit_source = harness("Xscope out 0 cell PARAMS: z=20k");
+        let global_source = harness(".PARAM z=20k\nXscope out 0 cell");
+        let override_source = harness(".PARAM z=1k\nXscope out 0 cell PARAMS: z=20k");
+        let unused_source = harness(".PARAM z=1k\nXscope out 0 cell PARAMS: z=20k")
+            .replace("Rbody p n {z}", "Rbody p n 20k");
+        let error_source = harness("Xscope out 0 cell");
+        for (path, source) in [
+            (&baseline, formal_source.as_str()),
+            (&implicit, implicit_source.as_str()),
+            (&global, global_source.as_str()),
+            (&overriding, override_source.as_str()),
+            (&unused, unused_source.as_str()),
+            (&error, error_source.as_str()),
+        ] {
+            fs::write(path, source).expect("write subcircuit-resolution member");
+        }
+        fs::write(&anchor, "").expect("write empty relational anchor");
+        let manifest = format!(
+            "Netlists/Certification_Tests/GENERIC_SCOPE_FORMS/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/Certification_Tests/GENERIC_SCOPE_FORMS/missing.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("write wrapper provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+        for (path, expected_role) in [
+            (&anchor, XyceSubcktParameterResolutionRole::Anchor),
+            (&baseline, XyceSubcktParameterResolutionRole::Baseline),
+            (&implicit, XyceSubcktParameterResolutionRole::Member),
+            (&global, XyceSubcktParameterResolutionRole::Member),
+            (&overriding, XyceSubcktParameterResolutionRole::Member),
+            (&unused, XyceSubcktParameterResolutionRole::Member),
+            (&error, XyceSubcktParameterResolutionRole::ExpectedError),
+        ] {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: runner.relative_key(path),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .subckt_parameter_resolution_family_contract(&deck)
+                .expect("complete generic parameter-resolution family qualifies");
+            assert_eq!(contract.role, expected_role);
+            assert_eq!(contract.valid_paths.len(), 5);
+        }
+
+        let error_plan = runner
+            .static_dc_plan_for_path(&error, ExpressionDialect::Xyce)
+            .expect("expected-error member has a static DC plan");
+        let error_netlist = XyceTestRunner::parse_xyce_netlist(&error_plan.source, &error)
+            .expect("expected-error member parses before flattening");
+        let (representation, parameter_name, snapshot) =
+            XyceTestRunner::subckt_parameter_resolution_qualification(
+                &error_netlist,
+                &error_plan.print,
+                &error_plan.dc.source,
+            )
+            .expect("missing binding is a typed qualified error");
+        assert_eq!(
+            representation,
+            XyceSubcktParameterResolutionRepresentation::UndefinedBinding
+        );
+        assert_eq!(parameter_name, "z");
+        assert!(snapshot.is_none());
+        assert!(matches!(
+            crate::netlist::flatten_netlist_with_models(&error_netlist),
+            Err(ParseError::UndefinedParameter(name)) if name.eq_ignore_ascii_case("z")
+        ));
+
+        let anchor_deck = XyceDeck {
+            path: anchor.clone(),
+            relative_path: runner.relative_key(&anchor),
+            section: XyceDeckSection::Netlists,
+        };
+        let extra = family_dir.join("unrelated.cir");
+        fs::write(&extra, &implicit_source).expect("write duplicate nonbaseline representation");
+        assert!(
+            runner
+                .subckt_parameter_resolution_family_contract(&anchor_deck)
+                .is_none(),
+            "an unrelated or duplicate circuit member prevents complete-family inference"
+        );
+        fs::remove_file(&extra).expect("remove unrelated member");
+
+        fs::write(&global, "").expect("make one semantic member empty");
+        assert!(
+            runner
+                .subckt_parameter_resolution_family_contract(&anchor_deck)
+                .is_none(),
+            "an extra empty member fails closed"
+        );
+        fs::write(&global, &global_source).expect("restore global member");
+
+        let output_dir = root
+            .join("OutputData")
+            .join("Certification_Tests")
+            .join("GENERIC_SCOPE_FORMS");
+        fs::create_dir_all(&output_dir).expect("create forbidden oracle directory");
+        fs::write(output_dir.join("formal.cir.prn"), "oracle\n")
+            .expect("write forbidden static oracle");
+        assert!(
+            runner
+                .subckt_parameter_resolution_family_contract(&anchor_deck)
+                .is_none(),
+            "generated-reference family cannot mix static waveform ownership"
+        );
+        fs::remove_dir_all(&output_dir).expect("remove forbidden oracle");
+
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "Netlists/Certification_Tests/GENERIC_SCOPE_FORMS/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("remove expected-error wrapper provenance");
+        let wrong_manifest_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            wrong_manifest_runner
+                .subckt_parameter_resolution_family_contract(&anchor_deck)
+                .is_none(),
+            "wrapper provenance must agree with the empty and error roles"
+        );
+
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("restore manifest");
+        fs::write(
+            &unused,
+            unused_source.replace("Rbody p n 20k", "Rbody p n 30k"),
+        )
+        .expect("change unused-binding literal");
+        let restored_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            restored_runner
+                .subckt_parameter_resolution_family_contract(&anchor_deck)
+                .is_none(),
+            "unused binding must equal the literal and the family semantics"
+        );
+
+        fs::remove_dir_all(&root).expect("remove subcircuit-resolution fixture");
     }
 
     #[test]
