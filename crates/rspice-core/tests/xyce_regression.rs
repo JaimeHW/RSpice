@@ -2062,6 +2062,39 @@ fn test_xyce_mixed_device_param_source_step_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_diode_model_parameter_alias_family_runs_byte_exactly() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_46_SON/bug_46_son.cir",
+            "diode_model_alias_family_anchor",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_46_SON/baseline.cir",
+            "diode_model_alias_family_canonical_baseline",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_46_SON/synonyms.cir",
+            "diode_model_alias_family_alias_member",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy the native diode model-alias relational oracle, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should serialize byte-identically across alias representations"
+        );
+        assert_eq!(result.contract, contract);
+    }
+}
+
+#[test]
 fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
