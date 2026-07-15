@@ -15,7 +15,7 @@ use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     TransientResult, extract_ac_value, extract_dc_value,
 };
-use crate::expr::{CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict};
+use crate::expr::{BinaryOp, CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict};
 use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
@@ -54,6 +54,8 @@ const XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-2;
 const XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE: f64 = 1.0e-12;
 const XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE: f64 = 1.0e-12;
 const XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE: f64 = 1.0e-12;
+const XYCE_VERIFY_COMP_NO_PRINTED_PROBE: &str =
+    "Xyce integrated-RMS *COMP contract has no directive for a printed probe";
 // The removed Release 7.10 sidecar emits `exp(-TIME/0.001)`. These constants
 // describe that generated oracle; the path-independent candidate detector does
 // not use them as deck-name or value allowlists.
@@ -252,18 +254,23 @@ struct XyceStaticTranPlan {
 enum XyceStaticTranComparisonMode {
     Pointwise,
     Release710IntegratedRms { scientific_precision: usize },
+    Release710IntegratedRmsComp { scientific_precision: usize },
 }
 
 impl XyceStaticTranComparisonMode {
     fn uses_adaptive_grid_only(self) -> bool {
-        matches!(self, Self::Release710IntegratedRms { .. })
+        matches!(
+            self,
+            Self::Release710IntegratedRms { .. } | Self::Release710IntegratedRmsComp { .. }
+        )
     }
 }
 
 impl XyceStaticTranPlan {
     fn result_contract(&self) -> &'static str {
         match self.comparison_mode {
-            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
+            | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
                 "static_xyce_verify_prn_tran"
             }
             XyceStaticTranComparisonMode::Pointwise => {
@@ -2894,6 +2901,32 @@ impl XyceTestRunner {
                     .to_string(),
             );
         }
+        if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
+            && !requires_wrapper
+            && plan.contract == XyceStaticTranContract::PlainStatic
+            && !plan.output_override
+            && !plan.timeint_conststep
+            && plan.steps.is_empty()
+            && plan.wrapper_tolerance.is_none()
+            && plan.reference_path.is_file()
+            && Self::source_has_comp_directive(&plan.source)
+            && Self::native_transient_uses_standard_startup(netlist)
+            && netlist.diagnostics.is_empty()
+            && Self::validate_native_transient_contract_for_purpose(
+                netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+            )
+            .is_ok()
+        {
+            match Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes) {
+                Ok(_) => {
+                    return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                        scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                    });
+                }
+                Err(_) => {}
+            }
+        }
         if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
             || requires_wrapper
             || plan.contract != XyceStaticTranContract::PlainStatic
@@ -2912,6 +2945,12 @@ impl XyceTestRunner {
                 .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
         {
             return Ok(pointwise);
+        }
+
+        if Self::netlist_is_native_exact_is_diode_xyce_verify_envelope(netlist) {
+            return Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            });
         }
 
         let mosfets = netlist
@@ -2957,9 +2996,32 @@ impl XyceTestRunner {
     }
 
     fn source_has_comp_directive(source: &str) -> bool {
-        source
-            .lines()
-            .any(|line| Self::comp_directive_body(line).is_some())
+        !Self::logical_comp_directives(source).is_empty()
+    }
+
+    fn logical_comp_directives(source: &str) -> Vec<String> {
+        let mut directives = Vec::new();
+        let mut current: Option<String> = None;
+        for raw in source.lines() {
+            let line = raw.split_once(';').map_or(raw, |(head, _)| head).trim_end();
+            if line.trim_start().starts_with('+') {
+                if let Some(directive) = current.as_mut() {
+                    directive.push(' ');
+                    directive.push_str(line.trim_start().trim_start_matches('+').trim_start());
+                }
+                continue;
+            }
+            if let Some(directive) = current.take() {
+                directives.push(directive);
+            }
+            if Self::comp_directive_body(line).is_some() {
+                current = Some(line.trim_start().to_string());
+            }
+        }
+        if let Some(directive) = current {
+            directives.push(directive);
+        }
+        directives
     }
 
     fn comp_directive_body(line: &str) -> Option<&str> {
@@ -3394,6 +3456,15 @@ impl XyceTestRunner {
 
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        #[cfg(not(feature = "veriloga-builtins"))]
+        if let Some(print) = print.as_ref() {
+            if Self::noise_print_requires_generated_vbic_mechanisms(print, &netlist)? {
+                return Err(
+                    "NOISE output requests a named VBIC mechanism supplied by the canonical generated Verilog-A device; rebuild with the 'veriloga-builtins' feature"
+                        .to_string(),
+                );
+            }
+        }
         let (output_node, reference_node, input_source, frequencies) =
             Self::noise_analysis_for_netlist(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
@@ -3490,6 +3561,65 @@ impl XyceTestRunner {
             frequencies,
             steps,
         })
+    }
+
+    #[cfg_attr(feature = "veriloga-builtins", allow(dead_code))]
+    fn noise_print_requires_generated_vbic_mechanisms(
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+    ) -> Result<bool, String> {
+        let device_uses_vbic = |device: &str| {
+            netlist.elements.iter().any(|element| {
+                if !element.name.eq_ignore_ascii_case(device) {
+                    return false;
+                }
+                let ElementKind::Bjt { model, .. } = &element.kind else {
+                    return false;
+                };
+                Self::find_model(&netlist.models, model).is_some_and(Self::model_is_native_vbic_bjt)
+            })
+        };
+
+        for printed_probe in &print.probes {
+            let mut contribution_calls = Vec::new();
+            if crate::analysis::NoiseContributionProbe::parse(printed_probe).is_ok() {
+                contribution_calls.push(printed_probe.clone());
+            } else if let Some(expression) = Self::print_expression_inner(printed_probe) {
+                let normalized_expression = expression.to_ascii_lowercase();
+                if !normalized_expression.contains("dno(")
+                    && !normalized_expression.contains("dni(")
+                {
+                    continue;
+                }
+                let mut collect = |call: &str| {
+                    if call.get(..3).is_some_and(|prefix| {
+                        prefix.eq_ignore_ascii_case("dno") || prefix.eq_ignore_ascii_case("dni")
+                    }) {
+                        contribution_calls.push(call.to_string());
+                    }
+                    Ok(1.0)
+                };
+                Self::evaluate_print_expression_with_probe_calls(
+                    expression,
+                    netlist.params.clone(),
+                    &mut collect,
+                )
+                .map_err(|err| {
+                    format!(
+                        "failed to inspect NOISE print expression '{printed_probe}' for generated-device mechanisms: {err}"
+                    )
+                })?;
+            }
+
+            for call in contribution_calls {
+                let contribution = crate::analysis::NoiseContributionProbe::parse(&call)
+                    .map_err(|err| err.to_string())?;
+                if contribution.mechanism.is_some() && device_uses_vbic(&contribution.device) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     fn static_dc_plan_for_path(
@@ -8134,7 +8264,8 @@ impl XyceTestRunner {
         };
 
         let reference_result = match plan.comparison_mode {
-            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
+            | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
                 Self::parse_xyce_verify_tran_reference_file(&plan.reference_path)
             }
             XyceStaticTranComparisonMode::Pointwise => {
@@ -12452,6 +12583,7 @@ impl XyceTestRunner {
     ) -> Result<XycePrnTable, String> {
         Self::validate_transient_result_time_grid(result)?;
         let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
+        let output_times = Self::xyce_verify_transient_output_times(plan, result)?;
         let columns = Self::transient_prn_header_columns(&plan.print, true);
         let mut stateful_expressions = plan
             .print
@@ -12460,8 +12592,8 @@ impl XyceTestRunner {
             .map(|probe| Self::stateful_tran_print_expression(probe, netlist))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let mut rows = Vec::with_capacity(result.time.len());
-        for (index, &time) in result.time.iter().enumerate() {
+        let mut rows = Vec::with_capacity(output_times.len());
+        for (index, time) in output_times.into_iter().enumerate() {
             let mut row = Vec::with_capacity(columns.len());
             row.push(index as Value);
             row.push(time * time_scale);
@@ -12483,6 +12615,72 @@ impl XyceTestRunner {
         }
 
         Ok(XycePrnTable { columns, rows })
+    }
+
+    fn xyce_verify_transient_output_times(
+        plan: &XyceStaticTranPlan,
+        result: &TransientResult,
+    ) -> Result<Vec<Value>, String> {
+        let output_start = plan.tran.start.unwrap_or(0.0).max(0.0);
+        let time_epsilon = 16.0 * Value::EPSILON * plan.tran.stop.abs().max(1.0);
+        if let Some((initial_interval, transitions)) = Self::output_interval_schedule(&plan.source)?
+        {
+            let mut times = Vec::new();
+            let mut next_time = 0.0;
+            let mut interval = initial_interval;
+            let mut boundaries = transitions;
+            boundaries.push((plan.tran.stop, interval));
+            for (boundary, next_interval) in boundaries {
+                let segment_end = boundary.min(plan.tran.stop);
+                while next_time < segment_end - time_epsilon {
+                    if next_time + time_epsilon >= output_start {
+                        times.push(next_time);
+                        if times.len() > MAX_NATIVE_TRAN_ORACLE_STEPS as usize {
+                            return Err(format!(
+                                "OUTPUT schedule requests more than {:.0} serialized transient rows",
+                                MAX_NATIVE_TRAN_ORACLE_STEPS
+                            ));
+                        }
+                    }
+                    next_time += interval;
+                }
+                if boundary > plan.tran.stop + time_epsilon {
+                    break;
+                }
+                if boundary + time_epsilon >= output_start
+                    && times
+                        .last()
+                        .is_none_or(|last| (boundary - *last).abs() > time_epsilon)
+                {
+                    times.push(boundary);
+                }
+                interval = next_interval;
+                next_time = boundary + interval;
+            }
+            if times
+                .last()
+                .is_none_or(|last| (plan.tran.stop - *last).abs() > time_epsilon)
+            {
+                times.push(plan.tran.stop);
+            }
+            if times.is_empty() {
+                return Err("transient output schedule produced no times".to_string());
+            }
+            return Ok(times);
+        }
+
+        let times = result
+            .time
+            .iter()
+            .copied()
+            .filter(|time| *time + time_epsilon >= output_start)
+            .collect::<Vec<_>>();
+        if times.is_empty() {
+            return Err(format!(
+                "transient result has no serialized sample at or after TSTART={output_start}"
+            ));
+        }
+        Ok(times)
     }
 
     fn transient_prn_header_columns(print: &XycePrintRequest, include_index: bool) -> Vec<String> {
@@ -16989,7 +17187,7 @@ impl XyceTestRunner {
                             "scoped-model diode '{key}' must reference exactly one effective model '{model}'"
                         )
                     })?;
-                    if !Self::model_is_native_scoped_model_relational_diode(effective_model) {
+                    if !Self::model_is_native_exact_is_diode(effective_model) {
                         return Err(format!(
                             "scoped-model diode '{key}' references an unresolved or unqualified effective model '{model}'"
                         ));
@@ -17480,7 +17678,7 @@ impl XyceTestRunner {
     fn normalized_xyce_verify_transient_rows(
         table: &XycePrnTable,
         role: &str,
-        tolerance: XyceVerifyTransientTolerance,
+        tolerances: &[XyceVerifyTransientTolerance],
         scientific_precision: usize,
     ) -> Result<Vec<(Value, Vec<Value>)>, String> {
         if table.columns.len() < 3
@@ -17493,6 +17691,13 @@ impl XyceTestRunner {
         }
         if table.rows.is_empty() {
             return Err(format!("{role} table contains no transient rows"));
+        }
+        if tolerances.len() != table.columns.len() - 2 {
+            return Err(format!(
+                "{role} table has {} output column(s), but {} xyce_verify tolerance(s) were supplied",
+                table.columns.len() - 2,
+                tolerances.len()
+            ));
         }
 
         let mut normalized = Vec::with_capacity(table.rows.len());
@@ -17536,7 +17741,7 @@ impl XyceTestRunner {
                             )
                         },
                     )?,
-                    tolerance.zero,
+                    tolerances[column_index].zero,
                 ));
             }
             if normalized
@@ -17674,6 +17879,22 @@ impl XyceTestRunner {
         scientific_precision: usize,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         let tolerance = tolerance.validate()?;
+        let probe_count = good.columns.len().saturating_sub(2);
+        self.compare_xyce_verify_transient_tables_with_probe_tolerances(
+            good,
+            test,
+            &vec![tolerance; probe_count],
+            scientific_precision,
+        )
+    }
+
+    fn compare_xyce_verify_transient_tables_with_probe_tolerances(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        tolerances: &[XyceVerifyTransientTolerance],
+        scientific_precision: usize,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
         Self::xyce_prn_scientific_text(0.0, scientific_precision)?;
         if good.columns.len() != test.columns.len()
             || !good
@@ -17687,17 +17908,66 @@ impl XyceTestRunner {
                 good.columns, test.columns
             ));
         }
+        if tolerances.len() != good.columns.len().saturating_sub(2) {
+            return Err(format!(
+                "xyce_verify transient comparison has {} output column(s), but {} tolerance(s) were supplied",
+                good.columns.len().saturating_sub(2),
+                tolerances.len()
+            ));
+        }
+        let tolerances = tolerances
+            .iter()
+            .copied()
+            .map(XyceVerifyTransientTolerance::validate)
+            .collect::<Result<Vec<_>, _>>()?;
+        let quotient_operand_indices =
+            Self::xyce_verify_quotient_operand_indices(&good.columns[2..]);
+        let serialization_relative_tolerance = 4.0 * 10.0f64.powi(-(scientific_precision as i32));
+        for (row_index, row) in test.rows.iter().enumerate() {
+            for (probe_index, operands) in quotient_operand_indices.iter().enumerate() {
+                let Some((numerator_index, divisor_index)) = *operands else {
+                    continue;
+                };
+                let Some((&actual, &numerator, &divisor)) = row
+                    .get(probe_index + 2)
+                    .zip(row.get(numerator_index + 2))
+                    .zip(row.get(divisor_index + 2))
+                    .map(|((actual, numerator), divisor)| (actual, numerator, divisor))
+                else {
+                    return Err(format!(
+                        "xyce_verify test row {row_index} is missing quotient or operand columns"
+                    ));
+                };
+                let recomputed = numerator / divisor;
+                if !recomputed.is_finite() {
+                    continue;
+                }
+                let consistency_scale = actual
+                    .abs()
+                    .max(recomputed.abs())
+                    .max(tolerances[probe_index].absolute);
+                let consistency_error = (actual - recomputed).abs() / consistency_scale;
+                if !consistency_error.is_finite()
+                    || consistency_error > serialization_relative_tolerance
+                {
+                    return Err(format!(
+                        "printed quotient {} is not algebraically consistent at test row {row_index}: printed={actual} numerator={numerator} divisor={divisor}",
+                        good.columns[probe_index + 2]
+                    ));
+                }
+            }
+        }
 
         let good_rows = Self::normalized_xyce_verify_transient_rows(
             good,
             "good",
-            tolerance,
+            &tolerances,
             scientific_precision,
         )?;
         let test_rows = Self::normalized_xyce_verify_transient_rows(
             test,
             "test",
-            tolerance,
+            &tolerances,
             scientific_precision,
         )?;
         if good_rows.len() < 2 || test_rows.len() < 2 {
@@ -17779,8 +18049,62 @@ impl XyceTestRunner {
             for probe_index in 0..probe_count {
                 let expected = good_values[probe_index];
                 let actual = test_values[probe_index];
-                let normalized_error =
-                    Self::xyce_verify_normalized_error_with_tolerance(expected, actual, tolerance);
+                let probe_tolerance = tolerances[probe_index];
+                let normalized_error = if let Some((numerator_index, divisor_index)) =
+                    quotient_operand_indices[probe_index]
+                {
+                    let numerator_tolerance = tolerances[numerator_index];
+                    let divisor_tolerance = tolerances[divisor_index];
+                    let numerator_error = Self::xyce_verify_normalized_error_with_tolerance(
+                        good_values[numerator_index],
+                        test_values[numerator_index],
+                        numerator_tolerance,
+                    );
+                    let divisor_error = Self::xyce_verify_normalized_error_with_tolerance(
+                        good_values[divisor_index],
+                        test_values[divisor_index],
+                        divisor_tolerance,
+                    );
+                    let operand_error = numerator_error.abs().max(divisor_error.abs());
+                    let one_sided_conditioning_floor = (divisor_tolerance.absolute
+                        / divisor_tolerance.relative)
+                        .min(Value::MAX / 2.0);
+                    let divisor_conditioning_floor = divisor_tolerance
+                        .zero
+                        .max(2.0 * one_sided_conditioning_floor);
+                    let divisor_is_conditioned = test_values[divisor_index]
+                        .abs()
+                        .min(good_values[divisor_index].abs())
+                        > divisor_conditioning_floor;
+                    let interpolated_reference_quotient =
+                        good_values[numerator_index] / good_values[divisor_index];
+                    let reference_consistency_scale = expected
+                        .abs()
+                        .max(interpolated_reference_quotient.abs())
+                        .max(probe_tolerance.absolute);
+                    let reference_consistency_error = (expected - interpolated_reference_quotient)
+                        .abs()
+                        / reference_consistency_scale;
+                    let reference_quotient_is_consistent = interpolated_reference_quotient
+                        .is_finite()
+                        && reference_consistency_error.is_finite()
+                        && reference_consistency_error <= serialization_relative_tolerance;
+                    if divisor_is_conditioned && reference_quotient_is_consistent {
+                        Self::xyce_verify_normalized_error_with_tolerance(
+                            expected,
+                            actual,
+                            probe_tolerance,
+                        )
+                    } else {
+                        operand_error
+                    }
+                } else {
+                    Self::xyce_verify_normalized_error_with_tolerance(
+                        expected,
+                        actual,
+                        probe_tolerance,
+                    )
+                };
                 if !normalized_error.is_finite() {
                     return Err(format!(
                         "normalized xyce_verify error is non-finite at test row {row_index}, probe {}",
@@ -17838,6 +18162,55 @@ impl XyceTestRunner {
             }
         }
         Ok(mismatches)
+    }
+
+    fn xyce_verify_quotient_operand_indices(columns: &[String]) -> Vec<Option<(usize, usize)>> {
+        let normalized_columns = columns
+            .iter()
+            .map(|column| Self::normalize_probe(column))
+            .collect::<Vec<_>>();
+        columns
+            .iter()
+            .map(|column| {
+                let expression = Self::print_expression_inner(column)?;
+                let ast = parse_expression_strict(expression).ok()?;
+                let (numerator_probe, divisor_probe) =
+                    Self::xyce_verify_direct_quotient_probes(&ast)?;
+                let normalized_numerator = Self::normalize_probe(&numerator_probe);
+                let normalized_divisor = Self::normalize_probe(&divisor_probe);
+                let numerator_index = normalized_columns
+                    .iter()
+                    .position(|candidate| *candidate == normalized_numerator)?;
+                let divisor_index = normalized_columns
+                    .iter()
+                    .position(|candidate| *candidate == normalized_divisor)?;
+                Some((numerator_index, divisor_index))
+            })
+            .collect()
+    }
+
+    fn xyce_verify_direct_quotient_probes(expression: &Expr) -> Option<(String, String)> {
+        let Expr::Binary {
+            op: BinaryOp::Div,
+            left,
+            right,
+            ..
+        } = expression
+        else {
+            return None;
+        };
+        Some((
+            Self::xyce_verify_direct_probe(left)?,
+            Self::xyce_verify_direct_probe(right)?,
+        ))
+    }
+
+    fn xyce_verify_direct_probe(expression: &Expr) -> Option<String> {
+        match expression {
+            Expr::NodeVoltage(node) => Some(format!("V({node})")),
+            Expr::BranchCurrent(element) => Some(format!("I({element})")),
+            _ => None,
+        }
     }
 
     fn compare_exact_prn_tables(
@@ -19664,6 +20037,19 @@ impl XyceTestRunner {
                     scientific_precision,
                 )
             }
+            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                scientific_precision,
+            } => {
+                let actual = Self::transient_family_result_to_prn_table(plan, netlist, result)?;
+                let tolerances =
+                    Self::xyce_verify_comp_tolerances(&plan.source, &reference.columns[2..])?;
+                self.compare_xyce_verify_transient_tables_with_probe_tolerances(
+                    reference,
+                    &actual,
+                    &tolerances,
+                    scientific_precision,
+                )
+            }
         }
     }
 
@@ -20139,6 +20525,71 @@ impl XyceTestRunner {
         Ok(interval)
     }
 
+    fn output_interval_schedule(
+        source: &str,
+    ) -> Result<Option<(Value, Vec<(Value, Value)>)>, String> {
+        let Some(initial_interval) = Self::output_initial_interval(source)? else {
+            return Ok(None);
+        };
+        let mut values = Vec::new();
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim();
+            let tokens = Self::split_grouped_whitespace_fields(trimmed, ".OPTIONS statement")?;
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            if !token_refs
+                .first()
+                .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
+                || !token_refs
+                    .iter()
+                    .skip(1)
+                    .any(|token| token.eq_ignore_ascii_case("output"))
+            {
+                continue;
+            }
+            let mut index = 1usize;
+            while index < token_refs.len() {
+                if let Some((_key, _value, consumed)) =
+                    Self::print_option_assignment(&token_refs, index)
+                {
+                    index += consumed;
+                    continue;
+                }
+                let token = token_refs[index].trim().trim_matches(['"', '\'']);
+                if !token.eq_ignore_ascii_case("output")
+                    && let Ok(value) = crate::netlist::lexer::parse_spice_value(token)
+                {
+                    values.push(value);
+                }
+                index += 1;
+            }
+        }
+        if values.len() % 2 != 0 {
+            return Err(format!(
+                "OUTPUT INITIAL_INTERVAL schedule requires time/interval pairs, found {} trailing numeric value(s)",
+                values.len()
+            ));
+        }
+        let mut transitions = Vec::with_capacity(values.len() / 2);
+        let mut previous_time = Value::NEG_INFINITY;
+        for pair in values.chunks_exact(2) {
+            let time = pair[0];
+            let interval = pair[1];
+            if !time.is_finite() || time < 0.0 || time <= previous_time {
+                return Err(format!(
+                    "OUTPUT interval transition times must be finite, nonnegative, and strictly increasing, got {time} after {previous_time}"
+                ));
+            }
+            if !interval.is_finite() || interval <= 0.0 {
+                return Err(format!(
+                    "OUTPUT interval after time {time} must be positive and finite, got {interval}"
+                ));
+            }
+            transitions.push((time, interval));
+            previous_time = time;
+        }
+        Ok(Some((initial_interval, transitions)))
+    }
+
     fn tran_print_time_scale_factor(source: &str) -> Result<Value, String> {
         let mut factor: Option<Value> = None;
         for line in Self::logical_netlist_lines(source) {
@@ -20275,7 +20726,8 @@ impl XyceTestRunner {
         reference: &XycePrnTable,
     ) -> Result<Value, String> {
         match plan.comparison_mode {
-            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
+            | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
                 Self::transient_max_step_with_optional_reference(netlist, tran, None)
             }
             XyceStaticTranComparisonMode::Pointwise => {
@@ -21446,10 +21898,9 @@ impl XyceTestRunner {
         }
 
         let mut tolerances = BTreeMap::new();
-        for line in source.lines() {
-            let Some(rest) = Self::comp_directive_body(line) else {
-                continue;
-            };
+        for line in Self::logical_comp_directives(source) {
+            let rest = Self::comp_directive_body(&line)
+                .expect("logical COMP collector only returns COMP directives");
             let Some((probe, options)) = Self::split_comp_directive(rest) else {
                 continue;
             };
@@ -21462,6 +21913,107 @@ impl XyceTestRunner {
             tolerances.insert(normalized_probe, tolerance);
         }
         Ok(tolerances)
+    }
+
+    fn xyce_verify_comp_tolerances(
+        source: &str,
+        columns: &[String],
+    ) -> Result<Vec<XyceVerifyTransientTolerance>, String> {
+        let normalized_columns = columns
+            .iter()
+            .map(|column| Self::normalize_probe(column))
+            .collect::<Vec<_>>();
+        let mut tolerances =
+            vec![XyceVerifyTransientTolerance::release_7_10_default(); columns.len()];
+        let mut assigned = vec![false; columns.len()];
+        let mut saw_comp = false;
+        for line in Self::logical_comp_directives(source) {
+            let rest = Self::comp_directive_body(&line)
+                .expect("logical COMP collector only returns COMP directives");
+            saw_comp = true;
+            let (probe, options) = Self::split_comp_directive(rest).ok_or_else(|| {
+                "Xyce *COMP directive is missing its probe expression".to_string()
+            })?;
+            let tolerance = Self::parse_xyce_verify_comp_tolerance(&options)?;
+            let normalized_probe = Self::normalize_probe(&probe);
+            let Some(index) = normalized_columns
+                .iter()
+                .position(|column| *column == normalized_probe)
+            else {
+                // Release 7.10 stores unreferenced *COMP entries harmlessly;
+                // only printed columns consult the resulting tolerance map.
+                continue;
+            };
+            if assigned[index] {
+                return Err(format!(
+                    "Xyce *COMP defines duplicate tolerances for printed probe '{}'",
+                    columns[index]
+                ));
+            }
+            assigned[index] = true;
+            tolerances[index] = tolerance;
+        }
+        if !saw_comp {
+            return Err("Xyce integrated-RMS *COMP contract has no *COMP directive".to_string());
+        }
+        if !assigned.iter().any(|assigned| *assigned) {
+            return Err(XYCE_VERIFY_COMP_NO_PRINTED_PROBE.to_string());
+        }
+        Ok(tolerances)
+    }
+
+    fn parse_xyce_verify_comp_tolerance(
+        options: &str,
+    ) -> Result<XyceVerifyTransientTolerance, String> {
+        let mut tolerance = XyceVerifyTransientTolerance::release_7_10_default();
+        let tokens = options.split_whitespace().collect::<Vec<_>>();
+        let mut seen = BTreeSet::new();
+        let mut index = 0usize;
+        while index < tokens.len() {
+            let token = tokens[index];
+            let (raw_key, raw_value, consumed) = if token.ends_with('=') {
+                let key = token.trim_end_matches('=');
+                let value = tokens.get(index + 1).copied().unwrap_or_default();
+                (key, value, 2usize)
+            } else if let Some((key, value)) = token.split_once('=') {
+                (key, value, 1usize)
+            } else if tokens
+                .get(index + 1)
+                .is_some_and(|candidate| *candidate == "=")
+            {
+                let value = tokens.get(index + 2).copied().unwrap_or_default();
+                (token, value, 3usize)
+            } else {
+                return Err(format!(
+                    "Xyce *COMP option '{token}' must use KEY=VALUE syntax"
+                ));
+            };
+            let key = raw_key.trim().to_ascii_lowercase();
+            let value = raw_value.trim();
+            if key.is_empty() || value.is_empty() {
+                return Err(format!("Xyce *COMP option '{key}' is missing a value"));
+            }
+            if !seen.insert(key.clone()) {
+                return Err(format!("Xyce *COMP option '{key}' is duplicated"));
+            }
+            let parsed = Self::parse_comp_float(value)?;
+            match key.as_str() {
+                "reltol" => tolerance.relative = parsed,
+                "abstol" => tolerance.absolute = parsed,
+                "zerotol" => tolerance.zero = parsed,
+                "absdifftol" => tolerance.absolute_difference = parsed,
+                "offset" if parsed == 0.0 => {}
+                "numfail" if parsed == 0.0 => {}
+                "offset" | "numfail" => {
+                    return Err(format!(
+                        "Xyce integrated-RMS *COMP option {key}={value} requires a broader comparison contract"
+                    ));
+                }
+                _ => return Err(format!("unrecognized Xyce *COMP option '{key}'")),
+            }
+            index += consumed;
+        }
+        tolerance.validate()
     }
 
     fn default_comparison_tolerance(&self, normalized_probe: &str) -> XyceComparisonTolerance {
@@ -22428,11 +22980,15 @@ impl XyceTestRunner {
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_npn(netlist, element)
             });
+        let has_qualified_diode = purpose.validates_absolute_device_contract()
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_native_absolute_transient_exact_is_diode(netlist, element)
+            });
         let has_qualified_level9_bsim3 = purpose.admits_default_level9_bsim3()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
             });
-        if (has_qualified_bjt || has_qualified_level9_bsim3)
+        if (has_qualified_bjt || has_qualified_diode || has_qualified_level9_bsim3)
             && !Self::native_transient_uses_standard_startup(netlist)
         {
             return Err(
@@ -22610,6 +23166,11 @@ impl XyceTestRunner {
                 ElementKind::Jfet { .. }
                     if Self::netlist_device_is_native_classic_jfet(netlist, &element.name) => {}
                 ElementKind::Diode { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_native_absolute_transient_exact_is_diode(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Diode { .. }
                     if matches!(
                         purpose,
                         XyceStaticTranPlanPurpose::RelationalFamily
@@ -22622,7 +23183,7 @@ impl XyceTestRunner {
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and exact IS-only diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -22765,9 +23326,7 @@ impl XyceTestRunner {
                         netlist, element,
                     ) => {}
                 ElementKind::Diode { .. }
-                    if Self::netlist_element_is_native_scoped_model_relational_diode(
-                        netlist, element,
-                    ) => {}
+                    if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
                         "native scoped-model relational comparison does not qualify element '{}'",
@@ -27011,7 +27570,7 @@ impl XyceTestRunner {
             })
     }
 
-    fn netlist_element_is_native_scoped_model_relational_diode(
+    fn netlist_element_is_native_exact_is_diode(
         netlist: &Netlist,
         element: &crate::netlist::Element,
     ) -> bool {
@@ -27027,10 +27586,52 @@ impl XyceTestRunner {
             && instance_params.is_empty()
             && deferred_params.is_empty()
             && Self::find_unique_model_in(&netlist.models, model)
-                .is_some_and(Self::model_is_native_scoped_model_relational_diode)
+                .is_some_and(Self::model_is_native_exact_is_diode)
     }
 
-    fn model_is_native_scoped_model_relational_diode(model: &crate::netlist::ModelDef) -> bool {
+    fn netlist_element_is_native_absolute_transient_exact_is_diode(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        netlist.options.gmin.is_none()
+            && Self::netlist_element_is_native_exact_is_diode(netlist, element)
+    }
+
+    fn netlist_is_native_exact_is_diode_xyce_verify_envelope(netlist: &Netlist) -> bool {
+        let diodes = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Diode { .. }))
+            .collect::<Vec<_>>();
+        if diodes.is_empty()
+            || diodes.iter().any(|element| {
+                !Self::netlist_element_is_native_absolute_transient_exact_is_diode(netlist, element)
+            })
+            || netlist.elements.iter().any(|element| {
+                matches!(
+                    element.kind,
+                    ElementKind::Bjt { .. } | ElementKind::Mosfet { .. } | ElementKind::Jfet { .. }
+                )
+            })
+        {
+            return false;
+        }
+
+        let referenced_models = diodes
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Diode { model, .. } => Some(model.to_ascii_lowercase()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        netlist.models.len() == referenced_models.len()
+            && netlist.models.iter().all(|model| {
+                referenced_models.contains(&model.name.to_ascii_lowercase())
+                    && Self::model_is_native_exact_is_diode(model)
+            })
+    }
+
+    fn model_is_native_exact_is_diode(model: &crate::netlist::ModelDef) -> bool {
         matches!(
             model.model_type.to_ascii_uppercase().as_str(),
             "D" | "DIODE"
@@ -32812,6 +33413,34 @@ mod tests {
     }
 
     #[test]
+    fn named_vbic_noise_mechanisms_require_the_generated_device_route() {
+        let netlist = Netlist::parse(
+            "generated VBIC noise ownership\n\
+             Q1 c b e model\n\
+             .MODEL model NPN LEVEL=12\n\
+             .NOISE V(c) VIN LIN 1 1 1\n\
+             VIN b 0 AC 1\n\
+             .END\n",
+        )
+        .expect("VBIC noise ownership fixture parses");
+        let generated = XycePrintRequest {
+            probes: vec!["{sqrt(abs(DNO(Q1,white_bi_ei_ibei_shot_noise)))}".to_string()],
+        };
+        let aggregate = XycePrintRequest {
+            probes: vec!["{sqrt(abs(DNO(Q1)))}".to_string()],
+        };
+
+        assert_eq!(
+            XyceTestRunner::noise_print_requires_generated_vbic_mechanisms(&generated, &netlist),
+            Ok(true)
+        );
+        assert_eq!(
+            XyceTestRunner::noise_print_requires_generated_vbic_mechanisms(&aggregate, &netlist),
+            Ok(false)
+        );
+    }
+
+    #[test]
     fn noise_complex_reference_columns_preserve_real_and_imaginary_components() {
         let real = XyceAcReferenceColumn::Probe {
             name: "i(llp1)".to_string(),
@@ -34784,6 +35413,25 @@ interval output
         .expect("initial interval is detected");
 
         assert!((interval - 5.0e-4).abs() <= 1.0e-15);
+
+        let schedule = XyceTestRunner::output_interval_schedule(
+            "interval output\n.options output initial_interval=1ms 9ms .1ms 10ms 10us\n.end\n",
+        )
+        .expect("piecewise output schedule parses")
+        .expect("piecewise output schedule is present");
+        assert!((schedule.0 - 1.0e-3).abs() <= 1.0e-15);
+        assert_eq!(schedule.1.len(), 2);
+        assert!((schedule.1[0].0 - 9.0e-3).abs() <= 1.0e-15);
+        assert!((schedule.1[0].1 - 1.0e-4).abs() <= 1.0e-15);
+        assert!((schedule.1[1].0 - 10.0e-3).abs() <= 1.0e-15);
+        assert!((schedule.1[1].1 - 10.0e-6).abs() <= 1.0e-15);
+        assert!(
+            XyceTestRunner::output_interval_schedule(
+                "invalid output schedule\n.options output initial_interval=1ms 9ms\n.end\n"
+            )
+            .is_err(),
+            "an incomplete time/interval pair must fail closed"
+        );
     }
 
     #[test]
@@ -36632,6 +37280,137 @@ Cload out 0 2u\n\
             )
             .is_err(),
             "the self-grid oracle cannot accept a truncated trace"
+        );
+    }
+
+    #[test]
+    fn xyce_verify_comp_tolerances_follow_release_probe_mapping_and_fail_closed() {
+        let columns = vec!["{V(4)+1}".to_string(), "{V(11)-0.5}".to_string()];
+        let source = "\
+*COMP V(11) reltol=0.02
+*COMP {V(4)+1} reltol=0.02 abstol=2e-12 zerotol=3e-12 absdifftol=4e-12
+";
+        let tolerances = XyceTestRunner::xyce_verify_comp_tolerances(source, &columns)
+            .expect("canonical Release 7.10 *COMP metadata parses");
+        assert_eq!(tolerances.len(), 2);
+        assert_eq!(tolerances[0].relative.to_bits(), 0.02f64.to_bits());
+        assert_eq!(tolerances[0].absolute.to_bits(), 2.0e-12f64.to_bits());
+        assert_eq!(tolerances[0].zero.to_bits(), 3.0e-12f64.to_bits());
+        assert_eq!(
+            tolerances[0].absolute_difference.to_bits(),
+            4.0e-12f64.to_bits()
+        );
+        assert_eq!(
+            tolerances[1],
+            XyceVerifyTransientTolerance::release_7_10_default(),
+            "an unprinted *COMP probe remains harmless and does not retarget an affine expression"
+        );
+        let continued = XyceTestRunner::xyce_verify_comp_tolerances(
+            "*COMP {V(4)+1} reltol=0.02\n+ abstol=2e-12 zerotol=3e-12 absdifftol=4e-12",
+            &columns,
+        )
+        .expect("Release 7.10 *COMP continuation lines are joined before parsing");
+        assert_eq!(continued[0], tolerances[0]);
+        assert!(
+            XyceTestRunner::xyce_verify_comp_tolerances("*COMP V(unprinted) reltol=1", &columns)
+                .is_err(),
+            "an unreferenced *COMP comment alone must not select integrated-RMS comparison"
+        );
+
+        for malformed in [
+            "*COMP {V(4)+1} reltol=0.02 reltol=0.03",
+            "*COMP {V(4)+1} unknown=1",
+            "*COMP {V(4)+1} offset=1",
+            "*COMP {V(4)+1} numfail=1",
+            "*COMP",
+        ] {
+            assert!(
+                XyceTestRunner::xyce_verify_comp_tolerances(malformed, &columns).is_err(),
+                "malformed or unsupported *COMP metadata must fail closed: {malformed}"
+            );
+        }
+        assert!(
+            XyceTestRunner::xyce_verify_comp_tolerances(
+                "*COMP {V(4)+1} reltol=0.02\n*COMP {V(4)+1} reltol=0.02",
+                &columns,
+            )
+            .is_err(),
+            "duplicate printed-probe tolerances must fail closed"
+        );
+    }
+
+    #[test]
+    fn xyce_verify_masks_only_singular_quotients_with_separately_checked_divisors() {
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        let columns = vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "I(VMON)".to_string(),
+            "V(out)".to_string(),
+            "{V(out)/I(VMON)}".to_string(),
+        ];
+        let table = |current: Value, voltage: Value, quotient: Value| XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, current, voltage, quotient],
+                vec![1.0, 1.0, current, voltage, quotient],
+            ],
+        };
+
+        let singular_good = table(5.0e-13, 5.0e-13, 1.0);
+        let singular_test = table(5.0e-25, 5.0e-13, 1.0e12);
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&singular_good, &singular_test)
+                .expect("singular quotient tables compare")
+                .is_empty(),
+            "a quotient adds no information when its separately compared divisor is within ZEROTOL"
+        );
+        let inconsistent_singular_test = table(5.0e-25, 5.0e-13, 1.0);
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&singular_good, &inconsistent_singular_test,)
+                .is_err(),
+            "ill-conditioning must not hide a broken quotient-expression evaluation"
+        );
+
+        let absolute_floor_good = table(5.0e-11, 5.0e-11, 1.0);
+        let absolute_floor_test = table(5.1e-11, 5.0e-11, 5.0e-11 / 5.1e-11);
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&absolute_floor_good, &absolute_floor_test)
+                .expect("absolute-floor quotient tables compare")
+                .is_empty(),
+            "a quotient is ill-conditioned below ABSTOL/RELTOL even when its divisor exceeds ZEROTOL"
+        );
+
+        let two_sided_floor_good = table(1.5e-10, 1.5e-10, 1.0);
+        let two_sided_floor_test = table(1.51e-10, 1.5e-10, 1.5e-10 / 1.51e-10);
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&two_sided_floor_good, &two_sided_floor_test,)
+                .expect("two-sided-floor quotient tables compare")
+                .is_empty(),
+            "independent traces contribute two absolute-error bounds to quotient conditioning"
+        );
+
+        let conditioned_good = table(1.0e-6, 1.0e-6, 1.0);
+        let conditioned_test = table(0.991e-6, 1.009e-6, 1.009 / 0.991);
+        let conditioned_mismatches = runner
+            .compare_xyce_verify_transient_tables(&conditioned_good, &conditioned_test)
+            .expect("conditioned quotient tables compare");
+        assert_eq!(conditioned_mismatches.len(), 1);
+        assert_eq!(conditioned_mismatches[0].probe, "{V(out)/I(VMON)}");
+
+        let bad_divisor = table(5.0e-13, 5.0e-7, 1.0e6);
+        let divisor_mismatches = runner
+            .compare_xyce_verify_transient_tables(&conditioned_good, &bad_divisor)
+            .expect("bad divisor tables compare");
+        assert!(
+            divisor_mismatches
+                .iter()
+                .any(|mismatch| mismatch.probe == "I(VMON)"),
+            "masking a singular quotient must never mask the independently compared divisor"
         );
     }
 
@@ -39373,10 +40152,8 @@ D1 c 0 DX
             XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
             "ordinary relational families must continue rejecting BJT devices"
         );
-        assert!(
-            XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
-            "the absolute transient purpose must continue rejecting this diode"
-        );
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("the absolute purpose shares the exact-IS diode and validated NPN envelopes");
 
         let contract = XyceBaselineFamilyContract {
             kind: XyceBaselineFamilyKind::ScopedModel,
@@ -39575,6 +40352,94 @@ D1 c 0 DX
             .is_err(),
             "ambiguous diode model definitions must fail closed"
         );
+    }
+
+    #[test]
+    fn absolute_transient_contract_accepts_only_exact_is_diode_subset() {
+        let source = "\
+validated native exact-IS diode transient subset
+VIN in 0 PULSE(5 -1 1n .1n .1n 2n 4n)
+R1 in out 2k
+D1 out 0 DMOD
+.MODEL DMOD D (IS=100f)
+.TRAN .1n 8n
+.PRINT TRAN V(out)
+.END
+";
+        let netlist = Netlist::parse(source).expect("validated exact-IS diode deck parses");
+
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("exact-IS diode with ordinary operating-point startup is eligible");
+
+        for mutation in [
+            source.replace("D1 out 0 DMOD", "D1 out 0 DMOD AREA=2"),
+            source.replace("(IS=100f)", "(IS=100f N=1)"),
+            source.replace("(IS=100f)", "(IS=0)"),
+            source.replace(".TRAN .1n 8n", ".TRAN .1n 8n UIC"),
+            source.replace(".TRAN .1n 8n", ".OPTIONS TEMP=50\n.TRAN .1n 8n"),
+            source.replace(".TRAN .1n 8n", ".OPTIONS GMIN=1e-12\n.TRAN .1n 8n"),
+        ] {
+            let mutated = Netlist::parse(&mutation).expect("diode contract mutation parses");
+            assert!(
+                XyceTestRunner::validate_native_transient_contract(&mutated).is_err(),
+                "instance overrides, broader models, and nonstandard startup must fail closed: {mutation}"
+            );
+        }
+
+        let mut ambiguous = netlist;
+        let duplicate = ambiguous
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("DMOD"))
+            .expect("DMOD exists")
+            .clone();
+        ambiguous.models.push(duplicate);
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&ambiguous).is_err(),
+            "ambiguous diode model definitions must fail closed"
+        );
+    }
+
+    #[test]
+    fn absolute_is_only_diode_model_contract_rejects_nonnumeric_parameter_routes() {
+        let qualified = crate::netlist::ModelDef {
+            name: "DMOD".to_string(),
+            model_type: "D".to_string(),
+            params: vec![("IS".to_string(), 1.0e-13)],
+            expr_params: Vec::new(),
+            string_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: Vec::new(),
+            integer_vector_params: Vec::new(),
+        };
+        assert!(XyceTestRunner::model_is_native_exact_is_diode(&qualified));
+
+        let mut nonfinite = qualified.clone();
+        nonfinite.params[0].1 = Value::NAN;
+        assert!(!XyceTestRunner::model_is_native_exact_is_diode(&nonfinite));
+
+        let mut unknown = qualified.clone();
+        unknown.params.push(("N".to_string(), 1.0));
+        assert!(!XyceTestRunner::model_is_native_exact_is_diode(&unknown));
+
+        let mut expression = qualified.clone();
+        expression
+            .expr_params
+            .push(("IS".to_string(), "saturation_current".to_string()));
+        assert!(!XyceTestRunner::model_is_native_exact_is_diode(&expression));
+
+        let mut string = qualified.clone();
+        string
+            .string_params
+            .push(("IS".to_string(), "nominal".to_string()));
+        assert!(!XyceTestRunner::model_is_native_exact_is_diode(&string));
+
+        let mut vector = qualified;
+        vector
+            .real_vector_params
+            .push(("IS".to_string(), vec![1.0e-13, 2.0e-13]));
+        assert!(!XyceTestRunner::model_is_native_exact_is_diode(&vector));
     }
 
     #[test]
