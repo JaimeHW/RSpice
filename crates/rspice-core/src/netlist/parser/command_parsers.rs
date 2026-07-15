@@ -157,12 +157,12 @@ pub(super) fn parse_step_command(
 
         match sweep_prefix.as_deref() {
             Some("DEC") => StepSweep::Decade {
-                points_per_decade: step_or_points as usize,
+                points_per_decade: parse_step_points_per_interval(step_or_points, "DEC", line_num)?,
                 start,
                 stop,
             },
             Some("OCT") => StepSweep::Octave {
-                points_per_octave: step_or_points as usize,
+                points_per_octave: parse_step_points_per_interval(step_or_points, "OCT", line_num)?,
                 start,
                 stop,
             },
@@ -180,6 +180,26 @@ pub(super) fn parse_step_command(
         param_name,
         sweep,
     })
+}
+
+fn parse_step_points_per_interval(
+    value: Value,
+    sweep_type: &str,
+    line_num: usize,
+) -> Result<usize, ParseError> {
+    // A usize contains values below 2^BITS. Expressing this exclusive bound in
+    // floating point avoids the rounding of `usize::MAX as f64` on 64-bit hosts.
+    let usize_upper_bound = 2.0_f64.powi(usize::BITS as i32);
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 || value >= usize_upper_bound {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".STEP {sweep_type} points per interval must be a positive integer representable as usize, found {value}"
+            ),
+        });
+    }
+
+    Ok(value as usize)
 }
 
 /// Parse .TEMP command: .TEMP t1 [t2 t3...]
