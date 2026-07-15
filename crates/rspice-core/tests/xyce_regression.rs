@@ -7140,6 +7140,32 @@ fn test_xyce_dc_analysis_expression_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_ac_analysis_expression_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/ISSUE_543/acBaseline1.cir",
+            "ac_analysis_expression_family_baseline",
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_543/acExpr1.cir",
+            "ac_analysis_expression_family_wrapper",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass its independently simulated AC-analysis expression oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_subcircuit_parameter_resolution_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
