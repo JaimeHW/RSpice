@@ -42,6 +42,7 @@ mod transient;
 
 // Re-export CompressionConfig for public API
 pub use crate::analysis::waveform::CompressionConfig;
+pub use advanced::{MaterializedStepRun, StepPlan, StepPlanLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{
     VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,

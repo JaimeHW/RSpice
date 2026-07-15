@@ -36,3 +36,5 @@ mod noise;
 mod pole_zero;
 mod sensitivity;
 mod step;
+
+pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};

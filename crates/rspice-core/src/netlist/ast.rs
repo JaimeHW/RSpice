@@ -8,6 +8,7 @@
 //! - Analysis commands (DC, AC, transient, parametric, noise)
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 
 use super::expr::FunctionDef;
 
@@ -1049,37 +1050,127 @@ impl DcSweepSpec {
     }
 
     pub fn points(&self) -> Vec<Value> {
+        if let DcSweepMode::List(values) = &self.mode {
+            return if values.iter().all(|value| value.is_finite()) {
+                values.clone()
+            } else {
+                Vec::new()
+            };
+        }
+        self.points_controlled(2_000_000, false, &NoAbort)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn points_bounded_with_abort(
+        &self,
+        max_points: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SweepPointGenerationError> {
+        self.points_controlled(max_points, true, abort)
+    }
+
+    fn points_controlled(
+        &self,
+        max_points: usize,
+        reject_limit: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SweepPointGenerationError> {
+        const MAX_GENERATED_SWEEP_POINTS: usize = 2_000_000;
+        let generated_limit = max_points.min(MAX_GENERATED_SWEEP_POINTS);
+        let reject_generated_limit = reject_limit;
         match &self.mode {
-            DcSweepMode::Linear => linear_sweep_points(self.start, self.stop, self.step),
+            DcSweepMode::Linear => linear_sweep_points_controlled(
+                self.start,
+                self.stop,
+                self.step,
+                generated_limit,
+                reject_generated_limit,
+                abort,
+            ),
             DcSweepMode::List(values) => {
-                if values.iter().all(|value| value.is_finite()) {
-                    values.clone()
-                } else {
-                    Vec::new()
-                }
+                copy_sweep_values_controlled(values, max_points, reject_limit, abort)
             }
-            DcSweepMode::Decade { points_per_decade } => {
-                logarithmic_sweep_points(self.start, self.stop, *points_per_decade, 10.0)
-            }
-            DcSweepMode::Octave { points_per_octave } => {
-                logarithmic_sweep_points(self.start, self.stop, *points_per_octave, 2.0)
-            }
+            DcSweepMode::Decade { points_per_decade } => logarithmic_sweep_points_controlled(
+                self.start,
+                self.stop,
+                *points_per_decade,
+                10.0,
+                generated_limit,
+                reject_generated_limit,
+                abort,
+            ),
+            DcSweepMode::Octave { points_per_octave } => logarithmic_sweep_points_controlled(
+                self.start,
+                self.stop,
+                *points_per_octave,
+                2.0,
+                generated_limit,
+                reject_generated_limit,
+                abort,
+            ),
         }
     }
 }
 
-fn linear_sweep_points(start: Value, stop: Value, step: Value) -> Vec<Value> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SweepPointGenerationError {
+    Aborted,
+    LimitExceeded { requested: usize, limit: usize },
+}
+
+fn poll_sweep_abort(
+    abort: &dyn AbortSignal,
+    index: usize,
+) -> Result<(), SweepPointGenerationError> {
+    if index.is_multiple_of(64) && abort.is_aborted() {
+        Err(SweepPointGenerationError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+fn copy_sweep_values_controlled(
+    values: &[Value],
+    max_values: usize,
+    reject_limit: bool,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SweepPointGenerationError> {
+    if reject_limit && values.len() > max_values {
+        return Err(SweepPointGenerationError::LimitExceeded {
+            requested: values.len(),
+            limit: max_values,
+        });
+    }
+    let retained = values.len().min(max_values);
+    let mut result = Vec::with_capacity(retained);
+    for (index, value) in values.iter().take(retained).copied().enumerate() {
+        poll_sweep_abort(abort, index)?;
+        if !value.is_finite() {
+            return Ok(Vec::new());
+        }
+        result.push(value);
+    }
+    Ok(result)
+}
+
+fn linear_sweep_points_controlled(
+    start: Value,
+    stop: Value,
+    step: Value,
+    max_points: usize,
+    reject_limit: bool,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SweepPointGenerationError> {
     if !start.is_finite() || !stop.is_finite() || !step.is_finite() || step == 0.0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if (stop > start && step < 0.0) || (stop < start && step > 0.0) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let mut points = Vec::new();
     let eps = (step.abs() * 1e-9).max(1e-18);
     let mut point_index = 0usize;
-    const MAX_POINTS: usize = 2_000_000;
 
     let done = |x: Value| -> bool {
         if step > 0.0 {
@@ -1090,15 +1181,25 @@ fn linear_sweep_points(start: Value, stop: Value, step: Value) -> Vec<Value> {
     };
 
     loop {
+        poll_sweep_abort(abort, point_index)?;
         let value = start + step * point_index as Value;
         if done(value) {
             break;
         }
 
         let snapped_to_stop = (value - stop).abs() <= eps;
+        if point_index >= max_points {
+            if reject_limit {
+                return Err(SweepPointGenerationError::LimitExceeded {
+                    requested: point_index.saturating_add(1),
+                    limit: max_points,
+                });
+            }
+            break;
+        }
         points.push(if snapped_to_stop { stop } else { value });
         point_index += 1;
-        if snapped_to_stop || point_index >= MAX_POINTS {
+        if snapped_to_stop {
             break;
         }
     }
@@ -1107,26 +1208,36 @@ fn linear_sweep_points(start: Value, stop: Value, step: Value) -> Vec<Value> {
         points.push(start);
     }
 
-    points
+    Ok(points)
 }
 
-fn logarithmic_sweep_points(
+fn logarithmic_sweep_points_controlled(
     start: Value,
     stop: Value,
     points_per_interval: usize,
     base: Value,
-) -> Vec<Value> {
+    max_points: usize,
+    reject_limit: bool,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SweepPointGenerationError> {
     if !start.is_finite()
         || !stop.is_finite()
         || start <= 0.0
         || stop <= 0.0
         || points_per_interval == 0
     {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     if start > stop {
-        return vec![start];
+        return if max_points == 0 && reject_limit {
+            Err(SweepPointGenerationError::LimitExceeded {
+                requested: 1,
+                limit: 0,
+            })
+        } else {
+            Ok(vec![start])
+        };
     }
 
     let multiplier = base.powf(1.0 / points_per_interval as Value);
@@ -1137,12 +1248,21 @@ fn logarithmic_sweep_points(
     };
     let raw_count = span * points_per_interval as Value + 1.0;
     let boundary_epsilon = 64.0 * Value::EPSILON * raw_count.abs().max(1.0);
-    let count = (raw_count + boundary_epsilon).floor() as usize;
-    let count = count.clamp(1, 2_000_000);
-
-    (0..count)
-        .map(|index| start * multiplier.powi(index as i32))
-        .collect()
+    let requested = (raw_count + boundary_epsilon).floor() as usize;
+    let requested = requested.max(1);
+    if reject_limit && requested > max_points {
+        return Err(SweepPointGenerationError::LimitExceeded {
+            requested,
+            limit: max_points,
+        });
+    }
+    let count = requested.min(max_points);
+    let mut points = Vec::with_capacity(count);
+    for index in 0..count {
+        poll_sweep_abort(abort, index)?;
+        points.push(start * multiplier.powi(index as i32));
+    }
+    Ok(points)
 }
 
 //=============================================================================
@@ -1863,6 +1983,125 @@ impl StepSweep {
             }
             StepSweep::Data { .. } => Vec::new(),
         }
+    }
+
+    pub(crate) fn values_bounded_with_abort(
+        &self,
+        max_values: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SweepPointGenerationError> {
+        match self {
+            StepSweep::Linear { start, stop, step } => DcSweepSpec::linear(*start, *stop, *step)
+                .points_bounded_with_abort(max_values, abort),
+            StepSweep::Decade {
+                points_per_decade,
+                start,
+                stop,
+            } => DcSweepSpec::decade(*start, *stop, *points_per_decade)
+                .points_bounded_with_abort(max_values, abort),
+            StepSweep::Octave {
+                points_per_octave,
+                start,
+                stop,
+            } => DcSweepSpec::octave(*start, *stop, *points_per_octave)
+                .points_bounded_with_abort(max_values, abort),
+            StepSweep::List(values) => {
+                copy_sweep_values_controlled(values, max_values, true, abort)
+            }
+            StepSweep::Data { .. } => Ok(Vec::new()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod controlled_step_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_step_grids_exactly_match_compatibility_generation() {
+        let sweeps = [
+            StepSweep::Linear {
+                start: -1.0,
+                stop: 1.0,
+                step: 0.25,
+            },
+            StepSweep::Decade {
+                points_per_decade: 5,
+                start: 1.0,
+                stop: 10_001.0,
+            },
+            StepSweep::Octave {
+                points_per_octave: 3,
+                start: 1.0,
+                stop: 8.0,
+            },
+            StepSweep::List(vec![3.0, 1.0, 4.0, 1.5]),
+        ];
+
+        for sweep in sweeps {
+            let expected = sweep.values();
+            let bounded = sweep
+                .values_bounded_with_abort(expected.len(), &NoAbort)
+                .expect("exact compatibility grid fits its bound");
+            assert_eq!(bounded, expected, "grid changed for {sweep:?}");
+
+            let error = sweep
+                .values_bounded_with_abort(expected.len() - 1, &NoAbort)
+                .expect_err("too-small bound must reject the whole grid");
+            assert!(matches!(
+                error,
+                SweepPointGenerationError::LimitExceeded { .. }
+            ));
+        }
+
+        let decade = StepSweep::Decade {
+            points_per_decade: 5,
+            start: 1.0,
+            stop: 10_001.0,
+        }
+        .values();
+        assert_eq!(decade.len(), 21);
+        assert!((decade[20] - 10_000.0).abs() <= 1.0e-10);
+    }
+
+    #[test]
+    fn list_compatibility_is_unbounded_while_controlled_generation_rejects() {
+        let sweep = DcSweepSpec::list(vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(sweep.points(), vec![1.0, 2.0, 3.0, 4.0]);
+        assert!(matches!(
+            sweep.points_bounded_with_abort(3, &NoAbort),
+            Err(SweepPointGenerationError::LimitExceeded {
+                requested: 4,
+                limit: 3
+            })
+        ));
+    }
+
+    #[test]
+    fn bounded_step_generation_honors_delayed_cancellation() {
+        let sweep = StepSweep::List((0..128).map(|value| value as Value).collect());
+        let abort = crate::abort_signal::CountingAbort::new(1);
+        assert!(matches!(
+            sweep.values_bounded_with_abort(128, &abort),
+            Err(SweepPointGenerationError::Aborted)
+        ));
+        assert!(abort.count() >= 2);
+    }
+
+    #[test]
+    fn bounded_log_grid_rejects_intrinsic_cap_without_allocating_partial_grid() {
+        let sweep = StepSweep::Decade {
+            points_per_decade: 2_000_001,
+            start: 1.0,
+            stop: 10.0,
+        };
+        assert!(matches!(
+            sweep.values_bounded_with_abort(3_000_000, &NoAbort),
+            Err(SweepPointGenerationError::LimitExceeded {
+                requested: 2_000_002,
+                limit: 2_000_000
+            })
+        ));
     }
 }
 

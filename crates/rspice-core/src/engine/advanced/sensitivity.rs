@@ -257,8 +257,22 @@ impl Engine {
         netlist: &Netlist,
         overrides: &[(String, Value)],
     ) -> Result<(Netlist, usize), SimulationError> {
+        Self::create_perturbed_netlist_multi_with_abort(netlist, overrides, &NoAbort)
+    }
+
+    pub(crate) fn create_perturbed_netlist_multi_with_abort(
+        netlist: &Netlist,
+        overrides: &[(String, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let mut override_map: HashMap<String, Value> = HashMap::new();
-        for (name, value) in overrides {
+        for (index, (name, value)) in overrides.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             override_map.insert(name.to_ascii_uppercase(), *value);
         }
 
@@ -267,7 +281,10 @@ impl Engine {
 
         let mut param_overrides = Vec::new();
         let mut device_overrides = Vec::new();
-        for (name, value) in ordered_overrides {
+        for (index, (name, value)) in ordered_overrides.into_iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             if let Some((device_name, param_name)) = Self::split_device_parameter_override(&name) {
                 device_overrides.push((device_name, param_name, value));
             } else {
@@ -279,8 +296,11 @@ impl Engine {
         for (name, value) in &param_overrides {
             perturbed.params.set(name, *value);
         }
-        let applied_device_overrides =
-            Self::apply_device_parameter_overrides(&mut perturbed, &device_overrides)?;
+        let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
+            &mut perturbed,
+            &device_overrides,
+            abort,
+        )?;
 
         let Some(source) = &netlist.source_text else {
             return Ok((perturbed, applied_device_overrides));
@@ -290,28 +310,38 @@ impl Engine {
             .iter()
             .filter(|(name, _)| Self::source_references_param(source, name))
             .count();
-        let overridden_source = Self::build_overridden_source_multi(source, &param_overrides);
+        let overridden_source =
+            Self::build_overridden_source_multi_with_abort(source, &param_overrides, abort)?;
 
         let parse_options = crate::netlist::NetlistParseOptions {
             statistical_mode: netlist.params.statistical_mode(),
             expression_dialect: netlist.params.expression_dialect(),
         };
         let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {
-            Netlist::parse_with_path_and_options(&overridden_source, source_path, parse_options)
+            Netlist::parse_with_path_and_options_and_abort(
+                &overridden_source,
+                source_path,
+                parse_options,
+                abort,
+            )
         } else {
-            Netlist::parse_with_options(&overridden_source, parse_options)
+            Netlist::parse_with_options_and_abort(&overridden_source, parse_options, abort)
         }
-        .map_err(|e| {
-            SimulationError::Netlist(format!(
+        .map_err(|error| match error {
+            crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+            crate::netlist::ParseWithAbortError::Parse(error) => SimulationError::Netlist(format!(
                 "Failed to reparse netlist for parameter override set {:?}: {}",
-                param_overrides, e
-            ))
+                param_overrides, error
+            )),
         })?;
         for (name, value) in &param_overrides {
             reparsed.params.set(name, *value);
         }
-        let applied_device_overrides =
-            Self::apply_device_parameter_overrides(&mut reparsed, &device_overrides)?;
+        let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
+            &mut reparsed,
+            &device_overrides,
+            abort,
+        )?;
 
         Ok((reparsed, referenced + applied_device_overrides))
     }
@@ -324,12 +354,16 @@ impl Engine {
             .then(|| (device_name.to_string(), param_name.to_string()))
     }
 
-    fn apply_device_parameter_overrides(
+    fn apply_device_parameter_overrides_with_abort(
         netlist: &mut Netlist,
         overrides: &[(String, String, Value)],
+        abort: &dyn AbortSignal,
     ) -> Result<usize, SimulationError> {
         let mut applied = 0;
-        for (device_name, param_name, value) in overrides {
+        for (index, (device_name, param_name, value)) in overrides.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let element = netlist
                 .elements
                 .iter_mut()
@@ -499,23 +533,38 @@ impl Engine {
             .map_or("", |idx| &trimmed[idx..])
     }
 
-    pub(in crate::engine::advanced) fn build_overridden_source_multi(
+    pub(in crate::engine::advanced) fn build_overridden_source_multi_with_abort(
         source: &str,
         overrides: &[(String, Value)],
-    ) -> String {
+        abort: &dyn AbortSignal,
+    ) -> Result<String, SimulationError> {
         use std::fmt::Write;
 
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let title = source.lines().next().unwrap_or("Untitled");
         let mut out = String::new();
 
         let _ = writeln!(out, "{}", title);
-        for (name, value) in overrides {
+        for (index, (name, value)) in overrides.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let _ = writeln!(out, ".PARAM {}={:.17e}", name, value);
         }
 
-        for line in Self::logical_lines_after_title_preserving_data_blocks(source) {
+        let lines =
+            Self::logical_lines_after_title_preserving_data_blocks_with_abort(source, abort)?;
+        for (line_index, line) in lines.into_iter().enumerate() {
+            if line_index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let mut override_suffix = String::new();
-            for (name, value) in overrides {
+            for (override_index, (name, value)) in overrides.iter().enumerate() {
+                if override_index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 if Self::param_assignment_present(&line, name) {
                     let _ = write!(override_suffix, " {}={:.17e}", name, value);
                 }
@@ -528,15 +577,21 @@ impl Engine {
             }
         }
 
-        out
+        Ok(out)
     }
 
-    fn logical_lines_after_title_preserving_data_blocks(source: &str) -> Vec<String> {
+    fn logical_lines_after_title_preserving_data_blocks_with_abort(
+        source: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<String>, SimulationError> {
         let mut lines = Vec::new();
         let mut continuation = String::new();
         let mut in_data_block = false;
 
-        for raw in source.lines().skip(1) {
+        for (line_index, raw) in source.lines().skip(1).enumerate() {
+            if line_index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let line = raw.split(';').next().unwrap_or("").trim();
             if line.is_empty() || line.starts_with('*') || line.starts_with('$') {
                 continue;
@@ -581,7 +636,7 @@ impl Engine {
             lines.push(continuation);
         }
 
-        lines
+        Ok(lines)
     }
 
     fn sensitivity_step(
@@ -2448,6 +2503,19 @@ mod tests {
     use crate::analysis::AcSensitivityOutput;
     use crate::netlist::AnalysisCommand;
     use crate::netlist::{StepCommand, StepSweep, StepTarget};
+
+    #[test]
+    fn source_override_construction_honors_mid_build_cancellation() {
+        let abort = crate::abort_signal::CountingAbort::new(1);
+        let error = Engine::build_overridden_source_multi_with_abort(
+            "override cancellation\n.param p=1\nR1 1 0 {p}\n.end\n",
+            &[("P".to_string(), 2.0)],
+            &abort,
+        )
+        .expect_err("source rewrite must poll while applying overrides");
+        assert!(matches!(error, crate::SimulationError::Aborted));
+        assert!(abort.count() >= 2);
+    }
 
     const PARAMETRIC_DIVIDER: &str = "\
 Parametric divider
