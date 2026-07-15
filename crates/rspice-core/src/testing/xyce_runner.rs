@@ -27887,6 +27887,8 @@ impl XyceTestRunner {
         steps: &[StepCommand],
         step_runs: &[XyceStepRun],
     ) -> Result<(), String> {
+        const PARAMETER_SWEEP_FOOTER: &str = "End of Xyce(TM) Parameter Sweep";
+
         let content = fs::read_to_string(path)
             .map_err(|err| format!("{}: {err}", self.display_path(path)))?;
         let mut nonempty_lines = content
@@ -27930,26 +27932,20 @@ impl XyceTestRunner {
             }
         }
 
-        let mut rows = Vec::new();
-        for (line_number, line) in nonempty_lines {
-            if line.to_ascii_lowercase().starts_with("end of xyce") {
-                break;
-            }
-            rows.push((line_number, line));
-        }
-
         let expected_row_count = expected_columns
             .first()
             .map(|(_, values)| values.len())
             .unwrap_or(0);
-        if rows.len() != expected_row_count {
+        let remaining_lines = nonempty_lines.collect::<Vec<_>>();
+        if remaining_lines.len() < expected_row_count {
             return Err(format!(
                 "{} has {} step row(s), expected {}",
                 self.display_path(path),
-                rows.len(),
+                remaining_lines.len(),
                 expected_row_count
             ));
         }
+        let (rows, footer_and_trailing) = remaining_lines.split_at(expected_row_count);
 
         for (row_index, (line_number, line)) in rows.iter().copied().enumerate() {
             let fields = line.split_whitespace().collect::<Vec<_>>();
@@ -27998,6 +27994,31 @@ impl XyceTestRunner {
                     ));
                 }
             }
+        }
+
+        let Some((footer_line_number, footer)) = footer_and_trailing.first().copied() else {
+            return Err(format!(
+                "{} is missing required footer '{PARAMETER_SWEEP_FOOTER}'",
+                self.display_path(path)
+            ));
+        };
+        if footer != PARAMETER_SWEEP_FOOTER {
+            return Err(format!(
+                "{} line {footer_line_number} must be exactly '{PARAMETER_SWEEP_FOOTER}', found '{footer}'",
+                self.display_path(path)
+            ));
+        }
+        if let Some((line_number, line)) = footer_and_trailing.get(1).copied() {
+            if line == PARAMETER_SWEEP_FOOTER {
+                return Err(format!(
+                    "{} line {line_number} duplicates footer '{PARAMETER_SWEEP_FOOTER}'",
+                    self.display_path(path)
+                ));
+            }
+            return Err(format!(
+                "{} line {line_number} has nonblank content after footer: '{line}'",
+                self.display_path(path)
+            ));
         }
 
         Ok(())
@@ -42064,6 +42085,105 @@ impl XyceTestRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn compare_generic_step_res_fixture(content: &str) -> Result<(), String> {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rspice-step-res-reference-{}-{nonce}.res",
+            std::process::id()
+        ));
+        fs::write(&path, content).expect("write generic STEP .res fixture");
+
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let netlist = Netlist::default();
+        let steps = vec![StepCommand {
+            target: StepTarget::Param,
+            name: "RESVAL".to_string(),
+            param_name: None,
+            sweep: StepSweep::List(vec![1.0, 1.584_893_19, 2.511_886_43]),
+        }];
+        let step_runs = [1.0, 1.584_893_19, 2.511_886_43]
+            .into_iter()
+            .map(|value| XyceStepRun {
+                step_values: vec![value],
+                netlist: Netlist::default(),
+            })
+            .collect::<Vec<_>>();
+
+        let result = runner.compare_step_res_reference(&path, &netlist, &steps, &step_runs);
+        fs::remove_file(&path).expect("remove generic STEP .res fixture");
+        result
+    }
+
+    #[test]
+    fn step_res_reference_accepts_exact_parameter_sweep_schema() {
+        let reference = "STEP              RESVAL\r\n\
+                         0       1.00000000e+00   \r\n\
+                         1       1.58489319e+00   \r\n\
+                         2       2.51188643e+00   \r\n\
+                         End of Xyce(TM) Parameter Sweep\r\n\r\n";
+
+        compare_generic_step_res_fixture(reference)
+            .expect("complete Xyce parameter-sweep .res shape is accepted");
+    }
+
+    #[test]
+    fn step_res_reference_rejects_footer_and_schema_mutations() {
+        let reference = "STEP              RESVAL\n\
+                         0       1.00000000e+00   \n\
+                         1       1.58489319e+00   \n\
+                         2       2.51188643e+00   \n\
+                         End of Xyce(TM) Parameter Sweep\n";
+        let mutations = [
+            (
+                reference.replace("End of Xyce(TM) Parameter Sweep\n", ""),
+                "missing required footer",
+                "missing footer",
+            ),
+            (
+                reference.replace("Parameter Sweep", "Simulation"),
+                "must be exactly",
+                "wrong footer",
+            ),
+            (
+                format!("{reference}End of Xyce(TM) Parameter Sweep\n"),
+                "duplicates footer",
+                "duplicate footer",
+            ),
+            (
+                format!("{reference}unexpected result metadata\n"),
+                "nonblank content after footer",
+                "trailing content",
+            ),
+            (
+                reference.replacen("RESVAL", "OTHER", 1),
+                ".STEP column 1 is 'OTHER', expected 'RESVAL'",
+                "wrong header",
+            ),
+            (
+                reference.replacen("1       1.58489319e+00", "7       1.58489319e+00", 1),
+                "STEP index 7, expected 1",
+                "wrong row index",
+            ),
+            (
+                reference.replacen("1.58489319e+00", "9.58489319e+00", 1),
+                "STEP RESVAL expected",
+                "wrong row value",
+            ),
+        ];
+
+        for (mutated, expected_error, reason) in mutations {
+            let error = compare_generic_step_res_fixture(&mutated)
+                .expect_err(&format!("{reason} must be rejected"));
+            assert!(
+                error.contains(expected_error),
+                "{reason} produced unexpected error: {error}"
+            );
+        }
+    }
 
     fn stepped_noise_fixture_root(label: &str, artifact_count: usize) -> (PathBuf, XyceDeck) {
         let root = std::env::temp_dir().join(format!(
