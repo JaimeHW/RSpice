@@ -677,6 +677,19 @@ struct XyceAgeCapFamilyContract {
     role: XyceAgeCapFamilyRole,
 }
 
+#[derive(Debug, Clone)]
+struct XyceSwitchStateCaseFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    role: XyceSwitchStateCaseFamilyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSwitchStateCaseFamilyRole {
+    Anchor,
+    UppercaseBaseline,
+    LowercaseMember,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceAgeCapFamilyRole {
     Anchor,
@@ -765,6 +778,29 @@ struct XyceAgeCapFamilySnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceSwitchStateCaseFamilySnapshot {
+    representation: XyceSwitchStateCaseRepresentation,
+    canonical_source: String,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    control_expression: XyceExpressionAstFingerprint,
+    model_name: String,
+    model_type: String,
+    model_numeric_bits: Vec<(String, u64)>,
+    ordered_probes: Vec<String>,
+    runtime_switch: XyceGenericSwitchRuntimeFingerprint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceGenericSwitchRuntimeFingerprint {
+    name: String,
+    node_pos: usize,
+    node_neg: usize,
+    numeric_bits: [u64; 6],
+    hysteresis_enabled: bool,
+    time_breakpoint_bits: Vec<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct XycePassivePrimaryValueSnapshot {
     title: String,
     device_kind: XycePassivePrimaryKind,
@@ -850,6 +886,7 @@ struct XyceAcAnalysisExpressionSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
     AgeCap(XyceAgeCapFamilySnapshot),
+    SwitchStateCase(XyceSwitchStateCaseFamilySnapshot),
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
     ParamExpression(XyceParamExpressionFamilySnapshot),
@@ -862,6 +899,12 @@ enum XyceStrictTransientFamilySnapshot {
 enum XyceAgeCapRepresentation {
     NativeAge,
     ParameterExpression,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSwitchStateCaseRepresentation {
+    Lowercase,
+    Uppercase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -995,6 +1038,7 @@ enum XyceBjtExternalNodeRepresentation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
     AgeCap,
+    SwitchStateCase,
     AcAnalysisExpression,
     BjtExternalNode,
     DcAnalysisExpression,
@@ -1077,6 +1121,7 @@ impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
             Self::AgeCap => "AGE_CAP_EQUIVALENCE",
+            Self::SwitchStateCase => "SWITCH_STATE_CASE_EQUIVALENCE",
             Self::AcAnalysisExpression => "AC_ANALYSIS_EXPRESSION",
             Self::BjtExternalNode => "BJT_EXTNODE",
             Self::DcAnalysisExpression => "DC_ANALYSIS_EXPRESSION",
@@ -1098,6 +1143,7 @@ impl XyceBaselineFamilyKind {
     fn wrapper_contract(self) -> &'static str {
         match self {
             Self::AgeCap => "age_cap_family_anchor",
+            Self::SwitchStateCase => "switch_state_case_family_anchor",
             Self::AcAnalysisExpression => "ac_analysis_expression_family_wrapper",
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
             Self::DcAnalysisExpression => "dc_analysis_expression_family_wrapper",
@@ -1119,6 +1165,7 @@ impl XyceBaselineFamilyKind {
     fn baseline_contract(self) -> &'static str {
         match self {
             Self::AgeCap => "age_cap_family_aged_baseline",
+            Self::SwitchStateCase => "switch_state_case_family_uppercase_baseline",
             Self::AcAnalysisExpression => "ac_analysis_expression_family_baseline",
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
             Self::DcAnalysisExpression => "dc_analysis_expression_family_baseline",
@@ -1163,6 +1210,7 @@ impl XyceBaselineFamilyKind {
             | Self::Supernode
             | Self::SubcktParameterPrecedence
             | Self::SubcktParameterResolution => XyceStaticTranPlanPurpose::RelationalFamily,
+            Self::SwitchStateCase => XyceStaticTranPlanPurpose::RelationalFamily,
         }
     }
 }
@@ -2347,6 +2395,19 @@ impl XyceTestRunner {
 
         if let Some(contract) = self.age_cap_family_contract(deck) {
             let result = self.run_age_cap_family_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.switch_state_case_family_contract(deck) {
+            let result = self.run_switch_state_case_family_contract(deck, contract, start);
             if self.config.verbose {
                 println!(
                     "{} [{}] {}",
@@ -10338,6 +10399,7 @@ impl XyceTestRunner {
             | XyceBaselineFamilyKind::SubcktParameterPrecedence
             | XyceBaselineFamilyKind::SubcktParameterResolution => false,
             XyceBaselineFamilyKind::AgeCap
+            | XyceBaselineFamilyKind::SwitchStateCase
             | XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
             | XyceBaselineFamilyKind::PassiveCapPrimaryValue
@@ -11659,6 +11721,28 @@ impl XyceTestRunner {
         result
     }
 
+    fn run_switch_state_case_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSwitchStateCaseFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
+        if result.passed && !result.expected_unsupported {
+            result.contract = match contract.role {
+                XyceSwitchStateCaseFamilyRole::Anchor => "switch_state_case_family_anchor",
+                XyceSwitchStateCaseFamilyRole::UppercaseBaseline => {
+                    "switch_state_case_family_uppercase_baseline"
+                }
+                XyceSwitchStateCaseFamilyRole::LowercaseMember => {
+                    "switch_state_case_family_lowercase_member"
+                }
+            }
+            .to_string();
+        }
+        result
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -11720,6 +11804,7 @@ impl XyceTestRunner {
         if matches!(
             contract.kind,
             XyceBaselineFamilyKind::AgeCap
+                | XyceBaselineFamilyKind::SwitchStateCase
                 | XyceBaselineFamilyKind::SinExpression
                 | XyceBaselineFamilyKind::ParamExpression
                 | XyceBaselineFamilyKind::PassiveCapPrimaryValue
@@ -12997,6 +13082,20 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::SwitchStateCase
+            && let Err(err) = Self::validate_switch_state_case_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if contract.kind == XyceBaselineFamilyKind::ParamExpression
             && let Err(err) = Self::validate_param_expression_transient_plan(&baseline_plan)
         {
@@ -13296,6 +13395,21 @@ impl XyceTestRunner {
             }
             if contract.kind == XyceBaselineFamilyKind::AgeCap
                 && let Err(err) = Self::validate_age_cap_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::SwitchStateCase
+                && let Err(err) = Self::validate_switch_state_case_transient_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,
@@ -17253,6 +17367,10 @@ impl XyceTestRunner {
         match contract.kind {
             XyceBaselineFamilyKind::AgeCap => Self::age_cap_family_snapshot(netlist, print)
                 .map(XyceStrictTransientFamilySnapshot::AgeCap),
+            XyceBaselineFamilyKind::SwitchStateCase => {
+                Self::switch_state_case_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::SwitchStateCase)
+            }
             XyceBaselineFamilyKind::ScopedModel => {
                 Self::scoped_model_family_snapshot(contract, netlist)?
                     .map(XyceStrictTransientFamilySnapshot::ScopedModel)
@@ -19837,6 +19955,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::AgeCap(target),
             ) => Self::compare_age_cap_family_snapshots(baseline, target),
             (
+                XyceStrictTransientFamilySnapshot::SwitchStateCase(baseline),
+                XyceStrictTransientFamilySnapshot::SwitchStateCase(target),
+            ) => Self::compare_switch_state_case_family_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::ScopedModel(baseline),
                 XyceStrictTransientFamilySnapshot::ScopedModel(target),
             ) if baseline == target => Ok(()),
@@ -19868,6 +19990,523 @@ impl XyceTestRunner {
             ) => Self::compare_transient_analysis_expression_snapshots(baseline, target),
             _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
+    }
+
+    fn validate_switch_state_case_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
+        const LABEL: &str = "generic-switch initial-state case equivalence";
+        if plan.contract != XyceStaticTranContract::PlainStatic
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+            || Self::source_has_comp_directive(&plan.source)
+        {
+            return Err(format!(
+                "{LABEL} requires one ordinary, unstepped, adaptive default .prn transient output"
+            ));
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step <= 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan.tran.start.map(Value::to_bits) != Some(0.0f64.to_bits())
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires finite '.TRAN step stop 0' values, positive zero START, and no MAXSTEP or UIC"
+            ));
+        }
+        if plan.print.probes.len() != 2 {
+            return Err(format!("{LABEL} requires exactly two ordered probes"));
+        }
+        Self::switch_state_case_source_qualification(&plan.source).map(|_| ())
+    }
+
+    fn switch_state_case_source_qualification(
+        source: &str,
+    ) -> Result<(XyceSwitchStateCaseRepresentation, String), String> {
+        const LABEL: &str = "generic-switch initial-state case equivalence";
+        let mut canonical_source = source.to_string();
+        let mut state_replacement = None::<(std::ops::Range<usize>, String)>;
+        let mut byte_offset = 0usize;
+        for raw_line in source.split_inclusive('\n') {
+            let physical = raw_line
+                .strip_suffix('\n')
+                .unwrap_or(raw_line)
+                .strip_suffix('\r')
+                .unwrap_or_else(|| raw_line.strip_suffix('\n').unwrap_or(raw_line));
+            let active = physical
+                .split_once(';')
+                .map(|(head, _)| head)
+                .unwrap_or(physical);
+            let trimmed = active.trim_start();
+            if trimmed.starts_with('*') || trimmed.starts_with("//") || trimmed.is_empty() {
+                byte_offset += raw_line.len();
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                byte_offset += raw_line.len();
+                continue;
+            };
+            if !command.starts_with('.')
+                && command
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.eq_ignore_ascii_case(&'S'))
+            {
+                if state_replacement.is_some() || active.trim_end().ends_with('+') {
+                    return Err(format!(
+                        "{LABEL} requires exactly one single-line generic switch statement"
+                    ));
+                }
+                let spans = active.char_indices().fold(
+                    Vec::<std::ops::Range<usize>>::new(),
+                    |mut spans, (index, ch)| {
+                        if ch.is_whitespace() {
+                            return spans;
+                        }
+                        if spans.last().is_none_or(|range| range.end != index) {
+                            spans.push(index..index + ch.len_utf8());
+                        } else if let Some(last) = spans.last_mut() {
+                            last.end = index + ch.len_utf8();
+                        }
+                        spans
+                    },
+                );
+                if spans.len() != 6 {
+                    return Err(format!(
+                        "{LABEL} switch must use 'Sname n+ n- model ON|OFF CONTROL={{expression}}'"
+                    ));
+                }
+                let token = &active[spans[4].clone()];
+                let canonical = match token {
+                    "on" => "ON",
+                    "off" => "OFF",
+                    "ON" | "OFF" => token,
+                    _ => {
+                        return Err(format!(
+                            "{LABEL} initial state must be pure lower- or uppercase ON/OFF"
+                        ));
+                    }
+                };
+                let control = &active[spans[5].clone()];
+                let Some((name, expression)) = control.split_once('=') else {
+                    return Err(format!("{LABEL} switch requires CONTROL={{expression}}"));
+                };
+                let Some(expression) = Self::print_expression_inner(expression) else {
+                    return Err(format!("{LABEL} switch CONTROL must be one braced token"));
+                };
+                if !name.eq_ignore_ascii_case("CONTROL") || expression.trim().is_empty() {
+                    return Err(format!("{LABEL} switch requires CONTROL={{expression}}"));
+                }
+                Self::parse_expression_fingerprint(expression)?;
+                state_replacement = Some((
+                    byte_offset + spans[4].start..byte_offset + spans[4].end,
+                    canonical.to_string(),
+                ));
+            }
+            byte_offset += raw_line.len();
+        }
+        let (range, canonical_state) = state_replacement
+            .ok_or_else(|| format!("{LABEL} requires exactly one generic switch"))?;
+        let original_state = canonical_source[range.clone()].to_string();
+        let representation = if original_state == canonical_state {
+            XyceSwitchStateCaseRepresentation::Uppercase
+        } else {
+            XyceSwitchStateCaseRepresentation::Lowercase
+        };
+        canonical_source.replace_range(range, &canonical_state);
+
+        let mut element_counts = BTreeMap::<char, usize>::new();
+        let mut directive_counts = BTreeMap::<String, usize>::new();
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            let fields = Self::split_grouped_whitespace_fields(stripped, LABEL)?;
+            if command.starts_with('.') {
+                let directive = command.to_ascii_lowercase();
+                *directive_counts.entry(directive.clone()).or_default() += 1;
+                match directive.as_str() {
+                    ".model" => {
+                        if fields.len() != 7 || !fields[2].eq_ignore_ascii_case("SWITCH") {
+                            return Err(format!(
+                                "{LABEL} requires one scalar four-parameter SWITCH model"
+                            ));
+                        }
+                        let mut names = BTreeSet::new();
+                        for assignment in &fields[3..] {
+                            let Some((name, value)) = assignment.split_once('=') else {
+                                return Err(format!(
+                                    "{LABEL} model parameters must be assignments"
+                                ));
+                            };
+                            let name = name.to_ascii_uppercase();
+                            if !matches!(name.as_str(), "RON" | "ROFF" | "ON" | "OFF")
+                                || !names.insert(name)
+                                || !Self::is_single_spice_numeric_literal(value)
+                            {
+                                return Err(format!(
+                                    "{LABEL} model requires unique numeric RON, ROFF, ON, and OFF assignments"
+                                ));
+                            }
+                        }
+                    }
+                    ".tran" => {
+                        if fields.len() != 4
+                            || !Self::is_single_spice_numeric_literal(&fields[1])
+                            || !Self::is_single_spice_numeric_literal(&fields[2])
+                            || Self::single_spice_numeric_literal_value(&fields[3])
+                                .ok()
+                                .map(Value::to_bits)
+                                != Some(0.0f64.to_bits())
+                        {
+                            return Err(format!(
+                                "{LABEL} requires direct numeric '.TRAN step stop 0' syntax with positive zero START"
+                            ));
+                        }
+                    }
+                    ".print" => {
+                        let print_fields = Self::split_print_fields(stripped)?;
+                        if print_fields.len() != 4 || !print_fields[1].eq_ignore_ascii_case("TRAN")
+                        {
+                            return Err(format!(
+                                "{LABEL} requires one default two-probe .PRINT TRAN"
+                            ));
+                        }
+                    }
+                    ".end" if stripped.eq_ignore_ascii_case(".end") => {}
+                    ".end" => return Err(format!("{LABEL} requires a bare .END")),
+                    other => return Err(format!("{LABEL} does not admit directive '{other}'")),
+                }
+                continue;
+            }
+            let designator = command
+                .chars()
+                .next()
+                .map(|ch| ch.to_ascii_uppercase())
+                .ok_or_else(|| format!("{LABEL} contains an empty element name"))?;
+            *element_counts.entry(designator).or_default() += 1;
+            match designator {
+                'S' if fields.len() == 6 => {}
+                'R' if fields.len() == 4 && Self::is_single_spice_numeric_literal(&fields[3]) => {}
+                'V' if fields.len() == 5
+                    && fields[3].eq_ignore_ascii_case("DC")
+                    && Self::is_single_spice_numeric_literal(&fields[4]) => {}
+                _ => return Err(format!("{LABEL} contains an unqualified element statement")),
+            }
+        }
+        if element_counts != BTreeMap::from([('R', 1), ('S', 1), ('V', 1)])
+            || directive_counts
+                != BTreeMap::from([
+                    (".end".to_string(), 1),
+                    (".model".to_string(), 1),
+                    (".print".to_string(), 1),
+                    (".tran".to_string(), 1),
+                ])
+        {
+            return Err(format!(
+                "{LABEL} requires one R, V, generic switch, SWITCH model, TRAN, PRINT, and END"
+            ));
+        }
+        Ok((representation, canonical_source))
+    }
+
+    fn switch_state_case_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceSwitchStateCaseFamilySnapshot, String> {
+        const LABEL: &str = "generic-switch initial-state case equivalence";
+        let source = netlist
+            .source_text
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} requires original source text"))?;
+        let (representation, canonical_source) =
+            Self::switch_state_case_source_qualification(source)?;
+        if !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }])
+            || netlist.models.len() != 1
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat, parameter-free, diagnostic-free native transient circuit without auxiliary state"
+            ));
+        }
+        let model = &netlist.models[0];
+        if !model.model_type.eq_ignore_ascii_case("SWITCH")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!("{LABEL} requires one scalar numeric SWITCH model"));
+        }
+        let mut model_numeric_bits = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_uppercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_numeric_bits.sort_by(|left, right| left.0.cmp(&right.0));
+        if model_numeric_bits.len() != 4
+            || model_numeric_bits
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .ne(["OFF", "ON", "ROFF", "RON"])
+            || model.params.iter().any(|(_, value)| !value.is_finite())
+        {
+            return Err(format!(
+                "{LABEL} model requires finite scalar OFF, ON, ROFF, and RON parameters"
+            ));
+        }
+        let model_value = |name: &str| {
+            model
+                .params
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                .map(|(_, value)| *value)
+        };
+        if model_value("RON").is_none_or(|value| value <= 0.0)
+            || model_value("ROFF")
+                .zip(model_value("RON"))
+                .is_none_or(|(roff, ron)| roff <= ron)
+            || model_value("ON")
+                .zip(model_value("OFF"))
+                .is_none_or(|(on, off)| on == off)
+        {
+            return Err(format!(
+                "{LABEL} requires positive switch resistances and distinct ON/OFF controls"
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut source_nodes = None;
+        let mut resistor_nodes = None;
+        let mut switch_nodes = None;
+        let mut control_expression = None;
+        for element in &netlist.elements {
+            if element.nodes.iter().any(|node| {
+                Self::canonical_passive_primary_node_name(node) == "0" && node.trim() != "0"
+            }) {
+                return Err(format!("{LABEL} requires literal node 0 for ground"));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_passive_primary_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if nodes.len() == 2 && value.is_finite() =>
+                {
+                    if source_nodes.replace(nodes.clone()).is_some() {
+                        return Err(format!("{LABEL} requires one finite direct DC source"));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && resistor_nodes.replace(nodes.clone()).is_none() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::GenericSwitch {
+                    model,
+                    control_expression: expression,
+                    initial_state: Some(state),
+                } if nodes.len() == 2
+                    && model.eq_ignore_ascii_case(&netlist.models[0].name)
+                    && switch_nodes.replace(nodes.clone()).is_none() =>
+                {
+                    let state = match state {
+                        crate::netlist::SwitchState::On => "ON",
+                        crate::netlist::SwitchState::Off => "OFF",
+                    };
+                    control_expression = Some(Self::parse_expression_fingerprint(expression)?);
+                    XyceRelationalElementFingerprint {
+                        kind: "S:GENERIC".to_string(),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec![model.to_ascii_lowercase(), state.to_string()],
+                    }
+                }
+                _ => return Err(format!("{LABEL} contains an unqualified native element")),
+            };
+            let key = Self::normalize_device_instance_name(&element.name);
+            if key.is_empty() || elements.insert(key, fingerprint).is_some() {
+                return Err(format!("{LABEL} has an empty or duplicate element name"));
+            }
+        }
+        let [source_pos, source_neg] = source_nodes
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} has no source"))?
+        else {
+            return Err(format!("{LABEL} source topology is invalid"));
+        };
+        let [switch_pos, switch_neg] = switch_nodes
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} has no generic switch"))?
+        else {
+            return Err(format!("{LABEL} switch topology is invalid"));
+        };
+        let [resistor_pos, resistor_neg] = resistor_nodes
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} has no resistor"))?
+        else {
+            return Err(format!("{LABEL} resistor topology is invalid"));
+        };
+        if elements.len() != 3
+            || source_neg != "0"
+            || resistor_neg != "0"
+            || source_pos == "0"
+            || switch_neg == "0"
+            || switch_pos != source_pos
+            || resistor_pos != switch_neg
+            || source_pos == switch_neg
+        {
+            return Err(format!(
+                "{LABEL} requires the grounded DC-source/switch/resistor series topology"
+            ));
+        }
+        let [first_probe, second_probe] = print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires exactly two ordered probes"));
+        };
+        let first = Self::parse_voltage_probe(first_probe)
+            .ok_or_else(|| format!("{LABEL} first probe is not an atomic voltage"))?;
+        let second = Self::parse_voltage_probe(second_probe)
+            .ok_or_else(|| format!("{LABEL} second probe is not an atomic voltage"))?;
+        if first.accessor != XyceVoltageAccessor::Value
+            || second.accessor != XyceVoltageAccessor::Value
+            || first.node_neg.is_some()
+            || second.node_neg.is_some()
+            || Self::canonical_passive_primary_node_name(&first.node_pos) != *source_pos
+            || Self::canonical_passive_primary_node_name(&second.node_pos) != *switch_neg
+        {
+            return Err(format!(
+                "{LABEL} probes must be ordered source-node then load-node voltage"
+            ));
+        }
+
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+        let circuit = engine
+            .build_circuit(netlist)
+            .map_err(|err| format!("{LABEL} circuit build failed: {err}"))?;
+        let [runtime] = circuit.generic_switches.as_slice() else {
+            return Err(format!(
+                "{LABEL} must resolve to exactly one native generic switch"
+            ));
+        };
+        let [AnalysisCommand::Tran { stop, .. }] = netlist.analyses.as_slice() else {
+            unreachable!("qualified above")
+        };
+        if !runtime
+            .time_breakpoints()
+            .iter()
+            .any(|breakpoint| breakpoint.is_finite() && *breakpoint > 0.0 && *breakpoint < *stop)
+        {
+            return Err(format!(
+                "{LABEL} CONTROL must produce a finite switching breakpoint inside the transient interval"
+            ));
+        }
+        let runtime_switch = XyceGenericSwitchRuntimeFingerprint {
+            name: Self::normalize_device_instance_name(&runtime.name),
+            node_pos: runtime.node_pos,
+            node_neg: runtime.node_neg,
+            numeric_bits: [
+                runtime.ron.to_bits(),
+                runtime.roff.to_bits(),
+                runtime.on.to_bits(),
+                runtime.off.to_bits(),
+                runtime.onh.to_bits(),
+                runtime.offh.to_bits(),
+            ],
+            hysteresis_enabled: runtime.hysteresis_enabled,
+            time_breakpoint_bits: runtime
+                .time_breakpoints()
+                .iter()
+                .map(|value| value.to_bits())
+                .collect(),
+        };
+        Ok(XyceSwitchStateCaseFamilySnapshot {
+            representation,
+            canonical_source,
+            elements,
+            control_expression: control_expression
+                .ok_or_else(|| format!("{LABEL} has no control expression"))?,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_uppercase(),
+            model_numeric_bits,
+            ordered_probes: print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect(),
+            runtime_switch,
+        })
+    }
+
+    fn compare_switch_state_case_family_snapshots(
+        baseline: &XyceSwitchStateCaseFamilySnapshot,
+        target: &XyceSwitchStateCaseFamilySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceSwitchStateCaseRepresentation::Uppercase
+            || target.representation != XyceSwitchStateCaseRepresentation::Lowercase
+        {
+            return Err(
+                "family must compare the canonical uppercase baseline to lowercase initial-state spelling"
+                    .to_string(),
+            );
+        }
+        let mut baseline = baseline.clone();
+        let mut target = target.clone();
+        baseline.representation = XyceSwitchStateCaseRepresentation::Uppercase;
+        target.representation = XyceSwitchStateCaseRepresentation::Uppercase;
+        if baseline != target {
+            return Err(
+                "source bytes, typed AST, topology, model state, probes, or resolved switch differ outside the initial-state token case"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     fn validate_age_cap_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
@@ -37389,6 +38028,133 @@ impl XyceTestRunner {
         })
     }
 
+    fn switch_state_case_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceSwitchStateCaseFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let mut records = Vec::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            let artifact_prefix = format!("{}.", path.file_name()?.to_str()?).to_ascii_lowercase();
+            let artifact_dir = self
+                .static_output_reference_path(&path, "artifact")?
+                .parent()?
+                .to_path_buf();
+            if artifact_dir.try_exists().ok()? {
+                if !fs::metadata(&artifact_dir).ok()?.is_dir() {
+                    return None;
+                }
+                for artifact in fs::read_dir(&artifact_dir).ok()? {
+                    let artifact = artifact.ok()?;
+                    let name = artifact.file_name();
+                    let name = name.to_str()?.to_ascii_lowercase();
+                    artifact.file_type().ok()?;
+                    if name.starts_with(&artifact_prefix) {
+                        return None;
+                    }
+                }
+            }
+            let source = fs::read_to_string(&path).ok()?;
+            let wrapper = self.requires_upstream_wrapper(&self.relative_key(&path));
+            if source.trim().is_empty() {
+                records.push((path, wrapper, None));
+                continue;
+            }
+            let plan = self
+                .static_tran_family_plan_for_path(
+                    &path,
+                    XyceStaticTranPlanPurpose::RelationalFamily,
+                )
+                .ok()?;
+            Self::validate_switch_state_case_transient_plan(&plan).ok()?;
+            let netlist = Self::parse_xyce_netlist(&plan.source, &path).ok()?;
+            let snapshot = Self::switch_state_case_family_snapshot(&netlist, &plan.print).ok()?;
+            records.push((path, wrapper, Some((plan, snapshot))));
+        }
+        if records.len() != 3
+            || !records
+                .iter()
+                .any(|(path, _, _)| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+        let anchors = records
+            .iter()
+            .filter(|(_, wrapper, worker)| *wrapper && worker.is_none())
+            .collect::<Vec<_>>();
+        let workers = records
+            .iter()
+            .filter(|(_, wrapper, worker)| !*wrapper && worker.is_some())
+            .collect::<Vec<_>>();
+        if anchors.len() != 1
+            || workers.len() != 2
+            || records.iter().any(|(_, wrapper, worker)| {
+                (*wrapper && worker.is_some()) || (!*wrapper && worker.is_none())
+            })
+        {
+            return None;
+        }
+        let uppercase = workers.iter().find(|(_, _, worker)| {
+            worker.as_ref().is_some_and(|(_, snapshot)| {
+                snapshot.representation == XyceSwitchStateCaseRepresentation::Uppercase
+            })
+        })?;
+        let lowercase = workers.iter().find(|(_, _, worker)| {
+            worker.as_ref().is_some_and(|(_, snapshot)| {
+                snapshot.representation == XyceSwitchStateCaseRepresentation::Lowercase
+            })
+        })?;
+        if Self::same_path(&uppercase.0, &lowercase.0) {
+            return None;
+        }
+        let (_, uppercase_snapshot) = uppercase.2.as_ref()?;
+        let (_, lowercase_snapshot) = lowercase.2.as_ref()?;
+        Self::compare_switch_state_case_family_snapshots(uppercase_snapshot, lowercase_snapshot)
+            .ok()?;
+        let anchor_path = anchors[0].0.clone();
+        let role = if Self::same_path(&deck.path, &anchor_path) {
+            XyceSwitchStateCaseFamilyRole::Anchor
+        } else if Self::same_path(&deck.path, &uppercase.0) {
+            XyceSwitchStateCaseFamilyRole::UppercaseBaseline
+        } else if Self::same_path(&deck.path, &lowercase.0) {
+            XyceSwitchStateCaseFamilyRole::LowercaseMember
+        } else {
+            return None;
+        };
+        let target_path = match role {
+            XyceSwitchStateCaseFamilyRole::Anchor => None,
+            XyceSwitchStateCaseFamilyRole::UppercaseBaseline => Some(uppercase.0.clone()),
+            XyceSwitchStateCaseFamilyRole::LowercaseMember => Some(lowercase.0.clone()),
+        };
+        Some(XyceSwitchStateCaseFamilyContract {
+            relational: XyceBaselineFamilyContract {
+                kind: XyceBaselineFamilyKind::SwitchStateCase,
+                comparison: XyceBaselineFamilyComparison::ExactPrn,
+                family: parent.file_name()?.to_str()?.to_string(),
+                baseline_path: uppercase.0.clone(),
+                member_paths: vec![uppercase.0.clone(), lowercase.0.clone()],
+                target_path,
+            },
+            role,
+        })
+    }
+
     fn delimited_expression_family_contract(
         &self,
         deck: &XyceDeck,
@@ -46672,6 +47438,165 @@ Cload node 0 3u
         fs::remove_file(output_dir.join("native.cir.prn")).unwrap();
         assert!(runner.age_cap_family_contract(&deck).is_none());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn switch_state_case_family_is_complete_byte_exact_and_fail_closed() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-switch-state-case-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_SWITCH_CASE");
+        fs::create_dir_all(&family_dir).expect("create switch-case family fixture");
+        let anchor_path = family_dir.join("owner.cir");
+        let uppercase_path = family_dir.join("canonical.cir");
+        let lowercase_path = family_dir.join("alternate.cir");
+        let uppercase = "**** generic switch case parity ****\n\
+SCASE source load model_a OFF CONTROL={if(time>.1,1,0)}\n\
+VSOURCE source 0 DC 5\n\
+RLOAD load 0 5k\n\
+.model model_a SWITCH roff=1e9 ron=1 off=0 on=1\n\
+.TRAN 100n 500ms 0\n\
+.PRINT TRAN V(source) V(load)\n\
+.END\n";
+        let lowercase = uppercase.replacen(" OFF CONTROL", " off CONTROL", 1);
+        fs::write(&anchor_path, " \r\n").expect("write empty wrapper anchor");
+        fs::write(&uppercase_path, uppercase).expect("write uppercase baseline");
+        fs::write(&lowercase_path, &lowercase).expect("write lowercase member");
+        let manifest = format!(
+            "Netlists/Certification_Tests/GENERIC_SWITCH_CASE/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("write wrapper provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let deck_for = |path: &Path| XyceDeck {
+            path: path.to_path_buf(),
+            relative_path: runner.relative_key(path),
+            section: XyceDeckSection::Netlists,
+        };
+
+        for (path, expected_role) in [
+            (&anchor_path, XyceSwitchStateCaseFamilyRole::Anchor),
+            (
+                &uppercase_path,
+                XyceSwitchStateCaseFamilyRole::UppercaseBaseline,
+            ),
+            (
+                &lowercase_path,
+                XyceSwitchStateCaseFamilyRole::LowercaseMember,
+            ),
+        ] {
+            let contract = runner
+                .switch_state_case_family_contract(&deck_for(path))
+                .expect("complete generic switch-state case family qualifies");
+            assert_eq!(contract.role, expected_role);
+            assert_eq!(
+                contract.relational.comparison,
+                XyceBaselineFamilyComparison::ExactPrn
+            );
+            assert!(XyceTestRunner::same_path(
+                &contract.relational.baseline_path,
+                &uppercase_path
+            ));
+        }
+
+        for invalid in [
+            lowercase.replace(" off CONTROL", " OFF CONTROL"),
+            lowercase.replace(" off CONTROL", " Off CONTROL"),
+            lowercase.replace(" off CONTROL", " on CONTROL"),
+            lowercase.replace("roff=1e9", "roff=1e8"),
+            lowercase.replace("roff=1e9", "roff=1"),
+            lowercase.replace("off=0 on=1", "OFF=0 on=1"),
+            lowercase.replace("time>.1", "time>.2"),
+            lowercase.replace("if(time>.1,1,0)", "0"),
+            lowercase.replace("RLOAD load 0 5k", "RLOAD load 0 6k"),
+            lowercase.replace("V(source) V(load)", "V(load) V(source)"),
+            lowercase.replace(".TRAN 100n 500ms 0", ".TRAN 100n 500ms"),
+            lowercase.replace(".TRAN 100n 500ms 0", ".TRAN 100n 500ms -0"),
+            lowercase.replace(".TRAN 100n 500ms 0", ".TRAN 100n 500ms 1n"),
+            lowercase.replace(".PRINT TRAN", ".OPTIONS RELTOL=1e-3\n.PRINT TRAN"),
+            lowercase.replace(".PRINT TRAN", "*COMP V(load) RELTOL=1\n.PRINT TRAN"),
+            lowercase.replace("VSOURCE source 0", "VSOURCE source GND"),
+            lowercase.replace("SCASE source load", "SCASE source changed"),
+            lowercase.replace("**** generic", "**** changed"),
+            lowercase.replace("SCASE source", "SCASE  source"),
+            lowercase.replace(
+                ".model model_a",
+                "SSECOND source load model_a OFF CONTROL={if(time>.1,1,0)}\n.model model_a",
+            ),
+            lowercase.replace(
+                ".TRAN",
+                ".model second SWITCH ron=1 roff=2 on=1 off=0\n.TRAN",
+            ),
+            lowercase.replace(".TRAN", ".include \"other.cir\"\n.TRAN"),
+            lowercase.replace(".END", ".PARAM unused=1\n.END"),
+        ] {
+            fs::write(&lowercase_path, &invalid).expect("write switch-case mutation");
+            assert!(
+                runner
+                    .switch_state_case_family_contract(&deck_for(&lowercase_path))
+                    .is_none(),
+                "all changes outside the one initial-state token case must fail closed: {invalid}"
+            );
+        }
+        fs::write(&lowercase_path, &lowercase).expect("restore lowercase member");
+
+        let extra_path = family_dir.join("extra.cir");
+        fs::write(&extra_path, uppercase).expect("write extra family record");
+        assert!(
+            runner
+                .switch_state_case_family_contract(&deck_for(&uppercase_path))
+                .is_none()
+        );
+        fs::remove_file(&extra_path).expect("remove extra family record");
+
+        fs::write(&anchor_path, "not an empty wrapper\n").expect("make anchor nonempty");
+        assert!(
+            runner
+                .switch_state_case_family_contract(&deck_for(&anchor_path))
+                .is_none()
+        );
+        fs::write(&anchor_path, " \r\n").expect("restore empty wrapper anchor");
+
+        let output_dir = root
+            .join("OutputData")
+            .join("Certification_Tests")
+            .join("GENERIC_SWITCH_CASE");
+        fs::create_dir_all(&output_dir).expect("create output artifact directory");
+        let artifact = output_dir.join("ALTERNATE.CIR.PRN");
+        fs::write(&artifact, "forbidden\n").expect("write case-varied static artifact");
+        assert!(
+            runner
+                .switch_state_case_family_contract(&deck_for(&lowercase_path))
+                .is_none()
+        );
+        fs::remove_file(&artifact).expect("remove static artifact");
+
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "{manifest}Netlists/Certification_Tests/GENERIC_SWITCH_CASE/alternate.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("give a worker wrapper provenance");
+        assert!(
+            XyceTestRunner::new(&root, XyceRunnerConfig::default())
+                .switch_state_case_family_contract(&deck_for(&lowercase_path))
+                .is_none()
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+        assert!(
+            XyceTestRunner::new(&root, XyceRunnerConfig::default())
+                .switch_state_case_family_contract(&deck_for(&anchor_path))
+                .is_none()
+        );
+        fs::remove_dir_all(&root).expect("remove switch-case family fixture");
     }
 
     #[test]
