@@ -7139,6 +7139,53 @@ fn test_xyce_dc_analysis_expression_relational_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_subcircuit_parameter_resolution_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let cases = [
+        (
+            "Netlists/Certification_Tests/BUG_1558/bug_1558.cir",
+            "subckt_parameter_resolution_family_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1558/bug_1558_0.cir",
+            "subckt_parameter_resolution_family_baseline",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1558/bug_1558_1.cir",
+            "subckt_parameter_resolution_family_member",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1558/bug_1558_2.cir",
+            "subckt_parameter_resolution_family_member",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1558/bug_1558_3.cir",
+            "subckt_parameter_resolution_family_member",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1558/bug_1558_4.cir",
+            "subckt_parameter_resolution_family_member",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1558/bug_1558_error.cir",
+            "subckt_parameter_resolution_expected_error",
+        ),
+    ];
+
+    for (relative, expected_contract) in cases {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy the complete subcircuit parameter-resolution family, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
