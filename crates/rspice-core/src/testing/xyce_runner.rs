@@ -13,7 +13,7 @@ use crate::analysis::AcResult;
 use crate::analysis::ac::ac_sweep_frequencies;
 use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
-    TransientResult, extract_ac_value, extract_dc_value,
+    StepPlanLimits, TransientResult, extract_ac_value, extract_dc_value,
 };
 use crate::expr::{BinaryOp, CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict};
 use crate::netlist::expr::ComplexValue as ExprComplexValue;
@@ -38,6 +38,22 @@ const MAX_NATIVE_TRAN_TARGET_COMPACT_DEVICE_STEPS: f64 = 10_000.0;
 const MAX_NATIVE_TRAN_ELEMENT_STEPS: f64 = 250_000_000.0;
 const MAX_NATIVE_TRAN_COMPACT_DEVICE_STEPS: f64 = 2_500_000.0;
 const MAX_NATIVE_TRAN_NODE_SOLVE_STEPS: f64 = 2_500_000_000.0;
+// Eager harness expansion clones one netlist per run. The checked-in corpus
+// currently peaks at 21 STEP rows, so 4096 preserves more than 195x headroom
+// while failing closed before an adversarial deck can allocate unbounded runs.
+const XYCE_STEP_PLAN_MAX_RUNS: usize = 4_096;
+const XYCE_STEP_PLAN_MAX_DIMENSIONS: usize = 256;
+const XYCE_STEP_PLAN_MAX_BINDINGS_PER_RUN: usize = 16_384;
+const XYCE_STEP_PLAN_MAX_STORED_VALUES: usize = 4_000_000;
+
+fn xyce_step_plan_limits() -> StepPlanLimits {
+    StepPlanLimits::new(
+        XYCE_STEP_PLAN_MAX_RUNS,
+        XYCE_STEP_PLAN_MAX_DIMENSIONS,
+        XYCE_STEP_PLAN_MAX_BINDINGS_PER_RUN,
+        XYCE_STEP_PLAN_MAX_STORED_VALUES,
+    )
+}
 const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
@@ -1783,18 +1799,6 @@ struct XyceAcDataPointResult {
 struct XyceStepRun {
     step_values: Vec<Value>,
     netlist: Netlist,
-}
-
-#[derive(Debug, Clone)]
-struct XyceStepRunBuilder {
-    step_values: Vec<Value>,
-    bindings: Vec<XyceStepBinding>,
-}
-
-#[derive(Debug, Clone)]
-struct XyceStepBinding {
-    step: StepCommand,
-    value: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -7145,30 +7149,46 @@ impl XyceTestRunner {
             );
         }
 
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let expansion_engine = self.create_xyce_engine();
-        let step_runs =
-            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
-                Ok(runs) => runs,
-                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_runtime",
-                        &format!(
-                            "RSpice runtime does not yet support this .STEP NOISE deck: {err}"
-                        ),
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!(".STEP expansion error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &expansion_engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        ) {
+            Ok(runs) => runs,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        ".STEP expansion exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this .STEP NOISE deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(".STEP expansion error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
         if step_runs.len() != plan.measurement_reference_paths.len() {
             return self.failure_result(
                 deck,
@@ -7184,7 +7204,6 @@ impl XyceTestRunner {
         }
 
         let engine = self.create_xyce_engine();
-        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mut all_mismatches = Vec::new();
         for (step_index, (run, reference_path)) in step_runs
             .iter()
@@ -7652,28 +7671,46 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         };
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let expansion_engine = self.create_xyce_engine();
-        let step_runs =
-            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
-                Ok(runs) => runs,
-                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_runtime",
-                        &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!(".STEP expansion error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &expansion_engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        ) {
+            Ok(runs) => runs,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        ".STEP expansion exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(".STEP expansion error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
 
         let engine = self.create_xyce_engine();
         let mut batches = Vec::with_capacity(step_runs.len());
@@ -7774,28 +7811,46 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = "wrapper_scalar_measure_step_ac";
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let expansion_engine = self.create_xyce_engine();
-        let step_runs =
-            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
-                Ok(runs) => runs,
-                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_runtime",
-                        &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!(".STEP expansion error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &expansion_engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        ) {
+            Ok(runs) => runs,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        ".STEP expansion exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(".STEP expansion error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
         if step_runs.len() != plan.measurement_reference_paths.len() {
             return self.failure_result(
                 deck,
@@ -9149,28 +9204,46 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.result_contract();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let expansion_engine = self.create_xyce_engine();
-        let step_runs =
-            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
-                Ok(runs) => runs,
-                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_runtime",
-                        &format!("RSpice runtime does not yet support this .STEP TRAN deck: {err}"),
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!(".STEP expansion error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &expansion_engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        ) {
+            Ok(runs) => runs,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        ".STEP expansion exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this .STEP TRAN deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(".STEP expansion error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
 
         let step_references =
             match Self::split_transient_step_reference(&reference, step_runs.len()) {
@@ -9186,7 +9259,6 @@ impl XyceTestRunner {
                 }
             };
 
-        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mismatches =
             match self.compare_step_tran_runs(&plan, &step_runs, &step_references, &abort, false) {
                 Ok(mismatches) => {
@@ -9881,9 +9953,28 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(true);
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let engine = self.create_dc_engine();
-        let step_runs = match Self::nested_step_runs_for_commands(&engine, &netlist, &plan.steps) {
+        let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        ) {
             Ok(runs) => runs,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        ".STEP expansion exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
             Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
                 return self.expected_unsupported_result(
                     deck,
@@ -9924,7 +10015,6 @@ impl XyceTestRunner {
             }
         }
 
-        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mut batches = Vec::with_capacity(step_runs.len());
         for run in step_runs {
             let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
@@ -10068,9 +10158,28 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = "wrapper_scalar_measure_step_dc";
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let engine = self.create_dc_engine();
-        let step_runs = match Self::nested_step_runs_for_commands(&engine, &netlist, &plan.steps) {
+        let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        ) {
             Ok(runs) => runs,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        ".STEP expansion exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
             Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
                 return self.expected_unsupported_result(
                     deck,
@@ -10103,7 +10212,6 @@ impl XyceTestRunner {
             );
         }
 
-        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mut all_mismatches = Vec::new();
         for (step_index, (run, reference_path)) in step_runs
             .iter()
@@ -10295,142 +10403,40 @@ impl XyceTestRunner {
         }
     }
 
+    #[cfg(test)]
     fn nested_step_runs_for_commands(
         engine: &Engine,
         netlist: &Netlist,
         steps: &[StepCommand],
     ) -> Result<Vec<XyceStepRun>, SimulationError> {
-        let mut runs = vec![XyceStepRunBuilder {
-            step_values: Vec::new(),
-            bindings: Vec::new(),
-        }];
-
-        for step in steps {
-            let values = Self::step_values_for_expansion(netlist, step)?;
-            if values.is_empty() {
-                return Err(SimulationError::Circuit(
-                    ".STEP produced no sweep values".to_string(),
-                ));
-            }
-
-            let mut next_runs = Vec::with_capacity(runs.len() * values.len());
-            for value in values {
-                for run in &runs {
-                    let mut step_values = run.step_values.clone();
-                    step_values.push(value);
-                    let mut bindings = run.bindings.clone();
-                    bindings.push(XyceStepBinding {
-                        step: step.clone(),
-                        value,
-                    });
-                    next_runs.push(XyceStepRunBuilder {
-                        step_values,
-                        bindings,
-                    });
-                }
-            }
-            runs = next_runs;
-        }
-
-        runs.into_iter()
-            .map(|run| {
-                let netlist = Self::materialize_nested_step_run(engine, netlist, &run.bindings)?;
-                Ok(XyceStepRun {
-                    step_values: run.step_values,
-                    netlist,
-                })
-            })
-            .collect()
+        Self::nested_step_runs_for_commands_with_limits_and_abort(
+            engine,
+            netlist,
+            steps,
+            xyce_step_plan_limits(),
+            &crate::abort_signal::NoAbort,
+        )
     }
 
-    fn step_values_for_expansion(
-        netlist: &Netlist,
-        step: &StepCommand,
-    ) -> Result<Vec<Value>, SimulationError> {
-        match &step.sweep {
-            StepSweep::Data { table_name } => {
-                let table = netlist
-                    .data_tables
-                    .iter()
-                    .find(|table| table.name.eq_ignore_ascii_case(table_name))
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            ".STEP DATA table '{table_name}' not found"
-                        ))
-                    })?;
-                if table.params.is_empty() {
-                    return Err(SimulationError::Circuit(format!(
-                        ".STEP DATA table '{}' has no parameter columns",
-                        table.name
-                    )));
-                }
-                if table.rows.is_empty() {
-                    return Err(SimulationError::Circuit(format!(
-                        ".STEP DATA table '{}' has no rows",
-                        table.name
-                    )));
-                }
-                Ok((0..table.rows.len()).map(|idx| idx as Value).collect())
-            }
-            _ => Ok(step.sweep.values()),
-        }
-    }
-
-    fn materialize_nested_step_run(
+    fn nested_step_runs_for_commands_with_limits_and_abort(
         engine: &Engine,
         netlist: &Netlist,
-        bindings: &[XyceStepBinding],
-    ) -> Result<Netlist, SimulationError> {
-        let param_overrides = bindings
-            .iter()
-            .filter(|binding| {
-                binding.step.target == StepTarget::Param
-                    && !matches!(binding.step.sweep, StepSweep::Data { .. })
-            })
-            .map(|binding| (binding.step.name.clone(), binding.value))
-            .collect::<Vec<_>>();
-
-        let mut run_netlist = if param_overrides.is_empty() {
-            netlist.clone()
-        } else {
-            Engine::create_perturbed_netlist_multi(netlist, &param_overrides)?.0
-        };
-
-        for binding in bindings {
-            if binding.step.target == StepTarget::Param
-                && !matches!(binding.step.sweep, StepSweep::Data { .. })
-            {
-                continue;
-            }
-            run_netlist = Self::materialize_nonparam_step_binding(engine, &run_netlist, binding)?;
+        steps: &[StepCommand],
+        limits: StepPlanLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<XyceStepRun>, SimulationError> {
+        let plan = engine.plan_step_commands_with_abort(netlist, steps, limits, abort)?;
+        let mut runs = Vec::with_capacity(plan.total_runs());
+        for run_index in 0..plan.total_runs() {
+            let materialized = engine.materialize_step_run_with_abort(&plan, run_index, abort)?;
+            debug_assert_eq!(materialized.run_index(), run_index);
+            let (step_values, netlist) = materialized.into_parts();
+            runs.push(XyceStepRun {
+                step_values,
+                netlist,
+            });
         }
-
-        Ok(run_netlist)
-    }
-
-    fn materialize_nonparam_step_binding(
-        engine: &Engine,
-        netlist: &Netlist,
-        binding: &XyceStepBinding,
-    ) -> Result<Netlist, SimulationError> {
-        let expanded = if matches!(binding.step.sweep, StepSweep::Data { .. }) {
-            engine.step_netlists_for_command(netlist, &binding.step, &[])?
-        } else {
-            engine.step_netlists_for_command(netlist, &binding.step, &[binding.value])?
-        };
-
-        if let Some((_, stepped_netlist)) = expanded
-            .into_iter()
-            .find(|(value, _)| (*value - binding.value).abs() <= Value::EPSILON)
-        {
-            return Ok(stepped_netlist);
-        }
-
-        Err(SimulationError::Circuit(format!(
-            ".STEP expansion for {} did not produce requested value {}",
-            Self::step_res_variable_name(&binding.step),
-            binding.value
-        )))
+        Ok(runs)
     }
 
     fn baseline_family_analysis_for_path(
@@ -11191,6 +11197,7 @@ impl XyceTestRunner {
         } else {
             BASELINE_CONTRACT
         };
+        let expansion_abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
             let owner_plan = self.static_tran_family_plan_for_path(
                 &contract.owner_path,
@@ -11230,12 +11237,20 @@ impl XyceTestRunner {
             let owner_options = Self::stepped_ic_option_signature(&owner_plan.source)?;
             let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_plan.deck_path)
                 .map_err(|err| format!("owner netlist parse failed: {err}"))?;
-            let step_runs = Self::nested_step_runs_for_commands(
+            let step_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
                 &self.create_xyce_engine(),
                 &owner_netlist,
                 &owner_plan.steps,
+                xyce_step_plan_limits(),
+                &expansion_abort,
             )
-            .map_err(|err| format!("owner .STEP expansion failed: {err}"))?;
+            .map_err(|err| match err {
+                SimulationError::Aborted => format!(
+                    "owner .STEP expansion exceeded timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                error => format!("owner .STEP expansion failed: {error}"),
+            })?;
             if step_runs.len() != contract.member_paths.len() {
                 return Err(format!(
                     "owner .STEP expands to {} run(s), but the family contains {} independent baseline deck(s)",
@@ -11352,6 +11367,9 @@ impl XyceTestRunner {
 
         let (owner_plan, step_runs, members) = match qualification {
             Ok(qualified) => qualified,
+            Err(reason) if reason.starts_with("owner .STEP expansion exceeded timeout") => {
+                return self.failure_result(deck, start, result_contract, reason, Vec::new());
+            }
             Err(reason) => {
                 return self.failure_result(
                     deck,
@@ -44083,6 +44101,91 @@ M1 d g s b nmod W=1u L=0.18u
                 other => panic!("unexpected Va kind: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn nested_step_shared_plan_preserves_data_metadata_and_combined_bindings() {
+        let netlist = Netlist::parse(
+            "nested DATA and parameter step\n\
+             .param gain=1 bias=1\n\
+             V1 out 0 {gain+bias}\n\
+             .data samples bias\n\
+             10\n\
+             20\n\
+             .enddata\n\
+             .step gain list 2 3\n\
+             .step data=samples\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let steps = XyceTestRunner::step_commands(&netlist).expect("steps parse");
+        let engine = Engine::new(SimulationConfig::default());
+        let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &steps)
+            .expect("shared plan expands DATA and PARAM steps");
+
+        assert_eq!(runs.len(), 4);
+        for (run, (gain, row_index, bias)) in runs.iter().zip([
+            (2.0, 0.0, 10.0),
+            (3.0, 0.0, 10.0),
+            (2.0, 1.0, 20.0),
+            (3.0, 1.0, 20.0),
+        ]) {
+            assert_eq!(run.step_values, vec![gain, row_index]);
+            assert_eq!(run.netlist.params.get("gain"), Some(gain));
+            assert_eq!(run.netlist.params.get("bias"), Some(bias));
+            let source = run
+                .netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("V1"))
+                .expect("V1 exists");
+            match &source.kind {
+                ElementKind::VoltageSource(spec) => {
+                    assert_eq!(extract_dc_value(spec), gain + bias);
+                }
+                other => panic!("unexpected V1 kind: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn nested_step_shared_plan_fails_closed_on_limits_and_cancellation() {
+        assert_eq!(XYCE_STEP_PLAN_MAX_RUNS, 4_096);
+        assert!(XYCE_STEP_PLAN_MAX_RUNS >= 21 * 195);
+        let harness_limits = xyce_step_plan_limits();
+        assert_eq!(harness_limits.max_runs(), XYCE_STEP_PLAN_MAX_RUNS);
+
+        let netlist = Netlist::parse(
+            "nested step resource limits\n\
+             .param a=0 b=0\n\
+             .step a list 1 2\n\
+             .step b list 3 4\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let steps = XyceTestRunner::step_commands(&netlist).expect("steps parse");
+        let engine = Engine::new(SimulationConfig::default());
+
+        let error = XyceTestRunner::nested_step_runs_for_commands_with_limits_and_abort(
+            &engine,
+            &netlist,
+            &steps,
+            StepPlanLimits::new(3, 2, 2, 4),
+            &crate::abort_signal::NoAbort,
+        )
+        .expect_err("four runs must exceed the explicit three-run harness limit");
+        assert!(error.to_string().contains("requests 4 run(s)"));
+
+        assert!(matches!(
+            XyceTestRunner::nested_step_runs_for_commands_with_limits_and_abort(
+                &engine,
+                &netlist,
+                &steps,
+                StepPlanLimits::new(4, 2, 2, 4),
+                &crate::abort_signal::ImmediateAbort,
+            ),
+            Err(SimulationError::Aborted)
+        ));
     }
 
     #[test]
