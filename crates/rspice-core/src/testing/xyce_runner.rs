@@ -112,6 +112,25 @@ const XYCE_BUG667_NODESET_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_667_son/nodeset_in_subckt.cir";
 const XYCE_BUG667_NODESET_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_667_son/nodeset_not_in_subckt.cir";
+const XYCE_BUG67_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_67/bug_67.cir";
+const XYCE_BUG671_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_671/vpwl_binaryfile.cir";
+const XYCE_BUG726_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_726/adjacent.cir";
+const XYCE_BUG744_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_744/bad_dc_op.cir";
+const XYCE_BUG67_SOURCE_BLAKE3: &str =
+    "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
+const XYCE_BUG671_SOURCE_BLAKE3: &str =
+    "40af3a1050a8efeb51c7e3052eb1228ad331fd1fa469cde74508798c85f77653";
+const XYCE_BUG726_SOURCE_BLAKE3: &str =
+    "e55050584c69086bd34d84be82c885902a94eb212ffb6973f1d7786dd8b8ab2f";
+const XYCE_BUG744_SOURCE_BLAKE3: &str =
+    "b0c2ba9e38e293eb0d9d53cc14713921890e81330e6b06c64d3fc8f0df26afda";
+const XYCE_BUG671_FIXTURE_BLAKE3: &str =
+    "a20bed61d99b2bd530e4bdfdb096315198e1c4702ac3ff8e320b6ea42efce9ba";
+const XYCE_BUG671_FIXTURE_BYTES: usize = 19_456;
+const XYCE_BUG671_OLE_MAGIC: [u8; 8] = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 const XYCE_BUG662_CANONICAL_LONG_TITLE: &str = r#"** Converted using XDM 0.20rc from /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/pspice_9_1.xml to /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/xyce_6_3.xml ** ** Profile: "SCHEMATIC1-bias"  [ H:\Xyce\PSpice\Netlists\TransmissionLine-PSpiceFiles\SCHEMATIC1\bias.sim ]"#;
 const XYCE_BUG655_CANONICAL_OWNER_SOURCE: &str = "*** Simple amplifier ***\n\
 \n\
@@ -136,6 +155,132 @@ q1 3 2 0 2n3510\n\
 .end\n";
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceExpectedFailureKind {
+    Bug67BehavioralExpression,
+    Bug671InvalidPwlFile,
+    Bug726AdjacentCouplings,
+    Bug744DcOperatingPoint,
+}
+
+impl XyceExpectedFailureKind {
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_BUG67_EXPECTED_FAILURE_RECORD => Some(Self::Bug67BehavioralExpression),
+            XYCE_BUG671_EXPECTED_FAILURE_RECORD => Some(Self::Bug671InvalidPwlFile),
+            XYCE_BUG726_EXPECTED_FAILURE_RECORD => Some(Self::Bug726AdjacentCouplings),
+            XYCE_BUG744_EXPECTED_FAILURE_RECORD => Some(Self::Bug744DcOperatingPoint),
+            _ => None,
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::Bug67BehavioralExpression => XYCE_BUG67_EXPECTED_FAILURE_RECORD,
+            Self::Bug671InvalidPwlFile => XYCE_BUG671_EXPECTED_FAILURE_RECORD,
+            Self::Bug726AdjacentCouplings => XYCE_BUG726_EXPECTED_FAILURE_RECORD,
+            Self::Bug744DcOperatingPoint => XYCE_BUG744_EXPECTED_FAILURE_RECORD,
+        }
+    }
+
+    fn source_blake3(self) -> &'static str {
+        match self {
+            Self::Bug67BehavioralExpression => XYCE_BUG67_SOURCE_BLAKE3,
+            Self::Bug671InvalidPwlFile => XYCE_BUG671_SOURCE_BLAKE3,
+            Self::Bug726AdjacentCouplings => XYCE_BUG726_SOURCE_BLAKE3,
+            Self::Bug744DcOperatingPoint => XYCE_BUG744_SOURCE_BLAKE3,
+        }
+    }
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Bug67BehavioralExpression => "expected_failure_behavioral_expression_build",
+            Self::Bug671InvalidPwlFile => "expected_failure_external_pwl_load",
+            Self::Bug726AdjacentCouplings => "expected_failure_adjacent_coupling_parse",
+            Self::Bug744DcOperatingPoint => "expected_failure_dc_operating_point",
+        }
+    }
+
+    fn upstream_error_policy(self) -> XyceUpstreamExpectedErrorPolicy {
+        let ordered_patterns = match self {
+            Self::Bug67BehavioralExpression => {
+                &[r"Syntax error in number of nodes in expression: \{POLY I[(]V6[)] 300u 1\}"][..]
+            }
+            Self::Bug671InvalidPwlFile => &["Failed to successfully read vpwl-word.csv"][..],
+            Self::Bug726AdjacentCouplings => &[
+                "in file adjacent.cir at or near line 13",
+                "Specified model not found for device K1",
+            ][..],
+            Self::Bug744DcOperatingPoint => &["DC Operating Point Failed"][..],
+        };
+        XyceUpstreamExpectedErrorPolicy {
+            requires_nonzero_exit: true,
+            search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
+            ordered_patterns,
+        }
+    }
+
+    fn expected_observation(self) -> XyceExpectedFailureObservation {
+        match self {
+            Self::Bug67BehavioralExpression => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::CircuitBuild,
+                category: XyceExpectedFailureCategory::BehavioralExpressionSyntax,
+                identifiers: vec!["X1.B6".to_string(), "X1.V6".to_string()],
+            },
+            Self::Bug671InvalidPwlFile => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::ExternalDataLoad,
+                category: XyceExpectedFailureCategory::InvalidPwlFileEncoding,
+                identifiers: vec!["VPWL".to_string(), "vpwl-word.csv".to_string()],
+            },
+            Self::Bug726AdjacentCouplings => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::AdjacentCouplingSyntax,
+                identifiers: vec!["K1".to_string(), "K2".to_string(), "line 13".to_string()],
+            },
+            Self::Bug744DcOperatingPoint => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::DcOperatingPoint,
+                category: XyceExpectedFailureCategory::ConflictingIdealVoltageConstraints,
+                identifiers: vec!["Vsrc1".to_string(), "Vsrc2".to_string(), "1".to_string()],
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceExpectedFailureStage {
+    NetlistParse,
+    CircuitBuild,
+    ExternalDataLoad,
+    DcOperatingPoint,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceExpectedFailureCategory {
+    BehavioralExpressionSyntax,
+    InvalidPwlFileEncoding,
+    AdjacentCouplingSyntax,
+    ConflictingIdealVoltageConstraints,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceExpectedFailureObservation {
+    stage: XyceExpectedFailureStage,
+    category: XyceExpectedFailureCategory,
+    identifiers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceUpstreamErrorSearchStreams {
+    EitherCompleteStdoutOrStderr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceUpstreamExpectedErrorPolicy {
+    requires_nonzero_exit: bool,
+    search_streams: XyceUpstreamErrorSearchStreams,
+    ordered_patterns: &'static [&'static str],
+}
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -3164,6 +3309,14 @@ impl XyceTestRunner {
         deck: &XyceDeck,
         start: Instant,
     ) -> Option<XyceTestResult> {
+        if let Some(kind) = XyceExpectedFailureKind::for_record(&deck.relative_path) {
+            let contract = kind.result_contract();
+            return Some(match self.validate_expected_failure_oracle(deck, kind) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            });
+        }
+
         let reference_path = self.static_prn_reference_path(&deck.path)?;
         if reference_path.is_file() {
             return None;
@@ -3191,6 +3344,643 @@ impl XyceTestRunner {
         Self::validate_expected_pwl_repeat_value_error_source(&source, &deck.path)
             .ok()
             .map(|()| self.passed_result(deck, start, contract))
+    }
+
+    fn validate_expected_failure_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<(), String> {
+        let upstream_policy = kind.upstream_error_policy();
+        if !upstream_policy.requires_nonzero_exit
+            || upstream_policy.search_streams
+                != XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr
+            || upstream_policy.ordered_patterns.is_empty()
+        {
+            return Err(format!(
+                "expected-failure record '{}' has an incomplete removed-wrapper error policy",
+                kind.record()
+            ));
+        }
+        self.validate_expected_failure_provenance(deck, kind)?;
+        let source_bytes = fs::read(&deck.path).map_err(|err| {
+            format!(
+                "failed to read expected-failure record {}: {err}",
+                deck.path.display()
+            )
+        })?;
+        let source_hash = blake3::hash(&source_bytes).to_hex().to_string();
+        if source_hash != kind.source_blake3() {
+            return Err(format!(
+                "expected-failure record '{}' source digest changed: expected {}, got {}",
+                kind.record(),
+                kind.source_blake3(),
+                source_hash
+            ));
+        }
+        let source = std::str::from_utf8(&source_bytes).map_err(|err| {
+            format!(
+                "expected-failure record '{}' is not UTF-8: {err}",
+                kind.record()
+            )
+        })?;
+        let observation = match kind {
+            XyceExpectedFailureKind::Bug67BehavioralExpression => {
+                self.observe_bug67_behavioral_expression_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug671InvalidPwlFile => {
+                self.observe_bug671_invalid_pwl_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug726AdjacentCouplings => {
+                Self::observe_bug726_adjacent_coupling_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug744DcOperatingPoint => {
+                self.observe_bug744_dc_operating_point_failure(source, &deck.path)?
+            }
+        };
+        let expected = kind.expected_observation();
+        if observation != expected {
+            return Err(format!(
+                "expected-failure record '{}' produced the wrong typed observation: expected {expected:?}, got {observation:?}",
+                kind.record()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_expected_failure_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<(), String> {
+        if deck.section != XyceDeckSection::Netlists {
+            return Err(format!(
+                "expected-failure record '{}' is not in the Netlists corpus",
+                kind.record()
+            ));
+        }
+        let actual_record = Self::normalize_manifest_key(&deck.relative_path);
+        if actual_record != kind.record() {
+            return Err(format!(
+                "expected-failure record path mismatch: expected '{}', got '{}'",
+                kind.record(),
+                deck.relative_path
+            ));
+        }
+        let expected_path = self.root.join(Path::new(&deck.relative_path));
+        let actual_canonical = deck.path.canonicalize().map_err(|err| {
+            format!(
+                "failed to canonicalize expected-failure record {}: {err}",
+                deck.path.display()
+            )
+        })?;
+        let expected_canonical = expected_path.canonicalize().map_err(|err| {
+            format!(
+                "expected-failure record '{}' is missing from the vendored corpus: {err}",
+                kind.record()
+            )
+        })?;
+        if actual_canonical != expected_canonical {
+            return Err(format!(
+                "expected-failure record '{}' resolved to {}, not {}",
+                kind.record(),
+                actual_canonical.display(),
+                expected_canonical.display()
+            ));
+        }
+        let metadata = fs::symlink_metadata(&deck.path).map_err(|err| {
+            format!(
+                "failed to inspect expected-failure record {}: {err}",
+                deck.path.display()
+            )
+        })?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "expected-failure record '{}' must be a regular non-symlink file",
+                kind.record()
+            ));
+        }
+        if !self.requires_upstream_wrapper(&deck.relative_path) {
+            return Err(format!(
+                "expected-failure record '{}' lost its removed-wrapper manifest provenance",
+                kind.record()
+            ));
+        }
+
+        let family_prefix = kind
+            .record()
+            .rsplit_once('/')
+            .map(|(parent, _)| format!("{parent}/"))
+            .ok_or_else(|| "expected-failure record has no family directory".to_string())?;
+        let manifest_family = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(&family_prefix))
+            .collect::<Vec<_>>();
+        if manifest_family.len() != 1 || manifest_family[0].as_str() != kind.record() {
+            return Err(format!(
+                "expected-failure family '{}' must have exactly one manifest owner, found {manifest_family:?}",
+                family_prefix.trim_end_matches('/')
+            ));
+        }
+
+        let family_dir = deck
+            .path
+            .parent()
+            .ok_or_else(|| "expected-failure record has no parent directory".to_string())?;
+        let mut circuit_siblings = Vec::new();
+        for entry in fs::read_dir(family_dir).map_err(|err| {
+            format!(
+                "failed to inspect expected-failure family {}: {err}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|err| {
+                format!(
+                    "failed to read expected-failure family entry in {}: {err}",
+                    family_dir.display()
+                )
+            })?;
+            let path = entry.path();
+            if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                circuit_siblings.push(path);
+            }
+        }
+        circuit_siblings.sort();
+        if circuit_siblings.len() != 1
+            || circuit_siblings[0].canonicalize().ok().as_ref() != Some(&actual_canonical)
+        {
+            return Err(format!(
+                "expected-failure family '{}' must contain exactly its one qualified .cir record",
+                family_dir.display()
+            ));
+        }
+
+        let output_anchor = self
+            .static_output_reference_path(&deck.path, "anchor")
+            .ok_or_else(|| {
+                format!(
+                    "expected-failure record '{}' cannot be mapped into OutputData",
+                    kind.record()
+                )
+            })?;
+        if let Some(output_dir) = output_anchor.parent()
+            && output_dir.is_dir()
+        {
+            let deck_name = deck
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| "expected-failure filename is not UTF-8".to_string())?;
+            let artifact_prefix = format!("{deck_name}.").to_ascii_lowercase();
+            let mut artifacts = Vec::new();
+            for entry in fs::read_dir(output_dir).map_err(|err| {
+                format!(
+                    "failed to inspect expected-failure OutputData directory {}: {err}",
+                    output_dir.display()
+                )
+            })? {
+                let entry = entry.map_err(|err| {
+                    format!(
+                        "failed to read expected-failure OutputData entry in {}: {err}",
+                        output_dir.display()
+                    )
+                })?;
+                if entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.to_ascii_lowercase().starts_with(&artifact_prefix))
+                {
+                    artifacts.push(entry.path());
+                }
+            }
+            if !artifacts.is_empty() {
+                return Err(format!(
+                    "expected-failure record '{}' must not own checked-in output artifacts: {artifacts:?}",
+                    kind.record()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn observe_bug67_behavioral_expression_failure(
+        &self,
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let netlist = Self::parse_xyce_netlist(source, deck_path)
+            .map_err(|err| format!("BUG 67 must parse before behavioral compilation: {err}"))?;
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "BUG 67 parse produced unexpected diagnostics: {:?}",
+                netlist.diagnostics
+            ));
+        }
+        if netlist.elements.len() != 15
+            || netlist.subcircuits.len() != 1
+            || !netlist.subcircuits[0].name.eq_ignore_ascii_case("LM124N")
+        {
+            return Err(
+                "BUG 67 must retain 15 top-level elements and one LM124N subcircuit".to_string(),
+            );
+        }
+        let top_instances = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Subcircuit { subckt_name, .. }
+                    if subckt_name.eq_ignore_ascii_case("LM124N") =>
+                {
+                    Some(element.name.to_ascii_uppercase())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if top_instances != ["X1", "X2"] {
+            return Err(format!(
+                "BUG 67 must instantiate LM124N in exact X1, X2 order, got {top_instances:?}"
+            ));
+        }
+        let malformed = netlist.subcircuits[0]
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::BehavioralCurrent { expression, .. }
+                    if expression.eq_ignore_ascii_case("POLY I(V6) 300u 1") =>
+                {
+                    Some(element.name.to_ascii_uppercase())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if malformed != ["B6"] {
+            return Err(format!(
+                "BUG 67 must retain exactly malformed LM124N B6 expression 'POLY I(V6) 300u 1', got {malformed:?}"
+            ));
+        }
+        let tran = Self::single_tran_analysis(&netlist)?;
+        if (tran.step - 1.0e-6).abs() > 1.0e-21
+            || (tran.stop - 1.0e-3).abs() > 1.0e-18
+            || tran.start != Some(0.0)
+            || tran
+                .max_step
+                .is_none_or(|max_step| (max_step - 5.0e-6).abs() > 1.0e-20)
+            || tran.uic
+        {
+            return Err(format!("BUG 67 .TRAN tuple changed: {tran:?}"));
+        }
+        let print = Self::single_tran_print_output_request(source)?;
+        if print.format.is_some() || print.file.is_some() || print.probes != ["V(7)", "V(8)"] {
+            return Err(format!(
+                "BUG 67 ordered .PRINT TRAN contract changed: {print:?}"
+            ));
+        }
+        let flattened = crate::netlist::flatten_netlist_with_models(&netlist)
+            .map_err(|err| format!("BUG 67 must flatten before behavioral compilation: {err}"))?;
+        let flattened_b6 = flattened
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::BehavioralCurrent { expression, .. }
+                    if element.name.ends_with(".B6") =>
+                {
+                    Some((element.name.clone(), expression.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if flattened_b6
+            != [
+                ("X1.B6".to_string(), "POLY I(X1.V6) 300u 1".to_string()),
+                ("X2.B6".to_string(), "POLY I(X2.V6) 300u 1".to_string()),
+            ]
+        {
+            return Err(format!(
+                "BUG 67 flattened malformed B6 instances changed: {flattened_b6:?}"
+            ));
+        }
+
+        match self.create_xyce_engine().build_circuit(&netlist) {
+            Err(SimulationError::Circuit(message))
+                if message.contains("Invalid behavioral expression")
+                    && message.contains("POLY I(X1.V6) 300u 1")
+                    && message.contains("Unknown identifier 'POLY'")
+                    && message.contains("Ident(\"I\")") =>
+            {
+                Ok(XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::CircuitBuild,
+                    category: XyceExpectedFailureCategory::BehavioralExpressionSyntax,
+                    identifiers: vec!["X1.B6".to_string(), "X1.V6".to_string()],
+                })
+            }
+            Err(error) => Err(format!(
+                "BUG 67 produced the wrong typed circuit-build failure: {error}"
+            )),
+            Ok(_) => Err(
+                "BUG 67 circuit built successfully; expected malformed behavioral expression"
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn observe_bug671_invalid_pwl_failure(
+        &self,
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let netlist = Self::parse_xyce_netlist(source, deck_path)
+            .map_err(|err| format!("BUG 671 must parse before PWL file loading: {err}"))?;
+        if !netlist.diagnostics.is_empty()
+            || netlist.elements.len() != 2
+            || !netlist.subcircuits.is_empty()
+        {
+            return Err(
+                "BUG 671 must parse diagnostic-free as exactly one source and one resistor"
+                    .to_string(),
+            );
+        }
+        let source_element = &netlist.elements[0];
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::PwlFile {
+            path,
+            time_scale,
+            value_scale,
+            time_offset,
+            value_offset,
+            delay,
+            repeat_from,
+        }) = &source_element.kind
+        else {
+            return Err("BUG 671 VPWL must remain a file-backed PWL voltage source".to_string());
+        };
+        if !source_element.name.eq_ignore_ascii_case("VPWL")
+            || source_element.nodes != ["1", "0"]
+            || time_scale.to_bits() != 1.0_f64.to_bits()
+            || value_scale.to_bits() != 1.0_f64.to_bits()
+            || time_offset.to_bits() != 0.0_f64.to_bits()
+            || value_offset.to_bits() != 0.0_f64.to_bits()
+            || delay.to_bits() != 0.0_f64.to_bits()
+            || repeat_from.is_some()
+        {
+            return Err(format!(
+                "BUG 671 VPWL source shape changed: {} {:?}",
+                source_element.name, source_element.nodes
+            ));
+        }
+        let resistor = &netlist.elements[1];
+        if !resistor.name.eq_ignore_ascii_case("R")
+            || resistor.nodes != ["1", "0"]
+            || !matches!(&resistor.kind, ElementKind::Resistor { value, .. } if value.to_bits() == 500.0_f64.to_bits())
+        {
+            return Err("BUG 671 must retain its 500-ohm shunt resistor".to_string());
+        }
+        let tran = Self::single_tran_analysis(&netlist)?;
+        if tran.step.to_bits() != 0.01_f64.to_bits()
+            || tran.stop.to_bits() != 11.0_f64.to_bits()
+            || tran.start.is_some()
+            || tran.max_step.is_some()
+            || tran.uic
+        {
+            return Err(format!("BUG 671 .TRAN tuple changed: {tran:?}"));
+        }
+        let print = Self::single_tran_print_output_request(source)?;
+        if print.format.is_some() || print.file.is_some() || print.probes != ["V(1)"] {
+            return Err(format!(
+                "BUG 671 ordered .PRINT TRAN contract changed: {print:?}"
+            ));
+        }
+        let sibling = deck_path
+            .parent()
+            .ok_or_else(|| "BUG 671 deck has no parent directory".to_string())?
+            .join("vpwl-word.csv");
+        let resolved = Path::new(path).canonicalize().map_err(|err| {
+            format!(
+                "BUG 671 parsed PWL path '{}' cannot be canonicalized: {err}",
+                path
+            )
+        })?;
+        let expected_resolved = sibling.canonicalize().map_err(|err| {
+            format!(
+                "BUG 671 exact sibling fixture {} is missing: {err}",
+                sibling.display()
+            )
+        })?;
+        if resolved != expected_resolved {
+            return Err(format!(
+                "BUG 671 PWL path resolved to {}, expected exact sibling {}",
+                resolved.display(),
+                expected_resolved.display()
+            ));
+        }
+        Self::validate_bug671_binary_fixture(&sibling)?;
+
+        match crate::device::pwl_file::load_pwl_file(&sibling) {
+            Err(crate::device::pwl_file::PwlFileError::IoError(error))
+                if error.kind() == std::io::ErrorKind::InvalidData => {}
+            Err(error) => {
+                return Err(format!(
+                    "BUG 671 direct PWL loader produced the wrong typed failure: {error}"
+                ));
+            }
+            Ok(_) => {
+                return Err(
+                    "BUG 671 binary fixture loaded successfully as PWL data; expected invalid encoding"
+                        .to_string(),
+                );
+            }
+        }
+        match self.create_xyce_engine().build_circuit(&netlist) {
+            Err(SimulationError::Circuit(message))
+                if message.contains("source 'VPWL'")
+                    && message.contains("vpwl-word.csv")
+                    && message.contains("failed to load PWL file")
+                    && message.contains("valid UTF-8") =>
+            {
+                Ok(XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::ExternalDataLoad,
+                    category: XyceExpectedFailureCategory::InvalidPwlFileEncoding,
+                    identifiers: vec!["VPWL".to_string(), "vpwl-word.csv".to_string()],
+                })
+            }
+            Err(error) => Err(format!(
+                "BUG 671 produced the wrong typed circuit-build/loader failure: {error}"
+            )),
+            Ok(_) => Err(
+                "BUG 671 circuit built successfully; expected its external PWL load to fail"
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn validate_bug671_binary_fixture(path: &Path) -> Result<(), String> {
+        let metadata = fs::symlink_metadata(path).map_err(|err| {
+            format!(
+                "failed to inspect BUG 671 binary fixture {}: {err}",
+                path.display()
+            )
+        })?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "BUG 671 binary fixture {} must be a regular non-symlink file",
+                path.display()
+            ));
+        }
+        let bytes = fs::read(path).map_err(|err| {
+            format!(
+                "failed to read BUG 671 binary fixture {}: {err}",
+                path.display()
+            )
+        })?;
+        if bytes.len() != XYCE_BUG671_FIXTURE_BYTES {
+            return Err(format!(
+                "BUG 671 binary fixture size changed: expected {}, got {}",
+                XYCE_BUG671_FIXTURE_BYTES,
+                bytes.len()
+            ));
+        }
+        if bytes.get(..XYCE_BUG671_OLE_MAGIC.len()) != Some(&XYCE_BUG671_OLE_MAGIC) {
+            return Err("BUG 671 binary fixture lost its OLE compound-file magic".to_string());
+        }
+        let digest = blake3::hash(&bytes).to_hex().to_string();
+        if digest != XYCE_BUG671_FIXTURE_BLAKE3 {
+            return Err(format!(
+                "BUG 671 binary fixture digest changed: expected {}, got {}",
+                XYCE_BUG671_FIXTURE_BLAKE3, digest
+            ));
+        }
+        Ok(())
+    }
+
+    fn observe_bug726_adjacent_coupling_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let physical_line = source
+            .lines()
+            .nth(12)
+            .ok_or_else(|| "BUG 726 source has fewer than 13 physical lines".to_string())?;
+        if physical_line != "K1 L1 L2 0.75 K2 L1 L3 0.8" {
+            return Err(format!(
+                "BUG 726 physical line 13 changed: expected concatenated K1/K2 statement, got {physical_line:?}"
+            ));
+        }
+        for statement in [
+            "VS 1 0 SIN(0 169.7 60HZ)",
+            "R1 1 2 1K",
+            "L1 2 0 1mH",
+            "R2 3 0 1K",
+            "L2 3 0 1mH",
+            "R3 4 0 1K",
+            "L3 4 0 1mH",
+            ".TRAN 100US 25MS",
+            ".OPTIONS TIMEINT METHOD=2",
+            ".PRINT TRAN I(VS) V(2) V(3) V(4)",
+        ] {
+            if !source.lines().any(|line| line == statement) {
+                return Err(format!(
+                    "BUG 726 required statement changed or moved: {statement}"
+                ));
+            }
+        }
+
+        match Self::parse_xyce_netlist(source, deck_path) {
+            Err(ParseError::Syntax { line, message })
+                if line == 13
+                    && message == "Unexpected trailing token in coupling specification: K2" =>
+            {
+                Ok(XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::NetlistParse,
+                    category: XyceExpectedFailureCategory::AdjacentCouplingSyntax,
+                    identifiers: vec!["K1".to_string(), "K2".to_string(), "line 13".to_string()],
+                })
+            }
+            Err(error) => Err(format!(
+                "BUG 726 produced the wrong typed parser failure: {error}"
+            )),
+            Ok(_) => Err(
+                "BUG 726 parsed successfully; expected the adjacent K2 token to be rejected"
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn observe_bug744_dc_operating_point_failure(
+        &self,
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let netlist = Self::parse_xyce_netlist(source, deck_path)
+            .map_err(|err| format!("BUG 744 must parse before DC operating point: {err}"))?;
+        if !netlist.diagnostics.is_empty()
+            || netlist.elements.len() != 3
+            || !netlist.subcircuits.is_empty()
+        {
+            return Err(
+                "BUG 744 must parse diagnostic-free as exactly two sources and one resistor"
+                    .to_string(),
+            );
+        }
+        let expected_sources: [(&str, Value); 2] = [("Vsrc1", 5.0), ("Vsrc2", 2.0)];
+        for (element, (name, value)) in netlist.elements[..2].iter().zip(expected_sources) {
+            if !element.name.eq_ignore_ascii_case(name)
+                || element.nodes != ["1", "0"]
+                || !matches!(&element.kind, ElementKind::VoltageSource(spec) if extract_dc_value(spec).to_bits() == value.to_bits())
+            {
+                return Err(format!(
+                    "BUG 744 conflicting source {name}={value} V topology changed"
+                ));
+            }
+        }
+        let resistor = &netlist.elements[2];
+        if !resistor.name.eq_ignore_ascii_case("Rgrn")
+            || resistor.nodes != ["1", "0"]
+            || !matches!(&resistor.kind, ElementKind::Resistor { value, .. } if value.to_bits() == 1.0e6_f64.to_bits())
+        {
+            return Err("BUG 744 must retain its 1-megohm node-1 shunt".to_string());
+        }
+        let tran = Self::single_tran_analysis(&netlist)?;
+        if tran.step.to_bits() != 0.0_f64.to_bits()
+            || tran.stop.to_bits() != 1.0_f64.to_bits()
+            || tran.start.is_some()
+            || tran.max_step.is_some()
+            || tran.uic
+        {
+            return Err(format!("BUG 744 .TRAN tuple changed: {tran:?}"));
+        }
+        let print = Self::single_tran_print_output_request(source)?;
+        if print.format.is_some() || print.file.is_some() || print.probes != ["v(1)"] {
+            return Err(format!(
+                "BUG 744 ordered .PRINT TRAN contract changed: {print:?}"
+            ));
+        }
+        let engine = self.create_xyce_engine();
+        engine
+            .build_circuit(&netlist)
+            .map_err(|error| format!("BUG 744 must build before DC operating point: {error}"))?;
+        match engine.run_dc_op(&netlist) {
+            Err(SimulationError::Circuit(message))
+                if message.contains("matrix is singular")
+                    && message.contains("ideal voltage sources")
+                    && message.contains("duplicate constraints") =>
+            {
+                Ok(XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::DcOperatingPoint,
+                    category: XyceExpectedFailureCategory::ConflictingIdealVoltageConstraints,
+                    identifiers: vec!["Vsrc1".to_string(), "Vsrc2".to_string(), "1".to_string()],
+                })
+            }
+            Err(error) => Err(format!(
+                "BUG 744 produced the wrong typed DC operating-point failure: {error}"
+            )),
+            Ok(_) => Err(
+                "BUG 744 DC operating point succeeded; expected conflicting ideal constraints"
+                    .to_string(),
+            ),
+        }
     }
 
     fn run_connectivity_diagnostic_contract(
@@ -62373,5 +63163,425 @@ R2 2 0 1
         fs::rename(&hidden_family, &temp_family).expect("restore candidate family directory");
 
         fs::remove_dir_all(&temp_root).expect("remove shared family fixture");
+    }
+
+    fn expected_failure_test_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce")
+    }
+
+    fn unique_expected_failure_temp_dir(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rspice-xyce-expected-failure-{label}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn expected_failure_oracles_retain_exact_removed_wrapper_policies() {
+        let cases = [
+            (
+                XyceExpectedFailureKind::Bug67BehavioralExpression,
+                &[r"Syntax error in number of nodes in expression: \{POLY I[(]V6[)] 300u 1\}"][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug671InvalidPwlFile,
+                &["Failed to successfully read vpwl-word.csv"][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug726AdjacentCouplings,
+                &[
+                    "in file adjacent.cir at or near line 13",
+                    "Specified model not found for device K1",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug744DcOperatingPoint,
+                &["DC Operating Point Failed"][..],
+            ),
+        ];
+
+        for (kind, patterns) in cases {
+            let policy = kind.upstream_error_policy();
+            assert!(policy.requires_nonzero_exit);
+            assert_eq!(
+                policy.search_streams,
+                XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr
+            );
+            assert_eq!(policy.ordered_patterns, patterns);
+        }
+    }
+
+    #[test]
+    fn expected_failure_oracle_census_is_exactly_four_distinct_records() {
+        let root = expected_failure_test_root();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let records = runner
+            .discover_tests()
+            .into_iter()
+            .filter_map(|deck| {
+                XyceExpectedFailureKind::for_record(&deck.relative_path).map(|kind| {
+                    (
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                        kind,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            records,
+            vec![
+                (
+                    XYCE_BUG67_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug67BehavioralExpression,
+                ),
+                (
+                    XYCE_BUG671_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug671InvalidPwlFile,
+                ),
+                (
+                    XYCE_BUG726_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug726AdjacentCouplings,
+                ),
+                (
+                    XYCE_BUG744_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug744DcOperatingPoint,
+                ),
+            ]
+        );
+        let contracts = records
+            .iter()
+            .map(|(_, kind)| kind.result_contract())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            contracts.len(),
+            4,
+            "each record requires a distinct contract"
+        );
+    }
+
+    #[test]
+    fn expected_failure_oracles_run_end_to_end_with_distinct_contracts() {
+        let root = expected_failure_test_root();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (relative, expected_contract) in [
+            (
+                "Netlists/Certification_Tests/BUG_67/bug_67.cir",
+                "expected_failure_behavioral_expression_build",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_671/vpwl_binaryfile.cir",
+                "expected_failure_external_pwl_load",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_726/adjacent.cir",
+                "expected_failure_adjacent_coupling_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir",
+                "expected_failure_dc_operating_point",
+            ),
+        ] {
+            let result = runner.run_test(root.join(relative));
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "{relative} must execute its typed expected-failure oracle: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+        }
+    }
+
+    #[test]
+    fn expected_failure_provenance_mutations_fail_closed() {
+        let source_root = expected_failure_test_root();
+        let source_path = source_root.join("Netlists/Certification_Tests/BUG_744/bad_dc_op.cir");
+        let source = fs::read(&source_path).expect("read canonical BUG 744 source");
+        let temp_root = unique_expected_failure_temp_dir("provenance");
+        let family_dir = temp_root.join("Netlists/Certification_Tests/BUG_744");
+        let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_744");
+        fs::create_dir_all(&family_dir).expect("create temporary BUG 744 family");
+        fs::create_dir_all(&output_dir).expect("create temporary BUG 744 OutputData");
+        let deck_path = family_dir.join("bad_dc_op.cir");
+        fs::write(&deck_path, &source).expect("copy canonical BUG 744 source");
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        let canonical_manifest = format!(
+            "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, &canonical_manifest).expect("write canonical manifest");
+
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+        let canonical = run();
+        assert!(
+            canonical.passed && !canonical.expected_unsupported,
+            "canonical temporary BUG 744 fixture must pass: {canonical:?}"
+        );
+
+        let mutated_source = String::from_utf8(source.clone()).expect("BUG 744 source is UTF-8")
+            + "* digest mutation\n";
+        fs::write(&deck_path, mutated_source).expect("write digest mutation");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("source digest changed")),
+            "source digest mutation must fail closed: {result:?}"
+        );
+        fs::write(&deck_path, &source).expect("restore canonical source");
+
+        fs::write(&manifest_path, "").expect("remove manifest ownership");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("manifest provenance")),
+            "missing manifest ownership must fail closed: {result:?}"
+        );
+        fs::write(&manifest_path, &canonical_manifest).expect("restore canonical manifest");
+
+        let duplicate_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_744/other.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, duplicate_manifest).expect("write duplicate family owner");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("exactly one manifest owner")),
+            "duplicate family manifest owner must fail closed: {result:?}"
+        );
+        fs::write(&manifest_path, &canonical_manifest).expect("restore one manifest owner");
+
+        let extra_sibling = family_dir.join("other.cir");
+        fs::write(&extra_sibling, "extra sibling\n.end\n").expect("write extra .cir sibling");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("exactly its one qualified .cir record")),
+            "extra .cir sibling must fail closed: {result:?}"
+        );
+        fs::remove_file(extra_sibling).expect("remove extra sibling");
+
+        let case_variant_artifact = output_dir.join("BAD_DC_OP.CIR.ERR");
+        fs::write(&case_variant_artifact, "forbidden").expect("write case-variant artifact");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("must not own checked-in output artifacts")),
+            "case-variant OutputData artifact must fail closed: {result:?}"
+        );
+
+        fs::remove_dir_all(&temp_root).expect("remove provenance fixture");
+    }
+
+    #[test]
+    fn bug67_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_67/bug_67.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 67");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        runner
+            .observe_bug67_behavioral_expression_failure(&source, &path)
+            .expect("canonical BUG 67 failure is observed");
+
+        for (mutated, label) in [
+            (
+                source.replacen("POLY I(V6) 300u 1", "POLY(1) I(V6) 300u 1", 1),
+                "corrected POLY dimension",
+            ),
+            (
+                source.replacen("POLY I(V6) 300u 1", "POLY I(V6) 300u 2", 1),
+                "different malformed expression",
+            ),
+            (
+                source.replacen(".TRAN 1U 1000U 0 5U", ".TRAN 2U 1000U 0 5U", 1),
+                "changed analysis",
+            ),
+            (
+                source.replacen(".PRINT TRAN  V(7)  V(8)", ".PRINT TRAN V(7)", 1),
+                "changed probes",
+            ),
+            (
+                source.replacen("X2 9 7 11 12 7 LM124N", "X9 9 7 11 12 7 LM124N", 1),
+                "changed instance order",
+            ),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                runner
+                    .observe_bug67_behavioral_expression_failure(&mutated, &path)
+                    .is_err(),
+                "{label} must not satisfy BUG 67"
+            );
+        }
+    }
+
+    #[test]
+    fn bug726_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_726/adjacent.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 726");
+        XyceTestRunner::observe_bug726_adjacent_coupling_failure(&source, &path)
+            .expect("canonical BUG 726 failure is observed");
+
+        for (mutated, label) in [
+            (
+                source.replacen(
+                    "K1 L1 L2 0.75 K2 L1 L3 0.8",
+                    "K1 L1 L2 0.75\nK2 L1 L3 0.8",
+                    1,
+                ),
+                "split valid K devices",
+            ),
+            (
+                source.replacen("K1 L1 L2 0.75 K2 L1 L3 0.8", "K1 L1 L2 0.75", 1),
+                "removed adjacent tail",
+            ),
+            (
+                source.replacen(
+                    "K1 L1 L2 0.75 K2 L1 L3 0.8",
+                    "K1 L1 L2 0.75 K9 L1 L3 0.8",
+                    1,
+                ),
+                "changed adjacent identifier",
+            ),
+            (
+                source.replacen(
+                    "K1 L1 L2 0.75 K2 L1 L3 0.8",
+                    "\nK1 L1 L2 0.75 K2 L1 L3 0.8",
+                    1,
+                ),
+                "shifted physical line",
+            ),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug726_adjacent_coupling_failure(&mutated, &path).is_err(),
+                "{label} must not satisfy BUG 726"
+            );
+        }
+    }
+
+    #[test]
+    fn bug671_expected_failure_observer_rejects_fixture_mutations() {
+        let root = expected_failure_test_root();
+        let source_path = root.join("Netlists/Certification_Tests/BUG_671/vpwl_binaryfile.cir");
+        let fixture_path = root.join("Netlists/Certification_Tests/BUG_671/vpwl-word.csv");
+        let source = fs::read_to_string(&source_path).expect("read BUG 671");
+        let fixture = fs::read(&fixture_path).expect("read BUG 671 fixture");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+        let temp_dir = unique_expected_failure_temp_dir("bug671");
+        fs::create_dir_all(&temp_dir).expect("create BUG 671 fixture directory");
+        let temp_deck = temp_dir.join("vpwl_binaryfile.cir");
+        let temp_fixture = temp_dir.join("vpwl-word.csv");
+        fs::write(&temp_deck, &source).expect("copy BUG 671 deck");
+        fs::write(&temp_fixture, &fixture).expect("copy BUG 671 fixture");
+        runner
+            .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+            .expect("canonical copied BUG 671 fixture is observed");
+
+        fs::write(&temp_fixture, "0,0\n1,1\n").expect("write valid CSV mutation");
+        assert!(
+            runner
+                .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+                .is_err(),
+            "valid CSV must not satisfy binary-file expected failure"
+        );
+        assert!(
+            crate::device::pwl_file::load_pwl_file(&temp_fixture).is_ok(),
+            "corrected CSV must genuinely load"
+        );
+
+        fs::remove_file(&temp_fixture).expect("remove fixture");
+        assert!(
+            runner
+                .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+                .is_err(),
+            "missing fixture must not satisfy invalid-encoding failure"
+        );
+
+        let mut flipped = fixture.clone();
+        flipped[128] ^= 0x01;
+        fs::write(&temp_fixture, flipped).expect("write byte-flipped fixture");
+        assert!(
+            runner
+                .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+                .is_err(),
+            "byte-flipped fixture must fail exact provenance"
+        );
+
+        fs::remove_dir_all(&temp_dir).expect("remove BUG 671 fixture directory");
+    }
+
+    #[test]
+    fn bug744_expected_failure_observer_rejects_corrected_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_744/bad_dc_op.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 744");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        runner
+            .observe_bug744_dc_operating_point_failure(&source, &path)
+            .expect("canonical BUG 744 failure is observed");
+
+        let corrected = source.replacen("Vsrc2 1 0 2", "", 1);
+        assert_ne!(corrected, source);
+        assert!(
+            runner
+                .observe_bug744_dc_operating_point_failure(&corrected, &path)
+                .is_err(),
+            "solvable one-source circuit must not satisfy BUG 744"
+        );
+        let corrected_netlist = XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("corrected BUG 744 source parses");
+        assert!(
+            runner
+                .create_xyce_engine()
+                .run_dc_op(&corrected_netlist)
+                .is_ok(),
+            "corrected BUG 744 source must genuinely have a DC operating point"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen("Vsrc2 1 0 2", "Vsrc2 1 0 5", 1),
+                "removed voltage contradiction",
+            ),
+            (
+                source.replacen(".tran 0 1", ".tran 1e-3 1", 1),
+                "changed analysis",
+            ),
+            (
+                source.replacen(".print tran v(1)", ".print tran v(2)", 1),
+                "changed probe",
+            ),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                runner
+                    .observe_bug744_dc_operating_point_failure(&mutated, &path)
+                    .is_err(),
+                "{label} must not satisfy BUG 744"
+            );
+        }
     }
 }
