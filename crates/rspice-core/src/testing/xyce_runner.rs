@@ -123,6 +123,14 @@ const XYCE_BUG726_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_726/adjacent.cir";
 const XYCE_BUG744_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_744/bad_dc_op.cir";
+const XYCE_BUG387_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_387_son/bug_387.cir";
+const XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/subcircuit/subckt_noname.cir";
+const XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/input/dc_excessargs.cir";
+const XYCE_ISSUE455_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/issue_455/issue455.cir";
 const XYCE_BUG67_SOURCE_BLAKE3: &str =
     "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
 const XYCE_BUG671_SOURCE_BLAKE3: &str =
@@ -131,6 +139,22 @@ const XYCE_BUG726_SOURCE_BLAKE3: &str =
     "e55050584c69086bd34d84be82c885902a94eb212ffb6973f1d7786dd8b8ab2f";
 const XYCE_BUG744_SOURCE_BLAKE3: &str =
     "b0c2ba9e38e293eb0d9d53cc14713921890e81330e6b06c64d3fc8f0df26afda";
+const XYCE_BUG387_SOURCE_BLAKE3: &str =
+    "4cf9e5605ea32387fb6e670928e057940236b92fe3c240ee64b8b9bdce60e1b0";
+const XYCE_SUBCKT_NONAME_SOURCE_BLAKE3: &str =
+    "0d6a0bd47a0637d0fb92dab3555532594e026b4ed52b1840596db2acd509e79f";
+const XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3: &str =
+    "472709aa403c4da89e736c47b64eff48fd919f2518d671c79cc728d847812ac1";
+const XYCE_ISSUE455_SOURCE_BLAKE3: &str =
+    "9552abaee2c6162c1f1b389708fd6e338fb9ea212e04e1c8be5ea972bf04c875";
+const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
+    "dc8a7465b5524072cc0ef71b35809e306abc438d3fde69996a6ccc8889967da4";
+const XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3: &str =
+    "ef67b79684be7a1f5f8e3daa3f448986ba05ab1afa66eac92d830f20afca0cc8";
+const XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3: &str =
+    "08e791377b7ae33d9f2611d0c40fad6a63f3d3d5ba2ad81c976c9e4e97402d9c";
+const XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3: &str =
+    "5dcb3ede7c1a655558ed9b430597d05c088381c8708e2c47da82ddfdbb41417b";
 const XYCE_BUG671_FIXTURE_BLAKE3: &str =
     "a20bed61d99b2bd530e4bdfdb096315198e1c4702ac3ff8e320b6ea42efce9ba";
 const XYCE_BUG671_FIXTURE_BYTES: usize = 19_456;
@@ -166,6 +190,18 @@ enum XyceExpectedFailureKind {
     Bug671InvalidPwlFile,
     Bug726AdjacentCouplings,
     Bug744DcOperatingPoint,
+    Bug387MissingLibraryEndl,
+    MessageSubcircuitMissingName,
+    MessageDcExcessArguments,
+    Issue455DuplicateDcSourceFunction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceExpectedFailureFamilyCensus {
+    physical_cir_count: usize,
+    physical_names_blake3: &'static str,
+    manifest_owner_count: usize,
+    manifest_records_blake3: &'static str,
 }
 
 impl XyceExpectedFailureKind {
@@ -175,6 +211,10 @@ impl XyceExpectedFailureKind {
             XYCE_BUG671_EXPECTED_FAILURE_RECORD => Some(Self::Bug671InvalidPwlFile),
             XYCE_BUG726_EXPECTED_FAILURE_RECORD => Some(Self::Bug726AdjacentCouplings),
             XYCE_BUG744_EXPECTED_FAILURE_RECORD => Some(Self::Bug744DcOperatingPoint),
+            XYCE_BUG387_EXPECTED_FAILURE_RECORD => Some(Self::Bug387MissingLibraryEndl),
+            XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD => Some(Self::MessageSubcircuitMissingName),
+            XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD => Some(Self::MessageDcExcessArguments),
+            XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
             _ => None,
         }
     }
@@ -185,6 +225,10 @@ impl XyceExpectedFailureKind {
             Self::Bug671InvalidPwlFile => XYCE_BUG671_EXPECTED_FAILURE_RECORD,
             Self::Bug726AdjacentCouplings => XYCE_BUG726_EXPECTED_FAILURE_RECORD,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_EXPECTED_FAILURE_RECORD,
+            Self::Bug387MissingLibraryEndl => XYCE_BUG387_EXPECTED_FAILURE_RECORD,
+            Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD,
+            Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD,
+            Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
         }
     }
 
@@ -194,6 +238,10 @@ impl XyceExpectedFailureKind {
             Self::Bug671InvalidPwlFile => XYCE_BUG671_SOURCE_BLAKE3,
             Self::Bug726AdjacentCouplings => XYCE_BUG726_SOURCE_BLAKE3,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_SOURCE_BLAKE3,
+            Self::Bug387MissingLibraryEndl => XYCE_BUG387_SOURCE_BLAKE3,
+            Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_SOURCE_BLAKE3,
+            Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3,
+            Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
         }
     }
 
@@ -203,6 +251,12 @@ impl XyceExpectedFailureKind {
             Self::Bug671InvalidPwlFile => "expected_failure_external_pwl_load",
             Self::Bug726AdjacentCouplings => "expected_failure_adjacent_coupling_parse",
             Self::Bug744DcOperatingPoint => "expected_failure_dc_operating_point",
+            Self::Bug387MissingLibraryEndl => "expected_failure_missing_library_endl_parse",
+            Self::MessageSubcircuitMissingName => "expected_failure_missing_subcircuit_name_parse",
+            Self::MessageDcExcessArguments => "expected_failure_dc_excess_arguments_parse",
+            Self::Issue455DuplicateDcSourceFunction => {
+                "expected_failure_duplicate_dc_source_function_parse"
+            }
         }
     }
 
@@ -217,6 +271,15 @@ impl XyceExpectedFailureKind {
                 "Specified model not found for device K1",
             ][..],
             Self::Bug744DcOperatingPoint => &["DC Operating Point Failed"][..],
+            Self::Bug387MissingLibraryEndl => {
+                &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..]
+            }
+            Self::MessageSubcircuitMissingName => &["Subcircuit name required"][..],
+            Self::MessageDcExcessArguments => &["Extraneous values"][..],
+            Self::Issue455DuplicateDcSourceFunction => &[
+                "Netlist error in file issue455.cir at or near line 4",
+                "No such source function dc in V2",
+            ][..],
         };
         XyceUpstreamExpectedErrorPolicy {
             requires_nonzero_exit: true,
@@ -247,6 +310,44 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::ConflictingIdealVoltageConstraints,
                 identifiers: vec!["Vsrc1".to_string(), "Vsrc2".to_string(), "1".to_string()],
             },
+            Self::Bug387MissingLibraryEndl => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingLibraryEndl,
+                identifiers: vec!["nom.lib".to_string(), "line 3".to_string()],
+            },
+            Self::MessageSubcircuitMissingName => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingSubcircuitName,
+                identifiers: vec![".SUBCKT".to_string(), "line 21".to_string()],
+            },
+            Self::MessageDcExcessArguments => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::DcExcessArguments,
+                identifiers: vec!["V1".to_string(), "4.0".to_string(), "line 6".to_string()],
+            },
+            Self::Issue455DuplicateDcSourceFunction => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::DuplicateDcSourceFunction,
+                identifiers: vec!["V2".to_string(), "DC".to_string(), "line 4".to_string()],
+            },
+        }
+    }
+
+    fn shared_family_census(self) -> Option<XyceExpectedFailureFamilyCensus> {
+        match self {
+            Self::MessageSubcircuitMissingName => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 8,
+                physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 8,
+                manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
+            }),
+            Self::MessageDcExcessArguments => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 79,
+                physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 50,
+                manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+            }),
+            _ => None,
         }
     }
 }
@@ -265,6 +366,10 @@ enum XyceExpectedFailureCategory {
     InvalidPwlFileEncoding,
     AdjacentCouplingSyntax,
     ConflictingIdealVoltageConstraints,
+    MissingLibraryEndl,
+    MissingSubcircuitName,
+    DcExcessArguments,
+    DuplicateDcSourceFunction,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3462,6 +3567,18 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::Bug744DcOperatingPoint => {
                 self.observe_bug744_dc_operating_point_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug387MissingLibraryEndl => {
+                Self::observe_bug387_missing_library_endl_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::MessageSubcircuitMissingName => {
+                Self::observe_subckt_noname_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::MessageDcExcessArguments => {
+                Self::observe_dc_excess_args_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction => {
+                Self::observe_issue455_duplicate_dc_failure(source, &deck.path)?
+            }
         };
         let expected = kind.expected_observation();
         if observation != expected {
@@ -3537,52 +3654,61 @@ impl XyceTestRunner {
             .rsplit_once('/')
             .map(|(parent, _)| format!("{parent}/"))
             .ok_or_else(|| "expected-failure record has no family directory".to_string())?;
-        let manifest_family = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(&family_prefix))
-            .collect::<Vec<_>>();
-        if manifest_family.len() != 1 || manifest_family[0].as_str() != kind.record() {
-            return Err(format!(
-                "expected-failure family '{}' must have exactly one manifest owner, found {manifest_family:?}",
-                family_prefix.trim_end_matches('/')
-            ));
-        }
-
         let family_dir = deck
             .path
             .parent()
             .ok_or_else(|| "expected-failure record has no parent directory".to_string())?;
-        let mut circuit_siblings = Vec::new();
-        for entry in fs::read_dir(family_dir).map_err(|err| {
-            format!(
-                "failed to inspect expected-failure family {}: {err}",
-                family_dir.display()
-            )
-        })? {
-            let entry = entry.map_err(|err| {
+        if let Some(census) = kind.shared_family_census() {
+            self.validate_expected_failure_shared_family_census(
+                kind,
+                family_dir,
+                &family_prefix,
+                census,
+            )?;
+        } else {
+            let manifest_family = self
+                .upstream_wrapper_decks
+                .iter()
+                .filter(|record| record.starts_with(&family_prefix))
+                .collect::<Vec<_>>();
+            if manifest_family.len() != 1 || manifest_family[0].as_str() != kind.record() {
+                return Err(format!(
+                    "expected-failure family '{}' must have exactly one manifest owner, found {manifest_family:?}",
+                    family_prefix.trim_end_matches('/')
+                ));
+            }
+
+            let mut circuit_siblings = Vec::new();
+            for entry in fs::read_dir(family_dir).map_err(|err| {
                 format!(
-                    "failed to read expected-failure family entry in {}: {err}",
+                    "failed to inspect expected-failure family {}: {err}",
                     family_dir.display()
                 )
-            })?;
-            let path = entry.path();
-            if path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
-            {
-                circuit_siblings.push(path);
+            })? {
+                let entry = entry.map_err(|err| {
+                    format!(
+                        "failed to read expected-failure family entry in {}: {err}",
+                        family_dir.display()
+                    )
+                })?;
+                let path = entry.path();
+                if path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                {
+                    circuit_siblings.push(path);
+                }
             }
-        }
-        circuit_siblings.sort();
-        if circuit_siblings.len() != 1
-            || circuit_siblings[0].canonicalize().ok().as_ref() != Some(&actual_canonical)
-        {
-            return Err(format!(
-                "expected-failure family '{}' must contain exactly its one qualified .cir record",
-                family_dir.display()
-            ));
+            circuit_siblings.sort();
+            if circuit_siblings.len() != 1
+                || circuit_siblings[0].canonicalize().ok().as_ref() != Some(&actual_canonical)
+            {
+                return Err(format!(
+                    "expected-failure family '{}' must contain exactly its one qualified .cir record",
+                    family_dir.display()
+                ));
+            }
         }
 
         let output_anchor = self
@@ -3631,6 +3757,289 @@ impl XyceTestRunner {
             }
         }
         Ok(())
+    }
+
+    fn validate_expected_failure_shared_family_census(
+        &self,
+        kind: XyceExpectedFailureKind,
+        family_dir: &Path,
+        family_prefix: &str,
+        expected: XyceExpectedFailureFamilyCensus,
+    ) -> Result<(), String> {
+        let mut physical_names = BTreeSet::new();
+        for entry in fs::read_dir(family_dir).map_err(|err| {
+            format!(
+                "failed to inspect expected-failure shared family {}: {err}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|err| {
+                format!(
+                    "failed to read expected-failure shared-family entry in {}: {err}",
+                    family_dir.display()
+                )
+            })?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path).map_err(|err| {
+                format!(
+                    "failed to inspect expected-failure shared-family member {}: {err}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "expected-failure shared-family member {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    format!(
+                        "expected-failure shared-family member {} is not UTF-8",
+                        path.display()
+                    )
+                })?
+                .to_ascii_lowercase();
+            if !physical_names.insert(name.clone()) {
+                return Err(format!(
+                    "expected-failure shared family '{}' contains a case-colliding .cir name '{name}'",
+                    family_dir.display()
+                ));
+            }
+        }
+        let physical_names = physical_names.into_iter().collect::<Vec<_>>();
+        let physical_hash = blake3::hash(physical_names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if physical_names.len() != expected.physical_cir_count
+            || physical_hash != expected.physical_names_blake3
+        {
+            return Err(format!(
+                "expected-failure shared family '{}' physical .cir census changed: expected {} records / {}, got {} records / {}",
+                family_dir.display(),
+                expected.physical_cir_count,
+                expected.physical_names_blake3,
+                physical_names.len(),
+                physical_hash
+            ));
+        }
+
+        let manifest_records = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(family_prefix))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest_records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if manifest_records.len() != expected.manifest_owner_count
+            || manifest_hash != expected.manifest_records_blake3
+        {
+            return Err(format!(
+                "expected-failure shared family '{}' manifest census changed: expected {} owners / {}, got {} owners / {}",
+                family_prefix.trim_end_matches('/'),
+                expected.manifest_owner_count,
+                expected.manifest_records_blake3,
+                manifest_records.len(),
+                manifest_hash
+            ));
+        }
+        if !manifest_records.contains(&kind.record()) {
+            return Err(format!(
+                "expected-failure record '{}' is absent from its pinned shared-family manifest census",
+                kind.record()
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_expected_failure_source_lines(
+        label: &str,
+        source: &str,
+        expected_line_count: usize,
+        expected_lines: &[(usize, &str)],
+    ) -> Result<(), String> {
+        let lines = source.lines().collect::<Vec<_>>();
+        if lines.len() != expected_line_count {
+            return Err(format!(
+                "{label} physical line count changed: expected {expected_line_count}, got {}",
+                lines.len()
+            ));
+        }
+        for &(line_number, expected) in expected_lines {
+            let actual = lines.get(line_number - 1).copied().ok_or_else(|| {
+                format!("{label} is missing required physical line {line_number}")
+            })?;
+            if actual != expected {
+                return Err(format!(
+                    "{label} physical line {line_number} changed: expected {expected:?}, got {actual:?}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn require_exact_syntax_failure(
+        label: &str,
+        source: &str,
+        deck_path: &Path,
+        expected_line: usize,
+        expected_message: &str,
+    ) -> Result<(), String> {
+        match Self::parse_xyce_netlist(source, deck_path) {
+            Err(ParseError::Syntax { line, message })
+                if line == expected_line && message == expected_message =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(format!(
+                "{label} produced the wrong typed parse failure: expected line {expected_line} / {expected_message:?}, got {error:?}"
+            )),
+            Ok(_) => Err(format!(
+                "{label} unexpectedly parsed; the canonical malformed construct is absent"
+            )),
+        }
+    }
+
+    fn observe_bug387_missing_library_endl_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 387",
+            source,
+            9,
+            &[
+                (3, ".lib nom.lib"),
+                (4, "c1 1 0 1uF IC=1"),
+                (7, ".print tran v(1)"),
+                (8, ".tran 0 5ms"),
+                (9, ".end"),
+            ],
+        )?;
+        if source
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case(".endl"))
+        {
+            return Err("BUG 387 must retain the missing .ENDL condition".to_string());
+        }
+        Self::require_exact_syntax_failure(
+            "BUG 387",
+            source,
+            deck_path,
+            3,
+            "Library section 'nom.lib' missing .ENDL",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::MissingLibraryEndl,
+            identifiers: vec!["nom.lib".to_string(), "line 3".to_string()],
+        })
+    }
+
+    fn observe_subckt_noname_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "Message/Subcircuit subckt_noname",
+            source,
+            28,
+            &[
+                (10, "xsub1 0 1 2 testsub"),
+                (12, ".subckt testsub a b c"),
+                (15, ".ends"),
+                (21, ".subckt "),
+                (22, "r1 a b 1"),
+                (23, ".ends"),
+                (25, ".tran 0 1"),
+                (26, ".print tran v(1)"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "Message/Subcircuit subckt_noname",
+            source,
+            deck_path,
+            21,
+            ".SUBCKT requires a subcircuit name",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::MissingSubcircuitName,
+            identifiers: vec![".SUBCKT".to_string(), "line 21".to_string()],
+        })
+    }
+
+    fn observe_dc_excess_args_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "Message/Input DC_excessArgs",
+            source,
+            9,
+            &[
+                (3, "V1 1 0 1.0"),
+                (4, "R1 1 0 1.0"),
+                (6, ".DC V1 -8.0 -4.0 0.0 4.0"),
+                (8, ".print dc V(1)"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "Message/Input DC_excessArgs",
+            source,
+            deck_path,
+            6,
+            ".DC has unexpected trailing token Number(4.0)",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::DcExcessArguments,
+            identifiers: vec!["V1".to_string(), "4.0".to_string(), "line 6".to_string()],
+        })
+    }
+
+    fn observe_issue455_duplicate_dc_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "ISSUE 455",
+            source,
+            11,
+            &[
+                (
+                    2,
+                    "* this test checks that V2 will trigger a useful error message",
+                ),
+                (4, "V2 1 0 dc 1.0 dc 0.0"),
+                (5, "R2 1 0 1.0"),
+                (7, ".OP"),
+                (8, ".Print DC V(*)"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "ISSUE 455",
+            source,
+            deck_path,
+            4,
+            "Unexpected trailing token in source specification: DC",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::DuplicateDcSourceFunction,
+            identifiers: vec!["V2".to_string(), "DC".to_string(), "line 4".to_string()],
+        })
     }
 
     fn observe_bug67_behavioral_expression_failure(
@@ -64287,6 +64696,25 @@ R2 2 0 1
                 XyceExpectedFailureKind::Bug744DcOperatingPoint,
                 &["DC Operating Point Failed"][..],
             ),
+            (
+                XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+                &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageSubcircuitMissingName,
+                &["Subcircuit name required"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageDcExcessArguments,
+                &["Extraneous values"][..],
+            ),
+            (
+                XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+                &[
+                    "Netlist error in file issue455.cir at or near line 4",
+                    "No such source function dc in V2",
+                ][..],
+            ),
         ];
 
         for (kind, patterns) in cases {
@@ -64301,10 +64729,10 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_four_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_eight_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        let records = runner
+        let mut records = runner
             .discover_tests()
             .into_iter()
             .filter_map(|deck| {
@@ -64316,9 +64744,14 @@ R2 2 0 1
                 })
             })
             .collect::<Vec<_>>();
+        records.sort_by(|left, right| left.0.cmp(&right.0));
         assert_eq!(
             records,
             vec![
+                (
+                    XYCE_BUG387_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+                ),
                 (
                     XYCE_BUG67_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug67BehavioralExpression,
@@ -64335,6 +64768,18 @@ R2 2 0 1
                     XYCE_BUG744_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug744DcOperatingPoint,
                 ),
+                (
+                    XYCE_ISSUE455_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+                ),
+                (
+                    XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageDcExcessArguments,
+                ),
+                (
+                    XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageSubcircuitMissingName,
+                ),
             ]
         );
         let contracts = records
@@ -64343,7 +64788,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            4,
+            8,
             "each record requires a distinct contract"
         );
     }
@@ -64369,6 +64814,22 @@ R2 2 0 1
                 "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir",
                 "expected_failure_dc_operating_point",
             ),
+            (
+                "Netlists/Certification_Tests/BUG_387_SON/bug_387.cir",
+                "expected_failure_missing_library_endl_parse",
+            ),
+            (
+                "Netlists/Message/Subcircuit/subckt_noname.cir",
+                "expected_failure_missing_subcircuit_name_parse",
+            ),
+            (
+                "Netlists/Message/Input/DC_excessArgs.cir",
+                "expected_failure_dc_excess_arguments_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
+                "expected_failure_duplicate_dc_source_function_parse",
+            ),
         ] {
             let result = runner.run_test(root.join(relative));
             assert!(
@@ -64377,6 +64838,188 @@ R2 2 0 1
             );
             assert_eq!(result.contract, expected_contract);
         }
+    }
+
+    #[test]
+    fn expected_failure_shared_family_censuses_are_exactly_pinned() {
+        assert_eq!(
+            XyceExpectedFailureKind::MessageSubcircuitMissingName.shared_family_census(),
+            Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 8,
+                physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 8,
+                manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
+            })
+        );
+        assert_eq!(
+            XyceExpectedFailureKind::MessageDcExcessArguments.shared_family_census(),
+            Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 79,
+                physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 50,
+                manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+            })
+        );
+        for singleton in [
+            XyceExpectedFailureKind::Bug67BehavioralExpression,
+            XyceExpectedFailureKind::Bug671InvalidPwlFile,
+            XyceExpectedFailureKind::Bug726AdjacentCouplings,
+            XyceExpectedFailureKind::Bug744DcOperatingPoint,
+            XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+            XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+        ] {
+            assert_eq!(
+                singleton.shared_family_census(),
+                None,
+                "{singleton:?} must retain singleton provenance"
+            );
+        }
+    }
+
+    #[test]
+    fn expected_failure_shared_family_provenance_mutations_fail_closed() {
+        let source_root = expected_failure_test_root();
+        let source_family = source_root.join("Netlists/Message/Subcircuit");
+        let temp_root = unique_expected_failure_temp_dir("shared-provenance");
+        let temp_family = temp_root.join("Netlists/Message/Subcircuit");
+        let output_dir = temp_root.join("OutputData/Message/Subcircuit");
+        fs::create_dir_all(&temp_family).expect("create shared-family fixture");
+        fs::create_dir_all(&output_dir).expect("create shared-family OutputData fixture");
+        for entry in fs::read_dir(&source_family).expect("read canonical Message/Subcircuit family")
+        {
+            let entry = entry.expect("read canonical family member");
+            let path = entry.path();
+            if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                fs::copy(&path, temp_family.join(entry.file_name()))
+                    .expect("copy canonical shared-family member");
+            }
+        }
+        let manifest_source =
+            fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE)).expect("read manifest");
+        let canonical_manifest = manifest_source
+            .lines()
+            .filter(|line| {
+                line.split_once('\t').is_some_and(|(path, contract)| {
+                    XyceTestRunner::normalize_manifest_key(path)
+                        .starts_with("netlists/message/subcircuit/")
+                        && contract.trim() == REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        fs::write(&manifest_path, &canonical_manifest).expect("write canonical shared manifest");
+        let deck_path = temp_family.join("subckt_noname.cir");
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+        let assert_rejected = |label: &str| {
+            let result = run();
+            assert!(
+                !result.passed,
+                "{label} must fail closed under shared-family provenance: {result:?}"
+            );
+        };
+
+        let canonical = run();
+        assert!(
+            canonical.passed && !canonical.expected_unsupported,
+            "canonical copied shared family must pass: {canonical:?}"
+        );
+
+        let added = temp_family.join("extra.cir");
+        fs::write(&added, "extra\n.end\n").expect("add physical family member");
+        assert_rejected("added physical .cir member");
+        fs::remove_file(&added).expect("remove added physical member");
+
+        let removable = temp_family.join("subckt_unused.cir");
+        let removable_source = fs::read(&removable).expect("read removable family member");
+        fs::remove_file(&removable).expect("remove physical family member");
+        assert_rejected("removed physical .cir member");
+        fs::write(&removable, &removable_source).expect("restore removed family member");
+
+        let renamed = temp_family.join("subckt_renamed.cir");
+        fs::rename(&removable, &renamed).expect("rename physical family member");
+        assert_rejected("renamed physical .cir member");
+        fs::rename(&renamed, &removable).expect("restore renamed family member");
+
+        let collision_paths = [
+            temp_family.join("RSpice_Case_Probe.cir"),
+            temp_family.join("rspice_case_probe.CIR"),
+        ];
+        fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+        fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+        let case_probe_entries = fs::read_dir(&temp_family)
+            .expect("read case-probe directory")
+            .map(|entry| entry.expect("read case-probe entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+            })
+            .collect::<Vec<_>>();
+        if case_probe_entries.len() == 2 {
+            let result = run();
+            assert!(
+                !result.passed
+                    && result
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains("case-colliding")),
+                "case-colliding physical names must fail explicitly: {result:?}"
+            );
+        }
+        for path in case_probe_entries {
+            fs::remove_file(path).expect("remove case probe");
+        }
+
+        let without_target = canonical_manifest
+            .lines()
+            .filter(|line| {
+                !XyceTestRunner::normalize_manifest_key(line)
+                    .starts_with(XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&manifest_path, without_target).expect("remove target manifest owner");
+        assert_rejected("removed target manifest owner");
+        fs::write(&manifest_path, &canonical_manifest).expect("restore target manifest owner");
+
+        let added_owner = format!(
+            "{canonical_manifest}Netlists/Message/Subcircuit/extra.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, added_owner).expect("add manifest owner");
+        assert_rejected("added manifest owner");
+        fs::write(&manifest_path, &canonical_manifest).expect("restore exact manifest census");
+
+        let replaced_owner = canonical_manifest.replacen(
+            "Netlists/Message/Subcircuit/subckt_unused.cir",
+            "Netlists/Message/Subcircuit/subckt_replaced.cir",
+            1,
+        );
+        assert_ne!(replaced_owner, canonical_manifest);
+        fs::write(&manifest_path, replaced_owner).expect("replace manifest owner");
+        assert_rejected("replaced manifest owner");
+        fs::write(&manifest_path, &canonical_manifest).expect("restore manifest owner");
+
+        let artifact = output_dir.join("SUBCKT_NONAME.CIR.ERR");
+        fs::write(&artifact, "forbidden").expect("write target output artifact");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("must not own checked-in output artifacts")),
+            "target artifact must fail closed: {result:?}"
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove shared-family provenance fixture");
     }
 
     #[test]
@@ -64662,6 +65305,135 @@ R2 2 0 1
                     .observe_bug744_dc_operating_point_failure(&mutated, &path)
                     .is_err(),
                 "{label} must not satisfy BUG 744"
+            );
+        }
+    }
+
+    #[test]
+    fn bug387_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_387_SON/bug_387.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 387");
+        XyceTestRunner::observe_bug387_missing_library_endl_failure(&source, &path)
+            .expect("canonical BUG 387 failure is observed");
+
+        let corrected = source.replacen(".end", ".endl\n.end", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("BUG 387 source with matching .ENDL genuinely parses");
+        assert!(
+            XyceTestRunner::observe_bug387_missing_library_endl_failure(&corrected, &path).is_err(),
+            "corrected library section must not satisfy BUG 387"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen(".lib nom.lib", ".lib other.lib", 1),
+                "different missing library section",
+            ),
+            (format!("\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug387_missing_library_endl_failure(&mutated, &path)
+                    .is_err(),
+                "{label} must not satisfy BUG 387"
+            );
+        }
+    }
+
+    #[test]
+    fn subckt_noname_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Message/Subcircuit/subckt_noname.cir");
+        let source = fs::read_to_string(&path).expect("read subckt_noname");
+        XyceTestRunner::observe_subckt_noname_failure(&source, &path)
+            .expect("canonical subckt_noname failure is observed");
+
+        let corrected = source.replacen(".subckt \r\n", ".subckt unused a b\r\n", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("named unused subcircuit genuinely parses");
+        assert!(
+            XyceTestRunner::observe_subckt_noname_failure(&corrected, &path).is_err(),
+            "corrected .SUBCKT must not satisfy the missing-name oracle"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen(".subckt \r\n", ".subckt\r\n", 1),
+                "changed malformed line spelling",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_subckt_noname_failure(&mutated, &path).is_err(),
+                "{label} must not satisfy subckt_noname"
+            );
+        }
+    }
+
+    #[test]
+    fn dc_excess_args_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Message/Input/DC_excessArgs.cir");
+        let source = fs::read_to_string(&path).expect("read DC_excessArgs");
+        XyceTestRunner::observe_dc_excess_args_failure(&source, &path)
+            .expect("canonical DC_excessArgs failure is observed");
+
+        let corrected = source.replacen(".DC V1 -8.0 -4.0 0.0 4.0", ".DC V1 -8.0 -4.0 0.0", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("three-value .DC sweep genuinely parses");
+        assert!(
+            XyceTestRunner::observe_dc_excess_args_failure(&corrected, &path).is_err(),
+            "corrected .DC must not satisfy the excess-argument oracle"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen(".DC V1 -8.0 -4.0 0.0 4.0", ".DC V1 -8.0 -4.0 0.0 5.0", 1),
+                "different excess value",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_dc_excess_args_failure(&mutated, &path).is_err(),
+                "{label} must not satisfy DC_excessArgs"
+            );
+        }
+    }
+
+    #[test]
+    fn issue455_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/ISSUE_455/issue455.cir");
+        let source = fs::read_to_string(&path).expect("read ISSUE 455");
+        XyceTestRunner::observe_issue455_duplicate_dc_failure(&source, &path)
+            .expect("canonical ISSUE 455 failure is observed");
+
+        let corrected = source.replacen("V2 1 0 dc 1.0 dc 0.0", "V2 1 0 dc 1.0", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("single DC source specification genuinely parses");
+        assert!(
+            XyceTestRunner::observe_issue455_duplicate_dc_failure(&corrected, &path).is_err(),
+            "corrected V2 source must not satisfy ISSUE 455"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen("V2 1 0 dc 1.0 dc 0.0", "V2 1 0 dc 1.0 dc 2.0", 1),
+                "different duplicate DC value",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_issue455_duplicate_dc_failure(&mutated, &path).is_err(),
+                "{label} must not satisfy ISSUE 455"
             );
         }
     }
