@@ -635,6 +635,7 @@ fn eval_complex_builtin_function(
         "ACOS" => real_unary(name, args, |x| x.acos()),
         "ATAN" => real_unary(name, args, |x| x.atan()),
         "ATAN2" => real_binary(name, args, |left, right| left.atan2(right)),
+        "FMOD" | "MOD" => eval_real_fmod_function(name, args),
         "FLOOR" => real_unary(name, args, |x| x.floor()),
         "CEIL" => real_unary(name, args, |x| x.ceil()),
         "ROUND" => real_unary(name, args, |x| x.round()),
@@ -852,6 +853,35 @@ fn real_binary(
         checked_real_arg(name, args, 0)?,
         checked_real_arg(name, args, 1)?,
     )))
+}
+
+/// Evaluate the real-valued C/POSIX `fmod` operation.
+///
+/// Rust's floating-point remainder operator has the same sign convention as
+/// `fmod`: the quotient is truncated toward zero, so a non-zero remainder has
+/// the sign of the dividend. Rejecting non-finite operands keeps invalid
+/// intermediate expression results from silently becoming printable values.
+fn eval_real_fmod_function(name: &str, args: &[ComplexValue]) -> Result<ComplexValue, ExprError> {
+    require_arg_count(name, args, 2)?;
+    let dividend = checked_real_arg(name, args, 0)?;
+    let divisor = checked_real_arg(name, args, 1)?;
+
+    if !dividend.is_finite() || !divisor.is_finite() {
+        return Err(ExprError::InvalidArgument(format!(
+            "{name}: operands must be finite"
+        )));
+    }
+    if divisor == 0.0 {
+        return Err(ExprError::DivisionByZero);
+    }
+
+    let remainder = dividend % divisor;
+    if !remainder.is_finite() {
+        return Err(ExprError::InvalidArgument(format!(
+            "{name}: remainder is not finite"
+        )));
+    }
+    Ok(ComplexValue::real(remainder))
 }
 
 fn xyce_tanh(x: Value) -> Value {

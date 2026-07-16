@@ -51,6 +51,54 @@ fn modulo_operator_matches_xyce_precedence() {
 }
 
 #[test]
+fn fmod_and_mod_functions_use_truncating_quotient_sign_rules() {
+    let ctx = ParamContext::new();
+    for name in ["fmod", "mod"] {
+        assert_eq!(eval_with(&ctx, &format!("{name}(5.5, 2)")), 1.5);
+        assert_eq!(eval_with(&ctx, &format!("{name}(-5.5, 2)")), -1.5);
+        assert_eq!(eval_with(&ctx, &format!("{name}(5.5, -2)")), 1.5);
+        assert_eq!(eval_with(&ctx, &format!("{name}(-5.5, -2)")), -1.5);
+        assert_eq!(eval_with(&ctx, &format!("{name}(99.5, 3)")), 0.5);
+        assert_eq!(
+            eval_with(&ctx, &format!("{name}(-4, 2)")).to_bits(),
+            (-0.0_f64).to_bits(),
+            "an exact remainder retains the dividend's negative sign"
+        );
+    }
+}
+
+#[test]
+fn fmod_and_mod_functions_reject_invalid_arity_and_divisors() {
+    let ctx = ParamContext::new();
+    for name in ["fmod", "mod"] {
+        assert!(matches!(
+            eval_expression(&format!("{name}(1)"), &ctx),
+            Err(ExprError::WrongArgCount(_))
+        ));
+        assert!(matches!(
+            eval_expression(&format!("{name}(1, 2, 3)"), &ctx),
+            Err(ExprError::WrongArgCount(_))
+        ));
+        assert!(matches!(
+            eval_expression(&format!("{name}(1, 0)"), &ctx),
+            Err(ExprError::DivisionByZero)
+        ));
+        assert!(matches!(
+            eval_expression(&format!("{name}(1, -0.0)"), &ctx),
+            Err(ExprError::DivisionByZero)
+        ));
+        assert!(matches!(
+            eval_expression(&format!("{name}(log(0), 2)"), &ctx),
+            Err(ExprError::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            eval_expression(&format!("{name}(1, log(0))"), &ctx),
+            Err(ExprError::InvalidArgument(_))
+        ));
+    }
+}
+
+#[test]
 fn table_function_clamps_outside_defined_range() {
     let ctx = ParamContext::new();
     assert_eq!(eval_with(&ctx, "table(110n%120n,0,0,60n,3.3,100n,0)"), 0.0);
