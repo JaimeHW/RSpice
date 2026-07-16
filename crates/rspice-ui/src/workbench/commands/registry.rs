@@ -38,33 +38,18 @@ impl CommandPlatform {
     }
 }
 
-pub const fn current_command_platform() -> CommandPlatform {
-    #[cfg(target_arch = "wasm32")]
-    {
-        CommandPlatform::Browser
-    }
-    #[cfg(target_os = "android")]
-    {
-        CommandPlatform::Phone
-    }
-    #[cfg(target_os = "ios")]
-    {
-        CommandPlatform::Phone
-    }
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
-    {
-        CommandPlatform::Desktop
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutContext {
     Global,
     ApplicationChrome,
     EditContext,
     EngineeringCanvas,
+    SymbolCanvas,
     DesignWorkspace,
     SimulationWorkspace,
+    ResultsWorkspace,
+    VerificationWorkspace,
+    ViolationNavigation,
     RunnableProject,
 }
 
@@ -75,8 +60,12 @@ impl ShortcutContext {
             Self::ApplicationChrome => "application-chrome",
             Self::EditContext => "edit-context",
             Self::EngineeringCanvas => "engineering-canvas",
+            Self::SymbolCanvas => "symbol-canvas",
             Self::DesignWorkspace => "design-workspace",
             Self::SimulationWorkspace => "simulation-workspace",
+            Self::ResultsWorkspace => "results-workspace",
+            Self::VerificationWorkspace => "verification-workspace",
+            Self::ViolationNavigation => "violation-navigation",
             Self::RunnableProject => "runnable-project",
         }
     }
@@ -88,17 +77,37 @@ impl ShortcutContext {
     pub fn matches(self, app: &RSpiceApp) -> bool {
         match self {
             Self::Global | Self::ApplicationChrome | Self::RunnableProject => true,
-            Self::EditContext | Self::EngineeringCanvas => {
+            Self::EditContext => match app.state.workspace.active_view_type() {
+                crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
+                    app.state.workbench.workspace == Workspace::Design
+                }
+                crate::state::ViewType::Symbol => matches!(
+                    app.state.workbench.workspace,
+                    Workspace::Design | Workspace::Models
+                ),
+                _ => false,
+            },
+            Self::EngineeringCanvas => {
                 app.state.workbench.workspace == Workspace::Design
                     && matches!(
                         app.state.workspace.active_view_type(),
-                        crate::state::ViewType::Schematic
-                            | crate::state::ViewType::Testbench
-                            | crate::state::ViewType::Symbol
+                        crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
                     )
+            }
+            Self::SymbolCanvas => {
+                matches!(
+                    app.state.workbench.workspace,
+                    Workspace::Design | Workspace::Models
+                ) && app.state.workspace.active_view_type() == crate::state::ViewType::Symbol
             }
             Self::DesignWorkspace => app.state.workbench.workspace == Workspace::Design,
             Self::SimulationWorkspace => app.state.workbench.workspace == Workspace::Simulate,
+            Self::ResultsWorkspace => app.state.workbench.workspace == Workspace::Results,
+            Self::VerificationWorkspace => app.state.workbench.workspace == Workspace::Verify,
+            Self::ViolationNavigation => matches!(
+                app.state.workbench.workspace,
+                Workspace::Design | Workspace::Verify
+            ),
         }
     }
 }
@@ -300,9 +309,28 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num7, false, true, false, "Alt+7"), ALL)];
 const PLACE_INSTANCE: &[ShortcutBinding] =
     &[primary(chord(Key::I, false, false, true, "Shift+I"), ALL)];
+const SELECT_TOOL: &[ShortcutBinding] = &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const PLACE_WIRE: &[ShortcutBinding] = &[primary(chord(Key::W, false, false, false, "W"), ALL)];
 const PLACE_LABEL: &[ShortcutBinding] = &[primary(chord(Key::N, false, false, false, "N"), ALL)];
 const PLACE_PROBE: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
+const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
+const SYMBOL_POLYLINE: &[ShortcutBinding] =
+    &[primary(chord(Key::W, false, false, false, "W"), ALL)];
+const SYMBOL_CIRCLE: &[ShortcutBinding] = &[primary(chord(Key::C, false, false, false, "C"), ALL)];
+const SYMBOL_ARC: &[ShortcutBinding] = &[primary(chord(Key::A, false, false, false, "A"), ALL)];
+const SYMBOL_ARROW: &[ShortcutBinding] = &[primary(chord(Key::D, false, false, false, "D"), ALL)];
+const SYMBOL_DOT: &[ShortcutBinding] = &[primary(chord(Key::O, false, false, false, "O"), ALL)];
+const PLACE_RESISTOR: &[ShortcutBinding] = &[primary(chord(Key::R, false, false, false, "R"), ALL)];
+const PLACE_CAPACITOR: &[ShortcutBinding] =
+    &[primary(chord(Key::C, false, false, false, "C"), ALL)];
+const PLACE_INDUCTOR: &[ShortcutBinding] = &[primary(chord(Key::L, false, false, false, "L"), ALL)];
+const PLACE_DIODE: &[ShortcutBinding] = &[primary(chord(Key::D, false, false, false, "D"), ALL)];
+const PLACE_GROUND: &[ShortcutBinding] =
+    &[primary(chord(Key::G, false, false, true, "Shift+G"), ALL)];
+const PLACE_VOLTAGE_SOURCE: &[ShortcutBinding] =
+    &[primary(chord(Key::V, false, false, false, "V"), ALL)];
+const PLACE_CURRENT_SOURCE: &[ShortcutBinding] =
+    &[primary(chord(Key::I, false, false, false, "I"), ALL)];
 const ASCEND_HIERARCHY: &[ShortcutBinding] =
     &[primary(chord(Key::H, false, false, true, "Shift+H"), ALL)];
 const DESCEND_HIERARCHY: &[ShortcutBinding] =
@@ -312,6 +340,10 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
     chord(Key::E, true, false, true, "Ctrl+Shift+E"),
     ALL,
 )];
+const NEXT_VIOLATION: &[ShortcutBinding] = &[
+    primary(chord(Key::CloseBracket, false, false, false, "]"), ALL),
+    alternate(chord(Key::F8, false, false, false, "F8"), ALL),
+];
 const RUN_SIMULATION: &[ShortcutBinding] = &[
     primary(chord(Key::F5, false, false, false, "F5"), DESKTOP),
     alternate(chord(Key::Enter, true, false, false, "Ctrl+Enter"), HOST),
@@ -324,6 +356,8 @@ const STOP_SIMULATION: &[ShortcutBinding] = &[
     ),
 ];
 const PREFLIGHT: &[ShortcutBinding] = &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
+const LINKED_CURSORS: &[ShortcutBinding] =
+    &[primary(chord(Key::C, false, false, true, "Shift+C"), ALL)];
 const GENERATED_NETLIST: &[ShortcutBinding] = &[
     primary(chord(Key::L, true, false, false, "Ctrl+L"), DESKTOP),
     alternate(chord(Key::L, true, true, false, "Ctrl+Alt+L"), HOST),
@@ -366,7 +400,6 @@ impl Command {
                 | Self::Cancel
                 | Self::PreviousWorkspace
                 | Self::NextWorkspace
-                | Self::ResetLayout
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
         )
@@ -381,15 +414,15 @@ impl Command {
             | Self::Paste
             | Self::Duplicate
             | Self::Delete
-            | Self::SelectAll => ShortcutContext::EditContext,
-            Self::ObjectProperties
-            | Self::FindInDesign
+            | Self::SelectAll
+            | Self::ObjectProperties
             | Self::ZoomIn
             | Self::ZoomOut
             | Self::ZoomFit
             | Self::ZoomOneToOne
             | Self::CycleGrid
-            | Self::SelectTool
+            | Self::SelectTool => ShortcutContext::EditContext,
+            Self::FindInDesign
             | Self::PlaceInstance
             | Self::PlaceWire
             | Self::PlaceLabel
@@ -404,6 +437,20 @@ impl Command {
             | Self::RunChecks
             | Self::CheckAndSave => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
+            Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
+            Self::ClearResults | Self::WaveformCalculator | Self::ResultViewer(_) => {
+                ShortcutContext::ResultsWorkspace
+            }
+            Self::SymbolPinTool
+            | Self::SymbolPolylineTool
+            | Self::SymbolCircleTool
+            | Self::SymbolArcTool
+            | Self::SymbolArrowTool
+            | Self::SymbolDotTool => ShortcutContext::SymbolCanvas,
+            Self::ToggleLinkedCursors => ShortcutContext::ResultsWorkspace,
+            Self::EditSpecifications | Self::VerificationPage(_) => {
+                ShortcutContext::VerificationWorkspace
+            }
             Self::RunSimulation | Self::StopSimulation => ShortcutContext::RunnableProject,
             _ => ShortcutContext::Global,
         }
@@ -447,17 +494,33 @@ impl Command {
             Self::ToggleInspector => TOGGLE_INSPECTOR,
             Self::ToggleConsole => TOGGLE_CONSOLE,
             Self::ToggleFocusMode => FOCUS_WORKSPACE,
+            Self::SelectTool => SELECT_TOOL,
             Self::PlaceInstance => PLACE_INSTANCE,
             Self::PlaceWire => PLACE_WIRE,
             Self::PlaceLabel => PLACE_LABEL,
             Self::PlaceProbe => PLACE_PROBE,
+            Self::SymbolPinTool => SYMBOL_PIN,
+            Self::SymbolPolylineTool => SYMBOL_POLYLINE,
+            Self::SymbolCircleTool => SYMBOL_CIRCLE,
+            Self::SymbolArcTool => SYMBOL_ARC,
+            Self::SymbolArrowTool => SYMBOL_ARROW,
+            Self::SymbolDotTool => SYMBOL_DOT,
+            Self::Place(crate::state::ComponentType::Resistor) => PLACE_RESISTOR,
+            Self::Place(crate::state::ComponentType::Capacitor) => PLACE_CAPACITOR,
+            Self::Place(crate::state::ComponentType::Inductor) => PLACE_INDUCTOR,
+            Self::Place(crate::state::ComponentType::Diode) => PLACE_DIODE,
+            Self::Place(crate::state::ComponentType::Ground) => PLACE_GROUND,
+            Self::Place(crate::state::ComponentType::VoltageSource) => PLACE_VOLTAGE_SOURCE,
+            Self::Place(crate::state::ComponentType::CurrentSource) => PLACE_CURRENT_SOURCE,
             Self::AscendHierarchy => ASCEND_HIERARCHY,
             Self::DescendHierarchy => DESCEND_HIERARCHY,
             Self::RunChecks => RUN_CHECKS,
             Self::CheckAndSave => CHECK_AND_SAVE,
+            Self::NextViolation => NEXT_VIOLATION,
             Self::RunSimulation => RUN_SIMULATION,
             Self::StopSimulation => STOP_SIMULATION,
             Self::PreflightChecks => PREFLIGHT,
+            Self::ToggleLinkedCursors => LINKED_CURSORS,
             Self::GenerateNetlist => GENERATED_NETLIST,
             Self::AutomationConsole => AUTOMATION_CONSOLE,
             Self::CommandPalette => COMMAND_PALETTE,
@@ -466,7 +529,9 @@ impl Command {
         }
     }
 
-    pub fn shortcut_label(self, platform: CommandPlatform) -> &'static str {
+    /// Immutable factory binding label for registry contract tests and
+    /// recovery diagnostics. Product UI must use `ShortcutPreferences`.
+    pub fn default_shortcut_label(self, platform: CommandPlatform) -> &'static str {
         self.shortcut_bindings()
             .iter()
             .find(|binding| binding.supports(platform))
@@ -565,7 +630,7 @@ mod tests {
                 vec![Command::OpenWorkspace(Workspace::Results)]
             );
             assert_eq!(
-                Command::OpenWorkspace(Workspace::Results).shortcut_label(platform),
+                Command::OpenWorkspace(Workspace::Results).default_shortcut_label(platform),
                 "Alt+4"
             );
             assert_eq!(
@@ -573,7 +638,7 @@ mod tests {
                 vec![Command::OpenWorkspace(Workspace::Verify)]
             );
             assert_eq!(
-                Command::OpenWorkspace(Workspace::Verify).shortcut_label(platform),
+                Command::OpenWorkspace(Workspace::Verify).default_shortcut_label(platform),
                 "Alt+5"
             );
         }
@@ -597,7 +662,7 @@ mod tests {
             vec![Command::Exit]
         );
         assert_eq!(
-            Command::Exit.shortcut_label(CommandPlatform::Desktop),
+            Command::Exit.default_shortcut_label(CommandPlatform::Desktop),
             "Alt+F4"
         );
 
@@ -607,7 +672,33 @@ mod tests {
             CommandPlatform::Phone,
         ] {
             assert!(binding_owners(EXIT[0].chord, platform).is_empty());
-            assert_eq!(Command::Exit.shortcut_label(platform), "");
+            assert_eq!(Command::Exit.default_shortcut_label(platform), "");
         }
+    }
+
+    #[test]
+    fn symbol_tool_defaults_are_complete_portable_and_view_scoped() {
+        for (command, label) in [
+            (Command::SymbolPinTool, "P"),
+            (Command::SymbolPolylineTool, "W"),
+            (Command::SymbolCircleTool, "C"),
+            (Command::SymbolArcTool, "A"),
+            (Command::SymbolArrowTool, "D"),
+            (Command::SymbolDotTool, "O"),
+        ] {
+            assert_eq!(command.shortcut_context(), ShortcutContext::SymbolCanvas);
+            for platform in CommandPlatform::ALL {
+                assert_eq!(command.default_shortcut_label(platform), label);
+            }
+        }
+
+        assert_eq!(
+            Command::PlaceProbe.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        assert_eq!(
+            Command::PlaceWire.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
     }
 }

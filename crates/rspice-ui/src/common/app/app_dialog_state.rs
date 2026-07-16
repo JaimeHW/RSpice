@@ -5,6 +5,82 @@
 
 use super::{ConfirmationDialogState, ProjectReviewDialogState};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ShortcutEditorContext {
+    #[default]
+    All,
+    Global,
+    Schematic,
+    Simulation,
+    Results,
+    Verification,
+}
+
+impl ShortcutEditorContext {
+    pub(crate) const ALL: [Self; 6] = [
+        Self::All,
+        Self::Global,
+        Self::Schematic,
+        Self::Simulation,
+        Self::Results,
+        Self::Verification,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All contexts",
+            Self::Global => "Global",
+            Self::Schematic => "Schematic",
+            Self::Simulation => "Simulation",
+            Self::Results => "Results",
+            Self::Verification => "Verification",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShortcutCaptureTarget {
+    pub(crate) command: crate::workbench::commands::Command,
+    pub(crate) slot: crate::workbench::ShortcutBindingSlot,
+}
+
+/// Retained transaction state for the command-binding editor. Visible
+/// controls mutate `draft`; the live profile is replaced only by validated
+/// Save.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ShortcutEditorState {
+    pub(crate) open: bool,
+    pub(crate) original: Option<crate::workbench::ShortcutPreferences>,
+    pub(crate) draft: Option<crate::workbench::ShortcutPreferences>,
+    pub(crate) query: String,
+    pub(crate) context: ShortcutEditorContext,
+    pub(crate) selected_command: Option<crate::workbench::commands::Command>,
+    pub(crate) recording: Option<ShortcutCaptureTarget>,
+    pub(crate) capture_strokes: Vec<crate::workbench::ShortcutStroke>,
+    pub(crate) capture_last_input_at: Option<f64>,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirmation: bool,
+    pub(crate) error_summary: Option<String>,
+    pub(crate) repair_receipt: Option<String>,
+    pub(crate) focus_error: Option<ShortcutCaptureTarget>,
+    pub(crate) body_scroll_offset: f32,
+}
+
+impl ShortcutEditorState {
+    pub(crate) fn open(&mut self, profile: &crate::workbench::ShortcutPreferences) {
+        *self = Self {
+            open: true,
+            original: Some(profile.clone()),
+            draft: Some(profile.clone()),
+            ..Self::default()
+        };
+    }
+
+    pub(crate) fn close_and_discard(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// Where the license-activation flow stands.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum LicensePhase {
@@ -140,6 +216,9 @@ pub struct DialogState {
     /// Preferences dialog open
     pub preferences_open: bool,
 
+    /// Transactional keyboard shortcut editor.
+    pub(crate) shortcut_editor: ShortcutEditorState,
+
     /// License activation dialog state
     pub license_dialog: LicenseDialogState,
 
@@ -182,6 +261,7 @@ impl DialogState {
             || self.rename_cell_dialog
             || self.waveform_calculator_dialog
             || self.preferences_open
+            || self.shortcut_editor.open
             || self.license_dialog.open
             || self.command_palette.open
             || self.veriloga_dialog.open
@@ -213,6 +293,7 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.rename_cell_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.veriloga_dialog.open = true);

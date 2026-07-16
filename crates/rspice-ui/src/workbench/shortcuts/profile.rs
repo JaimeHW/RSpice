@@ -1,11 +1,14 @@
-use std::collections::BTreeMap;
+use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
 
+use egui::os::OperatingSystem;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 use super::{
-    CommandShortcutOverride, ProfileShortcutBinding, ResolvedShortcutBinding, ShortcutBindingSlot,
-    ShortcutPolicies, ShortcutProfileError, ShortcutSequence, ShortcutStroke,
+    CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding,
+    ProtectedShortcutPolicy, ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutPolicies,
+    ShortcutProfileError, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
 use crate::product::CommandId;
 use crate::workbench::commands::{
@@ -15,20 +18,36 @@ use crate::workbench::commands::{
 /// Persisted user shortcut profile. Command entries remain raw until they are
 /// requested so a malformed or future command cannot invalidate the complete
 /// preferences/session document.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct ShortcutPreferences {
     policies: ShortcutPolicies,
     command_entries: BTreeMap<CommandId, Value>,
     malformed_command_entries: BTreeMap<String, Value>,
+    protected_override_acknowledgements: BTreeSet<String>,
     unknown_fields: BTreeMap<String, Value>,
     malformed_root: Option<Value>,
+    validation_cache: Cell<Option<bool>>,
 }
+
+impl PartialEq for ShortcutPreferences {
+    fn eq(&self, other: &Self) -> bool {
+        self.policies == other.policies
+            && self.command_entries == other.command_entries
+            && self.malformed_command_entries == other.malformed_command_entries
+            && self.protected_override_acknowledgements == other.protected_override_acknowledgements
+            && self.unknown_fields == other.unknown_fields
+            && self.malformed_root == other.malformed_root
+    }
+}
+
+impl Eq for ShortcutPreferences {}
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "kebab-case")]
 struct ShortcutPreferencesWire {
     policies: ShortcutPolicies,
     commands: BTreeMap<String, Value>,
+    protected_override_acknowledgements: BTreeSet<String>,
     #[serde(flatten)]
     unknown_fields: BTreeMap<String, Value>,
 }
@@ -50,6 +69,7 @@ impl Serialize for ShortcutPreferences {
         ShortcutPreferencesWire {
             policies: self.policies.clone(),
             commands,
+            protected_override_acknowledgements: self.protected_override_acknowledgements.clone(),
             unknown_fields: self.unknown_fields.clone(),
         }
         .serialize(serializer)
@@ -87,8 +107,10 @@ impl<'de> Deserialize<'de> for ShortcutPreferences {
             policies: wire.policies,
             command_entries,
             malformed_command_entries,
+            protected_override_acknowledgements: wire.protected_override_acknowledgements,
             unknown_fields: wire.unknown_fields,
             malformed_root: None,
+            validation_cache: Cell::new(None),
         })
     }
 }
@@ -101,6 +123,8 @@ impl ShortcutPreferences {
 
     pub fn policies_mut(&mut self) -> &mut ShortcutPolicies {
         self.malformed_root = None;
+        self.validation_cache.set(None);
+        self.protected_override_acknowledgements.clear();
         &mut self.policies
     }
 
@@ -120,6 +144,8 @@ impl ShortcutPreferences {
         let value = serde_json::to_value(command_override)
             .map_err(|error| ShortcutProfileError::InvalidBinding(error.to_string()))?;
         self.malformed_root = None;
+        self.validation_cache.set(None);
+        self.clear_protected_override_acknowledgement(command);
         self.command_entries.insert(command_id(command), value);
         Ok(())
     }
@@ -157,16 +183,85 @@ impl ShortcutPreferences {
 
     pub fn reset_command(&mut self, command: Command) {
         self.malformed_root = None;
+        self.validation_cache.set(None);
         self.command_entries.remove(&command_id(command));
+        self.clear_protected_override_acknowledgement(command);
     }
 
     /// Reset every command understood by this build. Unknown future commands
     /// stay byte-semantically intact when an older build edits the profile.
     pub fn reset_all(&mut self) {
         self.malformed_root = None;
+        self.validation_cache.set(None);
         for command in COMMAND_REGISTRY.iter().copied() {
             self.command_entries.remove(&command_id(command));
+            self.protected_override_acknowledgements
+                .remove(command.stable_id());
         }
+    }
+
+    /// Remove only data this build can prove is incompatible. Valid unknown
+    /// future commands and extension fields are intentionally preserved.
+    /// Returned identifiers are suitable for a user-facing repair receipt.
+    pub fn remove_blocking_invalid_entries(&mut self) -> Vec<String> {
+        if self.malformed_root.take().is_some() {
+            *self = Self::default();
+            return vec!["shortcut-profile-root".to_owned()];
+        }
+
+        let mut removed = self
+            .policies
+            .repair_unknown_execution_policies()
+            .into_iter()
+            .map(|name| format!("policy:{name}"))
+            .collect::<Vec<_>>();
+
+        removed.extend(self.malformed_command_entries.keys().cloned());
+        self.malformed_command_entries.clear();
+
+        let malformed_known_commands = self
+            .command_entries
+            .iter()
+            .filter_map(|(id, value)| {
+                let command = Command::from_stable_id(id.as_str())?;
+                let invalid = match serde_json::from_value::<CommandShortcutOverride>(value.clone())
+                {
+                    Ok(command_override) => command_override.validate().is_err(),
+                    Err(_) => true,
+                };
+                invalid.then_some((id.clone(), command))
+            })
+            .collect::<Vec<_>>();
+        for (id, command) in malformed_known_commands {
+            self.command_entries.remove(&id);
+            self.protected_override_acknowledgements
+                .remove(command.stable_id());
+            removed.push(id.as_str().to_owned());
+        }
+
+        if !removed.is_empty() {
+            self.validation_cache.set(None);
+        }
+        removed
+    }
+
+    pub fn acknowledge_protected_override(&mut self, command: Command) {
+        self.malformed_root = None;
+        self.validation_cache.set(None);
+        self.protected_override_acknowledgements
+            .insert(command.stable_id().to_owned());
+    }
+
+    #[must_use]
+    pub fn protected_override_acknowledged(&self, command: Command) -> bool {
+        self.protected_override_acknowledgements
+            .contains(command.stable_id())
+    }
+
+    pub fn clear_protected_override_acknowledgement(&mut self, command: Command) {
+        self.validation_cache.set(None);
+        self.protected_override_acknowledgements
+            .remove(command.stable_id());
     }
 
     #[must_use]
@@ -181,6 +276,91 @@ impl ShortcutPreferences {
         default_bindings(command)
     }
 
+    /// Runtime/display projection. Any profile error fails closed to the
+    /// complete immutable registry so execution, visible labels, and
+    /// accessibility metadata cannot disagree about a partially valid file.
+    #[must_use]
+    pub fn effective_bindings(&self, command: Command) -> Vec<ResolvedShortcutBinding> {
+        if self.is_effective_profile_valid() {
+            self.policy_projected_bindings(command)
+        } else {
+            default_bindings(command)
+        }
+    }
+
+    fn policy_projected_bindings(&self, command: Command) -> Vec<ResolvedShortcutBinding> {
+        let bindings = self.resolved_bindings(command);
+        if !matches!(
+            command.shortcut_context(),
+            ShortcutContext::EditContext
+                | ShortcutContext::EngineeringCanvas
+                | ShortcutContext::SymbolCanvas
+        ) {
+            return bindings;
+        }
+        bindings
+            .into_iter()
+            .filter_map(|binding| {
+                let [stroke] = binding.sequence().strokes() else {
+                    return Some(binding);
+                };
+                let stroke = *stroke;
+                if stroke.primary() || stroke.alt() || stroke.shift() {
+                    return Some(binding);
+                }
+                match self.policies.single_key_canvas() {
+                    SingleKeyCanvasPolicy::CanvasFocusOnly => Some(binding),
+                    SingleKeyCanvasPolicy::Disabled => None,
+                    SingleKeyCanvasPolicy::RequireAlt => Some(binding.with_sequence(
+                        ShortcutSequence::single(ShortcutStroke::new(
+                            stroke.key(),
+                            false,
+                            true,
+                            false,
+                        )),
+                    )),
+                }
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn resolved_labels(
+        &self,
+        command: Command,
+        platform: CommandPlatform,
+        operating_system: OperatingSystem,
+    ) -> Vec<String> {
+        self.effective_bindings(command)
+            .into_iter()
+            .filter(|binding| binding.supports(platform))
+            .map(|binding| binding.sequence().display_label_for(operating_system))
+            .collect()
+    }
+
+    #[must_use]
+    pub fn resolved_label(
+        &self,
+        command: Command,
+        platform: CommandPlatform,
+        operating_system: OperatingSystem,
+    ) -> String {
+        self.resolved_labels(command, platform, operating_system)
+            .into_iter()
+            .next()
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn is_effective_profile_valid(&self) -> bool {
+        if let Some(valid) = self.validation_cache.get() {
+            return valid;
+        }
+        let valid = self.audit().is_valid();
+        self.validation_cache.set(Some(valid));
+        valid
+    }
+
     #[must_use]
     pub fn audit(&self) -> ShortcutProfileAudit {
         let mut issues = Vec::new();
@@ -192,6 +372,18 @@ impl ShortcutPreferences {
                 None,
                 None,
                 "shortcut profile root is not understood by this build".to_owned(),
+            ));
+        }
+        for policy_name in self.policies.unknown_execution_policy_names() {
+            issues.push(ShortcutProfileIssue::new(
+                ShortcutProfileIssueSeverity::Error,
+                ShortcutProfileIssueCode::UnknownPolicy,
+                None,
+                None,
+                None,
+                format!(
+                    "shortcut execution policy '{policy_name}' is not understood by this build"
+                ),
             ));
         }
         for raw_id in self.malformed_command_entries.keys() {
@@ -248,7 +440,7 @@ impl ShortcutPreferences {
             .iter()
             .copied()
             .flat_map(|command| {
-                self.resolved_bindings(command)
+                self.policy_projected_bindings(command)
                     .into_iter()
                     .map(move |binding| EffectiveBinding { command, binding })
             })
@@ -261,7 +453,7 @@ impl ShortcutPreferences {
                 let Some(platform) = shared_platform(&left.binding, &right.binding) else {
                     continue;
                 };
-                if !contexts_overlap(
+                if !shortcut_contexts_overlap(
                     left.command.shortcut_context(),
                     right.command.shortcut_context(),
                 ) {
@@ -282,7 +474,22 @@ impl ShortcutPreferences {
                     } else {
                         ShortcutProfileIssueCode::PrefixCollision
                     };
-                    issues.push(ShortcutProfileIssue::collision(code, left, right, platform));
+                    let left_rank = shortcut_context_precedence_rank(
+                        left.command.shortcut_context(),
+                        self.policies.context_precedence(),
+                    );
+                    let right_rank = shortcut_context_precedence_rank(
+                        right.command.shortcut_context(),
+                        self.policies.context_precedence(),
+                    );
+                    let severity = if left_rank == right_rank {
+                        ShortcutProfileIssueSeverity::Error
+                    } else {
+                        ShortcutProfileIssueSeverity::Warning
+                    };
+                    issues.push(ShortcutProfileIssue::collision(
+                        severity, code, left, right, platform,
+                    ));
                 }
             }
         }
@@ -297,7 +504,15 @@ impl ShortcutPreferences {
                     && binding.supports(CommandPlatform::Browser)
             });
             if !has_browser_alternate {
-                issues.push(ShortcutProfileIssue::for_command(
+                let acknowledged = self.policies.protected_shortcuts()
+                    == ProtectedShortcutPolicy::AllowWithConfirmation
+                    && self.protected_override_acknowledged(command);
+                issues.push(ShortcutProfileIssue::for_command_with_severity(
+                    if acknowledged {
+                        ShortcutProfileIssueSeverity::Warning
+                    } else {
+                        ShortcutProfileIssueSeverity::Error
+                    },
                     ShortcutProfileIssueCode::MissingBrowserAlternate,
                     command,
                     Some(ShortcutBindingSlot::Alternate),
@@ -306,13 +521,15 @@ impl ShortcutPreferences {
             }
         }
 
-        ShortcutProfileAudit {
+        let audit = ShortcutProfileAudit {
             binding_count: effective
                 .iter()
                 .map(|binding| binding.binding.platforms().len())
                 .sum(),
             issues,
-        }
+        };
+        self.validation_cache.set(Some(audit.is_valid()));
+        audit
     }
 }
 
@@ -357,19 +574,76 @@ fn shared_platform(
         .find(|platform| left.supports(*platform) && right.supports(*platform))
 }
 
-const fn contexts_overlap(left: ShortcutContext, right: ShortcutContext) -> bool {
+pub(crate) const fn shortcut_contexts_overlap(
+    left: ShortcutContext,
+    right: ShortcutContext,
+) -> bool {
     context_workspace_mask(left) & context_workspace_mask(right) != 0
+        && context_view_mask(left) & context_view_mask(right) != 0
+}
+
+#[must_use]
+pub const fn shortcut_context_precedence_rank(
+    context: ShortcutContext,
+    policy: ContextPrecedencePolicy,
+) -> u8 {
+    let modal = matches!(context, ShortcutContext::ApplicationChrome);
+    let editor = matches!(
+        context,
+        ShortcutContext::EditContext
+            | ShortcutContext::EngineeringCanvas
+            | ShortcutContext::SymbolCanvas
+    );
+    if modal {
+        return match policy {
+            ContextPrecedencePolicy::ModalEditorWorkspaceGlobal => 0,
+            ContextPrecedencePolicy::EditorModalWorkspaceGlobal => 1,
+        };
+    }
+    if editor {
+        return match policy {
+            ContextPrecedencePolicy::ModalEditorWorkspaceGlobal => 1,
+            ContextPrecedencePolicy::EditorModalWorkspaceGlobal => 0,
+        };
+    }
+    if matches!(context, ShortcutContext::Global) {
+        3
+    } else {
+        2
+    }
 }
 
 const fn context_workspace_mask(context: ShortcutContext) -> u8 {
     match context {
         ShortcutContext::Global
         | ShortcutContext::ApplicationChrome
-        | ShortcutContext::RunnableProject => 0b11,
-        ShortcutContext::EditContext
-        | ShortcutContext::EngineeringCanvas
-        | ShortcutContext::DesignWorkspace => 0b01,
-        ShortcutContext::SimulationWorkspace => 0b10,
+        | ShortcutContext::RunnableProject => 0b1_1111,
+        ShortcutContext::EditContext => 0b1_0001,
+        ShortcutContext::EngineeringCanvas => 0b0_0001,
+        ShortcutContext::DesignWorkspace => 0b0_0001,
+        ShortcutContext::SymbolCanvas => 0b1_0001,
+        ShortcutContext::SimulationWorkspace => 0b0_0010,
+        ShortcutContext::ResultsWorkspace => 0b0_0100,
+        ShortcutContext::VerificationWorkspace => 0b0_1000,
+        ShortcutContext::ViolationNavigation => 0b0_1001,
+    }
+}
+
+/// View-family ownership complements the workspace mask so schematic and
+/// symbol editors may intentionally reuse conventional single-key tools.
+const fn context_view_mask(context: ShortcutContext) -> u8 {
+    match context {
+        ShortcutContext::EditContext => 0b0111,
+        ShortcutContext::EngineeringCanvas => 0b0011,
+        ShortcutContext::SymbolCanvas => 0b0100,
+        ShortcutContext::Global
+        | ShortcutContext::ApplicationChrome
+        | ShortcutContext::DesignWorkspace
+        | ShortcutContext::SimulationWorkspace
+        | ShortcutContext::ResultsWorkspace
+        | ShortcutContext::VerificationWorkspace
+        | ShortcutContext::ViolationNavigation
+        | ShortcutContext::RunnableProject => 0b1111,
     }
 }
 
@@ -390,6 +664,7 @@ pub enum ShortcutProfileIssueCode {
     ExactCollision,
     PrefixCollision,
     MissingBrowserAlternate,
+    UnknownPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -427,8 +702,24 @@ impl ShortcutProfileIssue {
         slot: Option<ShortcutBindingSlot>,
         message: String,
     ) -> Self {
-        Self::new(
+        Self::for_command_with_severity(
             ShortcutProfileIssueSeverity::Error,
+            code,
+            command,
+            slot,
+            message,
+        )
+    }
+
+    fn for_command_with_severity(
+        severity: ShortcutProfileIssueSeverity,
+        code: ShortcutProfileIssueCode,
+        command: Command,
+        slot: Option<ShortcutBindingSlot>,
+        message: String,
+    ) -> Self {
+        Self::new(
+            severity,
             code,
             Some(command_id(command)),
             None,
@@ -438,13 +729,14 @@ impl ShortcutProfileIssue {
     }
 
     fn collision(
+        severity: ShortcutProfileIssueSeverity,
         code: ShortcutProfileIssueCode,
         left: &EffectiveBinding,
         right: &EffectiveBinding,
         platform: CommandPlatform,
     ) -> Self {
         Self::new(
-            ShortcutProfileIssueSeverity::Error,
+            severity,
             code,
             Some(command_id(left.command)),
             Some(platform),
@@ -520,6 +812,7 @@ mod tests {
     use egui::Key;
 
     use super::*;
+    use crate::state::ComponentType;
     use crate::workbench::state::Workspace;
 
     fn sequence(key: Key, primary: bool) -> ShortcutSequence {
@@ -546,6 +839,30 @@ mod tests {
         );
         let audit = preferences.audit();
         assert!(audit.is_valid(), "default shortcut profile: {audit:#?}");
+    }
+
+    #[test]
+    fn default_profile_is_valid_with_complete_symbol_tool_registry() {
+        let preferences = ShortcutPreferences::default();
+        let audit = preferences.audit();
+        assert!(audit.is_valid(), "default shortcut profile: {audit:#?}");
+
+        for command in [
+            Command::SelectTool,
+            Command::SymbolPinTool,
+            Command::SymbolPolylineTool,
+            Command::SymbolCircleTool,
+            Command::SymbolArcTool,
+            Command::SymbolArrowTool,
+            Command::SymbolDotTool,
+            Command::ZoomFit,
+            Command::Cancel,
+        ] {
+            assert!(
+                !preferences.effective_bindings(command).is_empty(),
+                "missing effective symbol-editor binding: {command:?}"
+            );
+        }
     }
 
     #[test]
@@ -665,5 +982,169 @@ mod tests {
                 .iter()
                 .any(|issue| { issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate })
         );
+    }
+
+    #[test]
+    fn single_key_canvas_policy_is_part_of_the_effective_projection() {
+        let mut preferences = ShortcutPreferences::default();
+        assert_eq!(
+            preferences.resolved_label(
+                Command::PlaceWire,
+                CommandPlatform::Desktop,
+                OperatingSystem::Windows,
+            ),
+            "W"
+        );
+
+        preferences
+            .policies_mut()
+            .set_single_key_canvas(SingleKeyCanvasPolicy::RequireAlt);
+        assert_eq!(
+            preferences.resolved_label(
+                Command::PlaceWire,
+                CommandPlatform::Desktop,
+                OperatingSystem::Windows,
+            ),
+            "Alt+W"
+        );
+
+        preferences
+            .policies_mut()
+            .set_single_key_canvas(SingleKeyCanvasPolicy::Disabled);
+        assert!(
+            preferences
+                .effective_bindings(Command::PlaceWire)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn context_precedence_warns_across_tiers_but_blocks_same_tier_collisions() {
+        let mut across_tiers = ShortcutPreferences::default();
+        across_tiers
+            .set_binding(
+                Command::Save,
+                ShortcutBindingSlot::Primary,
+                CommandPlatform::ALL.to_vec(),
+                Some(sequence(Key::W, false)),
+            )
+            .unwrap();
+        let audit = across_tiers.audit();
+        assert!(
+            audit.is_valid(),
+            "precedence-resolved collision: {audit:#?}"
+        );
+        assert!(audit.issues().iter().any(|issue| {
+            issue.code() == ShortcutProfileIssueCode::ExactCollision
+                && issue.severity() == ShortcutProfileIssueSeverity::Warning
+        }));
+
+        let mut same_tier = ShortcutPreferences::default();
+        same_tier
+            .set_binding(
+                Command::Place(ComponentType::Ground),
+                ShortcutBindingSlot::Primary,
+                CommandPlatform::ALL.to_vec(),
+                Some(sequence(Key::W, false)),
+            )
+            .unwrap();
+        let audit = same_tier.audit();
+        assert!(!audit.is_valid());
+        assert!(audit.issues().iter().any(|issue| {
+            issue.code() == ShortcutProfileIssueCode::ExactCollision
+                && issue.severity() == ShortcutProfileIssueSeverity::Error
+        }));
+    }
+
+    #[test]
+    fn protected_override_acknowledgement_is_persisted_and_invalidated_by_edits() {
+        let mut preferences = ShortcutPreferences::default();
+        preferences
+            .policies_mut()
+            .set_protected_shortcuts(ProtectedShortcutPolicy::AllowWithConfirmation);
+        preferences
+            .set_binding(
+                Command::Save,
+                ShortcutBindingSlot::Alternate,
+                vec![
+                    CommandPlatform::Browser,
+                    CommandPlatform::Tablet,
+                    CommandPlatform::Phone,
+                ],
+                None,
+            )
+            .unwrap();
+        assert!(!preferences.audit().is_valid());
+
+        preferences.acknowledge_protected_override(Command::Save);
+        assert!(preferences.audit().is_valid());
+        let mut round_trip: ShortcutPreferences =
+            serde_json::from_value(serde_json::to_value(&preferences).unwrap()).unwrap();
+        assert!(round_trip.protected_override_acknowledged(Command::Save));
+
+        round_trip
+            .set_binding(
+                Command::Save,
+                ShortcutBindingSlot::Primary,
+                vec![CommandPlatform::Desktop],
+                Some(sequence(Key::F6, false)),
+            )
+            .unwrap();
+        assert!(!round_trip.protected_override_acknowledged(Command::Save));
+        assert!(!round_trip.audit().is_valid());
+    }
+
+    #[test]
+    fn unknown_execution_policy_is_preserved_but_fails_closed_until_repaired() {
+        let source = r#"{
+            "policies":{"single-key-canvas":"future-policy"},
+            "commands":{
+                "toggle-navigator":{"bindings":[{
+                    "slot":"primary",
+                    "platforms":["desktop","browser","tablet","phone"],
+                    "sequence":[{"key":"F6"}]
+                }]},
+                "future-command":{"bindings":[],"future-data":true}
+            },
+            "future-domain":{"version":2}
+        }"#;
+        let mut preferences: ShortcutPreferences = serde_json::from_str(source).unwrap();
+        assert_eq!(
+            preferences.resolved_bindings(Command::ToggleNavigator)[0].display_label(),
+            "F6"
+        );
+        let audit = preferences.audit();
+        assert!(!audit.is_valid());
+        assert!(
+            audit
+                .issues()
+                .iter()
+                .any(|issue| issue.code() == ShortcutProfileIssueCode::UnknownPolicy)
+        );
+        assert_eq!(
+            preferences.resolved_label(
+                Command::ToggleNavigator,
+                CommandPlatform::Desktop,
+                OperatingSystem::Windows,
+            ),
+            "Ctrl+B"
+        );
+        let encoded = serde_json::to_value(&preferences).unwrap();
+        assert_eq!(encoded["policies"]["single-key-canvas"], "future-policy");
+
+        let receipt = preferences.remove_blocking_invalid_entries();
+        assert_eq!(receipt, ["policy:single-key-canvas"]);
+        assert!(preferences.audit().is_valid());
+        assert_eq!(
+            preferences.resolved_label(
+                Command::ToggleNavigator,
+                CommandPlatform::Desktop,
+                OperatingSystem::Windows,
+            ),
+            "F6"
+        );
+        let repaired = serde_json::to_value(preferences).unwrap();
+        assert_eq!(repaired["commands"]["future-command"]["future-data"], true);
+        assert_eq!(repaired["future-domain"]["version"], 2);
     }
 }

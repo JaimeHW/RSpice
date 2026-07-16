@@ -1,4 +1,4 @@
-use crate::workbench::commands::Command;
+use crate::workbench::commands::{COMMAND_REGISTRY, Command};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShortcutCategory {
@@ -7,17 +7,21 @@ pub(crate) enum ShortcutCategory {
     View,
     Design,
     Simulation,
+    Results,
+    Verification,
     Navigation,
     General,
 }
 
 impl ShortcutCategory {
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::File,
         Self::Edit,
         Self::View,
         Self::Design,
         Self::Simulation,
+        Self::Results,
+        Self::Verification,
         Self::Navigation,
         Self::General,
     ];
@@ -29,77 +33,46 @@ impl ShortcutCategory {
             Self::View => "View and window",
             Self::Design => "Design",
             Self::Simulation => "Simulation",
-            Self::Navigation => "Workspaces",
+            Self::Results => "Results",
+            Self::Verification => "Verification",
+            Self::Navigation => "Workspaces and navigation",
             Self::General => "General",
         }
     }
 
-    pub(crate) const fn commands(self) -> &'static [Command] {
+    /// Lossless help projection from the canonical command metadata. Commands
+    /// are categorized from `CommandSpec::group`; this deliberately avoids a
+    /// second hand-maintained command inventory drifting from the registry.
+    pub(crate) fn commands(self) -> impl Iterator<Item = Command> {
+        COMMAND_REGISTRY.iter().copied().filter(move |command| {
+            *command != Command::Cancel
+                && !command.shortcut_bindings().is_empty()
+                && self.matches_group(command.spec().group)
+        })
+    }
+
+    const fn matches_group(self, group: &str) -> bool {
         match self {
-            Self::File => &[
-                Command::ProjectLauncher,
-                Command::NewProject,
-                Command::OpenProject,
-                Command::Save,
-                Command::SaveAs,
-                Command::SaveAll,
-                Command::CloseActiveDocument,
-                Command::CloseProject,
-                Command::Exit,
-            ],
-            Self::Edit => &[
-                Command::Undo,
-                Command::Redo,
-                Command::Cut,
-                Command::Copy,
-                Command::Paste,
-                Command::Duplicate,
-                Command::Delete,
-                Command::SelectAll,
-                Command::ObjectProperties,
-                Command::FindInDesign,
-            ],
-            Self::View => &[
-                Command::ZoomIn,
-                Command::ZoomOut,
-                Command::ZoomFit,
-                Command::CycleGrid,
-                Command::ToggleFullScreen,
-                Command::ToggleNavigator,
-                Command::ToggleInspector,
-                Command::ToggleConsole,
-                Command::ToggleFocusMode,
-            ],
-            Self::Design => &[
-                Command::PlaceInstance,
-                Command::PlaceWire,
-                Command::PlaceLabel,
-                Command::PlaceProbe,
-                Command::AscendHierarchy,
-                Command::DescendHierarchy,
-                Command::RunChecks,
-                Command::CheckAndSave,
-            ],
-            Self::Simulation => &[
-                Command::RunSimulation,
-                Command::StopSimulation,
-                Command::PreflightChecks,
-                Command::GenerateNetlist,
-            ],
-            Self::Navigation => &[
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Project),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Design),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Simulate),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Results),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Verify),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Models),
-                Command::OpenWorkspace(crate::workbench::state::Workspace::Netlist),
-            ],
-            Self::General => &[
-                Command::CommandPalette,
-                Command::Preferences,
-                Command::AutomationConsole,
-            ],
+            Self::File => matches!(group.as_bytes(), b"File"),
+            Self::Edit => matches!(group.as_bytes(), b"Edit"),
+            Self::View => matches!(group.as_bytes(), b"View" | b"Window"),
+            Self::Design => matches!(group.as_bytes(), b"Design"),
+            Self::Simulation => matches!(group.as_bytes(), b"Simulate"),
+            Self::Results => matches!(group.as_bytes(), b"Results"),
+            Self::Verification => matches!(group.as_bytes(), b"Verify"),
+            Self::Navigation => matches!(group.as_bytes(), b"Navigate"),
+            Self::General => !matches!(
+                group.as_bytes(),
+                b"File"
+                    | b"Edit"
+                    | b"View"
+                    | b"Window"
+                    | b"Design"
+                    | b"Simulate"
+                    | b"Results"
+                    | b"Verify"
+                    | b"Navigate"
+            ),
         }
     }
 }
@@ -107,20 +80,20 @@ impl ShortcutCategory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::{COMMAND_REGISTRY, CommandPlatform};
+    use crate::workbench::commands::CommandPlatform;
 
     #[test]
     fn help_is_a_lossless_projection_of_registered_shortcuts() {
         let mut seen = Vec::new();
         for category in ShortcutCategory::ALL {
             for command in category.commands() {
-                assert!(COMMAND_REGISTRY.contains(command));
+                assert!(COMMAND_REGISTRY.contains(&command));
                 assert!(
                     !command.shortcut_bindings().is_empty(),
                     "help row has no typed binding: {command:?}"
                 );
-                assert!(!seen.contains(command), "duplicate help row: {command:?}");
-                seen.push(*command);
+                assert!(!seen.contains(&command), "duplicate help row: {command:?}");
+                seen.push(command);
             }
         }
 
@@ -134,7 +107,7 @@ mod tests {
         }
 
         assert_eq!(
-            Command::OpenProject.shortcut_label(CommandPlatform::Browser),
+            Command::OpenProject.default_shortcut_label(CommandPlatform::Browser),
             "Ctrl+Alt+O"
         );
     }

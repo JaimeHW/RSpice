@@ -33,6 +33,8 @@ pub(crate) mod project_lifecycle;
 pub(crate) mod project_workflow;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod recovery_checkpoint;
+pub mod shortcut_artifacts;
+pub mod shortcut_library_persistence;
 pub mod shortcut_profile_workflow;
 pub mod simulation_analysis_tabs;
 pub mod time_compat;

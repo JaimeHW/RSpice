@@ -10,7 +10,10 @@ use crate::workbench::{
 
 use super::{
     AppState, ConsoleMessage, RSpiceApp,
-    app_shortcuts::{ShortcutInputSnapshot, resolve_shortcuts},
+    app_shortcuts::{
+        ShortcutEnvironment, ShortcutInputSnapshot, engineering_canvas_has_focus,
+        runtime_command_platform,
+    },
 };
 
 fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
@@ -56,54 +59,47 @@ fn unique_symbol_pin_name(document: &SymbolDocument, base: &str) -> String {
     candidate
 }
 
-fn symbol_shortcut_command_allowed(command: ShortcutCommand, modifiers: egui::Modifiers) -> bool {
-    if matches!(
-        command,
-        ShortcutCommand::SelectTool
-            | ShortcutCommand::PlaceWire
-            | ShortcutCommand::PlaceProbe
-            | ShortcutCommand::Place(crate::state::ComponentType::Capacitor)
-            | ShortcutCommand::Place(crate::state::ComponentType::Diode)
-            | ShortcutCommand::Place(crate::state::ComponentType::Ground)
-            | ShortcutCommand::RotateSelection
-            | ShortcutCommand::MirrorSelectionHorizontal
-            | ShortcutCommand::MirrorSelectionVertical
-            | ShortcutCommand::ZoomFit
-    ) {
-        return modifiers.is_none();
-    }
-    true
-}
-
 impl RSpiceApp {
     /// Handle keyboard shortcuts
     pub(super) fn handle_shortcuts(&mut self, ctx: &Context) {
         if shortcut_dispatch_blocked(&self.state, ctx) {
+            self.state.shortcut_resolver.reset();
             return;
         }
-        let has_focus = ctx.memory(|memory| memory.focused().is_some());
-        let snapshot = ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, has_focus));
-        for resolved in resolve_shortcuts(
+        let active_view = self.state.workspace.active_view_type();
+        let canvas_focus =
+            engineering_canvas_has_focus(ctx, self.state.workbench.workspace, active_view);
+        let non_canvas_focus = ctx.memory(|memory| memory.focused().is_some()) && !canvas_focus;
+        let snapshot =
+            ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, non_canvas_focus));
+        let injected_now =
+            ctx.input(|input| std::time::Duration::from_secs_f64(input.time.max(0.0)));
+        let profile = self.state.ui.preferences.shortcuts().clone();
+        let platform = runtime_command_platform(ctx);
+        let environment = ShortcutEnvironment {
+            workspace: self.state.workbench.workspace,
+            active_view,
+            canvas_focus,
+        };
+        let mut resolver = std::mem::take(&mut self.state.shortcut_resolver);
+        let resolution = resolver.resolve(
             &snapshot,
-            crate::workbench::commands::current_command_platform(),
-        ) {
-            if !resolved.command.shortcut_context_matches(self) {
-                continue;
-            }
-            let consumed =
-                ctx.input_mut(|input| input.consume_key(resolved.modifiers, resolved.key));
-            if !consumed {
-                continue;
-            }
-            let command = resolved.command;
-            if !command.is_enabled(self) {
-                continue;
-            }
-            if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol
-                && !symbol_shortcut_command_allowed(command, resolved.modifiers)
-            {
-                continue;
-            }
+            &profile,
+            platform,
+            environment,
+            injected_now,
+            |command| command.availability(self).is_available(),
+        );
+        self.state.shortcut_resolver = resolver;
+
+        if let Some(delay) = resolution.repaint_after {
+            ctx.request_repaint_after(delay);
+        }
+        let consumed = resolution
+            .consume
+            .iter()
+            .all(|(key, modifiers)| ctx.input_mut(|input| input.consume_key(*modifiers, *key)));
+        if consumed && let Some(command) = resolution.command {
             self.execute_shortcut_command(command);
         }
     }
@@ -193,6 +189,14 @@ impl RSpiceApp {
             ShortcutCommand::PlaceProbe => {
                 self.state.schematic.tool = Tool::Probe;
             }
+            ShortcutCommand::SymbolPinTool
+            | ShortcutCommand::SymbolPolylineTool
+            | ShortcutCommand::SymbolCircleTool
+            | ShortcutCommand::SymbolArcTool
+            | ShortcutCommand::SymbolArrowTool
+            | ShortcutCommand::SymbolDotTool => {
+                command.execute(self);
+            }
             ShortcutCommand::Place(ComponentType::Resistor) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Resistor);
             }
@@ -258,15 +262,9 @@ impl RSpiceApp {
                 crate::common::menu_bar::run_design_rule_check(&mut self.state);
             }
             ShortcutCommand::NextViolation => {
-                self.state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
                 crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
             }
             ShortcutCommand::PreviousViolation => {
-                self.state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
                 crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
             }
             ShortcutCommand::NextWorkspace => {
@@ -277,6 +275,9 @@ impl RSpiceApp {
             }
             ShortcutCommand::ZoomOut => {
                 self.state.schematic.zoom = (self.state.schematic.zoom / 1.25).max(0.1);
+            }
+            ShortcutCommand::ToggleLinkedCursors => {
+                self.state.ui.results.toggle_linked_cursors();
             }
             ShortcutCommand::ZoomFit => {
                 self.state.schematic.needs_fit = true;
@@ -378,26 +379,46 @@ impl RSpiceApp {
                 self.state.ui.symbol.tool = SymbolTool::Select;
                 true
             }
-            ShortcutCommand::PlaceProbe => {
+            ShortcutCommand::SymbolPinTool => {
                 self.state.ui.symbol.tool = SymbolTool::PlacePin;
-                self.state.ui.symbol.clear_selection();
+                let next = self
+                    .state
+                    .load_active_symbol_document()
+                    .ok()
+                    .and_then(|document| {
+                        document
+                            .pins
+                            .iter()
+                            .find(|pin| pin.position.is_none())
+                            .map(|pin| pin.name.clone())
+                    });
+                if let Some(pin) = next {
+                    self.state.ui.symbol.select_pin(pin);
+                } else {
+                    self.state.ui.symbol.clear_selection();
+                }
                 true
             }
-            ShortcutCommand::PlaceWire => {
+            ShortcutCommand::SymbolPolylineTool => {
                 self.state.ui.symbol.tool = SymbolTool::Polyline;
                 self.state.ui.symbol.pending_polyline.clear();
                 true
             }
-            ShortcutCommand::Place(crate::state::ComponentType::Capacitor) => {
+            ShortcutCommand::SymbolCircleTool => {
                 self.state.ui.symbol.tool = SymbolTool::Circle;
                 self.state.ui.symbol.shape_start = None;
                 true
             }
-            ShortcutCommand::Place(crate::state::ComponentType::Diode) => {
+            ShortcutCommand::SymbolArcTool => {
+                self.state.ui.symbol.tool = SymbolTool::Arc;
+                self.state.ui.symbol.shape_start = None;
+                true
+            }
+            ShortcutCommand::SymbolArrowTool => {
                 self.state.ui.symbol.tool = SymbolTool::Arrow;
                 true
             }
-            ShortcutCommand::Place(crate::state::ComponentType::Ground) => {
+            ShortcutCommand::SymbolDotTool => {
                 self.state.ui.symbol.tool = SymbolTool::Dot;
                 true
             }
@@ -456,12 +477,9 @@ impl RSpiceApp {
                 self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
                 true
             }
-            ShortcutCommand::Place(crate::state::ComponentType::VoltageSource)
-            | ShortcutCommand::Place(crate::state::ComponentType::CurrentSource)
-            | ShortcutCommand::Place(crate::state::ComponentType::Inductor)
-            | ShortcutCommand::Place(crate::state::ComponentType::Nmos)
-            | ShortcutCommand::Place(crate::state::ComponentType::NpnBjt)
-            | ShortcutCommand::Place(crate::state::ComponentType::Resistor)
+            ShortcutCommand::Place(_)
+            | ShortcutCommand::PlaceWire
+            | ShortcutCommand::PlaceProbe
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::PlaceInstance
             | ShortcutCommand::DescendHierarchy
@@ -817,12 +835,179 @@ mod shortcut_ownership_tests {
 
         assert!(shortcut_dispatch_blocked(&state, &ctx));
     }
+
+    #[test]
+    fn linked_cursor_command_toggles_real_results_state() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(!app.state.ui.results.linked_cursors);
+        app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
+        assert!(app.state.ui.results.linked_cursors);
+        app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
+        assert!(!app.state.ui.results.linked_cursors);
+    }
+
+    #[test]
+    fn next_marker_resolves_again_after_first_jump_activates_design() {
+        use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+        use crate::workbench::commands::CommandPlatform;
+
+        let mut app = RSpiceApp::test_instance();
+        let mut result = DrcResult::new();
+        for (id, x) in [(1, 0.0), (2, 10.0)] {
+            result.add_violation(DrcViolation::new(
+                id,
+                DrcViolationType::DanglingWire,
+                format!("Finding {id}"),
+                DrcLocation::Point { x, y: 0.0 },
+            ));
+        }
+        result.completed = true;
+        app.state.dialogs.drc_results = Some(result);
+        app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Verify);
+
+        app.execute_shortcut_command(ShortcutCommand::NextViolation);
+        assert_eq!(
+            app.state.workbench.workspace,
+            crate::workbench::state::Workspace::Design
+        );
+        assert_eq!(app.state.dialogs.drc_cycle, Some(0));
+
+        let snapshot = ShortcutInputSnapshot::from_events_for_test(
+            &[egui::Event::Key {
+                key: egui::Key::F8,
+                physical_key: Some(egui::Key::F8),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            false,
+        );
+        let profile = app.state.ui.preferences.shortcuts().clone();
+        let environment = ShortcutEnvironment {
+            workspace: app.state.workbench.workspace,
+            active_view: app.state.workspace.active_view_type(),
+            canvas_focus: false,
+        };
+        let mut resolver = std::mem::take(&mut app.state.shortcut_resolver);
+        let resolution = resolver.resolve(
+            &snapshot,
+            &profile,
+            CommandPlatform::Desktop,
+            environment,
+            std::time::Duration::from_millis(1),
+            |command| command.availability(&app).is_available(),
+        );
+        app.state.shortcut_resolver = resolver;
+        assert_eq!(resolution.command, Some(ShortcutCommand::NextViolation));
+
+        app.execute_shortcut_command(resolution.command.unwrap());
+        assert_eq!(app.state.dialogs.drc_cycle, Some(1));
+        assert_eq!(
+            app.state.workbench.workspace,
+            crate::workbench::state::Workspace::Design
+        );
+    }
 }
 
 #[cfg(test)]
 mod symbol_action_tests {
     use super::*;
-    use crate::state::{PortDirection, PortSpec, SymbolPin};
+    use crate::state::{
+        Cell, CellViewRef, Library, PortDirection, PortSpec, SymbolPin, View, ViewType,
+    };
+
+    #[test]
+    fn registered_symbol_tools_are_available_and_execute_complete_state_transitions() {
+        let mut app = RSpiceApp::test_instance();
+        let reference = CellViewRef::new("shortcut_tools", "amp", "symbol");
+        let mut library = Library::new("shortcut_tools");
+        let mut cell = Cell::new("amp");
+        let mut view = View::new("symbol", ViewType::Symbol);
+        SymbolDocument {
+            pins: vec![
+                SymbolPin::new("PLACED", PortDirection::In, Some(Point::new(-10, 0))),
+                SymbolPin::new("NEXT", PortDirection::Out, None),
+            ],
+            ..SymbolDocument::default()
+        }
+        .store_in_view(&mut view)
+        .unwrap();
+        cell.add_view(view);
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state.open_workspace_view(reference);
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
+
+        for command in [
+            ShortcutCommand::SelectTool,
+            ShortcutCommand::SymbolPinTool,
+            ShortcutCommand::SymbolPolylineTool,
+            ShortcutCommand::SymbolCircleTool,
+            ShortcutCommand::SymbolArcTool,
+            ShortcutCommand::SymbolArrowTool,
+            ShortcutCommand::SymbolDotTool,
+            ShortcutCommand::ZoomFit,
+        ] {
+            assert!(command.availability(&app).is_available(), "{command:?}");
+        }
+
+        app.execute_shortcut_command(ShortcutCommand::SymbolPinTool);
+        assert_eq!(
+            app.state.ui.symbol.tool,
+            crate::workbench::SymbolTool::PlacePin
+        );
+        assert_eq!(app.state.ui.symbol.selected_pin.as_deref(), Some("NEXT"));
+
+        app.state.ui.symbol.pending_polyline = vec![Point::new(0, 0)];
+        app.execute_shortcut_command(ShortcutCommand::SymbolPolylineTool);
+        assert_eq!(
+            app.state.ui.symbol.tool,
+            crate::workbench::SymbolTool::Polyline
+        );
+        assert!(app.state.ui.symbol.pending_polyline.is_empty());
+
+        for (command, expected) in [
+            (
+                ShortcutCommand::SymbolCircleTool,
+                crate::workbench::SymbolTool::Circle,
+            ),
+            (
+                ShortcutCommand::SymbolArcTool,
+                crate::workbench::SymbolTool::Arc,
+            ),
+            (
+                ShortcutCommand::SymbolArrowTool,
+                crate::workbench::SymbolTool::Arrow,
+            ),
+            (
+                ShortcutCommand::SymbolDotTool,
+                crate::workbench::SymbolTool::Dot,
+            ),
+            (
+                ShortcutCommand::SelectTool,
+                crate::workbench::SymbolTool::Select,
+            ),
+        ] {
+            app.state.ui.symbol.shape_start = Some(Point::new(10, 10));
+            app.execute_shortcut_command(command);
+            assert_eq!(app.state.ui.symbol.tool, expected);
+            if matches!(
+                command,
+                ShortcutCommand::SymbolCircleTool | ShortcutCommand::SymbolArcTool
+            ) {
+                assert!(app.state.ui.symbol.shape_start.is_none());
+            }
+        }
+
+        app.state.ui.symbol.needs_fit = false;
+        app.execute_shortcut_command(ShortcutCommand::ZoomFit);
+        assert!(app.state.ui.symbol.needs_fit);
+    }
 
     #[test]
     fn symbol_clipboard_copies_shapes_and_non_contract_pins_only() {
@@ -857,50 +1042,5 @@ mod symbol_action_tests {
                 .collect::<Vec<_>>(),
             vec!["TRIM"]
         );
-    }
-
-    #[test]
-    fn modified_app_symbol_tool_shortcuts_are_rejected() {
-        assert!(symbol_shortcut_command_allowed(
-            ShortcutCommand::SelectTool,
-            egui::Modifiers::NONE,
-        ));
-
-        for modifiers in [
-            egui::Modifiers {
-                alt: true,
-                ..egui::Modifiers::NONE
-            },
-            egui::Modifiers {
-                command: true,
-                ..egui::Modifiers::NONE
-            },
-            egui::Modifiers {
-                ctrl: true,
-                ..egui::Modifiers::NONE
-            },
-            egui::Modifiers {
-                shift: true,
-                ..egui::Modifiers::NONE
-            },
-        ] {
-            assert!(!symbol_shortcut_command_allowed(
-                ShortcutCommand::SelectTool,
-                modifiers,
-            ));
-            assert!(!symbol_shortcut_command_allowed(
-                ShortcutCommand::Place(crate::state::ComponentType::Capacitor),
-                modifiers,
-            ));
-        }
-
-        assert!(symbol_shortcut_command_allowed(
-            ShortcutCommand::Copy,
-            egui::Modifiers {
-                ctrl: true,
-                command: true,
-                ..egui::Modifiers::NONE
-            },
-        ));
     }
 }

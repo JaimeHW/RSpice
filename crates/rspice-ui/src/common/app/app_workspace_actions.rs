@@ -526,7 +526,7 @@ impl AppState {
                     self.log_buffer.log(
                         LogSeverity::Info,
                         LogSource::Drc,
-                        format!("+{hidden} more findings - F4 cycles through them"),
+                        format!("+{hidden} more findings - use the finding navigation commands"),
                         None,
                     );
                 }
@@ -543,6 +543,10 @@ impl AppState {
     }
 
     pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
+        self.navigate_to_log_anchor(anchor);
+    }
+
+    fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
         match anchor {
             LogAnchor::Schematic {
                 x,

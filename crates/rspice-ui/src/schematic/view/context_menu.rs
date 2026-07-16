@@ -19,6 +19,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus};
 use crate::workbench::ResultViewer;
+use crate::workbench::commands::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 
@@ -80,7 +81,7 @@ struct ContextCommand {
     action: ContextAction,
     icon: ContextIcon,
     label: &'static str,
-    shortcut: Option<&'static str>,
+    shortcut_command: Option<Command>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,51 +95,51 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Properties,
         icon: ContextIcon::Sliders,
         label: "Object properties…",
-        shortcut: Some("Q"),
+        shortcut_command: Some(Command::ObjectProperties),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Rotate,
         icon: ContextIcon::Rotate,
         label: "Rotate 90°",
-        shortcut: Some("R"),
+        shortcut_command: Some(Command::RotateSelection),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Mirror,
         icon: ContextIcon::Mirror,
         label: "Mirror",
-        shortcut: Some("M"),
+        shortcut_command: Some(Command::MirrorSelectionHorizontal),
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Copy,
         icon: ContextIcon::Copy,
         label: "Copy selection",
-        shortcut: Some("Ctrl+C"),
+        shortcut_command: Some(Command::Copy),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Duplicate,
         icon: ContextIcon::Copy,
         label: "Duplicate and place",
-        shortcut: Some("Ctrl+D"),
+        shortcut_command: Some(Command::Duplicate),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Delete,
         icon: ContextIcon::Trash,
         label: "Delete selection…",
-        shortcut: Some("Delete"),
+        shortcut_command: Some(Command::Delete),
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
         icon: ContextIcon::Probe,
         label: "Add voltage or current probe…",
-        shortcut: Some("P"),
+        shortcut_command: Some(Command::PlaceProbe),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OperatingPoint,
         icon: ContextIcon::Waveform,
         label: "Open operating point",
-        shortcut: None,
+        shortcut_command: Some(Command::ResultViewer(ResultViewer::Op)),
     }),
 ];
 
@@ -397,7 +398,17 @@ fn render_context_contents(
             ContextEntry::Separator => menu_separator(ui),
             ContextEntry::Command(command) => {
                 let (enabled, reason) = action_availability(command.action, state);
-                let response = menu_item(ui, command, enabled, reason, row_height);
+                let shortcut =
+                    command
+                        .shortcut_command
+                        .map_or_else(String::new, |product_command| {
+                            state.ui.preferences.shortcuts().resolved_label(
+                                product_command,
+                                crate::common::app::runtime_command_platform(ui.ctx()),
+                                ui.ctx().os(),
+                            )
+                        });
+                let response = menu_item(ui, command, &shortcut, enabled, reason, row_height);
                 let clicked = enabled && response.clicked();
                 rows.push(ContextRow { response, enabled });
                 if clicked {
@@ -512,6 +523,7 @@ fn menu_header(ui: &mut Ui, summary: &str) {
 fn menu_item(
     ui: &mut Ui,
     command: ContextCommand,
+    shortcut: &str,
     enabled: bool,
     disabled_reason: &'static str,
     row_height: f32,
@@ -532,6 +544,9 @@ fn menu_item(
         if !enabled {
             node.set_disabled();
             node.set_description(disabled_reason);
+        }
+        if enabled && !shortcut.is_empty() {
+            node.set_keyboard_shortcut(shortcut);
         }
     });
 
@@ -568,13 +583,15 @@ fn menu_item(
     command.icon.paint(ui.painter(), icon_rect, row_color);
 
     let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let shortcut_width = command.shortcut.map_or(0.0, |shortcut| {
+    let shortcut_width = if shortcut.is_empty() {
+        0.0
+    } else {
         ui.painter()
             .layout_no_wrap(shortcut.to_owned(), shortcut_font.clone(), faint)
             .size()
             .x
-    });
-    if let Some(shortcut) = command.shortcut {
+    };
+    if !shortcut.is_empty() {
         ui.painter().text(
             pos2(rect.right() - ROW_HORIZONTAL_PADDING, rect.center().y),
             Align2::RIGHT_CENTER,
@@ -585,7 +602,7 @@ fn menu_item(
     }
 
     let label_left = icon_rect.right() + ICON_LABEL_GAP;
-    let label_right = if command.shortcut.is_some() {
+    let label_right = if !shortcut.is_empty() {
         rect.right() - ROW_HORIZONTAL_PADDING - shortcut_width - ICON_LABEL_GAP
     } else {
         rect.right() - ROW_HORIZONTAL_PADDING
@@ -1130,21 +1147,24 @@ mod tests {
         let labels: Vec<_> = CONTEXT_ENTRIES
             .iter()
             .filter_map(|entry| match entry {
-                ContextEntry::Command(command) => Some((command.label, command.shortcut)),
+                ContextEntry::Command(command) => Some((command.label, command.shortcut_command)),
                 ContextEntry::Separator => None,
             })
             .collect();
         assert_eq!(
             labels,
             vec![
-                ("Object properties…", Some("Q")),
-                ("Rotate 90°", Some("R")),
-                ("Mirror", Some("M")),
-                ("Copy selection", Some("Ctrl+C")),
-                ("Duplicate and place", Some("Ctrl+D")),
-                ("Delete selection…", Some("Delete")),
-                ("Add voltage or current probe…", Some("P")),
-                ("Open operating point", None),
+                ("Object properties…", Some(Command::ObjectProperties)),
+                ("Rotate 90°", Some(Command::RotateSelection)),
+                ("Mirror", Some(Command::MirrorSelectionHorizontal)),
+                ("Copy selection", Some(Command::Copy)),
+                ("Duplicate and place", Some(Command::Duplicate)),
+                ("Delete selection…", Some(Command::Delete)),
+                ("Add voltage or current probe…", Some(Command::PlaceProbe)),
+                (
+                    "Open operating point",
+                    Some(Command::ResultViewer(ResultViewer::Op)),
+                ),
             ]
         );
         assert_eq!(

@@ -71,6 +71,11 @@ pub(crate) use app_property_edit::open_property_editor;
 mod app_modal_workflows;
 
 mod app_shortcuts;
+pub(crate) use app_shortcuts::{
+    accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
+};
+
+mod app_shortcut_library_persistence;
 
 mod app_actions;
 
@@ -247,6 +252,13 @@ pub struct AppState {
     pub(crate) ui: crate::workbench::UiSessionState,
     /// Canonical workbench navigation and responsive layout state.
     pub(crate) workbench: crate::workbench::WorkbenchState,
+    /// Runtime-only chord/prefix authority. Partial sequences are never
+    /// serialized or restored across application sessions.
+    pub(crate) shortcut_resolver: app_shortcuts::ShortcutResolverState,
+    /// Canonical device-local shortcut-library CAS authority. The recoverable
+    /// eframe session copy never replaces this owner after startup.
+    pub(crate) shortcut_library_persistence:
+        app_shortcut_library_persistence::ShortcutLibraryPersistenceRuntime,
 }
 
 impl Default for AppState {
@@ -543,6 +555,8 @@ impl RSpiceApp {
             AppState::default()
         };
 
+        state.initialize_shortcut_library_persistence(&cc.egui_ctx);
+
         // Apply the design-system theme (canvas painters read the active
         // palette directly).
         state.ui.theme.apply(&cc.egui_ctx);
@@ -632,6 +646,8 @@ impl RSpiceApp {
 
         #[cfg(target_arch = "wasm32")]
         synchronize_browser_surface_navigation(&mut self.state);
+        #[cfg(target_arch = "wasm32")]
+        self.state.poll_shortcut_library_persistence();
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
         crate::common::browser_file_import::register_text_import_repaint_context(ctx);

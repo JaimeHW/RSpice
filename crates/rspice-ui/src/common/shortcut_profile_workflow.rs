@@ -98,13 +98,14 @@ impl StagedShortcutProfile {
 pub fn serialize_shortcut_profile(
     profile: &ShortcutPreferences,
 ) -> Result<String, ShortcutProfileWorkflowError> {
-    let profile = serde_json::to_value(profile).map_err(|error| {
+    let mut profile = serde_json::to_value(profile).map_err(|error| {
         ShortcutProfileWorkflowError::new(
             "shortcut-profile.serialize",
             "$.profile",
             format!("could not serialize shortcut profile: {error}"),
         )
     })?;
+    strip_local_shortcut_state(&mut profile);
     validate_profile_limits(&profile, "$.profile")?;
 
     let mut envelope = BTreeMap::new();
@@ -179,25 +180,35 @@ pub fn stage_shortcut_profile_json(
             "shortcut profile document has no profile payload",
         )
     })?;
-    validate_profile_limits(profile, "$.profile")?;
+    let mut profile = profile.clone();
+    strip_local_shortcut_state(&mut profile);
+    validate_profile_limits(&profile, "$.profile")?;
 
     // ShortcutPreferences intentionally retains unknown and malformed raw
     // records. The resulting audit records anything this build cannot safely
     // execute while preserving the source for a newer build.
-    let candidate: ShortcutPreferences =
-        serde_json::from_value(profile.clone()).map_err(|error| {
-            ShortcutProfileWorkflowError::new(
-                "shortcut-profile.invalid-profile",
-                "$.profile",
-                format!("could not decode shortcut profile payload: {error}"),
-            )
-        })?;
+    let candidate: ShortcutPreferences = serde_json::from_value(profile).map_err(|error| {
+        ShortcutProfileWorkflowError::new(
+            "shortcut-profile.invalid-profile",
+            "$.profile",
+            format!("could not decode shortcut profile payload: {error}"),
+        )
+    })?;
     let audit = candidate.audit();
     Ok(StagedShortcutProfile {
         source_name: normalized_source_name(source_name.into()),
         candidate,
         audit,
     })
+}
+
+/// Protected-override acknowledgement is a device-local security decision,
+/// never portable profile data. Keep this scrub at the legacy boundary even
+/// after richer artifact workflows are added so dormant callers stay safe.
+fn strip_local_shortcut_state(profile: &mut Value) {
+    if let Some(profile) = profile.as_object_mut() {
+        profile.remove("protected-override-acknowledgements");
+    }
 }
 
 /// Export through the shared observed-destination contract. Native production
@@ -573,6 +584,44 @@ mod tests {
             reparsed["profile"]["future-profile-field"],
             serde_json::json!([1, 2, 3])
         );
+    }
+
+    #[test]
+    fn legacy_export_strips_device_local_protected_acknowledgements() {
+        let mut profile = ShortcutPreferences::default();
+        profile.acknowledge_protected_override(crate::workbench::commands::Command::Save);
+
+        let encoded = serialize_shortcut_profile(&profile).unwrap();
+        let document: Value = serde_json::from_str(&encoded).unwrap();
+
+        assert!(
+            document["profile"]
+                .get("protected-override-acknowledgements")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn legacy_import_never_trusts_transferred_protected_acknowledgements() {
+        let staged = stage_shortcut_profile_json(
+            "untrusted.json",
+            r#"{
+                "format":"rspice.shortcuts/1",
+                "profile":{
+                    "protected-override-acknowledgements":["save-project"],
+                    "commands":{}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert!(
+            !staged
+                .candidate()
+                .protected_override_acknowledged(crate::workbench::commands::Command::Save)
+        );
+        let reencoded = serialize_shortcut_profile(staged.candidate()).unwrap();
+        assert!(!reencoded.contains("protected-override-acknowledgements"));
     }
 
     #[test]

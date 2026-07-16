@@ -6,7 +6,7 @@ use crate::panels::{LogSeverity, LogSource};
 use crate::services::drc::DrcSeverity;
 
 /// Per-run cap on per-finding console rows; the rest stay reachable via
-/// the canvas badges and F4 cycling.
+/// the canvas badges and typed finding-navigation commands.
 const MAX_FINDING_ROWS: usize = 50;
 
 /// Run the design-rule / electrical-rule checks on the active schematic.
@@ -53,7 +53,7 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
         state.log_buffer.log(
             LogSeverity::Info,
             LogSource::Drc,
-            format!("+{hidden} more findings — F4 cycles through them"),
+            format!("+{hidden} more findings — use the finding navigation commands"),
             None,
         );
     }

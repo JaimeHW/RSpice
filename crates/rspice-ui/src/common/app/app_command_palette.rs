@@ -20,9 +20,7 @@ use egui::{
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Mode, Tokens};
-use crate::workbench::commands::{
-    Command, CommandAvailability, command_catalog, current_command_platform,
-};
+use crate::workbench::commands::{Command, CommandAvailability, CommandPlatform, command_catalog};
 
 use super::RSpiceApp;
 
@@ -385,10 +383,17 @@ impl PaletteEntry {
         }
     }
 
-    fn shortcut_label(&self) -> &'static str {
+    fn shortcut_label(
+        &self,
+        shortcuts: &crate::workbench::ShortcutPreferences,
+        platform: CommandPlatform,
+        operating_system: egui::os::OperatingSystem,
+    ) -> String {
         match self {
-            Self::Command(command) => command.shortcut_label(current_command_platform()),
-            Self::CellView(_) | Self::Model(_) | Self::Signal(_) => "",
+            Self::Command(command) => {
+                shortcuts.resolved_label(*command, platform, operating_system)
+            }
+            Self::CellView(_) | Self::Model(_) | Self::Signal(_) => String::new(),
         }
     }
 
@@ -515,6 +520,7 @@ struct PaletteRow {
     entry: PaletteEntry,
     marks: Vec<usize>,
     blocked: Option<&'static str>,
+    shortcut: String,
 }
 
 impl PaletteRow {
@@ -592,7 +598,10 @@ fn match_spans(text: &str, query: &str) -> Option<(u8, Vec<usize>)> {
             next += 1;
         }
     }
-    (next == query_lower.len()).then_some((4, marks))
+    let starts_at_word_boundary = marks
+        .first()
+        .is_some_and(|&index| index == 0 || text_lower[index.saturating_sub(1)].is_whitespace());
+    (next == query_lower.len() && starts_at_word_boundary).then_some((4, marks))
 }
 
 fn find_chars(haystack: &[char], needle: &[char]) -> Option<usize> {
@@ -689,7 +698,13 @@ impl RSpiceApp {
         entries
     }
 
-    fn palette_rows(&self, query: &str, scope: PaletteScope) -> Vec<PaletteRow> {
+    fn palette_rows(
+        &self,
+        query: &str,
+        scope: PaletteScope,
+        platform: CommandPlatform,
+        operating_system: egui::os::OperatingSystem,
+    ) -> Vec<PaletteRow> {
         let row = |entry: PaletteEntry, marks: Vec<usize>| {
             let blocked = match entry.availability(self) {
                 CommandAvailability::Available => None,
@@ -699,6 +714,11 @@ impl RSpiceApp {
                 CommandAvailability::Hidden => return None,
             };
             Some(PaletteRow {
+                shortcut: entry.shortcut_label(
+                    self.state.ui.preferences.shortcuts(),
+                    platform,
+                    operating_system,
+                ),
                 entry,
                 marks,
                 blocked,
@@ -733,7 +753,13 @@ impl RSpiceApp {
                         recents.iter().position(|candidate| *candidate == command)
                     });
                     let entry_scope = entry.scope();
-                    let has_shortcut = !entry.shortcut_label().is_empty();
+                    let has_shortcut = !entry
+                        .shortcut_label(
+                            self.state.ui.preferences.shortcuts(),
+                            platform,
+                            operating_system,
+                        )
+                        .is_empty();
                     (recent_index.is_some()
                         || entry_scope == workspace_scope
                         || entry_scope == PaletteScope::Navigate
@@ -911,7 +937,12 @@ impl RSpiceApp {
                 self.state.dialogs.command_palette.selected = 0;
             }
 
-            let rows = self.palette_rows(&self.state.dialogs.command_palette.query, scope);
+            let rows = self.palette_rows(
+                &self.state.dialogs.command_palette.query,
+                scope,
+                crate::common::app::runtime_command_platform(ctx),
+                ctx.os(),
+            );
             let selected = &mut self.state.dialogs.command_palette.selected;
             if rows.is_empty() {
                 *selected = 0;
@@ -1328,7 +1359,7 @@ fn render_result_row(
         if row.blocked.is_some() {
             node.set_disabled();
         }
-        let shortcut = row.entry.shortcut_label();
+        let shortcut = row.shortcut.as_str();
         if !shortcut.is_empty() && row.blocked.is_none() {
             node.set_keyboard_shortcut(shortcut);
         }
@@ -1372,7 +1403,7 @@ fn render_result_row(
     let trailing = if row.blocked.is_some() {
         "Unavailable"
     } else {
-        row.entry.shortcut_label()
+        row.shortcut.as_str()
     };
     let trailing_width = if trailing.is_empty() {
         0.0
@@ -1825,6 +1856,7 @@ mod tests {
         assert!(!marks.is_empty());
         assert!(match_entry(&command, "simulate").is_some());
         assert!(match_entry(&command, "nonexistent-token").is_none());
+        assert_eq!(match_spans("Draw symbol circle", "wire"), None);
     }
 
     #[test]
@@ -1877,7 +1909,12 @@ mod tests {
     fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete() {
         let mut app = test_app();
         app.state.dialogs.command_palette.recent = vec![Command::PlaceProbe, Command::Save];
-        let all = app.palette_rows("", PaletteScope::All);
+        let all = app.palette_rows(
+            "",
+            PaletteScope::All,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
         assert_eq!(all[0].entry.command(), Some(Command::PlaceProbe));
         assert_eq!(all[1].entry.command(), Some(Command::Save));
         assert_eq!(all.len(), SUGGESTION_LIMIT);
@@ -1889,7 +1926,12 @@ mod tests {
         );
         assert!(all.iter().all(|row| row.section_label() != "Recent"));
 
-        let signals = app.palette_rows("", PaletteScope::Signals);
+        let signals = app.palette_rows(
+            "",
+            PaletteScope::Signals,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
         assert!(
             signals.is_empty(),
             "no result data means no invented signal rows"
@@ -1911,7 +1953,12 @@ mod tests {
         library.add_cell(cell);
         app.state.library_manager.add_library(library);
 
-        let mut rows = app.palette_rows("precision gain_stage", PaletteScope::Design);
+        let mut rows = app.palette_rows(
+            "precision gain_stage",
+            PaletteScope::Design,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
         assert_eq!(rows.len(), 1);
         assert!(rows[0].detail().contains("Precision front-end amplifier"));
         let entry = rows.remove(0).entry;
@@ -1947,7 +1994,12 @@ mod tests {
         app.state.model_library_manager.filter_type =
             Some(crate::state::model_library::ModelType::Pmos);
 
-        let mut rows = app.palette_rows("qualified foundry_65lp", PaletteScope::Models);
+        let mut rows = app.palette_rows(
+            "qualified foundry_65lp",
+            PaletteScope::Models,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
         assert_eq!(rows.len(), 1);
         assert!(
             rows[0]
@@ -2048,11 +2100,21 @@ mod tests {
         app.state.simulation.runs = vec![stale_run, active_run];
         assert!(app.state.simulation.select_run(1));
         assert!(
-            app.palette_rows("V(stale)", PaletteScope::Signals)
-                .is_empty(),
+            app.palette_rows(
+                "V(stale)",
+                PaletteScope::Signals,
+                CommandPlatform::Desktop,
+                egui::os::OperatingSystem::Windows,
+            )
+            .is_empty(),
             "inactive run history must not leak into the active-signal index"
         );
-        let mut rows = app.palette_rows("precision_out tran", PaletteScope::Signals);
+        let mut rows = app.palette_rows(
+            "precision_out tran",
+            PaletteScope::Signals,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
         assert_eq!(rows.len(), 1);
         assert!(rows[0].detail().contains("Run 41"));
         assert!(rows[0].detail().contains("hidden"));
@@ -2155,7 +2217,14 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = test_app();
         app.state.dialogs.command_palette.open();
-        let row_count = app.palette_rows("", PaletteScope::All).len();
+        let row_count = app
+            .palette_rows(
+                "",
+                PaletteScope::All,
+                CommandPlatform::Desktop,
+                egui::os::OperatingSystem::Windows,
+            )
+            .len();
         let _ = ctx.run(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
 
         let _ = ctx.run(raw_input(vec![key_event(Key::ArrowDown)]), |ctx| {

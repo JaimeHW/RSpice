@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::shortcuts::ShortcutPreferences;
+use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary, ShortcutProfileLibraryError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -90,7 +90,7 @@ pub struct UserPreferences {
     /// keys are retained byte-semantically for a later compatible build.
     choices: BTreeMap<String, Value>,
     toggles: BTreeMap<String, Value>,
-    shortcuts: ShortcutPreferences,
+    shortcuts: ShortcutProfileLibrary,
     /// Forward-compatible typed domains that this build does not understand.
     #[serde(flatten)]
     unknown_domains: BTreeMap<String, Value>,
@@ -99,10 +99,21 @@ pub struct UserPreferences {
 impl UserPreferences {
     #[must_use]
     pub const fn shortcuts(&self) -> &ShortcutPreferences {
+        self.shortcuts.active()
+    }
+
+    pub fn shortcuts_mut(
+        &mut self,
+    ) -> Result<&mut ShortcutPreferences, ShortcutProfileLibraryError> {
+        self.shortcuts.active_mut()
+    }
+
+    #[must_use]
+    pub const fn shortcut_profiles(&self) -> &ShortcutProfileLibrary {
         &self.shortcuts
     }
 
-    pub const fn shortcuts_mut(&mut self) -> &mut ShortcutPreferences {
+    pub fn shortcut_profiles_mut(&mut self) -> &mut ShortcutProfileLibrary {
         &mut self.shortcuts
     }
 
@@ -290,6 +301,7 @@ mod tests {
         let mut preferences = UserPreferences::default();
         preferences
             .shortcuts_mut()
+            .unwrap()
             .set_binding(
                 crate::workbench::commands::Command::Save,
                 crate::workbench::shortcuts::ShortcutBindingSlot::Primary,
@@ -326,7 +338,10 @@ mod tests {
         assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
         assert!(!preferences.shortcuts().audit().is_valid());
 
-        preferences.shortcuts_mut().reset_all();
-        assert!(serde_json::to_value(&preferences).unwrap()["shortcuts"].is_object());
+        assert!(matches!(
+            preferences.shortcuts_mut(),
+            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
+        ));
+        assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
     }
 }

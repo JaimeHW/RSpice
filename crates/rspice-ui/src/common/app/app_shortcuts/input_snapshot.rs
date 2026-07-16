@@ -2,56 +2,62 @@ use egui::Event;
 
 use super::{InputState, Key, Modifiers};
 
-#[derive(Debug, Clone, Copy)]
-struct ShortcutKeyPress {
+/// One non-repeating key-down event in exact egui event order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ShortcutKeyPress {
     key: Key,
     modifiers: Modifiers,
+}
+
+impl ShortcutKeyPress {
+    pub(super) const fn key(self) -> Key {
+        self.key
+    }
+
+    pub(super) const fn modifiers(self) -> Modifiers {
+        self.modifiers
+    }
+
+    pub(super) fn matches(self, key: Key, primary: bool, alt: bool, shift: bool) -> bool {
+        self.key == key && modifiers_match(self.modifiers, primary, alt, shift)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ShortcutInputSnapshot {
     key_presses: Vec<ShortcutKeyPress>,
-    has_focus: bool,
+    non_canvas_focus: bool,
 }
 
 impl ShortcutInputSnapshot {
-    pub(crate) fn from_input_state(input: &InputState, has_focus: bool) -> Self {
+    pub(crate) fn from_input_state(input: &InputState, non_canvas_focus: bool) -> Self {
         Self {
             key_presses: collect_key_presses(&input.events),
-            has_focus,
+            non_canvas_focus,
         }
     }
 
-    pub(super) fn matching_modifiers(
-        &self,
-        key: Key,
-        primary: bool,
-        alt: bool,
-        shift: bool,
-    ) -> Option<Modifiers> {
-        self.key_presses
-            .iter()
-            .find(|press| press.key == key && modifiers_match(press.modifiers, primary, alt, shift))
-            .map(|press| press.modifiers)
+    pub(super) fn key_presses(&self) -> &[ShortcutKeyPress] {
+        &self.key_presses
     }
 
-    pub(super) fn has_focus(&self) -> bool {
-        self.has_focus
+    pub(super) const fn has_non_canvas_focus(&self) -> bool {
+        self.non_canvas_focus
     }
 
     #[cfg(test)]
-    pub(crate) fn for_test(key: Key, modifiers: Modifiers, has_focus: bool) -> Self {
-        Self {
-            key_presses: vec![ShortcutKeyPress { key, modifiers }],
-            has_focus,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_events_for_test(events: &[Event], has_focus: bool) -> Self {
+    pub(crate) fn from_events_for_test(events: &[Event], non_canvas_focus: bool) -> Self {
         Self {
             key_presses: collect_key_presses(events),
-            has_focus,
+            non_canvas_focus,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn empty_for_test(non_canvas_focus: bool) -> Self {
+        Self {
+            key_presses: Vec::new(),
+            non_canvas_focus,
         }
     }
 }
@@ -81,13 +87,91 @@ fn modifiers_match(actual: Modifiers, primary: bool, alt: bool, shift: bool) -> 
     }
     if primary {
         // `command` is egui's portable primary modifier. Reject the only
-        // genuinely ambiguous state: physical Control held together with
-        // macOS Command. Normal Windows/Linux Ctrl and macOS Command events
-        // each set only their own physical source plus `command`.
+        // ambiguous physical state: Control held together with macOS Command.
         actual.command && !(actual.ctrl && actual.mac_cmd)
     } else {
-        // A physical macOS Control key does not set `command`; include every
-        // source here so Ctrl+W cannot accidentally become the plain W tool.
+        // Physical macOS Control does not set `command`; include every source
+        // so Ctrl+W cannot accidentally become the plain W canvas tool.
         !actual.command && !actual.ctrl && !actual.mac_cmd
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key_event(key: Key, modifiers: Modifiers, pressed: bool, repeat: bool) -> Event {
+        Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn snapshot_preserves_order_and_ignores_repeat_and_release() {
+        let events = [
+            key_event(Key::K, Modifiers::COMMAND, true, false),
+            key_event(Key::C, Modifiers::COMMAND, true, true),
+            key_event(Key::V, Modifiers::COMMAND, false, false),
+            key_event(Key::S, Modifiers::COMMAND, true, false),
+        ];
+        let snapshot = ShortcutInputSnapshot::from_events_for_test(&events, false);
+        assert_eq!(
+            snapshot
+                .key_presses()
+                .iter()
+                .map(|press| press.key())
+                .collect::<Vec<_>>(),
+            vec![Key::K, Key::S]
+        );
+    }
+
+    #[test]
+    fn primary_modifier_accepts_ctrl_or_command_but_not_both() {
+        for modifiers in [
+            Modifiers {
+                ctrl: true,
+                command: true,
+                ..Modifiers::NONE
+            },
+            Modifiers {
+                mac_cmd: true,
+                command: true,
+                ..Modifiers::NONE
+            },
+        ] {
+            assert!(
+                ShortcutKeyPress {
+                    key: Key::K,
+                    modifiers
+                }
+                .matches(Key::K, true, false, false)
+            );
+        }
+        assert!(
+            !ShortcutKeyPress {
+                key: Key::K,
+                modifiers: Modifiers {
+                    ctrl: true,
+                    mac_cmd: true,
+                    command: true,
+                    ..Modifiers::NONE
+                },
+            }
+            .matches(Key::K, true, false, false)
+        );
+        assert!(
+            !ShortcutKeyPress {
+                key: Key::W,
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Modifiers::NONE
+                },
+            }
+            .matches(Key::W, false, false, false)
+        );
     }
 }

@@ -103,7 +103,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                             Command::Preferences.execute(app);
                         }
                     }
-                    if search_button(ui, viewport_width, large_targets) {
+                    if search_button(ui, app, viewport_width, large_targets) {
                         Command::CommandPalette.execute(app);
                     }
                     context_right = ui.available_rect_before_wrap().right();
@@ -991,7 +991,13 @@ fn command_item_as(
         return;
     }
     let enabled = availability.is_available();
-    let shortcut = shortcut_for_occurrence(command, shortcut_override);
+    let shortcut = shortcut_for_occurrence(
+        app.state.ui.preferences.shortcuts(),
+        crate::common::app::runtime_command_platform(ui.ctx()),
+        ui.ctx().os(),
+        command,
+        shortcut_override,
+    );
     let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
     let (rect, response) = ui
         .add_enabled_ui(enabled, |ui| {
@@ -1004,6 +1010,9 @@ fn command_item_as(
         node.set_label(label);
         if let CommandAvailability::Disabled(reason) = availability {
             node.set_description(reason);
+        }
+        if enabled && !shortcut.is_empty() {
+            node.set_keyboard_shortcut(shortcut.as_str());
         }
     });
     record_menu_row(ui.ctx(), &response, label, enabled);
@@ -1166,10 +1175,17 @@ fn menu_separator(ui: &mut Ui) {
     );
 }
 
-fn shortcut_for_occurrence(command: Command, shortcut_override: Option<&str>) -> &str {
-    shortcut_override.unwrap_or_else(|| {
-        command.shortcut_label(crate::workbench::commands::current_command_platform())
-    })
+fn shortcut_for_occurrence(
+    shortcuts: &crate::workbench::ShortcutPreferences,
+    platform: crate::workbench::commands::CommandPlatform,
+    operating_system: egui::os::OperatingSystem,
+    command: Command,
+    shortcut_override: Option<&str>,
+) -> String {
+    shortcut_override.map_or_else(
+        || shortcuts.resolved_label(command, platform, operating_system),
+        str::to_owned,
+    )
 }
 
 fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1615,8 +1631,14 @@ fn ellipsize(value: &str, maximum_characters: usize) -> String {
     shortened
 }
 
-fn search_button(ui: &mut Ui, viewport_width: f32, large_target: bool) -> bool {
+fn search_button(ui: &mut Ui, app: &RSpiceApp, viewport_width: f32, large_target: bool) -> bool {
     let t = Tokens::get(ui.ctx());
+    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+        Command::CommandPalette,
+        crate::common::app::runtime_command_platform(ui.ctx()),
+        ui.ctx().os(),
+    );
+    let keycap = shortcut.replace('+', " ");
     let width = search_button_width(viewport_width, large_target);
     let height = if large_target { 44.0 } else { 25.0 };
     let icon_only = width <= 60.0;
@@ -1628,6 +1650,11 @@ fn search_button(ui: &mut Ui, viewport_width: f32, large_target: bool) -> bool {
             "Search and run a command",
         )
     });
+    if !shortcut.is_empty() {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_keyboard_shortcut(shortcut.as_str());
+        });
+    }
     if !icon_only {
         ui.painter().rect_filled(rect, t.radius, t.color.bg_inset);
     }
@@ -1668,7 +1695,7 @@ fn search_button(ui: &mut Ui, viewport_width: f32, large_target: bool) -> bool {
         // 1 px border. Measure the invariant shortcut instead of forcing it
         // into a 36 px box; that fixed width clips the final glyph at the
         // workstation font metrics used by the mockup.
-        let shortcut_width = search_keycap_width(ui);
+        let shortcut_width = search_keycap_width(ui, &keycap);
         let shortcut_rect = egui::Rect::from_center_size(
             egui::Pos2::new(rect.right() - 7.0 - shortcut_width * 0.5, rect.center().y),
             Vec2::new(shortcut_width, SEARCH_KEYCAP_HEIGHT),
@@ -1705,22 +1732,25 @@ fn search_button(ui: &mut Ui, viewport_width: f32, large_target: bool) -> bool {
         ui.painter().text(
             shortcut_rect.center(),
             egui::Align2::CENTER_CENTER,
-            "Ctrl K",
+            &keycap,
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_faint,
         );
     }
     theme::paint_focus_ring_outset(ui, &response, rect);
-    response
-        .on_hover_text("Search and run a command (Ctrl+K)")
-        .clicked()
+    let tooltip = if shortcut.is_empty() {
+        "Search and run a command".to_owned()
+    } else {
+        format!("Search and run a command ({shortcut})")
+    };
+    response.on_hover_text(tooltip).clicked()
 }
 
-fn search_keycap_width(ui: &Ui) -> f32 {
+fn search_keycap_width(ui: &Ui, shortcut: &str) -> f32 {
     let text_width = ui
         .painter()
         .layout_no_wrap(
-            "Ctrl K".to_owned(),
+            shortcut.to_owned(),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             egui::Color32::WHITE,
         )
@@ -2039,7 +2069,7 @@ mod tests {
         let mut width = 0.0;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                width = search_keycap_width(ui);
+                width = search_keycap_width(ui, "Ctrl K");
                 let text_width = ui
                     .painter()
                     .layout_no_wrap(
@@ -2082,12 +2112,25 @@ mod tests {
 
     #[test]
     fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
+        let shortcuts = crate::workbench::ShortcutPreferences::default();
         assert_eq!(
-            shortcut_for_occurrence(Command::KeyboardShortcuts, Some("")),
+            shortcut_for_occurrence(
+                &shortcuts,
+                crate::workbench::commands::CommandPlatform::Desktop,
+                egui::os::OperatingSystem::Windows,
+                Command::KeyboardShortcuts,
+                Some("")
+            ),
             ""
         );
         assert_eq!(
-            shortcut_for_occurrence(Command::KeyboardShortcuts, Some("Ctrl+Alt+R")),
+            shortcut_for_occurrence(
+                &shortcuts,
+                crate::workbench::commands::CommandPlatform::Desktop,
+                egui::os::OperatingSystem::Windows,
+                Command::KeyboardShortcuts,
+                Some("Ctrl+Alt+R")
+            ),
             "Ctrl+Alt+R"
         );
         assert_eq!(DESCEND_MENU_LABEL, "Descend into selected instance…");
@@ -2096,7 +2139,8 @@ mod tests {
 
     #[test]
     fn menu_shortcuts_are_projected_from_the_typed_registry() {
-        let platform = crate::workbench::commands::current_command_platform();
+        let platform = crate::workbench::commands::CommandPlatform::Desktop;
+        let shortcuts = crate::workbench::ShortcutPreferences::default();
         for command in [
             Command::OpenProject,
             Command::Save,
@@ -2106,12 +2150,24 @@ mod tests {
             Command::ToggleConsole,
         ] {
             assert_eq!(
-                shortcut_for_occurrence(command, None),
-                command.shortcut_label(platform)
+                shortcut_for_occurrence(
+                    &shortcuts,
+                    platform,
+                    egui::os::OperatingSystem::Windows,
+                    command,
+                    None
+                ),
+                command.default_shortcut_label(platform)
             );
         }
         assert_eq!(
-            shortcut_for_occurrence(Command::KeyboardShortcuts, None),
+            shortcut_for_occurrence(
+                &shortcuts,
+                platform,
+                egui::os::OperatingSystem::Windows,
+                Command::KeyboardShortcuts,
+                None
+            ),
             ""
         );
     }

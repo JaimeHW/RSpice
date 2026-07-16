@@ -29,6 +29,9 @@ pub(super) fn render(
         PreferenceCategory::Workspace => workspace(ui, state, actions),
         PreferenceCategory::Files => files(ui, state),
         PreferenceCategory::Accessibility => accessibility(ui, state),
+        PreferenceCategory::Shortcuts => {
+            super::shortcut_preferences::render_page(ui, state, actions);
+        }
     }
 }
 

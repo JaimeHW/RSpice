@@ -66,18 +66,6 @@ impl Workspace {
         }
     }
 
-    pub const fn shortcut(self) -> &'static str {
-        match self {
-            Self::Project => "Alt+1",
-            Self::Design => "Alt+2",
-            Self::Simulate => "Alt+3",
-            Self::Results => "Alt+4",
-            Self::Verify => "Alt+5",
-            Self::Models => "Alt+6",
-            Self::Netlist => "Alt+7",
-        }
-    }
-
     pub const fn navigator_title(self) -> &'static str {
         match self {
             Self::Project => "Project navigator",
@@ -1488,11 +1476,8 @@ mod tests {
     use crate::workbench::CapabilityWorkflowId;
 
     #[test]
-    fn canonical_workspace_order_and_shortcuts_are_stable() {
+    fn canonical_workspace_order_is_stable() {
         assert_eq!(Workspace::ALL.len(), 7);
-        for (index, workspace) in Workspace::ALL.into_iter().enumerate() {
-            assert_eq!(workspace.shortcut(), format!("Alt+{}", index + 1));
-        }
     }
 
     #[test]

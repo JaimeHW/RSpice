@@ -2,6 +2,7 @@
 
 mod preference_pages;
 mod preferences_shell;
+mod shortcut_preferences;
 
 use egui::{Context, Id};
 
@@ -17,6 +18,7 @@ pub(super) const CAPABILITY_MATRIX_HELP: &str = "See installed, licensed, previe
 #[derive(Debug, Default)]
 pub(super) struct PreferencePageActions {
     pub(super) open_capability_matrix: bool,
+    pub(super) open_shortcut_editor: bool,
     pub(super) updated_profile_label: Option<&'static str>,
 }
 
@@ -32,6 +34,7 @@ impl RSpiceApp {
             );
         if !route_owned && !retained_under_child_manager {
             self.state.dialogs.preferences_open = false;
+            self.state.dialogs.shortcut_editor.close_and_discard();
             ctx.data_mut(|data| data.remove_temp::<PreferenceCategory>(category_id));
             preferences_shell::unmount(ctx);
             return;
@@ -43,8 +46,9 @@ impl RSpiceApp {
         let mut actions = PreferencePageActions::default();
         // The retained parent does not consume Escape while one of its real
         // child executors is open above it.
-        let nested_modal_open =
-            self.state.dialogs.license_dialog.open || retained_under_child_manager;
+        let nested_modal_open = self.state.dialogs.license_dialog.open
+            || self.state.dialogs.shortcut_editor.open
+            || retained_under_child_manager;
         let shell_response = {
             let state = &mut self.state;
             preferences_shell::show(ctx, &mut category, !nested_modal_open, |ui, category| {
@@ -74,6 +78,7 @@ impl RSpiceApp {
                 self.state.workbench.current_route().surface_id() == SurfaceId::AccountOrganization;
         }
         self.execute_preference_page_actions(actions);
+        shortcut_preferences::render_editor(ctx, &mut self.state);
     }
 
     fn execute_preference_page_actions(&mut self, actions: PreferencePageActions) {
@@ -81,6 +86,10 @@ impl RSpiceApp {
             crate::workbench::commands::Command::FeatureAvailability.execute(self);
             self.state.dialogs.preferences_open =
                 self.state.workbench.current_route().surface_id() == SurfaceId::FeatureAvailability;
+        }
+        if actions.open_shortcut_editor {
+            let profile = self.state.ui.preferences.shortcuts().clone();
+            self.state.dialogs.shortcut_editor.open(&profile);
         }
     }
 }
@@ -303,6 +312,21 @@ mod tests {
             SurfaceId::FeatureAvailability
         );
         assert!(app.state.dialogs.preferences_open);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn shortcut_editor_action_opens_an_isolated_profile_draft() {
+        let mut app = test_app();
+        app.execute_preference_page_actions(PreferencePageActions {
+            open_shortcut_editor: true,
+            ..PreferencePageActions::default()
+        });
+        assert!(app.state.dialogs.shortcut_editor.open);
+        assert_eq!(
+            app.state.dialogs.shortcut_editor.draft.as_ref(),
+            Some(app.state.ui.preferences.shortcuts())
+        );
     }
 
     #[test]

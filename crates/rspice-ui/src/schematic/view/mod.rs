@@ -229,16 +229,33 @@ fn refresh_symbol_context_after_interactions(
     true
 }
 
-fn schematic_accessibility_label(state: &AppState) -> String {
+fn schematic_accessibility_label(
+    state: &AppState,
+    platform: crate::workbench::commands::CommandPlatform,
+    operating_system: egui::os::OperatingSystem,
+) -> String {
     use crate::ui::accessibility::counted;
+    use crate::workbench::commands::Command;
     let schematic = &state.schematic;
     let tool = if schematic.tool.is_place_tool() {
         format!("Place {}", schematic.tool.display_name())
     } else {
         schematic.tool.display_name().to_owned()
     };
+    let shortcuts = crate::common::app::accessibility_shortcut_summary(
+        state.ui.preferences.shortcuts(),
+        platform,
+        operating_system,
+        &[
+            Command::SelectTool,
+            Command::PlaceWire,
+            Command::PlaceProbe,
+            Command::ZoomFit,
+            Command::Cancel,
+        ],
+    );
     format!(
-        "Schematic canvas. {}, {}, {}, {}; {}. Active tool: {}. Use S for select, W for wire, P for probe, F to fit the view, and Escape to cancel the active operation.",
+        "Schematic canvas. {}, {}, {}, {}; {}. Active tool: {}.{shortcuts}",
         counted(schematic.components.len(), "component", "components"),
         counted(schematic.wires.len(), "wire", "wires"),
         counted(schematic.junctions.len(), "junction", "junctions"),
@@ -441,13 +458,24 @@ mod tests {
         state.schematic.selection.select_component(1);
         state.schematic.tool = crate::state::Tool::Wire;
 
-        let label = schematic_accessibility_label(&state);
+        let label = schematic_accessibility_label(
+            &state,
+            crate::workbench::commands::CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
 
         assert!(label.starts_with(
             "Schematic canvas. 1 component, 1 wire, 1 junction, 1 net label; 1 item selected."
         ));
         assert!(label.contains("Active tool: Wire."));
-        assert!(label.contains("Escape to cancel"));
+        assert!(label.contains("Escape: Cancel active command"));
+    }
+
+    #[test]
+    fn schematic_canvas_has_no_static_shortcut_prose() {
+        let source = include_str!("mod.rs");
+        assert!(!source.contains(concat!("Use S", " for select")));
+        assert!(!source.contains(concat!("Escape", " to cancel")));
     }
 }
 
@@ -547,16 +575,22 @@ pub fn render_schematic_view(
         .map(|cursor| to_grid_units(cursor, state));
     state.ui.canvas_view_center = Some(to_grid_units(available.center(), state));
 
+    let shortcut_platform = crate::common::app::runtime_command_platform(ui.ctx());
+    let operating_system = ui.ctx().os();
     response.widget_info(|| {
         WidgetInfo::labeled(
             WidgetType::Image,
             ui.is_enabled(),
-            schematic_accessibility_label(state),
+            schematic_accessibility_label(state, shortcut_platform, operating_system),
         )
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Canvas);
     });
+    crate::common::app::report_engineering_canvas_focus(
+        &response,
+        state.workspace.active_view_type(),
+    );
     crate::ui::theme::paint_focus_ring(ui, &response, available);
 }
 

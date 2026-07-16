@@ -7,27 +7,44 @@ use super::{RSpiceApp, app_shortcuts::ShortcutCategory};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
-use crate::workbench::commands::Command;
+use crate::workbench::ShortcutPreferences;
+use crate::workbench::commands::{Command, CommandPlatform};
 
-fn shortcut_help_row(command: Command) -> (&'static str, &'static str) {
+fn shortcut_help_row(
+    shortcuts: &ShortcutPreferences,
+    command: Command,
+    platform: CommandPlatform,
+    operating_system: egui::os::OperatingSystem,
+) -> (String, &'static str) {
     (
-        command.shortcut_label(crate::workbench::commands::current_command_platform()),
+        shortcuts.resolved_label(command, platform, operating_system),
         command.spec().label,
     )
 }
 
-fn shortcut_row_matches(command: Command, filter: &str) -> bool {
+fn shortcut_row_matches(
+    shortcuts: &ShortcutPreferences,
+    command: Command,
+    filter: &str,
+    platform: CommandPlatform,
+    operating_system: egui::os::OperatingSystem,
+) -> bool {
     filter.is_empty()
         || command.spec().label.to_lowercase().contains(filter)
-        || command
-            .shortcut_label(crate::workbench::commands::current_command_platform())
+        || shortcuts
+            .resolved_label(command, platform, operating_system)
             .to_lowercase()
             .contains(filter)
 }
 
-fn shortcut_is_visible(command: Command) -> bool {
-    !command
-        .shortcut_label(crate::workbench::commands::current_command_platform())
+fn shortcut_is_visible(
+    shortcuts: &ShortcutPreferences,
+    command: Command,
+    platform: CommandPlatform,
+    operating_system: egui::os::OperatingSystem,
+) -> bool {
+    !shortcuts
+        .resolved_label(command, platform, operating_system)
         .is_empty()
 }
 
@@ -174,16 +191,22 @@ impl RSpiceApp {
 
         // Count against the filter as entered last frame — immediate mode
         // corrects the hint one frame after each keystroke.
+        let shortcuts = self.state.ui.preferences.shortcuts().clone();
+        let platform = crate::common::app::runtime_command_platform(ctx);
+        let operating_system = ctx.os();
         let filter = self.state.dialogs.shortcuts_filter.trim().to_lowercase();
         let total: usize = ShortcutCategory::ALL
             .iter()
             .flat_map(|category| category.commands())
-            .filter(|command| shortcut_is_visible(**command))
+            .filter(|command| shortcut_is_visible(&shortcuts, *command, platform, operating_system))
             .count();
         let shown: usize = ShortcutCategory::ALL
             .iter()
             .flat_map(|c| c.commands())
-            .filter(|c| shortcut_is_visible(**c) && shortcut_row_matches(**c, &filter))
+            .filter(|c| {
+                shortcut_is_visible(&shortcuts, *c, platform, operating_system)
+                    && shortcut_row_matches(&shortcuts, *c, &filter, platform, operating_system)
+            })
             .count();
         let hint = format!("{shown} of {total} shortcuts");
 
@@ -210,9 +233,16 @@ impl RSpiceApp {
                 for category in ShortcutCategory::ALL {
                     let commands: Vec<_> = category
                         .commands()
-                        .iter()
-                        .copied()
-                        .filter(|c| shortcut_is_visible(*c) && shortcut_row_matches(*c, &filter))
+                        .filter(|c| {
+                            shortcut_is_visible(&shortcuts, *c, platform, operating_system)
+                                && shortcut_row_matches(
+                                    &shortcuts,
+                                    *c,
+                                    &filter,
+                                    platform,
+                                    operating_system,
+                                )
+                        })
                         .collect();
                     if commands.is_empty() {
                         continue;
@@ -235,7 +265,8 @@ impl RSpiceApp {
                     ui.add_space(2.0);
 
                     for command in commands {
-                        let (shortcut, display_name) = shortcut_help_row(command);
+                        let (shortcut, display_name) =
+                            shortcut_help_row(&shortcuts, command, platform, operating_system);
                         // Description left, key chord right in mono — the
                         // kv pattern with the value rendered as a key cap.
                         let (rect, _) = ui.allocate_exact_size(

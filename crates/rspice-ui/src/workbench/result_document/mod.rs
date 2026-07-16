@@ -196,6 +196,9 @@ pub struct ResultsState {
     pub cursors: CursorPair,
     /// Which strip (analysis index) the cursors were placed on.
     pub cursor_strip: Option<usize>,
+    /// Share the same A/B cursor positions across every compatible waveform
+    /// strip instead of scoping them to `cursor_strip`.
+    pub linked_cursors: bool,
     /// Decimation envelope cache.
     pub cache: DecimationCache,
     /// Derived dB/phase series cache.
@@ -291,6 +294,10 @@ impl ResultsState {
     pub fn clear_cursors(&mut self) {
         self.cursors.clear();
         self.cursor_strip = None;
+    }
+
+    pub fn toggle_linked_cursors(&mut self) {
+        self.linked_cursors = !self.linked_cursors;
     }
 
     /// Clear result UI state that is tied to the active project/design data.
@@ -707,7 +714,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     app.state.ui.results.well_rect = Some(well);
 
     if !app.state.simulation.has_results() {
-        well_hint(ui, "No results yet — run a simulation (F5)");
+        let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+            crate::workbench::commands::Command::RunSimulation,
+            crate::common::app::runtime_command_platform(ui.ctx()),
+            ui.ctx().os(),
+        );
+        let hint = if shortcut.is_empty() {
+            "No results yet — run a simulation".to_owned()
+        } else {
+            format!("No results yet — run a simulation ({shortcut})")
+        };
+        well_hint(ui, &hint);
         return;
     }
 
@@ -755,6 +772,11 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
             // Viewer-local controls.
             match state.ui.results.viewer {
                 ResultViewer::Waves => {
+                    let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
+                        crate::workbench::commands::Command::ToggleLinkedCursors,
+                        crate::common::app::runtime_command_platform(ui.ctx()),
+                        ui.ctx().os(),
+                    );
                     let results = &mut state.ui.results;
                     if !results.hidden_strips.is_empty() {
                         let n = results.hidden_strips.len();
@@ -771,6 +793,30 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
                         .clicked()
                     {
                         results.clear_cursors();
+                    }
+                    let linked_label = "Linked A/B cursors";
+                    let linked = results.linked_cursors;
+                    let linked_tooltip = if linked {
+                        "A/B positions are shared across plots with matching analysis and X-axis domains"
+                    } else {
+                        "A/B positions are scoped to the active plot"
+                    };
+                    let linked_tooltip = if linked_shortcut.is_empty() {
+                        linked_tooltip.to_owned()
+                    } else {
+                        format!("{linked_tooltip} · {linked_shortcut}")
+                    };
+                    let response = chip(ui, linked_label, linked).on_hover_text(linked_tooltip);
+                    response.widget_info(|| {
+                        WidgetInfo::selected(WidgetType::Button, true, linked, linked_label)
+                    });
+                    if !linked_shortcut.is_empty() {
+                        ui.ctx().accesskit_node_builder(response.id, |node| {
+                            node.set_keyboard_shortcut(linked_shortcut.as_str());
+                        });
+                    }
+                    if response.clicked() {
+                        results.toggle_linked_cursors();
                     }
                 }
                 ResultViewer::Fft => {

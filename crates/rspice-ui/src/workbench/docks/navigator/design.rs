@@ -377,7 +377,16 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     if !query.is_empty() {
         return None;
     }
-    section_header(ui, "Pinned", Some("Shift+I"));
+    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+        crate::workbench::commands::Command::PlaceInstance,
+        crate::common::app::runtime_command_platform(ui.ctx()),
+        ui.ctx().os(),
+    );
+    section_header(
+        ui,
+        "Pinned",
+        (!shortcut.is_empty()).then_some(shortcut.as_str()),
+    );
     let mut selected = None;
     egui::Frame::new()
         .inner_margin(egui::Margin {

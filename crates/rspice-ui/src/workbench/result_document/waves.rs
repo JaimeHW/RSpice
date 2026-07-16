@@ -56,6 +56,7 @@ struct StripTrace {
 /// One strip (== one analysis of the active run).
 pub(super) struct StripModel {
     analysis_index: usize,
+    analysis_type: AnalysisType,
     kind_tag: String,
     subtitle: String,
     x_scale: XScale,
@@ -69,6 +70,13 @@ pub(super) struct StripModel {
     /// hue — one chip per signal, all runs).
     signal_trace_count: usize,
     traces: Vec<StripTrace>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CursorDomain {
+    analysis_type: AnalysisType,
+    x_scale: XScale,
+    x_unit: &'static str,
 }
 
 /// Frame cache for the strip models. Building them clones every trace name
@@ -181,6 +189,14 @@ fn matching_overlay_analysis<'a>(
 }
 
 impl StripModel {
+    const fn cursor_domain(&self) -> CursorDomain {
+        CursorDomain {
+            analysis_type: self.analysis_type,
+            x_scale: self.x_scale,
+            x_unit: self.x_unit,
+        }
+    }
+
     fn x_label(&self) -> &'static str {
         match self.x_scale {
             XScale::Log10 => "f",
@@ -348,6 +364,7 @@ pub(super) fn build_models(
 
         models.push(StripModel {
             analysis_index,
+            analysis_type: analysis.analysis_type,
             kind_tag: analysis.analysis_type.short_label().to_uppercase(),
             subtitle,
             x_scale,
@@ -428,11 +445,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let models = cached_models(&state.simulation, &mut state.ui.results, &t);
     if models.is_empty() {
         let hint = if state.simulation.active_run().is_none() {
-            "No results yet — press F5 or the Run button to simulate"
+            let shortcut = state.ui.preferences.shortcuts().resolved_label(
+                crate::workbench::commands::Command::RunSimulation,
+                crate::common::app::runtime_command_platform(ui.ctx()),
+                ui.ctx().os(),
+            );
+            if shortcut.is_empty() {
+                "No results yet — use the Run button to simulate".to_owned()
+            } else {
+                format!("No results yet — press {shortcut} or use the Run button to simulate")
+            }
         } else {
-            "The active run has no plottable analyses"
+            "The active run has no plottable analyses".to_owned()
         };
-        well_hint(ui, hint);
+        well_hint(ui, &hint);
         return;
     }
 
@@ -467,6 +493,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let separators = (n.saturating_sub(1)) as f32;
     let strip_height = ((avail.height() - separators) / n as f32).max(140.0);
     let maximized = state.ui.results.maximized_strip.is_some();
+    let linked_cursor_domain = state
+        .ui
+        .results
+        .cursor_strip
+        .and_then(|owner| models.iter().find(|model| model.analysis_index == owner))
+        .map(|model| model.cursor_domain());
 
     egui::ScrollArea::vertical()
         .id_salt("rspice.results.strips")
@@ -571,7 +603,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         // building) — only the space is reserved.
                         let plot_rect = ui.available_rect_before_wrap();
                         if ui.is_rect_visible(plot_rect) {
-                            show_strip_plot(ui, state, model);
+                            show_strip_plot(ui, state, model, linked_cursor_domain);
                         } else {
                             ui.allocate_exact_size(plot_rect.size(), egui::Sense::hover());
                         }
@@ -930,7 +962,12 @@ pub(crate) fn toggle_visibility(
     }
 }
 
-fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
+fn show_strip_plot(
+    ui: &mut Ui,
+    state: &mut AppState,
+    model: &StripModel,
+    linked_cursor_domain: Option<CursorDomain>,
+) {
     let t = Tokens::get(ui.ctx());
     let Some((x0, x1)) = x_range(model) else {
         well_hint(ui, "No data");
@@ -1044,7 +1081,9 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         );
     }
 
-    let cursors = (state.ui.results.cursor_strip == Some(model.analysis_index))
+    let cursor_domain_matches = linked_cursor_domain == Some(model.cursor_domain());
+    let cursors = (state.ui.results.cursor_strip == Some(model.analysis_index)
+        || (state.ui.results.linked_cursors && cursor_domain_matches))
         .then_some(state.ui.results.cursors);
 
     let readout = |x: f64| -> Vec<(String, String)> {
@@ -1070,10 +1109,12 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
 
     if let Some(clicked_x) = response.clicked_x {
         let results = &mut state.ui.results;
-        if results.cursor_strip != Some(model.analysis_index) {
+        if results.cursor_strip != Some(model.analysis_index)
+            && (!results.linked_cursors || !cursor_domain_matches)
+        {
             results.cursors = CursorPair::default();
-            results.cursor_strip = Some(model.analysis_index);
         }
+        results.cursor_strip = Some(model.analysis_index);
         results.cursors.place(clicked_x);
     }
 

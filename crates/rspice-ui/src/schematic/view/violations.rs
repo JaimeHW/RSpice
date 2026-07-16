@@ -23,13 +23,13 @@ use super::viewport::Viewport;
 pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     let Some(result) = &state.dialogs.drc_results else {
         state.push_user_message(ConsoleMessage::info(
-            "No check results — run design checks first (Ctrl+E)",
+            "No check results — run design checks first",
         ));
         return;
     };
     if state.dialogs.drc_checked_version != state.schematic.topology_version() {
         state.push_user_message(ConsoleMessage::warning(
-            "Check results are stale — re-run design checks (Ctrl+E)",
+            "Check results are stale — re-run design checks",
         ));
         return;
     }

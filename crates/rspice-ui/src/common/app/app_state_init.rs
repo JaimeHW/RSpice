@@ -59,5 +59,8 @@ pub(super) fn default_app_state() -> AppState {
         analysis,
         ui: crate::workbench::UiSessionState::new(),
         workbench: crate::workbench::WorkbenchState::default(),
+        shortcut_resolver: super::app_shortcuts::ShortcutResolverState::default(),
+        shortcut_library_persistence:
+            super::app_shortcut_library_persistence::ShortcutLibraryPersistenceRuntime::default(),
     }
 }

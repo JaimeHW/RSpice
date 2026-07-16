@@ -77,9 +77,14 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                         && app.state.ui.results_seen_version != app.state.simulation.data_version,
                 );
                 let command = Command::OpenWorkspace(workspace);
+                let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+                    command,
+                    crate::common::app::runtime_command_platform(ui.ctx()),
+                    ui.ctx().os(),
+                );
                 let response = ui
                     .add_enabled_ui(command.is_enabled(app), |ui| {
-                        activity_button(ui, workspace, active, new_result_count)
+                        activity_button(ui, workspace, active, new_result_count, &shortcut)
                     })
                     .inner;
                 if response.clicked() {
@@ -102,17 +107,19 @@ fn activity_button(
     workspace: Workspace,
     active: bool,
     badge_count: usize,
+    shortcut: &str,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let enabled = ui.is_enabled();
-    let label = if badge_count > 0 {
-        format!(
-            "{} ({}) · {badge_count} new result",
-            workspace.label(),
-            workspace.shortcut()
-        )
+    let base_label = if shortcut.is_empty() {
+        workspace.label().to_owned()
     } else {
-        format!("{} ({})", workspace.label(), workspace.shortcut())
+        format!("{} ({shortcut})", workspace.label())
+    };
+    let label = if badge_count > 0 {
+        format!("{base_label} · {badge_count} new result")
+    } else {
+        base_label
     };
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(ACTIVITY_BUTTON_WIDTH, ACTIVITY_BUTTON_HEIGHT),
@@ -126,6 +133,11 @@ fn activity_button(
             workspace.label(),
         )
     });
+    if !shortcut.is_empty() && enabled {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_keyboard_shortcut(shortcut);
+        });
+    }
     if active && enabled {
         ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
         ui.painter().rect_filled(

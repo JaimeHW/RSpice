@@ -321,18 +321,14 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let label = app.state.schematic.tool == Tool::Label;
     let probe = app.state.schematic.tool == Tool::Probe;
     let grid = app.state.ui.grid != crate::workbench::GridStyle::Off;
-    if take_projected_tool_slot(ui, layout)
-        && icon_button(
-            ui,
-            WorkbenchIcon::Select,
-            "Select (Esc)",
-            select,
-            toolbar_icon_button_size(layout),
-        )
-        .clicked()
-    {
-        Command::SelectTool.execute(app);
-    }
+    toolbar_icon_command_selected(
+        ui,
+        app,
+        Command::SelectTool,
+        WorkbenchIcon::Select,
+        select,
+        layout,
+    );
     toolbar_icon_command_selected(
         ui,
         app,
@@ -392,7 +388,7 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         app,
         Command::RunChecks,
         WorkbenchIcon::Check,
-        "Run schematic checks (Ctrl+E)",
+        "Run schematic checks",
         layout,
     );
 }
@@ -540,11 +536,21 @@ fn toolbar_command(
         return;
     }
     let spec = command.spec();
-    let (icon, label, show_label, selected) = match presentation {
+    let (icon, base_label, show_label, selected) = match presentation {
         ToolbarCommandPresentation::Icon { icon, selected } => (icon, spec.label, false, selected),
         ToolbarCommandPresentation::Text { icon, label } => {
             (icon, label, layout.toolbar_labels, false)
         }
+    };
+    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+        command,
+        crate::common::app::runtime_command_platform(ui.ctx()),
+        ui.ctx().os(),
+    );
+    let label = if shortcut.is_empty() {
+        base_label.to_owned()
+    } else {
+        format!("{base_label} ({shortcut})")
     };
     let enabled = command.is_enabled(app);
     let response = ui.add_enabled_ui(enabled, |ui| {
@@ -552,15 +558,20 @@ fn toolbar_command(
             labeled_icon_button_sized(
                 ui,
                 icon,
-                label,
+                &label,
                 selected,
-                explicit_label_width(label),
+                explicit_label_width(&label),
                 layout.toolbar_control_height,
             )
         } else {
-            icon_button(ui, icon, label, selected, toolbar_icon_button_size(layout))
+            icon_button(ui, icon, &label, selected, toolbar_icon_button_size(layout))
         }
     });
+    if enabled && !shortcut.is_empty() {
+        ui.ctx().accesskit_node_builder(response.inner.id, |node| {
+            node.set_keyboard_shortcut(shortcut.as_str());
+        });
+    }
     if response.inner.clicked() {
         command.execute(app);
     }
@@ -644,6 +655,16 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     pvt_temperature_label(reference.temperature_celsius)
                 )
             };
+            let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+                command,
+                crate::common::app::runtime_command_platform(ui.ctx()),
+                ui.ctx().os(),
+            );
+            let accessibility_label = if shortcut.is_empty() {
+                accessibility_label
+            } else {
+                format!("{accessibility_label} ({shortcut})")
+            };
             let enabled = command.is_enabled(app);
             let (rect, response) = ui.allocate_exact_size(
                 Vec2::new(primary_width, layout.run_control_height),
@@ -660,6 +681,11 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     &accessibility_label,
                 )
             });
+            if enabled && !shortcut.is_empty() {
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.set_keyboard_shortcut(shortcut.as_str());
+                });
+            }
             let base_fill = if enabled {
                 if running { t.color.err } else { t.color.accent }
             } else {
@@ -706,6 +732,9 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             theme::paint_focus_ring_outset(ui, &response, rect);
             if response.clicked() && enabled {
                 command.execute(app);
+            }
+            if enabled {
+                response.clone().on_hover_text(&accessibility_label);
             }
             if !enabled {
                 let reason = if app.state.workbench.workspace == Workspace::Netlist {
@@ -778,13 +807,23 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
     let enabled = command.is_enabled(app);
-    if ui
-        .add_enabled(
-            enabled,
-            egui::Button::new(command.spec().label).frame(false),
-        )
-        .clicked()
-    {
+    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+        command,
+        crate::common::app::runtime_command_platform(ui.ctx()),
+        ui.ctx().os(),
+    );
+    let label = if shortcut.is_empty() {
+        command.spec().label.to_owned()
+    } else {
+        format!("{} ({shortcut})", command.spec().label)
+    };
+    let response = ui.add_enabled(enabled, egui::Button::new(label).frame(false));
+    if enabled && !shortcut.is_empty() {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_keyboard_shortcut(shortcut.as_str());
+        });
+    }
+    if response.clicked() {
         command.execute(app);
         ui.close();
     }

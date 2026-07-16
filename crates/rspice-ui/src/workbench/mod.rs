@@ -55,7 +55,7 @@ pub use shortcuts::{
     ProtectedShortcutPolicy, ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutPolicies, ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileError,
     ShortcutProfileIssue, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity, ShortcutSequence,
-    ShortcutStroke, SingleKeyCanvasPolicy,
+    ShortcutStroke, SingleKeyCanvasPolicy, shortcut_context_precedence_rank,
 };
 pub use state::{EngineeringProfile, WorkbenchState};
 pub use surface_catalog::{

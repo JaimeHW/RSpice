@@ -39,8 +39,11 @@ fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
     state: &AppState,
     read_only: bool,
+    platform: crate::workbench::commands::CommandPlatform,
+    operating_system: egui::os::OperatingSystem,
 ) -> String {
     use crate::ui::accessibility::counted;
+    use crate::workbench::commands::Command;
     let placed_pins = document
         .pins
         .iter()
@@ -49,8 +52,24 @@ fn symbol_canvas_accessibility_label(
     let selection = state.ui.symbol.effective_selection();
     let selected = selection.pins.len() + selection.shapes.len();
     let edit_state = if read_only { "Read only." } else { "Editable." };
+    let shortcuts = crate::common::app::accessibility_shortcut_summary(
+        state.ui.preferences.shortcuts(),
+        platform,
+        operating_system,
+        &[
+            Command::SelectTool,
+            Command::SymbolPinTool,
+            Command::SymbolPolylineTool,
+            Command::SymbolCircleTool,
+            Command::SymbolArcTool,
+            Command::SymbolArrowTool,
+            Command::SymbolDotTool,
+            Command::ZoomFit,
+            Command::Cancel,
+        ],
+    );
     format!(
-        "Symbol editor canvas. {}; {}, {}; {}. Active tool: {}. {} Use S for select, P to place a pin, W for polyline, C for circle, A for arc, D for arrow, O for dot, F to fit the view, and Escape to cancel the active operation.",
+        "Symbol editor canvas. {}; {}, {}; {}. Active tool: {}. {}{shortcuts}",
         counted(document.body.len(), "shape", "shapes"),
         counted(document.pins.len(), "pin", "pins"),
         counted(placed_pins, "pin placed", "pins placed"),
@@ -126,19 +145,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
         let mut changed = false;
         let viewport = update_viewport(ui, state, rect, &document, &response);
-        changed |= handle_symbol_keys(ui, state, &mut document);
         changed |= handle_canvas_interaction(state, &mut document, viewport, &response);
         draw_canvas(ui, viewport, &document, &ports, state);
+        let shortcut_platform = crate::common::app::runtime_command_platform(ui.ctx());
+        let operating_system = ui.ctx().os();
         response.widget_info(|| {
             WidgetInfo::labeled(
                 WidgetType::Image,
                 ui.is_enabled(),
-                symbol_canvas_accessibility_label(&document, state, state.active_view_read_only()),
+                symbol_canvas_accessibility_label(
+                    &document,
+                    state,
+                    state.active_view_read_only(),
+                    shortcut_platform,
+                    operating_system,
+                ),
             )
         });
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Canvas);
         });
+        crate::common::app::report_engineering_canvas_focus(
+            &response,
+            state.workspace.active_view_type(),
+        );
         theme::paint_focus_ring(ui, &response, rect);
         if changed && let Err(error) = state.store_active_symbol_document(&document) {
             state.push_user_message(ConsoleMessage::warning(error));
@@ -308,65 +338,6 @@ fn fit_symbol_view(state: &mut AppState, rect: Rect, document: &SymbolDocument) 
     let center = Point::new((min.x + max.x) / 2, (min.y + max.y) / 2);
     state.ui.symbol.zoom = zoom;
     state.ui.symbol.pan = (-(center.x as f32) * zoom, -(center.y as f32) * zoom);
-}
-
-fn handle_symbol_keys(ui: &mut Ui, state: &mut AppState, document: &mut SymbolDocument) -> bool {
-    if ui.ctx().egui_wants_keyboard_input() {
-        return false;
-    }
-    let mut changed = false;
-    ui.input(|input| {
-        let plain = plain_symbol_tool_hotkey(input.modifiers);
-        if plain && input.key_pressed(egui::Key::S) {
-            state.ui.symbol.tool = SymbolTool::Select;
-        }
-        if plain && input.key_pressed(egui::Key::P) {
-            state.ui.symbol.tool = SymbolTool::PlacePin;
-            if let Some(pin) = next_unplaced_pin(document) {
-                state.ui.symbol.select_pin(pin);
-            } else {
-                state.ui.symbol.clear_selection();
-            }
-        }
-        if plain && input.key_pressed(egui::Key::W) {
-            state.ui.symbol.tool = SymbolTool::Polyline;
-            state.ui.symbol.pending_polyline.clear();
-        }
-        if plain && input.key_pressed(egui::Key::C) {
-            state.ui.symbol.tool = SymbolTool::Circle;
-            state.ui.symbol.shape_start = None;
-        }
-        if plain && input.key_pressed(egui::Key::A) {
-            state.ui.symbol.tool = SymbolTool::Arc;
-            state.ui.symbol.shape_start = None;
-        }
-        if plain && input.key_pressed(egui::Key::D) {
-            state.ui.symbol.tool = SymbolTool::Arrow;
-        }
-        if plain && input.key_pressed(egui::Key::O) {
-            state.ui.symbol.tool = SymbolTool::Dot;
-        }
-        if input.key_pressed(egui::Key::Escape) {
-            if state.ui.symbol.pending_polyline.len() >= 2 {
-                changed |= finish_pending_polyline(state, document);
-            } else {
-                state.ui.symbol.pending_polyline.clear();
-            }
-            state.ui.symbol.tool = SymbolTool::Select;
-            state.ui.symbol.shape_start = None;
-            state.ui.symbol.clear_drag_state();
-            state.ui.symbol.marquee_start = None;
-            state.ui.symbol.marquee_current = None;
-        }
-        if plain && input.key_pressed(egui::Key::F) {
-            state.ui.symbol.needs_fit = true;
-        }
-    });
-    changed
-}
-
-fn plain_symbol_tool_hotkey(modifiers: egui::Modifiers) -> bool {
-    !modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.shift
 }
 
 fn handle_canvas_interaction(
@@ -1462,32 +1433,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn modified_shortcuts_do_not_switch_symbol_tools() {
-        assert!(plain_symbol_tool_hotkey(egui::Modifiers::NONE));
-
-        for modifiers in [
-            egui::Modifiers {
-                alt: true,
-                ..egui::Modifiers::NONE
-            },
-            egui::Modifiers {
-                ctrl: true,
-                ..egui::Modifiers::NONE
-            },
-            egui::Modifiers {
-                command: true,
-                ..egui::Modifiers::NONE
-            },
-            egui::Modifiers {
-                shift: true,
-                ..egui::Modifiers::NONE
-            },
-        ] {
-            assert!(
-                !plain_symbol_tool_hotkey(modifiers),
-                "modified key input must stay available for global shortcuts and text entry"
-            );
-        }
+    fn symbol_editor_has_no_direct_product_key_bypass() {
+        let source = include_str!("symbol_editor.rs");
+        assert!(!source.contains(concat!("input.", "key_pressed(")));
+        assert!(!source.contains(concat!("ctx.input_mut(|input| input.", "consume_key")));
+        assert!(!source.contains(concat!("Use S", " for select")));
+        assert!(!source.contains(concat!("Escape", " to cancel")));
     }
 
     #[test]
@@ -1657,11 +1608,18 @@ mod tests {
             ..SymbolDocument::default()
         };
 
-        let label = symbol_canvas_accessibility_label(&document, &state, false);
+        let label = symbol_canvas_accessibility_label(
+            &document,
+            &state,
+            false,
+            crate::workbench::commands::CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
 
         assert!(label.starts_with(
             "Symbol editor canvas. 1 shape; 1 pin, 1 pin placed; 1 item selected. Active tool: Circle. Editable."
         ));
-        assert!(label.contains("Escape to cancel"));
+        assert!(label.contains("P: Place symbol pin"));
+        assert!(label.contains("Escape: Cancel active command"));
     }
 }

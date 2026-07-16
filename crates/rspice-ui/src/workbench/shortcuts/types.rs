@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use egui::Key;
+use egui::{Key, os::OperatingSystem};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
 use serde_json::Value;
 
@@ -118,9 +118,18 @@ impl ShortcutStroke {
 
     #[must_use]
     pub fn display_label(self) -> String {
+        self.display_label_for(OperatingSystem::default())
+    }
+
+    #[must_use]
+    pub fn display_label_for(self, operating_system: OperatingSystem) -> String {
         let mut parts = Vec::with_capacity(4);
         if self.primary {
-            parts.push("Ctrl");
+            parts.push(if operating_system.is_mac() {
+                "Cmd"
+            } else {
+                "Ctrl"
+            });
         }
         if self.alt {
             parts.push("Alt");
@@ -158,9 +167,14 @@ impl ShortcutSequence {
 
     #[must_use]
     pub fn display_label(&self) -> String {
+        self.display_label_for(OperatingSystem::default())
+    }
+
+    #[must_use]
+    pub fn display_label_for(&self, operating_system: OperatingSystem) -> String {
         self.0
             .iter()
-            .map(|stroke| stroke.display_label())
+            .map(|stroke| stroke.display_label_for(operating_system))
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -423,6 +437,11 @@ impl ResolvedShortcutBinding {
     pub(crate) fn supports(&self, platform: CommandPlatform) -> bool {
         self.platforms.contains(&platform)
     }
+
+    pub(crate) fn with_sequence(mut self, sequence: ShortcutSequence) -> Self {
+        self.sequence = sequence;
+        self
+    }
 }
 
 macro_rules! policy_enum {
@@ -524,6 +543,10 @@ impl<T: Copy> StoredPolicy<T> {
         self.effective = value;
         self.unknown = None;
     }
+
+    const fn has_unknown(&self) -> bool {
+        self.unknown.is_some()
+    }
 }
 
 impl<T: Serialize> Serialize for StoredPolicy<T> {
@@ -607,6 +630,34 @@ impl ShortcutPolicies {
     pub fn set_context_precedence(&mut self, value: ContextPrecedencePolicy) {
         self.context_precedence.set(value);
     }
+
+    /// Unknown execution-affecting policy values are preserved for forward
+    /// compatibility, but must fail closed until this build understands them.
+    pub(crate) fn unknown_execution_policy_names(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        if self.single_key_canvas.has_unknown() {
+            names.push("single-key-canvas");
+        }
+        if self.chord_timeout.has_unknown() {
+            names.push("chord-timeout");
+        }
+        if self.protected_shortcuts.has_unknown() {
+            names.push("protected-shortcuts");
+        }
+        if self.context_precedence.has_unknown() {
+            names.push("context-precedence");
+        }
+        names
+    }
+
+    pub(crate) fn repair_unknown_execution_policies(&mut self) -> Vec<&'static str> {
+        let names = self.unknown_execution_policy_names();
+        self.single_key_canvas.unknown = None;
+        self.chord_timeout.unknown = None;
+        self.protected_shortcuts.unknown = None;
+        self.context_precedence.unknown = None;
+        names
+    }
 }
 
 #[cfg(test)]
@@ -626,6 +677,23 @@ mod tests {
             assert_eq!(stroke.display_label(), label);
             assert_eq!(serde_json::to_value(stroke).unwrap()["key"], wire_name);
         }
+    }
+
+    #[test]
+    fn primary_modifier_uses_command_on_apple_platforms() {
+        let stroke = ShortcutStroke::new(Key::S, true, false, true);
+        assert_eq!(
+            stroke.display_label_for(OperatingSystem::Mac),
+            "Cmd+Shift+S"
+        );
+        assert_eq!(
+            stroke.display_label_for(OperatingSystem::IOS),
+            "Cmd+Shift+S"
+        );
+        assert_eq!(
+            stroke.display_label_for(OperatingSystem::Windows),
+            "Ctrl+Shift+S"
+        );
     }
 
     #[test]

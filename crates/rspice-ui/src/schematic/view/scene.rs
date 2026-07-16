@@ -16,13 +16,13 @@ const CULL_MARGIN: f32 = 160.0;
 const EMPTY_HINT_MOBILE_BREAKPOINT: f32 = 460.0;
 const EMPTY_HINT_DESKTOP_LINES: [&str; 3] = [
     "Empty schematic",
-    "Pick a part from the left panel, or press Shift+R, C, L, V, G to place one",
+    "Pick a part from the left panel to place a device or source",
     "File > Open example loads a ready-to-run circuit",
 ];
 const EMPTY_HINT_MOBILE_LINES: [&str; 4] = [
     "Empty schematic",
-    "Use Library or shortcuts to place parts",
-    "Shift+R, C, L, V, G place common parts",
+    "Use Library to place devices and sources",
+    "The toolbar provides wiring, labels, and probes",
     "File > Open example loads a circuit",
 ];
 
@@ -165,7 +165,7 @@ fn draw_empty_hint(painter: &Painter, available: Rect) {
     painter.text(
         center + egui::vec2(0.0, 2.0),
         egui::Align2::CENTER_CENTER,
-        "Pick a part from the left panel, or press Shift+R · C · L · V · G to place one",
+        "Pick a part from the left panel to place a device or source",
         theme::sans(12.0, FontWeight::Regular),
         palette.text_faint,
     );

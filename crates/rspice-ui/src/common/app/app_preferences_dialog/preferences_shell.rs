@@ -52,6 +52,8 @@ pub(super) enum PreferenceCategory {
     Workspace,
     Files,
     Accessibility,
+    #[allow(dead_code)]
+    Shortcuts,
 }
 
 impl PreferenceCategory {
@@ -68,6 +70,7 @@ impl PreferenceCategory {
             Self::Workspace => "Workspace",
             Self::Files => "Files & storage",
             Self::Accessibility => "Accessibility",
+            Self::Shortcuts => "Shortcuts",
         }
     }
 
@@ -77,6 +80,7 @@ impl PreferenceCategory {
             Self::Workspace => "workspace",
             Self::Files => "files",
             Self::Accessibility => "accessibility",
+            Self::Shortcuts => "shortcuts",
         }
     }
 }
