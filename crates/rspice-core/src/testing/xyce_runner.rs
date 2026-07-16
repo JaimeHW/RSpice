@@ -1044,6 +1044,19 @@ impl XyceExpectedFailureKind {
             _ => None,
         }
     }
+
+    fn rejects_source_directory_sidecars(self) -> bool {
+        matches!(
+            self,
+            Self::MessageAcUnsupportedSweepType
+                | Self::MessageNoiseUnsupportedSweepType
+                | Self::MessageMissingLibraryEndl
+                | Self::MessageMissingLibraryFileUnquoted
+                | Self::MessageMissingLibraryFileQuoted
+                | Self::MessageDuplicateDevice
+                | Self::MessageMissingDeviceNodes
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4553,6 +4566,7 @@ impl XyceTestRunner {
                 ));
             }
         }
+        Self::validate_expected_failure_source_sidecars(kind, &deck.path)?;
 
         let output_anchor = self
             .static_output_reference_path(&deck.path, "anchor")
@@ -4648,6 +4662,52 @@ impl XyceTestRunner {
         } else if !artifacts.is_empty() {
             return Err(format!(
                 "expected-failure record '{}' must not own checked-in output artifacts: {artifacts:?}",
+                kind.record()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_expected_failure_source_sidecars(
+        kind: XyceExpectedFailureKind,
+        deck_path: &Path,
+    ) -> Result<(), String> {
+        if !kind.rejects_source_directory_sidecars() {
+            return Ok(());
+        }
+        let family_dir = deck_path
+            .parent()
+            .ok_or_else(|| "expected-failure record has no source directory".to_string())?;
+        let deck_name = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "expected-failure filename is not UTF-8".to_string())?;
+        let sidecar_prefix = format!("{deck_name}.").to_ascii_lowercase();
+        let mut sidecars = Vec::new();
+        for entry in fs::read_dir(family_dir).map_err(|error| {
+            format!(
+                "failed to inspect expected-failure source directory {}: {error}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect expected-failure source entry in {}: {error}",
+                    family_dir.display()
+                )
+            })?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&sidecar_prefix))
+            {
+                sidecars.push(entry.path());
+            }
+        }
+        sidecars.sort();
+        if !sidecars.is_empty() {
+            return Err(format!(
+                "expected-failure record '{}' must not own source-directory sidecars: {sidecars:?}",
                 kind.record()
             ));
         }
@@ -68620,6 +68680,75 @@ R2 2 0 1
         }
 
         fs::remove_dir_all(temp_root).expect("remove missing-library fixture");
+    }
+
+    #[test]
+    fn selected_message_expected_failures_reject_source_directory_sidecars() {
+        let temp_dir = unique_expected_failure_temp_dir("message-source-sidecars");
+        fs::create_dir_all(&temp_dir).expect("create source-sidecar fixture");
+        fs::write(temp_dir.join("README"), "allowed family documentation")
+            .expect("write allowed README");
+        fs::write(temp_dir.join("options"), "allowed family options")
+            .expect("write allowed options");
+
+        for (kind, file_name) in [
+            (
+                XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+                "AC_setupSweepParam.cir",
+            ),
+            (
+                XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+                "NOISE_setupSweepParam.cir",
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingLibraryEndl,
+                "CircuitBlock_parseIncludeFile_2a.cir",
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+                "CircuitBlock_parseIncludeFile_2b.cir",
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+                "CircuitBlock_parseIncludeFile_2c.cir",
+            ),
+            (
+                XyceExpectedFailureKind::MessageDuplicateDevice,
+                "CircuitBlock_addTableData_1.cir",
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingDeviceNodes,
+                "DeviceBlock_extractNodes_1.cir",
+            ),
+        ] {
+            let deck_path = temp_dir.join(file_name);
+            fs::write(&deck_path, "fixture").expect("write selected expected-failure deck");
+            XyceTestRunner::validate_expected_failure_source_sidecars(kind, &deck_path)
+                .unwrap_or_else(|error| {
+                    panic!("{file_name} without a source sidecar must qualify: {error}")
+                });
+
+            let sidecar = temp_dir.join(format!("{file_name}.res"));
+            fs::write(&sidecar, "forbidden").expect("write forbidden source sidecar");
+            assert!(
+                XyceTestRunner::validate_expected_failure_source_sidecars(kind, &deck_path)
+                    .is_err(),
+                "{file_name} source sidecar must fail closed"
+            );
+            fs::remove_file(sidecar).expect("remove forbidden source sidecar");
+
+            let case_variant = temp_dir.join(format!("{}.PRN", file_name.to_ascii_uppercase()));
+            fs::write(&case_variant, "forbidden").expect("write case-variant source sidecar");
+            assert!(
+                XyceTestRunner::validate_expected_failure_source_sidecars(kind, &deck_path)
+                    .is_err(),
+                "{file_name} case-variant source sidecar must fail closed"
+            );
+            fs::remove_file(case_variant).expect("remove case-variant source sidecar");
+            fs::remove_file(deck_path).expect("remove selected expected-failure deck");
+        }
+
+        fs::remove_dir_all(temp_dir).expect("remove source-sidecar fixture");
     }
 
     #[test]
