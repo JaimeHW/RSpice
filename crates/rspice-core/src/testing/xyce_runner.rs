@@ -100,6 +100,11 @@ const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_647_son/semic_resistor.cir";
 const XYCE_BUG647_RESISTOR_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_647_son/semic_resistor_modpar.cir";
+const XYCE_BUG662_LONG_HEADER_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_662/headerlinelengthmorethan256.cir";
+const XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/bug_662/headerlinelengthlessthan256.cir";
+const XYCE_BUG662_CANONICAL_LONG_TITLE: &str = r#"** Converted using XDM 0.20rc from /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/pspice_9_1.xml to /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/xyce_6_3.xml ** ** Profile: "SCHEMATIC1-bias"  [ H:\Xyce\PSpice\Netlists\TransmissionLine-PSpiceFiles\SCHEMATIC1\bias.sim ]"#;
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
@@ -468,6 +473,28 @@ struct XyceBug647ResistorContract {
     owner_plan: XyceStaticDcPlan,
     reference_plan: XyceStaticDcPlan,
     role: XyceBug647ResistorRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug662HeaderRole {
+    LongHeaderOwner,
+    ShortHeaderReference,
+}
+
+impl XyceBug662HeaderRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::LongHeaderOwner => "bug662_long_header_relational_wrapper_owner",
+            Self::ShortHeaderReference => "bug662_long_header_relational_wrapper_short_reference",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug662HeaderContract {
+    owner_plan: XyceStaticTranPlan,
+    reference_plan: XyceStaticTranPlan,
+    role: XyceBug662HeaderRole,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2727,6 +2754,30 @@ impl XyceTestRunner {
                     start,
                     "bug647_resistor_relational_wrapper",
                     format!("BUG 647 resistor relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.bug662_long_header_relational_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_bug662_long_header_relational_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "bug662_long_header_relational_wrapper",
+                    format!("BUG 662 long-header relational qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -12112,6 +12163,188 @@ impl XyceTestRunner {
                 .collect(),
         );
         Ok(lines)
+    }
+
+    fn run_bug662_long_header_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug662HeaderContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        // Preserve the removed wrapper's order and oracle direction: the
+        // short-header sibling is independently simulated as good data before
+        // the long-header owner is independently simulated as test data.
+        let reference = match self.simulate_bug662_header_member(
+            &contract.reference_plan,
+            start,
+            "short-header reference",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 662 short-header execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let owner = match self.simulate_bug662_header_member(
+            &contract.owner_plan,
+            start,
+            "long-header owner",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 662 long-header execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mismatches = match self.compare_bug662_header_tables(&reference, &owner) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 662 Release 7.10 xyce_verify adapter failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} BUG 662 transient mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn simulate_bug662_header_member(
+        &self,
+        plan: &XyceStaticTranPlan,
+        start: Instant,
+        role: &str,
+    ) -> Result<XycePrnTable, String> {
+        let (netlist, result) = self
+            .run_transient_family_plan(plan, start, None)
+            .map_err(|err| format!("{role} parse/simulation failed: {err}"))?;
+        Self::transient_family_result_to_prn_table(plan, &netlist, &result)
+            .map_err(|err| format!("{role} default PRN generation failed: {err}"))
+    }
+
+    fn compare_bug662_header_tables(
+        &self,
+        reference: &XycePrnTable,
+        owner: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let reference_lines = Self::bug662_default_prn_token_lines(reference)?;
+        let owner_lines = Self::bug662_default_prn_token_lines(owner)?;
+        Self::validate_bug662_default_prn_token_lines(&reference_lines, reference.rows.len())?;
+        Self::validate_bug662_default_prn_token_lines(&owner_lines, owner.rows.len())?;
+        if reference_lines.first() != owner_lines.first()
+            || reference_lines.last() != owner_lines.last()
+        {
+            return Err(
+                "BUG 662 default PRNs do not preserve the same canonical header and completion footer"
+                    .into(),
+            );
+        }
+        self.compare_xyce_verify_transient_tables(reference, owner)
+    }
+
+    fn bug662_default_prn_token_lines(table: &XycePrnTable) -> Result<Vec<Vec<String>>, String> {
+        let expected_columns = ["Index", "TIME", "V(N14950)", "V(N15037)"];
+        if table.columns != expected_columns || table.rows.len() < 2 {
+            return Err(format!(
+                "BUG 662 default PRN requires columns {expected_columns:?} and at least two transient rows, got {:?} and {} row(s)",
+                table.columns,
+                table.rows.len()
+            ));
+        }
+        let mut lines = Vec::with_capacity(table.rows.len() + 2);
+        lines.push(table.columns.clone());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != expected_columns.len() {
+                return Err(format!(
+                    "BUG 662 default PRN row {row_index} has {} fields instead of {}",
+                    row.len(),
+                    expected_columns.len()
+                ));
+            }
+            if row[0].to_bits() != (row_index as Value).to_bits() {
+                return Err(format!(
+                    "BUG 662 default PRN row {row_index} does not preserve the canonical Index sequence"
+                ));
+            }
+            lines.push(
+                row.iter()
+                    .map(|value| Self::xyce_default_prn_text(*value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        lines.push(
+            ["End", "of", "Xyce(TM)", "Simulation"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        Ok(lines)
+    }
+
+    fn validate_bug662_default_prn_token_lines(
+        lines: &[Vec<String>],
+        data_rows: usize,
+    ) -> Result<(), String> {
+        let expected_header = ["Index", "TIME", "V(N14950)", "V(N15037)"];
+        let expected_footer = ["End", "of", "Xyce(TM)", "Simulation"];
+        if lines.len() != data_rows + 2
+            || lines.first().is_none_or(|line| line != &expected_header)
+            || lines.last().is_none_or(|line| line != &expected_footer)
+        {
+            return Err(format!(
+                "BUG 662 serialized PRN must contain the exact header, {data_rows} data rows, and normal completion footer"
+            ));
+        }
+        for (row_index, row) in lines[1..lines.len() - 1].iter().enumerate() {
+            if row.len() != expected_header.len() {
+                return Err(format!(
+                    "BUG 662 serialized PRN data row {row_index} has {} tokens instead of {}",
+                    row.len(),
+                    expected_header.len()
+                ));
+            }
+            let values = row
+                .iter()
+                .map(|token| {
+                    token.parse::<Value>().map_err(|err| {
+                        format!(
+                            "BUG 662 serialized PRN data row {row_index} has invalid numeric token '{token}': {err}"
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if values.iter().any(|value| !value.is_finite())
+                || values[0].to_bits() != (row_index as Value).to_bits()
+            {
+                return Err(format!(
+                    "BUG 662 serialized PRN data row {row_index} has non-finite data or a noncanonical Index"
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn compare_analytic_integer_dc_table(
@@ -43747,6 +43980,329 @@ impl XyceTestRunner {
         })())
     }
 
+    fn bug662_long_header_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug662HeaderContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = match relative.as_str() {
+            XYCE_BUG662_LONG_HEADER_OWNER_RECORD => XyceBug662HeaderRole::LongHeaderOwner,
+            XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD => XyceBug662HeaderRole::ShortHeaderReference,
+            _ => return None,
+        };
+        Some((|| {
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| "BUG 662 record has no sibling directory".to_string())?;
+            let owner_path = parent.join("headerLineLengthMoreThan256.cir");
+            let reference_path = parent.join("headerLineLengthLessThan256.cir");
+            if Self::normalize_manifest_key(&self.relative_key(&owner_path))
+                != XYCE_BUG662_LONG_HEADER_OWNER_RECORD
+                || Self::normalize_manifest_key(&self.relative_key(&reference_path))
+                    != XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD
+            {
+                return Err("owner/reference paths are not the exact BUG 662 sibling pair".into());
+            }
+            if !self.requires_upstream_wrapper(XYCE_BUG662_LONG_HEADER_OWNER_RECORD)
+                || self.requires_upstream_wrapper(XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD)
+            {
+                return Err(
+                    "exactly headerLineLengthMoreThan256.cir must own the removed wrapper".into(),
+                );
+            }
+            for (member_role, path) in [
+                ("long-header owner", &owner_path),
+                ("short-header reference", &reference_path),
+            ] {
+                let metadata = fs::metadata(path)
+                    .map_err(|err| format!("could not inspect {member_role}: {err}"))?;
+                if !metadata.is_file() || metadata.len() == 0 {
+                    return Err(format!("{member_role} must be a nonempty regular file"));
+                }
+                self.reject_wrapper_output_artifacts(path)
+                    .map_err(|err| format!("{member_role} {err}"))?;
+            }
+
+            let owner_source = fs::read_to_string(&owner_path)
+                .map_err(|err| format!("failed to read long-header owner: {err}"))?;
+            let reference_source = fs::read_to_string(&reference_path)
+                .map_err(|err| format!("failed to read short-header reference: {err}"))?;
+            Self::validate_bug662_header_source_pair(&owner_source, &reference_source)?;
+
+            let owner_plan = self.static_tran_plan_for_path_with_purpose(
+                &owner_path,
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            )?;
+            let reference_plan = self.static_tran_plan_for_path_with_purpose(
+                &reference_path,
+                XyceStaticTranPlanPurpose::RelationalFamily,
+            )?;
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_path)
+                .map_err(|err| format!("long-header owner parse failed: {err}"))?;
+            let reference_netlist =
+                Self::parse_xyce_netlist(&reference_plan.source, &reference_path)
+                    .map_err(|err| format!("short-header reference parse failed: {err}"))?;
+            Self::validate_bug662_header_member(
+                &owner_plan,
+                &owner_netlist,
+                XyceBug662HeaderRole::LongHeaderOwner,
+            )?;
+            Self::validate_bug662_header_member(
+                &reference_plan,
+                &reference_netlist,
+                XyceBug662HeaderRole::ShortHeaderReference,
+            )?;
+            Ok(XyceBug662HeaderContract {
+                owner_plan,
+                reference_plan,
+                role,
+            })
+        })())
+    }
+
+    fn validate_bug662_header_source_pair(
+        owner_source: &str,
+        reference_source: &str,
+    ) -> Result<(), String> {
+        let (owner_header, owner_body) =
+            Self::bug662_header_and_body(owner_source, XyceBug662HeaderRole::LongHeaderOwner)?;
+        let (reference_header, reference_body) = Self::bug662_header_and_body(
+            reference_source,
+            XyceBug662HeaderRole::ShortHeaderReference,
+        )?;
+        if owner_body != reference_body {
+            return Err(
+                "BUG 662 siblings differ outside the title/header wrapping boundary".into(),
+            );
+        }
+        let continuation = reference_header[1]
+            .strip_prefix('*')
+            .ok_or_else(|| "short-header continuation is not a SPICE comment".to_string())?;
+        if owner_header[0] != format!("{}{continuation}", reference_header[0]) {
+            return Err(
+                "long title is not the exact reconstruction of the split short-header title".into(),
+            );
+        }
+        if owner_header[0] != XYCE_BUG662_CANONICAL_LONG_TITLE {
+            return Err("BUG 662 reconstructed title content is not canonical".into());
+        }
+        Ok(())
+    }
+
+    fn bug662_header_and_body(
+        source: &str,
+        role: XyceBug662HeaderRole,
+    ) -> Result<(Vec<String>, String), String> {
+        if !source.is_ascii() {
+            return Err("BUG 662 title/header contract is ASCII-only".into());
+        }
+        let normalized = source.replace("\r\n", "\n");
+        if normalized.contains('\r') {
+            return Err("BUG 662 source contains a noncanonical bare carriage return".into());
+        }
+        let lines = normalized.lines().collect::<Vec<_>>();
+        let separator = lines
+            .iter()
+            .position(|line| line.is_empty())
+            .ok_or_else(|| "BUG 662 source has no blank title/body separator".to_string())?;
+        let header = lines[..separator]
+            .iter()
+            .map(|line| (*line).to_string())
+            .collect::<Vec<_>>();
+        let expected_header_lines = match role {
+            XyceBug662HeaderRole::LongHeaderOwner => 1,
+            XyceBug662HeaderRole::ShortHeaderReference => 2,
+        };
+        if header.len() != expected_header_lines || header.iter().any(|line| !line.starts_with('*'))
+        {
+            return Err(format!(
+                "BUG 662 {role:?} requires exactly {expected_header_lines} leading comment header line(s)"
+            ));
+        }
+        match role {
+            XyceBug662HeaderRole::LongHeaderOwner => {
+                if header[0].len() != 312 || header[0].len() <= 256 {
+                    return Err(format!(
+                        "BUG 662 owner title must be the canonical 312-byte over-256 line, got {} bytes",
+                        header[0].len()
+                    ));
+                }
+            }
+            XyceBug662HeaderRole::ShortHeaderReference => {
+                if header[0].len() != 256 || header[1].len() != 57 {
+                    return Err(format!(
+                        "BUG 662 reference title must split at the canonical 256/57-byte boundary, got {}/{}",
+                        header[0].len(),
+                        header[1].len()
+                    ));
+                }
+            }
+        }
+        let body = lines[separator + 1..].join("\n");
+        const CANONICAL_BODY: &str = "*Analysis directives:\n\
+.TRAN 0 100ns 0\n\
+.PRINT TRAN V(N14950) V(N15037)\n\
+\n\
+* source TRANSMISSIONLINE\n\
+T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50\n\
+R_R1 N14553 N14950 TC=0,0 R=50\n\
+R_R2 N15037 0 TC=0,0 R=50\n\
+V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
+\n\
+\n\
+.END";
+        if body != CANONICAL_BODY {
+            return Err(
+                "BUG 662 executable body is not the canonical transmission-line deck".into(),
+            );
+        }
+        Ok((header, body))
+    }
+
+    fn validate_bug662_header_member(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        role: XyceBug662HeaderRole,
+    ) -> Result<(), String> {
+        if plan.output_override
+            || plan.timeint_conststep
+            || !plan.steps.is_empty()
+            || plan.wrapper_tolerance.is_some()
+            || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+            || plan.print.probes != ["V(N14950)", "V(N15037)"]
+            || plan.tran.step.to_bits() != 0.0f64.to_bits()
+            || plan.tran.stop.to_bits() != (100.0f64 * 1e-9).to_bits()
+            || plan.tran.start.map(Value::to_bits) != Some(0.0f64.to_bits())
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "BUG 662 member requires one default two-probe .TRAN 0 100ns 0 plan without output overrides, STEPs, or tolerance directives; actual output_override={} conststep={} steps={} tolerance={:?} mode={:?} probes={:?} tran={:?}",
+                plan.output_override,
+                plan.timeint_conststep,
+                plan.steps.len(),
+                plan.wrapper_tolerance,
+                plan.comparison_mode,
+                plan.print.probes,
+                plan.tran
+            ));
+        }
+        let expected_contract = match role {
+            XyceBug662HeaderRole::LongHeaderOwner => XyceStaticTranContract::WrapperStatic,
+            XyceBug662HeaderRole::ShortHeaderReference => XyceStaticTranContract::PlainStatic,
+        };
+        if plan.contract != expected_contract {
+            return Err(format!(
+                "BUG 662 {role:?} has unexpected transient plan contract {:?}",
+                plan.contract
+            ));
+        }
+        if netlist.elements.len() != 4
+            || netlist.analyses.len() != 1
+            || !matches!(netlist.analyses[0], AnalysisCommand::Tran { .. })
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+        {
+            return Err(
+                "BUG 662 member admits exactly one T line, two resistors, one PULSE source, and one TRAN analysis"
+                    .into(),
+            );
+        }
+
+        let element = |name: &str| {
+            netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("BUG 662 member is missing {name}"))
+        };
+        let line = element("T_T1")?;
+        if line.nodes != ["N14950", "0", "N15037", "0"]
+            || !matches!(
+                line.kind,
+                ElementKind::TransmissionLine {
+                    z0: Some(z0),
+                    td: Some(td),
+                    freq: None,
+                    nl: None,
+                    model: None,
+                } if z0.to_bits() == 50.0f64.to_bits()
+                    && td.to_bits() == 10e-9f64.to_bits()
+            )
+        {
+            return Err("BUG 662 T_T1 topology or lossless-line parameters changed".into());
+        }
+        for (name, nodes) in [("R_R1", ["N14553", "N14950"]), ("R_R2", ["N15037", "0"])] {
+            let resistor = element(name)?;
+            let ElementKind::Resistor {
+                value,
+                value_expr: None,
+                model: None,
+                instance_params,
+                deferred_params,
+            } = &resistor.kind
+            else {
+                return Err(format!("{name} is not a canonical scalar resistor"));
+            };
+            let mut params = instance_params
+                .iter()
+                .map(|(param, value)| (param.to_ascii_lowercase(), value.to_bits()))
+                .collect::<Vec<_>>();
+            params.sort();
+            let mut expected_params = vec![
+                ("r".to_string(), 50.0f64.to_bits()),
+                ("tc".to_string(), 0.0f64.to_bits()),
+            ];
+            expected_params.sort();
+            if resistor.nodes != nodes
+                || value.to_bits() != 50.0f64.to_bits()
+                || !deferred_params.is_empty()
+                || params != expected_params
+            {
+                return Err(format!(
+                    "{name} topology, value, or TC=0,0 parameters changed: nodes={:?} value={} params={params:?} deferred={deferred_params:?}",
+                    resistor.nodes, value
+                ));
+            }
+        }
+        let source = element("V_V1")?;
+        if source.nodes != ["N14553", "0"]
+            || !matches!(
+                source.kind,
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Pulse {
+                    v1,
+                    v2,
+                    delay,
+                    rise,
+                    fall,
+                    width,
+                    period,
+                    phase,
+                    width_defaults_to_zero: false,
+                }) if v1.to_bits() == 0.0f64.to_bits()
+                    && v2.to_bits() == 5.0f64.to_bits()
+                    && delay.to_bits() == 0.0f64.to_bits()
+                    && rise.to_bits() == 0.1e-9f64.to_bits()
+                    && fall.to_bits() == 0.1e-9f64.to_bits()
+                    && width.to_bits() == 5e-9f64.to_bits()
+                    && period.to_bits() == 25e-9f64.to_bits()
+                    && phase.to_bits() == 0.0f64.to_bits()
+            )
+        {
+            return Err("BUG 662 V_V1 topology or PULSE waveform changed".into());
+        }
+        Ok(())
+    }
+
     fn validate_bug647_resistor_member(
         plan: &XyceStaticDcPlan,
         netlist: &Netlist,
@@ -49988,6 +50544,67 @@ VMON 1 2 0V\n\
 .PRINT DC V(1) I(VMON) R1:W R1:TC1 R1:TC2 R1:TEMP\n\
 .END\n";
 
+    fn bug662_header_sources() -> (String, String) {
+        let (short_title, continuation_body) = XYCE_BUG662_CANONICAL_LONG_TITLE.split_at(256);
+        let continuation = format!("*{continuation_body}");
+        let body = "*Analysis directives:\n\
+.TRAN 0 100ns 0\n\
+.PRINT TRAN V(N14950) V(N15037)\n\
+\n\
+* source TRANSMISSIONLINE\n\
+T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50\n\
+R_R1 N14553 N14950 TC=0,0 R=50\n\
+R_R2 N15037 0 TC=0,0 R=50\n\
+V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
+\n\
+\n\
+.END\n";
+        (
+            format!("{XYCE_BUG662_CANONICAL_LONG_TITLE}\n\n{body}"),
+            format!("{short_title}\n{continuation}\n\n{body}"),
+        )
+    }
+
+    fn bug662_header_fixture(
+        label: &str,
+        owner_source: &str,
+        reference_source: &str,
+    ) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-bug662-header-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let family = root.join("Netlists/Certification_Tests/BUG_662");
+        fs::create_dir_all(&family).expect("create BUG 662 fixture directory");
+        let owner_path = family.join("headerLineLengthMoreThan256.cir");
+        let reference_path = family.join("headerLineLengthLessThan256.cir");
+        fs::write(&owner_path, owner_source).expect("write BUG 662 long-header owner");
+        fs::write(&reference_path, reference_source).expect("write BUG 662 short-header reference");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_662/headerLineLengthMoreThan256.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 662 wrapper provenance");
+        let owner = XyceDeck {
+            path: owner_path,
+            relative_path: "Netlists/Certification_Tests/BUG_662/headerLineLengthMoreThan256.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let reference = XyceDeck {
+            path: reference_path,
+            relative_path: "Netlists/Certification_Tests/BUG_662/headerLineLengthLessThan256.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        (root, owner, reference, runner)
+    }
+
     fn bug647_resistor_fixture(
         label: &str,
         owner_source: &str,
@@ -50347,6 +50964,312 @@ VMON 1 2 0V\n\
             assert_eq!(result.contract, expected_contract);
         }
         fs::remove_dir_all(root).expect("remove BUG 647 execution fixture");
+    }
+
+    #[test]
+    fn bug662_header_pair_is_manifest_owned_and_structurally_qualified() {
+        let (owner_source, reference_source) = bug662_header_sources();
+        let (root, owner, reference, runner) =
+            bug662_header_fixture("qualification", &owner_source, &reference_source);
+        let owner_contract = runner
+            .bug662_long_header_relational_contract(&owner)
+            .expect("owner is selected")
+            .expect("owner pair qualifies");
+        let reference_contract = runner
+            .bug662_long_header_relational_contract(&reference)
+            .expect("reference is selected")
+            .expect("reference pair qualifies");
+        assert_eq!(owner_contract.role, XyceBug662HeaderRole::LongHeaderOwner);
+        assert_eq!(
+            reference_contract.role,
+            XyceBug662HeaderRole::ShortHeaderReference
+        );
+        assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+        assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+        fs::remove_dir_all(root).expect("remove BUG 662 qualification fixture");
+    }
+
+    #[test]
+    fn bug662_header_pair_rejects_header_and_executable_mutations() {
+        let (owner_source, reference_source) = bug662_header_sources();
+        let mut short_boundary_mutation = reference_source.clone();
+        short_boundary_mutation.remove(255);
+        let mutations = [
+            (
+                owner_source.replacen("SCHEMATIC1", "SCHEMATIC", 1),
+                reference_source.clone(),
+                "owner over-256 boundary",
+            ),
+            (
+                owner_source.clone(),
+                short_boundary_mutation,
+                "reference 256-byte boundary",
+            ),
+            (
+                owner_source.replacen("SCHEMATIC1-bias", "SCHEMATIC1-baas", 1),
+                reference_source.replacen("SCHEMATIC1-bias", "SCHEMATIC1-baas", 1),
+                "same-length canonical title content",
+            ),
+            (
+                owner_source.replace("Z0=50", "Z0=75"),
+                reference_source.clone(),
+                "owner transmission-line value",
+            ),
+            (
+                owner_source.clone(),
+                reference_source.replace("V(N14950) V(N15037)", "V(N15037) V(N14950)"),
+                "reference probe order",
+            ),
+            (
+                owner_source.replace(".END", ".OPTIONS GMIN=1e-9\n.END"),
+                reference_source.clone(),
+                "statement envelope",
+            ),
+        ];
+        for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+            let (root, owner, _, runner) = bug662_header_fixture(
+                &format!("mutation-{index}"),
+                &owner_source,
+                &reference_source,
+            );
+            assert!(
+                runner
+                    .bug662_long_header_relational_contract(&owner)
+                    .expect("owner remains selected")
+                    .is_err(),
+                "{reason} mutation must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove BUG 662 mutation fixture");
+        }
+    }
+
+    #[test]
+    fn bug662_header_pair_requires_owner_only_wrapper_provenance() {
+        let (owner_source, reference_source) = bug662_header_sources();
+        let (root, owner, _, _) =
+            bug662_header_fixture("manifest", &owner_source, &reference_source);
+        for manifest in [
+            "",
+            "Netlists/Certification_Tests/BUG_662/headerLineLengthLessThan256.cir\trequires_upstream_wrapper\n",
+            "Netlists/Certification_Tests/BUG_662/headerLineLengthMoreThan256.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_662/headerLineLengthLessThan256.cir\trequires_upstream_wrapper\n",
+        ] {
+            fs::write(root.join(HARNESS_MANIFEST_FILE), manifest)
+                .expect("mutate BUG 662 provenance");
+            let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+            assert!(
+                runner
+                    .bug662_long_header_relational_contract(&owner)
+                    .expect("exact owner path remains selected")
+                    .is_err(),
+                "non-owner-only BUG 662 provenance must fail closed"
+            );
+        }
+        fs::remove_dir_all(root).expect("remove BUG 662 provenance fixture");
+    }
+
+    #[test]
+    fn bug662_header_comparator_serializes_full_prn_and_uses_xyce_verify_defaults() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let reference = XycePrnTable {
+            columns: vec![
+                "Index".into(),
+                "TIME".into(),
+                "V(N14950)".into(),
+                "V(N15037)".into(),
+            ],
+            rows: vec![
+                vec![0.0, 0.0, 1.0, 0.0],
+                vec![1.0, 1.0, 1.0, 0.0],
+                vec![2.0, 2.0, 1.0, 0.0],
+            ],
+        };
+        let tokens = XyceTestRunner::bug662_default_prn_token_lines(&reference)
+            .expect("canonical BUG 662 PRN serializes");
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0], reference.columns);
+        assert_eq!(tokens[4], ["End", "of", "Xyce(TM)", "Simulation"]);
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &reference)
+                .expect("identical serialized PRNs compare")
+                .is_empty()
+        );
+
+        let mut within_default_rms = reference.clone();
+        within_default_rms.rows[1][2] += 1.0e-4;
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &within_default_rms)
+                .expect("default xyce_verify tolerance is evaluated")
+                .is_empty()
+        );
+        let duplicate_time = XycePrnTable {
+            columns: reference.columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0, 0.0],
+                vec![1.0, 1.0, 1.0, 0.0],
+                vec![2.0, 1.0, 1.0, 0.0],
+                vec![3.0, 2.0, 1.0, 0.0],
+            ],
+        };
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &duplicate_time)
+                .expect("Release 7.10 duplicate-time normalization is evaluated")
+                .is_empty()
+        );
+        let mut outside_default_rms = reference.clone();
+        outside_default_rms.rows[1][2] = 2.0;
+        assert_eq!(
+            runner
+                .compare_bug662_header_tables(&reference, &outside_default_rms)
+                .expect("out-of-tolerance waveform compares")
+                .len(),
+            1
+        );
+        let mut bad_index = reference.clone();
+        bad_index.rows[1][0] = 2.0;
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &bad_index)
+                .is_err()
+        );
+        let mut starts_before_reference = reference.clone();
+        starts_before_reference.rows[0][1] = -1.0;
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &starts_before_reference)
+                .is_err(),
+            "good data must cover the test start"
+        );
+        let mut ends_after_reference = reference.clone();
+        ends_after_reference.rows[2][1] = 3.0;
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &ends_after_reference)
+                .is_err(),
+            "good data must cover the test end"
+        );
+        let mut nonfinite = reference.clone();
+        nonfinite.rows[1][2] = Value::NAN;
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &nonfinite)
+                .is_err()
+        );
+        let mut changed_header = reference.clone();
+        changed_header.columns[2] = "V(OTHER)".into();
+        assert!(
+            runner
+                .compare_bug662_header_tables(&reference, &changed_header)
+                .is_err()
+        );
+        let mut changed_footer = tokens.clone();
+        changed_footer[4][3] = "Sweep".into();
+        assert!(
+            XyceTestRunner::validate_bug662_default_prn_token_lines(&changed_footer, 3).is_err()
+        );
+    }
+
+    #[test]
+    fn bug662_header_candidate_census_is_exactly_two_records() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let discovered = runner.discover_tests();
+        let discovered_by_path = discovered
+            .iter()
+            .map(|deck| {
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    deck,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut independent_candidates = BTreeSet::new();
+        for owner in discovered.iter().filter(|deck| {
+            runner.requires_upstream_wrapper(&deck.relative_path)
+                && deck
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.eq_ignore_ascii_case("headerLineLengthMoreThan256.cir")
+                    })
+        }) {
+            let owner_source = fs::read_to_string(&owner.path).expect("read BUG 662 owner");
+            let owner_lines = owner_source.lines().collect::<Vec<_>>();
+            let reference_key = XyceTestRunner::normalize_manifest_key(
+                &runner.relative_key(&owner.path.with_file_name("headerLineLengthLessThan256.cir")),
+            );
+            let Some(reference) = discovered_by_path.get(&reference_key) else {
+                continue;
+            };
+            let reference_source =
+                fs::read_to_string(&reference.path).expect("read BUG 662 reference");
+            let reference_lines = reference_source.lines().collect::<Vec<_>>();
+            if owner_lines.first().is_some_and(|line| line.len() == 312)
+                && reference_lines
+                    .first()
+                    .is_some_and(|line| line.len() == 256)
+                && reference_lines.get(1).is_some_and(|line| line.len() == 57)
+                && owner_source.contains(".TRAN 0 100ns 0")
+                && reference_source.contains(".TRAN 0 100ns 0")
+                && owner_source.contains("T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50")
+                && reference_source.contains("T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50")
+            {
+                independent_candidates
+                    .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+                independent_candidates.insert(reference_key);
+            }
+        }
+        let selected = discovered
+            .iter()
+            .filter_map(|deck| {
+                runner
+                    .bug662_long_header_relational_contract(deck)
+                    .map(|contract| {
+                        contract.unwrap_or_else(|err| {
+                            panic!("BUG 662 header candidate failed qualification: {err}")
+                        });
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(independent_candidates, selected);
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                XYCE_BUG662_LONG_HEADER_OWNER_RECORD.to_string(),
+                XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn bug662_header_relational_pair_executes_both_roles() {
+        let (owner_source, reference_source) = bug662_header_sources();
+        let (root, owner, reference, runner) =
+            bug662_header_fixture("execution", &owner_source, &reference_source);
+        for (deck, expected_contract) in [
+            (owner, "bug662_long_header_relational_wrapper_owner"),
+            (
+                reference,
+                "bug662_long_header_relational_wrapper_short_reference",
+            ),
+        ] {
+            let result = runner.run_discovered_test(&deck);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "BUG 662 header role must execute: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+        }
+        fs::remove_dir_all(root).expect("remove BUG 662 execution fixture");
     }
 
     #[test]
