@@ -104,6 +104,10 @@ const XYCE_BUG662_LONG_HEADER_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_662/headerlinelengthmorethan256.cir";
 const XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_662/headerlinelengthlessthan256.cir";
+const XYCE_BUG667_NODESET_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_667_son/nodeset_in_subckt.cir";
+const XYCE_BUG667_NODESET_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/bug_667_son/nodeset_not_in_subckt.cir";
 const XYCE_BUG662_CANONICAL_LONG_TITLE: &str = r#"** Converted using XDM 0.20rc from /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/pspice_9_1.xml to /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/xyce_6_3.xml ** ** Profile: "SCHEMATIC1-bias"  [ H:\Xyce\PSpice\Netlists\TransmissionLine-PSpiceFiles\SCHEMATIC1\bias.sim ]"#;
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
@@ -495,6 +499,30 @@ struct XyceBug662HeaderContract {
     owner_plan: XyceStaticTranPlan,
     reference_plan: XyceStaticTranPlan,
     role: XyceBug662HeaderRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug667NodesetRole {
+    ScopedOwner,
+    ExplicitHierarchicalReference,
+}
+
+impl XyceBug667NodesetRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::ScopedOwner => "bug667_nodeset_relational_wrapper_owner",
+            Self::ExplicitHierarchicalReference => {
+                "bug667_nodeset_relational_wrapper_explicit_reference"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug667NodesetContract {
+    owner_plan: XyceStaticTranPlan,
+    reference_plan: XyceStaticTranPlan,
+    role: XyceBug667NodesetRole,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2778,6 +2806,28 @@ impl XyceTestRunner {
                     start,
                     "bug662_long_header_relational_wrapper",
                     format!("BUG 662 long-header relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.bug667_nodeset_relational_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_bug667_nodeset_relational_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "bug667_nodeset_relational_wrapper",
+                    format!("BUG 667 NODESET relational qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -12345,6 +12395,122 @@ impl XyceTestRunner {
             }
         }
         Ok(())
+    }
+
+    fn run_bug667_nodeset_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug667NodesetContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        // Preserve the removed wrapper's execution order. Each sibling is
+        // parsed and simulated independently, including its own adaptive
+        // transient grid, before reproducing the wrapper's raw PRN diff.
+        let owner = match self.simulate_bug667_nodeset_member(
+            &contract.owner_plan,
+            start,
+            "subcircuit-scoped owner",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 667 scoped owner execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let reference = match self.simulate_bug667_nodeset_member(
+            &contract.reference_plan,
+            start,
+            "explicit hierarchical reference",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 667 explicit reference execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mismatches = match self.compare_bug667_nodeset_tables(&owner, &reference) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 667 raw default-PRN diff adapter failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} BUG 667 exact PRN mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn simulate_bug667_nodeset_member(
+        &self,
+        plan: &XyceStaticTranPlan,
+        start: Instant,
+        role: &str,
+    ) -> Result<XycePrnTable, String> {
+        let (netlist, result) = self
+            .run_transient_family_plan(plan, start, None)
+            .map_err(|err| format!("{role} parse/simulation failed: {err}"))?;
+        Self::transient_family_result_to_prn_table(plan, &netlist, &result)
+            .map_err(|err| format!("{role} default PRN generation failed: {err}"))
+    }
+
+    fn compare_bug667_nodeset_tables(
+        &self,
+        owner: &XycePrnTable,
+        reference: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        const COLUMNS: [&str; 8] = [
+            "Index",
+            "TIME",
+            "V(N15206)",
+            "V(N15971)",
+            "V(N15554)",
+            "V(N15997)",
+            "V(N16554)",
+            "V(N16997)",
+        ];
+        if owner.columns != COLUMNS
+            || reference.columns != COLUMNS
+            || owner.rows.len() < 2
+            || reference.rows.len() < 2
+        {
+            return Err(format!(
+                "BUG 667 default PRNs require the exact eight-column header and complete nonempty transient domains: owner={:?}/{} reference={:?}/{}",
+                owner.columns,
+                owner.rows.len(),
+                reference.columns,
+                reference.rows.len()
+            ));
+        }
+
+        // The upstream oracle is plain `diff`, not xyce_verify. The shared
+        // exact serializer comparison requires equal row counts, canonical
+        // Index sequences, case-sensitive columns, and byte-identical
+        // precision-8 scientific tokens for every TIME and probe value.
+        self.compare_serialized_default_prn_tables(owner, reference)
     }
 
     fn compare_analytic_integer_dc_table(
@@ -44061,6 +44227,516 @@ impl XyceTestRunner {
         })())
     }
 
+    fn bug667_nodeset_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug667NodesetContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = match relative.as_str() {
+            XYCE_BUG667_NODESET_OWNER_RECORD => XyceBug667NodesetRole::ScopedOwner,
+            XYCE_BUG667_NODESET_REFERENCE_RECORD => {
+                XyceBug667NodesetRole::ExplicitHierarchicalReference
+            }
+            _ => return None,
+        };
+        Some((|| {
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| "BUG 667 NODESET record has no sibling directory".to_string())?;
+            let owner_path = parent.join("nodeset_in_subckt.cir");
+            let reference_path = parent.join("nodeset_not_in_subckt.cir");
+            if Self::normalize_manifest_key(&self.relative_key(&owner_path))
+                != XYCE_BUG667_NODESET_OWNER_RECORD
+                || Self::normalize_manifest_key(&self.relative_key(&reference_path))
+                    != XYCE_BUG667_NODESET_REFERENCE_RECORD
+            {
+                return Err("owner/reference paths are not the exact BUG 667 sibling pair".into());
+            }
+            if !self.requires_upstream_wrapper(XYCE_BUG667_NODESET_OWNER_RECORD)
+                || self.requires_upstream_wrapper(XYCE_BUG667_NODESET_REFERENCE_RECORD)
+            {
+                return Err(
+                    "exactly nodeset_in_subckt.cir must own the removed upstream wrapper".into(),
+                );
+            }
+            for (member_role, path) in [
+                ("subcircuit-scoped owner", &owner_path),
+                ("explicit hierarchical reference", &reference_path),
+            ] {
+                let metadata = fs::metadata(path)
+                    .map_err(|err| format!("could not inspect {member_role}: {err}"))?;
+                if !metadata.is_file() || metadata.len() == 0 {
+                    return Err(format!("{member_role} must be a nonempty regular file"));
+                }
+                self.reject_wrapper_output_artifacts(path)
+                    .map_err(|err| format!("{member_role} {err}"))?;
+            }
+
+            let owner_plan = self.static_tran_plan_for_path_with_purpose(
+                &owner_path,
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            )?;
+            let reference_plan = self.static_tran_plan_for_path_with_purpose(
+                &reference_path,
+                XyceStaticTranPlanPurpose::RelationalFamily,
+            )?;
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_path)
+                .map_err(|err| format!("subcircuit-scoped owner parse failed: {err}"))?;
+            let reference_netlist =
+                Self::parse_xyce_netlist(&reference_plan.source, &reference_path).map_err(
+                    |err| format!("explicit hierarchical reference parse failed: {err}"),
+                )?;
+            Self::validate_bug667_nodeset_member(
+                &owner_plan,
+                &owner_netlist,
+                XyceBug667NodesetRole::ScopedOwner,
+            )?;
+            Self::validate_bug667_nodeset_member(
+                &reference_plan,
+                &reference_netlist,
+                XyceBug667NodesetRole::ExplicitHierarchicalReference,
+            )?;
+
+            let owner_nodesets = Self::bug667_effective_nodeset_map(&owner_netlist)?;
+            let reference_nodesets = Self::bug667_effective_nodeset_map(&reference_netlist)?;
+            let expected_nodesets = BTreeMap::from([
+                ("n15967".to_string(), 0.5f64.to_bits()),
+                ("x_x1.mid".to_string(), 0.5f64.to_bits()),
+            ]);
+            if owner_nodesets != expected_nodesets
+                || reference_nodesets != expected_nodesets
+                || owner_nodesets != reference_nodesets
+            {
+                return Err(format!(
+                    "BUG 667 effective NODESET maps differ from the exact hierarchical equivalence contract: owner={owner_nodesets:?} reference={reference_nodesets:?}"
+                ));
+            }
+
+            Ok(XyceBug667NodesetContract {
+                owner_plan,
+                reference_plan,
+                role,
+            })
+        })())
+    }
+
+    fn validate_bug667_nodeset_member(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        role: XyceBug667NodesetRole,
+    ) -> Result<(), String> {
+        Self::validate_bug667_nodeset_statement_envelope(&plan.source)?;
+        let expected_contract = match role {
+            XyceBug667NodesetRole::ScopedOwner => XyceStaticTranContract::WrapperStatic,
+            XyceBug667NodesetRole::ExplicitHierarchicalReference => {
+                XyceStaticTranContract::PlainStatic
+            }
+        };
+        let expected_probes = [
+            "V(N15206)",
+            "V(N15971)",
+            "V(N15554)",
+            "V(N15997)",
+            "V(N16554)",
+            "V(N16997)",
+        ];
+        if plan.contract != expected_contract
+            || plan.output_override
+            || plan.timeint_conststep
+            || !plan.steps.is_empty()
+            || plan.wrapper_tolerance.is_some()
+            || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+            || plan.print.probes != expected_probes
+            || plan.reference_path.is_file()
+            || plan.tran.step.to_bits() != 0.0f64.to_bits()
+            || plan.tran.stop.to_bits() != 10e-3f64.to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "BUG 667 member requires one ordinary default-PRN '.TRAN 0 10ms' with the exact six ordered probes and no STEP, output override, tolerance, reference artifact, START, MAXSTEP, or UIC state: contract={:?} probes={:?} tran={:?}",
+                plan.contract, plan.print.probes, plan.tran
+            ));
+        }
+        if netlist.title.trim() != "*Analysis directives:"
+            || netlist.elements.len() != 14
+            || netlist.subcircuits.len() != 1
+            || !netlist.models.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }])
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(
+                "BUG 667 member admits only the canonical 14-element RC/PULSE harness, one two-element subcircuit, two NODESET hints, and one TRAN analysis"
+                    .into(),
+            );
+        }
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = element.name.to_ascii_lowercase();
+            if elements.insert(name.clone(), element).is_some() {
+                return Err(format!(
+                    "BUG 667 member contains duplicate element '{name}'"
+                ));
+            }
+        }
+        let expected_names = [
+            "r_r1", "r_r2", "c_c1", "r_r3", "v_v1", "v_v2", "r_r4", "r_r5", "c_c2", "r_r6", "v_v3",
+            "r_r7", "x_x1", "r_r8",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+        if elements.keys().cloned().collect::<BTreeSet<_>>() != expected_names {
+            return Err(format!(
+                "BUG 667 top-level element inventory changed: {:?}",
+                elements.keys().collect::<Vec<_>>()
+            ));
+        }
+
+        for (name, nodes, resistance) in [
+            ("r_r1", ["N15206", "N15971"], 1e3),
+            ("r_r2", ["N15975", "N15971"], 10.0),
+            ("r_r3", ["N16095", "0"], 10.0),
+            ("r_r4", ["N15554", "N15997"], 1e3),
+            ("r_r5", ["N15967", "N15997"], 10.0),
+            ("r_r6", ["N16112", "0"], 10.0),
+            ("r_r7", ["N16554", "N16997"], 1e3),
+            ("r_r8", ["N17112", "0"], 10.0),
+        ] {
+            Self::validate_bug667_scalar_resistor(elements[name], nodes, resistance)?;
+        }
+        for (name, nodes) in [
+            ("c_c1", ["N16095", "N15975"]),
+            ("c_c2", ["N16112", "N15967"]),
+        ] {
+            Self::validate_bug667_scalar_capacitor(elements[name], nodes, 1e-6)?;
+        }
+        for (name, node) in [("v_v1", "N15206"), ("v_v2", "N15554"), ("v_v3", "N16554")] {
+            let source = elements[name];
+            if source.nodes != [node, "0"]
+                || !matches!(
+                    source.kind,
+                    ElementKind::VoltageSource(crate::netlist::SourceSpec::Pulse {
+                        v1,
+                        v2,
+                        delay,
+                        rise,
+                        fall,
+                        width,
+                        period,
+                        phase,
+                        width_defaults_to_zero: false,
+                    }) if v1.to_bits() == 0.0f64.to_bits()
+                        && v2.to_bits() == 1.0f64.to_bits()
+                        && delay.to_bits() == 0.0f64.to_bits()
+                        && rise.to_bits() == 1e-3f64.to_bits()
+                        && fall.to_bits() == 1e-3f64.to_bits()
+                        && width.to_bits() == 5e-3f64.to_bits()
+                        && period.to_bits() == 1.0f64.to_bits()
+                        && phase.to_bits() == 0.0f64.to_bits()
+                )
+            {
+                return Err(format!("{name} topology or PULSE waveform changed"));
+            }
+        }
+
+        let instance = elements["x_x1"];
+        let ElementKind::Subcircuit {
+            subckt_name,
+            params,
+        } = &instance.kind
+        else {
+            return Err("X_X1 is not the canonical subcircuit instance".into());
+        };
+        if instance.nodes != ["N16997", "N17112"]
+            || !subckt_name.eq_ignore_ascii_case("NODESET_Subckt")
+        {
+            return Err("X_X1 topology or subcircuit binding changed".into());
+        }
+        match role {
+            XyceBug667NodesetRole::ScopedOwner => match params.as_slice() {
+                [(name, ParametricValue::Resolved(value))]
+                    if name.eq_ignore_ascii_case("vmid") && value.to_bits() == 0.5f64.to_bits() => {
+                }
+                _ => return Err("owner X_X1 must retain the exact vmid=0.5 override".into()),
+            },
+            XyceBug667NodesetRole::ExplicitHierarchicalReference if params.is_empty() => {}
+            XyceBug667NodesetRole::ExplicitHierarchicalReference => {
+                return Err("reference X_X1 must not carry an instance parameter".into());
+            }
+        }
+
+        let subcircuit = &netlist.subcircuits[0];
+        if !subcircuit.name.eq_ignore_ascii_case("NODESET_Subckt")
+            || subcircuit.ports.len() != 2
+            || !subcircuit.ports[0].eq_ignore_ascii_case("in")
+            || !subcircuit.ports[1].eq_ignore_ascii_case("out")
+            || subcircuit.elements.len() != 2
+            || !subcircuit.initial_conditions.is_empty()
+            || !subcircuit.body_params.is_empty()
+            || !subcircuit.expr_params.is_empty()
+            || !subcircuit.string_params.is_empty()
+            || !subcircuit.body_expr_params.is_empty()
+            || !subcircuit.body_string_params.is_empty()
+            || !subcircuit.body_functions.is_empty()
+            || !subcircuit.local_options.is_empty()
+            || subcircuit.library_ref.is_some()
+            || !subcircuit.nested_subcircuits.is_empty()
+        {
+            return Err("NODESET_Subckt definition shape or auxiliary state changed".into());
+        }
+        let sub_resistor = subcircuit
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .ok_or_else(|| "NODESET_Subckt is missing R1".to_string())?;
+        Self::validate_bug667_scalar_resistor(sub_resistor, ["in", "mid"], 10.0)?;
+        let sub_capacitor = subcircuit
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("C1"))
+            .ok_or_else(|| "NODESET_Subckt is missing C1".to_string())?;
+        Self::validate_bug667_scalar_capacitor(sub_capacitor, ["mid", "out"], 1e-6)?;
+
+        match role {
+            XyceBug667NodesetRole::ScopedOwner => {
+                if subcircuit.params.len() != 1
+                    || !subcircuit.params[0].0.eq_ignore_ascii_case("vmid")
+                    || subcircuit.params[0].1.to_bits() != 5.0f64.to_bits()
+                    || subcircuit.node_sets.len() != 1
+                    || !netlist.node_sets.iter().any(|nodeset| {
+                        nodeset.node.eq_ignore_ascii_case("N15967")
+                            && nodeset.voltage.to_bits() == 0.5f64.to_bits()
+                            && nodeset.voltage_expr.is_none()
+                    })
+                {
+                    return Err(
+                        "owner must retain vmid=5.0 formal, vmid=0.5 instance override, local V(mid)={vmid}, and common V(N15967)=0.5"
+                            .into(),
+                    );
+                }
+                let local = &subcircuit.node_sets[0];
+                if !local.node.eq_ignore_ascii_case("mid")
+                    || local.voltage.to_bits() != 5.0f64.to_bits()
+                    || local
+                        .voltage_expr
+                        .as_deref()
+                        .is_none_or(|expr| !expr.eq_ignore_ascii_case("vmid"))
+                    || netlist.node_sets.len() != 1
+                {
+                    return Err(
+                        "owner local NODESET must remain deferred as V(mid)={vmid} before instance-scope flattening"
+                            .into(),
+                    );
+                }
+            }
+            XyceBug667NodesetRole::ExplicitHierarchicalReference => {
+                if !subcircuit.params.is_empty()
+                    || !subcircuit.node_sets.is_empty()
+                    || netlist.node_sets.len() != 2
+                {
+                    return Err(
+                        "reference subcircuit must have no parameters/local NODESET and exactly two top-level NODESET hints"
+                            .into(),
+                    );
+                }
+                let raw = netlist
+                    .node_sets
+                    .iter()
+                    .map(|nodeset| {
+                        (
+                            nodeset.node.to_ascii_lowercase().replace(':', "."),
+                            nodeset.voltage.to_bits(),
+                            nodeset.voltage_expr.is_none(),
+                        )
+                    })
+                    .collect::<BTreeSet<_>>();
+                if raw
+                    != BTreeSet::from([
+                        ("n15967".to_string(), 0.5f64.to_bits(), true),
+                        ("x_x1.mid".to_string(), 0.5f64.to_bits(), true),
+                    ])
+                {
+                    return Err(format!(
+                        "reference raw top-level NODESET representation changed: {raw:?}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_bug667_scalar_resistor(
+        element: &crate::netlist::Element,
+        nodes: [&str; 2],
+        expected: Value,
+    ) -> Result<(), String> {
+        let ElementKind::Resistor {
+            value,
+            value_expr: None,
+            model: None,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return Err(format!(
+                "BUG 667 element '{}' is not a scalar resistor",
+                element.name
+            ));
+        };
+        if element.nodes.len() != 2
+            || !element.nodes[0].eq_ignore_ascii_case(nodes[0])
+            || !element.nodes[1].eq_ignore_ascii_case(nodes[1])
+            || value.to_bits() != expected.to_bits()
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+        {
+            return Err(format!(
+                "BUG 667 resistor '{}' topology, value, or parameter state changed",
+                element.name
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_bug667_scalar_capacitor(
+        element: &crate::netlist::Element,
+        nodes: [&str; 2],
+        expected: Value,
+    ) -> Result<(), String> {
+        let ElementKind::Capacitor {
+            value,
+            value_expr: None,
+            initial_voltage: None,
+            model: None,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return Err(format!(
+                "BUG 667 element '{}' is not a scalar capacitor",
+                element.name
+            ));
+        };
+        if element.nodes.len() != 2
+            || !element.nodes[0].eq_ignore_ascii_case(nodes[0])
+            || !element.nodes[1].eq_ignore_ascii_case(nodes[1])
+            || value.to_bits() != expected.to_bits()
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+        {
+            return Err(format!(
+                "BUG 667 capacitor '{}' topology, value, or parameter state changed",
+                element.name
+            ));
+        }
+        Ok(())
+    }
+
+    fn bug667_effective_nodeset_map(netlist: &Netlist) -> Result<BTreeMap<String, u64>, String> {
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|err| format!("BUG 667 hierarchy flattening failed: {err}"))?;
+        let mut nodesets = BTreeMap::new();
+        for nodeset in netlist
+            .node_sets
+            .iter()
+            .chain(flattened.scoped_node_sets.iter())
+        {
+            if !nodeset.voltage.is_finite() || nodeset.voltage_expr.is_some() {
+                return Err(format!(
+                    "BUG 667 effective NODESET '{}' is nonfinite or remains deferred",
+                    nodeset.node
+                ));
+            }
+            let node = if nodeset.node.contains([':', '.']) {
+                Engine::resolve_hierarchical_node_name(netlist, &nodeset.node).ok_or_else(|| {
+                    format!(
+                        "BUG 667 hierarchical NODESET target '{}' does not resolve through the parsed instance tree",
+                        nodeset.node
+                    )
+                })?
+            } else {
+                nodeset.node.clone()
+            }
+            .replace(':', ".")
+            .to_ascii_lowercase();
+            if nodesets
+                .insert(node.clone(), nodeset.voltage.to_bits())
+                .is_some()
+            {
+                return Err(format!(
+                    "BUG 667 effective NODESET map contains duplicate node '{node}'"
+                ));
+            }
+        }
+        Ok(nodesets)
+    }
+
+    fn validate_bug667_nodeset_statement_envelope(source: &str) -> Result<(), String> {
+        let body = source.split_once('\n').map_or("", |(_, body)| body);
+        let mut counts = BTreeMap::<String, usize>::new();
+        for line in Self::logical_netlist_lines(body) {
+            let statement = Self::strip_netlist_comment(&line).trim();
+            if statement.is_empty() {
+                continue;
+            }
+            let head = statement
+                .split_ascii_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let key = if head.starts_with('.') {
+                match head.as_str() {
+                    ".tran" | ".print" | ".nodeset" | ".subckt" | ".ends" | ".end" => head,
+                    _ => return Err(format!("unrelated directive '{head}' in BUG 667 pair")),
+                }
+            } else {
+                match head.as_bytes().first().map(u8::to_ascii_lowercase) {
+                    Some(b'r') => "r".to_string(),
+                    Some(b'c') => "c".to_string(),
+                    Some(b'v') => "v".to_string(),
+                    Some(b'x') => "x".to_string(),
+                    _ => return Err(format!("unrelated element '{head}' in BUG 667 pair")),
+                }
+            };
+            *counts.entry(key).or_default() += 1;
+        }
+        for (key, expected) in [
+            ("r", 9),
+            ("c", 3),
+            ("v", 3),
+            ("x", 1),
+            (".tran", 1),
+            (".print", 1),
+            (".nodeset", 2),
+            (".subckt", 1),
+            (".ends", 1),
+            (".end", 1),
+        ] {
+            if counts.remove(key) != Some(expected) {
+                return Err(format!(
+                    "BUG 667 statement count for '{key}' must be {expected}"
+                ));
+            }
+        }
+        if !counts.is_empty() {
+            return Err(format!("BUG 667 source has extra statements: {counts:?}"));
+        }
+        Ok(())
+    }
+
     fn validate_bug662_header_source_pair(
         owner_source: &str,
         reference_source: &str,
@@ -50544,6 +51220,76 @@ VMON 1 2 0V\n\
 .PRINT DC V(1) I(VMON) R1:W R1:TC1 R1:TC2 R1:TEMP\n\
 .END\n";
 
+    const BUG667_NODESET_OWNER_SOURCE: &str = "*Analysis directives:\n\
+.TRAN  0 10ms\n\
+.PRINT TRAN V(N15206) V(N15971) V(N15554) V(N15997)\n\
++  V(N16554) V(N16997)\n\
+\n\
+* RC Decay\n\
+R_R1         N15206 N15971  1k\n\
+R_R2         N15975 N15971  10\n\
+C_C1         N16095 N15975  1u\n\
+R_R3         N16095 0  10\n\
+V_V1         N15206 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+\n\
+*RC Decay with NODESET\n\
+V_V2         N15554 0\n\
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s\n\
+R_R4         N15554 N15997  1k\n\
+R_R5         N15967 N15997  10\n\
+C_C2         N16112 N15967  1u\n\
+R_R6         N16112 0  10\n\
+.NODESET     V(N15967) =0.5\n\
+\n\
+*RC Decay with NODESET in subcircuit\n\
+V_V3         N16554 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+R_R7         N16554 N16997  1k\n\
+X_X1         N16997 N17112  NODESET_Subckt params: vmid=0.5\n\
+R_R8         N17112 0 10\n\
+\n\
+.SUBCKT NODESET_Subckt in out params: vmid=5.0\n\
+R1          in  mid 10\n\
+C1          mid out 1u\n\
+.NODESET    V(mid)={vmid}\n\
+.ENDS\n\
+\n\
+.END\n";
+
+    const BUG667_NODESET_REFERENCE_SOURCE: &str = "*Analysis directives:\n\
+.TRAN  0 10ms\n\
+.PRINT TRAN V(N15206) V(N15971) V(N15554) V(N15997)\n\
++  V(N16554) V(N16997)\n\
+\n\
+* RC Decay\n\
+R_R1         N15206 N15971  1k\n\
+R_R2         N15975 N15971  10\n\
+C_C1         N16095 N15975  1u\n\
+R_R3         N16095 0  10\n\
+V_V1         N15206 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+\n\
+*RC Decay with NODESET\n\
+V_V2         N15554 0\n\
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s\n\
+R_R4         N15554 N15997  1k\n\
+R_R5         N15967 N15997  10\n\
+C_C2         N16112 N15967  1u\n\
+R_R6         N16112 0  10\n\
+.NODESET     V(N15967) =0.5\n\
+\n\
+*RC Decay with NODESET in subcircuit\n\
+V_V3         N16554 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+R_R7         N16554 N16997  1k\n\
+X_X1         N16997 N17112  NODESET_Subckt\n\
+R_R8         N17112 0 10\n\
+\n\
+.SUBCKT NODESET_Subckt in out\n\
+R1          in  mid 10\n\
+C1          mid out 1u\n\
+.ENDS\n\
+.NODESET    V(X_X1:mid )=0.5\n\
+\n\
+.END\n";
+
     fn bug662_header_sources() -> (String, String) {
         let (short_title, continuation_body) = XYCE_BUG662_CANONICAL_LONG_TITLE.split_at(256);
         let continuation = format!("*{continuation_body}");
@@ -50638,6 +51384,46 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
         let reference = XyceDeck {
             path: reference_path,
             relative_path: "Netlists/Certification_Tests/BUG_647_SON/semic_resistor_modpar.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        (root, owner, reference, runner)
+    }
+
+    fn bug667_nodeset_fixture(
+        label: &str,
+        owner_source: &str,
+        reference_source: &str,
+    ) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-bug667-nodeset-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let family = root.join("Netlists/Certification_Tests/BUG_667_SON");
+        fs::create_dir_all(&family).expect("create BUG 667 NODESET fixture directory");
+        let owner_path = family.join("nodeset_in_subckt.cir");
+        let reference_path = family.join("nodeset_not_in_subckt.cir");
+        fs::write(&owner_path, owner_source).expect("write BUG 667 NODESET owner");
+        fs::write(&reference_path, reference_source).expect("write BUG 667 NODESET reference");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_667_SON/nodeset_in_subckt.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 667 NODESET wrapper provenance");
+        let owner = XyceDeck {
+            path: owner_path,
+            relative_path: "Netlists/Certification_Tests/BUG_667_SON/nodeset_in_subckt.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let reference = XyceDeck {
+            path: reference_path,
+            relative_path: "Netlists/Certification_Tests/BUG_667_SON/nodeset_not_in_subckt.cir"
                 .to_string(),
             section: XyceDeckSection::Netlists,
         };
@@ -51270,6 +52056,326 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             assert_eq!(result.contract, expected_contract);
         }
         fs::remove_dir_all(root).expect("remove BUG 662 execution fixture");
+    }
+
+    #[test]
+    fn bug667_nodeset_pair_is_manifest_owned_and_semantically_equivalent() {
+        let (root, owner, reference, runner) = bug667_nodeset_fixture(
+            "qualification",
+            BUG667_NODESET_OWNER_SOURCE,
+            BUG667_NODESET_REFERENCE_SOURCE,
+        );
+        let owner_contract = runner
+            .bug667_nodeset_relational_contract(&owner)
+            .expect("owner is selected")
+            .expect("owner pair qualifies");
+        let reference_contract = runner
+            .bug667_nodeset_relational_contract(&reference)
+            .expect("reference is selected")
+            .expect("reference pair qualifies");
+        assert_eq!(owner_contract.role, XyceBug667NodesetRole::ScopedOwner);
+        assert_eq!(
+            reference_contract.role,
+            XyceBug667NodesetRole::ExplicitHierarchicalReference
+        );
+        assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+        assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+
+        let owner_netlist =
+            XyceTestRunner::parse_xyce_netlist(&owner_contract.owner_plan.source, &owner.path)
+                .expect("owner reparses");
+        let reference_netlist = XyceTestRunner::parse_xyce_netlist(
+            &reference_contract.reference_plan.source,
+            &reference.path,
+        )
+        .expect("reference reparses");
+        assert_eq!(
+            XyceTestRunner::bug667_effective_nodeset_map(&owner_netlist)
+                .expect("owner NODESET map materializes"),
+            BTreeMap::from([
+                ("n15967".to_string(), 0.5f64.to_bits()),
+                ("x_x1.mid".to_string(), 0.5f64.to_bits()),
+            ])
+        );
+        assert_eq!(
+            XyceTestRunner::bug667_effective_nodeset_map(&reference_netlist)
+                .expect("reference NODESET map materializes"),
+            BTreeMap::from([
+                ("n15967".to_string(), 0.5f64.to_bits()),
+                ("x_x1.mid".to_string(), 0.5f64.to_bits()),
+            ])
+        );
+        fs::remove_dir_all(root).expect("remove BUG 667 NODESET fixture");
+    }
+
+    #[test]
+    fn bug667_nodeset_pair_rejects_semantic_mutations() {
+        let mutations = [
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace("vmid=5.0", "vmid=6.0"),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "subcircuit formal default",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace("vmid=0.5", "vmid=0.6"),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "instance override",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace("V(mid)={vmid}", "V(out)={vmid}"),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "local NODESET target",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.to_string(),
+                BUG667_NODESET_REFERENCE_SOURCE.replace("V(X_X1:mid )=0.5", "V(X_X1:mid )=0.6"),
+                "explicit hierarchical NODESET",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.to_string(),
+                BUG667_NODESET_REFERENCE_SOURCE.replace("V(X_X1:mid )=0.5", "V(X_BAD:mid )=0.5"),
+                "unresolvable hierarchical NODESET",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.to_string(),
+                BUG667_NODESET_REFERENCE_SOURCE.replace("V(N15967) =0.5", "V(N15967) =0.6"),
+                "common NODESET",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace(
+                    "R_R7         N16554 N16997  1k",
+                    "R_R7         N16554 N16998  1k",
+                ),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "topology",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace(
+                    "PULSE(0 1 0 1e-3 1e-3 5e-3 1s)",
+                    "PULSE(0 1 0 1e-3 1e-3 4e-3 1s)",
+                ),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "PULSE waveform",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace(".TRAN  0 10ms", ".TRAN  0 9ms"),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "transient domain",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace("V(N15206) V(N15971)", "V(N15971) V(N15206)"),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "probe order",
+            ),
+            (
+                BUG667_NODESET_OWNER_SOURCE.replace("\n.END\n", "\n.OPTIONS RELTOL=1e-5\n.END\n"),
+                BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+                "extra directive",
+            ),
+        ];
+        for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+            let (root, owner, _, runner) = bug667_nodeset_fixture(
+                &format!("mutation-{index}"),
+                &owner_source,
+                &reference_source,
+            );
+            assert!(
+                runner
+                    .bug667_nodeset_relational_contract(&owner)
+                    .expect("exact owner path remains selected")
+                    .is_err(),
+                "{reason} mutation must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove BUG 667 mutation fixture");
+        }
+    }
+
+    #[test]
+    fn bug667_nodeset_pair_requires_exact_wrapper_provenance() {
+        let (root, owner, _, _) = bug667_nodeset_fixture(
+            "manifest",
+            BUG667_NODESET_OWNER_SOURCE,
+            BUG667_NODESET_REFERENCE_SOURCE,
+        );
+        for manifest in [
+            "",
+            "Netlists/Certification_Tests/BUG_667_SON/nodeset_not_in_subckt.cir\trequires_upstream_wrapper\n",
+            "Netlists/Certification_Tests/BUG_667_SON/nodeset_in_subckt.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_667_SON/nodeset_not_in_subckt.cir\trequires_upstream_wrapper\n",
+        ] {
+            fs::write(root.join(HARNESS_MANIFEST_FILE), manifest)
+                .expect("mutate BUG 667 provenance");
+            let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+            assert!(
+                runner
+                    .bug667_nodeset_relational_contract(&owner)
+                    .expect("exact owner path remains selected")
+                    .is_err(),
+                "non-owner-only BUG 667 provenance must fail closed"
+            );
+        }
+        fs::remove_dir_all(root).expect("remove BUG 667 provenance fixture");
+    }
+
+    #[test]
+    fn bug667_nodeset_comparator_reproduces_complete_default_prn_diff() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let columns = vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(N15206)".to_string(),
+            "V(N15971)".to_string(),
+            "V(N15554)".to_string(),
+            "V(N15997)".to_string(),
+            "V(N16554)".to_string(),
+            "V(N16997)".to_string(),
+        ];
+        let baseline = XycePrnTable {
+            columns,
+            rows: vec![
+                vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                vec![1.0, 1e-3, 0.5, 0.25, 0.5, 0.25, 0.5, 0.25],
+                vec![2.0, 10e-3, 1.0, 0.75, 1.0, 0.75, 1.0, 0.75],
+            ],
+        };
+        assert!(
+            runner
+                .compare_bug667_nodeset_tables(&baseline, &baseline)
+                .expect("identical complete PRNs compare")
+                .is_empty()
+        );
+
+        let mut changed_time_token = baseline.clone();
+        changed_time_token.rows[1][1] += 1e-10;
+        assert_eq!(
+            runner
+                .compare_bug667_nodeset_tables(&baseline, &changed_time_token)
+                .expect("TIME token mutation compares")
+                .len(),
+            1
+        );
+        let mut changed_probe_token = baseline.clone();
+        changed_probe_token.rows[1][4] += 1e-8;
+        assert_eq!(
+            runner
+                .compare_bug667_nodeset_tables(&baseline, &changed_probe_token)
+                .expect("probe token mutation compares")
+                .len(),
+            1
+        );
+        let mut changed_header = baseline.clone();
+        changed_header.columns[2] = "V(OTHER)".into();
+        assert!(
+            runner
+                .compare_bug667_nodeset_tables(&baseline, &changed_header)
+                .is_err()
+        );
+        let mut changed_index = baseline.clone();
+        changed_index.rows[1][0] = 2.0;
+        assert!(
+            runner
+                .compare_bug667_nodeset_tables(&baseline, &changed_index)
+                .is_err()
+        );
+        let mut changed_row_count = baseline.clone();
+        changed_row_count.rows.pop();
+        assert!(
+            runner
+                .compare_bug667_nodeset_tables(&baseline, &changed_row_count)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn bug667_nodeset_candidate_census_is_exactly_two_records() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let discovered = runner.discover_tests();
+        let discovered_by_path = discovered
+            .iter()
+            .map(|deck| {
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    deck,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut independent_candidates = BTreeSet::new();
+        for owner in discovered.iter().filter(|deck| {
+            runner.requires_upstream_wrapper(&deck.relative_path)
+                && deck
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("nodeset_in_subckt.cir"))
+        }) {
+            let owner_source = fs::read_to_string(&owner.path).expect("read BUG 667 owner");
+            let reference_key = XyceTestRunner::normalize_manifest_key(
+                &runner.relative_key(&owner.path.with_file_name("nodeset_not_in_subckt.cir")),
+            );
+            let Some(reference) = discovered_by_path.get(&reference_key) else {
+                continue;
+            };
+            let reference_source =
+                fs::read_to_string(&reference.path).expect("read BUG 667 reference");
+            if owner_source.contains(".NODESET    V(mid)={vmid}")
+                && owner_source.contains("params: vmid=0.5")
+                && reference_source.contains(".NODESET    V(X_X1:mid )=0.5")
+            {
+                independent_candidates
+                    .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+                independent_candidates.insert(reference_key);
+            }
+        }
+        let selected = discovered
+            .iter()
+            .filter_map(|deck| {
+                runner
+                    .bug667_nodeset_relational_contract(deck)
+                    .map(|contract| {
+                        contract.unwrap_or_else(|err| {
+                            panic!("BUG 667 NODESET candidate failed qualification: {err}")
+                        });
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(independent_candidates, selected);
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                XYCE_BUG667_NODESET_OWNER_RECORD.to_string(),
+                XYCE_BUG667_NODESET_REFERENCE_RECORD.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn bug667_nodeset_relational_pair_executes_both_roles() {
+        let (root, owner, reference, runner) = bug667_nodeset_fixture(
+            "execution",
+            BUG667_NODESET_OWNER_SOURCE,
+            BUG667_NODESET_REFERENCE_SOURCE,
+        );
+        for (deck, expected_contract) in [
+            (owner, "bug667_nodeset_relational_wrapper_owner"),
+            (
+                reference,
+                "bug667_nodeset_relational_wrapper_explicit_reference",
+            ),
+        ] {
+            let result = runner.run_discovered_test(&deck);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "BUG 667 NODESET role must execute: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+        }
+        fs::remove_dir_all(root).expect("remove BUG 667 execution fixture");
     }
 
     #[test]
