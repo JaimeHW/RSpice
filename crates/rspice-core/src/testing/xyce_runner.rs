@@ -330,6 +330,16 @@ const XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3: &str =
     "b0a43d2f55c88c8c32673364f8a7fa361771af4c4ef065ff4783146a1cc31628";
 const XYCE_BUG702_MANIFEST_CENSUS_BLAKE3: &str =
     "91bcb74c1c7a203646ec14cd8754b3e520e0ad4ab589d8257f7edc14cb583dd6";
+const XYCE_BUG702_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
+    "aea8d348997e22d1b024d59a9eab58cbf99eeab549119eaff091deb8b0491564";
+const XYCE_BUG702_OUTPUT_DIRECTORY_CENSUS_BLAKE3: &str =
+    "c896ecc7c724958b95072fd5972035335a23d96d4169bde9b4d07b550759a6c3";
+const XYCE_BUG702_README_BLAKE3: &str =
+    "599a576884838a0d5c0a57082945108cadb8af280ef31985cdef1058584d54b3";
+const XYCE_BUG702_README_BYTES: usize = 2_571;
+const XYCE_BUG702_OPTIONS_BLAKE3: &str =
+    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
+const XYCE_BUG702_OPTIONS_BYTES: usize = 14;
 const XYCE_BUG671_FIXTURE_BLAKE3: &str =
     "a20bed61d99b2bd530e4bdfdb096315198e1c4702ac3ff8e320b6ea42efce9ba";
 const XYCE_BUG671_FIXTURE_BYTES: usize = 19_456;
@@ -1283,6 +1293,16 @@ impl XyceExpectedFailureKind {
                 | Self::MessageMissingLibraryFileQuoted
                 | Self::MessageDuplicateDevice
                 | Self::MessageMissingDeviceNodes
+        )
+    }
+
+    fn is_bug702_family(self) -> bool {
+        matches!(
+            self,
+            Self::Bug702DuplicateExternalInitcond
+                | Self::Bug702DuplicateInlinedInitcond
+                | Self::Bug702MalformedInitcondFile
+                | Self::Bug702MissingInitcondFile
         )
     }
 }
@@ -4633,6 +4653,220 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn validate_bug702_complete_family_provenance(&self, family_dir: &Path) -> Result<(), String> {
+        let expected_family = self.root.join("Netlists/Certification_Tests/BUG_702");
+        if family_dir.canonicalize().ok() != expected_family.canonicalize().ok() {
+            return Err(format!(
+                "BUG702 family resolved outside its canonical corpus directory: {}",
+                family_dir.display()
+            ));
+        }
+        let source_files = [
+            (
+                "dup-external.cir",
+                6_674,
+                XYCE_BUG702_DUP_EXTERNAL_SOURCE_BLAKE3,
+            ),
+            (
+                "dup-inlined.cir",
+                6_615,
+                XYCE_BUG702_DUP_INLINED_SOURCE_BLAKE3,
+            ),
+            (
+                "empty-initcond.cir",
+                6_482,
+                XYCE_BUG702_EMPTY_INITCOND_SOURCE_BLAKE3,
+            ),
+            ("external.cir", 6_564, XYCE_BUG702_EXTERNAL_SOURCE_BLAKE3),
+            (
+                "initcond.dat",
+                XYCE_BUG702_INITCOND_DATA_BYTES,
+                XYCE_BUG702_INITCOND_DATA_BLAKE3,
+            ),
+            (
+                "inlined-multiple.cir",
+                1_474,
+                XYCE_BUG702_INLINED_MULTIPLE_SOURCE_BLAKE3,
+            ),
+            (
+                "inlined-single.cir",
+                6_542,
+                XYCE_BUG702_INLINED_SINGLE_SOURCE_BLAKE3,
+            ),
+            (
+                "missing-initcond.cir",
+                6_596,
+                XYCE_BUG702_MISSING_INITCOND_SOURCE_BLAKE3,
+            ),
+            (
+                "noinits.dat",
+                XYCE_BUG702_NOINITS_DATA_BYTES,
+                XYCE_BUG702_NOINITS_DATA_BLAKE3,
+            ),
+            (
+                "options",
+                XYCE_BUG702_OPTIONS_BYTES,
+                XYCE_BUG702_OPTIONS_BLAKE3,
+            ),
+            (
+                "precedence.cir",
+                6_633,
+                XYCE_BUG702_PRECEDENCE_SOURCE_BLAKE3,
+            ),
+            (
+                "README",
+                XYCE_BUG702_README_BYTES,
+                XYCE_BUG702_README_BLAKE3,
+            ),
+        ];
+        let mut names = BTreeSet::new();
+        for entry in fs::read_dir(family_dir).map_err(|error| {
+            format!(
+                "failed to inspect complete BUG702 source family {}: {error}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect complete BUG702 source entry in {}: {error}",
+                    family_dir.display()
+                )
+            })?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| "BUG702 source filename is not UTF-8".to_string())?
+                .to_ascii_lowercase();
+            if !names.insert(name.clone()) {
+                return Err(format!(
+                    "BUG702 source family has case-colliding name {name:?}"
+                ));
+            }
+        }
+        let names = names.into_iter().collect::<Vec<_>>();
+        let names_hash = blake3::hash(names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if names.len() != source_files.len()
+            || names_hash != XYCE_BUG702_SOURCE_DIRECTORY_CENSUS_BLAKE3
+        {
+            return Err(format!(
+                "BUG702 complete source-directory census changed: expected {} / {}, got {} / {}",
+                source_files.len(),
+                XYCE_BUG702_SOURCE_DIRECTORY_CENSUS_BLAKE3,
+                names.len(),
+                names_hash
+            ));
+        }
+        for (file_name, expected_bytes, expected_hash) in source_files {
+            let path = family_dir.join(file_name);
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!(
+                    "failed to inspect BUG702 source {}: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "BUG702 source {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let bytes = fs::read(&path).map_err(|error| {
+                format!("failed to read BUG702 source {}: {error}", path.display())
+            })?;
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            if bytes.len() != expected_bytes || hash != expected_hash {
+                return Err(format!(
+                    "BUG702 source {file_name} changed: expected {expected_bytes} / {expected_hash}, got {} / {hash}",
+                    bytes.len()
+                ));
+            }
+        }
+
+        let output_dir = self.root.join("OutputData/Certification_Tests/BUG_702");
+        let output_files = [
+            (
+                "inv1xIC.cir.prn",
+                XYCE_BUG702_INV1XIC_REFERENCE_BYTES,
+                XYCE_BUG702_INV1XIC_REFERENCE_BLAKE3,
+            ),
+            (
+                "nlrcs10.cir.prn",
+                XYCE_BUG702_NLRCS10_REFERENCE_BYTES,
+                XYCE_BUG702_NLRCS10_REFERENCE_BLAKE3,
+            ),
+        ];
+        let mut output_names = BTreeSet::new();
+        for entry in fs::read_dir(&output_dir).map_err(|error| {
+            format!(
+                "failed to inspect BUG702 OutputData directory {}: {error}",
+                output_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect BUG702 OutputData entry in {}: {error}",
+                    output_dir.display()
+                )
+            })?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| "BUG702 OutputData filename is not UTF-8".to_string())?
+                .to_ascii_lowercase();
+            if !output_names.insert(name.clone()) {
+                return Err(format!(
+                    "BUG702 OutputData has case-colliding name {name:?}"
+                ));
+            }
+        }
+        let output_names = output_names.into_iter().collect::<Vec<_>>();
+        let output_hash = blake3::hash(output_names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if output_names.len() != output_files.len()
+            || output_hash != XYCE_BUG702_OUTPUT_DIRECTORY_CENSUS_BLAKE3
+        {
+            return Err(format!(
+                "BUG702 OutputData census changed: expected {} / {}, got {} / {}",
+                output_files.len(),
+                XYCE_BUG702_OUTPUT_DIRECTORY_CENSUS_BLAKE3,
+                output_names.len(),
+                output_hash
+            ));
+        }
+        for (file_name, expected_bytes, expected_hash) in output_files {
+            let path = output_dir.join(file_name);
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!(
+                    "failed to inspect BUG702 reference {}: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "BUG702 reference {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let bytes = fs::read(&path).map_err(|error| {
+                format!(
+                    "failed to read BUG702 reference {}: {error}",
+                    path.display()
+                )
+            })?;
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            if bytes.len() != expected_bytes || hash != expected_hash {
+                return Err(format!(
+                    "BUG702 reference {file_name} changed: expected {expected_bytes} / {expected_hash}, got {} / {hash}",
+                    bytes.len()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn replace_bug702_block_once(
         label: &str,
         source: String,
@@ -4919,6 +5153,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 .parent()
                 .ok_or_else(|| "BUG702 positive record has no family directory".to_string())?;
             self.validate_bug702_family_census(family_dir, kind.record())?;
+            self.validate_bug702_complete_family_provenance(family_dir)?;
 
             let source_bytes = fs::read(&deck.path)
                 .map_err(|error| format!("failed to read BUG702 positive deck: {error}"))?;
@@ -5364,6 +5599,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     family_dir.display()
                 ));
             }
+        }
+        if kind.is_bug702_family() {
+            self.validate_bug702_complete_family_provenance(family_dir)?;
         }
         Self::validate_expected_failure_source_sidecars(kind, &deck.path)?;
 
@@ -70229,6 +70467,121 @@ R2 2 0 1
             );
         }
         assert_eq!(contracts.len(), 4);
+    }
+
+    #[test]
+    fn bug702_complete_family_provenance_rejects_source_reference_and_manifest_drift() {
+        let source_root = expected_failure_test_root();
+        let source_family = source_root.join("Netlists/Certification_Tests/BUG_702");
+        let source_output = source_root.join("OutputData/Certification_Tests/BUG_702");
+        let temp_root = unique_expected_failure_temp_dir("bug702-complete-provenance");
+        let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_702");
+        let temp_output = temp_root.join("OutputData/Certification_Tests/BUG_702");
+        fs::create_dir_all(&temp_family).expect("create BUG702 source fixture");
+        fs::create_dir_all(&temp_output).expect("create BUG702 output fixture");
+        for entry in fs::read_dir(&source_family).expect("read canonical BUG702 source family") {
+            let entry = entry.expect("read BUG702 source entry");
+            if entry.path().is_file() {
+                fs::copy(entry.path(), temp_family.join(entry.file_name()))
+                    .expect("copy BUG702 source entry");
+            }
+        }
+        for entry in fs::read_dir(&source_output).expect("read canonical BUG702 output family") {
+            let entry = entry.expect("read BUG702 output entry");
+            if entry.path().is_file() {
+                fs::copy(entry.path(), temp_output.join(entry.file_name()))
+                    .expect("copy BUG702 output entry");
+            }
+        }
+        let manifest_source =
+            fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE)).expect("read manifest");
+        let canonical_manifest = manifest_source
+            .lines()
+            .filter(|line| {
+                line.split_once('\t').is_some_and(|(path, contract)| {
+                    XyceTestRunner::normalize_manifest_key(path)
+                        .starts_with("netlists/certification_tests/bug_702/")
+                        && contract.trim() == REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        fs::write(&manifest_path, &canonical_manifest).expect("write BUG702 manifest");
+        let runner = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        runner()
+            .validate_bug702_complete_family_provenance(&temp_family)
+            .expect("canonical copied BUG702 complete family qualifies");
+        runner()
+            .validate_bug702_family_census(
+                &temp_family,
+                XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD,
+            )
+            .expect("canonical copied BUG702 manifest bijection qualifies");
+
+        let unexpected = temp_family.join("inlined-single.cir.prn");
+        fs::write(&unexpected, "forbidden source sidecar").expect("write BUG702 source sidecar");
+        assert!(
+            runner()
+                .validate_bug702_complete_family_provenance(&temp_family)
+                .is_err(),
+            "BUG702 source sidecar must fail complete-family provenance"
+        );
+        fs::remove_file(unexpected).expect("remove BUG702 source sidecar");
+
+        let readme = temp_family.join("README");
+        let readme_bytes = fs::read(&readme).expect("read copied BUG702 README");
+        fs::write(&readme, "mutated README").expect("mutate BUG702 README");
+        assert!(
+            runner()
+                .validate_bug702_complete_family_provenance(&temp_family)
+                .is_err(),
+            "BUG702 README drift must fail complete-family provenance"
+        );
+        fs::write(&readme, readme_bytes).expect("restore BUG702 README");
+
+        let reference = temp_output.join("inv1xIC.cir.prn");
+        let reference_bytes = fs::read(&reference).expect("read copied BUG702 reference");
+        fs::write(&reference, "mutated reference").expect("mutate BUG702 reference");
+        assert!(
+            runner()
+                .validate_bug702_complete_family_provenance(&temp_family)
+                .is_err(),
+            "BUG702 reference drift must fail complete-family provenance"
+        );
+        fs::write(&reference, &reference_bytes).expect("restore BUG702 reference");
+
+        fs::remove_file(&reference).expect("remove BUG702 reference");
+        assert!(
+            runner()
+                .validate_bug702_complete_family_provenance(&temp_family)
+                .is_err(),
+            "missing BUG702 alias reference must fail complete-family provenance"
+        );
+        fs::write(&reference, reference_bytes).expect("restore removed BUG702 reference");
+
+        let missing_owner = canonical_manifest
+            .lines()
+            .filter(|line| {
+                !XyceTestRunner::normalize_manifest_key(line)
+                    .starts_with(XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&manifest_path, missing_owner).expect("remove BUG702 manifest owner");
+        assert!(
+            runner()
+                .validate_bug702_family_census(
+                    &temp_family,
+                    XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD
+                )
+                .is_err(),
+            "missing BUG702 manifest owner must fail the 8/8 bijection"
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove BUG702 provenance fixture");
     }
 
     #[test]

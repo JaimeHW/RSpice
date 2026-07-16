@@ -343,6 +343,22 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "expected_failure_message_missing_device_nodes_parse",
         ),
         (
+            "Netlists/Certification_Tests/BUG_702/dup-external.cir",
+            "expected_failure_bug702_duplicate_external_initcond_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/dup-inlined.cir",
+            "expected_failure_bug702_duplicate_inlined_initcond_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/empty-initcond.cir",
+            "expected_failure_bug702_malformed_initcond_file_load",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/missing-initcond.cir",
+            "expected_failure_bug702_missing_initcond_file_load",
+        ),
+        (
             "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
             "expected_failure_duplicate_dc_source_function_parse",
         ),
@@ -423,9 +439,47 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        33,
-        "the expected-failure oracle census is exactly thirty-three distinct physical records"
+        37,
+        "the expected-failure oracle census is exactly thirty-seven distinct physical records"
     );
+}
+
+#[test]
+fn test_xyce_bug702_positive_initcond_aliases_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_702/inlined-multiple.cir",
+            "bug702_inlined_multiple_initcond_alias_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/inlined-single.cir",
+            "bug702_inlined_single_initcond_alias_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/external.cir",
+            "bug702_external_initcond_alias_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/precedence.cir",
+            "bug702_initcond_precedence_alias_tran",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must retain BUG702 wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} must execute its BUG702 alias transient oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
 }
 
 #[test]
