@@ -16,10 +16,56 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{
-    ParseError, ParseWithAbortError, ensure_parse_not_aborted, finish_non_aborting_parse,
-    map_abort_parse_error, poll_parse_abort, poll_parse_text, read_file_with_encoding_with_abort,
+    NetlistSourceLocation, ParseError, ParseWithAbortError, ensure_parse_not_aborted,
+    finish_non_aborting_parse, map_abort_parse_error, poll_parse_abort, poll_parse_text,
+    read_file_with_encoding_with_abort,
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
+
+/// One source-aware item in an include-expanded netlist.
+///
+/// Source boundaries are out-of-band so they cannot collide with authored
+/// SPICE directives or perturb expanded-text line numbering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ExpandedSourceItem {
+    EnterSource {
+        path: PathBuf,
+    },
+    Line {
+        text: String,
+        origin: NetlistSourceLocation,
+    },
+    EndCard {
+        origin: NetlistSourceLocation,
+    },
+    ExitSource {
+        path: PathBuf,
+        eof_line: usize,
+    },
+}
+
+/// Include-expanded source retaining exact ownership of every physical line.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ExpandedSource {
+    pub(crate) items: Vec<ExpandedSourceItem>,
+}
+
+impl ExpandedSource {
+    pub(crate) fn render(&self) -> String {
+        let mut output = String::new();
+        for item in &self.items {
+            if let ExpandedSourceItem::Line { text, .. } = item {
+                output.push_str(text);
+                output.push('\n');
+            }
+        }
+        output
+    }
+
+    fn append(&mut self, other: Self) {
+        self.items.extend(other.items);
+    }
+}
 
 /// Production include-depth limit shared by library discovery and executable
 /// netlist expansion. Foundry PDKs commonly have substantially deeper include
@@ -421,15 +467,16 @@ impl IncludeProcessor {
         let result = (|| {
             let content =
                 self.read_source_with_abort(&canonical, &canonical.display().to_string(), abort)?;
-            let content = strip_terminal_end_cards_with_abort(&content, abort)?;
-            let expanded = self.expand_content_from_with_abort(
+            let expanded = self.expand_content_from_mapped_with_abort(
                 &content,
                 &canonical,
                 section,
                 section.is_some(),
+                true,
                 abort,
             )?;
-            for (line_index, line) in expanded.lines().enumerate() {
+            let rendered = expanded.render();
+            for (line_index, line) in rendered.lines().enumerate() {
                 poll_parse_abort(abort, line_index)?;
                 if parse_include_directive(line).is_some() || parse_lib_directive(line).is_some() {
                     return Err(ParseWithAbortError::from(ParseError::Syntax {
@@ -443,7 +490,7 @@ impl IncludeProcessor {
                 }
             }
             ensure_parse_not_aborted(abort)?;
-            Ok(expanded)
+            Ok(rendered)
         })();
 
         self.leave_include(&key);
@@ -467,7 +514,25 @@ impl IncludeProcessor {
         current_path: &Path,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
-        self.expand_content_from_with_abort(content, current_path, None, false, abort)
+        self.expand_content_mapped_with_abort(content, current_path, abort)
+            .map(|expanded| expanded.render())
+    }
+
+    /// Recursively expand includes while preserving exact source ownership.
+    pub(crate) fn expand_content_mapped_with_abort(
+        &mut self,
+        content: &str,
+        current_path: &Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<ExpandedSource, ParseWithAbortError> {
+        self.expand_content_from_mapped_with_abort(
+            content,
+            current_path,
+            None,
+            false,
+            false,
+            abort,
+        )
     }
 
     /// Resolve a filename to an absolute path
@@ -617,6 +682,22 @@ impl IncludeProcessor {
         selected_section: Option<&str>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.process_include_from_with_selection_mapped_and_abort(
+            owner_path,
+            filename,
+            selected_section,
+            abort,
+        )
+        .map(|expanded| expanded.render())
+    }
+
+    fn process_include_from_with_selection_mapped_and_abort(
+        &mut self,
+        owner_path: &Path,
+        filename: &str,
+        selected_section: Option<&str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
         let path = self.resolve_path_from_with_abort(owner_path, filename, abort)?;
         let canonical = if self.sealed_sources.is_some() {
@@ -624,14 +705,20 @@ impl IncludeProcessor {
         } else {
             path.canonicalize().unwrap_or_else(|_| path.clone())
         };
-        let key = IncludeKey::new(canonical, None);
+        let key = IncludeKey::new(canonical.clone(), None);
         self.enter_include(&key)
             .map_err(ParseWithAbortError::from)?;
 
         let result = (|| {
             let content = self.read_source_with_abort(&path, filename, abort)?;
-            let content = strip_terminal_end_cards_with_abort(&content, abort)?;
-            self.expand_content_from_with_abort(&content, &path, selected_section, false, abort)
+            self.expand_content_from_mapped_with_abort(
+                &content,
+                &canonical,
+                selected_section,
+                false,
+                true,
+                abort,
+            )
         })();
 
         self.leave_include(&key);
@@ -645,6 +732,17 @@ impl IncludeProcessor {
         section: Option<&str>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.process_lib_from_mapped_with_abort(owner_path, filename, section, abort)
+            .map(|expanded| expanded.render())
+    }
+
+    fn process_lib_from_mapped_with_abort(
+        &mut self,
+        owner_path: &Path,
+        filename: &str,
+        section: Option<&str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
         let path = self.resolve_path_from_with_abort(owner_path, filename, abort)?;
         let canonical = if self.sealed_sources.is_some() {
@@ -652,38 +750,56 @@ impl IncludeProcessor {
         } else {
             path.canonicalize().unwrap_or_else(|_| path.clone())
         };
-        let key = IncludeKey::new(canonical, section);
+        let key = IncludeKey::new(canonical.clone(), section);
         self.enter_include(&key)
             .map_err(ParseWithAbortError::from)?;
 
         let result = (|| {
             let content = self.read_source_with_abort(&path, filename, abort)?;
-            let content = strip_terminal_end_cards_with_abort(&content, abort)?;
-            self.expand_content_from_with_abort(&content, &path, section, section.is_some(), abort)
+            self.expand_content_from_mapped_with_abort(
+                &content,
+                &canonical,
+                section,
+                section.is_some(),
+                true,
+                abort,
+            )
         })();
 
         self.leave_include(&key);
         result
     }
 
-    fn expand_content_from_with_abort(
+    fn expand_content_from_mapped_with_abort(
         &mut self,
         content: &str,
         current_path: &Path,
         selected_section: Option<&str>,
         require_selected_section: bool,
+        strip_end_cards: bool,
         abort: &dyn AbortSignal,
-    ) -> Result<String, ParseWithAbortError> {
+    ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        let mut result = String::new();
+        let mut result = ExpandedSource::default();
+        result.items.push(ExpandedSourceItem::EnterSource {
+            path: current_path.to_path_buf(),
+        });
         let mut inline_sections: Vec<InlineLibFrame> = Vec::new();
         let mut selected_section_found = selected_section.is_none();
+        let source_line_count = content.lines().count();
 
         for (line_index, line) in content.lines().enumerate() {
             poll_parse_abort(abort, line_index)?;
             poll_parse_text(abort, line)?;
             let line_number = line_index + 1;
             let trimmed = line.trim();
+
+            if strip_end_cards && trimmed.eq_ignore_ascii_case(".end") {
+                result.items.push(ExpandedSourceItem::EndCard {
+                    origin: NetlistSourceLocation::in_file(current_path, line_number),
+                });
+                continue;
+            }
 
             if split_directive(trimmed)
                 .is_some_and(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
@@ -720,16 +836,18 @@ impl IncludeProcessor {
                 }
 
                 let included = self
-                    .process_lib_from_with_abort(current_path, &filename, section.as_deref(), abort)
+                    .process_lib_from_mapped_with_abort(
+                        current_path,
+                        &filename,
+                        section.as_deref(),
+                        abort,
+                    )
                     .map_err(|error| {
                         map_abort_parse_error(error, |error| {
                             include_error_at(error, current_path, line_number, ".lib")
                         })
                     })?;
-                result.push_str(&included);
-                if !included.ends_with('\n') {
-                    result.push('\n');
-                }
+                result.append(included);
                 continue;
             }
 
@@ -793,11 +911,14 @@ impl IncludeProcessor {
                     }
                     let path = self.resolve_path_from_with_abort(current_path, &filename, abort)?;
                     let normalized = path.display().to_string().replace('\\', "/");
-                    result.push_str(&format!(".spef_include \"{normalized}\"\n"));
+                    result.items.push(ExpandedSourceItem::Line {
+                        text: format!(".spef_include \"{normalized}\""),
+                        origin: NetlistSourceLocation::in_file(current_path, line_number),
+                    });
                     continue;
                 }
                 let included = self
-                    .process_include_from_with_selection_and_abort(
+                    .process_include_from_with_selection_mapped_and_abort(
                         current_path,
                         &filename,
                         selected_section,
@@ -808,15 +929,14 @@ impl IncludeProcessor {
                             include_error_at(error, current_path, line_number, ".include")
                         })
                     })?;
-                result.push_str(&included);
-                if !included.ends_with('\n') {
-                    result.push('\n');
-                }
+                result.append(included);
                 continue;
             }
 
-            result.push_str(line);
-            result.push('\n');
+            result.items.push(ExpandedSourceItem::Line {
+                text: line.to_string(),
+                origin: NetlistSourceLocation::in_file(current_path, line_number),
+            });
         }
 
         if let Some(frame) = inline_sections.last() {
@@ -840,6 +960,10 @@ impl IncludeProcessor {
         }
 
         ensure_parse_not_aborted(abort)?;
+        result.items.push(ExpandedSourceItem::ExitSource {
+            path: current_path.to_path_buf(),
+            eof_line: source_line_count + 1,
+        });
         Ok(result)
     }
 
@@ -966,23 +1090,6 @@ impl Default for IncludeProcessor {
     fn default() -> Self {
         Self::new(Path::new("."))
     }
-}
-
-fn strip_terminal_end_cards_with_abort(
-    content: &str,
-    abort: &dyn AbortSignal,
-) -> Result<String, ParseWithAbortError> {
-    let mut out = String::with_capacity(content.len());
-    for (index, line) in content.lines().enumerate() {
-        poll_parse_abort(abort, index)?;
-        if line.trim().eq_ignore_ascii_case(".END") {
-            continue;
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    ensure_parse_not_aborted(abort)?;
-    Ok(out)
 }
 
 /// Stable identity for a path literal as written in an include or external
@@ -1294,6 +1401,83 @@ mod tests {
         assert!(expanded.contains("R1 1 2 1"), "{expanded}");
         assert!(expanded.contains("R2 2 3 1"), "{expanded}");
         assert!(expanded.contains("R3 3 0 1"), "{expanded}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mapped_include_expansion_preserves_nested_source_boundaries_and_lines() {
+        let dir = unique_include_temp_dir("mapped-origins");
+        let nested = dir.join("nested");
+        std::fs::create_dir_all(&nested).expect("create mapped include fixture");
+        let deck_path = dir.join("deck.cir");
+        let child_path = nested.join("child.inc");
+        let leaf_path = nested.join("leaf.inc");
+        std::fs::write(&child_path, "Rchild 1 0 1\n.include leaf.inc\n.end\n")
+            .expect("write child include");
+        std::fs::write(&leaf_path, "Rleaf 2 0 2\n").expect("write leaf include");
+        let deck = "mapped title\n.include nested/child.inc\nRtop 3 0 3\n.end\n";
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        let mapped = processor
+            .expand_content_mapped_with_abort(deck, &deck_path, &NoAbort)
+            .expect("mapped expansion succeeds");
+        assert_eq!(
+            mapped.render(),
+            "mapped title\nRchild 1 0 1\nRleaf 2 0 2\nRtop 3 0 3\n.end\n"
+        );
+
+        let child_canonical = child_path.canonicalize().expect("canonical child path");
+        let leaf_canonical = leaf_path.canonicalize().expect("canonical leaf path");
+        assert_eq!(
+            mapped.items,
+            vec![
+                ExpandedSourceItem::EnterSource {
+                    path: deck_path.clone(),
+                },
+                ExpandedSourceItem::Line {
+                    text: "mapped title".to_string(),
+                    origin: NetlistSourceLocation::in_file(&deck_path, 1),
+                },
+                ExpandedSourceItem::EnterSource {
+                    path: child_canonical.clone(),
+                },
+                ExpandedSourceItem::Line {
+                    text: "Rchild 1 0 1".to_string(),
+                    origin: NetlistSourceLocation::in_file(&child_canonical, 1),
+                },
+                ExpandedSourceItem::EnterSource {
+                    path: leaf_canonical.clone(),
+                },
+                ExpandedSourceItem::Line {
+                    text: "Rleaf 2 0 2".to_string(),
+                    origin: NetlistSourceLocation::in_file(&leaf_canonical, 1),
+                },
+                ExpandedSourceItem::ExitSource {
+                    path: leaf_canonical,
+                    eof_line: 2,
+                },
+                ExpandedSourceItem::EndCard {
+                    origin: NetlistSourceLocation::in_file(&child_canonical, 3),
+                },
+                ExpandedSourceItem::ExitSource {
+                    path: child_canonical,
+                    eof_line: 4,
+                },
+                ExpandedSourceItem::Line {
+                    text: "Rtop 3 0 3".to_string(),
+                    origin: NetlistSourceLocation::in_file(&deck_path, 3),
+                },
+                ExpandedSourceItem::Line {
+                    text: ".end".to_string(),
+                    origin: NetlistSourceLocation::in_file(&deck_path, 4),
+                },
+                ExpandedSourceItem::ExitSource {
+                    path: deck_path.clone(),
+                    eof_line: 5,
+                },
+            ]
+        );
+
         let _ = std::fs::remove_dir_all(dir);
     }
 

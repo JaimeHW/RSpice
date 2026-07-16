@@ -59,6 +59,30 @@ use thiserror::Error;
 
 use crate::abort_signal::{AbortSignal, NoAbort};
 
+/// Exact physical location in one netlist source.
+///
+/// In-memory parses have no path. File-backed parses retain the top-level or
+/// included source path so diagnostics do not collapse onto expanded-text line
+/// numbers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetlistSourceLocation {
+    pub path: Option<std::path::PathBuf>,
+    pub line: usize,
+}
+
+impl NetlistSourceLocation {
+    pub fn in_memory(line: usize) -> Self {
+        Self { path: None, line }
+    }
+
+    pub fn in_file(path: impl Into<std::path::PathBuf>, line: usize) -> Self {
+        Self {
+            path: Some(path.into()),
+            line,
+        }
+    }
+}
+
 /// Errors that can occur during netlist parsing
 #[derive(Debug, Error)]
 pub enum ParseError {
