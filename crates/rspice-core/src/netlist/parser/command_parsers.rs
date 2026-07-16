@@ -890,15 +890,30 @@ fn parse_voltage_hint_value(
     params: &ParamContext,
     defer_values: bool,
 ) -> Result<(Value, Option<String>), ParseError> {
+    if defer_values {
+        // A subcircuit-scoped .IC/.NODESET expression must be evaluated in
+        // each instance's effective parameter scope. Evaluating a formal
+        // parameter here would freeze its definition-time default and discard
+        // an X-line override before flattening. Preserve every scoped value
+        // expression, while still validating it and retaining the definition
+        // scope's value for parser diagnostics and introspection.
+        let mut expression_stream = stream.clone();
+        let expression = collect_voltage_hint_expression(&mut expression_stream, line_num)?;
+        let mut value_stream = stream.clone();
+        let voltage = match expect_value(&mut value_stream, line_num, params) {
+            Ok(value) => value,
+            Err(err) if parameter_error_can_defer(&err) => Value::NAN,
+            Err(err) => return Err(err),
+        };
+        *stream = expression_stream;
+        return Ok((voltage, Some(expression)));
+    }
+
     let mut value_stream = stream.clone();
     match expect_value(&mut value_stream, line_num, params) {
         Ok(value) => {
             *stream = value_stream;
             Ok((value, None))
-        }
-        Err(err) if defer_values && parameter_error_can_defer(&err) => {
-            let expr = collect_voltage_hint_expression(stream, line_num)?;
-            Ok((Value::NAN, Some(expr)))
         }
         Err(err) => Err(err),
     }

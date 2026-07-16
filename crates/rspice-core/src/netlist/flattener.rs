@@ -2958,4 +2958,69 @@ R1 out 0 1k
             "subcircuit port probe must not be prefixed as an internal node: {expression}"
         );
     }
+
+    #[test]
+    fn subcircuit_nodeset_uses_instance_parameter_scope_and_remaps_internal_node() {
+        let scoped = Netlist::parse(
+            "\
+scoped nodeset
+X_X1 in out NODESET_Subckt params: vmid=0.5
+.SUBCKT NODESET_Subckt in out params: vmid=5.0
+R1 in mid 10
+C1 mid out 1u
+.NODESET V(mid)={vmid}
+.ENDS
+.END
+",
+        )
+        .expect("scoped NODESET deck parses");
+        let subcircuit = scoped
+            .subcircuits
+            .iter()
+            .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case("NODESET_Subckt"))
+            .expect("subcircuit exists");
+        assert_eq!(subcircuit.node_sets.len(), 1);
+        assert!(subcircuit.node_sets[0].node.eq_ignore_ascii_case("mid"));
+        assert!(
+            subcircuit.node_sets[0].voltage_expr.is_some(),
+            "subcircuit-scoped NODESET must remain deferred for instance overrides"
+        );
+
+        let flattened = flatten_netlist_with_models(&scoped).expect("scoped NODESET flattens");
+        assert_eq!(flattened.scoped_node_sets.len(), 1);
+        assert!(
+            flattened.scoped_node_sets[0]
+                .node
+                .eq_ignore_ascii_case("X_X1.mid")
+        );
+        assert_eq!(
+            flattened.scoped_node_sets[0].voltage.to_bits(),
+            0.5f64.to_bits()
+        );
+        assert!(flattened.scoped_node_sets[0].voltage_expr.is_none());
+
+        let explicit = Netlist::parse(
+            "\
+explicit hierarchical nodeset
+X_X1 in out NODESET_Subckt
+.SUBCKT NODESET_Subckt in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.NODESET V(X_X1:mid)=0.5
+.END
+",
+        )
+        .expect("explicit hierarchical NODESET deck parses");
+        assert_eq!(explicit.node_sets.len(), 1);
+        assert!(explicit.node_sets[0].node.eq_ignore_ascii_case("X_X1:mid"));
+        assert_eq!(explicit.node_sets[0].voltage.to_bits(), 0.5f64.to_bits());
+        assert!(explicit.node_sets[0].voltage_expr.is_none());
+        assert!(
+            flatten_netlist_with_models(&explicit)
+                .expect("explicit NODESET deck flattens")
+                .scoped_node_sets
+                .is_empty()
+        );
+    }
 }
