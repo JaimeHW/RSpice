@@ -134,6 +134,12 @@ const XYCE_ISSUE455_EXPECTED_FAILURE_RECORD: &str =
 const XYCE_BUG204_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_204/bug204.cir";
 const XYCE_BUG281_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_281/bug_281.cir";
+const XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_401/bad-device-line.cir";
+const XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_401/extra-space.cir";
+const XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_401/worse-device-line.cir";
 const XYCE_BUG67_SOURCE_BLAKE3: &str =
     "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
 const XYCE_BUG671_SOURCE_BLAKE3: &str =
@@ -154,6 +160,16 @@ const XYCE_BUG204_SOURCE_BLAKE3: &str =
     "ed8984a5badf07bdc1cccab7a56cfa66303b678814dd5efcb7ca7a4b03daf947";
 const XYCE_BUG281_SOURCE_BLAKE3: &str =
     "e7a31257432216b07ee6023392590aef62f2006d2111110242839b3d4c1c07d0";
+const XYCE_BUG401_BAD_DEVICE_SOURCE_BLAKE3: &str =
+    "53aaeb8ac36ee9748870b1eb59923eeae6e3faf19a4034fd1014457a637ff381";
+const XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3: &str =
+    "934e28a8ccfbd346bf66b6884c818d74d08fce9f2265363887ed9d2b569c07b5";
+const XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3: &str =
+    "d452d7f4844510bd2c1076ae6f6829d5c5ef421b36f0ee228a476900dd7e8fc3";
+const XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3: &str =
+    "ccdc1cb4b46160d2c993d155a6816c81e5671aecd700bd364ab8b7d512320a13";
+const XYCE_BUG401_MANIFEST_CENSUS_BLAKE3: &str =
+    "427c97a38a5a66616877760976392652da5ddd5363a9abb64108bff5e40ea50b";
 const XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
     "bcd3e366443f97db8ccb98d5d9f0102cbb67a5903657382da3ea7770ed666afc";
 const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
@@ -205,6 +221,9 @@ enum XyceExpectedFailureKind {
     Issue455DuplicateDcSourceFunction,
     Bug204InvalidDcSweepArity,
     Bug281InvalidDcSweepArity,
+    Bug401BadDeviceLine,
+    Bug401ExtraSpace,
+    Bug401WorseDeviceLine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +232,7 @@ struct XyceExpectedFailureFamilyCensus {
     physical_names_blake3: &'static str,
     manifest_owner_count: usize,
     manifest_records_blake3: &'static str,
+    require_manifest_bijection: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +255,9 @@ impl XyceExpectedFailureKind {
             XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
             XYCE_BUG204_EXPECTED_FAILURE_RECORD => Some(Self::Bug204InvalidDcSweepArity),
             XYCE_BUG281_EXPECTED_FAILURE_RECORD => Some(Self::Bug281InvalidDcSweepArity),
+            XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401BadDeviceLine),
+            XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401ExtraSpace),
+            XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401WorseDeviceLine),
             _ => None,
         }
     }
@@ -251,6 +274,9 @@ impl XyceExpectedFailureKind {
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_EXPECTED_FAILURE_RECORD,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_EXPECTED_FAILURE_RECORD,
+            Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD,
+            Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD,
+            Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD,
         }
     }
 
@@ -266,6 +292,9 @@ impl XyceExpectedFailureKind {
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_SOURCE_BLAKE3,
+            Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_SOURCE_BLAKE3,
+            Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3,
+            Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3,
         }
     }
 
@@ -287,6 +316,9 @@ impl XyceExpectedFailureKind {
             Self::Bug281InvalidDcSweepArity => {
                 "expected_failure_bug281_invalid_dc_sweep_arity_parse"
             }
+            Self::Bug401BadDeviceLine => "expected_failure_bug401_bad_device_line_build",
+            Self::Bug401ExtraSpace => "expected_failure_bug401_extra_space_build",
+            Self::Bug401WorseDeviceLine => "expected_failure_bug401_worse_device_line_parse",
         }
     }
 
@@ -317,6 +349,18 @@ impl XyceExpectedFailureKind {
             Self::Bug281InvalidDcSweepArity => &[
                 "in file bug_281.cir at or near line 7",
                 ".DC line not formatted correctly, found unexpected number of fields",
+            ][..],
+            Self::Bug401BadDeviceLine => &[
+                "in file bad-device-line.cir at or near line 5",
+                "Invalid device type for device AN",
+            ][..],
+            Self::Bug401ExtraSpace => &[
+                "in file extra-space.cir at or near line 2",
+                "Invalid device type for device APERFECT",
+            ][..],
+            Self::Bug401WorseDeviceLine => &[
+                "in file worse-device-line.cir at or near line 6",
+                "Illegal value found for device REALLY",
             ][..],
         };
         XyceUpstreamExpectedErrorPolicy {
@@ -378,6 +422,29 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::InvalidDcSweepArity,
                 identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 7".to_string()],
             },
+            Self::Bug401BadDeviceLine => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::CircuitBuild,
+                category: XyceExpectedFailureCategory::UnknownXspiceModel,
+                identifiers: vec!["AN".to_string(), "USER!".to_string(), "line 5".to_string()],
+            },
+            Self::Bug401ExtraSpace => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::CircuitBuild,
+                category: XyceExpectedFailureCategory::UnknownXspiceModel,
+                identifiers: vec![
+                    "APERFECT".to_string(),
+                    "USER!".to_string(),
+                    "line 2".to_string(),
+                ],
+            },
+            Self::Bug401WorseDeviceLine => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MalformedResistorSpecification,
+                identifiers: vec![
+                    "REALLY".to_string(),
+                    "PERFECT".to_string(),
+                    "line 6".to_string(),
+                ],
+            },
         }
     }
 
@@ -388,13 +455,24 @@ impl XyceExpectedFailureKind {
                 physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 8,
                 manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
             }),
             Self::MessageDcExcessArguments => Some(XyceExpectedFailureFamilyCensus {
                 physical_cir_count: 79,
                 physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 50,
                 manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
             }),
+            Self::Bug401BadDeviceLine | Self::Bug401ExtraSpace | Self::Bug401WorseDeviceLine => {
+                Some(XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 3,
+                    physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 3,
+                    manifest_records_blake3: XYCE_BUG401_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                })
+            }
             _ => None,
         }
     }
@@ -430,6 +508,8 @@ enum XyceExpectedFailureCategory {
     DcExcessArguments,
     DuplicateDcSourceFunction,
     InvalidDcSweepArity,
+    UnknownXspiceModel,
+    MalformedResistorSpecification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3645,6 +3725,15 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::Bug281InvalidDcSweepArity => {
                 Self::observe_bug281_invalid_dc_sweep_arity(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug401BadDeviceLine => {
+                self.observe_bug401_bad_device_line_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug401ExtraSpace => {
+                self.observe_bug401_extra_space_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug401WorseDeviceLine => {
+                Self::observe_bug401_worse_device_line_failure(source, &deck.path)?
+            }
         };
         let expected = kind.expected_observation();
         if observation != expected {
@@ -3951,15 +4040,37 @@ impl XyceTestRunner {
             ));
         }
 
-        let manifest_records = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(family_prefix))
-            .map(String::as_str)
-            .collect::<Vec<_>>();
+        let manifest_records = self.expected_failure_manifest_family_records(family_prefix)?;
         let manifest_hash = blake3::hash(manifest_records.join("\n").as_bytes())
             .to_hex()
             .to_string();
+        if expected.require_manifest_bijection {
+            let mut manifest_names = BTreeSet::new();
+            for record in &manifest_records {
+                let name = record
+                    .rsplit_once('/')
+                    .map(|(_, name)| name)
+                    .ok_or_else(|| {
+                        format!(
+                            "expected-failure shared-family manifest record '{record}' has no filename"
+                        )
+                    })?
+                    .to_ascii_lowercase();
+                if !manifest_names.insert(name.clone()) {
+                    return Err(format!(
+                        "expected-failure shared family '{}' contains a case-colliding manifest filename '{name}'",
+                        family_prefix.trim_end_matches('/')
+                    ));
+                }
+            }
+            let manifest_names = manifest_names.into_iter().collect::<Vec<_>>();
+            if manifest_names != physical_names {
+                return Err(format!(
+                    "expected-failure shared family '{}' manifest/physical .cir census is not a bijection: physical={physical_names:?}, manifest={manifest_names:?}",
+                    family_prefix.trim_end_matches('/')
+                ));
+            }
+        }
         if manifest_records.len() != expected.manifest_owner_count
             || manifest_hash != expected.manifest_records_blake3
         {
@@ -3972,13 +4083,68 @@ impl XyceTestRunner {
                 manifest_hash
             ));
         }
-        if !manifest_records.contains(&kind.record()) {
+        if !manifest_records
+            .iter()
+            .any(|record| record == kind.record())
+        {
             return Err(format!(
                 "expected-failure record '{}' is absent from its pinned shared-family manifest census",
                 kind.record()
             ));
         }
         Ok(())
+    }
+
+    fn expected_failure_manifest_family_records(
+        &self,
+        family_prefix: &str,
+    ) -> Result<Vec<String>, String> {
+        let manifest_path = self.root.join(HARNESS_MANIFEST_FILE);
+        let content = fs::read_to_string(&manifest_path).map_err(|error| {
+            format!(
+                "failed to read expected-failure manifest {}: {error}",
+                manifest_path.display()
+            )
+        })?;
+        let mut records = Vec::new();
+        let mut normalized_rows = BTreeMap::<String, (usize, String)>::new();
+        for (index, raw_line) in content.lines().enumerate() {
+            let line_number = index + 1;
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((path, contract)) = line.split_once('\t') else {
+                let normalized = Self::normalize_manifest_key(line);
+                if normalized.starts_with(family_prefix) {
+                    return Err(format!(
+                        "expected-failure shared-family manifest row {line_number} is malformed: {raw_line:?}"
+                    ));
+                }
+                continue;
+            };
+            let normalized = Self::normalize_manifest_key(path);
+            if !normalized.starts_with(family_prefix) {
+                continue;
+            }
+            if contract.trim() != REQUIRES_UPSTREAM_WRAPPER_CONTRACT {
+                return Err(format!(
+                    "expected-failure shared-family manifest row {line_number} has contract {:?}, expected {:?}",
+                    contract.trim(),
+                    REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+                ));
+            }
+            if let Some((first_line, first_path)) =
+                normalized_rows.insert(normalized.clone(), (line_number, path.to_string()))
+            {
+                return Err(format!(
+                    "expected-failure shared-family manifest contains duplicate or case-colliding record '{normalized}' at rows {first_line} ({first_path:?}) and {line_number} ({path:?})"
+                ));
+            }
+            records.push(normalized);
+        }
+        records.sort();
+        Ok(records)
     }
 
     fn require_expected_failure_source_lines(
@@ -4223,6 +4389,214 @@ impl XyceTestRunner {
             stage: XyceExpectedFailureStage::NetlistParse,
             category: XyceExpectedFailureCategory::InvalidDcSweepArity,
             identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 7".to_string()],
+        })
+    }
+
+    fn observe_bug401_bad_device_line_failure(
+        &self,
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 401 bad-device-line",
+            source,
+            11,
+            &[
+                (
+                    5,
+                    "An example of perfect nonsense that is too easy to get from a user!",
+                ),
+                (6, "R1 1 0 1meg"),
+                (7, "V1 1 0 DC 1V"),
+                (8, ".DC V1 1 1 1 "),
+                (9, ".PRINT DC V(1)"),
+                (10, ".end"),
+            ],
+        )?;
+        self.observe_bug401_unknown_xspice_model_failure(
+            "BUG 401 bad-device-line",
+            source,
+            deck_path,
+            "AN",
+            &[
+                "EXAMPLE", "OF", "PERFECT", "NONSENSE", "THAT", "IS", "TOO", "EASY", "TO", "GET",
+                "FROM", "A",
+            ],
+            5,
+        )
+    }
+
+    fn observe_bug401_extra_space_failure(
+        &self,
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 401 extra-space",
+            source,
+            13,
+            &[
+                (2, "APerfect nonsense that is too easy to get from a user!"),
+                (8, "R1 1 0 1meg"),
+                (9, "V1 1 0 DC 1V"),
+                (10, ".DC V1 1 1 1 "),
+                (11, ".PRINT DC V(1)"),
+                (12, ".end"),
+            ],
+        )?;
+        self.observe_bug401_unknown_xspice_model_failure(
+            "BUG 401 extra-space",
+            source,
+            deck_path,
+            "APERFECT",
+            &[
+                "NONSENSE", "THAT", "IS", "TOO", "EASY", "TO", "GET", "FROM", "A",
+            ],
+            2,
+        )
+    }
+
+    fn observe_bug401_unknown_xspice_model_failure(
+        &self,
+        label: &str,
+        source: &str,
+        deck_path: &Path,
+        expected_element: &str,
+        expected_ports: &[&str],
+        expected_line: usize,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let netlist = Self::parse_xyce_netlist(source, deck_path).map_err(|error| {
+            format!("{label} must parse before XSPICE model resolution: {error}")
+        })?;
+        if !netlist.title.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || netlist.elements.len() != 3
+        {
+            return Err(format!(
+                "{label} parsed structure changed: title={:?}, diagnostics={:?}, models={}, subcircuits={}, elements={}",
+                netlist.title,
+                netlist.diagnostics,
+                netlist.models.len(),
+                netlist.subcircuits.len(),
+                netlist.elements.len()
+            ));
+        }
+        let element_names = netlist
+            .elements
+            .iter()
+            .map(|element| element.name.as_str())
+            .collect::<Vec<_>>();
+        if element_names != [expected_element, "R1", "V1"] {
+            return Err(format!(
+                "{label} element order changed: expected [{expected_element:?}, \"R1\", \"V1\"], got {element_names:?}"
+            ));
+        }
+        let ElementKind::Xspice {
+            model,
+            pspice_u_timing,
+            ports,
+            params,
+            expr_params,
+            string_params,
+            string_expr_params,
+            string_vector_params,
+            string_vector_expr_params,
+            real_vector_params,
+            real_vector_expr_params,
+        } = &netlist.elements[0].kind
+        else {
+            return Err(format!(
+                "{label} malformed A-prefixed line no longer parses as an XSPICE instance"
+            ));
+        };
+        let analog_ports = ports
+            .iter()
+            .map(|port| match port {
+                crate::netlist::XspicePort::Analog(node) => Some(node.as_str()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| format!("{label} acquired a non-analog XSPICE port"))?;
+        if model != "USER!"
+            || analog_ports != expected_ports
+            || pspice_u_timing.is_some()
+            || !params.is_empty()
+            || !expr_params.is_empty()
+            || !string_params.is_empty()
+            || !string_expr_params.is_empty()
+            || !string_vector_params.is_empty()
+            || !string_vector_expr_params.is_empty()
+            || !real_vector_params.is_empty()
+            || !real_vector_expr_params.is_empty()
+        {
+            return Err(format!(
+                "{label} XSPICE interpretation changed: model={model:?}, ports={analog_ports:?}"
+            ));
+        }
+        match self.create_xyce_engine().build_circuit(&netlist) {
+            Err(SimulationError::Circuit(message))
+                if message.contains(&format!(
+                    "Failed to resolve XSPICE model 'USER!' for element {expected_element}"
+                )) && message.contains("Unknown XSPICE model 'USER!'") => {}
+            Err(error) => {
+                return Err(format!(
+                    "{label} produced the wrong typed build failure: {error:?}"
+                ));
+            }
+            Ok(_) => {
+                return Err(format!(
+                    "{label} unexpectedly built; the unknown XSPICE model condition is absent"
+                ));
+            }
+        }
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::CircuitBuild,
+            category: XyceExpectedFailureCategory::UnknownXspiceModel,
+            identifiers: vec![
+                expected_element.to_string(),
+                "USER!".to_string(),
+                format!("line {expected_line}"),
+            ],
+        })
+    }
+
+    fn observe_bug401_worse_device_line_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 401 worse-device-line",
+            source,
+            12,
+            &[
+                (
+                    6,
+                    "Really good example of perfect nonsense that is too easy to get from a user!",
+                ),
+                (7, "R1 1 0 1meg"),
+                (8, "V1 1 0 DC 1V"),
+                (9, ".DC V1 1 1 1 "),
+                (10, ".PRINT DC V(1)"),
+                (11, ".end"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "BUG 401 worse-device-line",
+            source,
+            deck_path,
+            6,
+            "Unexpected trailing token in resistor specification: PERFECT",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::MalformedResistorSpecification,
+            identifiers: vec![
+                "REALLY".to_string(),
+                "PERFECT".to_string(),
+                "line 6".to_string(),
+            ],
         })
     }
 
@@ -64913,6 +65287,27 @@ R2 2 0 1
                     ".DC line not formatted correctly, found unexpected number of fields",
                 ][..],
             ),
+            (
+                XyceExpectedFailureKind::Bug401BadDeviceLine,
+                &[
+                    "in file bad-device-line.cir at or near line 5",
+                    "Invalid device type for device AN",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug401ExtraSpace,
+                &[
+                    "in file extra-space.cir at or near line 2",
+                    "Invalid device type for device APERFECT",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug401WorseDeviceLine,
+                &[
+                    "in file worse-device-line.cir at or near line 6",
+                    "Illegal value found for device REALLY",
+                ][..],
+            ),
         ];
 
         for (kind, patterns) in cases {
@@ -64939,7 +65334,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_ten_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_thirteen_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -64969,6 +65364,18 @@ R2 2 0 1
                 (
                     XYCE_BUG387_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+                ),
+                (
+                    XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug401BadDeviceLine,
+                ),
+                (
+                    XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug401ExtraSpace,
+                ),
+                (
+                    XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug401WorseDeviceLine,
                 ),
                 (
                     XYCE_BUG67_EXPECTED_FAILURE_RECORD.to_string(),
@@ -65006,7 +65413,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            10,
+            13,
             "each record requires a distinct contract"
         );
     }
@@ -65056,6 +65463,18 @@ R2 2 0 1
                 "Netlists/Certification_Tests/BUG_281/bug_281.cir",
                 "expected_failure_bug281_invalid_dc_sweep_arity_parse",
             ),
+            (
+                "Netlists/Certification_Tests/BUG_401/bad-device-line.cir",
+                "expected_failure_bug401_bad_device_line_build",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_401/extra-space.cir",
+                "expected_failure_bug401_extra_space_build",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_401/worse-device-line.cir",
+                "expected_failure_bug401_worse_device_line_parse",
+            ),
         ] {
             let result = runner.run_test(root.join(relative));
             assert!(
@@ -65075,6 +65494,7 @@ R2 2 0 1
                 physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 8,
                 manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
             })
         );
         assert_eq!(
@@ -65084,8 +65504,23 @@ R2 2 0 1
                 physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 50,
                 manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
             })
         );
+        let bug401_census = Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 3,
+            physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 3,
+            manifest_records_blake3: XYCE_BUG401_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: true,
+        });
+        for member in [
+            XyceExpectedFailureKind::Bug401BadDeviceLine,
+            XyceExpectedFailureKind::Bug401ExtraSpace,
+            XyceExpectedFailureKind::Bug401WorseDeviceLine,
+        ] {
+            assert_eq!(member.shared_family_census(), bug401_census);
+        }
         for singleton in [
             XyceExpectedFailureKind::Bug67BehavioralExpression,
             XyceExpectedFailureKind::Bug671InvalidPwlFile,
@@ -65736,6 +66171,248 @@ R2 2 0 1
                 "{label} must not satisfy BUG 281"
             );
         }
+    }
+
+    #[test]
+    fn bug401_expected_failure_observers_reject_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let family = root.join("Netlists/Certification_Tests/BUG_401");
+
+        let bad_path = family.join("bad-device-line.cir");
+        let bad_source = fs::read_to_string(&bad_path).expect("read BUG 401 bad-device-line");
+        runner
+            .observe_bug401_bad_device_line_failure(&bad_source, &bad_path)
+            .expect("canonical BUG 401 bad-device-line failure is observed");
+        let corrected_bad = bad_source.replacen(
+            "An example of perfect nonsense that is too easy to get from a user!",
+            "* An example of perfect nonsense that is too easy to get from a user!",
+            1,
+        );
+        assert_ne!(corrected_bad, bad_source);
+        let corrected_bad_netlist = XyceTestRunner::parse_xyce_netlist(&corrected_bad, &bad_path)
+            .expect("commented BUG 401 bad-device-line genuinely parses");
+        runner
+            .create_xyce_engine()
+            .build_circuit(&corrected_bad_netlist)
+            .expect("commented BUG 401 bad-device-line genuinely builds");
+        for (mutated, label) in [
+            (corrected_bad, "commented malformed A line"),
+            (
+                bad_source.replacen("from a user!", "from a operator!", 1),
+                "different inferred XSPICE model",
+            ),
+            (format!("\n{bad_source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, bad_source, "{label} mutation must change source");
+            assert!(
+                runner
+                    .observe_bug401_bad_device_line_failure(&mutated, &bad_path)
+                    .is_err(),
+                "{label} must not satisfy BUG 401 bad-device-line"
+            );
+        }
+
+        let extra_path = family.join("extra-space.cir");
+        let extra_source = fs::read_to_string(&extra_path).expect("read BUG 401 extra-space");
+        runner
+            .observe_bug401_extra_space_failure(&extra_source, &extra_path)
+            .expect("canonical BUG 401 extra-space failure is observed");
+        let corrected_extra = extra_source.replacen(
+            "APerfect nonsense that is too easy to get from a user!",
+            "* APerfect nonsense that is too easy to get from a user!",
+            1,
+        );
+        assert_ne!(corrected_extra, extra_source);
+        let corrected_extra_netlist =
+            XyceTestRunner::parse_xyce_netlist(&corrected_extra, &extra_path)
+                .expect("commented BUG 401 extra-space genuinely parses");
+        runner
+            .create_xyce_engine()
+            .build_circuit(&corrected_extra_netlist)
+            .expect("commented BUG 401 extra-space genuinely builds");
+        for (mutated, label) in [
+            (corrected_extra, "commented malformed A line"),
+            (
+                extra_source.replacen("from a user!", "from a operator!", 1),
+                "different inferred XSPICE model",
+            ),
+            (format!("\n{extra_source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, extra_source, "{label} mutation must change source");
+            assert!(
+                runner
+                    .observe_bug401_extra_space_failure(&mutated, &extra_path)
+                    .is_err(),
+                "{label} must not satisfy BUG 401 extra-space"
+            );
+        }
+
+        let worse_path = family.join("worse-device-line.cir");
+        let worse_source = fs::read_to_string(&worse_path).expect("read BUG 401 worse-device-line");
+        XyceTestRunner::observe_bug401_worse_device_line_failure(&worse_source, &worse_path)
+            .expect("canonical BUG 401 worse-device-line failure is observed");
+        let corrected_worse = worse_source.replacen(
+            "Really good example of perfect nonsense that is too easy to get from a user!",
+            "* Really good example of perfect nonsense that is too easy to get from a user!",
+            1,
+        );
+        assert_ne!(corrected_worse, worse_source);
+        let corrected_worse_netlist =
+            XyceTestRunner::parse_xyce_netlist(&corrected_worse, &worse_path)
+                .expect("commented BUG 401 worse-device-line genuinely parses");
+        runner
+            .create_xyce_engine()
+            .build_circuit(&corrected_worse_netlist)
+            .expect("commented BUG 401 worse-device-line genuinely builds");
+        for (mutated, label) in [
+            (corrected_worse, "commented malformed resistor line"),
+            (
+                worse_source.replacen("perfect nonsense", "different nonsense", 1),
+                "different illegal resistor token",
+            ),
+            (format!("\n{worse_source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, worse_source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug401_worse_device_line_failure(&mutated, &worse_path)
+                    .is_err(),
+                "{label} must not satisfy BUG 401 worse-device-line"
+            );
+        }
+    }
+
+    #[test]
+    fn bug401_expected_failure_family_provenance_fails_closed() {
+        let source_root = expected_failure_test_root();
+        let source_family = source_root.join("Netlists/Certification_Tests/BUG_401");
+        let temp_root = unique_expected_failure_temp_dir("bug401-family");
+        let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_401");
+        fs::create_dir_all(&temp_family).expect("create BUG 401 family fixture");
+        for file_name in [
+            "bad-device-line.cir",
+            "extra-space.cir",
+            "worse-device-line.cir",
+        ] {
+            fs::copy(source_family.join(file_name), temp_family.join(file_name))
+                .expect("copy BUG 401 family member");
+        }
+        let canonical_manifest = [
+            "Netlists/Certification_Tests/BUG_401/bad-device-line.cir\trequires_upstream_wrapper",
+            "Netlists/Certification_Tests/BUG_401/extra-space.cir\trequires_upstream_wrapper",
+            "Netlists/Certification_Tests/BUG_401/worse-device-line.cir\trequires_upstream_wrapper",
+        ]
+        .join("\n")
+            + "\n";
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        fs::write(&manifest_path, &canonical_manifest).expect("write BUG 401 manifest");
+        let deck_path = temp_family.join("bad-device-line.cir");
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+        let assert_rejected = |label: &str, expected_error: &str| {
+            let result = run();
+            assert!(
+                !result.passed
+                    && result
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains(expected_error)),
+                "{label} must fail closed with {expected_error:?}: {result:?}"
+            );
+        };
+
+        let canonical = run();
+        assert!(
+            canonical.passed
+                && !canonical.expected_unsupported
+                && canonical.contract == "expected_failure_bug401_bad_device_line_build",
+            "canonical copied BUG 401 family must pass: {canonical:?}"
+        );
+
+        let added = temp_family.join("added.cir");
+        fs::write(&added, "added\n.end\n").expect("add BUG 401 physical member");
+        assert_rejected("added physical member", "physical .cir census changed");
+        fs::remove_file(&added).expect("remove added BUG 401 member");
+
+        let removable = temp_family.join("worse-device-line.cir");
+        let removable_source = fs::read(&removable).expect("read removable BUG 401 member");
+        fs::remove_file(&removable).expect("remove BUG 401 physical member");
+        assert_rejected("removed physical member", "physical .cir census changed");
+        fs::write(&removable, &removable_source).expect("restore BUG 401 member");
+
+        let collision_paths = [
+            temp_family.join("RSpice_Case_Probe.cir"),
+            temp_family.join("rspice_case_probe.CIR"),
+        ];
+        fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+        fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+        let case_probe_entries = fs::read_dir(&temp_family)
+            .expect("read BUG 401 case-probe directory")
+            .map(|entry| entry.expect("read BUG 401 case-probe entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+            })
+            .collect::<Vec<_>>();
+        if case_probe_entries.len() == 2 {
+            assert_rejected("case-colliding physical members", "case-colliding");
+        }
+        for path in case_probe_entries {
+            fs::remove_file(path).expect("remove BUG 401 case probe");
+        }
+
+        let duplicate_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_401/bad-device-line.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, duplicate_manifest).expect("write duplicate BUG 401 owner");
+        assert_rejected(
+            "duplicate manifest owner",
+            "duplicate or case-colliding record",
+        );
+
+        let case_variant_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_401/BAD-DEVICE-LINE.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, case_variant_manifest).expect("write case-variant BUG 401 owner");
+        assert_rejected(
+            "case-variant manifest owner",
+            "duplicate or case-colliding record",
+        );
+
+        let non_bijective_manifest = canonical_manifest.replace(
+            "Netlists/Certification_Tests/BUG_401/worse-device-line.cir",
+            "Netlists/Certification_Tests/BUG_401/missing-device-line.cir",
+        );
+        fs::write(&manifest_path, non_bijective_manifest)
+            .expect("write non-bijective BUG 401 manifest");
+        assert_rejected(
+            "non-bijective manifest owner",
+            "manifest/physical .cir census is not a bijection",
+        );
+
+        let prefix_isolation_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_401_SON/unrelated.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, prefix_isolation_manifest)
+            .expect("write BUG 401 SON prefix-isolation row");
+        let prefix_isolated = run();
+        assert!(
+            prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+            "BUG_401_SON manifest rows must not enter the BUG_401 family census: {prefix_isolated:?}"
+        );
+
+        fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 401 manifest");
+        let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_401");
+        fs::create_dir_all(&output_dir).expect("create BUG 401 OutputData fixture");
+        fs::write(output_dir.join("bad-device-line.cir.prn"), "forbidden")
+            .expect("write forbidden BUG 401 artifact");
+        assert_rejected(
+            "target output artifact",
+            "must not own checked-in output artifacts",
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove BUG 401 family fixture");
     }
 
     #[test]
