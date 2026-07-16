@@ -7,18 +7,19 @@
 //! - Subcircuit definitions and instances
 
 use super::expr::{eval_expression, eval_expression_complex, prepare_behavioral_expression};
+use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, DataTable, Element, ElementKind, ExpressionDialect, FftAnalysis,
     FftFormat, FftOutput, FftWindow, FreqVariation, InitialCondition, JfetType, MesfetType,
-    ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet, ParamContext,
-    ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
-    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
-    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
-    VerilogAInclude, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
-    poll_parse_text,
+    MissingSubcircuitEndsBoundary, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
+    Netlist, NetlistSourceLocation, NodeSet, ParamContext, ParameterRedefinitionPolicy,
+    ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError, PoleZeroAnalysisType,
+    PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal,
+    SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -81,6 +82,42 @@ struct DataTableBuilder {
     name: String,
     params: Vec<String>,
     flat_values: Vec<Value>,
+}
+
+#[derive(Debug)]
+struct SourceEventSchedule {
+    origins: Vec<NetlistSourceLocation>,
+    events: HashMap<usize, Vec<ExpandedSourceItem>>,
+}
+
+impl SourceEventSchedule {
+    fn from_expanded(expanded: &ExpandedSource) -> Self {
+        let mut origins = Vec::new();
+        let mut events = HashMap::<usize, Vec<ExpandedSourceItem>>::new();
+        for item in &expanded.items {
+            match item {
+                ExpandedSourceItem::Line { origin, .. } => origins.push(origin.clone()),
+                event => events.entry(origins.len()).or_default().push(event.clone()),
+            }
+        }
+        Self { origins, events }
+    }
+
+    fn origin(&self, zero_based_line: usize) -> Option<&NetlistSourceLocation> {
+        self.origins.get(zero_based_line)
+    }
+
+    fn take_events(&mut self, before_zero_based_line: usize) -> Vec<ExpandedSourceItem> {
+        self.events
+            .remove(&before_zero_based_line)
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug)]
+struct ActiveSourceFrame {
+    path: std::path::PathBuf,
+    entry_subckt_depth: usize,
 }
 
 impl DataTableBuilder {
@@ -263,6 +300,29 @@ pub fn parse_netlist_with_options_and_abort(
     options: NetlistParseOptions,
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
+    parse_netlist_impl(input, options, None, abort)
+}
+
+pub(crate) fn parse_expanded_netlist_with_options_and_abort(
+    expanded: &ExpandedSource,
+    options: NetlistParseOptions,
+    abort: &dyn AbortSignal,
+) -> Result<Netlist, ParseWithAbortError> {
+    let rendered = expanded.render();
+    parse_netlist_impl(
+        &rendered,
+        options,
+        Some(SourceEventSchedule::from_expanded(expanded)),
+        abort,
+    )
+}
+
+fn parse_netlist_impl(
+    input: &str,
+    options: NetlistParseOptions,
+    mut source_schedule: Option<SourceEventSchedule>,
+    abort: &dyn AbortSignal,
+) -> Result<Netlist, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
     let mut lines: Vec<&str> = Vec::new();
     for (index, line) in input.lines().enumerate() {
@@ -297,12 +357,44 @@ pub fn parse_netlist_with_options_and_abort(
     let mut line_num = 1;
     let mut continuation = String::new();
     let mut continuation_line = None;
+    let mut continuation_origin = None;
     let mut data_table: Option<DataTableBuilder> = None;
+    let mut active_sources = Vec::new();
+    let mut deferred_source_boundaries = Vec::new();
+    let mut termination = None;
+    let mut root_eof = None;
+
+    process_source_events_at(
+        source_schedule.as_mut(),
+        0,
+        &mut active_sources,
+        &mut deferred_source_boundaries,
+        &mut continuation,
+        &mut continuation_line,
+        &mut continuation_origin,
+        &mut state,
+    )?;
 
     for (line_index, line) in lines.iter().skip(1).enumerate() {
+        let zero_based_line = line_index + 1;
+        process_source_events_at(
+            source_schedule.as_mut(),
+            zero_based_line,
+            &mut active_sources,
+            &mut deferred_source_boundaries,
+            &mut continuation,
+            &mut continuation_line,
+            &mut continuation_origin,
+            &mut state,
+        )?;
         poll_parse_abort(abort, line_index)?;
         poll_parse_text(abort, line)?;
         line_num += 1;
+        let origin = source_schedule
+            .as_ref()
+            .and_then(|schedule| schedule.origin(zero_based_line))
+            .cloned()
+            .unwrap_or_else(|| NetlistSourceLocation::in_memory(line_num));
 
         // Strip inline comments (common SPICE syntax), then trim.
         // We intentionally keep this simple and treat these markers as comment
@@ -311,6 +403,22 @@ pub fn parse_netlist_with_options_and_abort(
         let trimmed = no_inline_comment.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
+        }
+
+        let ordinary_continuation = data_table.is_none() && trimmed.starts_with('+');
+        if !ordinary_continuation {
+            flush_pending_logical_line(
+                &mut continuation,
+                &mut continuation_line,
+                &mut continuation_origin,
+                &mut state,
+            )?;
+            apply_deferred_source_boundaries(
+                &mut deferred_source_boundaries,
+                false,
+                &mut active_sources,
+                &state,
+            )?;
         }
 
         let head = trimmed.split_whitespace().next().unwrap_or("");
@@ -342,23 +450,15 @@ pub fn parse_netlist_with_options_and_abort(
         // Handle line continuation (+ at start of line)
         if let Some(rest) = trimmed.strip_prefix('+') {
             continuation_line.get_or_insert(line_num);
+            continuation_origin.get_or_insert_with(|| origin.clone());
             continuation.push(' ');
             continuation.push_str(rest);
             continue;
         }
 
-        // Process previous continued line if exists
-        if !continuation.is_empty() {
-            let logical_line = continuation_line
-                .take()
-                .expect("non-empty logical statement records its physical origin");
-            process_line_gated(&continuation, logical_line, &mut state)
-                .map_err(ParseWithAbortError::from)?;
-            continuation.clear();
-        }
-
         // Check for .END
         if trimmed.eq_ignore_ascii_case(".end") {
+            termination = Some((MissingSubcircuitEndsBoundary::EndCard, origin));
             break;
         }
 
@@ -369,6 +469,7 @@ pub fn parse_netlist_with_options_and_abort(
                 "line {line_num}: .ALTER present; this parse covers the base deck - \
                  run multi-run expansion for the alter variants"
             );
+            termination = Some((MissingSubcircuitEndsBoundary::AlterCard, origin));
             break;
         }
         if head.eq_ignore_ascii_case(".data") {
@@ -393,6 +494,20 @@ pub fn parse_netlist_with_options_and_abort(
         // Start new continuation or process line
         continuation = trimmed.to_string();
         continuation_line = Some(line_num);
+        continuation_origin = Some(origin);
+    }
+
+    if termination.is_none() {
+        process_source_events_at(
+            source_schedule.as_mut(),
+            lines.len(),
+            &mut active_sources,
+            &mut deferred_source_boundaries,
+            &mut continuation,
+            &mut continuation_line,
+            &mut continuation_origin,
+            &mut state,
+        )?;
     }
 
     if let Some(table) = data_table {
@@ -405,11 +520,20 @@ pub fn parse_netlist_with_options_and_abort(
 
     // Process final line
     if !continuation.is_empty() {
-        let logical_line = continuation_line
-            .take()
-            .expect("non-empty logical statement records its physical origin");
-        process_line_gated(&continuation, logical_line, &mut state)
-            .map_err(ParseWithAbortError::from)?;
+        flush_pending_logical_line(
+            &mut continuation,
+            &mut continuation_line,
+            &mut continuation_origin,
+            &mut state,
+        )?;
+    }
+    if termination.is_none() {
+        root_eof = apply_deferred_source_boundaries(
+            &mut deferred_source_boundaries,
+            true,
+            &mut active_sources,
+            &state,
+        )?;
     }
 
     if let Some(frame) = state.conditional_stack.last() {
@@ -420,14 +544,195 @@ pub fn parse_netlist_with_options_and_abort(
         .into());
     }
 
+    if let Some((boundary, detected_at)) = termination {
+        if let Some(error) = state.missing_subcircuit_ends(detected_at, boundary) {
+            return Err(error.into());
+        }
+    } else {
+        let detected_at = root_eof
+            .clone()
+            .unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1));
+        if let Some(error) = state.missing_subcircuit_ends(
+            detected_at.clone(),
+            MissingSubcircuitEndsBoundary::EndOfSource,
+        ) {
+            return Err(error.into());
+        }
+    }
+
     normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
     resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
     validate_resistor_model_references_with_abort(&state, abort)?;
 
     ensure_parse_not_aborted(abort)?;
     state
-        .into_netlist(title, input, line_num)
+        .into_netlist(
+            title,
+            input,
+            root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
+        )
         .map_err(ParseWithAbortError::from)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_source_events_at(
+    source_schedule: Option<&mut SourceEventSchedule>,
+    before_zero_based_line: usize,
+    active_sources: &mut Vec<ActiveSourceFrame>,
+    deferred_source_boundaries: &mut Vec<ExpandedSourceItem>,
+    continuation: &mut String,
+    continuation_line: &mut Option<usize>,
+    continuation_origin: &mut Option<NetlistSourceLocation>,
+    state: &mut ParseState,
+) -> Result<(), ParseWithAbortError> {
+    let Some(source_schedule) = source_schedule else {
+        return Ok(());
+    };
+    for event in source_schedule.take_events(before_zero_based_line) {
+        match event {
+            event @ (ExpandedSourceItem::EnterSource { .. }
+            | ExpandedSourceItem::ExitSource { .. }) => {
+                deferred_source_boundaries.push(event);
+            }
+            ExpandedSourceItem::EndCard { origin } => {
+                flush_pending_logical_line(
+                    continuation,
+                    continuation_line,
+                    continuation_origin,
+                    state,
+                )?;
+                apply_deferred_source_boundaries(
+                    deferred_source_boundaries,
+                    false,
+                    active_sources,
+                    state,
+                )?;
+                let Some(source) = active_sources.last() else {
+                    return Err(ParseError::Syntax {
+                        line: origin.line,
+                        message: format!(
+                            "{}: included .END has no active source frame",
+                            origin
+                        ),
+                    }
+                    .into());
+                };
+                validate_source_subckt_depth(
+                    state,
+                    source,
+                    origin,
+                    MissingSubcircuitEndsBoundary::EndCard,
+                )?;
+            }
+            ExpandedSourceItem::Line { .. } => {
+                unreachable!("line items are represented in the rendered source")
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_deferred_source_boundaries(
+    deferred_source_boundaries: &mut Vec<ExpandedSourceItem>,
+    defer_root_exit: bool,
+    active_sources: &mut Vec<ActiveSourceFrame>,
+    state: &ParseState,
+) -> Result<Option<NetlistSourceLocation>, ParseWithAbortError> {
+    let mut root_eof = None;
+    for event in deferred_source_boundaries.drain(..) {
+        match event {
+            ExpandedSourceItem::EnterSource { path } => {
+                active_sources.push(ActiveSourceFrame {
+                    path,
+                    entry_subckt_depth: state.subckt_stack.len(),
+                });
+            }
+            ExpandedSourceItem::ExitSource { path, eof_line } => {
+                let Some(source) = active_sources.last() else {
+                    return Err(ParseError::Syntax {
+                        line: eof_line,
+                        message: format!(
+                            "{}:{}: source exit has no matching source entry",
+                            path.display(),
+                            eof_line
+                        ),
+                    }
+                    .into());
+                };
+                if source.path != path {
+                    return Err(ParseError::Syntax {
+                        line: eof_line,
+                        message: format!(
+                            "source expansion boundary mismatch: entered '{}', exited '{}'",
+                            source.path.display(),
+                            path.display()
+                        ),
+                    }
+                    .into());
+                }
+                let detected_at = NetlistSourceLocation::in_file(&path, eof_line);
+                if defer_root_exit && active_sources.len() == 1 {
+                    root_eof = Some(detected_at);
+                } else {
+                    validate_source_subckt_depth(
+                        state,
+                        source,
+                        detected_at,
+                        MissingSubcircuitEndsBoundary::EndOfSource,
+                    )?;
+                }
+                active_sources.pop();
+            }
+            ExpandedSourceItem::EndCard { .. } | ExpandedSourceItem::Line { .. } => {
+                unreachable!("only source entry/exit events are deferred")
+            }
+        }
+    }
+    Ok(root_eof)
+}
+
+fn flush_pending_logical_line(
+    continuation: &mut String,
+    continuation_line: &mut Option<usize>,
+    continuation_origin: &mut Option<NetlistSourceLocation>,
+    state: &mut ParseState,
+) -> Result<(), ParseWithAbortError> {
+    if continuation.is_empty() {
+        return Ok(());
+    }
+    let logical_line = continuation_line
+        .take()
+        .expect("non-empty logical statement records its physical origin");
+    let logical_origin = continuation_origin
+        .take()
+        .unwrap_or_else(|| NetlistSourceLocation::in_memory(logical_line));
+    process_line_gated(continuation, logical_line, &logical_origin, state)
+        .map_err(ParseWithAbortError::from)?;
+    continuation.clear();
+    Ok(())
+}
+
+fn validate_source_subckt_depth(
+    state: &ParseState,
+    source: &ActiveSourceFrame,
+    detected_at: NetlistSourceLocation,
+    boundary: MissingSubcircuitEndsBoundary,
+) -> Result<(), ParseWithAbortError> {
+    match state.subckt_stack.len().cmp(&source.entry_subckt_depth) {
+        std::cmp::Ordering::Greater => Err(state
+            .missing_subcircuit_ends(detected_at, boundary)
+            .expect("greater subcircuit depth has an open frame")
+            .into()),
+        std::cmp::Ordering::Less => Err(ParseError::Syntax {
+            line: detected_at.line,
+            message: format!(
+                "{}: included source closed a .SUBCKT opened by its parent source",
+                detected_at
+            ),
+        }
+        .into()),
+        std::cmp::Ordering::Equal => Ok(()),
+    }
 }
 
 fn resolve_top_level_deferred_source_specs_with_abort(
@@ -1269,6 +1574,7 @@ fn scan_temperature_option_line(
 fn process_line_gated(
     line: &str,
     line_num: usize,
+    origin: &NetlistSourceLocation,
     state: &mut ParseState,
 ) -> Result<(), ParseError> {
     if let Some(directive) = parse_conditional_directive(line) {
@@ -1277,7 +1583,7 @@ fn process_line_gated(
     if state.conditionals_suppress() {
         return Ok(());
     }
-    process_line(line, line_num, state)
+    process_line(line, line_num, origin, state)
 }
 
 /// Pre-scan for `.options seed=<n>` (alias `rndseed=<n>`) so the statistical

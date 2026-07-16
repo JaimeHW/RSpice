@@ -798,7 +798,7 @@ impl IncludeProcessor {
                 result.items.push(ExpandedSourceItem::EndCard {
                     origin: NetlistSourceLocation::in_file(current_path, line_number),
                 });
-                continue;
+                break;
             }
 
             if split_directive(trimmed)
@@ -1412,7 +1412,10 @@ mod tests {
         let deck_path = dir.join("deck.cir");
         let child_path = nested.join("child.inc");
         let leaf_path = nested.join("leaf.inc");
-        std::fs::write(&child_path, "Rchild 1 0 1\n.include leaf.inc\n.end\n")
+        std::fs::write(
+            &child_path,
+            "Rchild 1 0 1\n.include leaf.inc\n.end\nRignored 9 0 9\n",
+        )
             .expect("write child include");
         std::fs::write(&leaf_path, "Rleaf 2 0 2\n").expect("write leaf include");
         let deck = "mapped title\n.include nested/child.inc\nRtop 3 0 3\n.end\n";
@@ -1461,7 +1464,7 @@ mod tests {
                 },
                 ExpandedSourceItem::ExitSource {
                     path: child_canonical,
-                    eof_line: 4,
+                    eof_line: 5,
                 },
                 ExpandedSourceItem::Line {
                     text: "Rtop 3 0 3".to_string(),

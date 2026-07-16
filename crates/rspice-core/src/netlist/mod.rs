@@ -83,6 +83,33 @@ impl NetlistSourceLocation {
     }
 }
 
+impl std::fmt::Display for NetlistSourceLocation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.path {
+            Some(path) => write!(formatter, "{}:{}", path.display(), self.line),
+            None => write!(formatter, "line {}", self.line),
+        }
+    }
+}
+
+/// Boundary that exposed an unterminated `.SUBCKT` definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingSubcircuitEndsBoundary {
+    EndCard,
+    AlterCard,
+    EndOfSource,
+}
+
+impl std::fmt::Display for MissingSubcircuitEndsBoundary {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::EndCard => ".END",
+            Self::AlterCard => ".ALTER",
+            Self::EndOfSource => "end of source",
+        })
+    }
+}
+
 /// Errors that can occur during netlist parsing
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -105,6 +132,18 @@ pub enum ParseError {
         scope: String,
         first_line: usize,
         duplicate_line: usize,
+    },
+
+    #[error(
+        "Subcircuit {canonical_name} missing .ENDS (opened as '{authored_name}' in scope '{qualified_name}' at {opened_at}; reached {boundary} at {detected_at})"
+    )]
+    MissingSubcircuitEnds {
+        authored_name: String,
+        canonical_name: String,
+        qualified_name: String,
+        opened_at: NetlistSourceLocation,
+        detected_at: NetlistSourceLocation,
+        boundary: MissingSubcircuitEndsBoundary,
     },
 
     #[error("Missing required parameter: {0}")]
@@ -436,13 +475,18 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let processed = Self::preprocess_includes_with_execution_dir_and_abort(
+        let expanded = Self::preprocess_includes_mapped_with_execution_dir_and_abort(
             input,
             file_path,
             execution_dir,
             abort,
         )?;
-        let mut netlist = Self::parse_with_options_and_abort(&processed, options, abort)?;
+        let (sanitized, mut diagnostics) =
+            Self::sanitize_expanded_source_with_abort(expanded, abort)?;
+        let mut netlist =
+            parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
+        diagnostics.extend(netlist.diagnostics);
+        netlist.diagnostics = diagnostics;
         Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
@@ -577,8 +621,16 @@ impl Netlist {
             poll_parse_abort(abort, index)?;
             processor.add_lib_path(dir.clone());
         }
-        let processed = processor.expand_content_with_abort(input, path, abort)?;
-        let mut netlist = Self::parse_with_abort(&processed, abort)?;
+        let expanded = processor.expand_content_mapped_with_abort(input, path, abort)?;
+        let (sanitized, mut diagnostics) =
+            Self::sanitize_expanded_source_with_abort(expanded, abort)?;
+        let mut netlist = parser::parse_expanded_netlist_with_options_and_abort(
+            &sanitized,
+            NetlistParseOptions::default(),
+            abort,
+        )?;
+        diagnostics.extend(netlist.diagnostics);
+        netlist.diagnostics = diagnostics;
         Self::normalize_model_string_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
@@ -618,8 +670,23 @@ impl Netlist {
         execution_dir: Option<&std::path::Path>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        Self::preprocess_includes_mapped_with_execution_dir_and_abort(
+            content,
+            file_path,
+            execution_dir,
+            abort,
+        )
+        .map(|expanded| expanded.render())
+    }
+
+    fn preprocess_includes_mapped_with_execution_dir_and_abort(
+        content: &str,
+        file_path: &std::path::Path,
+        execution_dir: Option<&std::path::Path>,
+        abort: &dyn AbortSignal,
+    ) -> Result<include::ExpandedSource, ParseWithAbortError> {
         let mut processor = IncludeProcessor::new_with_execution_dir(file_path, execution_dir);
-        processor.expand_content_with_abort(content, file_path, abort)
+        processor.expand_content_mapped_with_abort(content, file_path, abort)
     }
 
     /// Strip .control/.endc blocks from netlist
@@ -741,6 +808,158 @@ impl Netlist {
 
         ensure_parse_not_aborted(abort)?;
         Ok(promoted)
+    }
+
+    fn sanitize_expanded_source_with_abort(
+        expanded: include::ExpandedSource,
+        abort: &dyn AbortSignal,
+    ) -> Result<(include::ExpandedSource, Vec<ParseDiagnostic>), ParseWithAbortError> {
+        let mut promoted = Vec::<(String, NetlistSourceLocation)>::new();
+        let mut in_control = false;
+        for (index, item) in expanded.items.iter().enumerate() {
+            poll_parse_abort(abort, index)?;
+            let include::ExpandedSourceItem::Line { text, origin } = item else {
+                continue;
+            };
+            poll_parse_text(abort, text)?;
+            let trimmed = text.trim();
+            let head = trimmed.split_whitespace().next().unwrap_or("");
+            if head.eq_ignore_ascii_case(".control") {
+                in_control = true;
+                continue;
+            }
+            if head.eq_ignore_ascii_case(".endc") {
+                in_control = false;
+                continue;
+            }
+            if !in_control {
+                continue;
+            }
+            for command in Self::promoted_control_commands_for_line(text) {
+                promoted.push((command, origin.clone()));
+            }
+        }
+
+        let mut output = include::ExpandedSource::default();
+        let mut diagnostics = Vec::new();
+        let mut in_control = false;
+        let mut opened_at = None;
+        let mut inserted = false;
+        for (index, item) in expanded.items.into_iter().enumerate() {
+            poll_parse_abort(abort, index)?;
+            match item {
+                include::ExpandedSourceItem::Line { text, origin } => {
+                    poll_parse_text(abort, &text)?;
+                    let trimmed = text.trim();
+                    let head = trimmed.split_whitespace().next().unwrap_or("");
+                    if head.eq_ignore_ascii_case(".control") {
+                        in_control = true;
+                        opened_at = Some(origin.clone());
+                        diagnostics.push(ParseDiagnostic::warning(
+                            origin.line,
+                            "control-block-ignored",
+                            ".control scripting ignored; simple analysis/output commands and supported settings are promoted into the parsed deck",
+                        ));
+                        output.items.push(include::ExpandedSourceItem::Line {
+                            text: format!("* {text}"),
+                            origin,
+                        });
+                        continue;
+                    }
+                    if head.eq_ignore_ascii_case(".endc") {
+                        if !in_control {
+                            return Err(ParseError::Syntax {
+                                line: origin.line,
+                                message: ".ENDC without matching .CONTROL".to_string(),
+                            }
+                            .into());
+                        }
+                        in_control = false;
+                        opened_at = None;
+                        output.items.push(include::ExpandedSourceItem::Line {
+                            text: format!("* {text}"),
+                            origin,
+                        });
+                        continue;
+                    }
+                    if in_control {
+                        output.items.push(include::ExpandedSourceItem::Line {
+                            text: format!("* {text}"),
+                            origin,
+                        });
+                        continue;
+                    }
+                    if !inserted && head.eq_ignore_ascii_case(".end") {
+                        for (command, command_origin) in &promoted {
+                            output.items.push(include::ExpandedSourceItem::Line {
+                                text: command.clone(),
+                                origin: command_origin.clone(),
+                            });
+                        }
+                        inserted = true;
+                    }
+                    output
+                        .items
+                        .push(include::ExpandedSourceItem::Line { text, origin });
+                }
+                event => output.items.push(event),
+            }
+        }
+
+        if let Some(origin) = opened_at {
+            return Err(ParseError::Syntax {
+                line: origin.line,
+                message: ".CONTROL without a matching .ENDC".to_string(),
+            }
+            .into());
+        }
+
+        if !inserted && !promoted.is_empty() {
+            let insertion = output
+                .items
+                .iter()
+                .rposition(|item| {
+                    matches!(item, include::ExpandedSourceItem::ExitSource { .. })
+                })
+                .unwrap_or(output.items.len());
+            output.items.splice(
+                insertion..insertion,
+                promoted.into_iter().map(|(text, origin)| {
+                    include::ExpandedSourceItem::Line { text, origin }
+                }),
+            );
+        }
+        ensure_parse_not_aborted(abort)?;
+        Ok((output, diagnostics))
+    }
+
+    fn promoted_control_commands_for_line(line: &str) -> Vec<String> {
+        let mut promoted = Vec::new();
+        if let Some(command) = Self::promote_control_netlist_command(line) {
+            promoted.push(command);
+        }
+        if let Some(command) = Self::promote_control_esave_command(line) {
+            promoted.push(command);
+        }
+        if let Some(command) = Self::promote_control_codemodel_command(line) {
+            promoted.push(command);
+        }
+        if let Some(command) = Self::promote_control_set_command(line) {
+            promoted.push(command);
+        }
+        if let Some(command) = Self::promote_control_option_command(line) {
+            promoted.push(command);
+        }
+        if let Some(command) = Self::promote_control_auto_bridge_set_command(line) {
+            promoted.push(command);
+        }
+        if let Some(command) = Self::promote_control_auto_bridge_param_set_command(line) {
+            promoted.push(command);
+        }
+        if let Some(command) = Self::promote_control_no_auto_bridge_family_set_command(line) {
+            promoted.push(command);
+        }
+        promoted
     }
 
     fn promote_control_netlist_command(line: &str) -> Option<String> {
@@ -6295,6 +6514,322 @@ mod tests {
                 .iter()
                 .any(|subckt| subckt.name.eq_ignore_ascii_case("SAR_ADC"))
         );
+    }
+
+    fn assert_missing_subcircuit_ends(
+        error: ParseError,
+        authored_name: &str,
+        canonical_name: &str,
+        qualified_name: &str,
+        opened_path: Option<&Path>,
+        opened_line: usize,
+        detected_path: Option<&Path>,
+        detected_line: usize,
+        boundary: MissingSubcircuitEndsBoundary,
+    ) {
+        match error {
+            ParseError::MissingSubcircuitEnds {
+                authored_name: actual_authored,
+                canonical_name: actual_canonical,
+                qualified_name: actual_qualified,
+                opened_at,
+                detected_at,
+                boundary: actual_boundary,
+            } => {
+                assert_eq!(actual_authored, authored_name);
+                assert_eq!(actual_canonical, canonical_name);
+                assert_eq!(actual_qualified, qualified_name);
+                assert_eq!(opened_at.path.as_deref(), opened_path);
+                assert_eq!(opened_at.line, opened_line);
+                assert_eq!(detected_at.path.as_deref(), detected_path);
+                assert_eq!(detected_at.line, detected_line);
+                assert_eq!(actual_boundary, boundary);
+            }
+            other => panic!("expected MissingSubcircuitEnds, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_subcircuit_ends_is_typed_at_end_alter_and_eof_boundaries() {
+        for (source, detected_line, boundary) in [
+            (
+                "missing at END\n.subckt Cell a b\nR1 a b 1\n.end\n",
+                4,
+                MissingSubcircuitEndsBoundary::EndCard,
+            ),
+            (
+                "missing at ALTER\n.subckt Cell a b\nR1 a b 1\n.alter\n",
+                4,
+                MissingSubcircuitEndsBoundary::AlterCard,
+            ),
+            (
+                "missing at EOF\n.subckt Cell a b\nR1 a b 1\n",
+                4,
+                MissingSubcircuitEndsBoundary::EndOfSource,
+            ),
+        ] {
+            let error = Netlist::parse(source).expect_err("missing .ENDS must be rejected");
+            assert_missing_subcircuit_ends(
+                error,
+                "Cell",
+                "CELL",
+                "CELL",
+                None,
+                2,
+                None,
+                detected_line,
+                boundary,
+            );
+        }
+    }
+
+    #[test]
+    fn nested_missing_subcircuit_reports_innermost_qualified_scope() {
+        let error = Netlist::parse(
+            "nested missing ends\n\
+             .subckt Outer a b\n\
+             .subckt Inner x y\n\
+             R1 x y 1\n",
+        )
+        .expect_err("innermost missing .ENDS must be rejected");
+        assert_missing_subcircuit_ends(
+            error,
+            "Inner",
+            "INNER",
+            "OUTER.INNER",
+            None,
+            3,
+            None,
+            5,
+            MissingSubcircuitEndsBoundary::EndOfSource,
+        );
+    }
+
+    #[test]
+    fn included_missing_subcircuit_retains_child_source_provenance() {
+        let dir = cancellation_fixture_path("missing-ends-include");
+        std::fs::create_dir_all(&dir).expect("create include provenance fixture");
+        let deck = dir.join("deck.cir");
+        let child = dir.join("missing.ends");
+        std::fs::write(
+            &deck,
+            "include missing ends\n.include missing.ends\n.end\n",
+        )
+        .expect("write include owner");
+        std::fs::write(&child, ".subckt testsub a b\nR1 a b 1\nR2 b 0 1\n")
+            .expect("write missing child");
+
+        let error = Netlist::parse_file(&deck).expect_err("included missing .ENDS must fail");
+        let child = child.canonicalize().expect("canonical child");
+        assert_missing_subcircuit_ends(
+            error,
+            "testsub",
+            "TESTSUB",
+            "TESTSUB",
+            Some(&child),
+            1,
+            Some(&child),
+            4,
+            MissingSubcircuitEndsBoundary::EndOfSource,
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn included_end_card_is_a_source_owned_missing_ends_boundary() {
+        let dir = cancellation_fixture_path("missing-ends-child-end");
+        std::fs::create_dir_all(&dir).expect("create included END fixture");
+        let deck = dir.join("deck.cir");
+        let child = dir.join("child.inc");
+        std::fs::write(&deck, "included END\n.include child.inc\n.end\n")
+            .expect("write include owner");
+        std::fs::write(
+            &child,
+            ".subckt child a b\nR1 a b 1\n.end\nRignored 9 0 9\n",
+        )
+        .expect("write child END fixture");
+
+        let error = Netlist::parse_file(&deck).expect_err("child .END cannot replace .ENDS");
+        let child = child.canonicalize().expect("canonical child");
+        assert_missing_subcircuit_ends(
+            error,
+            "child",
+            "CHILD",
+            "CHILD",
+            Some(&child),
+            1,
+            Some(&child),
+            3,
+            MissingSubcircuitEndsBoundary::EndCard,
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mapped_control_transformations_preserve_missing_ends_origins() {
+        let dir = cancellation_fixture_path("missing-ends-control-origin");
+        std::fs::create_dir_all(&dir).expect("create control origin fixture");
+        let deck = dir.join("deck.cir");
+        let child = dir.join("child.inc");
+        std::fs::write(&deck, "control origin\n.include child.inc\n.end\n")
+            .expect("write control owner");
+        std::fs::write(
+            &child,
+            ".control\nop\n.endc\n.subckt shifted a b\nR1 a b 1\n",
+        )
+        .expect("write control child");
+
+        let error = Netlist::parse_file(&deck).expect_err("missing child .ENDS must fail");
+        let child = child.canonicalize().expect("canonical child");
+        assert_missing_subcircuit_ends(
+            error,
+            "shifted",
+            "SHIFTED",
+            "SHIFTED",
+            Some(&child),
+            4,
+            Some(&child),
+            6,
+            MissingSubcircuitEndsBoundary::EndOfSource,
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn balanced_includes_preserve_parent_and_nested_subcircuit_scopes() {
+        let dir = cancellation_fixture_path("balanced-subckt-includes");
+        std::fs::create_dir_all(&dir).expect("create balanced include fixture");
+        let deck = dir.join("deck.cir");
+        std::fs::write(
+            &deck,
+            "balanced includes\n\
+             .subckt outer a b\n\
+             .include body.inc\n\
+             .include nested.inc\n\
+             .ends outer\n\
+             X1 1 0 outer\n\
+             .end\n",
+        )
+        .expect("write balanced include owner");
+        std::fs::write(dir.join("body.inc"), "Rbody a b 1\n.end\nRignored 9 0 9\n")
+            .expect("write parent body include");
+        std::fs::write(
+            dir.join("nested.inc"),
+            ".subckt inner x y\nRinner x y 2\n.ends inner\n",
+        )
+        .expect("write balanced nested include");
+
+        let netlist = Netlist::parse_file(&deck).expect("balanced includes parse");
+        let outer = netlist
+            .subcircuits
+            .iter()
+            .find(|subckt| subckt.name.eq_ignore_ascii_case("OUTER"))
+            .expect("outer subcircuit retained");
+        assert!(outer.elements.iter().any(|element| element.name == "RBODY"));
+        assert!(
+            outer
+                .nested_subcircuits
+                .iter()
+                .any(|subckt| subckt.name.eq_ignore_ascii_case("OUTER.INNER"))
+        );
+        assert!(
+            !outer
+                .elements
+                .iter()
+                .any(|element| element.name == "RIGNORED")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn included_source_cannot_close_a_parent_subcircuit() {
+        let dir = cancellation_fixture_path("cross-source-ends");
+        std::fs::create_dir_all(&dir).expect("create cross-source ENDS fixture");
+        let deck = dir.join("deck.cir");
+        std::fs::write(
+            &deck,
+            "cross-source ends\n.subckt outer a b\n.include child.inc\n.end\n",
+        )
+        .expect("write cross-source owner");
+        std::fs::write(dir.join("child.inc"), ".ends outer\n")
+            .expect("write cross-source closer");
+
+        let error = Netlist::parse_file(&deck).expect_err("child cannot close parent .SUBCKT");
+        assert!(
+            error
+                .to_string()
+                .contains("included source closed a .SUBCKT opened by its parent source"),
+            "{error}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn included_end_card_prevents_cross_source_continuation() {
+        let dir = cancellation_fixture_path("included-end-continuation");
+        std::fs::create_dir_all(&dir).expect("create included END continuation fixture");
+        let deck = dir.join("deck.cir");
+        std::fs::write(
+            &deck,
+            "included END continuation\n.include child.inc\n+ TC=1\n.end\n",
+        )
+        .expect("write continuation owner");
+        std::fs::write(dir.join("child.inc"), "R1 1 0 1k\n.end\n")
+            .expect("write terminal child");
+
+        Netlist::parse_file(&deck)
+            .expect_err("parent continuation cannot attach across an included .END boundary");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ordinary_include_boundaries_preserve_textual_continuations() {
+        let dir = cancellation_fixture_path("include-continuations");
+        std::fs::create_dir_all(&dir).expect("create include continuation fixture");
+
+        let parent_base = dir.join("parent-base.cir");
+        std::fs::write(
+            &parent_base,
+            "parent base continuation\nR1 1 0\n.include child-leading.inc\n.end\n",
+        )
+        .expect("write parent-base owner");
+        std::fs::write(dir.join("child-leading.inc"), "+ 1k\n")
+            .expect("write child leading continuation");
+        let parsed = Netlist::parse_file(&parent_base)
+            .expect("child leading continuation extends the parent base line");
+        assert_eq!(parsed.elements.len(), 1);
+
+        let child_base = dir.join("child-base.cir");
+        std::fs::write(
+            &child_base,
+            "child base continuation\n.include child-base.inc\n+ 1k\n.end\n",
+        )
+        .expect("write child-base owner");
+        std::fs::write(dir.join("child-base.inc"), "R1 1 0\n")
+            .expect("write child base statement");
+        let parsed = Netlist::parse_file(&child_base)
+            .expect("parent continuation extends the child base line");
+        assert_eq!(parsed.elements.len(), 1);
+
+        let subckt_header = dir.join("subckt-header.cir");
+        std::fs::write(
+            &subckt_header,
+            "subckt header continuation\n\
+             .subckt cell a b\n\
+             .include subckt-params.inc\n\
+             R1 a b {VALUE}\n\
+             .ends\n\
+             X1 1 0 cell VALUE=2\n\
+             .end\n",
+        )
+        .expect("write subckt-header owner");
+        std::fs::write(dir.join("subckt-params.inc"), "+ PARAMS: VALUE=1\n")
+            .expect("write subckt header continuation");
+        let parsed = Netlist::parse_file(&subckt_header)
+            .expect("source entry depth is established after a continued .SUBCKT header");
+        assert_eq!(parsed.subcircuits.len(), 1);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

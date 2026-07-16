@@ -57,6 +57,7 @@ impl ElementNameRegistry {
 pub(super) struct SubcktFrame {
     pub(super) def: SubcircuitDef,
     pub(super) qualified_name: String,
+    pub(super) opened_at: NetlistSourceLocation,
     pub(super) local_params: ParamContext,
     pub(super) nested_aliases: HashMap<String, String>,
     pub(super) local_model_aliases: HashMap<String, String>,
@@ -124,13 +125,14 @@ impl ParseState {
         self,
         title: String,
         input: &str,
-        line_num: usize,
+        detected_at: NetlistSourceLocation,
     ) -> Result<Netlist, ParseError> {
-        if !self.subckt_stack.is_empty() {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: "Unterminated .SUBCKT block".to_string(),
-            });
+        if let Some(frame) = self.subckt_stack.last() {
+            return Err(Self::missing_subcircuit_ends_error(
+                frame,
+                detected_at,
+                MissingSubcircuitEndsBoundary::EndOfSource,
+            ));
         }
         super::super::expr::validate_global_parameter_expressions(&self.params)
             .map_err(ParseError::InvalidValue)?;
@@ -156,6 +158,31 @@ impl ParseState {
             source_text: Some(input.to_string()),
             source_path: None,
         })
+    }
+
+    pub(super) fn missing_subcircuit_ends(
+        &self,
+        detected_at: NetlistSourceLocation,
+        boundary: MissingSubcircuitEndsBoundary,
+    ) -> Option<ParseError> {
+        self.subckt_stack.last().map(|frame| {
+            Self::missing_subcircuit_ends_error(frame, detected_at, boundary)
+        })
+    }
+
+    fn missing_subcircuit_ends_error(
+        frame: &SubcktFrame,
+        detected_at: NetlistSourceLocation,
+        boundary: MissingSubcircuitEndsBoundary,
+    ) -> ParseError {
+        ParseError::MissingSubcircuitEnds {
+            authored_name: frame.def.name.clone(),
+            canonical_name: frame.def.name.to_ascii_uppercase(),
+            qualified_name: frame.qualified_name.to_ascii_uppercase(),
+            opened_at: frame.opened_at.clone(),
+            detected_at,
+            boundary,
+        }
     }
 }
 

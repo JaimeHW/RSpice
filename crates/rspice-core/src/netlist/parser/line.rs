@@ -158,6 +158,7 @@ fn expect_xspice_instance_name(
 pub(super) fn process_line(
     line: &str,
     line_num: usize,
+    origin: &NetlistSourceLocation,
     state: &mut ParseState,
 ) -> Result<(), ParseError> {
     let authored_element_name = line
@@ -215,6 +216,7 @@ pub(super) fn process_line(
         state.subckt_stack.push(SubcktFrame {
             def: subckt,
             qualified_name,
+            opened_at: origin.clone(),
             local_params,
             nested_aliases: HashMap::new(),
             local_model_aliases: HashMap::new(),
@@ -750,8 +752,13 @@ mod tests {
     #[test]
     fn process_line_registers_authored_and_synthesized_rf_port_names() {
         let mut state = ParseState::new();
-        process_line("P1 OUT 0 DC 2 PORT=1 Z0=75", 2, &mut state)
-            .expect("real Xyce RF port parses");
+        process_line(
+            "P1 OUT 0 DC 2 PORT=1 Z0=75",
+            2,
+            &NetlistSourceLocation::in_memory(2),
+            &mut state,
+        )
+        .expect("real Xyce RF port parses");
 
         assert_eq!(state.elements.len(), 2);
         assert!(
