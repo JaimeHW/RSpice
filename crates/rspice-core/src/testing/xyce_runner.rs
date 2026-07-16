@@ -131,6 +131,9 @@ const XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/input/dc_excessargs.cir";
 const XYCE_ISSUE455_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/issue_455/issue455.cir";
+const XYCE_BUG204_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_204/bug204.cir";
+const XYCE_BUG281_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_281/bug_281.cir";
 const XYCE_BUG67_SOURCE_BLAKE3: &str =
     "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
 const XYCE_BUG671_SOURCE_BLAKE3: &str =
@@ -147,6 +150,12 @@ const XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3: &str =
     "472709aa403c4da89e736c47b64eff48fd919f2518d671c79cc728d847812ac1";
 const XYCE_ISSUE455_SOURCE_BLAKE3: &str =
     "9552abaee2c6162c1f1b389708fd6e338fb9ea212e04e1c8be5ea972bf04c875";
+const XYCE_BUG204_SOURCE_BLAKE3: &str =
+    "ed8984a5badf07bdc1cccab7a56cfa66303b678814dd5efcb7ca7a4b03daf947";
+const XYCE_BUG281_SOURCE_BLAKE3: &str =
+    "e7a31257432216b07ee6023392590aef62f2006d2111110242839b3d4c1c07d0";
+const XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
+    "bcd3e366443f97db8ccb98d5d9f0102cbb67a5903657382da3ea7770ed666afc";
 const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
     "dc8a7465b5524072cc0ef71b35809e306abc438d3fde69996a6ccc8889967da4";
 const XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3: &str =
@@ -194,6 +203,8 @@ enum XyceExpectedFailureKind {
     MessageSubcircuitMissingName,
     MessageDcExcessArguments,
     Issue455DuplicateDcSourceFunction,
+    Bug204InvalidDcSweepArity,
+    Bug281InvalidDcSweepArity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,6 +213,13 @@ struct XyceExpectedFailureFamilyCensus {
     physical_names_blake3: &'static str,
     manifest_owner_count: usize,
     manifest_records_blake3: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceExpectedFailureRetainedArtifact {
+    file_name: &'static str,
+    bytes: usize,
+    blake3: &'static str,
 }
 
 impl XyceExpectedFailureKind {
@@ -215,6 +233,8 @@ impl XyceExpectedFailureKind {
             XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD => Some(Self::MessageSubcircuitMissingName),
             XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD => Some(Self::MessageDcExcessArguments),
             XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
+            XYCE_BUG204_EXPECTED_FAILURE_RECORD => Some(Self::Bug204InvalidDcSweepArity),
+            XYCE_BUG281_EXPECTED_FAILURE_RECORD => Some(Self::Bug281InvalidDcSweepArity),
             _ => None,
         }
     }
@@ -229,6 +249,8 @@ impl XyceExpectedFailureKind {
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD,
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD,
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
+            Self::Bug204InvalidDcSweepArity => XYCE_BUG204_EXPECTED_FAILURE_RECORD,
+            Self::Bug281InvalidDcSweepArity => XYCE_BUG281_EXPECTED_FAILURE_RECORD,
         }
     }
 
@@ -242,6 +264,8 @@ impl XyceExpectedFailureKind {
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_SOURCE_BLAKE3,
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3,
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
+            Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
+            Self::Bug281InvalidDcSweepArity => XYCE_BUG281_SOURCE_BLAKE3,
         }
     }
 
@@ -256,6 +280,12 @@ impl XyceExpectedFailureKind {
             Self::MessageDcExcessArguments => "expected_failure_dc_excess_arguments_parse",
             Self::Issue455DuplicateDcSourceFunction => {
                 "expected_failure_duplicate_dc_source_function_parse"
+            }
+            Self::Bug204InvalidDcSweepArity => {
+                "expected_failure_bug204_invalid_dc_sweep_arity_parse"
+            }
+            Self::Bug281InvalidDcSweepArity => {
+                "expected_failure_bug281_invalid_dc_sweep_arity_parse"
             }
         }
     }
@@ -279,6 +309,14 @@ impl XyceExpectedFailureKind {
             Self::Issue455DuplicateDcSourceFunction => &[
                 "Netlist error in file issue455.cir at or near line 4",
                 "No such source function dc in V2",
+            ][..],
+            Self::Bug204InvalidDcSweepArity => &[
+                "in file bug204.cir at or near line 14",
+                ".DC line not formatted correctly, found unexpected number of fields",
+            ][..],
+            Self::Bug281InvalidDcSweepArity => &[
+                "in file bug_281.cir at or near line 7",
+                ".DC line not formatted correctly, found unexpected number of fields",
             ][..],
         };
         XyceUpstreamExpectedErrorPolicy {
@@ -330,6 +368,16 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::DuplicateDcSourceFunction,
                 identifiers: vec!["V2".to_string(), "DC".to_string(), "line 4".to_string()],
             },
+            Self::Bug204InvalidDcSweepArity => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::InvalidDcSweepArity,
+                identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 14".to_string()],
+            },
+            Self::Bug281InvalidDcSweepArity => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::InvalidDcSweepArity,
+                identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 7".to_string()],
+            },
         }
     }
 
@@ -346,6 +394,17 @@ impl XyceExpectedFailureKind {
                 physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 50,
                 manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+            }),
+            _ => None,
+        }
+    }
+
+    fn retained_non_oracle_artifact(self) -> Option<XyceExpectedFailureRetainedArtifact> {
+        match self {
+            Self::Bug204InvalidDcSweepArity => Some(XyceExpectedFailureRetainedArtifact {
+                file_name: "bug204.cir.prn",
+                bytes: 147,
+                blake3: XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3,
             }),
             _ => None,
         }
@@ -370,6 +429,7 @@ enum XyceExpectedFailureCategory {
     MissingSubcircuitName,
     DcExcessArguments,
     DuplicateDcSourceFunction,
+    InvalidDcSweepArity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3579,6 +3639,12 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction => {
                 Self::observe_issue455_duplicate_dc_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug204InvalidDcSweepArity => {
+                Self::observe_bug204_invalid_dc_sweep_arity(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug281InvalidDcSweepArity => {
+                Self::observe_bug281_invalid_dc_sweep_arity(source, &deck.path)?
+            }
         };
         let expected = kind.expected_observation();
         if observation != expected {
@@ -3719,16 +3785,17 @@ impl XyceTestRunner {
                     kind.record()
                 )
             })?;
-        if let Some(output_dir) = output_anchor.parent()
-            && output_dir.is_dir()
-        {
-            let deck_name = deck
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| "expected-failure filename is not UTF-8".to_string())?;
-            let artifact_prefix = format!("{deck_name}.").to_ascii_lowercase();
-            let mut artifacts = Vec::new();
+        let output_dir = output_anchor
+            .parent()
+            .ok_or_else(|| "expected-failure OutputData path has no parent".to_string())?;
+        let deck_name = deck
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "expected-failure filename is not UTF-8".to_string())?;
+        let artifact_prefix = format!("{deck_name}.").to_ascii_lowercase();
+        let mut artifacts = Vec::new();
+        if output_dir.is_dir() {
             for entry in fs::read_dir(output_dir).map_err(|err| {
                 format!(
                     "failed to inspect expected-failure OutputData directory {}: {err}",
@@ -3749,12 +3816,63 @@ impl XyceTestRunner {
                     artifacts.push(entry.path());
                 }
             }
-            if !artifacts.is_empty() {
+        }
+        artifacts.sort();
+        if let Some(expected_artifact) = kind.retained_non_oracle_artifact() {
+            if artifacts.len() != 1 {
                 return Err(format!(
-                    "expected-failure record '{}' must not own checked-in output artifacts: {artifacts:?}",
-                    kind.record()
+                    "expected-failure record '{}' must retain exactly its one classified non-oracle artifact '{}', found {artifacts:?}",
+                    kind.record(),
+                    expected_artifact.file_name
                 ));
             }
+            let artifact = &artifacts[0];
+            let artifact_name = artifact
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| "expected-failure artifact filename is not UTF-8".to_string())?;
+            if artifact_name != expected_artifact.file_name {
+                return Err(format!(
+                    "expected-failure record '{}' retained non-oracle artifact changed name: expected '{}', got '{}'",
+                    kind.record(),
+                    expected_artifact.file_name,
+                    artifact_name
+                ));
+            }
+            let metadata = fs::symlink_metadata(artifact).map_err(|err| {
+                format!(
+                    "failed to inspect expected-failure retained artifact {}: {err}",
+                    artifact.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "expected-failure retained artifact {} must be a regular non-symlink file",
+                    artifact.display()
+                ));
+            }
+            let bytes = fs::read(artifact).map_err(|err| {
+                format!(
+                    "failed to read expected-failure retained artifact {}: {err}",
+                    artifact.display()
+                )
+            })?;
+            let digest = blake3::hash(&bytes).to_hex().to_string();
+            if bytes.len() != expected_artifact.bytes || digest != expected_artifact.blake3 {
+                return Err(format!(
+                    "expected-failure record '{}' retained non-oracle artifact changed: expected {} bytes / {}, got {} bytes / {}",
+                    kind.record(),
+                    expected_artifact.bytes,
+                    expected_artifact.blake3,
+                    bytes.len(),
+                    digest
+                ));
+            }
+        } else if !artifacts.is_empty() {
+            return Err(format!(
+                "expected-failure record '{}' must not own checked-in output artifacts: {artifacts:?}",
+                kind.record()
+            ));
         }
         Ok(())
     }
@@ -4039,6 +4157,72 @@ impl XyceTestRunner {
             stage: XyceExpectedFailureStage::NetlistParse,
             category: XyceExpectedFailureCategory::DuplicateDcSourceFunction,
             identifiers: vec!["V2".to_string(), "DC".to_string(), "line 4".to_string()],
+        })
+    }
+
+    fn observe_bug204_invalid_dc_sweep_arity(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 204",
+            source,
+            17,
+            &[
+                (9, "VIN 1 0 DC 5V"),
+                (10, "R1 1 2 2K"),
+                (11, "D1 3 0 DMOD"),
+                (12, "VMON 2 3 0"),
+                (13, ".MODEL DMOD D (IS=100FA)"),
+                (14, ".DC VIN 5 5"),
+                (15, ".PRINT DC V(1) I(VMON) V(3)"),
+                (17, ".END"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "BUG 204",
+            source,
+            deck_path,
+            14,
+            ".DC linear sweep requires a step value",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::InvalidDcSweepArity,
+            identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 14".to_string()],
+        })
+    }
+
+    fn observe_bug281_invalid_dc_sweep_arity(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 281",
+            source,
+            10,
+            &[
+                (2, "VIN 1 0 DC 5V"),
+                (3, "R1 1 2 2K"),
+                (4, "D1 3 0 DMOD"),
+                (5, "VMON 2 3 0"),
+                (6, ".MODEL DMOD D (IS=100FA)"),
+                (7, ".DC VIN 5 5"),
+                (8, ".PRINT DC I(VMON) V(3)"),
+                (10, ".END"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "BUG 281",
+            source,
+            deck_path,
+            7,
+            ".DC linear sweep requires a step value",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::InvalidDcSweepArity,
+            identifiers: vec!["VIN".to_string(), "STEP".to_string(), "line 7".to_string()],
         })
     }
 
@@ -64715,6 +64899,20 @@ R2 2 0 1
                     "No such source function dc in V2",
                 ][..],
             ),
+            (
+                XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+                &[
+                    "in file bug204.cir at or near line 14",
+                    ".DC line not formatted correctly, found unexpected number of fields",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
+                &[
+                    "in file bug_281.cir at or near line 7",
+                    ".DC line not formatted correctly, found unexpected number of fields",
+                ][..],
+            ),
         ];
 
         for (kind, patterns) in cases {
@@ -64726,10 +64924,22 @@ R2 2 0 1
             );
             assert_eq!(policy.ordered_patterns, patterns);
         }
+        assert_eq!(
+            XyceExpectedFailureKind::Bug204InvalidDcSweepArity.retained_non_oracle_artifact(),
+            Some(XyceExpectedFailureRetainedArtifact {
+                file_name: "bug204.cir.prn",
+                bytes: 147,
+                blake3: XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3,
+            })
+        );
+        assert_eq!(
+            XyceExpectedFailureKind::Bug281InvalidDcSweepArity.retained_non_oracle_artifact(),
+            None
+        );
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_eight_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_ten_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -64748,6 +64958,14 @@ R2 2 0 1
         assert_eq!(
             records,
             vec![
+                (
+                    XYCE_BUG204_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+                ),
+                (
+                    XYCE_BUG281_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
+                ),
                 (
                     XYCE_BUG387_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug387MissingLibraryEndl,
@@ -64788,7 +65006,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            8,
+            10,
             "each record requires a distinct contract"
         );
     }
@@ -64830,6 +65048,14 @@ R2 2 0 1
                 "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
                 "expected_failure_duplicate_dc_source_function_parse",
             ),
+            (
+                "Netlists/Certification_Tests/BUG_204/bug204.cir",
+                "expected_failure_bug204_invalid_dc_sweep_arity_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_281/bug_281.cir",
+                "expected_failure_bug281_invalid_dc_sweep_arity_parse",
+            ),
         ] {
             let result = runner.run_test(root.join(relative));
             assert!(
@@ -64867,6 +65093,8 @@ R2 2 0 1
             XyceExpectedFailureKind::Bug744DcOperatingPoint,
             XyceExpectedFailureKind::Bug387MissingLibraryEndl,
             XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+            XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+            XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
         ] {
             assert_eq!(
                 singleton.shared_family_census(),
@@ -65436,5 +65664,165 @@ R2 2 0 1
                 "{label} must not satisfy ISSUE 455"
             );
         }
+    }
+
+    #[test]
+    fn bug204_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_204/bug204.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 204");
+        XyceTestRunner::observe_bug204_invalid_dc_sweep_arity(&source, &path)
+            .expect("canonical BUG 204 failure is observed");
+
+        let corrected = source.replacen(".DC VIN 5 5", ".DC VIN 5 5 1", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("BUG 204 with explicit STEP genuinely parses");
+        assert!(
+            XyceTestRunner::observe_bug204_invalid_dc_sweep_arity(&corrected, &path).is_err(),
+            "corrected BUG 204 must not satisfy invalid DC arity"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen(".DC VIN 5 5", ".DC VMON 5 5", 1),
+                "different sweep source",
+            ),
+            (
+                source.replacen(".DC VIN 5 5", ".DC VIN 4 5", 1),
+                "different sweep bounds",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug204_invalid_dc_sweep_arity(&mutated, &path).is_err(),
+                "{label} must not satisfy BUG 204"
+            );
+        }
+    }
+
+    #[test]
+    fn bug281_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_281/bug_281.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 281");
+        XyceTestRunner::observe_bug281_invalid_dc_sweep_arity(&source, &path)
+            .expect("canonical BUG 281 failure is observed");
+
+        let corrected = source.replacen(".DC VIN 5 5", ".DC VIN 5 5 1", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("BUG 281 with explicit STEP genuinely parses");
+        assert!(
+            XyceTestRunner::observe_bug281_invalid_dc_sweep_arity(&corrected, &path).is_err(),
+            "corrected BUG 281 must not satisfy invalid DC arity"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen(".DC VIN 5 5", ".DC VMON 5 5", 1),
+                "different sweep source",
+            ),
+            (
+                source.replacen(".DC VIN 5 5", ".DC VIN 4 5", 1),
+                "different sweep bounds",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug281_invalid_dc_sweep_arity(&mutated, &path).is_err(),
+                "{label} must not satisfy BUG 281"
+            );
+        }
+    }
+
+    #[test]
+    fn bug204_retained_non_oracle_artifact_provenance_fails_closed() {
+        let source_root = expected_failure_test_root();
+        let source_deck = source_root.join("Netlists/Certification_Tests/BUG_204/bug204.cir");
+        let source_artifact =
+            source_root.join("OutputData/Certification_Tests/BUG_204/bug204.cir.prn");
+        let temp_root = unique_expected_failure_temp_dir("bug204-artifact");
+        let family_dir = temp_root.join("Netlists/Certification_Tests/BUG_204");
+        let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_204");
+        fs::create_dir_all(&family_dir).expect("create BUG 204 family fixture");
+        fs::create_dir_all(&output_dir).expect("create BUG 204 OutputData fixture");
+        let deck_path = family_dir.join("bug204.cir");
+        let artifact_path = output_dir.join("bug204.cir.prn");
+        fs::copy(&source_deck, &deck_path).expect("copy BUG 204 source");
+        fs::copy(&source_artifact, &artifact_path).expect("copy retained BUG 204 artifact");
+        fs::write(
+            temp_root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "Netlists/Certification_Tests/BUG_204/bug204.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("write BUG 204 manifest");
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+
+        let canonical = run();
+        assert!(
+            canonical.passed
+                && !canonical.expected_unsupported
+                && canonical.contract == "expected_failure_bug204_invalid_dc_sweep_arity_parse",
+            "canonical BUG 204 must route to typed failure before stale PRN planning: {canonical:?}"
+        );
+
+        let artifact = fs::read(&artifact_path).expect("read retained BUG 204 artifact");
+        fs::remove_file(&artifact_path).expect("remove retained BUG 204 artifact");
+        let missing = run();
+        assert!(
+            !missing.passed
+                && missing
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("classified non-oracle artifact")),
+            "missing retained artifact must fail closed: {missing:?}"
+        );
+        fs::write(&artifact_path, &artifact).expect("restore retained BUG 204 artifact");
+
+        let mut mutated_artifact = artifact.clone();
+        mutated_artifact[0] ^= 0x01;
+        fs::write(&artifact_path, mutated_artifact).expect("mutate retained BUG 204 artifact");
+        let mutated = run();
+        assert!(
+            !mutated.passed
+                && mutated
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("retained non-oracle artifact changed")),
+            "mutated retained artifact must fail closed: {mutated:?}"
+        );
+        fs::write(&artifact_path, &artifact).expect("restore exact retained artifact");
+
+        let renamed_artifact = output_dir.join("bug204.cir.old");
+        fs::rename(&artifact_path, &renamed_artifact).expect("rename retained BUG 204 artifact");
+        let renamed = run();
+        assert!(
+            !renamed.passed
+                && renamed
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("changed name")),
+            "renamed retained artifact must fail closed: {renamed:?}"
+        );
+        fs::rename(&renamed_artifact, &artifact_path).expect("restore artifact name");
+
+        let extra_artifact = output_dir.join("bug204.cir.csv");
+        fs::write(&extra_artifact, "forbidden").expect("write extra BUG 204 artifact");
+        let extra = run();
+        assert!(
+            !extra.passed
+                && extra
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("exactly its one classified non-oracle")),
+            "extra target artifact must fail closed: {extra:?}"
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove BUG 204 artifact fixture");
     }
 }

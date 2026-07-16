@@ -302,6 +302,14 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
             "expected_failure_duplicate_dc_source_function_parse",
         ),
+        (
+            "Netlists/Certification_Tests/BUG_204/bug204.cir",
+            "expected_failure_bug204_invalid_dc_sweep_arity_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_281/bug_281.cir",
+            "expected_failure_bug281_invalid_dc_sweep_arity_parse",
+        ),
     ];
 
     let mut observed_contracts = BTreeSet::new();
@@ -323,8 +331,8 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        8,
-        "the expected-failure oracle census is exactly eight distinct physical records"
+        10,
+        "the expected-failure oracle census is exactly ten distinct physical records"
     );
 }
 
@@ -4150,7 +4158,6 @@ fn test_xyce_plain_static_dc_wrapper_cases_run_natively() {
         "Netlists/XDM/HSPICE/OTHER_PARSING/mixed_param_and_func.cir",
         "Netlists/XDM/HSPICE/OTHER_PARSING/library_parsing.cir",
         "Netlists/XDM/HSPICE/MODELS/correct_instance_parameters_translation_inside_subckt.cir",
-        "Netlists/Certification_Tests/BUG_204/bug204.cir",
         "Netlists/XDM/HSPICE/TEMPERATURE/tnom_default_setting.cir",
         "Netlists/XDM/HSPICE/TEMPERATURE/tnom_option_setting.cir",
     ] {
