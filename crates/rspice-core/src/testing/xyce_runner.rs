@@ -21,10 +21,10 @@ use crate::netlist::expr::{
     behavioral_expression_references_unbound_frequency, prepare_behavioral_expression,
 };
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, MissingSubcircuitEndsBoundary,
-    MissingSubcircuitEndsError, Netlist, NetlistParseOptions, ParameterRedefinitionPolicy,
-    ParametricValue, ParseError, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
-    SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    AnalysisCommand, DcSecondSweep, DeviceInitialConditionError, ElementKind, ExpressionDialect,
+    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist, NetlistParseOptions,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, StatisticalParamMode, StepCommand,
+    StepSweep, StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -154,6 +154,14 @@ const XYCE_MESSAGE_DUPLICATE_DEVICE_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/device/circuitblock_addtabledata_1.cir";
 const XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/device/deviceblock_extractnodes_1.cir";
+const XYCE_BUG702_DUP_EXTERNAL_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_702/dup-external.cir";
+const XYCE_BUG702_DUP_INLINED_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_702/dup-inlined.cir";
+const XYCE_BUG702_EMPTY_INITCOND_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_702/empty-initcond.cir";
+const XYCE_BUG702_MISSING_INITCOND_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_702/missing-initcond.cir";
 const XYCE_ISSUE455_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/issue_455/issue455.cir";
 const XYCE_BUG204_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_204/bug204.cir";
@@ -221,6 +229,20 @@ const XYCE_MESSAGE_DUPLICATE_DEVICE_SOURCE_BLAKE3: &str =
     "ce5680dc24782e35dcb2ca9929a895306c47664591f11697ad51114e189f4171";
 const XYCE_MESSAGE_MISSING_DEVICE_NODES_SOURCE_BLAKE3: &str =
     "a0564ed5888ea5c23b87ceca58ad61e9cc34cf974c5cb36922b0345994e2f278";
+const XYCE_BUG702_DUP_EXTERNAL_SOURCE_BLAKE3: &str =
+    "dbde7992544ec0958d58024f2f110606f770b83c7440f447833d20e51712691f";
+const XYCE_BUG702_DUP_INLINED_SOURCE_BLAKE3: &str =
+    "469a39662513264b899cd706c8fc279d24c3a630a3c274e7e05999b5406618bd";
+const XYCE_BUG702_EMPTY_INITCOND_SOURCE_BLAKE3: &str =
+    "ffc26554455d078bd6a2f66715ee65fa7f624422efbb97991f791998ece99874";
+const XYCE_BUG702_MISSING_INITCOND_SOURCE_BLAKE3: &str =
+    "0a75b775d3532734bcbcbdc24f47f156130dbefb32dd4ebee201d4a2c4eaa352";
+const XYCE_BUG702_INITCOND_DATA_BLAKE3: &str =
+    "aeb67f1437f1c271fc8803120cb2a4b9b2b476baf4313c3627634cf5732534f9";
+const XYCE_BUG702_INITCOND_DATA_BYTES: usize = 26;
+const XYCE_BUG702_NOINITS_DATA_BLAKE3: &str =
+    "544397224dca2dae387a0754c1e039de23d7d9d8d75269ee9aeaba68eedcffba";
+const XYCE_BUG702_NOINITS_DATA_BYTES: usize = 29;
 const XYCE_ISSUE455_SOURCE_BLAKE3: &str =
     "9552abaee2c6162c1f1b389708fd6e338fb9ea212e04e1c8be5ea972bf04c875";
 const XYCE_BUG204_SOURCE_BLAKE3: &str =
@@ -277,6 +299,10 @@ const XYCE_MESSAGE_DEVICE_PHYSICAL_CENSUS_BLAKE3: &str =
     "d54485c64515210437cb32173963bd8c1383dfe4b392981220e4702444834c45";
 const XYCE_MESSAGE_DEVICE_MANIFEST_CENSUS_BLAKE3: &str =
     "9ad114c0e228f83b9c5095e653c9692c98a3e5c434bb1f32ad7b71c5894d9843";
+const XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3: &str =
+    "b0a43d2f55c88c8c32673364f8a7fa361771af4c4ef065ff4783146a1cc31628";
+const XYCE_BUG702_MANIFEST_CENSUS_BLAKE3: &str =
+    "91bcb74c1c7a203646ec14cd8754b3e520e0ad4ab589d8257f7edc14cb583dd6";
 const XYCE_BUG671_FIXTURE_BLAKE3: &str =
     "a20bed61d99b2bd530e4bdfdb096315198e1c4702ac3ff8e320b6ea42efce9ba";
 const XYCE_BUG671_FIXTURE_BYTES: usize = 19_456;
@@ -326,6 +352,10 @@ enum XyceExpectedFailureKind {
     MessageMissingLibraryFileQuoted,
     MessageDuplicateDevice,
     MessageMissingDeviceNodes,
+    Bug702DuplicateExternalInitcond,
+    Bug702DuplicateInlinedInitcond,
+    Bug702MalformedInitcondFile,
+    Bug702MissingInitcondFile,
     Issue455DuplicateDcSourceFunction,
     Bug204InvalidDcSweepArity,
     Bug281InvalidDcSweepArity,
@@ -402,6 +432,18 @@ impl XyceExpectedFailureKind {
             XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD => {
                 Some(Self::MessageMissingDeviceNodes)
             }
+            XYCE_BUG702_DUP_EXTERNAL_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug702DuplicateExternalInitcond)
+            }
+            XYCE_BUG702_DUP_INLINED_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug702DuplicateInlinedInitcond)
+            }
+            XYCE_BUG702_EMPTY_INITCOND_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug702MalformedInitcondFile)
+            }
+            XYCE_BUG702_MISSING_INITCOND_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug702MissingInitcondFile)
+            }
             XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
             XYCE_BUG204_EXPECTED_FAILURE_RECORD => Some(Self::Bug204InvalidDcSweepArity),
             XYCE_BUG281_EXPECTED_FAILURE_RECORD => Some(Self::Bug281InvalidDcSweepArity),
@@ -471,6 +513,12 @@ impl XyceExpectedFailureKind {
             Self::MessageMissingDeviceNodes => {
                 XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD
             }
+            Self::Bug702DuplicateExternalInitcond => {
+                XYCE_BUG702_DUP_EXTERNAL_EXPECTED_FAILURE_RECORD
+            }
+            Self::Bug702DuplicateInlinedInitcond => XYCE_BUG702_DUP_INLINED_EXPECTED_FAILURE_RECORD,
+            Self::Bug702MalformedInitcondFile => XYCE_BUG702_EMPTY_INITCOND_EXPECTED_FAILURE_RECORD,
+            Self::Bug702MissingInitcondFile => XYCE_BUG702_MISSING_INITCOND_EXPECTED_FAILURE_RECORD,
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_EXPECTED_FAILURE_RECORD,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_EXPECTED_FAILURE_RECORD,
@@ -523,6 +571,10 @@ impl XyceExpectedFailureKind {
             }
             Self::MessageDuplicateDevice => XYCE_MESSAGE_DUPLICATE_DEVICE_SOURCE_BLAKE3,
             Self::MessageMissingDeviceNodes => XYCE_MESSAGE_MISSING_DEVICE_NODES_SOURCE_BLAKE3,
+            Self::Bug702DuplicateExternalInitcond => XYCE_BUG702_DUP_EXTERNAL_SOURCE_BLAKE3,
+            Self::Bug702DuplicateInlinedInitcond => XYCE_BUG702_DUP_INLINED_SOURCE_BLAKE3,
+            Self::Bug702MalformedInitcondFile => XYCE_BUG702_EMPTY_INITCOND_SOURCE_BLAKE3,
+            Self::Bug702MissingInitcondFile => XYCE_BUG702_MISSING_INITCOND_SOURCE_BLAKE3,
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_SOURCE_BLAKE3,
@@ -581,6 +633,16 @@ impl XyceExpectedFailureKind {
             Self::MessageMissingDeviceNodes => {
                 "expected_failure_message_missing_device_nodes_parse"
             }
+            Self::Bug702DuplicateExternalInitcond => {
+                "expected_failure_bug702_duplicate_external_initcond_parse"
+            }
+            Self::Bug702DuplicateInlinedInitcond => {
+                "expected_failure_bug702_duplicate_inlined_initcond_parse"
+            }
+            Self::Bug702MalformedInitcondFile => {
+                "expected_failure_bug702_malformed_initcond_file_load"
+            }
+            Self::Bug702MissingInitcondFile => "expected_failure_bug702_missing_initcond_file_load",
             Self::Issue455DuplicateDcSourceFunction => {
                 "expected_failure_duplicate_dc_source_function_parse"
             }
@@ -654,6 +716,13 @@ impl XyceExpectedFailureKind {
             Self::MessageMissingDeviceNodes => {
                 &["Not enough fields on input line for device R2"][..]
             }
+            Self::Bug702DuplicateExternalInitcond | Self::Bug702DuplicateInlinedInitcond => {
+                &[".INITCOND line may appear only once."][..]
+            }
+            Self::Bug702MalformedInitcondFile => {
+                &[r"\.INITCOND file \'noinits\.dat\' is not formatted properly"][..]
+            }
+            Self::Bug702MissingInitcondFile => &["Could not open the .INITCOND file ic.dat"][..],
             Self::Issue455DuplicateDcSourceFunction => &[
                 "Netlist error in file issue455.cir at or near line 4",
                 "No such source function dc in V2",
@@ -854,6 +923,38 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::MissingDeviceNodes,
                 identifiers: vec!["R2".to_string(), "OUT_1".to_string(), "line 14".to_string()],
             },
+            Self::Bug702DuplicateExternalInitcond => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::DuplicateDeviceInitialCondition,
+                identifiers: vec![
+                    "EXTERNAL".to_string(),
+                    "dup-external.cir:20".to_string(),
+                    "dup-external.cir:29".to_string(),
+                ],
+            },
+            Self::Bug702DuplicateInlinedInitcond => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::DuplicateDeviceInitialCondition,
+                identifiers: vec![
+                    "INLINE".to_string(),
+                    "dup-inlined.cir:20".to_string(),
+                    "dup-inlined.cir:29".to_string(),
+                ],
+            },
+            Self::Bug702MalformedInitcondFile => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::ExternalDataLoad,
+                category: XyceExpectedFailureCategory::MalformedDeviceInitialConditionFile,
+                identifiers: vec![
+                    "noinits.dat".to_string(),
+                    "empty-initcond.cir:19".to_string(),
+                    "noinits.dat:1".to_string(),
+                ],
+            },
+            Self::Bug702MissingInitcondFile => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::ExternalDataLoad,
+                category: XyceExpectedFailureCategory::MissingDeviceInitialConditionFile,
+                identifiers: vec!["ic.dat".to_string(), "missing-initcond.cir:21".to_string()],
+            },
             Self::Issue455DuplicateDcSourceFunction => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::NetlistParse,
                 category: XyceExpectedFailureCategory::DuplicateDcSourceFunction,
@@ -1003,6 +1104,16 @@ impl XyceExpectedFailureKind {
                     require_manifest_bijection: false,
                 })
             }
+            Self::Bug702DuplicateExternalInitcond
+            | Self::Bug702DuplicateInlinedInitcond
+            | Self::Bug702MalformedInitcondFile
+            | Self::Bug702MissingInitcondFile => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 8,
+                physical_names_blake3: XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 8,
+                manifest_records_blake3: XYCE_BUG702_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            }),
             Self::Bug401BadDeviceLine | Self::Bug401ExtraSpace | Self::Bug401WorseDeviceLine => {
                 Some(XyceExpectedFailureFamilyCensus {
                     physical_cir_count: 3,
@@ -1080,6 +1191,9 @@ enum XyceExpectedFailureCategory {
     InvalidFrequencySweepType,
     MissingLibraryFile,
     MissingDeviceNodes,
+    DuplicateDeviceInitialCondition,
+    MalformedDeviceInitialConditionFile,
+    MissingDeviceInitialConditionFile,
     DuplicateDcSourceFunction,
     InvalidDcSweepArity,
     UnknownXspiceModel,
@@ -4370,6 +4484,12 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::MessageMissingDeviceNodes => {
                 Self::observe_message_missing_device_nodes_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond
+            | XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond
+            | XyceExpectedFailureKind::Bug702MalformedInitcondFile
+            | XyceExpectedFailureKind::Bug702MissingInitcondFile => {
+                Self::observe_bug702_expected_failure(source, &deck.path, kind)?
+            }
             XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction => {
                 Self::observe_issue455_duplicate_dc_failure(source, &deck.path)?
             }
@@ -5690,6 +5810,324 @@ impl XyceTestRunner {
             category: XyceExpectedFailureCategory::MissingDeviceNodes,
             identifiers: vec!["R2".to_string(), "OUT_1".to_string(), "line 14".to_string()],
         })
+    }
+
+    fn validate_bug702_resource(
+        family_dir: &Path,
+        file_name: &str,
+        expected_bytes: usize,
+        expected_blake3: &str,
+    ) -> Result<PathBuf, String> {
+        let path = family_dir.join(file_name);
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            format!(
+                "failed to inspect BUG702 resource {}: {error}",
+                path.display()
+            )
+        })?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "BUG702 resource {} must be a regular non-symlink file",
+                path.display()
+            ));
+        }
+        let bytes = fs::read(&path).map_err(|error| {
+            format!("failed to read BUG702 resource {}: {error}", path.display())
+        })?;
+        let digest = blake3::hash(&bytes).to_hex().to_string();
+        if bytes.len() != expected_bytes || digest != expected_blake3 {
+            return Err(format!(
+                "BUG702 resource {file_name} changed: expected {expected_bytes} bytes / {expected_blake3}, got {} bytes / {digest}",
+                bytes.len()
+            ));
+        }
+        path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize BUG702 resource {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    fn require_bug702_missing_ic_dat(family_dir: &Path) -> Result<(), String> {
+        for entry in fs::read_dir(family_dir).map_err(|error| {
+            format!(
+                "failed to inspect BUG702 execution directory {}: {error}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect BUG702 execution-directory entry in {}: {error}",
+                    family_dir.display()
+                )
+            })?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("ic.dat"))
+            {
+                return Err(format!(
+                    "BUG702 missing-initcond oracle acquired execution-directory dependency {}",
+                    entry.path().display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn observe_bug702_expected_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let family_dir = deck_path
+            .parent()
+            .ok_or_else(|| "BUG702 deck has no family execution directory".to_string())?;
+        let (label, file_name, line_count, expected_lines) = match kind {
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond => (
+                "BUG702 dup-external",
+                "dup-external.cir",
+                156,
+                vec![
+                    (20, ".initCOND FILE \"initcond.dat\""),
+                    (25, ".tran 20ns 30us"),
+                    (
+                        26,
+                        ".print tran PRECISION=10 WIDTH=19 v(vout) {v(in)+1.0} v(1)",
+                    ),
+                    (29, ".INITcond initcond.dat"),
+                    (37, "XINV1 IN VOUT VDD 0 INVERTER"),
+                    (156, ".END"),
+                ],
+            ),
+            XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond => (
+                "BUG702 dup-inlined",
+                "dup-inlined.cir",
+                156,
+                vec![
+                    (20, ".initcond XiNv1:mn1 ic=2,0"),
+                    (25, ".tran 20ns 30us"),
+                    (
+                        26,
+                        ".print tran PRECISION=10 WIDTH=19 v(vout) {v(in)+1.0} v(1)",
+                    ),
+                    (29, ".initcond xinV1:MN1=2,0"),
+                    (37, "XINV1 IN VOUT VDD 0 INVERTER"),
+                    (156, ".END"),
+                ],
+            ),
+            XyceExpectedFailureKind::Bug702MalformedInitcondFile => (
+                "BUG702 empty-initcond",
+                "empty-initcond.cir",
+                152,
+                vec![
+                    (
+                        14,
+                        "MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=2,0 ",
+                    ),
+                    (19, ".INITCOND FILE noinits.dat"),
+                    (24, ".tran 20ns 30us"),
+                    (
+                        25,
+                        ".print tran PRECISION=10 WIDTH=19 v(vout) {v(in)+1.0} v(1)",
+                    ),
+                    (33, "XINV1 IN VOUT VDD 0 INVERTER"),
+                    (152, ".END"),
+                ],
+            ),
+            XyceExpectedFailureKind::Bug702MissingInitcondFile => (
+                "BUG702 missing-initcond",
+                "missing-initcond.cir",
+                154,
+                vec![
+                    (21, ".initCOND file \"ic.dat\""),
+                    (26, ".tran 20ns 30us"),
+                    (
+                        27,
+                        ".print tran PRECISION=10 WIDTH=19 v(vout) {v(in)+1.0} v(1)",
+                    ),
+                    (35, "XINV1 IN VOUT VDD 0 INVERTER"),
+                    (154, ".END"),
+                ],
+            ),
+            _ => {
+                return Err(format!(
+                    "non-BUG702 failure kind passed to BUG702 observer: {kind:?}"
+                ));
+            }
+        };
+        Self::require_expected_failure_file_name(label, deck_path, file_name)?;
+        Self::require_expected_failure_source_lines(label, source, line_count, &expected_lines)?;
+
+        if matches!(
+            kind,
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond
+        ) {
+            Self::validate_bug702_resource(
+                family_dir,
+                "initcond.dat",
+                XYCE_BUG702_INITCOND_DATA_BYTES,
+                XYCE_BUG702_INITCOND_DATA_BLAKE3,
+            )?;
+        }
+        let expected_noinits =
+            if matches!(kind, XyceExpectedFailureKind::Bug702MalformedInitcondFile) {
+                Some(Self::validate_bug702_resource(
+                    family_dir,
+                    "noinits.dat",
+                    XYCE_BUG702_NOINITS_DATA_BYTES,
+                    XYCE_BUG702_NOINITS_DATA_BLAKE3,
+                )?)
+            } else {
+                None
+            };
+        if matches!(kind, XyceExpectedFailureKind::Bug702MissingInitcondFile) {
+            Self::require_bug702_missing_ic_dat(family_dir)?;
+        }
+
+        let error = Self::parse_netlist_with_expression_dialect_and_execution_dir(
+            source,
+            deck_path,
+            ExpressionDialect::Xyce,
+            Some(family_dir),
+        )
+        .expect_err("BUG702 expected-failure observer requires a parse/load failure");
+        let expected_owner = Self::canonical_expected_failure_source_path(deck_path, label)?;
+        match (kind, error) {
+            (
+                XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+                ParseError::DeviceInitialCondition(inner),
+            )
+            | (
+                XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+                ParseError::DeviceInitialCondition(inner),
+            ) => {
+                let DeviceInitialConditionError::DuplicateDirective { first, duplicate } = *inner
+                else {
+                    return Err(format!(
+                        "{label} produced the wrong typed INITCOND failure: {inner:?}"
+                    ));
+                };
+                let first_path = first
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| format!("{label} first directive has no source path"))?;
+                let duplicate_path = duplicate
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| format!("{label} duplicate directive has no source path"))?;
+                if first.line != 20
+                    || duplicate.line != 29
+                    || Self::canonical_expected_failure_source_path(first_path, label)?
+                        != expected_owner
+                    || Self::canonical_expected_failure_source_path(duplicate_path, label)?
+                        != expected_owner
+                {
+                    return Err(format!(
+                        "{label} duplicate INITCOND locations changed: first={first:?}, duplicate={duplicate:?}"
+                    ));
+                }
+                let representation = if matches!(
+                    kind,
+                    XyceExpectedFailureKind::Bug702DuplicateExternalInitcond
+                ) {
+                    "EXTERNAL"
+                } else {
+                    "INLINE"
+                };
+                Ok(XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::NetlistParse,
+                    category: XyceExpectedFailureCategory::DuplicateDeviceInitialCondition,
+                    identifiers: vec![
+                        representation.to_string(),
+                        format!("{file_name}:20"),
+                        format!("{file_name}:29"),
+                    ],
+                })
+            }
+            (
+                XyceExpectedFailureKind::Bug702MissingInitcondFile,
+                ParseError::DeviceInitialCondition(inner),
+            ) => {
+                let DeviceInitialConditionError::SourceUnavailable {
+                    origin,
+                    requested_path,
+                } = *inner
+                else {
+                    return Err(format!(
+                        "{label} produced the wrong typed INITCOND failure: {inner:?}"
+                    ));
+                };
+                let origin_path = origin
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| format!("{label} directive has no source path"))?;
+                if requested_path != "ic.dat"
+                    || origin.line != 21
+                    || Self::canonical_expected_failure_source_path(origin_path, label)?
+                        != expected_owner
+                {
+                    return Err(format!(
+                        "{label} missing-source observation changed: origin={origin:?}, requested={requested_path:?}"
+                    ));
+                }
+                Ok(XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::ExternalDataLoad,
+                    category: XyceExpectedFailureCategory::MissingDeviceInitialConditionFile,
+                    identifiers: vec!["ic.dat".to_string(), format!("{file_name}:21")],
+                })
+            }
+            (
+                XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+                ParseError::DeviceInitialCondition(inner),
+            ) => {
+                let DeviceInitialConditionError::MalformedSource {
+                    origin,
+                    requested_path,
+                    record_origin,
+                    detail,
+                } = *inner
+                else {
+                    return Err(format!(
+                        "{label} produced the wrong typed INITCOND failure: {inner:?}"
+                    ));
+                };
+                let origin_path = origin
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| format!("{label} directive has no source path"))?;
+                let record_path = record_origin
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| format!("{label} malformed record has no source path"))?;
+                if requested_path != "noinits.dat"
+                    || origin.line != 19
+                    || record_origin.line != 1
+                    || detail != "source contains no device initial-condition records"
+                    || Self::canonical_expected_failure_source_path(origin_path, label)?
+                        != expected_owner
+                    || Self::canonical_expected_failure_source_path(record_path, label)?
+                        != expected_noinits.expect("malformed source path is pinned")
+                {
+                    return Err(format!(
+                        "{label} malformed-source observation changed: origin={origin:?}, requested={requested_path:?}, record={record_origin:?}, detail={detail:?}"
+                    ));
+                }
+                Ok(XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::ExternalDataLoad,
+                    category: XyceExpectedFailureCategory::MalformedDeviceInitialConditionFile,
+                    identifiers: vec![
+                        "noinits.dat".to_string(),
+                        format!("{file_name}:19"),
+                        "noinits.dat:1".to_string(),
+                    ],
+                })
+            }
+            (_, error) => Err(format!(
+                "{label} produced the wrong typed expected failure: {error:?}"
+            )),
+        }
     }
 
     fn observe_issue455_duplicate_dc_failure(
@@ -67279,6 +67717,22 @@ R2 2 0 1
                 &["Not enough fields on input line for device R2"][..],
             ),
             (
+                XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+                &[".INITCOND line may appear only once."][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+                &[".INITCOND line may appear only once."][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+                &[r"\.INITCOND file \'noinits\.dat\' is not formatted properly"][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug702MissingInitcondFile,
+                &["Could not open the .INITCOND file ic.dat"][..],
+            ),
+            (
                 XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
                 &[
                     "Netlist error in file issue455.cir at or near line 4",
@@ -67401,7 +67855,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_thirty_three_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_thirty_seven_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -67475,6 +67929,22 @@ R2 2 0 1
                 (
                     XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice,
+                ),
+                (
+                    XYCE_BUG702_DUP_EXTERNAL_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+                ),
+                (
+                    XYCE_BUG702_DUP_INLINED_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+                ),
+                (
+                    XYCE_BUG702_EMPTY_INITCOND_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+                ),
+                (
+                    XYCE_BUG702_MISSING_INITCOND_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug702MissingInitcondFile,
                 ),
                 (
                     XYCE_BUG726_EXPECTED_FAILURE_RECORD.to_string(),
@@ -67560,7 +68030,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            33,
+            37,
             "each record requires a distinct contract"
         );
     }
@@ -67641,6 +68111,22 @@ R2 2 0 1
             (
                 "Netlists/Message/Device/DeviceBlock_extractNodes_1.cir",
                 "expected_failure_message_missing_device_nodes_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_702/dup-external.cir",
+                "expected_failure_bug702_duplicate_external_initcond_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_702/dup-inlined.cir",
+                "expected_failure_bug702_duplicate_inlined_initcond_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_702/empty-initcond.cir",
+                "expected_failure_bug702_malformed_initcond_file_load",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_702/missing-initcond.cir",
+                "expected_failure_bug702_missing_initcond_file_load",
             ),
             (
                 "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
@@ -67759,6 +68245,21 @@ R2 2 0 1
             XyceExpectedFailureKind::MessageMissingDeviceNodes,
         ] {
             assert_eq!(member.shared_family_census(), message_device_census);
+        }
+        let bug702_census = Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 8,
+            physical_names_blake3: XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 8,
+            manifest_records_blake3: XYCE_BUG702_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: true,
+        });
+        for member in [
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+            XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+            XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+            XyceExpectedFailureKind::Bug702MissingInitcondFile,
+        ] {
+            assert_eq!(member.shared_family_census(), bug702_census);
         }
         let bug401_census = Some(XyceExpectedFailureFamilyCensus {
             physical_cir_count: 3,
@@ -68749,6 +69250,190 @@ R2 2 0 1
         }
 
         fs::remove_dir_all(temp_dir).expect("remove source-sidecar fixture");
+    }
+
+    #[test]
+    fn bug702_expected_failure_observers_reject_corrections_shifts_paths_and_resources() {
+        let root = expected_failure_test_root();
+        let family = root.join("Netlists/Certification_Tests/BUG_702");
+        for (file_name, kind) in [
+            (
+                "dup-external.cir",
+                XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+            ),
+            (
+                "dup-inlined.cir",
+                XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+            ),
+            (
+                "empty-initcond.cir",
+                XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+            ),
+            (
+                "missing-initcond.cir",
+                XyceExpectedFailureKind::Bug702MissingInitcondFile,
+            ),
+        ] {
+            let path = family.join(file_name);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read BUG702 {file_name}: {error}"));
+            XyceTestRunner::observe_bug702_expected_failure(&source, &path, kind).unwrap_or_else(
+                |error| {
+                    panic!("canonical BUG702 {file_name} expected failure is observed: {error}")
+                },
+            );
+
+            let shifted = format!("\r\n{source}");
+            assert!(
+                XyceTestRunner::observe_bug702_expected_failure(&shifted, &path, kind).is_err(),
+                "shifted BUG702 {file_name} must fail exact line provenance"
+            );
+
+            let temp_dir = unique_expected_failure_temp_dir("bug702-path");
+            fs::create_dir_all(&temp_dir).expect("create BUG702 renamed fixture");
+            let renamed = temp_dir.join("renamed.cir");
+            fs::write(&renamed, &source).expect("write renamed BUG702 deck");
+            assert!(
+                XyceTestRunner::observe_bug702_expected_failure(&source, &renamed, kind).is_err(),
+                "renamed BUG702 {file_name} must fail exact record identity"
+            );
+            fs::remove_dir_all(temp_dir).expect("remove BUG702 renamed fixture");
+        }
+
+        for (file_name, kind, duplicate_line) in [
+            (
+                "dup-external.cir",
+                XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+                ".INITcond initcond.dat",
+            ),
+            (
+                "dup-inlined.cir",
+                XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+                ".initcond xinV1:MN1=2,0",
+            ),
+        ] {
+            let path = family.join(file_name);
+            let source = fs::read_to_string(&path).expect("read duplicate BUG702 deck");
+            let corrected = source.replacen(duplicate_line, &format!("*{duplicate_line}"), 1);
+            assert_ne!(corrected, source);
+            XyceTestRunner::parse_netlist_with_expression_dialect_and_execution_dir(
+                &corrected,
+                &path,
+                ExpressionDialect::Xyce,
+                Some(&family),
+            )
+            .unwrap_or_else(|error| panic!("corrected BUG702 {file_name} parses: {error}"));
+            assert!(
+                XyceTestRunner::observe_bug702_expected_failure(&corrected, &path, kind).is_err(),
+                "single-directive BUG702 {file_name} must not satisfy duplicate oracle"
+            );
+        }
+
+        let external_source =
+            fs::read_to_string(family.join("dup-external.cir")).expect("read dup-external");
+        let initcond_bytes = fs::read(family.join("initcond.dat")).expect("read initcond.dat");
+        let temp_external = unique_expected_failure_temp_dir("bug702-dup-external-resource");
+        fs::create_dir_all(&temp_external).expect("create dup-external resource fixture");
+        let external_path = temp_external.join("dup-external.cir");
+        let resource_path = temp_external.join("initcond.dat");
+        fs::write(&external_path, &external_source).expect("write dup-external fixture");
+        fs::write(&resource_path, &initcond_bytes).expect("write initcond resource");
+        XyceTestRunner::observe_bug702_expected_failure(
+            &external_source,
+            &external_path,
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+        )
+        .expect("copied dup-external fixture qualifies");
+        fs::write(&resource_path, "XiNv1:mn1 IC=3,0\n").expect("mutate initcond resource");
+        assert!(
+            XyceTestRunner::observe_bug702_expected_failure(
+                &external_source,
+                &external_path,
+                XyceExpectedFailureKind::Bug702DuplicateExternalInitcond
+            )
+            .is_err(),
+            "mutated initcond.dat must fail exact resource provenance"
+        );
+        fs::remove_dir_all(temp_external).expect("remove dup-external resource fixture");
+
+        let missing_source =
+            fs::read_to_string(family.join("missing-initcond.cir")).expect("read missing-initcond");
+        let temp_missing = unique_expected_failure_temp_dir("bug702-missing-resource");
+        fs::create_dir_all(&temp_missing).expect("create missing-initcond fixture");
+        let missing_path = temp_missing.join("missing-initcond.cir");
+        fs::write(&missing_path, &missing_source).expect("write missing-initcond fixture");
+        XyceTestRunner::observe_bug702_expected_failure(
+            &missing_source,
+            &missing_path,
+            XyceExpectedFailureKind::Bug702MissingInitcondFile,
+        )
+        .expect("copied missing-initcond fixture qualifies");
+        let ic_path = temp_missing.join("Ic.DaT");
+        fs::write(&ic_path, "XiNv1:mn1 IC=2,0\n").expect("create case-variant ic.dat");
+        assert!(
+            XyceTestRunner::observe_bug702_expected_failure(
+                &missing_source,
+                &missing_path,
+                XyceExpectedFailureKind::Bug702MissingInitcondFile
+            )
+            .is_err(),
+            "case-insensitive execution-directory dependency must invalidate missing-file oracle"
+        );
+        fs::remove_file(&ic_path).expect("remove case-variant ic.dat");
+        fs::write(temp_missing.join("ic.dat"), "XiNv1:mn1 IC=2,0\n")
+            .expect("create corrected ic.dat");
+        XyceTestRunner::parse_netlist_with_expression_dialect_and_execution_dir(
+            &missing_source,
+            &missing_path,
+            ExpressionDialect::Xyce,
+            Some(&temp_missing),
+        )
+        .expect("missing-initcond deck with valid dependency genuinely parses");
+        fs::remove_dir_all(temp_missing).expect("remove missing-initcond fixture");
+
+        let empty_source =
+            fs::read_to_string(family.join("empty-initcond.cir")).expect("read empty-initcond");
+        let noinits_bytes = fs::read(family.join("noinits.dat")).expect("read noinits.dat");
+        let temp_empty = unique_expected_failure_temp_dir("bug702-empty-resource");
+        fs::create_dir_all(&temp_empty).expect("create empty-initcond fixture");
+        let empty_path = temp_empty.join("empty-initcond.cir");
+        let noinits_path = temp_empty.join("noinits.dat");
+        fs::write(&empty_path, &empty_source).expect("write empty-initcond fixture");
+        fs::write(&noinits_path, &noinits_bytes).expect("write whitespace noinits.dat");
+        XyceTestRunner::observe_bug702_expected_failure(
+            &empty_source,
+            &empty_path,
+            XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+        )
+        .expect("copied empty-initcond fixture qualifies");
+        fs::write(&noinits_path, "XiNv1:mn1 IC=2,0\n").expect("correct noinits.dat");
+        XyceTestRunner::parse_netlist_with_expression_dialect_and_execution_dir(
+            &empty_source,
+            &empty_path,
+            ExpressionDialect::Xyce,
+            Some(&temp_empty),
+        )
+        .expect("empty-initcond deck with valid resource genuinely parses");
+        assert!(
+            XyceTestRunner::observe_bug702_expected_failure(
+                &empty_source,
+                &empty_path,
+                XyceExpectedFailureKind::Bug702MalformedInitcondFile
+            )
+            .is_err(),
+            "corrected noinits.dat must not satisfy malformed-file oracle"
+        );
+        fs::remove_file(&noinits_path).expect("remove noinits.dat");
+        assert!(
+            XyceTestRunner::observe_bug702_expected_failure(
+                &empty_source,
+                &empty_path,
+                XyceExpectedFailureKind::Bug702MalformedInitcondFile
+            )
+            .is_err(),
+            "missing noinits.dat must not be confused with malformed-file oracle"
+        );
+        fs::remove_dir_all(temp_empty).expect("remove empty-initcond fixture");
     }
 
     #[test]
