@@ -409,12 +409,10 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
             vec![Diagnostic::error(message).with_line(line.checked_sub(1))],
             None,
         ),
-        Err(
-            ref error @ rspice_core::netlist::ParseError::MissingSubcircuitEnds {
-                ref opened_at, ..
-            },
-        ) => (
-            vec![Diagnostic::error(error.to_string()).with_line(opened_at.line.checked_sub(1))],
+        Err(rspice_core::netlist::ParseError::MissingSubcircuitEnds(error)) => (
+            vec![
+                Diagnostic::error(error.to_string()).with_line(error.opened_at.line.checked_sub(1)),
+            ],
             None,
         ),
         Err(other) => (vec![Diagnostic::error(other.to_string())], None),

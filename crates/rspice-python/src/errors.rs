@@ -130,37 +130,32 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             None,
             None,
         ),
-        CoreParseError::MissingSubcircuitEnds {
-            authored_name,
-            canonical_name,
-            qualified_name,
-            opened_at,
-            detected_at,
-            boundary,
-        } => (
+        CoreParseError::MissingSubcircuitEnds(error) => (
             "missing_subcircuit_ends",
-            Some(opened_at.line),
-            Some(canonical_name.clone()),
-            opened_at
+            Some(error.opened_at.line),
+            Some(error.canonical_name.clone()),
+            error
+                .opened_at
                 .path
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
-            Some(detected_at.line),
-            detected_at
+            Some(error.detected_at.line),
+            error
+                .detected_at
                 .path
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
             Some(
-                match boundary {
+                match error.boundary {
                     MissingSubcircuitEndsBoundary::EndCard => "end_card",
                     MissingSubcircuitEndsBoundary::AlterCard => "alter_card",
                     MissingSubcircuitEndsBoundary::EndOfSource => "end_of_source",
                 }
                 .to_string(),
             ),
-            Some(authored_name.clone()),
-            Some(canonical_name.clone()),
-            Some(qualified_name.clone()),
+            Some(error.authored_name.clone()),
+            Some(error.canonical_name.clone()),
+            Some(error.qualified_name.clone()),
         ),
         CoreParseError::MissingParameter(value) => (
             "missing_parameter",

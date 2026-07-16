@@ -110,6 +110,24 @@ impl std::fmt::Display for MissingSubcircuitEndsBoundary {
     }
 }
 
+/// Structured details for an unterminated `.SUBCKT` definition.
+///
+/// The payload is boxed by [`ParseError`] so ordinary parse results remain
+/// compact while callers retain direct, typed access to every diagnostic
+/// field.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Subcircuit {canonical_name} missing .ENDS (opened as '{authored_name}' in scope '{qualified_name}' at {opened_at}; reached {boundary} at {detected_at})"
+)]
+pub struct MissingSubcircuitEndsError {
+    pub authored_name: String,
+    pub canonical_name: String,
+    pub qualified_name: String,
+    pub opened_at: NetlistSourceLocation,
+    pub detected_at: NetlistSourceLocation,
+    pub boundary: MissingSubcircuitEndsBoundary,
+}
+
 /// Errors that can occur during netlist parsing
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -134,17 +152,8 @@ pub enum ParseError {
         duplicate_line: usize,
     },
 
-    #[error(
-        "Subcircuit {canonical_name} missing .ENDS (opened as '{authored_name}' in scope '{qualified_name}' at {opened_at}; reached {boundary} at {detected_at})"
-    )]
-    MissingSubcircuitEnds {
-        authored_name: String,
-        canonical_name: String,
-        qualified_name: String,
-        opened_at: NetlistSourceLocation,
-        detected_at: NetlistSourceLocation,
-        boundary: MissingSubcircuitEndsBoundary,
-    },
+    #[error(transparent)]
+    MissingSubcircuitEnds(Box<MissingSubcircuitEndsError>),
 
     #[error("Missing required parameter: {0}")]
     MissingParameter(String),
@@ -6526,14 +6535,15 @@ mod tests {
         boundary: MissingSubcircuitEndsBoundary,
     ) {
         match error {
-            ParseError::MissingSubcircuitEnds {
-                authored_name: actual_authored,
-                canonical_name: actual_canonical,
-                qualified_name: actual_qualified,
-                opened_at,
-                detected_at,
-                boundary: actual_boundary,
-            } => {
+            ParseError::MissingSubcircuitEnds(error) => {
+                let MissingSubcircuitEndsError {
+                    authored_name: actual_authored,
+                    canonical_name: actual_canonical,
+                    qualified_name: actual_qualified,
+                    opened_at,
+                    detected_at,
+                    boundary: actual_boundary,
+                } = *error;
                 assert_eq!(actual_authored, authored_name);
                 assert_eq!(actual_canonical, canonical_name);
                 assert_eq!(actual_qualified, qualified_name);

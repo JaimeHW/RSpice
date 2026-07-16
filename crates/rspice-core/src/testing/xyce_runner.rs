@@ -22,9 +22,9 @@ use crate::netlist::expr::{
 };
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, MissingSubcircuitEndsBoundary,
-    Netlist, NetlistParseOptions, ParameterRedefinitionPolicy, ParametricValue, ParseError,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    MissingSubcircuitEndsError, Netlist, NetlistParseOptions, ParameterRedefinitionPolicy,
+    ParametricValue, ParseError, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
+    SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -4975,19 +4975,19 @@ impl XyceTestRunner {
                 ));
             }
         };
-        let ParseError::MissingSubcircuitEnds {
+        let ParseError::MissingSubcircuitEnds(error) = error else {
+            return Err(format!(
+                "{label} produced the wrong typed parse failure: {error:?}"
+            ));
+        };
+        let MissingSubcircuitEndsError {
             authored_name: actual_authored,
             canonical_name: actual_canonical,
             qualified_name: actual_qualified,
             opened_at,
             detected_at,
             boundary: actual_boundary,
-        } = error
-        else {
-            return Err(format!(
-                "{label} produced the wrong typed parse failure: {error:?}"
-            ));
-        };
+        } = *error;
         let opened_path = opened_at
             .path
             .as_deref()

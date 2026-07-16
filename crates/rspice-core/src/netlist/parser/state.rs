@@ -175,14 +175,14 @@ impl ParseState {
         detected_at: NetlistSourceLocation,
         boundary: MissingSubcircuitEndsBoundary,
     ) -> ParseError {
-        ParseError::MissingSubcircuitEnds {
+        ParseError::MissingSubcircuitEnds(Box::new(MissingSubcircuitEndsError {
             authored_name: frame.def.name.clone(),
             canonical_name: frame.def.name.to_ascii_uppercase(),
             qualified_name: frame.qualified_name.to_ascii_uppercase(),
             opened_at: frame.opened_at.clone(),
             detected_at,
             boundary,
-        }
+        }))
     }
 }
 
