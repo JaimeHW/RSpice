@@ -264,6 +264,55 @@ fn test_xyce_wrapper_manifest_covers_trimmed_sidecar_contracts() {
 }
 
 #[test]
+fn test_xyce_typed_expected_failure_wrapper_cases_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let cases = [
+        (
+            "Netlists/Certification_Tests/BUG_67/bug_67.cir",
+            "expected_failure_behavioral_expression_build",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_671/vpwl_binaryfile.cir",
+            "expected_failure_external_pwl_load",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_726/adjacent.cir",
+            "expected_failure_adjacent_coupling_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir",
+            "expected_failure_dc_operating_point",
+        ),
+    ];
+
+    let mut observed_contracts = BTreeSet::new();
+    for (relative, expected_contract) in cases {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must retain removed-wrapper manifest provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} must execute and validate its typed expected failure, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(
+            observed_contracts.insert(result.contract),
+            "{relative} must not share an indistinguishable result contract"
+        );
+    }
+    assert_eq!(
+        observed_contracts.len(),
+        4,
+        "the expected-failure oracle census is exactly four distinct physical records"
+    );
+}
+
+#[test]
 fn test_xyce_static_prn_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
