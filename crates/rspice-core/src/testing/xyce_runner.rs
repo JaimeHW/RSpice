@@ -63359,6 +63359,15 @@ Q1 c b 0 s dt QV
 .PRINT TRAN V(c)
 .END
 ",
+        ] {
+            let netlist = Netlist::parse(deck).expect("negative NPN startup/route deck parses");
+            assert!(
+                XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+                "explicit startup, temperature, scaling, and generated-device routes must remain unsupported"
+            );
+        }
+
+        let duplicate_name = Netlist::parse(
             "\
 duplicate normalized BJT names with different models
 VCC c 0 5
@@ -63371,13 +63380,22 @@ q1 c b 0 QBAD
 .PRINT TRAN V(c)
 .END
 ",
-        ] {
-            let netlist = Netlist::parse(deck).expect("negative NPN startup/route deck parses");
-            assert!(
-                XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
-                "explicit startup, temperature, scaling, and generated-device routes must remain unsupported"
-            );
-        }
+        )
+        .expect_err("case-insensitive duplicate BJT names fail before route admission");
+        assert!(matches!(
+            duplicate_name,
+            ParseError::DuplicateName {
+                ref canonical_name,
+                ref first_name,
+                ref duplicate_name,
+                ref scope,
+                first_line: 4,
+                duplicate_line: 5,
+            } if canonical_name == "Q1"
+                && first_name == "Q1"
+                && duplicate_name == "q1"
+                && scope == "TOP_LEVEL"
+        ));
     }
 
     #[test]
