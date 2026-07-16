@@ -2444,6 +2444,32 @@ fn test_xyce_solution_dependent_resistor_cases_run() {
 }
 
 #[test]
+fn test_xyce_solution_dependent_resistor_temperature_wrapper_runs_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/SOLN_DEP_RES/exp_temp_dep.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain its removed upstream wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native modeled solution-dependent resistor temperature comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_static_prn_step_dc",
+        "{relative} should report the wrapper-origin stepped .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_semiconductor_resistor_step_wrapper_case_runs_natively() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -4975,8 +4975,8 @@ impl XyceTestRunner {
                 }
                 ".subckt" => subckt_count += 1,
                 ".ends" => ends_count += 1,
-                ".print" | ".measure" | ".meas" | ".op" | ".step" | ".param" | ".func"
-                | ".options" | ".end" => {}
+                ".print" | ".measure" | ".meas" | ".op" | ".step" | ".param" | ".global_param"
+                | ".func" | ".options" | ".end" => {}
                 other => {
                     return Err(format!(
                         "wrapper-origin plain static DC contract does not cover {other} directives"
@@ -5019,7 +5019,10 @@ impl XyceTestRunner {
         let normalized = model_type
             .trim_matches(|ch| matches!(ch, '(' | ')' | ','))
             .to_ascii_uppercase();
-        if matches!(normalized.as_str(), "NMOS" | "PMOS" | "D" | "DIODE") {
+        if matches!(
+            normalized.as_str(),
+            "NMOS" | "PMOS" | "D" | "DIODE" | "R" | "RES" | "RESISTOR"
+        ) {
             return Ok(());
         }
         Err(format!(
@@ -5031,7 +5034,7 @@ impl XyceTestRunner {
         for model in &netlist.models {
             if !matches!(
                 model.model_type.to_ascii_uppercase().as_str(),
-                "NMOS" | "PMOS" | "D" | "DIODE"
+                "NMOS" | "PMOS" | "D" | "DIODE" | "R" | "RES" | "RESISTOR"
             ) {
                 return Err(format!(
                     "wrapper-origin plain static DC contract does not yet cover parsed model type {}",
@@ -5048,9 +5051,23 @@ impl XyceTestRunner {
                     model.model_type
                 ));
             }
+            if matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "R" | "RES" | "RESISTOR"
+            ) && !Self::model_is_native_legacy_resistor(model)
+            {
+                return Err(format!(
+                    "wrapper-origin plain static DC contract does not yet cover advanced resistor model type {}",
+                    model.model_type
+                ));
+            }
         }
         if netlist.models.len() > 1
             && !Self::models_form_single_binned_native_mos_family(&netlist.models)
+            && !netlist
+                .models
+                .iter()
+                .all(Self::model_is_native_legacy_resistor)
         {
             return Err(format!(
                 "wrapper-origin plain static DC contract currently covers at most one parsed model unless all models form one binned native MOS model family, found {}",
@@ -31488,6 +31505,13 @@ impl XyceTestRunner {
                     original, resistance
                 ));
             }
+            if Self::find_resistor_element(netlist, &element_name).is_some() {
+                // A solution-dependent resistor cannot have a scalar resistance
+                // reconstructed during validation. Its constitutive law is
+                // validated by the circuit builder and its accepted current is
+                // exported through the result's typed device observables.
+                return Ok(());
+            }
             return Err(format!(
                 "current probe '{}' targets an unsupported branch/device",
                 original
@@ -31504,6 +31528,9 @@ impl XyceTestRunner {
                     "power probe '{}' targets a resistor with invalid resistance {}",
                     original, resistance
                 ));
+            }
+            if Self::find_resistor_element(netlist, &element_name).is_some() {
+                return Ok(());
             }
             return Err(format!(
                 "power probe '{}' targets an unsupported branch/device",
@@ -31645,6 +31672,9 @@ impl XyceTestRunner {
         }
 
         if let Some(element_name) = Self::parse_current_probe(normalized) {
+            if let Some(current) = result.try_dc_observable_named(normalized) {
+                return Ok(current);
+            }
             if let Some(current) = Self::result_branch_current_named(result, &element_name) {
                 return Ok(current);
             }
@@ -31658,10 +31688,13 @@ impl XyceTestRunner {
             }
         }
 
-        if let Some(element_name) = Self::parse_power_probe(normalized)
-            && let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)
-        {
-            return Self::evaluate_resistor_power(netlist, result, &element_name, resistance);
+        if let Some(element_name) = Self::parse_power_probe(normalized) {
+            if let Some(power) = result.try_dc_observable_named(normalized) {
+                return Ok(power);
+            }
+            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
+                return Self::evaluate_resistor_power(netlist, result, &element_name, resistance);
+            }
         }
 
         Err(format!("unsupported DC probe '{}'", normalized))
@@ -34793,6 +34826,29 @@ impl XyceTestRunner {
             return true;
         }
         (level - 2.0).abs() <= 1.0e-9 && Self::model_is_native_xyce_level2_diode_subset(model)
+    }
+
+    fn model_is_native_legacy_resistor(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "R" | "RES" | "RESISTOR"
+        ) {
+            return false;
+        }
+        if model
+            .expr_params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            || model
+                .string_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+        {
+            return false;
+        }
+        Self::numeric_param_value(&model.params, "LEVEL").is_none_or(|level| {
+            level.is_finite() && ((level - 0.0).abs() <= 1.0e-9 || (level - 1.0).abs() <= 1.0e-9)
+        })
     }
 
     fn model_is_native_xyce_level2_diode_subset(model: &crate::netlist::ModelDef) -> bool {
@@ -54737,6 +54793,52 @@ D1 1 0 DXX
             err.contains("advanced diode model"),
             "unexpected validation error: {err}"
         );
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_accepts_native_resistor_model_family_and_global_param() {
+        let source = "\
+plain static native resistor models dc
+.GLOBAL_PARAM SCALE_R=1
+V1 in 0 1
+R1 in out {V(in)*SCALE_R} RMOD
+R2 out 0 RMOD_SC L=1u W=1u
+.MODEL RMOD R (TCE=3)
+.MODEL RMOD_SC R (RSH=1 TCE=-6)
+.DC V1 1 1 1
+.STEP TEMP 27 37 10
+.PRINT DC V(out) I(R1) I(R2)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("source-level validation accepts native resistor model syntax");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("native_resistors.cir"))
+            .expect("native resistor model deck parses");
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect("plain static DC netlist accepts multiple native resistor models");
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_rejects_generated_resistor_model_level() {
+        let source = "\
+plain static generated resistor model dc
+V1 in 0 1
+R1 in 0 RMOD
+.MODEL RMOD R (LEVEL=1002)
+.DC V1 1 1 1
+.PRINT DC V(in)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("source-level validation accepts resistor model syntax");
+        let netlist =
+            XyceTestRunner::parse_xyce_netlist(source, Path::new("generated_resistor.cir"))
+                .expect("generated resistor model deck parses at netlist level");
+        let error = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect_err("generated resistor levels stay outside the native wrapper contract");
+        assert!(error.contains("advanced resistor model"));
     }
 
     #[test]
