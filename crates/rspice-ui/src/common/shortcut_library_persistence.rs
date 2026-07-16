@@ -49,6 +49,14 @@ impl ShortcutLibraryPersistenceError {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    /// A browser write crossed `localStorage.setItem` but could not prove the
+    /// exact stored bytes afterwards. The caller must not restore stale CAS
+    /// authority or attempt another write until storage is reloaded.
+    #[must_use]
+    pub fn is_commit_in_doubt(&self) -> bool {
+        self.code == "shortcut-library.browser-commit-in-doubt"
+    }
 }
 
 impl fmt::Display for ShortcutLibraryPersistenceError {
@@ -99,6 +107,20 @@ impl PersistedShortcutProfileLibrary {
     #[must_use]
     pub fn into_library(self) -> ShortcutProfileLibrary {
         self.library
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_snapshot(library: ShortcutProfileLibrary, generation: u64) -> Self {
+        let file_digest = serde_json::to_vec(&library)
+            .map(|bytes| sha256(&bytes))
+            .unwrap_or([0; 32]);
+        Self {
+            library,
+            token: ShortcutLibraryPersistenceToken {
+                generation,
+                file_digest,
+            },
+        }
     }
 }
 
@@ -780,6 +802,7 @@ pub struct BrowserShortcutLibraryWriteToken(u64);
 struct BrowserWriteLeaseState {
     next_generation: u64,
     active: Option<BrowserShortcutLibraryWriteToken>,
+    commit_verified: bool,
     completed: bool,
 }
 
@@ -802,6 +825,7 @@ impl BrowserWriteLeaseState {
         })?;
         let token = BrowserShortcutLibraryWriteToken(self.next_generation);
         self.active = Some(token);
+        self.commit_verified = false;
         self.completed = false;
         Ok(token)
     }
@@ -818,20 +842,33 @@ impl BrowserWriteLeaseState {
         true
     }
 
+    /// Cross the irreversible publication boundary after an exact storage
+    /// reread. From this point cancellation must fail and the owner must poll
+    /// the eventual completion, even while Web Lock cleanup is still pending.
+    fn mark_commit_verified(&mut self, token: BrowserShortcutLibraryWriteToken) -> bool {
+        if !self.is_current(token) {
+            return false;
+        }
+        self.commit_verified = true;
+        true
+    }
+
     fn take_completed(&mut self, token: BrowserShortcutLibraryWriteToken) -> bool {
         if self.active != Some(token) || !self.completed {
             return false;
         }
         self.active = None;
+        self.commit_verified = false;
         self.completed = false;
         true
     }
 
     fn cancel(&mut self, token: BrowserShortcutLibraryWriteToken) -> bool {
-        if self.active != Some(token) {
+        if self.active != Some(token) || self.commit_verified || self.completed {
             return false;
         }
         self.active = None;
+        self.commit_verified = false;
         self.completed = false;
         true
     }
@@ -1013,6 +1050,11 @@ fn browser_operation_is_current(token: BrowserShortcutLibraryWriteToken) -> bool
 }
 
 #[cfg(target_arch = "wasm32")]
+fn mark_browser_commit_verified(token: BrowserShortcutLibraryWriteToken) -> bool {
+    BROWSER_WRITE_OWNER.with(|owner| owner.borrow_mut().lease.mark_commit_verified(token))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn finish_browser_write(
     token: BrowserShortcutLibraryWriteToken,
     result: Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError>,
@@ -1138,19 +1180,28 @@ async fn browser_compare_exchange(
                     ),
                 )
             })?;
+        // setItem has returned successfully. This is now non-cancellable even
+        // if the exact verification read fails and the commit must be reported
+        // as in-doubt rather than falsely restoring predecessor authority.
+        if !mark_browser_commit_verified(token) {
+            return Err(ShortcutLibraryPersistenceError::new(
+                "shortcut-library.browser-commit-in-doubt",
+                "shortcut library bytes were stored, but publication ownership was lost before verification",
+            ));
+        }
         let verified = storage.get_item(BROWSER_STORAGE_KEY).map_err(|error| {
             ShortcutLibraryPersistenceError::new(
-                "shortcut-library.browser-verify",
+                "shortcut-library.browser-commit-in-doubt",
                 format!(
-                    "published localStorage bytes could not be reread: {}",
+                    "shortcut library bytes were stored, but exact verification could not be read: {}",
                     js_error(error)
                 ),
             )
         })?;
         if verified.as_deref().map(str::as_bytes) != Some(bytes) {
             return Err(ShortcutLibraryPersistenceError::new(
-                "shortcut-library.browser-verify",
-                "published localStorage bytes did not verify exactly",
+                "shortcut-library.browser-commit-in-doubt",
+                "shortcut library bytes were stored, but the exact verification read did not match",
             ));
         }
         Ok(())
@@ -1696,6 +1747,21 @@ mod tests {
     }
 
     #[test]
+    fn verified_browser_commit_cannot_be_cancelled_before_cleanup_completes() {
+        let mut state = BrowserWriteLeaseState::default();
+        let cancellable = state.begin().unwrap();
+        assert!(state.cancel(cancellable));
+
+        let committed = state.begin().unwrap();
+        assert!(state.mark_commit_verified(committed));
+        assert!(!state.cancel(committed));
+        assert!(state.complete(committed));
+        assert!(!state.cancel(committed));
+        assert!(state.take_completed(committed));
+        assert!(state.begin().is_ok());
+    }
+
+    #[test]
     fn verified_browser_commit_is_authoritative_even_if_lock_release_fails() {
         let release_error = ShortcutLibraryPersistenceError::new(
             "shortcut-library.browser-lock",
@@ -1710,6 +1776,22 @@ mod tests {
         assert_eq!(
             finish_verified_browser_commit(Err(commit_error.clone()), Ok(())).unwrap_err(),
             commit_error
+        );
+    }
+
+    #[test]
+    fn commit_in_doubt_errors_are_typed_and_never_retryable_as_ordinary_failures() {
+        let error = ShortcutLibraryPersistenceError::new(
+            "shortcut-library.browser-commit-in-doubt",
+            "simulated post-set verification failure",
+        );
+        assert!(error.is_commit_in_doubt());
+        assert!(
+            !ShortcutLibraryPersistenceError::new(
+                "shortcut-library.browser-publish",
+                "simulated pre-commit failure",
+            )
+            .is_commit_in_doubt()
         );
     }
 }

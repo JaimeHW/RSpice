@@ -54,6 +54,20 @@ pub enum ShortcutContext {
 }
 
 impl ShortcutContext {
+    pub const ALL: [Self; 11] = [
+        Self::Global,
+        Self::ApplicationChrome,
+        Self::EditContext,
+        Self::EngineeringCanvas,
+        Self::SymbolCanvas,
+        Self::DesignWorkspace,
+        Self::SimulationWorkspace,
+        Self::ResultsWorkspace,
+        Self::VerificationWorkspace,
+        Self::ViolationNavigation,
+        Self::RunnableProject,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Global => "global",

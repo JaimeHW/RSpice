@@ -519,25 +519,36 @@ fn clear_browser_shortcut_artifact_import_owner(
 /// callback from the cancelled picker fails its current-token check and is
 /// unable to publish a completion or release the replacement gate.
 #[cfg(any(test, target_arch = "wasm32"))]
-pub fn cancel_browser_shortcut_artifact_import() -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserShortcutArtifactImportCancelOutcome {
+    /// This workflow's exact picker lease was cancelled.
+    Cancelled,
+    /// This workflow no longer owns a picker; no completion can arrive.
+    AlreadyReleased,
+    /// The exact owner still exists and must be polled or cancelled later.
+    StillOwned,
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn cancel_browser_shortcut_artifact_import() -> BrowserShortcutArtifactImportCancelOutcome {
     let Some(token) = BROWSER_SHORTCUT_ARTIFACT_IMPORT_TOKEN.with(std::cell::Cell::get) else {
-        return false;
+        return BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased;
     };
     if !crate::common::browser_file_import::text_import_is_current(token) {
         clear_browser_shortcut_artifact_import_owner(token);
         BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| {
             *slot.borrow_mut() = None;
         });
-        return false;
+        return BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased;
     }
     if crate::common::browser_file_import::cancel_active_text_import() != Some(token) {
-        return false;
+        return BrowserShortcutArtifactImportCancelOutcome::StillOwned;
     }
     clear_browser_shortcut_artifact_import_owner(token);
     BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| {
         *slot.borrow_mut() = None;
     });
-    true
+    BrowserShortcutArtifactImportCancelOutcome::Cancelled
 }
 
 #[cfg(test)]
@@ -597,7 +608,10 @@ mod tests {
     }
 
     fn reset_browser_test_state() {
-        if !cancel_browser_shortcut_artifact_import() {
+        if matches!(
+            cancel_browser_shortcut_artifact_import(),
+            BrowserShortcutArtifactImportCancelOutcome::StillOwned
+        ) {
             let _ = crate::common::browser_file_import::cancel_active_text_import();
         }
         BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| {
@@ -800,7 +814,10 @@ mod tests {
             Ok(ShortcutArtifactImportOutcome::Cancelled)
         ));
 
-        assert!(cancel_browser_shortcut_artifact_import());
+        assert_eq!(
+            cancel_browser_shortcut_artifact_import(),
+            BrowserShortcutArtifactImportCancelOutcome::Cancelled
+        );
         assert!(poll_browser_shortcut_artifact_import().is_none());
         assert!(!complete_browser_shortcut_artifact_import(
             cancelled,
@@ -818,7 +835,10 @@ mod tests {
         assert!(crate::common::browser_file_import::text_import_is_current(
             replacement
         ));
-        assert!(cancel_browser_shortcut_artifact_import());
+        assert_eq!(
+            cancel_browser_shortcut_artifact_import(),
+            BrowserShortcutArtifactImportCancelOutcome::Cancelled
+        );
         reset_browser_test_state();
     }
 
@@ -830,13 +850,33 @@ mod tests {
         )
         .expect("other workflow starts");
 
-        assert!(!cancel_browser_shortcut_artifact_import());
+        assert_eq!(
+            cancel_browser_shortcut_artifact_import(),
+            BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased
+        );
         assert!(crate::common::browser_file_import::text_import_is_current(
             other
         ));
         assert!(crate::common::browser_file_import::finish_text_import(
             other
         ));
+        reset_browser_test_state();
+    }
+
+    #[test]
+    fn stale_shortcut_picker_cancel_is_a_terminal_released_outcome() {
+        reset_browser_test_state();
+        let stale = begin_browser_shortcut_artifact_import().expect("shortcut picker starts");
+        assert_eq!(
+            crate::common::browser_file_import::cancel_active_text_import(),
+            Some(stale)
+        );
+
+        assert_eq!(
+            cancel_browser_shortcut_artifact_import(),
+            BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased
+        );
+        assert!(poll_browser_shortcut_artifact_import().is_none());
         reset_browser_test_state();
     }
 

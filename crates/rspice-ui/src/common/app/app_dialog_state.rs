@@ -59,6 +59,9 @@ pub(crate) struct ShortcutEditorState {
     pub(crate) capture_strokes: Vec<crate::workbench::ShortcutStroke>,
     pub(crate) capture_last_input_at: Option<f64>,
     pub(crate) dirty: bool,
+    /// A browser CAS is in flight. The draft remains isolated and the editor
+    /// cannot close or launch a second publication until completion.
+    pub(crate) persistence_pending: bool,
     pub(crate) discard_confirmation: bool,
     pub(crate) error_summary: Option<String>,
     pub(crate) repair_receipt: Option<String>,
@@ -216,8 +219,18 @@ pub struct DialogState {
     /// Preferences dialog open
     pub preferences_open: bool,
 
+    /// Read-only resolved policy review owned by Preferences.
+    pub(crate) managed_preference_policy_open: bool,
+
+    /// Transactional shortcut import/export workflows.
+    pub(crate) shortcut_portability: super::app_preferences_dialog::shortcut_portability_dialogs::ShortcutPortabilityDialogsState,
+
     /// Transactional keyboard shortcut editor.
     pub(crate) shortcut_editor: ShortcutEditorState,
+
+    /// Browser-only persist-before-live policy candidate. Native publication
+    /// completes in the initiating frame, while browser storage is async.
+    pub(crate) shortcut_policy_candidate: Option<crate::workbench::ShortcutPreferences>,
 
     /// License activation dialog state
     pub license_dialog: LicenseDialogState,
@@ -261,6 +274,8 @@ impl DialogState {
             || self.rename_cell_dialog
             || self.waveform_calculator_dialog
             || self.preferences_open
+            || self.managed_preference_policy_open
+            || self.shortcut_portability.application_modal_open()
             || self.shortcut_editor.open
             || self.license_dialog.open
             || self.command_palette.open
@@ -293,6 +308,9 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.rename_cell_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.shortcut_portability.open_import());
+        assert_blocks_shortcuts(|dialogs| dialogs.shortcut_portability.open_export());
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);

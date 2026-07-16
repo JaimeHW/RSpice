@@ -13,6 +13,11 @@ mod projection;
 mod schema;
 mod vscode;
 
+#[cfg(target_arch = "wasm32")]
+pub use import_io::{
+    BrowserShortcutArtifactImportCancelOutcome, cancel_browser_shortcut_artifact_import,
+    poll_browser_shortcut_artifact_import, start_browser_shortcut_artifact_import,
+};
 pub use import_io::{
     MAX_SHORTCUT_ARTIFACT_SOURCE_BYTES, ReadyShortcutArtifactSource, ShortcutArtifactImportError,
     ShortcutArtifactImportErrorKind, ShortcutArtifactImportOutcome,
@@ -21,11 +26,6 @@ pub use import_io::{
 pub use import_io::{
     NativeShortcutArtifactImportIo, ShortcutArtifactImportIo, import_shortcut_artifact_source,
     import_shortcut_artifact_source_with_io,
-};
-#[cfg(target_arch = "wasm32")]
-pub use import_io::{
-    cancel_browser_shortcut_artifact_import, poll_browser_shortcut_artifact_import,
-    start_browser_shortcut_artifact_import,
 };
 pub use io::{
     MAX_SHORTCUT_JSON_ARTIFACT_BYTES, MAX_SHORTCUT_MARKDOWN_ARTIFACT_BYTES,

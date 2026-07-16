@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use egui::{Context, Key, Modifiers, Response, Stroke, Ui, WidgetInfo, WidgetType};
 
-use crate::ui::theme::{self, FontWeight};
+use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
 use crate::workbench::commands::{COMMAND_REGISTRY, Command, CommandPlatform, ShortcutContext};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{
@@ -16,7 +16,7 @@ use crate::workbench::{
 };
 
 use super::preferences_shell::{
-    page_heading, right_aligned, scope_strip, section_label, setting_row,
+    actionable_scope_strip, page_heading, right_aligned, section_label, setting_row,
 };
 use super::{AppState, ConsoleMessage, PreferencePageActions};
 use crate::common::app::app_dialog_state::{
@@ -24,8 +24,16 @@ use crate::common::app::app_dialog_state::{
 };
 
 const RESPONSIVE_TABLE_BREAKPOINT: f32 = 760.0;
-const EDITOR_TABLE_MIN_WIDTH: f32 = 920.0;
-const KEY_CAPTURE_MIN_WIDTH: f32 = 92.0;
+const ENGINEERING_TABLE_BREAKPOINT: f32 = 820.0;
+const EDITOR_NARROW_TABLE_MIN_WIDTH: f32 = 660.0;
+const REGISTRY_COLUMN_COUNT: f32 = 5.0;
+const REGISTRY_ROW_HEIGHT: f32 = 28.0;
+const REGISTRY_HEADER_HEIGHT: f32 = 27.0;
+const KBD_HEIGHT: f32 = 18.0;
+const KBD_HORIZONTAL_PADDING: f32 = 4.0;
+const KBD_MIN_WIDTH: f32 = 19.0;
+const KBD_CORNER_RADIUS: u8 = 3;
+const KEY_CAPTURE_MIN_WIDTH: f32 = 74.0;
 
 const REGISTRY_ROWS: &[(Command, &str)] = &[
     (Command::CommandPalette, "Command palette"),
@@ -42,11 +50,14 @@ const REGISTRY_ROWS: &[(Command, &str)] = &[
 ];
 
 pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    scope_strip(
+    if actionable_scope_strip(
         ui,
         "User profile",
         "portable bindings with platform and organization exceptions",
-    );
+        "View resolved policy\u{2026}",
+    ) {
+        actions.open_resolved_shortcut_policy = true;
+    }
     page_heading(
         ui,
         "Keyboard and command shortcuts",
@@ -72,23 +83,101 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         },
     );
 
-    // Import/export intentionally remain absent until their production file,
-    // schema, review, rollback and platform workflows are integrated.
+    setting_row(
+        ui,
+        "Portable profile",
+        "Import or export stable command identifiers and platform mappings.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let phone = ui.ctx().content_rect().width() <= 560.0;
+                let width = ui.available_width();
+                let action_height = if phone {
+                    44.0
+                } else {
+                    Tokens::get(ui.ctx()).metrics.ctl_h
+                };
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, action_height),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        if !phone {
+                            let actions_width = portable_actions_width(ui);
+                            ui.add_space((width - actions_width).max(0.0));
+                        }
+                        if ui
+                            .push_id("preferences.shortcuts.import", |ui| {
+                                Button::new("Import\u{2026}")
+                                    .min_height(action_height)
+                                    .show(ui)
+                                    .clicked()
+                            })
+                            .inner
+                        {
+                            actions.open_shortcut_import = true;
+                        }
+                        if ui
+                            .push_id("preferences.shortcuts.export", |ui| {
+                                Button::new("Export\u{2026}")
+                                    .min_height(action_height)
+                                    .show(ui)
+                                    .clicked()
+                            })
+                            .inner
+                        {
+                            actions.open_shortcut_export = true;
+                        }
+                    },
+                );
+            });
+        },
+    );
+
     section_label(ui, "Binding policy");
-    // Render against an isolated value so a read-only frame never advances
-    // the shortcut-library revision and invalidates an open import review.
-    let mut policy_draft = state.ui.preferences.shortcuts().clone();
-    render_policy_rows(ui, &mut policy_draft);
-    if policy_draft != *state.ui.preferences.shortcuts()
-        && let Err(error) = state
-            .ui
-            .preferences
-            .shortcut_profiles_mut()
-            .replace_active(policy_draft)
-    {
-        state.push_console_message(ConsoleMessage::error(format!(
-            "Shortcut policy was not saved: {error}"
-        )));
+    // A browser commit is asynchronous. Keep showing the candidate selected
+    // by the user while the persist-before-live owner has the controls locked.
+    let policy_pending = state.dialogs.shortcut_policy_candidate.is_some();
+    let mut policy_draft = state
+        .dialogs
+        .shortcut_policy_candidate
+        .as_ref()
+        .unwrap_or_else(|| state.ui.preferences.shortcuts())
+        .clone();
+    ui.add_enabled_ui(!policy_pending, |ui| {
+        render_policy_rows(ui, &mut policy_draft);
+    });
+    queue_policy_candidate(
+        actions,
+        state.ui.preferences.shortcuts(),
+        policy_draft,
+        policy_pending,
+    );
+}
+
+fn portable_actions_width(ui: &mut Ui) -> f32 {
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let text_width = ui.fonts_mut(|fonts| {
+        ["Import\u{2026}", "Export\u{2026}"]
+            .iter()
+            .map(|label| {
+                fonts
+                    .layout_no_wrap((*label).to_owned(), font.clone(), egui::Color32::WHITE)
+                    .size()
+                    .x
+            })
+            .sum::<f32>()
+    });
+    text_width + 40.0 + 6.0
+}
+
+fn queue_policy_candidate(
+    actions: &mut PreferencePageActions,
+    live: &ShortcutPreferences,
+    candidate: ShortcutPreferences,
+    pending: bool,
+) {
+    if !pending && candidate != *live {
+        actions.shortcut_policy_candidate = Some(candidate);
     }
 }
 
@@ -179,7 +268,7 @@ fn policy_select(
                 title,
                 current,
                 &options,
-                ui.available_width().min(390.0),
+                ui.available_width().min(360.0),
             );
         });
     });
@@ -189,171 +278,194 @@ fn policy_select(
 fn render_registry_table(ui: &mut Ui, profile: &ShortcutPreferences) {
     let audit = profile.audit();
     let operating_system = ui.ctx().os();
-    let narrow = ui.available_width() <= RESPONSIVE_TABLE_BREAKPOINT;
-    let horizontal = if ui.ctx().content_rect().width() <= 560.0 {
-        16
-    } else {
-        24
-    };
-    egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(horizontal, 0))
-        .show(ui, |ui| {
-            if narrow {
-                for (command, label) in REGISTRY_ROWS.iter().copied() {
-                    registry_card(ui, profile, &audit, operating_system, command, label);
+    let table_width = ui.available_width().max(1.0);
+    let column_width = table_width / REGISTRY_COLUMN_COUNT;
+    let table_response = ui
+        .vertical(|ui| {
+            ui.set_width(table_width);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            semantic_table_row(ui, "Shortcut registry column headings", |ui| {
+                for heading in [
+                    "Command",
+                    "Desktop primary",
+                    "Browser / touch alternate",
+                    "Context",
+                    "Status",
+                ] {
+                    table_text_cell(
+                        ui,
+                        heading,
+                        true,
+                        false,
+                        column_width,
+                        REGISTRY_HEADER_HEIGHT,
+                        TableCellTone::Normal,
+                    );
                 }
-            } else {
-                let grid = egui::Grid::new("preferences.shortcuts.registry-table")
-                    .num_columns(5)
-                    .striped(true)
-                    .spacing([10.0, 0.0])
-                    .show(ui, |ui| {
-                        for heading in [
-                            "Command",
-                            "Desktop primary",
-                            "Browser / touch alternate",
-                            "Context",
-                            "Status",
-                        ] {
-                            table_text(ui, heading, true, None);
-                        }
-                        ui.end_row();
-                        for (command, label) in REGISTRY_ROWS.iter().copied() {
-                            table_text(ui, label, false, None);
-                            table_text(
-                                ui,
-                                &binding_for_platform(
-                                    profile,
-                                    command,
-                                    ShortcutBindingSlot::Primary,
-                                    CommandPlatform::Desktop,
-                                    operating_system,
-                                ),
-                                false,
-                                Some(true),
-                            );
-                            table_text(
-                                ui,
-                                &binding_for_platform(
-                                    profile,
-                                    command,
-                                    ShortcutBindingSlot::Alternate,
-                                    CommandPlatform::Browser,
-                                    operating_system,
-                                ),
-                                false,
-                                Some(true),
-                            );
-                            table_text(ui, command.shortcut_context().label(), false, Some(true));
-                            table_text(ui, registry_status(&audit, command), false, Some(false));
-                            ui.end_row();
-                        }
+            });
+            for (command, label) in REGISTRY_ROWS.iter().copied() {
+                ui.push_id(command.stable_id(), |ui| {
+                    semantic_table_row(ui, label, |ui| {
+                        table_text_cell(
+                            ui,
+                            label,
+                            false,
+                            false,
+                            column_width,
+                            REGISTRY_ROW_HEIGHT,
+                            TableCellTone::Normal,
+                        );
+                        table_kbd(
+                            ui,
+                            &binding_for_platform(
+                                profile,
+                                command,
+                                ShortcutBindingSlot::Primary,
+                                CommandPlatform::Desktop,
+                                operating_system,
+                            ),
+                            column_width,
+                            REGISTRY_ROW_HEIGHT,
+                        );
+                        table_kbd(
+                            ui,
+                            &binding_for_platform(
+                                profile,
+                                command,
+                                ShortcutBindingSlot::Alternate,
+                                CommandPlatform::Browser,
+                                operating_system,
+                            ),
+                            column_width,
+                            REGISTRY_ROW_HEIGHT,
+                        );
+                        table_text_cell(
+                            ui,
+                            command.shortcut_context().label(),
+                            false,
+                            true,
+                            column_width,
+                            REGISTRY_ROW_HEIGHT,
+                            TableCellTone::Normal,
+                        );
+                        table_text_cell(
+                            ui,
+                            registry_status(&audit, command),
+                            false,
+                            false,
+                            column_width,
+                            REGISTRY_ROW_HEIGHT,
+                            registry_status_tone(&audit, command),
+                        );
                     });
-                ui.ctx().accesskit_node_builder(grid.response.id, |node| {
-                    node.set_role(egui::accesskit::Role::Table);
-                    node.set_label("Protected shortcut registry");
                 });
             }
-            ui.add_space(7.0);
-            audit_status(ui, profile, &audit);
-            ui.add_space(9.0);
-        });
-}
-
-fn registry_card(
-    ui: &mut Ui,
-    profile: &ShortcutPreferences,
-    audit: &ShortcutProfileAudit,
-    operating_system: egui::os::OperatingSystem,
-    command: Command,
-    label: &str,
-) {
-    let t = Tokens::get(ui.ctx());
-    let response = egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(
-                egui::RichText::new(label)
-                    .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                    .color(t.color.text),
-            );
-            card_value(
-                ui,
-                "Desktop primary",
-                &binding_for_platform(
-                    profile,
-                    command,
-                    ShortcutBindingSlot::Primary,
-                    CommandPlatform::Desktop,
-                    operating_system,
-                ),
-            );
-            card_value(
-                ui,
-                "Browser / touch alternate",
-                &binding_for_platform(
-                    profile,
-                    command,
-                    ShortcutBindingSlot::Alternate,
-                    CommandPlatform::Browser,
-                    operating_system,
-                ),
-            );
-            card_value(ui, "Context", command.shortcut_context().label());
-            card_value(ui, "Status", registry_status(audit, command));
         })
         .response;
+    table_response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Label,
+            ui.is_enabled(),
+            "Protected shortcut registry",
+        )
+    });
+    ui.ctx().accesskit_node_builder(table_response.id, |node| {
+        node.set_role(egui::accesskit::Role::Table);
+        node.set_label("Protected shortcut registry");
+    });
+    ui.add_space(7.0);
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(24, 0))
+        .show(ui, |ui| audit_status(ui, profile, &audit));
+    ui.add_space(9.0);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableCellTone {
+    Normal,
+    Ok,
+    Warn,
+    Error,
+}
+
+fn semantic_table_row(ui: &mut Ui, label: &str, add_cells: impl FnOnce(&mut Ui)) {
+    let response = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            add_cells(ui);
+        })
+        .response;
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Row);
         node.set_label(label);
     });
-    ui.add_space(6.0);
 }
 
-fn card_value(ui: &mut Ui, label: &str, value: &str) {
+fn table_text_cell(
+    ui: &mut Ui,
+    text: &str,
+    header: bool,
+    mono: bool,
+    width: f32,
+    height: f32,
+    tone: TableCellTone,
+) -> Response {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal_wrapped(|ui| {
-        ui.label(
-            egui::RichText::new(format!("{label}:"))
-                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.text_faint),
-        );
-        ui.label(
-            egui::RichText::new(value)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-    });
-}
-
-fn table_text(ui: &mut Ui, text: &str, header: bool, mono: Option<bool>) {
-    let t = Tokens::get(ui.ctx());
-    let font = if mono.unwrap_or(false) {
+    let font = if mono {
         theme::mono(tokens::FS_0, FontWeight::Regular)
     } else {
         theme::sans(
             tokens::FS_0,
             if header {
-                FontWeight::SemiBold
+                FontWeight::Medium
             } else {
                 FontWeight::Regular
             },
         )
     };
-    let response = ui.add_sized(
-        [
-            ((text.chars().count() as f32 * 6.25) + 12.0).clamp(86.0, 166.0),
-            28.0,
-        ],
-        egui::Label::new(egui::RichText::new(text).font(font).color(if header {
-            t.color.text_faint
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+    if header {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let color = if header {
+        t.color.text_faint
+    } else {
+        match tone {
+            TableCellTone::Normal => t.color.text_dim,
+            TableCellTone::Ok => t.color.ok,
+            TableCellTone::Warn => t.color.warn,
+            TableCellTone::Error => t.color.err,
+        }
+    };
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = (width - 16.0).max(1.0);
+    job.append(
+        &if header {
+            text.to_uppercase()
         } else {
-            t.color.text_dim
-        }))
-        .truncate(),
+            text.to_owned()
+        },
+        0.0,
+        egui::TextFormat {
+            font_id: font,
+            color,
+            extra_letter_spacing: if header { 0.04 * tokens::FS_0 } else { 0.0 },
+            ..Default::default()
+        },
+    );
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let clip = rect.shrink2(egui::vec2(8.0, 0.0));
+    ui.painter().with_clip_rect(clip).galley(
+        egui::pos2(clip.left(), rect.center().y - galley.size().y * 0.5),
+        galley,
+        color,
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(if header {
@@ -362,6 +474,52 @@ fn table_text(ui: &mut Ui, text: &str, header: bool, mono: Option<bool>) {
             egui::accesskit::Role::Cell
         });
         node.set_label(text);
+    });
+    response
+}
+
+fn table_kbd(ui: &mut Ui, text: &str, width: f32, height: f32) {
+    let t = Tokens::get(ui.ctx());
+    let (cell, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+    ui.painter().hline(
+        cell.x_range(),
+        cell.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let galley =
+        ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, t.color.text_faint));
+    let capsule_width = (galley.size().x + KBD_HORIZONTAL_PADDING * 2.0)
+        .max(KBD_MIN_WIDTH)
+        .min((width - 16.0).max(KBD_MIN_WIDTH));
+    let capsule = egui::Rect::from_min_size(
+        egui::pos2(cell.left() + 8.0, cell.center().y - KBD_HEIGHT * 0.5),
+        egui::vec2(capsule_width, KBD_HEIGHT),
+    );
+    ui.painter().rect_filled(
+        capsule,
+        egui::CornerRadius::same(KBD_CORNER_RADIUS),
+        t.color.bg_panel,
+    );
+    ui.painter().rect_stroke(
+        capsule,
+        egui::CornerRadius::same(KBD_CORNER_RADIUS),
+        Stroke::new(1.0, t.color.border_strong),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().with_clip_rect(capsule).galley(
+        egui::pos2(
+            capsule.left() + KBD_HORIZONTAL_PADDING,
+            capsule.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        t.color.text_faint,
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Cell);
+        node.set_label(text);
+        node.set_description("Keyboard binding capsule");
     });
 }
 
@@ -403,6 +561,17 @@ fn registry_status(audit: &ShortcutProfileAudit, command: Command) -> &'static s
     }
 }
 
+fn registry_status_tone(audit: &ShortcutProfileAudit, command: Command) -> TableCellTone {
+    let mut tone = TableCellTone::Ok;
+    for issue in audit_issues_for_command(audit, command) {
+        match issue.severity() {
+            ShortcutProfileIssueSeverity::Error => return TableCellTone::Error,
+            ShortcutProfileIssueSeverity::Warning => tone = TableCellTone::Warn,
+        }
+    }
+    tone
+}
+
 fn audit_status(ui: &mut Ui, profile: &ShortcutPreferences, audit: &ShortcutProfileAudit) {
     let collisions = audit
         .issues()
@@ -440,10 +609,12 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
         return;
     }
 
-    process_key_capture(ctx, &mut state.dialogs.shortcut_editor);
-    synchronize_editor_validation(&mut state.dialogs.shortcut_editor);
+    if !state.dialogs.shortcut_editor.persistence_pending {
+        process_key_capture(ctx, &mut state.dialogs.shortcut_editor);
+        synchronize_editor_validation(&mut state.dialogs.shortcut_editor);
+    }
 
-    let (hint, save_enabled) = {
+    let save_enabled = {
         let editor = &state.dialogs.shortcut_editor;
         let audit = editor
             .draft
@@ -451,60 +622,95 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
             .expect("open editor owns a draft")
             .audit();
         let errors = blocking_issue_count(&audit);
-        let hint = if errors == 0 {
-            format!(
-                "{} bindings \u{00b7} conflict-free draft",
-                audit.binding_count()
-            )
-        } else {
-            format!("{errors} blocking conflict(s) \u{00b7} review before save")
-        };
-        (
-            hint,
-            editor.dirty && editor.recording.is_none() && errors == 0,
-        )
+        editor.dirty && editor.recording.is_none() && errors == 0 && !editor.persistence_pending
     };
 
     let choice = {
         let editor = &mut state.dialogs.shortcut_editor;
         let mut scroll_offset = editor.body_scroll_offset;
-        let choice = Dialog::new(
+        let cancel_label = if editor.discard_confirmation {
+            "Discard changes"
+        } else {
+            "Cancel"
+        };
+        let transaction_state = if editor.persistence_pending {
+            Some((
+                DialogTransactionTone::Progress,
+                "Saving shortcut profile",
+                "Controls are locked until durable storage acknowledges the new profile."
+                    .to_owned(),
+            ))
+        } else if editor.discard_confirmation {
+            Some((
+                DialogTransactionTone::Error,
+                "Unsaved shortcut changes",
+                "Discard changes closes this editor without applying the draft.".to_owned(),
+            ))
+        } else if let Some(summary) = editor.error_summary.as_deref() {
+            Some((
+                DialogTransactionTone::Error,
+                "Shortcut profile requires attention",
+                summary.to_owned(),
+            ))
+        } else {
+            editor.repair_receipt.as_deref().map(|receipt| {
+                (
+                    DialogTransactionTone::Complete,
+                    "Incompatible entries removed",
+                    receipt.to_owned(),
+                )
+            })
+        };
+        let mut dialog = Dialog::new(
             "PREFERENCES \u{00b7} COMMAND BINDINGS \u{00b7} CONFLICT SAFE",
             "Keyboard shortcut editor",
             "Save shortcut profile",
         )
-        .description("Edit a versioned user shortcut profile. Changes remain isolated until the complete profile validates and Save succeeds.")
+        .description(
+            "Edit context-aware command bindings, resolve conflicts, and save one validated portable shortcut profile.",
+        )
         .size(DialogSize::CapabilityReview)
         .primary_enabled(save_enabled)
         .primary_on_enter(false)
-        .ghost("Cancel")
-        .hint(&hint)
+        .ghost(cancel_label)
         .body_scroll_offset(&mut scroll_offset)
-        .flush_body()
-        .show(ctx, |ui| render_editor_body(ui, editor));
+        .flush_body();
+        if let Some((tone, title, detail)) = transaction_state.as_ref() {
+            dialog = dialog.transaction_state(*tone, title, detail);
+        }
+        let choice = dialog.show(ctx, |ui| {
+            ui.add_enabled_ui(!editor.persistence_pending, |ui| {
+                render_editor_body(ui, editor);
+            });
+        });
         editor.body_scroll_offset = scroll_offset;
         choice
     };
 
     match choice {
-        DialogChoice::Primary => commit_editor(state),
-        DialogChoice::Ghost | DialogChoice::Cancelled => request_editor_cancel(state),
+        DialogChoice::Primary => commit_editor(ctx, state),
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            if state.dialogs.shortcut_editor.persistence_pending {
+                #[cfg(target_arch = "wasm32")]
+                if state.cancel_pending_shortcut_library_publication() {
+                    state.shortcut_library_publication_continuation = None;
+                    state.dialogs.shortcut_editor.close_and_discard();
+                } else {
+                    state.dialogs.shortcut_editor.error_summary = Some(
+                        "The durable commit boundary was already reached. Keep this editor open while the saved profile is installed."
+                            .to_owned(),
+                    );
+                }
+            } else {
+                request_editor_cancel(state);
+            }
+        }
         DialogChoice::None | DialogChoice::Secondary => {}
     }
-
-    render_discard_confirmation(ctx, state);
 }
 
 fn render_editor_body(ui: &mut Ui, editor: &mut ShortcutEditorState) {
     editor_toolbar(ui, editor);
-    if let Some(summary) = editor.error_summary.as_deref() {
-        error_banner(ui, summary);
-    }
-    if let Some(receipt) = editor.repair_receipt.as_deref() {
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(ui, |ui| status_text(ui, receipt, false));
-    }
 
     let audit = editor.draft.as_ref().expect("editor draft").audit();
     let commands = filtered_commands(editor, ui.ctx().os());
@@ -519,10 +725,6 @@ fn render_editor_body(ui: &mut Ui, editor: &mut ShortcutEditorState) {
                         .color(t.color.text_faint),
                 );
             });
-    } else if ui.available_width() <= RESPONSIVE_TABLE_BREAKPOINT {
-        for command in commands {
-            editor_card(ui, editor, &audit, command);
-        }
     } else {
         editor_table(ui, editor, &audit, &commands);
     }
@@ -535,17 +737,35 @@ fn render_editor_body(ui: &mut Ui, editor: &mut ShortcutEditorState) {
 
 fn editor_toolbar(ui: &mut Ui, editor: &mut ShortcutEditorState) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::NONE
+    let response = egui::Frame::NONE
         .fill(t.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(12, 7))
+        .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
-            let narrow = ui.available_width() <= RESPONSIVE_TABLE_BREAKPOINT;
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+            let narrow = ui.ctx().content_rect().width() <= RESPONSIVE_TABLE_BREAKPOINT;
             if narrow {
                 ui.vertical(|ui| toolbar_controls(ui, editor, true));
             } else {
                 ui.horizontal(|ui| toolbar_controls(ui, editor, false));
             }
-        });
+        })
+        .response;
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Label,
+            ui.is_enabled(),
+            "Shortcut editor controls",
+        )
+    });
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Group);
+        node.set_label("Shortcut editor controls");
+    });
 }
 
 fn toolbar_controls(ui: &mut Ui, editor: &mut ShortcutEditorState, narrow: bool) {
@@ -590,15 +810,6 @@ fn toolbar_controls(ui: &mut Ui, editor: &mut ShortcutEditorState, narrow: bool)
         }
     }
 
-    ui.label(
-        egui::RichText::new(format!(
-            "Current platform \u{00b7} {}",
-            crate::common::app::runtime_command_platform(ui.ctx()).label()
-        ))
-        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-        .color(Tokens::get(ui.ctx()).color.text_faint),
-    );
-
     let reset_selected = Button::new("Reset selected")
         .enabled(editor.selected_command.is_some())
         .show(ui);
@@ -612,25 +823,6 @@ fn toolbar_controls(ui: &mut Ui, editor: &mut ShortcutEditorState, narrow: bool)
             .reset_command(command);
         mark_editor_changed(editor);
     }
-    let reset_context = Button::new("Reset context")
-        .enabled(editor.context != ShortcutEditorContext::All)
-        .show(ui);
-    if reset_context.clicked() && editor.context != ShortcutEditorContext::All {
-        let context = editor.context;
-        let draft = editor.draft.as_mut().expect("editor draft");
-        for command in COMMAND_REGISTRY
-            .iter()
-            .copied()
-            .filter(|command| context_matches(*command, context))
-        {
-            draft.reset_command(command);
-        }
-        mark_editor_changed(editor);
-    }
-    if Button::new("Reset all").show(ui).clicked() {
-        editor.draft.as_mut().expect("editor draft").reset_all();
-        mark_editor_changed(editor);
-    }
 }
 
 fn editor_table(
@@ -639,113 +831,196 @@ fn editor_table(
     audit: &ShortcutProfileAudit,
     commands: &[Command],
 ) {
+    let viewport_width = ui.available_width().max(1.0);
+    let narrow = ui.ctx().content_rect().width() <= ENGINEERING_TABLE_BREAKPOINT;
+    let table_width = if narrow {
+        viewport_width.max(EDITOR_NARROW_TABLE_MIN_WIDTH)
+    } else {
+        viewport_width
+    };
+    let column_width = table_width / 6.0;
+    let row_height = Tokens::get(ui.ctx()).metrics.ctl_h.max(REGISTRY_ROW_HEIGHT);
     egui::ScrollArea::horizontal()
         .id_salt("shortcut-editor-table-scroll")
         .show(ui, |ui| {
-            ui.set_min_width(EDITOR_TABLE_MIN_WIDTH);
-            let grid = egui::Grid::new("shortcut-editor-table")
-                .num_columns(6)
-                .striped(true)
-                .spacing([12.0, 2.0])
-                .show(ui, |ui| {
-                    for heading in [
-                        "Command",
-                        "Context",
-                        "Primary binding",
-                        "Alternate",
-                        "Platform",
-                        "Status",
-                    ] {
-                        table_text(ui, heading, true, None);
-                    }
-                    ui.end_row();
-                    for command in commands.iter().copied() {
-                        let selected = editor.selected_command == Some(command);
-                        let response = ui.selectable_label(selected, command.spec().label);
-                        response.widget_info(|| {
-                            WidgetInfo::selected(
-                                WidgetType::SelectableLabel,
+            ui.set_min_width(table_width);
+            ui.set_width(table_width);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let table = ui
+                .vertical(|ui| {
+                    semantic_table_row(ui, "Shortcut editor column headings", |ui| {
+                        for heading in [
+                            "Command",
+                            "Context",
+                            "Primary binding",
+                            "Alternate",
+                            "Platform",
+                            "Status",
+                        ] {
+                            table_text_cell(
+                                ui,
+                                heading,
                                 true,
-                                selected,
-                                command.spec().label,
-                            )
-                        });
-                        if response.clicked() {
-                            editor.selected_command = Some(command);
+                                false,
+                                column_width,
+                                REGISTRY_HEADER_HEIGHT,
+                                TableCellTone::Normal,
+                            );
                         }
-                        table_text(ui, editor_context(command).label(), false, Some(true));
-                        capture_button(ui, editor, command, ShortcutBindingSlot::Primary);
-                        capture_button(ui, editor, command, ShortcutBindingSlot::Alternate);
-                        table_text(
-                            ui,
-                            &platform_summary(
-                                editor.draft.as_ref().expect("editor draft"),
-                                command,
-                            ),
-                            false,
-                            Some(true),
-                        );
-                        table_text(ui, editor_status(audit, command), false, None);
-                        ui.end_row();
+                    });
+                    for command in commands.iter().copied() {
+                        ui.push_id(command.stable_id(), |ui| {
+                            semantic_table_row(ui, command.spec().label, |ui| {
+                                let selected = editor.selected_command == Some(command);
+                                let response = selectable_table_cell(
+                                    ui,
+                                    command.spec().label,
+                                    selected,
+                                    column_width,
+                                    row_height,
+                                );
+                                if response.clicked() {
+                                    editor.selected_command = Some(command);
+                                }
+                                table_text_cell(
+                                    ui,
+                                    editor_context(command).label(),
+                                    false,
+                                    true,
+                                    column_width,
+                                    row_height,
+                                    TableCellTone::Normal,
+                                );
+                                capture_table_cell(
+                                    ui,
+                                    editor,
+                                    command,
+                                    ShortcutBindingSlot::Primary,
+                                    column_width,
+                                    row_height,
+                                );
+                                capture_table_cell(
+                                    ui,
+                                    editor,
+                                    command,
+                                    ShortcutBindingSlot::Alternate,
+                                    column_width,
+                                    row_height,
+                                );
+                                table_text_cell(
+                                    ui,
+                                    &platform_summary(
+                                        editor.draft.as_ref().expect("editor draft"),
+                                        command,
+                                    ),
+                                    false,
+                                    true,
+                                    column_width,
+                                    row_height,
+                                    TableCellTone::Normal,
+                                );
+                                table_text_cell(
+                                    ui,
+                                    editor_status(audit, command),
+                                    false,
+                                    false,
+                                    column_width,
+                                    row_height,
+                                    editor_status_tone(audit, command),
+                                );
+                            });
+                        });
                     }
-                });
-            ui.ctx().accesskit_node_builder(grid.response.id, |node| {
+                })
+                .response;
+            table.widget_info(|| {
+                WidgetInfo::labeled(
+                    WidgetType::Label,
+                    ui.is_enabled(),
+                    "Editable command bindings",
+                )
+            });
+            ui.ctx().accesskit_node_builder(table.id, |node| {
                 node.set_role(egui::accesskit::Role::Table);
                 node.set_label("Editable command bindings");
             });
         });
 }
 
-fn editor_card(
+fn selectable_table_cell(
     ui: &mut Ui,
-    editor: &mut ShortcutEditorState,
-    audit: &ShortcutProfileAudit,
-    command: Command,
-) {
+    text: &str,
+    selected: bool,
+    width: f32,
+    height: f32,
+) -> Response {
     let t = Tokens::get(ui.ctx());
-    let selected = editor.selected_command == Some(command);
-    let response = egui::Frame::NONE
-        .fill(if selected {
-            t.color.bg_active
-        } else {
-            t.color.bg_panel
-        })
-        .stroke(Stroke::new(
-            if selected { 2.0 } else { 1.0 },
-            if selected {
-                t.color.accent
-            } else {
-                t.color.border
-            },
-        ))
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            if ui
-                .selectable_label(selected, command.spec().label)
-                .clicked()
-            {
-                editor.selected_command = Some(command);
-            }
-            card_value(ui, "Context", editor_context(command).label());
-            card_value(
-                ui,
-                "Platform",
-                &platform_summary(editor.draft.as_ref().expect("editor draft"), command),
-            );
-            ui.horizontal_wrapped(|ui| {
-                capture_button(ui, editor, command, ShortcutBindingSlot::Primary);
-                capture_button(ui, editor, command, ShortcutBindingSlot::Alternate);
-            });
-            card_value(ui, "Status", editor_status(audit, command));
-        })
-        .response;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    response.widget_info(|| {
+        WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), selected, text)
+    });
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
+    } else if response.hovered() && ui.is_enabled() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let galley =
+        ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, t.color.text_dim));
+    let clip = rect.shrink2(egui::vec2(8.0, 0.0));
+    ui.painter().with_clip_rect(clip).galley(
+        egui::pos2(clip.left(), rect.center().y - galley.size().y * 0.5),
+        galley,
+        t.color.text_dim,
+    );
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Row);
-        node.set_label(command.spec().label);
+        node.set_role(egui::accesskit::Role::Cell);
+        node.set_label(text);
         node.set_selected(selected);
     });
-    ui.add_space(6.0);
+    theme::paint_focus_ring_outset(ui, &response, rect);
+    response
+}
+
+fn capture_table_cell(
+    ui: &mut Ui,
+    editor: &mut ShortcutEditorState,
+    command: Command,
+    slot: ShortcutBindingSlot,
+    width: f32,
+    height: f32,
+) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Label,
+            ui.is_enabled(),
+            format!("{} binding", slot.label()),
+        )
+    });
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let content = rect.shrink2(egui::vec2(8.0, 0.0));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+    capture_button(&mut child, editor, command, slot, content.width());
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Cell);
+        node.set_label(format!("{} binding", slot.label()));
+    });
 }
 
 fn capture_button(
@@ -753,9 +1028,17 @@ fn capture_button(
     editor: &mut ShortcutEditorState,
     command: Command,
     slot: ShortcutBindingSlot,
+    max_width: f32,
 ) -> Response {
     let target = ShortcutCaptureTarget { command, slot };
     let is_recording = editor.recording == Some(target);
+    let resolved_binding = binding_for_slot(
+        editor.draft.as_ref().expect("editor draft"),
+        command,
+        slot,
+        ui.ctx().os(),
+    );
+    let empty = !is_recording && resolved_binding.is_none();
     let label = if is_recording {
         if editor.capture_strokes.is_empty() {
             "Press keys\u{2026}".to_owned()
@@ -768,13 +1051,7 @@ fn capture_button(
             )
         }
     } else {
-        binding_for_slot(
-            editor.draft.as_ref().expect("editor draft"),
-            command,
-            slot,
-            ui.ctx().os(),
-        )
-        .unwrap_or_else(|| "Record\u{2026}".to_owned())
+        resolved_binding.unwrap_or_else(|| "Record\u{2026}".to_owned())
     };
     let accessible = if is_recording {
         format!(
@@ -789,10 +1066,7 @@ fn capture_button(
             command.spec().label
         )
     };
-    let response = Button::new(&label)
-        .min_width(KEY_CAPTURE_MIN_WIDTH)
-        .accessible_label(&accessible)
-        .show(ui);
+    let response = key_capture_control(ui, &label, &accessible, is_recording, empty, max_width);
     if response.clicked() {
         editor.selected_command = Some(command);
         editor.recording = Some(target);
@@ -801,7 +1075,7 @@ fn capture_button(
         editor.error_summary = None;
         response.request_focus();
     }
-    if editor.focus_error == Some(target) {
+    if ui.is_enabled() && editor.focus_error == Some(target) {
         response.request_focus();
         editor.focus_error = None;
     }
@@ -814,6 +1088,116 @@ fn capture_button(
         }
     });
     response
+}
+
+fn key_capture_control(
+    ui: &mut Ui,
+    label: &str,
+    accessible: &str,
+    recording: bool,
+    empty: bool,
+    max_width: f32,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let enabled = ui.is_enabled();
+    let font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let color = if empty {
+        t.color.text_faint
+    } else {
+        t.color.text
+    };
+    let galley = ui.fonts_mut(|fonts| fonts.layout_no_wrap(label.to_owned(), font, color));
+    let width = (galley.size().x + 14.0)
+        .max(KEY_CAPTURE_MIN_WIDTH)
+        .min(max_width.max(1.0));
+    let height = if ui.ctx().content_rect().width() <= 560.0 {
+        44.0
+    } else {
+        t.metrics.ctl_h.max(25.0)
+    };
+    let (rect, mut response) = ui.allocate_exact_size(
+        egui::vec2(width, height),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, accessible));
+    let hover = ui.ctx().animate_bool_with_time(
+        response.id,
+        enabled && response.hovered(),
+        ui.style().animation_time,
+    );
+    let fill = if recording {
+        mix(t.color.bg_inset, t.color.accent_dim, 0.65)
+    } else if response.is_pointer_button_down_on() {
+        t.color.bg_active
+    } else {
+        mix(t.color.bg_inset, t.color.bg_hover, hover)
+    };
+    let opacity = if enabled { 1.0 } else { 0.4 };
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(2),
+        fill.gamma_multiply(opacity),
+    );
+    let border_color = t.color.border_strong.gamma_multiply(opacity);
+    if empty {
+        paint_dashed_rect(ui.painter(), rect, border_color);
+    } else {
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(2),
+            Stroke::new(1.0, border_color),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.painter().with_clip_rect(rect).galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        color.gamma_multiply(opacity),
+    );
+    if enabled {
+        response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+    theme::paint_focus_ring_outset(ui, &response, rect);
+    response
+}
+
+fn paint_dashed_rect(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let stroke = Stroke::new(1.0, color);
+    let step = 5.0;
+    let dash = 3.0;
+    let mut x = rect.left() + 1.0;
+    while x < rect.right() - 1.0 {
+        let end = (x + dash).min(rect.right() - 1.0);
+        painter.line_segment(
+            [egui::pos2(x, rect.top()), egui::pos2(end, rect.top())],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(x, rect.bottom()), egui::pos2(end, rect.bottom())],
+            stroke,
+        );
+        x += step;
+    }
+    let mut y = rect.top() + 1.0;
+    while y < rect.bottom() - 1.0 {
+        let end = (y + dash).min(rect.bottom() - 1.0);
+        painter.line_segment(
+            [egui::pos2(rect.left(), y), egui::pos2(rect.left(), end)],
+            stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(rect.right(), y), egui::pos2(rect.right(), end)],
+            stroke,
+        );
+        y += step;
+    }
 }
 
 fn process_key_capture(ctx: &Context, editor: &mut ShortcutEditorState) {
@@ -982,6 +1366,7 @@ fn binding_platforms(
 
 fn mark_editor_changed(editor: &mut ShortcutEditorState) {
     editor.dirty = editor.draft != editor.original;
+    editor.discard_confirmation = false;
     editor.repair_receipt = None;
     synchronize_editor_validation(editor);
 }
@@ -1104,6 +1489,10 @@ fn editor_status(audit: &ShortcutProfileAudit, command: Command) -> &str {
         .map_or("available", ShortcutProfileIssue::message)
 }
 
+fn editor_status_tone(audit: &ShortcutProfileAudit, command: Command) -> TableCellTone {
+    registry_status_tone(audit, command)
+}
+
 fn audit_issues_for_command(
     audit: &ShortcutProfileAudit,
     command: Command,
@@ -1219,6 +1608,9 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
             }
         })
         .response;
+    response.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), "Shortcut editor notes")
+    });
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
         node.set_label("Shortcut profile audit");
@@ -1246,80 +1638,86 @@ fn repair_invalid_entries(editor: &mut ShortcutEditorState) {
 }
 
 fn editor_notes(ui: &mut Ui) {
-    let narrow = ui.available_width() <= RESPONSIVE_TABLE_BREAKPOINT;
+    ui.add_space(10.0);
+    let narrow = ui.ctx().content_rect().width() <= RESPONSIVE_TABLE_BREAKPOINT;
     let t = Tokens::get(ui.ctx());
-    let frame = |ui: &mut Ui, title: &str, body: &str| {
-        egui::Frame::NONE
-            .fill(t.color.bg_panel)
-            .stroke(Stroke::new(1.0, t.color.border))
-            .inner_margin(egui::Margin::same(10))
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(title)
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text),
+    let outer = egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border_strong))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+            if narrow {
+                let first = editor_note(
+                    ui,
+                    "Conflict resolution",
+                    "Bindings are validated by context and platform. Protected browser and operating-system shortcuts require an explicit alternate.",
                 );
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(body)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    )
-                    .wrap(),
+                ui.painter().hline(
+                    first.rect.x_range(),
+                    first.rect.bottom(),
+                    Stroke::new(1.0, t.color.border_strong),
                 );
-            });
-    };
-    if narrow {
-        ui.vertical(|ui| {
-            frame(
-                ui,
-                "Conflict resolution",
-                "Bindings are validated by context and platform. Protected browser and operating-system shortcuts require an explicit alternate.",
-            );
-            frame(
-                ui,
-                "Reset scope",
-                "Reset one command, one context, or the complete user profile without changing organization-managed bindings.",
-            );
-        });
-    } else {
-        ui.columns(2, |columns| {
-            frame(
-                &mut columns[0],
-                "Conflict resolution",
-                "Bindings are validated by context and platform. Protected browser and operating-system shortcuts require an explicit alternate.",
-            );
-            frame(
-                &mut columns[1],
-                "Reset scope",
-                "Reset one command, one context, or the complete user profile without changing organization-managed bindings.",
-            );
-        });
+                editor_note(
+                    ui,
+                    "Reset scope",
+                    "Reset one command, one context, or the complete user profile without changing organization-managed bindings.",
+                );
+            } else {
+                ui.columns(2, |columns| {
+                    editor_note(
+                        &mut columns[0],
+                        "Conflict resolution",
+                        "Bindings are validated by context and platform. Protected browser and operating-system shortcuts require an explicit alternate.",
+                    );
+                    editor_note(
+                        &mut columns[1],
+                        "Reset scope",
+                        "Reset one command, one context, or the complete user profile without changing organization-managed bindings.",
+                    );
+                });
+            }
+        })
+        .response;
+    if !narrow {
+        ui.painter().vline(
+            outer.rect.center().x,
+            outer.rect.y_range(),
+            Stroke::new(1.0, t.color.border_strong),
+        );
     }
+    ui.ctx().accesskit_node_builder(outer.id, |node| {
+        node.set_role(egui::accesskit::Role::Group);
+        node.set_label("Shortcut editor notes");
+    });
 }
 
-fn error_banner(ui: &mut Ui, message: &str) {
+fn editor_note(ui: &mut Ui, title: &str, body: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let response = egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.err))
-        .inner_margin(egui::Margin::symmetric(12, 8))
+        .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(title)
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.text),
+            );
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.err),
+                    egui::RichText::new(body)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
                 )
                 .wrap(),
             );
         })
         .response;
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), title));
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Alert);
-        node.set_label(message);
-        node.set_live(egui::accesskit::Live::Assertive);
+        node.set_role(egui::accesskit::Role::Group);
+        node.set_label(title);
+        node.set_description(body);
     });
+    response
 }
 
 fn status_text(ui: &mut Ui, text: &str, error: bool) {
@@ -1351,7 +1749,7 @@ fn blocking_issue_count(audit: &ShortcutProfileAudit) -> usize {
         .count()
 }
 
-fn commit_editor(state: &mut AppState) {
+fn commit_editor(ctx: &Context, state: &mut AppState) {
     let audit = state
         .dialogs
         .shortcut_editor
@@ -1376,15 +1774,11 @@ fn commit_editor(state: &mut AppState) {
         .dialogs
         .shortcut_editor
         .draft
-        .take()
+        .as_ref()
+        .cloned()
         .expect("editor draft");
-    if let Err(error) = state
-        .ui
-        .preferences
-        .shortcut_profiles_mut()
-        .replace_active(draft.clone())
-    {
-        state.dialogs.shortcut_editor.draft = Some(draft);
+    let mut candidate = state.ui.preferences.shortcut_profiles().clone();
+    if let Err(error) = candidate.replace_active(draft) {
         state.dialogs.shortcut_editor.error_summary =
             Some(format!("Shortcut profile was not saved: {error}"));
         state.push_console_message(ConsoleMessage::error(format!(
@@ -1392,10 +1786,29 @@ fn commit_editor(state: &mut AppState) {
         )));
         return;
     }
-    state.dialogs.shortcut_editor.close_and_discard();
-    state.push_console_message(ConsoleMessage::info(
-        "Keyboard shortcut profile saved after complete collision and reserved-binding validation.",
-    ));
+    if state.shortcut_library_publication_continuation.is_some() {
+        state.complete_shortcut_library_publication(
+            super::ShortcutLibraryPublicationContinuation::Editor,
+            Err("another shortcut-library publication is awaiting acknowledgement".to_owned()),
+        );
+        return;
+    }
+    match state.publish_shortcut_library_candidate(&candidate, ctx) {
+        Ok(super::ShortcutLibraryPublication::Published) => state
+            .complete_shortcut_library_publication(
+                super::ShortcutLibraryPublicationContinuation::Editor,
+                Ok(()),
+            ),
+        Ok(super::ShortcutLibraryPublication::Pending) => {
+            state.dialogs.shortcut_editor.persistence_pending = true;
+            state.shortcut_library_publication_continuation =
+                Some(super::ShortcutLibraryPublicationContinuation::Editor);
+        }
+        Err(error) => state.complete_shortcut_library_publication(
+            super::ShortcutLibraryPublicationContinuation::Editor,
+            Err(error),
+        ),
+    }
 }
 
 fn first_error_target(audit: &ShortcutProfileAudit) -> Option<ShortcutCaptureTarget> {
@@ -1414,39 +1827,10 @@ fn first_error_target(audit: &ShortcutProfileAudit) -> Option<ShortcutCaptureTar
 
 fn request_editor_cancel(state: &mut AppState) {
     cancel_capture(&mut state.dialogs.shortcut_editor);
-    if state.dialogs.shortcut_editor.dirty {
+    if state.dialogs.shortcut_editor.dirty && !state.dialogs.shortcut_editor.discard_confirmation {
         state.dialogs.shortcut_editor.discard_confirmation = true;
     } else {
         state.dialogs.shortcut_editor.close_and_discard();
-    }
-}
-
-fn render_discard_confirmation(ctx: &Context, state: &mut AppState) {
-    if !state.dialogs.shortcut_editor.discard_confirmation {
-        return;
-    }
-    let choice = Dialog::new(
-        "PREFERENCES \u{00b7} UNSAVED COMMAND BINDINGS",
-        "Discard shortcut changes?",
-        "Discard changes",
-    )
-    .description("The unsaved shortcut draft will be removed. The active user profile remains unchanged.")
-    .destructive()
-    .ghost("Keep editing")
-    .show(ctx, |ui| {
-        ui.add(
-            egui::Label::new(
-                "Every binding and reset made in this editor session is still isolated from the active profile.",
-            )
-            .wrap(),
-        );
-    });
-    match choice {
-        DialogChoice::Primary => state.dialogs.shortcut_editor.close_and_discard(),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.dialogs.shortcut_editor.discard_confirmation = false;
-        }
-        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
@@ -1464,11 +1848,109 @@ mod tests {
         }
     }
 
+    fn node_bounds(
+        nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+        role: egui::accesskit::Role,
+        label: &str,
+    ) -> egui::accesskit::Rect {
+        nodes
+            .iter()
+            .find(|(_, node)| node.role() == role && node.label() == Some(label))
+            .and_then(|(_, node)| node.bounds())
+            .unwrap_or_else(|| panic!("missing {role:?} node {label}"))
+    }
+
+    fn click_page_button(label: &str) -> PreferencePageActions {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut state = AppState::default();
+        let mut actions = PreferencePageActions::default();
+        let first = ctx.run(input(1_100.0, 900.0), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_page(ui, &mut state, &mut actions);
+            });
+        });
+        let nodes = first
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update")
+            .nodes;
+        let bounds = node_bounds(&nodes, egui::accesskit::Role::Button, label);
+        let position = egui::pos2(
+            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        );
+
+        for pressed in [true, false] {
+            let events = vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ];
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: input(1_100.0, 900.0).screen_rect,
+                    events,
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        render_page(ui, &mut state, &mut actions);
+                    });
+                },
+            );
+        }
+        actions
+    }
+
     #[test]
     fn page_registry_is_the_exact_mockup_review_projection() {
         assert_eq!(REGISTRY_ROWS.len(), 11);
         assert_eq!(REGISTRY_ROWS[0].1, "Command palette");
         assert_eq!(REGISTRY_ROWS[10].1, "Toggle console");
+        assert_eq!(ENGINEERING_TABLE_BREAKPOINT, 820.0);
+        assert_eq!(EDITOR_NARROW_TABLE_MIN_WIDTH, 660.0);
+        assert_eq!(REGISTRY_COLUMN_COUNT, 5.0);
+        assert_eq!(REGISTRY_HEADER_HEIGHT, 27.0);
+        assert_eq!(REGISTRY_ROW_HEIGHT, 28.0);
+        assert_eq!(KBD_HEIGHT, 18.0);
+        assert_eq!(KBD_HORIZONTAL_PADDING, 4.0);
+        assert_eq!(KBD_MIN_WIDTH, 19.0);
+        assert_eq!(KBD_CORNER_RADIUS, 3);
+    }
+
+    #[test]
+    fn policy_edits_queue_persist_before_live_candidates() {
+        let live = ShortcutPreferences::default();
+        let mut candidate = live.clone();
+        candidate
+            .policies_mut()
+            .set_chord_timeout(ChordTimeoutPolicy::ALL[1]);
+        let mut actions = PreferencePageActions::default();
+
+        queue_policy_candidate(&mut actions, &live, candidate.clone(), false);
+
+        assert_eq!(actions.shortcut_policy_candidate, Some(candidate));
+        assert_eq!(live, ShortcutPreferences::default());
+    }
+
+    #[test]
+    fn pending_policy_publication_cannot_queue_a_second_candidate() {
+        let live = ShortcutPreferences::default();
+        let mut candidate = live.clone();
+        candidate
+            .policies_mut()
+            .set_chord_timeout(ChordTimeoutPolicy::ALL[1]);
+        let mut actions = PreferencePageActions::default();
+
+        queue_policy_candidate(&mut actions, &live, candidate, true);
+
+        assert!(actions.shortcut_policy_candidate.is_none());
     }
 
     #[test]
@@ -1546,9 +2028,9 @@ mod tests {
     }
 
     #[test]
-    fn shortcuts_category_remains_unreachable_until_review_workflows_land() {
+    fn shortcuts_category_is_exposed_after_review_workflows_land() {
         assert!(
-            !super::super::preferences_shell::PreferenceCategory::ALL
+            super::super::preferences_shell::PreferenceCategory::ALL
                 .contains(&super::super::preferences_shell::PreferenceCategory::Shortcuts)
         );
     }
@@ -1646,6 +2128,7 @@ mod tests {
     #[test]
     fn valid_save_atomically_replaces_the_live_profile() {
         let mut state = AppState::default();
+        state.enable_volatile_test_shortcut_persistence();
         let live = state.ui.preferences.shortcuts().clone();
         state.dialogs.shortcut_editor.open(&live);
         state
@@ -1668,7 +2151,7 @@ mod tests {
             .unwrap();
         state.dialogs.shortcut_editor.dirty = true;
 
-        commit_editor(&mut state);
+        commit_editor(&Context::default(), &mut state);
 
         assert!(!state.dialogs.shortcut_editor.open);
         assert_eq!(
@@ -1710,7 +2193,7 @@ mod tests {
         state.dialogs.shortcut_editor.query = "schematic only".to_owned();
         state.dialogs.shortcut_editor.context = ShortcutEditorContext::Schematic;
 
-        commit_editor(&mut state);
+        commit_editor(&Context::default(), &mut state);
 
         assert!(state.dialogs.shortcut_editor.open);
         assert!(state.dialogs.shortcut_editor.error_summary.is_some());
@@ -1755,10 +2238,102 @@ mod tests {
                     .label()
                     .is_some_and(|label| label.contains("unresolved collisions"))
         }));
+        for label in ["Binding editor", "Portable profile"] {
+            assert!(nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::Label && node.label() == Some(label)
+            }));
+        }
+        for label in [
+            "View resolved policy\u{2026}",
+            "Edit shortcuts\u{2026}",
+            "Import\u{2026}",
+            "Export\u{2026}",
+        ] {
+            assert!(nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+            }));
+        }
+        let portable = node_bounds(&nodes, egui::accesskit::Role::Label, "Portable profile");
+        let heading = node_bounds(
+            &nodes,
+            egui::accesskit::Role::Heading,
+            "Keyboard and command shortcuts",
+        );
+        let registry = node_bounds(
+            &nodes,
+            egui::accesskit::Role::Table,
+            "Protected shortcut registry",
+        );
+        let resolved = node_bounds(
+            &nodes,
+            egui::accesskit::Role::Button,
+            "View resolved policy\u{2026}",
+        );
+        let import = node_bounds(&nodes, egui::accesskit::Role::Button, "Import\u{2026}");
+        let export = node_bounds(&nodes, egui::accesskit::Role::Button, "Export\u{2026}");
+        assert!(registry.x0 < heading.x0);
+        assert!(registry.x1 > heading.x1);
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::ColumnHeader)
+                .count(),
+            5
+        );
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Row
+                        && (node.label() == Some("Shortcut registry column headings")
+                            || REGISTRY_ROWS
+                                .iter()
+                                .any(|(_, label)| node.label() == Some(*label)))
+                })
+                .count(),
+            REGISTRY_ROWS.len() + 1
+        );
+        assert!(
+            nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Cell
+                        && node.description() == Some("Keyboard binding capsule")
+                })
+                .count()
+                >= REGISTRY_ROWS.len() * 2
+        );
+        assert!(resolved.x0 > portable.x0);
+        assert!(import.x0 > portable.x1);
+        assert!(
+            export.x0 > import.x1,
+            "portable action controls overlap or are reversed: import={import:?}, export={export:?}"
+        );
+        assert_eq!(import.y0, export.y0);
+        assert_eq!(import.y1, export.y1);
     }
 
     #[test]
-    fn phone_page_reflows_registry_to_accessible_rows() {
+    fn portable_profile_buttons_emit_distinct_workflow_actions() {
+        let imported = click_page_button("Import\u{2026}");
+        assert!(imported.open_shortcut_import);
+        assert!(!imported.open_shortcut_export);
+        assert!(!imported.open_shortcut_editor);
+
+        let exported = click_page_button("Export\u{2026}");
+        assert!(exported.open_shortcut_export);
+        assert!(!exported.open_shortcut_import);
+        assert!(!exported.open_shortcut_editor);
+
+        let resolved = click_page_button("View resolved policy\u{2026}");
+        assert!(resolved.open_resolved_shortcut_policy);
+        assert!(!resolved.open_shortcut_import);
+        assert!(!resolved.open_shortcut_export);
+        assert!(!resolved.open_shortcut_editor);
+    }
+
+    #[test]
+    fn phone_page_keeps_the_registry_fluid_and_portable_actions_in_source_order() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -1774,13 +2349,37 @@ mod tests {
             .accesskit_update
             .expect("AccessKit update")
             .nodes;
+        let registry = node_bounds(
+            &nodes,
+            egui::accesskit::Role::Table,
+            "Protected shortcut registry",
+        );
+        assert!(registry.x0 >= 0.0);
+        assert!(registry.x1 <= 390.0);
+        assert!(registry.x1 - registry.x0 >= 360.0);
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Row && node.label() == Some("Command palette")
         }));
-        assert!(!nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Table
-                && node.label() == Some("Protected shortcut registry")
-        }));
+        let import = node_bounds(&nodes, egui::accesskit::Role::Button, "Import\u{2026}");
+        let export = node_bounds(&nodes, egui::accesskit::Role::Button, "Export\u{2026}");
+        assert!(import.x0 < export.x0);
+        assert_eq!(import.y0, export.y0);
+        assert!(import.y1 - import.y0 >= 44.0);
+        let import_index = nodes
+            .iter()
+            .position(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Import\u{2026}")
+            })
+            .unwrap();
+        let export_index = nodes
+            .iter()
+            .position(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Export\u{2026}")
+            })
+            .unwrap();
+        assert!(import_index < export_index);
     }
 
     #[test]
@@ -1806,6 +2405,31 @@ mod tests {
             node.role() == egui::accesskit::Role::TextInput
                 && node.label() == Some("Filter keyboard commands")
         }));
+        let table = node_bounds(
+            &nodes,
+            egui::accesskit::Role::Table,
+            "Editable command bindings",
+        );
+        assert!(table.x1 - table.x0 >= EDITOR_NARROW_TABLE_MIN_WIDTH as f64);
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::ColumnHeader)
+                .count(),
+            6
+        );
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Row
+                && node.label() == Some("Shortcut editor column headings")
+        }));
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Group
+                && node.label() == Some("Shortcut editor controls")
+        }));
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Group
+                && node.label() == Some("Shortcut editor notes")
+        }));
         let button = nodes
             .iter()
             .find(|(_, node)| {
@@ -1817,5 +2441,72 @@ mod tests {
             .and_then(|(_, node)| node.bounds())
             .expect("primary capture button bounds");
         assert!(button.y1 - button.y0 >= 44.0);
+    }
+
+    #[test]
+    fn pending_editor_is_immutable_and_exposes_a_disabled_progress_state() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut state = AppState::default();
+        let profile = state.ui.preferences.shortcuts().clone();
+        state.dialogs.shortcut_editor.open(&profile);
+        state.dialogs.shortcut_editor.query = "save".to_owned();
+        state.dialogs.shortcut_editor.selected_command = Some(Command::Save);
+        state.dialogs.shortcut_editor.recording = Some(ShortcutCaptureTarget {
+            command: Command::Save,
+            slot: ShortcutBindingSlot::Primary,
+        });
+        state
+            .dialogs
+            .shortcut_editor
+            .capture_strokes
+            .push(ShortcutStroke::new(Key::K, true, false, false));
+        state.dialogs.shortcut_editor.capture_last_input_at = Some(1.0);
+        state.dialogs.shortcut_editor.dirty = true;
+        state.dialogs.shortcut_editor.persistence_pending = true;
+        let before = state.dialogs.shortcut_editor.clone();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: input(1_100.0, 900.0).screen_rect,
+                events: vec![egui::Event::Key {
+                    key: Key::F6,
+                    physical_key: Some(Key::F6),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                }],
+                ..egui::RawInput::default()
+            },
+            |ctx| render_editor(ctx, &mut state),
+        );
+
+        let after = &state.dialogs.shortcut_editor;
+        assert_eq!(after.draft, before.draft);
+        assert_eq!(after.query, before.query);
+        assert_eq!(after.context, before.context);
+        assert_eq!(after.selected_command, before.selected_command);
+        assert_eq!(after.recording, before.recording);
+        assert_eq!(after.capture_strokes, before.capture_strokes);
+        assert_eq!(after.capture_last_input_at, before.capture_last_input_at);
+        assert_eq!(after.dirty, before.dirty);
+        assert_eq!(after.error_summary, before.error_summary);
+        assert_eq!(after.focus_error, before.focus_error);
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update")
+            .nodes;
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Status
+                && node.label() == Some("Saving shortcut profile")
+        }));
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Button
+                && node
+                    .label()
+                    .is_some_and(|label| label.starts_with("Record Primary binding for"))
+                && node.is_disabled()
+        }));
     }
 }

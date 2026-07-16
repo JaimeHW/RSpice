@@ -52,16 +52,16 @@ pub(super) enum PreferenceCategory {
     Workspace,
     Files,
     Accessibility,
-    #[allow(dead_code)]
     Shortcuts,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 4] = [
+    pub(super) const ALL: [Self; 5] = [
         Self::Appearance,
         Self::Workspace,
         Self::Files,
         Self::Accessibility,
+        Self::Shortcuts,
     ];
 
     pub(super) const fn label(self) -> &'static str {
@@ -718,9 +718,8 @@ pub(super) fn page_heading(ui: &mut Ui, title: &str, description: &str) {
     ui.add_space(if phone { 8.0 } else { 12.0 });
 }
 
-/// Read-only ownership strip shown above each settings page. The mockup's
-/// policy-review action remains absent until RSpice has a resolved-policy
-/// engine, but the authoritative scope copy is still useful and truthful.
+/// Read-only ownership strip shown above settings pages without a trailing
+/// resolved-policy action.
 pub(super) fn scope_strip(ui: &mut Ui, scope: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     let narrow = ui.ctx().content_rect().width() <= SCOPE_NARROW_MAX_WIDTH;
@@ -759,6 +758,107 @@ pub(super) fn scope_strip(ui: &mut Ui, scope: &str, detail: &str) {
     // CSS collapses the strip's 14 px bottom margin with the 14–18 px top
     // margin of the next heading/section. Every runtime-backed page has that
     // next block, so it owns the single resolved gap here.
+}
+
+/// Mockup scope strip variant with the trailing resolved-policy executor.
+/// Pages use this only once their policy review workflow is wired end to end.
+pub(super) fn actionable_scope_strip(
+    ui: &mut Ui,
+    scope: &str,
+    detail: &str,
+    action_label: &str,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let narrow = ui.ctx().content_rect().width() <= SCOPE_NARROW_MAX_WIDTH;
+    let large_target = ui.ctx().content_rect().width() <= NARROW_MAX_WIDTH
+        || ui.ctx().input(|input| input.has_touch_screen());
+    let horizontal = if narrow { 12 } else { 24 };
+    let mut clicked = false;
+    let response = egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(horizontal, 7))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_min_height(28.0);
+            ui.horizontal(|ui| {
+                let gap = 10.0;
+                ui.spacing_mut().item_spacing.x = gap;
+                let available = ui.available_width();
+                let action_width = ui
+                    .fonts_mut(|fonts| {
+                        fonts
+                            .layout_no_wrap(
+                                action_label.to_owned(),
+                                theme::sans(tokens::FS_0, FontWeight::Regular),
+                                t.color.text,
+                            )
+                            .size()
+                            .x
+                            + 20.0
+                    })
+                    .max(if large_target { TOUCH_TARGET } else { 0.0 })
+                    .min((available - gap).max(1.0));
+                let action_height = if large_target { TOUCH_TARGET } else { 28.0 };
+                let copy_width = (available - action_width - gap).max(0.0);
+                ui.allocate_ui_with_layout(
+                    vec2(copy_width, 28.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(copy_width);
+                        scope_copy(ui, scope, detail);
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        ui.set_clip_rect(ui.max_rect());
+                        clicked = Button::new(action_label)
+                            .ghost()
+                            .max_width(action_width)
+                            .min_height(if large_target { TOUCH_TARGET } else { 0.0 })
+                            .show(ui)
+                            .clicked();
+                    },
+                );
+            });
+        })
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    clicked
+}
+
+fn scope_copy(ui: &mut Ui, scope: &str, detail: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let scope_response = ui.label(
+        egui::RichText::new(scope)
+            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.text),
+    );
+    scope_response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, scope));
+    ui.ctx().accesskit_node_builder(scope_response.id, |node| {
+        node.set_role(egui::accesskit::Role::Label);
+        node.set_label(scope);
+    });
+    ui.add_space(2.0);
+    let detail_response = ui.add(
+        egui::Label::new(
+            egui::RichText::new(detail)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_faint),
+        )
+        .wrap(),
+    );
+    detail_response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, detail));
+    ui.ctx().accesskit_node_builder(detail_response.id, |node| {
+        node.set_role(egui::accesskit::Role::Label);
+        node.set_label(detail);
+    });
 }
 
 pub(super) fn section_label(ui: &mut Ui, title: &str) {
@@ -1250,6 +1350,53 @@ mod tests {
     }
 
     #[test]
+    fn phone_scope_action_remains_horizontal_and_contained() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        let _ = actionable_scope_strip(
+                            ui,
+                            "User profile",
+                            "portable bindings with platform and organization exceptions",
+                            "View resolved policy…",
+                        );
+                    });
+            },
+        );
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+        let scope = node_bounds(&nodes, egui::accesskit::Role::Label, "User profile");
+        let detail = node_bounds(
+            &nodes,
+            egui::accesskit::Role::Label,
+            "portable bindings with platform and organization exceptions",
+        );
+        let action = node_bounds(
+            &nodes,
+            egui::accesskit::Role::Button,
+            "View resolved policy…",
+        );
+
+        assert!(scope.x0 >= 12.0);
+        assert!(action.x1 <= 378.0);
+        assert!(action.x0 >= detail.x1);
+        assert!(action.y0 < detail.y1);
+        assert!(action.y1 > scope.y0);
+    }
+
+    #[test]
     fn tablet_uses_category_selector_without_phone_full_height_override() {
         let layout =
             PreferencesLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, vec2(768.0, 1024.0)));
@@ -1290,6 +1437,7 @@ mod tests {
                 "Workspace",
                 "Files & storage",
                 "Accessibility",
+                "Shortcuts",
             ]
         );
     }

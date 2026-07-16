@@ -62,5 +62,6 @@ pub(super) fn default_app_state() -> AppState {
         shortcut_resolver: super::app_shortcuts::ShortcutResolverState::default(),
         shortcut_library_persistence:
             super::app_shortcut_library_persistence::ShortcutLibraryPersistenceRuntime::default(),
+        shortcut_library_publication_continuation: None,
     }
 }

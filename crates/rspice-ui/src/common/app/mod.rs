@@ -259,6 +259,9 @@ pub struct AppState {
     /// eframe session copy never replaces this owner after startup.
     pub(crate) shortcut_library_persistence:
         app_shortcut_library_persistence::ShortcutLibraryPersistenceRuntime,
+    /// UI transaction paired with the single browser shortcut-library CAS.
+    pub(crate) shortcut_library_publication_continuation:
+        Option<app_shortcut_library_persistence::ShortcutLibraryPublicationContinuation>,
 }
 
 impl Default for AppState {

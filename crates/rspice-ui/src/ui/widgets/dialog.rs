@@ -305,6 +305,21 @@ struct DialogFooterOutput {
     ghost_id: Option<Id>,
 }
 
+/// Mockup transaction strip rendered between a workflow body and its footer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogTransactionTone {
+    Progress,
+    Complete,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DialogTransactionState<'a> {
+    tone: DialogTransactionTone,
+    title: &'a str,
+    detail: &'a str,
+}
+
 /// Declarative description of one modal frame.
 pub struct Dialog<'a> {
     kicker: &'a str,
@@ -319,6 +334,7 @@ pub struct Dialog<'a> {
     ghost: Option<&'a str>,
     ghost_enabled: bool,
     hint: Option<&'a str>,
+    transaction_state: Option<DialogTransactionState<'a>>,
     body_scroll_offset: Option<&'a mut f32>,
     flush_body: bool,
     initial_focus: DialogInitialFocus,
@@ -341,6 +357,7 @@ impl<'a> Dialog<'a> {
             ghost: None,
             ghost_enabled: true,
             hint: None,
+            transaction_state: None,
             body_scroll_offset: None,
             flush_body: false,
             initial_focus: DialogInitialFocus::Container,
@@ -406,6 +423,22 @@ impl<'a> Dialog<'a> {
     /// Mono footer hint (validation count, shortcut reminder).
     pub fn hint(mut self, hint: &'a str) -> Self {
         self.hint = Some(hint);
+        self
+    }
+
+    /// Show the canonical workflow transaction strip immediately above the
+    /// footer. It is intentionally absent in the normal idle state.
+    pub fn transaction_state(
+        mut self,
+        tone: DialogTransactionTone,
+        title: &'a str,
+        detail: &'a str,
+    ) -> Self {
+        self.transaction_state = Some(DialogTransactionState {
+            tone,
+            title,
+            detail,
+        });
         self
     }
 
@@ -538,7 +571,13 @@ impl<'a> Dialog<'a> {
                     }
                     let header_height = ui.cursor().top() - header_top;
                     let footer_height = self.footer_height(hide_close_only_footer, large_targets);
-                    let body_max_height = (max_height - header_height - footer_height).max(1.0);
+                    let transaction_height = if self.transaction_state.is_some() {
+                        37.0
+                    } else {
+                        0.0
+                    };
+                    let body_max_height =
+                        (max_height - header_height - footer_height - transaction_height).max(1.0);
                     let initial_scroll_offset = self
                         .body_scroll_offset
                         .as_deref()
@@ -573,6 +612,7 @@ impl<'a> Dialog<'a> {
                     if let Some(offset) = self.body_scroll_offset.as_deref_mut() {
                         *offset = body_output.state.offset.y;
                     }
+                    self.transaction_strip(ui, &t);
                     let footer = self.footer(ui, &t, hide_close_only_footer, large_targets);
                     rendered_focus.primary = footer.primary_id;
                     rendered_focus.secondary = footer.secondary_id;
@@ -722,6 +762,68 @@ impl<'a> Dialog<'a> {
             return 0.0;
         }
         48.0
+    }
+
+    fn transaction_strip(&self, ui: &mut Ui, t: &Tokens) {
+        let Some(transaction) = self.transaction_state else {
+            return;
+        };
+        let color = match transaction.tone {
+            DialogTransactionTone::Progress => t.color.accent,
+            DialogTransactionTone::Complete => t.color.ok,
+            DialogTransactionTone::Error => t.color.err,
+        };
+        let response = Frame::NONE
+            .fill(t.color.bg_panel)
+            .inner_margin(Margin::symmetric(12, 6))
+            .show(ui, |ui| {
+                let width = ui.available_width();
+                ui.allocate_ui_with_layout(
+                    vec2(width, 25.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let (indicator, _) =
+                            ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                        ui.painter().circle_stroke(
+                            indicator.center(),
+                            4.0,
+                            Stroke::new(1.0, color),
+                        );
+                        if transaction.tone == DialogTransactionTone::Complete {
+                            ui.painter().circle_filled(indicator.center(), 2.0, color);
+                        }
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            ui.label(
+                                egui::RichText::new(transaction.title)
+                                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                                    .color(t.color.text),
+                            );
+                            ui.label(
+                                egui::RichText::new(transaction.detail)
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text_faint),
+                            );
+                        });
+                    },
+                );
+            });
+        ui.painter().hline(
+            response.response.rect.x_range(),
+            response.response.rect.top(),
+            Stroke::new(1.0, t.color.border_strong),
+        );
+        ui.ctx()
+            .accesskit_node_builder(response.response.id, |node| {
+                node.set_role(if transaction.tone == DialogTransactionTone::Error {
+                    egui::accesskit::Role::Alert
+                } else {
+                    egui::accesskit::Role::Status
+                });
+                node.set_label(transaction.title);
+                node.set_description(transaction.detail);
+            });
     }
 
     fn footer(
@@ -1114,6 +1216,37 @@ mod tests {
         assert!(!padded.flush_body);
         let flush = Dialog::new("Test", TEST_TITLE, "Accept").flush_body();
         assert!(flush.flush_body);
+    }
+
+    #[test]
+    fn transaction_state_is_absent_when_idle_and_exposes_an_assertive_strip_on_error() {
+        let idle = Dialog::new("Test", TEST_TITLE, "Accept");
+        assert!(idle.transaction_state.is_none());
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new("Test", TEST_TITLE, "Accept")
+                .transaction_state(
+                    DialogTransactionTone::Error,
+                    "Unsaved dialog changes",
+                    "Choose Discard changes again to close.",
+                )
+                .show(ctx, |ui| {
+                    ui.label("Dialog body");
+                });
+        });
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Alert
+                && node.label() == Some("Unsaved dialog changes")
+                && node.description() == Some("Choose Discard changes again to close.")
+        }));
     }
 
     #[test]
