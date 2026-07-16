@@ -23,9 +23,9 @@ use super::param_scope::ParamResolver;
 use super::parser::parse_source_spec_text;
 use super::{
     DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
-    Element, ElementKind, InitialCondition, ModelDef, Netlist, NodeSet, ParamContext,
-    ParameterRedefinitionPolicy, ParametricValue, ParseError, RandomState, SourceSpec,
-    SubcircuitDef,
+    DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
+    InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
+    ParametricValue, ParseError, RandomState, SourceSpec, SubcircuitDef,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -461,9 +461,58 @@ impl<'a> Flattener<'a> {
             format!("{}.{}", prefix, instance.name)
         };
 
-        // A connection-count mismatch silently mis-wires the circuit if the
-        // ports are truncated or nodes are dropped, so it is a hard error —
-        // the same contract Spectre and HSPICE enforce.
+        // Resolve every actual through the parent context before validating
+        // repeated formal ports. Duplicate formals are legal only when every
+        // occurrence maps to the same effective node for this invocation.
+        let mapped_ports = subckt
+            .ports
+            .iter()
+            .zip(&instance.nodes)
+            .map(|(port, actual)| (port, self.remap_node(actual, prefix, parent_node_map)))
+            .collect::<Vec<_>>();
+        let mut first_bindings = HashMap::<String, (usize, &str)>::new();
+        for (index, (formal, actual)) in mapped_ports.iter().enumerate() {
+            let canonical_formal = formal.to_ascii_uppercase();
+            if let Some((first_index, first_actual)) = first_bindings.get(&canonical_formal) {
+                if !first_actual.eq_ignore_ascii_case(actual) {
+                    return Err(ParseError::DuplicateSubcircuitPortBinding(Box::new(
+                        DuplicateSubcircuitPortBindingError {
+                            subcircuit_name: subckt.name.clone(),
+                            instance_name: instance.name.clone(),
+                            canonical_instance_name: instance.name.to_ascii_uppercase(),
+                            qualified_instance_name: new_prefix.clone(),
+                            formal_port: formal.to_string(),
+                            first_position: first_index + 1,
+                            conflicting_position: index + 1,
+                            first_actual_node: (*first_actual).to_string(),
+                            conflicting_actual_node: actual.clone(),
+                        },
+                    )));
+                }
+            } else {
+                let formal_is_global = self.global_nodes.contains(&canonical_formal)
+                    || formal
+                        .get(..2)
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("$G"));
+                if formal_is_global && !formal.eq_ignore_ascii_case(actual) {
+                    return Err(ParseError::GlobalSubcircuitPortBinding(Box::new(
+                        GlobalSubcircuitPortBindingError {
+                            subcircuit_name: subckt.name.clone(),
+                            instance_name: instance.name.clone(),
+                            canonical_instance_name: instance.name.to_ascii_uppercase(),
+                            qualified_instance_name: new_prefix.clone(),
+                            formal_port: formal.to_string(),
+                            position: index + 1,
+                            actual_node: actual.clone(),
+                        },
+                    )));
+                }
+                first_bindings.insert(canonical_formal, (index, actual.as_str()));
+            }
+        }
+
+        // Xyce validates every available duplicate/global binding before
+        // connection count and recursion.
         if instance.nodes.len() != subckt.ports.len() {
             return Err(ParseError::Syntax {
                 line: 0,
@@ -478,9 +527,6 @@ impl<'a> Flattener<'a> {
             });
         }
 
-        // A definition that is still being expanded cannot be instantiated
-        // again below itself; report the cycle by name instead of expanding
-        // until max_depth trips ~100 levels later.
         if self
             .expansion_stack
             .iter()
@@ -506,14 +552,13 @@ impl<'a> Flattener<'a> {
             });
         }
 
-        // Build node map: subcircuit port -> instance connection
+        // Preserve the first mapping, matching Xyce. Repeated identical
+        // bindings are compatibility aliases and never replace it.
         let mut node_map = HashMap::new();
-
-        // Map ports to external connections
-        for (i, port) in subckt.ports.iter().enumerate() {
-            if i < instance.nodes.len() {
-                let external_node = self.remap_node(&instance.nodes[i], prefix, parent_node_map);
-                node_map.insert(port.clone(), external_node);
+        let mut mapped_formals = HashSet::new();
+        for (formal, actual) in mapped_ports {
+            if mapped_formals.insert(formal.to_ascii_uppercase()) {
+                node_map.insert(formal.clone(), actual);
             }
         }
 
@@ -2973,6 +3018,301 @@ fn is_simple_probe_name(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn duplicate_binding_error(source: &str) -> Box<DuplicateSubcircuitPortBindingError> {
+        let netlist = Netlist::parse(source).expect("duplicate-formal deck parses");
+        let error = flatten_netlist(&netlist).expect_err("conflicting invocation must fail");
+        let ParseError::DuplicateSubcircuitPortBinding(error) = error else {
+            panic!("expected typed duplicate subcircuit-port binding error");
+        };
+        error
+    }
+
+    #[test]
+    fn repeated_formals_are_legal_when_effective_actual_nodes_match() {
+        let netlist = Netlist::parse(
+            "compatible duplicate formals\n\
+             .SUBCKT DUP a b A g G\n\
+             R1 a b 1\n\
+             .ENDS\n\
+             X1 Input Out input 0 GND DUP\n\
+             .END\n",
+        )
+        .expect("parser must not reject duplicate formal ports");
+        let duplicate = netlist
+            .subcircuits
+            .iter()
+            .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case("DUP"))
+            .expect("duplicate-port definition retained");
+        assert_eq!(duplicate.ports, ["A", "B", "A", "G", "G"]);
+
+        let flattened = flatten_netlist(&netlist)
+            .expect("case-equivalent and ground-equivalent bindings are legal");
+        let resistor = flattened
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("X1.R1"))
+            .expect("subcircuit resistor expands");
+        assert!(resistor.nodes[0].eq_ignore_ascii_case("Input"));
+        assert!(resistor.nodes[1].eq_ignore_ascii_case("Out"));
+    }
+
+    #[test]
+    fn repeated_formals_compare_nodes_after_parent_hierarchy_remapping() {
+        let netlist = Netlist::parse(
+            "parent-remapped duplicate formals\n\
+             .SUBCKT OUTER p q\n\
+             XINNER p q P DUP\n\
+             .ENDS\n\
+             .SUBCKT DUP a b A\n\
+             R1 a b 1\n\
+             .ENDS\n\
+             XTOP N1 N2 OUTER\n\
+             .END\n",
+        )
+        .expect("nested duplicate-formal deck parses");
+
+        let flattened =
+            flatten_netlist(&netlist).expect("parent-remapped identical nodes are legal");
+        let resistor = flattened
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("XTOP.XINNER.R1"))
+            .expect("nested resistor expands");
+        assert!(resistor.nodes[0].eq_ignore_ascii_case("N1"));
+        assert!(resistor.nodes[1].eq_ignore_ascii_case("N2"));
+    }
+
+    #[test]
+    fn third_repeated_formal_reports_first_binding_and_deterministic_conflict() {
+        let error = duplicate_binding_error(
+            "third duplicate conflict\n\
+             .SUBCKT DUP a A a\n\
+             R1 a 0 1\n\
+             .ENDS\n\
+             X1 SAME same DIFFERENT DUP\n\
+             .END\n",
+        );
+
+        assert_eq!(error.subcircuit_name, "DUP");
+        assert_eq!(error.instance_name, "X1");
+        assert_eq!(error.canonical_instance_name, "X1");
+        assert_eq!(error.qualified_instance_name, "X1");
+        assert_eq!(error.formal_port, "A");
+        assert_eq!(error.first_position, 1);
+        assert_eq!(error.conflicting_position, 3);
+        assert_eq!(error.first_actual_node, "SAME");
+        assert_eq!(error.conflicting_actual_node, "DIFFERENT");
+    }
+
+    #[test]
+    fn duplicate_binding_validation_precedes_connection_count_validation() {
+        let error = duplicate_binding_error(
+            "duplicate binding before arity\n\
+             .SUBCKT DUP a A\n\
+             R1 a 0 1\n\
+             .ENDS\n\
+             X1 FIRST SECOND EXTRA DUP\n\
+             .END\n",
+        );
+        assert_eq!(error.first_position, 1);
+        assert_eq!(error.conflicting_position, 2);
+        assert_eq!(error.first_actual_node, "FIRST");
+        assert_eq!(error.conflicting_actual_node, "SECOND");
+    }
+
+    #[test]
+    fn duplicate_binding_validation_precedes_recursion_validation() {
+        let error = duplicate_binding_error(
+            "duplicate binding before recursion\n\
+             .SUBCKT REC a A\n\
+             XSELF a internal REC\n\
+             .ENDS\n\
+             XTOP TOP top REC\n\
+             .END\n",
+        );
+        assert_eq!(error.instance_name, "XSELF");
+        assert_eq!(error.qualified_instance_name, "XTOP.XSELF");
+        assert_eq!(error.first_actual_node, "TOP");
+        assert_eq!(error.conflicting_actual_node, "XTOP.INTERNAL");
+    }
+
+    #[test]
+    fn global_formal_ports_require_the_same_effective_node_name() {
+        let explicit = Netlist::parse(
+            "explicit global binding\n\
+             .GLOBAL VDD\n\
+             .SUBCKT CELL VDD p\n\
+             R1 VDD p 1\n\
+             .ENDS\n\
+             X1 OTHER out CELL\n\
+             .END\n",
+        )
+        .expect("explicit-global fixture parses");
+        let error = flatten_netlist(&explicit).expect_err("global binding mismatch must fail");
+        let ParseError::GlobalSubcircuitPortBinding(error) = error else {
+            panic!("expected typed global subcircuit-port binding error");
+        };
+        assert_eq!(error.subcircuit_name, "CELL");
+        assert_eq!(error.instance_name, "X1");
+        assert_eq!(error.canonical_instance_name, "X1");
+        assert_eq!(error.formal_port, "VDD");
+        assert_eq!(error.position, 1);
+        assert_eq!(error.actual_node, "OTHER");
+
+        let implicit = Netlist::parse(
+            "implicit global binding\n\
+             .SUBCKT CELL $G_SHARED p\n\
+             R1 $G_SHARED p 1\n\
+             .ENDS\n\
+             X1 local out CELL\n\
+             .END\n",
+        )
+        .expect("implicit-global fixture parses");
+        assert!(matches!(
+            flatten_netlist(&implicit),
+            Err(ParseError::GlobalSubcircuitPortBinding(_))
+        ));
+
+        let valid_explicit = Netlist::parse(
+            "valid explicit global binding\n\
+             .GLOBAL VDD\n\
+             .SUBCKT CELL VDD p\n\
+             R1 VDD p 1\n\
+             .ENDS\n\
+             X1 vdd out CELL\n\
+             .END\n",
+        )
+        .expect("valid explicit-global fixture parses");
+        flatten_netlist(&valid_explicit).expect("case-equivalent explicit global binding is legal");
+
+        let valid_implicit = Netlist::parse(
+            "valid implicit global binding\n\
+             .SUBCKT CELL $G_SHARED p\n\
+             R1 $G_SHARED p 1\n\
+             .ENDS\n\
+             X1 $g_shared out CELL\n\
+             .END\n",
+        )
+        .expect("valid implicit-global fixture parses");
+        flatten_netlist(&valid_implicit).expect("case-equivalent $G binding is legal");
+    }
+
+    #[test]
+    fn later_duplicate_global_conflict_precedes_global_name_error() {
+        let netlist = Netlist::parse(
+            "duplicate global precedence\n\
+             .GLOBAL VDD\n\
+             .SUBCKT CELL VDD vdd\n\
+             R1 VDD 0 1\n\
+             .ENDS\n\
+             X1 VDD OTHER CELL\n\
+             .END\n",
+        )
+        .expect("duplicate-global fixture parses");
+        assert!(matches!(
+            flatten_netlist(&netlist),
+            Err(ParseError::DuplicateSubcircuitPortBinding(_))
+        ));
+    }
+
+    #[test]
+    fn xyce_duplicate_formal_oracle_decks_report_exact_conflicts() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/xyce/Netlists/Message/Subcircuit");
+        for (
+            file_name,
+            subcircuit_name,
+            instance_name,
+            formal_port,
+            first_position,
+            conflicting_position,
+            first_actual,
+            conflicting_actual,
+        ) in [
+            (
+                "subckt_a2_dup_error.cir",
+                "INV1",
+                "Xinv1",
+                "GND",
+                4,
+                8,
+                "0",
+                "VDD",
+            ),
+            (
+                "subckt_j1_dup_error.cir",
+                "ONEBIT",
+                "X1",
+                "6",
+                6,
+                8,
+                "99",
+                "1",
+            ),
+        ] {
+            let netlist =
+                Netlist::parse_file(&root.join(file_name)).expect("oracle deck must parse");
+            let error =
+                flatten_netlist(&netlist).expect_err("oracle invocation conflict must fail");
+            let ParseError::DuplicateSubcircuitPortBinding(error) = error else {
+                panic!("{file_name}: expected typed duplicate binding error");
+            };
+            assert_eq!(error.subcircuit_name, subcircuit_name, "{file_name}");
+            assert_eq!(error.instance_name, instance_name, "{file_name}");
+            assert_eq!(
+                error.canonical_instance_name,
+                instance_name.to_ascii_uppercase(),
+                "{file_name}"
+            );
+            assert_eq!(error.qualified_instance_name, instance_name, "{file_name}");
+            assert_eq!(error.formal_port, formal_port, "{file_name}");
+            assert_eq!(error.first_position, first_position, "{file_name}");
+            assert_eq!(
+                error.conflicting_position, conflicting_position,
+                "{file_name}"
+            );
+            assert_eq!(error.first_actual_node, first_actual, "{file_name}");
+            assert_eq!(
+                error.conflicting_actual_node, conflicting_actual,
+                "{file_name}"
+            );
+            assert!(
+                error.to_string().contains(&format!(
+                    "Duplicate nodes in .subckt {subcircuit_name} point to different nodes in X line invocation"
+                ))
+            );
+            assert!(error.to_string().contains(&format!(
+                "Error invoking subcircuit {subcircuit_name} instance {}",
+                instance_name.to_ascii_uppercase()
+            )));
+        }
+    }
+
+    #[test]
+    fn xyce_bug784_duplicate_formal_deck_reports_invocation_conflict() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/xyce/Netlists/Certification_Tests/BUG_784/bug_784.cir");
+        let netlist = Netlist::parse_file(&path)
+            .expect("BUG784 duplicate formal definition remains parser-legal");
+        let subcircuit = netlist
+            .subcircuits
+            .iter()
+            .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case("SUBA"))
+            .expect("SUBA definition retained");
+        assert_eq!(subcircuit.ports, ["B", "B"]);
+
+        let error = flatten_netlist(&netlist).expect_err("BUG784 invocation must fail");
+        let ParseError::DuplicateSubcircuitPortBinding(error) = error else {
+            panic!("BUG784 must expose the typed duplicate binding error");
+        };
+        assert_eq!(error.subcircuit_name, "suba");
+        assert_eq!(error.instance_name, "X1");
+        assert_eq!(error.canonical_instance_name, "X1");
+        assert_eq!(error.formal_port, "B");
+        assert_eq!(error.first_position, 1);
+        assert_eq!(error.conflicting_position, 2);
+        assert_eq!(error.first_actual_node, "1");
+        assert_eq!(error.conflicting_actual_node, "2");
+    }
 
     #[test]
     fn xyce_dollar_g_nodes_remain_global_across_subcircuits() {

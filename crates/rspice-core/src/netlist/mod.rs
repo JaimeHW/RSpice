@@ -134,6 +134,41 @@ pub struct MissingSubcircuitEndsError {
     pub boundary: MissingSubcircuitEndsBoundary,
 }
 
+/// Conflicting actual-node bindings for a repeated formal `.SUBCKT` port.
+///
+/// Xyce permits duplicate formal ports only when every occurrence maps to the
+/// same effective node at a particular X-line invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Duplicate nodes in .subckt {subcircuit_name} point to different nodes in X line invocation: formal '{formal_port}' at position {first_position} maps to '{first_actual_node}', but position {conflicting_position} maps to '{conflicting_actual_node}'; Error invoking subcircuit {subcircuit_name} instance {canonical_instance_name}"
+)]
+pub struct DuplicateSubcircuitPortBindingError {
+    pub subcircuit_name: String,
+    pub instance_name: String,
+    pub canonical_instance_name: String,
+    pub qualified_instance_name: String,
+    pub formal_port: String,
+    pub first_position: usize,
+    pub conflicting_position: usize,
+    pub first_actual_node: String,
+    pub conflicting_actual_node: String,
+}
+
+/// A formal global subcircuit port was connected to a differently named node.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Global node in subcircuit invocation must match same name in .subckt: formal '{formal_port}' at position {position} maps to '{actual_node}'; Error invoking subcircuit {subcircuit_name} instance {canonical_instance_name}"
+)]
+pub struct GlobalSubcircuitPortBindingError {
+    pub subcircuit_name: String,
+    pub instance_name: String,
+    pub canonical_instance_name: String,
+    pub qualified_instance_name: String,
+    pub formal_port: String,
+    pub position: usize,
+    pub actual_node: String,
+}
+
 /// Structured `.INITCOND` failures retained across parser, source-provider,
 /// hierarchy, and public adapter boundaries.
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -233,6 +268,12 @@ pub enum ParseError {
 
     #[error(transparent)]
     MissingSubcircuitEnds(Box<MissingSubcircuitEndsError>),
+
+    #[error(transparent)]
+    DuplicateSubcircuitPortBinding(Box<DuplicateSubcircuitPortBindingError>),
+
+    #[error(transparent)]
+    GlobalSubcircuitPortBinding(Box<GlobalSubcircuitPortBindingError>),
 
     #[error(transparent)]
     DeviceInitialCondition(Box<DeviceInitialConditionError>),
