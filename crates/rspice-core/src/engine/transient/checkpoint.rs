@@ -329,7 +329,7 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
 /// expanded include/SPEF content and public post-parse AST edits are included.
 pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-elaborated-netlist-v2\0");
+    hasher.update(b"rspice-transient-elaborated-netlist-v3\0");
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -346,6 +346,11 @@ pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
         &mut hasher,
         "initial_conditions",
         &netlist.initial_conditions,
+    );
+    hash_field(
+        &mut hasher,
+        "device_initial_conditions",
+        &netlist.device_initial_conditions,
     );
     hash_field(&mut hasher, "node_sets", &netlist.node_sets);
     let mut global_nodes = netlist.global_nodes.iter().collect::<Vec<_>>();
@@ -1880,6 +1885,53 @@ mod tests {
         checkpoint
             .validate_for(&netlist)
             .expect("programmatic AST identity authorizes its own checkpoint");
+    }
+
+    #[test]
+    fn initcond_directive_and_resolved_content_identity_affect_checkpoint_identity() {
+        let first = Netlist::parse("initcond checkpoint\n.INITCOND C1 IC=1\nC1 1 0 1u\n.END\n")
+            .expect("first INITCOND deck parses");
+        let second = Netlist::parse("initcond checkpoint\n.INITCOND C1 IC=2\nC1 1 0 1u\n.END\n")
+            .expect("second INITCOND deck parses");
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&second),
+            "semantic INITCOND values must participate in checkpoint identity"
+        );
+
+        let mut external = first.clone();
+        external.device_initial_conditions =
+            Some(crate::netlist::DeviceInitialConditionDirective {
+                origin: crate::netlist::NetlistSourceLocation::in_memory(2),
+                source: crate::netlist::DeviceInitialConditionSource::File {
+                    requested_path: "initcond.dat".to_string(),
+                    resolved_path: Some(std::path::PathBuf::from("initcond.dat")),
+                    content_identity: Some("a".repeat(64)),
+                },
+                entries: first
+                    .device_initial_conditions
+                    .as_ref()
+                    .expect("inline directive exists")
+                    .entries
+                    .clone(),
+            });
+        let mut changed_content = external.clone();
+        let Some(crate::netlist::DeviceInitialConditionDirective {
+            source:
+                crate::netlist::DeviceInitialConditionSource::File {
+                    content_identity, ..
+                },
+            ..
+        }) = changed_content.device_initial_conditions.as_mut()
+        else {
+            panic!("external directive retained");
+        };
+        *content_identity = Some("b".repeat(64));
+        assert_ne!(
+            netlist_checkpoint_identity(&external),
+            netlist_checkpoint_identity(&changed_content),
+            "resolved external source content identity must participate in checkpoint identity"
+        );
     }
 
     #[test]

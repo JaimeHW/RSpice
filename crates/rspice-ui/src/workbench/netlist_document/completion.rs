@@ -97,6 +97,11 @@ const DOT_COMMANDS: &[(&str, &str, &str)] = &[
         "v(<node>)=<value> …",
         "Transient initial conditions.",
     ),
+    (
+        ".initcond",
+        "<device> ic=<value>[,<value>…] … | file <path>",
+        "Xyce-compatible device initial-condition overrides.",
+    ),
     (".nodeset", "v(<node>)=<value> …", "DC convergence hints."),
     (".save", "<signal> …", "Restrict saved outputs."),
     (".probe", "<signal> …", "Mark signals for output."),
@@ -446,5 +451,16 @@ mod tests {
         assert!(geometry.width <= 304.0);
         assert!(geometry.position.x >= 8.0);
         assert!(geometry.position.x + geometry.width <= 312.0);
+    }
+
+    #[test]
+    fn dot_command_completion_includes_initcond_forms() {
+        let (_, signature, documentation) = DOT_COMMANDS
+            .iter()
+            .find(|(command, _, _)| *command == ".initcond")
+            .expect(".initcond completion is registered");
+        assert!(signature.contains("ic=<value>"));
+        assert!(signature.contains("file <path>"));
+        assert!(documentation.contains("device initial-condition"));
     }
 }
