@@ -140,6 +140,20 @@ const XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/subcircuit/subckt_missing_ends4.cir";
 const XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/input/dc_excessargs.cir";
+const XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/input/ac_setupsweepparam.cir";
+const XYCE_NOISE_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/input/noise_setupsweepparam.cir";
+const XYCE_MESSAGE_MISSING_LIBRARY_ENDL_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/input/circuitblock_parseincludefile_2a.cir";
+const XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/input/circuitblock_parseincludefile_2b.cir";
+const XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/input/circuitblock_parseincludefile_2c.cir";
+const XYCE_MESSAGE_DUPLICATE_DEVICE_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/device/circuitblock_addtabledata_1.cir";
+const XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/device/deviceblock_extractnodes_1.cir";
 const XYCE_ISSUE455_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/issue_455/issue455.cir";
 const XYCE_BUG204_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_204/bug204.cir";
@@ -193,6 +207,20 @@ const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3: &str =
 const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES: usize = 43;
 const XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3: &str =
     "472709aa403c4da89e736c47b64eff48fd919f2518d671c79cc728d847812ac1";
+const XYCE_AC_UNSUPPORTED_SWEEP_SOURCE_BLAKE3: &str =
+    "de4ea71d020e6d7b8cf23bb762f3fa55bfbc60afe7bd19de452537b544a8b043";
+const XYCE_NOISE_UNSUPPORTED_SWEEP_SOURCE_BLAKE3: &str =
+    "a65a56ba1272ade0546c639ca4efd9782d6edabb0cc8845c9cded1ef8689af0f";
+const XYCE_MESSAGE_MISSING_LIBRARY_ENDL_SOURCE_BLAKE3: &str =
+    "f9b70136edeec498d0ce7429bc00810a0709c6943f806400bd1bdc4a3ecd06a6";
+const XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_SOURCE_BLAKE3: &str =
+    "36cc809ea597e944ccc8eb92057c9eacd347fbd5b21ca2b092870db47d9db57e";
+const XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_SOURCE_BLAKE3: &str =
+    "c70a89579ff9d39c287fd874bd7a7482a43aaae7e755bf521be46da0952edd2c";
+const XYCE_MESSAGE_DUPLICATE_DEVICE_SOURCE_BLAKE3: &str =
+    "ce5680dc24782e35dcb2ca9929a895306c47664591f11697ad51114e189f4171";
+const XYCE_MESSAGE_MISSING_DEVICE_NODES_SOURCE_BLAKE3: &str =
+    "a0564ed5888ea5c23b87ceca58ad61e9cc34cf974c5cb36922b0345994e2f278";
 const XYCE_ISSUE455_SOURCE_BLAKE3: &str =
     "9552abaee2c6162c1f1b389708fd6e338fb9ea212e04e1c8be5ea972bf04c875";
 const XYCE_BUG204_SOURCE_BLAKE3: &str =
@@ -245,6 +273,10 @@ const XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3: &str =
     "08e791377b7ae33d9f2611d0c40fad6a63f3d3d5ba2ad81c976c9e4e97402d9c";
 const XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3: &str =
     "5dcb3ede7c1a655558ed9b430597d05c088381c8708e2c47da82ddfdbb41417b";
+const XYCE_MESSAGE_DEVICE_PHYSICAL_CENSUS_BLAKE3: &str =
+    "d54485c64515210437cb32173963bd8c1383dfe4b392981220e4702444834c45";
+const XYCE_MESSAGE_DEVICE_MANIFEST_CENSUS_BLAKE3: &str =
+    "9ad114c0e228f83b9c5095e653c9692c98a3e5c434bb1f32ad7b71c5894d9843";
 const XYCE_BUG671_FIXTURE_BLAKE3: &str =
     "a20bed61d99b2bd530e4bdfdb096315198e1c4702ac3ff8e320b6ea42efce9ba";
 const XYCE_BUG671_FIXTURE_BYTES: usize = 19_456;
@@ -287,6 +319,13 @@ enum XyceExpectedFailureKind {
     MessageSubcircuitMissingEndsTopLevelEof,
     MessageSubcircuitMissingEndsTsInvEof,
     MessageDcExcessArguments,
+    MessageAcUnsupportedSweepType,
+    MessageNoiseUnsupportedSweepType,
+    MessageMissingLibraryEndl,
+    MessageMissingLibraryFileUnquoted,
+    MessageMissingLibraryFileQuoted,
+    MessageDuplicateDevice,
+    MessageMissingDeviceNodes,
     Issue455DuplicateDcSourceFunction,
     Bug204InvalidDcSweepArity,
     Bug281InvalidDcSweepArity,
@@ -342,6 +381,27 @@ impl XyceExpectedFailureKind {
                 Some(Self::MessageSubcircuitMissingEndsTsInvEof)
             }
             XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD => Some(Self::MessageDcExcessArguments),
+            XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageAcUnsupportedSweepType)
+            }
+            XYCE_NOISE_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageNoiseUnsupportedSweepType)
+            }
+            XYCE_MESSAGE_MISSING_LIBRARY_ENDL_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageMissingLibraryEndl)
+            }
+            XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageMissingLibraryFileUnquoted)
+            }
+            XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageMissingLibraryFileQuoted)
+            }
+            XYCE_MESSAGE_DUPLICATE_DEVICE_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageDuplicateDevice)
+            }
+            XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageMissingDeviceNodes)
+            }
             XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
             XYCE_BUG204_EXPECTED_FAILURE_RECORD => Some(Self::Bug204InvalidDcSweepArity),
             XYCE_BUG281_EXPECTED_FAILURE_RECORD => Some(Self::Bug281InvalidDcSweepArity),
@@ -392,6 +452,25 @@ impl XyceExpectedFailureKind {
                 XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD
             }
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD,
+            Self::MessageAcUnsupportedSweepType => {
+                XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageNoiseUnsupportedSweepType => {
+                XYCE_NOISE_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageMissingLibraryEndl => {
+                XYCE_MESSAGE_MISSING_LIBRARY_ENDL_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageMissingLibraryFileUnquoted => {
+                XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageMissingLibraryFileQuoted => {
+                XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageDuplicateDevice => XYCE_MESSAGE_DUPLICATE_DEVICE_EXPECTED_FAILURE_RECORD,
+            Self::MessageMissingDeviceNodes => {
+                XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD
+            }
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_EXPECTED_FAILURE_RECORD,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_EXPECTED_FAILURE_RECORD,
@@ -433,6 +512,17 @@ impl XyceExpectedFailureKind {
                 XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_SOURCE_BLAKE3
             }
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3,
+            Self::MessageAcUnsupportedSweepType => XYCE_AC_UNSUPPORTED_SWEEP_SOURCE_BLAKE3,
+            Self::MessageNoiseUnsupportedSweepType => XYCE_NOISE_UNSUPPORTED_SWEEP_SOURCE_BLAKE3,
+            Self::MessageMissingLibraryEndl => XYCE_MESSAGE_MISSING_LIBRARY_ENDL_SOURCE_BLAKE3,
+            Self::MessageMissingLibraryFileUnquoted => {
+                XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_SOURCE_BLAKE3
+            }
+            Self::MessageMissingLibraryFileQuoted => {
+                XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_SOURCE_BLAKE3
+            }
+            Self::MessageDuplicateDevice => XYCE_MESSAGE_DUPLICATE_DEVICE_SOURCE_BLAKE3,
+            Self::MessageMissingDeviceNodes => XYCE_MESSAGE_MISSING_DEVICE_NODES_SOURCE_BLAKE3,
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
             Self::Bug281InvalidDcSweepArity => XYCE_BUG281_SOURCE_BLAKE3,
@@ -472,6 +562,25 @@ impl XyceExpectedFailureKind {
                 "expected_failure_subckt_missing_ends_ts_inv_eof_parse"
             }
             Self::MessageDcExcessArguments => "expected_failure_dc_excess_arguments_parse",
+            Self::MessageAcUnsupportedSweepType => {
+                "expected_failure_ac_unsupported_sweep_type_parse"
+            }
+            Self::MessageNoiseUnsupportedSweepType => {
+                "expected_failure_noise_unsupported_sweep_type_parse"
+            }
+            Self::MessageMissingLibraryEndl => {
+                "expected_failure_message_missing_library_endl_parse"
+            }
+            Self::MessageMissingLibraryFileUnquoted => {
+                "expected_failure_message_missing_library_file_unquoted_parse"
+            }
+            Self::MessageMissingLibraryFileQuoted => {
+                "expected_failure_message_missing_library_file_quoted_parse"
+            }
+            Self::MessageDuplicateDevice => "expected_failure_message_duplicate_device_parse",
+            Self::MessageMissingDeviceNodes => {
+                "expected_failure_message_missing_device_nodes_parse"
+            }
             Self::Issue455DuplicateDcSourceFunction => {
                 "expected_failure_duplicate_dc_source_function_parse"
             }
@@ -533,6 +642,18 @@ impl XyceExpectedFailureKind {
             ][..],
             Self::MessageSubcircuitMissingEndsTsInvEof => &["Subcircuit TS_INV missing .ENDS"][..],
             Self::MessageDcExcessArguments => &["Extraneous values"][..],
+            Self::MessageAcUnsupportedSweepType => &["Unsupported AC sweep type: BOGO"][..],
+            Self::MessageNoiseUnsupportedSweepType => &["Unsupported NOISE sweep type: BOGO"][..],
+            Self::MessageMissingLibraryEndl => {
+                &[r"Could not find \.ENDL statement for \'\.LIB PLUGH\.LIB\'"][..]
+            }
+            Self::MessageMissingLibraryFileUnquoted | Self::MessageMissingLibraryFileQuoted => {
+                &[r"Could not find include file plugh\.lib"][..]
+            }
+            Self::MessageDuplicateDevice => &["Duplicate device DA"][..],
+            Self::MessageMissingDeviceNodes => {
+                &["Not enough fields on input line for device R2"][..]
+            }
             Self::Issue455DuplicateDcSourceFunction => &[
                 "Netlist error in file issue455.cir at or near line 4",
                 "No such source function dc in V2",
@@ -675,6 +796,64 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::DcExcessArguments,
                 identifiers: vec!["V1".to_string(), "4.0".to_string(), "line 6".to_string()],
             },
+            Self::MessageAcUnsupportedSweepType => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::InvalidFrequencySweepType,
+                identifiers: vec!["AC".to_string(), "BOGO".to_string(), "line 14".to_string()],
+            },
+            Self::MessageNoiseUnsupportedSweepType => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::InvalidFrequencySweepType,
+                identifiers: vec![
+                    "NOISE".to_string(),
+                    "BOGO".to_string(),
+                    "line 17".to_string(),
+                ],
+            },
+            Self::MessageMissingLibraryEndl => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingLibraryEndl,
+                identifiers: vec![
+                    "plugh.lib".to_string(),
+                    "UNQUOTED".to_string(),
+                    "line 3".to_string(),
+                ],
+            },
+            Self::MessageMissingLibraryFileUnquoted => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingLibraryFile,
+                identifiers: vec![
+                    "plugh.lib".to_string(),
+                    "x".to_string(),
+                    "UNQUOTED".to_string(),
+                    "line 3".to_string(),
+                ],
+            },
+            Self::MessageMissingLibraryFileQuoted => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingLibraryFile,
+                identifiers: vec![
+                    "plugh.lib".to_string(),
+                    "x".to_string(),
+                    "SINGLE_QUOTED".to_string(),
+                    "line 3".to_string(),
+                ],
+            },
+            Self::MessageDuplicateDevice => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::DuplicateDeviceName,
+                identifiers: vec![
+                    "DA".to_string(),
+                    "TOP_LEVEL".to_string(),
+                    "line 8".to_string(),
+                    "line 9".to_string(),
+                ],
+            },
+            Self::MessageMissingDeviceNodes => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingDeviceNodes,
+                identifiers: vec!["R2".to_string(), "OUT_1".to_string(), "line 14".to_string()],
+            },
             Self::Issue455DuplicateDcSourceFunction => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::NetlistParse,
                 category: XyceExpectedFailureCategory::DuplicateDcSourceFunction,
@@ -803,13 +982,27 @@ impl XyceExpectedFailureKind {
                 manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
                 require_manifest_bijection: false,
             }),
-            Self::MessageDcExcessArguments => Some(XyceExpectedFailureFamilyCensus {
+            Self::MessageDcExcessArguments
+            | Self::MessageAcUnsupportedSweepType
+            | Self::MessageNoiseUnsupportedSweepType
+            | Self::MessageMissingLibraryEndl
+            | Self::MessageMissingLibraryFileUnquoted
+            | Self::MessageMissingLibraryFileQuoted => Some(XyceExpectedFailureFamilyCensus {
                 physical_cir_count: 79,
                 physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 50,
                 manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
                 require_manifest_bijection: false,
             }),
+            Self::MessageDuplicateDevice | Self::MessageMissingDeviceNodes => {
+                Some(XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 28,
+                    physical_names_blake3: XYCE_MESSAGE_DEVICE_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 26,
+                    manifest_records_blake3: XYCE_MESSAGE_DEVICE_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: false,
+                })
+            }
             Self::Bug401BadDeviceLine | Self::Bug401ExtraSpace | Self::Bug401WorseDeviceLine => {
                 Some(XyceExpectedFailureFamilyCensus {
                     physical_cir_count: 3,
@@ -871,6 +1064,9 @@ enum XyceExpectedFailureCategory {
     MissingSubcircuitName,
     MissingSubcircuitEnds,
     DcExcessArguments,
+    InvalidFrequencySweepType,
+    MissingLibraryFile,
+    MissingDeviceNodes,
     DuplicateDcSourceFunction,
     InvalidDcSweepArity,
     UnknownXspiceModel,
@@ -4140,6 +4336,27 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::MessageDcExcessArguments => {
                 Self::observe_dc_excess_args_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType => {
+                Self::observe_unsupported_frequency_sweep_failure(source, &deck.path, kind)?
+            }
+            XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType => {
+                Self::observe_unsupported_frequency_sweep_failure(source, &deck.path, kind)?
+            }
+            XyceExpectedFailureKind::MessageMissingLibraryEndl => {
+                Self::observe_message_missing_library_endl_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted => {
+                Self::observe_message_missing_library_file_failure(source, &deck.path, kind)?
+            }
+            XyceExpectedFailureKind::MessageMissingLibraryFileQuoted => {
+                Self::observe_message_missing_library_file_failure(source, &deck.path, kind)?
+            }
+            XyceExpectedFailureKind::MessageDuplicateDevice => {
+                Self::observe_message_duplicate_device_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::MessageMissingDeviceNodes => {
+                Self::observe_message_missing_device_nodes_failure(source, &deck.path)?
+            }
             XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction => {
                 Self::observe_issue455_duplicate_dc_failure(source, &deck.path)?
             }
@@ -4666,6 +4883,23 @@ impl XyceTestRunner {
         }
     }
 
+    fn require_expected_failure_file_name(
+        label: &str,
+        deck_path: &Path,
+        expected_file_name: &str,
+    ) -> Result<(), String> {
+        let actual = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("{label} deck path has no UTF-8 filename"))?;
+        if actual != expected_file_name {
+            return Err(format!(
+                "{label} deck filename changed: expected {expected_file_name:?}, got {actual:?}"
+            ));
+        }
+        Ok(())
+    }
+
     fn observe_bug387_missing_library_endl_failure(
         source: &str,
         deck_path: &Path,
@@ -5060,6 +5294,341 @@ impl XyceTestRunner {
             stage: XyceExpectedFailureStage::NetlistParse,
             category: XyceExpectedFailureCategory::DcExcessArguments,
             identifiers: vec!["V1".to_string(), "4.0".to_string(), "line 6".to_string()],
+        })
+    }
+
+    fn observe_unsupported_frequency_sweep_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let (label, file_name, line_count, sweep_line, analysis) = match kind {
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType => (
+                "Message/Input AC_setupSweepParam",
+                "AC_setupSweepParam.cir",
+                17,
+                14,
+                "AC",
+            ),
+            XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType => (
+                "Message/Input NOISE_setupSweepParam",
+                "NOISE_setupSweepParam.cir",
+                22,
+                17,
+                "NOISE",
+            ),
+            _ => {
+                return Err(format!(
+                    "non-AC/NOISE expected-failure kind passed to unsupported-sweep observer: {kind:?}"
+                ));
+            }
+        };
+        Self::require_expected_failure_file_name(label, deck_path, file_name)?;
+        let expected_lines = if analysis == "AC" {
+            vec![
+                (9, "R1 b 0 2"),
+                (10, "C1 a b 1u"),
+                (11, "V1 a 0 DC 0V AC 1"),
+                (13, ".print AC vm(b)"),
+                (14, ".ac bogo 5 100 1e6"),
+                (16, ".end"),
+            ]
+        } else {
+            vec![
+                (8, "v1  1 0 dc 5.0 ac 1"),
+                (13, "eamp  3 0 2 0 1"),
+                (15, "clp1  4 0 1.59nf"),
+                (17, ".noise v(4) v1 bogo 5 100 1e6"),
+                (19, ".print noise V(4) {log(onoise)} {log(inoise)}"),
+                (21, ".end"),
+            ]
+        };
+        Self::require_expected_failure_source_lines(label, source, line_count, &expected_lines)?;
+        Self::require_exact_syntax_failure(
+            label,
+            source,
+            deck_path,
+            sweep_line,
+            "Unknown frequency variation: BOGO",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::InvalidFrequencySweepType,
+            identifiers: vec![
+                analysis.to_string(),
+                "BOGO".to_string(),
+                format!("line {sweep_line}"),
+            ],
+        })
+    }
+
+    fn observe_message_missing_library_endl_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let label = "Message/Input CircuitBlock_parseIncludeFile_2a";
+        Self::require_expected_failure_file_name(
+            label,
+            deck_path,
+            "CircuitBlock_parseIncludeFile_2a.cir",
+        )?;
+        Self::require_expected_failure_source_lines(
+            label,
+            source,
+            10,
+            &[
+                (
+                    1,
+                    "demonstrates how Xyce missing the analysis statement if it can't find a library",
+                ),
+                (3, ".lib plugh.lib"),
+                (5, "c1 1 0 1uF IC=1"),
+                (8, ".print tran v(1)"),
+                (9, ".tran 0 5ms"),
+                (10, ".end"),
+            ],
+        )?;
+        if source
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case(".endl"))
+        {
+            return Err(format!("{label} must retain the missing .ENDL condition"));
+        }
+        Self::require_exact_syntax_failure(
+            label,
+            source,
+            deck_path,
+            3,
+            "Library section 'plugh.lib' missing .ENDL",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::MissingLibraryEndl,
+            identifiers: vec![
+                "plugh.lib".to_string(),
+                "UNQUOTED".to_string(),
+                "line 3".to_string(),
+            ],
+        })
+    }
+
+    fn require_missing_library_dependency_absent(
+        label: &str,
+        deck_path: &Path,
+        execution_dir: &Path,
+    ) -> Result<(), String> {
+        let owner_dir = deck_path
+            .parent()
+            .ok_or_else(|| format!("{label} deck has no parent directory"))?;
+        let mut search_directories = BTreeSet::new();
+        for directory in [
+            owner_dir.to_path_buf(),
+            execution_dir.to_path_buf(),
+            owner_dir.join("lib"),
+            owner_dir.join("models"),
+            owner_dir.join("..").join("lib"),
+            owner_dir.join("..").join("models"),
+        ] {
+            search_directories.insert(directory);
+        }
+        let mut present = Vec::new();
+        for directory in search_directories {
+            if !directory.is_dir() {
+                continue;
+            }
+            for entry in fs::read_dir(&directory).map_err(|error| {
+                format!(
+                    "failed to inspect {label} missing-library search directory {}: {error}",
+                    directory.display()
+                )
+            })? {
+                let entry = entry.map_err(|error| {
+                    format!(
+                        "failed to inspect {label} missing-library search entry in {}: {error}",
+                        directory.display()
+                    )
+                })?;
+                if entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("plugh.lib"))
+                {
+                    present.push(entry.path());
+                }
+            }
+        }
+        present.sort();
+        if !present.is_empty() {
+            return Err(format!(
+                "{label} missing-library oracle acquired a resolvable plugh.lib dependency: {present:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn observe_message_missing_library_file_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let (label, file_name, library_line, quoting) = match kind {
+            XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted => (
+                "Message/Input CircuitBlock_parseIncludeFile_2b",
+                "CircuitBlock_parseIncludeFile_2b.cir",
+                ".lib plugh.lib x",
+                "UNQUOTED",
+            ),
+            XyceExpectedFailureKind::MessageMissingLibraryFileQuoted => (
+                "Message/Input CircuitBlock_parseIncludeFile_2c",
+                "CircuitBlock_parseIncludeFile_2c.cir",
+                ".lib 'plugh.lib' x",
+                "SINGLE_QUOTED",
+            ),
+            _ => {
+                return Err(format!(
+                    "non-missing-library-file kind passed to dependency observer: {kind:?}"
+                ));
+            }
+        };
+        Self::require_expected_failure_file_name(label, deck_path, file_name)?;
+        Self::require_expected_failure_source_lines(
+            label,
+            source,
+            10,
+            &[
+                (
+                    1,
+                    "demonstrates how Xyce missing the analysis statement if it can't find a library",
+                ),
+                (3, library_line),
+                (5, "c1 1 0 1uF IC=1"),
+                (8, ".print tran v(1)"),
+                (9, ".tran 0 5ms"),
+                (10, ".end"),
+            ],
+        )?;
+        let execution_dir = deck_path
+            .parent()
+            .ok_or_else(|| format!("{label} deck has no execution directory"))?;
+        Self::require_missing_library_dependency_absent(label, deck_path, execution_dir)?;
+        let expected_message = format!(
+            "{}:3: .lib resolution failed: Include file not found: plugh.lib (searched {})",
+            deck_path.display(),
+            execution_dir.display()
+        );
+        match Self::parse_netlist_with_expression_dialect_and_execution_dir(
+            source,
+            deck_path,
+            ExpressionDialect::Xyce,
+            Some(execution_dir),
+        ) {
+            Err(ParseError::Syntax { line, message })
+                if line == 3 && message == expected_message => {}
+            Err(error) => {
+                return Err(format!(
+                    "{label} produced the wrong typed missing-library failure: expected line 3 / {expected_message:?}, got {error:?}"
+                ));
+            }
+            Ok(_) => {
+                return Err(format!(
+                    "{label} unexpectedly parsed; the missing-library condition is absent"
+                ));
+            }
+        }
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::MissingLibraryFile,
+            identifiers: vec![
+                "plugh.lib".to_string(),
+                "x".to_string(),
+                quoting.to_string(),
+                "line 3".to_string(),
+            ],
+        })
+    }
+
+    fn observe_message_duplicate_device_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let label = "Message/Device CircuitBlock_addTableData_1";
+        Self::require_expected_failure_file_name(
+            label,
+            deck_path,
+            "CircuitBlock_addTableData_1.cir",
+        )?;
+        Self::require_expected_failure_source_lines(
+            label,
+            source,
+            16,
+            &[
+                (1, "level=1 diode circuit"),
+                (4, "R 1 2 0.0001"),
+                (7, "D2 1 3 DA"),
+                (8, "DA 1 3 DA"),
+                (9, "DA 1 3 DA"),
+                (12, ".MODEL DA D (RS=1.73320090e-004 IS=1.85431192e-010)"),
+                (14, ".DC V2 0.0 2.0 0.005"),
+                (15, ".print DC v(2) I(V1)  "),
+                (16, ".END"),
+            ],
+        )?;
+        Self::require_exact_duplicate_device_failure(
+            label,
+            source,
+            deck_path,
+            "DA",
+            "TOP_LEVEL",
+            8,
+            9,
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::DuplicateDeviceName,
+            identifiers: vec![
+                "DA".to_string(),
+                "TOP_LEVEL".to_string(),
+                "line 8".to_string(),
+                "line 9".to_string(),
+            ],
+        })
+    }
+
+    fn observe_message_missing_device_nodes_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let label = "Message/Device DeviceBlock_extractNodes_1";
+        Self::require_expected_failure_file_name(
+            label,
+            deck_path,
+            "DeviceBlock_extractNodes_1.cir",
+        )?;
+        Self::require_expected_failure_source_lines(
+            label,
+            source,
+            18,
+            &[
+                (1, "test circuit for missing nodes on lines"),
+                (4, "V1 in_1 0 5V"),
+                (7, ".DC V1 1 5 1"),
+                (10, ".PRINT DC v(in_1) v(out_1)"),
+                (13, "R1 in_1 out_1 100K"),
+                (14, "R2 out_1"),
+                (17, "C2 out_1 100pF"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            label,
+            source,
+            deck_path,
+            14,
+            "Expected node name, found Eof",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::MissingDeviceNodes,
+            identifiers: vec!["R2".to_string(), "OUT_1".to_string(), "line 14".to_string()],
         })
     }
 
@@ -66622,6 +67191,34 @@ R2 2 0 1
                 &["Extraneous values"][..],
             ),
             (
+                XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+                &["Unsupported AC sweep type: BOGO"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+                &["Unsupported NOISE sweep type: BOGO"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingLibraryEndl,
+                &[r"Could not find \.ENDL statement for \'\.LIB PLUGH\.LIB\'"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+                &[r"Could not find include file plugh\.lib"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+                &[r"Could not find include file plugh\.lib"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageDuplicateDevice,
+                &["Duplicate device DA"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageMissingDeviceNodes,
+                &["Not enough fields on input line for device R2"][..],
+            ),
+            (
                 XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
                 &[
                     "Netlist error in file issue455.cir at or near line 4",
@@ -66744,7 +67341,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_twenty_six_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_thirty_three_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -66844,8 +67441,36 @@ R2 2 0 1
                     XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
                 ),
                 (
+                    XYCE_MESSAGE_DUPLICATE_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageDuplicateDevice,
+                ),
+                (
+                    XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageMissingDeviceNodes,
+                ),
+                (
+                    XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+                ),
+                (
+                    XYCE_MESSAGE_MISSING_LIBRARY_ENDL_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageMissingLibraryEndl,
+                ),
+                (
+                    XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+                ),
+                (
+                    XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+                ),
+                (
                     XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::MessageDcExcessArguments,
+                ),
+                (
+                    XYCE_NOISE_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
                 ),
                 (
                     XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD.to_string(),
@@ -66875,7 +67500,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            26,
+            33,
             "each record requires a distinct contract"
         );
     }
@@ -66928,6 +67553,34 @@ R2 2 0 1
             (
                 "Netlists/Message/Input/DC_excessArgs.cir",
                 "expected_failure_dc_excess_arguments_parse",
+            ),
+            (
+                "Netlists/Message/Input/AC_setupSweepParam.cir",
+                "expected_failure_ac_unsupported_sweep_type_parse",
+            ),
+            (
+                "Netlists/Message/Input/NOISE_setupSweepParam.cir",
+                "expected_failure_noise_unsupported_sweep_type_parse",
+            ),
+            (
+                "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2a.cir",
+                "expected_failure_message_missing_library_endl_parse",
+            ),
+            (
+                "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2b.cir",
+                "expected_failure_message_missing_library_file_unquoted_parse",
+            ),
+            (
+                "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2c.cir",
+                "expected_failure_message_missing_library_file_quoted_parse",
+            ),
+            (
+                "Netlists/Message/Device/CircuitBlock_addTableData_1.cir",
+                "expected_failure_message_duplicate_device_parse",
+            ),
+            (
+                "Netlists/Message/Device/DeviceBlock_extractNodes_1.cir",
+                "expected_failure_message_missing_device_nodes_parse",
             ),
             (
                 "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
@@ -67017,16 +67670,36 @@ R2 2 0 1
         ] {
             assert_eq!(member.shared_family_census(), message_subcircuit_census);
         }
-        assert_eq!(
-            XyceExpectedFailureKind::MessageDcExcessArguments.shared_family_census(),
-            Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 79,
-                physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 50,
-                manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: false,
-            })
-        );
+        let message_input_census = Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 79,
+            physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 50,
+            manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: false,
+        });
+        for member in [
+            XyceExpectedFailureKind::MessageDcExcessArguments,
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+            XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+            XyceExpectedFailureKind::MessageMissingLibraryEndl,
+            XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+            XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+        ] {
+            assert_eq!(member.shared_family_census(), message_input_census);
+        }
+        let message_device_census = Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 28,
+            physical_names_blake3: XYCE_MESSAGE_DEVICE_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 26,
+            manifest_records_blake3: XYCE_MESSAGE_DEVICE_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: false,
+        });
+        for member in [
+            XyceExpectedFailureKind::MessageDuplicateDevice,
+            XyceExpectedFailureKind::MessageMissingDeviceNodes,
+        ] {
+            assert_eq!(member.shared_family_census(), message_device_census);
+        }
         let bug401_census = Some(XyceExpectedFailureFamilyCensus {
             physical_cir_count: 3,
             physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
@@ -67748,6 +68421,205 @@ R2 2 0 1
                 "{label} must not satisfy DC_excessArgs"
             );
         }
+    }
+
+    #[test]
+    fn message_input_and_device_observers_reject_corrections_shifts_and_path_mutations() {
+        let root = expected_failure_test_root();
+        let cases = [
+            (
+                "Netlists/Message/Input/AC_setupSweepParam.cir",
+                XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+            ),
+            (
+                "Netlists/Message/Input/NOISE_setupSweepParam.cir",
+                XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+            ),
+            (
+                "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2a.cir",
+                XyceExpectedFailureKind::MessageMissingLibraryEndl,
+            ),
+            (
+                "Netlists/Message/Device/CircuitBlock_addTableData_1.cir",
+                XyceExpectedFailureKind::MessageDuplicateDevice,
+            ),
+            (
+                "Netlists/Message/Device/DeviceBlock_extractNodes_1.cir",
+                XyceExpectedFailureKind::MessageMissingDeviceNodes,
+            ),
+        ];
+        for (relative, kind) in cases {
+            let path = root.join(relative);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {relative}: {error}"));
+            let observe = |candidate: &str, candidate_path: &Path| match kind {
+                XyceExpectedFailureKind::MessageAcUnsupportedSweepType
+                | XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType => {
+                    XyceTestRunner::observe_unsupported_frequency_sweep_failure(
+                        candidate,
+                        candidate_path,
+                        kind,
+                    )
+                }
+                XyceExpectedFailureKind::MessageMissingLibraryEndl => {
+                    XyceTestRunner::observe_message_missing_library_endl_failure(
+                        candidate,
+                        candidate_path,
+                    )
+                }
+                XyceExpectedFailureKind::MessageDuplicateDevice => {
+                    XyceTestRunner::observe_message_duplicate_device_failure(
+                        candidate,
+                        candidate_path,
+                    )
+                }
+                XyceExpectedFailureKind::MessageMissingDeviceNodes => {
+                    XyceTestRunner::observe_message_missing_device_nodes_failure(
+                        candidate,
+                        candidate_path,
+                    )
+                }
+                _ => unreachable!("case list contains only the five direct observers"),
+            };
+            observe(&source, &path).unwrap_or_else(|error| {
+                panic!("canonical {relative} expected failure is observed: {error}")
+            });
+
+            let corrected = match kind {
+                XyceExpectedFailureKind::MessageAcUnsupportedSweepType => {
+                    source.replacen(".ac bogo 5 100 1e6", ".ac dec 5 100 1e6", 1)
+                }
+                XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType => {
+                    source.replacen(".noise v(4) v1 bogo", ".noise v(4) v1 dec", 1)
+                }
+                XyceExpectedFailureKind::MessageMissingLibraryEndl => {
+                    source.replacen(".end", ".endl\n.end", 1)
+                }
+                XyceExpectedFailureKind::MessageDuplicateDevice => {
+                    source.replacen("DA 1 3 DA", "DB 1 3 DA", 1)
+                }
+                XyceExpectedFailureKind::MessageMissingDeviceNodes => source
+                    .replacen("R2 out_1", "R2 out_1 0 100K", 1)
+                    .replacen("C2 out_1 100pF", "C2 out_1 0 100pF", 1),
+                _ => unreachable!(),
+            };
+            assert_ne!(
+                corrected, source,
+                "{relative} correction must change source"
+            );
+            XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+                .unwrap_or_else(|error| panic!("corrected {relative} genuinely parses: {error}"));
+            assert!(
+                observe(&corrected, &path).is_err(),
+                "corrected {relative} must not satisfy its expected-failure oracle"
+            );
+
+            let shifted = format!("\r\n{source}");
+            assert!(
+                observe(&shifted, &path).is_err(),
+                "shifted {relative} must not satisfy its expected-failure oracle"
+            );
+
+            let temp_dir = unique_expected_failure_temp_dir("message-path");
+            fs::create_dir_all(&temp_dir).expect("create message path fixture");
+            let renamed = temp_dir.join("renamed.cir");
+            fs::write(&renamed, &source).expect("write renamed message fixture");
+            assert!(
+                observe(&source, &renamed).is_err(),
+                "renamed {relative} must fail exact record identity"
+            );
+            fs::remove_dir_all(temp_dir).expect("remove message path fixture");
+        }
+    }
+
+    #[test]
+    fn missing_library_file_observers_pin_quoting_execution_dir_and_absent_dependency() {
+        let root = expected_failure_test_root();
+        let temp_root = unique_expected_failure_temp_dir("missing-library-file");
+        let family = temp_root.join("Netlists/Message/Input");
+        fs::create_dir_all(&family).expect("create missing-library family fixture");
+
+        for (file_name, kind, source_line, alternate_line) in [
+            (
+                "CircuitBlock_parseIncludeFile_2b.cir",
+                XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+                ".lib plugh.lib x",
+                ".lib 'plugh.lib' x",
+            ),
+            (
+                "CircuitBlock_parseIncludeFile_2c.cir",
+                XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+                ".lib 'plugh.lib' x",
+                ".lib plugh.lib x",
+            ),
+        ] {
+            let canonical_path = root.join("Netlists/Message/Input").join(file_name);
+            let source = fs::read_to_string(&canonical_path)
+                .unwrap_or_else(|error| panic!("read {file_name}: {error}"));
+            let deck_path = family.join(file_name);
+            fs::write(&deck_path, &source).expect("write missing-library owner");
+            XyceTestRunner::observe_message_missing_library_file_failure(&source, &deck_path, kind)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "canonical copied {file_name} missing-library failure is observed: {error}"
+                    )
+                });
+
+            let quote_mutation = source.replacen(source_line, alternate_line, 1);
+            assert_ne!(quote_mutation, source);
+            assert!(
+                XyceTestRunner::observe_message_missing_library_file_failure(
+                    &quote_mutation,
+                    &deck_path,
+                    kind
+                )
+                .is_err(),
+                "quote spelling mutation must not satisfy {file_name}"
+            );
+            let shifted = format!("\r\n{source}");
+            assert!(
+                XyceTestRunner::observe_message_missing_library_file_failure(
+                    &shifted, &deck_path, kind
+                )
+                .is_err(),
+                "shifted source must not satisfy {file_name}"
+            );
+            let renamed = family.join("renamed.cir");
+            fs::write(&renamed, &source).expect("write renamed missing-library owner");
+            assert!(
+                XyceTestRunner::observe_message_missing_library_file_failure(
+                    &source, &renamed, kind
+                )
+                .is_err(),
+                "renamed owner must not satisfy {file_name}"
+            );
+            fs::remove_file(&renamed).expect("remove renamed missing-library owner");
+
+            for dependency_dir in [
+                family.clone(),
+                family.join("lib"),
+                family.join("models"),
+                family.join("..").join("lib"),
+                family.join("..").join("models"),
+            ] {
+                fs::create_dir_all(&dependency_dir)
+                    .expect("create missing-library resolver directory");
+                let dependency = dependency_dir.join("PlUgH.LiB");
+                fs::write(&dependency, ".lib x\nRKEEP 1 0 1\n.endl x\n")
+                    .expect("write case-variant plugh.lib dependency");
+                assert!(
+                    XyceTestRunner::observe_message_missing_library_file_failure(
+                        &source, &deck_path, kind
+                    )
+                    .is_err(),
+                    "resolvable dependency at {} must invalidate {file_name}",
+                    dependency.display()
+                );
+                fs::remove_file(&dependency).expect("remove plugh.lib dependency");
+            }
+        }
+
+        fs::remove_dir_all(temp_root).expect("remove missing-library fixture");
     }
 
     #[test]
