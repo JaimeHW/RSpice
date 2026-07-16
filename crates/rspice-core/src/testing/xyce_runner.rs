@@ -100,6 +100,10 @@ const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_647_son/semic_resistor.cir";
 const XYCE_BUG647_RESISTOR_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_647_son/semic_resistor_modpar.cir";
+const XYCE_BUG655_CONTINUATION_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_655_son/contline.cir";
+const XYCE_BUG655_CONTINUATION_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/bug_655_son/contline_with_spaces.cir";
 const XYCE_BUG662_LONG_HEADER_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_662/headerlinelengthmorethan256.cir";
 const XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD: &str =
@@ -109,6 +113,27 @@ const XYCE_BUG667_NODESET_OWNER_RECORD: &str =
 const XYCE_BUG667_NODESET_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_667_son/nodeset_not_in_subckt.cir";
 const XYCE_BUG662_CANONICAL_LONG_TITLE: &str = r#"** Converted using XDM 0.20rc from /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/pspice_9_1.xml to /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/xyce_6_3.xml ** ** Profile: "SCHEMATIC1-bias"  [ H:\Xyce\PSpice\Netlists\TransmissionLine-PSpiceFiles\SCHEMATIC1\bias.sim ]"#;
+const XYCE_BUG655_CANONICAL_OWNER_SOURCE: &str = "*** Simple amplifier ***\n\
+\n\
+vcc 1 0 dc 12V\n\
+i1 2 0 dc 0A\n\
+\n\
+r1 1 3 5k\n\
+r2 2 3 20k\n\
+\n\
+q1 3 2 0 2n3510\n\
+\n\
+.model 2n3510 npn\n\
++ bf=100 br=1.35e-4 xtb=1.5 is=8.35e-14 eg=1.11 cjc=9.63e-12\n\
++ cje=9.47e-12 rb=16.7 rc=1.66 vaf=90 tf=1e-10 tr=1.27e-4\n\
++ cjs=1e-15 vjs=0.8 mjs=0.5 var=100 ise=4.77e-11 isc=1e-16\n\
++ ikf=0.18 ikr=1000 irb=1 rbm=0 vtf=1000\n\
+\n\
+.DC i1 -100uA 100uA 10uA\n\
+\n\
+.PRINT DC I(I1) V(3)\n\
+\n\
+.end\n";
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
@@ -477,6 +502,39 @@ struct XyceBug647ResistorContract {
     owner_plan: XyceStaticDcPlan,
     reference_plan: XyceStaticDcPlan,
     role: XyceBug647ResistorRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug655ContinuationRole {
+    ColumnZeroOwner,
+    LeadingSpaceReference,
+}
+
+impl XyceBug655ContinuationRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::ColumnZeroOwner => "bug655_continuation_relational_wrapper_owner",
+            Self::LeadingSpaceReference => {
+                "bug655_continuation_relational_wrapper_spaced_reference"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug655ContinuationContract {
+    owner_plan: XyceStaticDcPlan,
+    reference_plan: XyceStaticDcPlan,
+    role: XyceBug655ContinuationRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug655ContinuationSnapshot {
+    title: String,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    model_name: String,
+    model_type: String,
+    model_params: Vec<(String, u64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2782,6 +2840,30 @@ impl XyceTestRunner {
                     start,
                     "bug647_resistor_relational_wrapper",
                     format!("BUG 647 resistor relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.bug655_continuation_relational_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_bug655_continuation_relational_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "bug655_continuation_relational_wrapper",
+                    format!("BUG 655 continuation-line qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -12208,6 +12290,270 @@ impl XyceTestRunner {
         }
         lines.push(
             ["End", "of", "Xyce(TM)", "Parameter", "Sweep"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        Ok(lines)
+    }
+
+    fn run_bug655_continuation_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug655ContinuationContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        let owner = match self.simulate_bug655_continuation_member(
+            &contract.owner_plan,
+            start,
+            "column-zero continuation owner",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 655 owner execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let reference = match self.simulate_bug655_continuation_member(
+            &contract.reference_plan,
+            start,
+            "leading-space continuation reference",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 655 spaced-reference execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mismatches = match self.compare_bug655_continuation_tables(&owner, &reference) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 655 Release 7.10 xyce_verify adapter failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} BUG 655 DC mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn simulate_bug655_continuation_member(
+        &self,
+        plan: &XyceStaticDcPlan,
+        start: Instant,
+        role: &str,
+    ) -> Result<XycePrnTable, String> {
+        let (netlist, results) = self
+            .run_static_dc_results(plan, start)
+            .map_err(|err| format!("{role} simulation failed: {err}"))?;
+        if results.len() != 21 {
+            return Err(format!(
+                "{role} produced {} DC points instead of 21",
+                results.len()
+            ));
+        }
+        self.dc_results_to_prn_table(plan, &netlist, &results)
+            .map_err(|err| format!("{role} default PRN generation failed: {err}"))
+    }
+
+    fn compare_bug655_continuation_tables(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let good_tokens = Self::bug655_default_prn_token_lines(good)?;
+        let test_tokens = Self::bug655_default_prn_token_lines(test)?;
+        if good_tokens.len() != 23
+            || test_tokens.len() != 23
+            || !good_tokens[0]
+                .iter()
+                .zip(&test_tokens[0])
+                .all(|(left, right)| left.eq_ignore_ascii_case(right))
+            || good_tokens[22] != test_tokens[22]
+        {
+            return Err(
+                "BUG 655 paired default PRNs do not have matching complete header/data/footer layouts"
+                    .into(),
+            );
+        }
+        if good.columns.len() != 3
+            || test.columns.len() != 3
+            || good.rows.len() != 21
+            || test.rows.len() != 21
+            || !good
+                .columns
+                .iter()
+                .zip(&test.columns)
+                .all(|(left, right)| left.eq_ignore_ascii_case(right))
+        {
+            return Err(format!(
+                "BUG 655 xyce_verify requires matching three-column, 21-row PRNs, got good={:?}/{} test={:?}/{}",
+                good.columns,
+                good.rows.len(),
+                test.columns,
+                test.rows.len()
+            ));
+        }
+
+        let tolerance = XyceVerifyTransientTolerance::release_7_10_default().validate()?;
+        let zero_small = |value: Value| {
+            if value.abs() <= tolerance.zero {
+                0.0
+            } else {
+                value
+            }
+        };
+        let mut good_rows = Vec::with_capacity(21);
+        let mut test_rows = Vec::with_capacity(21);
+        for (row_index, (good_row, test_row)) in good.rows.iter().zip(&test.rows).enumerate() {
+            let expected_index = row_index as Value;
+            if good_row.len() != 3
+                || test_row.len() != 3
+                || good_row[0].to_bits() != expected_index.to_bits()
+                || test_row[0].to_bits() != expected_index.to_bits()
+            {
+                return Err(format!(
+                    "BUG 655 PRN row {row_index} does not preserve the canonical Index and three-field layout"
+                ));
+            }
+            let serialize = |value: Value, role: &str, column: &str| {
+                Self::xyce_prn_scientific_roundtrip(value, XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION)
+                    .map(zero_small)
+                    .map_err(|err| {
+                        format!(
+                            "could not serialize BUG 655 {role} {column} at row {row_index}: {err}"
+                        )
+                    })
+            };
+            good_rows.push([
+                serialize(good_row[1], "good", &good.columns[1])?,
+                serialize(good_row[2], "good", &good.columns[2])?,
+            ]);
+            test_rows.push([
+                serialize(test_row[1], "test", &test.columns[1])?,
+                serialize(test_row[2], "test", &test.columns[2])?,
+            ]);
+        }
+
+        for (row_index, (good_row, test_row)) in good_rows.iter().zip(&test_rows).enumerate() {
+            let expected_sweep = Self::xyce_prn_scientific_roundtrip(
+                -100.0e-6 + row_index as Value * 10.0e-6,
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            for (role, actual) in [("good", good_row[0]), ("test", test_row[0])] {
+                if (actual - expected_sweep).abs() > tolerance.absolute_difference {
+                    return Err(format!(
+                        "BUG 655 {role} sweep coordinate {row_index} is {actual}, expected precision-8 value {expected_sweep}"
+                    ));
+                }
+            }
+        }
+
+        let duration = (test_rows[20][0] - test_rows[0][0]).abs();
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(format!(
+                "BUG 655 test sweep integration interval is invalid: [{}, {}]",
+                test_rows[0][0], test_rows[20][0]
+            ));
+        }
+        let mut squared_errors = [0.0; 21];
+        let mut worst_row = 0usize;
+        let mut worst_error = 0.0;
+        for row_index in 0..21 {
+            let normalized_error = Self::xyce_verify_normalized_error_with_tolerance(
+                good_rows[row_index][1],
+                test_rows[row_index][1],
+                tolerance,
+            );
+            if !normalized_error.is_finite() {
+                return Err(format!(
+                    "BUG 655 normalized V(3) error is non-finite at row {row_index}"
+                ));
+            }
+            if normalized_error.abs() > worst_error {
+                worst_error = normalized_error.abs();
+                worst_row = row_index;
+            }
+            squared_errors[row_index] = normalized_error * normalized_error;
+        }
+        let mut integrated_error = 0.0;
+        for row_index in 1..21 {
+            let width = (test_rows[row_index][0] - test_rows[row_index - 1][0]).abs();
+            integrated_error +=
+                0.5 * (squared_errors[row_index] + squared_errors[row_index - 1]) * width;
+        }
+        let rms_error = (integrated_error / duration).sqrt();
+        if !rms_error.is_finite() {
+            return Err("BUG 655 integrated V(3) RMS error is non-finite".into());
+        }
+        if rms_error <= 1.0 {
+            return Ok(Vec::new());
+        }
+        Ok(vec![XyceValueMismatch {
+            row: worst_row,
+            probe: good.columns[2].clone(),
+            expected: good_rows[worst_row][1],
+            actual: test_rows[worst_row][1],
+            relative_error: rms_error,
+        }])
+    }
+
+    fn bug655_default_prn_token_lines(table: &XycePrnTable) -> Result<Vec<Vec<String>>, String> {
+        let expected_columns = ["Index", "I(I1)", "V(3)"];
+        if table.columns.len() != expected_columns.len()
+            || !table
+                .columns
+                .iter()
+                .zip(expected_columns)
+                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+            || table.rows.len() != 21
+        {
+            return Err(format!(
+                "BUG 655 default PRN requires columns {expected_columns:?} and 21 rows, got {:?}/{}",
+                table.columns,
+                table.rows.len()
+            ));
+        }
+        let mut lines = Vec::with_capacity(23);
+        lines.push(table.columns.clone());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != 3 || row[0].to_bits() != (row_index as Value).to_bits() {
+                return Err(format!(
+                    "BUG 655 default PRN row {row_index} has a noncanonical Index or field count"
+                ));
+            }
+            lines.push(
+                row.iter()
+                    .map(|value| Self::xyce_default_prn_text(*value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        lines.push(
+            ["End", "of", "Xyce(TM)", "Simulation"]
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
@@ -44146,6 +44492,113 @@ impl XyceTestRunner {
         })())
     }
 
+    fn bug655_continuation_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug655ContinuationContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = match relative.as_str() {
+            XYCE_BUG655_CONTINUATION_OWNER_RECORD => XyceBug655ContinuationRole::ColumnZeroOwner,
+            XYCE_BUG655_CONTINUATION_REFERENCE_RECORD => {
+                XyceBug655ContinuationRole::LeadingSpaceReference
+            }
+            _ => return None,
+        };
+        Some((|| {
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| "BUG 655 record has no sibling directory".to_string())?;
+            let owner_path = parent.join("contLine.cir");
+            let reference_path = parent.join("contLine_with_spaces.cir");
+            if Self::normalize_manifest_key(&self.relative_key(&owner_path))
+                != XYCE_BUG655_CONTINUATION_OWNER_RECORD
+                || Self::normalize_manifest_key(&self.relative_key(&reference_path))
+                    != XYCE_BUG655_CONTINUATION_REFERENCE_RECORD
+            {
+                return Err("owner/reference paths are not the exact BUG 655 sibling pair".into());
+            }
+            if !self.requires_upstream_wrapper(XYCE_BUG655_CONTINUATION_OWNER_RECORD)
+                || self.requires_upstream_wrapper(XYCE_BUG655_CONTINUATION_REFERENCE_RECORD)
+            {
+                return Err("exactly contLine.cir must own the removed upstream wrapper".into());
+            }
+
+            let mut directory_entries = fs::read_dir(parent)
+                .map_err(|err| format!("could not inspect BUG 655 directory: {err}"))?
+                .map(|entry| {
+                    let entry =
+                        entry.map_err(|err| format!("could not inspect BUG 655 entry: {err}"))?;
+                    let file_type = entry
+                        .file_type()
+                        .map_err(|err| format!("could not inspect BUG 655 entry type: {err}"))?;
+                    let name = entry.file_name().into_string().map_err(|_| {
+                        "BUG 655 directory contains a non-Unicode entry".to_string()
+                    })?;
+                    Ok((name, file_type.is_file()))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            directory_entries.sort();
+            if directory_entries
+                != [
+                    ("contLine.cir".to_string(), true),
+                    ("contLine_with_spaces.cir".to_string(), true),
+                ]
+            {
+                return Err(format!(
+                    "BUG 655 directory must contain exactly its two regular .cir records, got {directory_entries:?}"
+                ));
+            }
+            for (member_role, path) in [
+                ("column-zero continuation owner", &owner_path),
+                ("leading-space continuation reference", &reference_path),
+            ] {
+                let metadata = fs::metadata(path)
+                    .map_err(|err| format!("could not inspect {member_role}: {err}"))?;
+                if !metadata.is_file() || metadata.len() == 0 {
+                    return Err(format!("{member_role} must be a nonempty regular file"));
+                }
+                self.reject_wrapper_output_artifacts(path)
+                    .map_err(|err| format!("{member_role} {err}"))?;
+            }
+
+            let owner_source = fs::read_to_string(&owner_path)
+                .map_err(|err| format!("failed to read BUG 655 owner: {err}"))?;
+            let reference_source = fs::read_to_string(&reference_path)
+                .map_err(|err| format!("failed to read BUG 655 reference: {err}"))?;
+            Self::validate_bug655_continuation_source_pair(&owner_source, &reference_source)?;
+
+            let owner_plan = self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?;
+            let reference_plan =
+                self.static_dc_plan_for_path(&reference_path, ExpressionDialect::Xyce)?;
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_path)
+                .map_err(|err| format!("BUG 655 owner parse failed: {err}"))?;
+            let reference_netlist =
+                Self::parse_xyce_netlist(&reference_plan.source, &reference_path)
+                    .map_err(|err| format!("BUG 655 reference parse failed: {err}"))?;
+            Self::validate_bug655_continuation_member(
+                &owner_plan,
+                &owner_netlist,
+                XyceBug655ContinuationRole::ColumnZeroOwner,
+            )?;
+            Self::validate_bug655_continuation_member(
+                &reference_plan,
+                &reference_netlist,
+                XyceBug655ContinuationRole::LeadingSpaceReference,
+            )?;
+            Self::validate_bug655_continuation_semantic_identity(
+                &owner_netlist,
+                &reference_netlist,
+            )?;
+
+            Ok(XyceBug655ContinuationContract {
+                owner_plan,
+                reference_plan,
+                role,
+            })
+        })())
+    }
+
     fn bug662_long_header_relational_contract(
         &self,
         deck: &XyceDeck,
@@ -44735,6 +45188,381 @@ impl XyceTestRunner {
             return Err(format!("BUG 667 source has extra statements: {counts:?}"));
         }
         Ok(())
+    }
+
+    fn validate_bug655_continuation_source_pair(
+        owner_source: &str,
+        reference_source: &str,
+    ) -> Result<(), String> {
+        let normalize = |source: &str, role: &str| {
+            if !source.is_ascii() {
+                return Err(format!("BUG 655 {role} source must be ASCII"));
+            }
+            let normalized = source.replace("\r\n", "\n");
+            if normalized.contains('\r') {
+                return Err(format!(
+                    "BUG 655 {role} source contains a noncanonical bare carriage return"
+                ));
+            }
+            Ok(normalized)
+        };
+        let owner = normalize(owner_source, "owner")?;
+        let reference = normalize(reference_source, "reference")?;
+        if owner != XYCE_BUG655_CANONICAL_OWNER_SOURCE {
+            return Err("BUG 655 owner source is not the canonical continuation deck".into());
+        }
+        let mut expected_reference_lines = XYCE_BUG655_CANONICAL_OWNER_SOURCE
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        for (line_index, spaces) in [(11usize, 2usize), (13, 1), (14, 3)] {
+            expected_reference_lines[line_index] = format!(
+                "{}{}",
+                " ".repeat(spaces),
+                expected_reference_lines[line_index]
+            );
+        }
+        let expected_reference = format!("{}\n", expected_reference_lines.join("\n"));
+        if reference != expected_reference {
+            return Err(
+                "BUG 655 reference source is not the canonical 2/1/3-space continuation variant"
+                    .into(),
+            );
+        }
+
+        let owner_lines = owner.lines().collect::<Vec<_>>();
+        let reference_lines = reference.lines().collect::<Vec<_>>();
+        if owner_lines.len() != 21 || reference_lines.len() != 21 {
+            return Err(format!(
+                "BUG 655 siblings must each contain exactly 21 physical lines, got owner={} reference={}",
+                owner_lines.len(),
+                reference_lines.len()
+            ));
+        }
+        for line_index in 0..21 {
+            if matches!(line_index, 11 | 13 | 14) {
+                let expected_spaces = match line_index {
+                    11 => 2,
+                    13 => 1,
+                    14 => 3,
+                    _ => unreachable!(),
+                };
+                if !owner_lines[line_index].starts_with('+')
+                    || reference_lines[line_index]
+                        .len()
+                        .saturating_sub(reference_lines[line_index].trim_start().len())
+                        != expected_spaces
+                    || reference_lines[line_index].trim_start() != owner_lines[line_index]
+                {
+                    return Err(format!(
+                        "BUG 655 line {} does not preserve the exact leading-whitespace-only continuation difference",
+                        line_index + 1
+                    ));
+                }
+            } else if owner_lines[line_index] != reference_lines[line_index] {
+                return Err(format!(
+                    "BUG 655 siblings differ outside continuation lines 12, 14, and 15 at physical line {}",
+                    line_index + 1
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_bug655_continuation_member(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        role: XyceBug655ContinuationRole,
+    ) -> Result<(), String> {
+        let requires_wrapper = role == XyceBug655ContinuationRole::ColumnZeroOwner;
+        let expected_contract = if requires_wrapper {
+            XyceStaticDcContract::WrapperDefault
+        } else {
+            XyceStaticDcContract::PlainStatic
+        };
+        if Self::static_dc_contract_for_print_format(
+            requires_wrapper,
+            plan.print_format.as_deref(),
+        )? != expected_contract
+        {
+            return Err(format!(
+                "BUG 655 {role:?} does not map to the required {expected_contract:?} DC contract"
+            ));
+        }
+        if plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !plan.steps.is_empty()
+            || !plan.diagnostics.is_empty()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+            || !plan.dc.source.eq_ignore_ascii_case("I1")
+            || plan.dc.start.to_bits() != (-100.0f64 * 1.0e-6).to_bits()
+            || plan.dc.stop.to_bits() != (100.0f64 * 1.0e-6).to_bits()
+            || plan.dc.step.to_bits() != (10.0f64 * 1.0e-6).to_bits()
+            || plan
+                .print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .ne(["i(i1)", "v(3)"])
+        {
+            return Err(format!(
+                "BUG 655 member requires one diagnostic-free I1 -100u:10u:100u DC sweep and ordered default I(I1), V(3) output; actual execution_dir={:?} dc_data={} format={:?} steps={} diagnostics={:?} source={} mode={:?} start={} stop={} step={} sweep2={} probes={:?}",
+                plan.execution_dir,
+                plan.dc_data.is_some(),
+                plan.print_format,
+                plan.steps.len(),
+                plan.diagnostics,
+                plan.dc.source,
+                plan.dc.mode,
+                plan.dc.start,
+                plan.dc.stop,
+                plan.dc.step,
+                plan.dc.sweep2.is_some(),
+                plan.print.probes
+            ));
+        }
+        if netlist.analyses.len() != 1
+            || !matches!(netlist.analyses[0], AnalysisCommand::Dc { .. })
+            || netlist.elements.len() != 5
+            || netlist.models.len() != 1
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(
+                "BUG 655 member admits exactly VCC, I1, R1, R2, Q1, one NPN model, and one DC analysis"
+                    .into(),
+            );
+        }
+        let actual = Self::bug655_continuation_snapshot(netlist)?;
+        let expected = Self::bug655_expected_continuation_snapshot();
+        if actual != expected {
+            return Err(format!(
+                "BUG 655 canonical circuit/model fingerprint changed: actual={actual:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_bug655_continuation_semantic_identity(
+        owner: &Netlist,
+        reference: &Netlist,
+    ) -> Result<(), String> {
+        let owner = Self::bug655_continuation_snapshot(owner)?;
+        let reference = Self::bug655_continuation_snapshot(reference)?;
+        if owner != reference {
+            return Err(format!(
+                "BUG 655 continuation parsing produced different logical circuits: owner={owner:?} reference={reference:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn bug655_expected_continuation_snapshot() -> XyceBug655ContinuationSnapshot {
+        let elements = BTreeMap::from([
+            (
+                "i1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "I:DC".to_string(),
+                    nodes: vec!["2".to_string(), "0".to_string()],
+                    numeric_bits: vec![0.0f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+            (
+                "q1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "Q:NPN:L1".to_string(),
+                    nodes: vec!["3".to_string(), "2".to_string(), "0".to_string()],
+                    numeric_bits: Vec::new(),
+                    text: vec!["2n3510".to_string()],
+                },
+            ),
+            (
+                "r1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "R".to_string(),
+                    nodes: vec!["1".to_string(), "3".to_string()],
+                    numeric_bits: vec![5_000.0f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+            (
+                "r2".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "R".to_string(),
+                    nodes: vec!["2".to_string(), "3".to_string()],
+                    numeric_bits: vec![20_000.0f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+            (
+                "vcc".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "V:DC".to_string(),
+                    nodes: vec!["1".to_string(), "0".to_string()],
+                    numeric_bits: vec![12.0f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+        ]);
+        let mut model_params: Vec<(String, u64)> = [
+            ("bf", 100.0),
+            ("br", 1.35e-4),
+            ("xtb", 1.5),
+            ("is", 8.35e-14),
+            ("eg", 1.11),
+            ("cjc", 9.63e-12),
+            ("cje", 9.47e-12),
+            ("rb", 16.7),
+            ("rc", 1.66),
+            ("vaf", 90.0),
+            ("tf", 1e-10),
+            ("tr", 1.27e-4),
+            ("cjs", 1e-15),
+            ("vjs", 0.8),
+            ("mjs", 0.5),
+            ("var", 100.0),
+            ("ise", 4.77e-11),
+            ("isc", 1e-16),
+            ("ikf", 0.18),
+            ("ikr", 1000.0),
+            ("irb", 1.0),
+            ("rbm", 0.0),
+            ("vtf", 1000.0),
+        ]
+        .into_iter()
+        .map(|(name, value): (&str, Value)| (name.to_string(), value.to_bits()))
+        .collect::<Vec<_>>();
+        model_params.sort();
+        XyceBug655ContinuationSnapshot {
+            title: "*** Simple amplifier ***".to_string(),
+            elements,
+            model_name: "2n3510".to_string(),
+            model_type: "npn".to_string(),
+            model_params,
+        }
+    }
+
+    fn bug655_continuation_snapshot(
+        netlist: &Netlist,
+    ) -> Result<XyceBug655ContinuationSnapshot, String> {
+        let model = netlist
+            .models
+            .first()
+            .ok_or_else(|| "BUG 655 member has no NPN model".to_string())?;
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || model.params.len() != 23
+            || model.params.iter().any(|(_, value)| !value.is_finite())
+        {
+            return Err(
+                "BUG 655 model must contain exactly 23 finite scalar Level-1 NPN parameters".into(),
+            );
+        }
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if value.is_finite() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::CurrentSource(crate::netlist::SourceSpec::Dc(value))
+                    if value.is_finite() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "I:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::Bjt {
+                    model,
+                    instance_params,
+                    deferred_params,
+                    ..
+                } if instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && model.eq_ignore_ascii_case(&netlist.models[0].name) =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "Q:NPN:L1".to_string(),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec![model.to_ascii_lowercase()],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "BUG 655 element '{}' is outside the exact V/I/R/Level-1-NPN envelope",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!("BUG 655 contains duplicate element name '{name}'"));
+            }
+        }
+        Ok(XyceBug655ContinuationSnapshot {
+            title: netlist.title.trim().to_string(),
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params,
+        })
     }
 
     fn validate_bug662_header_source_pair(
@@ -51391,6 +52219,64 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
         (root, owner, reference, runner)
     }
 
+    fn bug655_continuation_sources() -> (String, String) {
+        let owner = XYCE_BUG655_CANONICAL_OWNER_SOURCE.to_string();
+        let mut reference_lines = owner.lines().map(str::to_string).collect::<Vec<_>>();
+        for (line_index, spaces) in [(11usize, 2usize), (13, 1), (14, 3)] {
+            reference_lines[line_index] =
+                format!("{}{}", " ".repeat(spaces), reference_lines[line_index]);
+        }
+        (owner, format!("{}\n", reference_lines.join("\n")))
+    }
+
+    fn bug655_continuation_fixture(
+        label: &str,
+        owner_source: &str,
+        reference_source: &str,
+    ) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-bug655-continuation-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let family = root.join("Netlists/Certification_Tests/BUG_655_SON");
+        fs::create_dir_all(&family).expect("create BUG 655 fixture directory");
+        let owner_path = family.join("contLine.cir");
+        let reference_path = family.join("contLine_with_spaces.cir");
+        fs::write(&owner_path, owner_source).expect("write BUG 655 owner");
+        fs::write(&reference_path, reference_source).expect("write BUG 655 spaced reference");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_655_SON/contLine.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 655 wrapper provenance");
+        let owner = XyceDeck {
+            path: owner_path,
+            relative_path: "Netlists/Certification_Tests/BUG_655_SON/contLine.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let reference = XyceDeck {
+            path: reference_path,
+            relative_path: "Netlists/Certification_Tests/BUG_655_SON/contLine_with_spaces.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        (root, owner, reference, runner)
+    }
+
+    fn bug655_comparator_table(output: Value) -> XycePrnTable {
+        XycePrnTable {
+            columns: vec!["Index".into(), "I(I1)".into(), "V(3)".into()],
+            rows: (0..21)
+                .map(|row| vec![row as Value, -100.0e-6 + row as Value * 10.0e-6, output])
+                .collect(),
+        }
+    }
+
     fn bug667_nodeset_fixture(
         label: &str,
         owner_source: &str,
@@ -51750,6 +52636,355 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             assert_eq!(result.contract, expected_contract);
         }
         fs::remove_dir_all(root).expect("remove BUG 647 execution fixture");
+    }
+
+    #[test]
+    fn netlist_parser_accepts_leading_space_continuation_lines() {
+        let (owner_source, reference_source) = bug655_continuation_sources();
+        let owner = XyceTestRunner::parse_xyce_netlist(
+            &owner_source,
+            Path::new("generic-column-zero-continuation.cir"),
+        )
+        .expect("column-zero continuation source parses");
+        let reference = XyceTestRunner::parse_xyce_netlist(
+            &reference_source,
+            Path::new("generic-leading-space-continuation.cir"),
+        )
+        .expect("leading-space continuation source parses");
+        assert_eq!(owner.models.len(), 1);
+        assert_eq!(owner.models[0].params.len(), 23);
+        assert_eq!(
+            XyceTestRunner::bug655_continuation_snapshot(&owner)
+                .expect("column-zero source has a canonical semantic snapshot"),
+            XyceTestRunner::bug655_continuation_snapshot(&reference)
+                .expect("spaced source has a canonical semantic snapshot")
+        );
+    }
+
+    #[test]
+    fn bug655_continuation_pair_is_manifest_owned_and_semantically_identical() {
+        let (owner_source, reference_source) = bug655_continuation_sources();
+        let (root, owner, reference, runner) =
+            bug655_continuation_fixture("qualification", &owner_source, &reference_source);
+        let owner_contract = runner
+            .bug655_continuation_relational_contract(&owner)
+            .expect("owner path is selected")
+            .expect("owner pair qualifies");
+        let reference_contract = runner
+            .bug655_continuation_relational_contract(&reference)
+            .expect("reference path is selected")
+            .expect("reference pair qualifies");
+        assert_eq!(
+            owner_contract.role,
+            XyceBug655ContinuationRole::ColumnZeroOwner
+        );
+        assert_eq!(
+            reference_contract.role,
+            XyceBug655ContinuationRole::LeadingSpaceReference
+        );
+        assert_eq!(
+            XyceTestRunner::static_dc_contract_for_print_format(
+                true,
+                owner_contract.owner_plan.print_format.as_deref(),
+            )
+            .expect("owner DC format classifies"),
+            XyceStaticDcContract::WrapperDefault
+        );
+        assert_eq!(
+            XyceTestRunner::static_dc_contract_for_print_format(
+                false,
+                reference_contract.reference_plan.print_format.as_deref(),
+            )
+            .expect("reference DC format classifies"),
+            XyceStaticDcContract::PlainStatic
+        );
+        assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+        assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+        fs::remove_dir_all(root).expect("remove BUG 655 qualification fixture");
+    }
+
+    #[test]
+    fn bug655_continuation_pair_rejects_source_and_semantic_mutations() {
+        let (owner_source, reference_source) = bug655_continuation_sources();
+        let mutations = [
+            (
+                owner_source.clone(),
+                reference_source.replacen("  + bf=100", " + bf=100", 1),
+                "line 12 two-space boundary",
+            ),
+            (
+                owner_source.clone(),
+                reference_source.replacen("\n+ cje=", "\n + cje=", 1),
+                "line 13 zero-space boundary",
+            ),
+            (
+                owner_source.clone(),
+                reference_source.replacen("\n + cjs=", "\n  + cjs=", 1),
+                "line 14 one-space boundary",
+            ),
+            (
+                owner_source.clone(),
+                reference_source.replacen("\n   + ikf=", "\n  + ikf=", 1),
+                "line 15 three-space boundary",
+            ),
+            (
+                owner_source.replacen("r1 1 3 5k", "r1 1 4 5k", 1),
+                reference_source.clone(),
+                "topology",
+            ),
+            (
+                owner_source.replacen("bf=100", "bf=101", 1),
+                reference_source.clone(),
+                "model parameter",
+            ),
+            (
+                owner_source.replacen("100uA 10uA", "100uA 20uA", 1),
+                reference_source.clone(),
+                "DC grid",
+            ),
+            (
+                owner_source.replacen("I(I1) V(3)", "V(3) I(I1)", 1),
+                reference_source.clone(),
+                "probe order",
+            ),
+            (
+                owner_source.replacen("q1 3 2 0", "q1 3 1 0", 1),
+                reference_source,
+                "BJT topology",
+            ),
+        ];
+        for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+            let (root, owner, _, runner) = bug655_continuation_fixture(
+                &format!("mutation-{index}"),
+                &owner_source,
+                &reference_source,
+            );
+            assert!(
+                runner
+                    .bug655_continuation_relational_contract(&owner)
+                    .expect("exact owner path remains selected")
+                    .is_err(),
+                "{reason} mutation must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove BUG 655 mutation fixture");
+        }
+    }
+
+    #[test]
+    fn bug655_continuation_pair_requires_owner_only_provenance() {
+        let (owner_source, reference_source) = bug655_continuation_sources();
+        let (root, owner, _, _) =
+            bug655_continuation_fixture("provenance", &owner_source, &reference_source);
+        for manifest in [
+            "",
+            "Netlists/Certification_Tests/BUG_655_SON/contLine_with_spaces.cir\trequires_upstream_wrapper\n",
+            "Netlists/Certification_Tests/BUG_655_SON/contLine.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_655_SON/contLine_with_spaces.cir\trequires_upstream_wrapper\n",
+        ] {
+            fs::write(root.join(HARNESS_MANIFEST_FILE), manifest)
+                .expect("mutate BUG 655 provenance");
+            let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+            assert!(
+                runner
+                    .bug655_continuation_relational_contract(&owner)
+                    .expect("exact owner path remains selected")
+                    .is_err(),
+                "non-owner-only BUG 655 provenance must fail closed"
+            );
+        }
+        fs::remove_dir_all(root).expect("remove BUG 655 provenance fixture");
+    }
+
+    #[test]
+    fn bug655_continuation_pair_requires_exact_census_and_no_artifacts() {
+        let (owner_source, reference_source) = bug655_continuation_sources();
+        for (index, extra_name) in ["contLine.cir.prn", "unexpected.cir", "notes.txt"]
+            .into_iter()
+            .enumerate()
+        {
+            let (root, owner, _, runner) = bug655_continuation_fixture(
+                &format!("census-{index}"),
+                &owner_source,
+                &reference_source,
+            );
+            fs::write(
+                owner
+                    .path
+                    .parent()
+                    .expect("BUG 655 fixture parent")
+                    .join(extra_name),
+                "unexpected",
+            )
+            .expect("write unexpected BUG 655 directory entry");
+            assert!(
+                runner
+                    .bug655_continuation_relational_contract(&owner)
+                    .expect("exact owner path remains selected")
+                    .is_err(),
+                "extra directory entry '{extra_name}' must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove BUG 655 census fixture");
+        }
+    }
+
+    #[test]
+    fn bug655_continuation_comparator_reproduces_release_710_dc_boundaries() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let good = bug655_comparator_table(1.0);
+        assert!(
+            runner
+                .compare_bug655_continuation_tables(&good, &good)
+                .expect("identical BUG 655 tables compare")
+                .is_empty()
+        );
+
+        let rms_boundary = bug655_comparator_table(0.99);
+        assert!(
+            runner
+                .compare_bug655_continuation_tables(&good, &rms_boundary)
+                .expect("RMS boundary table compares")
+                .is_empty(),
+            "precision-8 normalized RMS at or below one must pass"
+        );
+        let above_rms_boundary = bug655_comparator_table(0.989_999_99);
+        let mismatches = runner
+            .compare_bug655_continuation_tables(&good, &above_rms_boundary)
+            .expect("above-boundary table compares");
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].probe, "V(3)");
+        assert!(mismatches[0].relative_error > 1.0);
+
+        let mut wrong_axis = good.clone();
+        wrong_axis.rows[10][1] = 2.0e-12;
+        assert!(
+            runner
+                .compare_bug655_continuation_tables(&good, &wrong_axis)
+                .is_err(),
+            "precision-8 sweep coordinates must remain within ABSDIFFTOL"
+        );
+        let mut nonfinite = good.clone();
+        nonfinite.rows[10][2] = Value::NAN;
+        assert!(
+            runner
+                .compare_bug655_continuation_tables(&good, &nonfinite)
+                .is_err(),
+            "non-finite PRN values must fail closed"
+        );
+        let mut wrong_header = good.clone();
+        wrong_header.columns[2] = "V(OTHER)".into();
+        assert!(
+            runner
+                .compare_bug655_continuation_tables(&good, &wrong_header)
+                .is_err()
+        );
+        let mut missing_row = good.clone();
+        missing_row.rows.pop();
+        assert!(
+            runner
+                .compare_bug655_continuation_tables(&good, &missing_row)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn bug655_continuation_candidate_census_is_exactly_two_records() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let discovered = runner.discover_tests();
+        let discovered_by_path = discovered
+            .iter()
+            .map(|deck| {
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    deck,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut independent_candidates = BTreeSet::new();
+        for owner in discovered.iter().filter(|deck| {
+            runner.requires_upstream_wrapper(&deck.relative_path)
+                && deck
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("contLine.cir"))
+        }) {
+            let reference_key = XyceTestRunner::normalize_manifest_key(
+                &runner.relative_key(&owner.path.with_file_name("contLine_with_spaces.cir")),
+            );
+            let Some(reference) = discovered_by_path.get(&reference_key) else {
+                continue;
+            };
+            let owner_source = fs::read_to_string(&owner.path).expect("read BUG 655 owner");
+            let reference_source =
+                fs::read_to_string(&reference.path).expect("read BUG 655 reference");
+            let owner_lines = owner_source.lines().collect::<Vec<_>>();
+            let reference_lines = reference_source.lines().collect::<Vec<_>>();
+            if owner_lines.len() == 21
+                && reference_lines.len() == 21
+                && [11usize, 12, 13, 14].into_iter().all(|line| {
+                    owner_lines[line].trim_start() == reference_lines[line].trim_start()
+                })
+                && [0usize, 0, 0, 0]
+                    == [11usize, 12, 13, 14]
+                        .map(|line| owner_lines[line].len() - owner_lines[line].trim_start().len())
+                && [2usize, 0, 1, 3]
+                    == [11usize, 12, 13, 14].map(|line| {
+                        reference_lines[line].len() - reference_lines[line].trim_start().len()
+                    })
+            {
+                independent_candidates
+                    .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+                independent_candidates.insert(reference_key);
+            }
+        }
+        let selected = discovered
+            .iter()
+            .filter_map(|deck| {
+                runner
+                    .bug655_continuation_relational_contract(deck)
+                    .map(|contract| {
+                        contract.unwrap_or_else(|err| {
+                            panic!("BUG 655 continuation candidate failed qualification: {err}")
+                        });
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(independent_candidates, selected);
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                XYCE_BUG655_CONTINUATION_OWNER_RECORD.to_string(),
+                XYCE_BUG655_CONTINUATION_REFERENCE_RECORD.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn bug655_continuation_relational_pair_executes_both_roles() {
+        let (owner_source, reference_source) = bug655_continuation_sources();
+        let (root, owner, reference, runner) =
+            bug655_continuation_fixture("execution", &owner_source, &reference_source);
+        for (deck, expected_contract) in [
+            (owner, "bug655_continuation_relational_wrapper_owner"),
+            (
+                reference,
+                "bug655_continuation_relational_wrapper_spaced_reference",
+            ),
+        ] {
+            let result = runner.run_discovered_test(&deck);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "BUG 655 continuation role must execute: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+        }
+        fs::remove_dir_all(root).expect("remove BUG 655 execution fixture");
     }
 
     #[test]
