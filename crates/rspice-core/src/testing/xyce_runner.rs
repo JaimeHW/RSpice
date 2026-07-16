@@ -53926,9 +53926,25 @@ V1 a 0 AC 1
 .END
 ";
 
-        let err = XyceTestRunner::parse_xyce_netlist(source, Path::new("freq.cir"))
-            .expect_err("plain parse should reject unbound FREQ");
-        assert!(XyceTestRunner::parse_error_is_undefined_ac_frequency_symbol(&err));
+        let unbound = XyceTestRunner::parse_xyce_netlist(source, Path::new("freq.cir"))
+            .expect("plain parse retains FREQ-dependent global expressions");
+        assert_eq!(
+            unbound.params.get_global_expression("OMEGA"),
+            Some("2*PI*FREQ")
+        );
+        let resistor_expression = unbound
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .and_then(|element| match &element.kind {
+                ElementKind::Resistor { value_expr, .. } => value_expr.as_deref(),
+                _ => None,
+            });
+        assert_eq!(
+            resistor_expression,
+            Some("OMEGA"),
+            "the unbound resistor value remains deferred until AC frequency binding"
+        );
 
         let rebound = XyceTestRunner::source_with_ac_frequency_bindings(source, 10.0);
         let netlist = XyceTestRunner::parse_xyce_netlist(&rebound, Path::new("freq.cir"))
