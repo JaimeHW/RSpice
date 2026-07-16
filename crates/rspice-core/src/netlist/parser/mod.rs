@@ -10,7 +10,7 @@ use super::expr::{eval_expression, eval_expression_complex, prepare_behavioral_e
 use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::mutual_inductor::{
-    MutualInductorSemanticRecord, validate_mutual_inductor_semantic_records,
+    MutualInductorSemanticRecord, validate_mutual_inductor_semantic_records_with_abort,
 };
 use super::xspice_parser;
 use super::{
@@ -586,13 +586,12 @@ fn parse_netlist_impl(
     validate_resistor_model_references_with_abort(&state, abort)?;
 
     ensure_parse_not_aborted(abort)?;
-    state
-        .into_netlist(
-            title,
-            input,
-            root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
-        )
-        .map_err(ParseWithAbortError::from)
+    state.into_netlist(
+        title,
+        input,
+        root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
+        abort,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

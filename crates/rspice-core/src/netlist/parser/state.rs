@@ -130,18 +130,21 @@ impl ParseState {
         title: String,
         input: &str,
         detected_at: NetlistSourceLocation,
-    ) -> Result<Netlist, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Netlist, ParseWithAbortError> {
         if let Some(frame) = self.subckt_stack.last() {
             return Err(Self::missing_subcircuit_ends_error(
                 frame,
                 detected_at,
                 MissingSubcircuitEndsBoundary::EndOfSource,
-            ));
+            )
+            .into());
         }
         super::super::expr::validate_global_parameter_expressions(&self.params)
-            .map_err(ParseError::InvalidValue)?;
+            .map_err(ParseError::InvalidValue)
+            .map_err(ParseWithAbortError::from)?;
 
-        validate_mutual_inductor_semantic_records(&self.mutual_inductor_records)?;
+        validate_mutual_inductor_semantic_records_with_abort(&self.mutual_inductor_records, abort)?;
 
         Ok(Netlist {
             title,

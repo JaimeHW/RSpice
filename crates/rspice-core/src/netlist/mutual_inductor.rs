@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::lexer::{TokenKind, tokenize};
 use super::{
-    Element, ElementKind, Netlist, NetlistSourceLocation, ParseError, SubcircuitDef,
-    UndefinedMutualInductorReferenceError,
+    Element, ElementKind, Netlist, NetlistSourceLocation, ParseError, ParseWithAbortError,
+    SubcircuitDef, UndefinedMutualInductorReferenceError, ensure_parse_not_aborted,
+    finish_non_aborting_parse, poll_parse_abort,
 };
+use crate::abort_signal::{AbortSignal, NoAbort};
 
 /// One source-ordered semantic record used by the parser's post-parse
 /// validation pass.
@@ -92,15 +94,28 @@ impl MutualInductorSemanticRecord {
 /// scope.
 ///
 /// All inductor definitions are collected before references are checked, so
-/// forward references are legal. Couplings are then checked in source order
-/// and references in authored list order, producing a deterministic first
-/// failure. The coefficient is intentionally irrelevant: a zero-coupling card
-/// still carries real references and must be valid.
+/// forward references are legal. Couplings are checked in source order. Within
+/// one K-card, Xyce stores references in a case-insensitive ordered map, so
+/// distinct canonical names are validated in lexical order and case-colliding
+/// duplicates collapse to their first authored occurrence. The coefficient is
+/// intentionally irrelevant: a zero-coupling card still carries real
+/// references and must be valid.
 pub(crate) fn validate_mutual_inductor_semantic_records(
     records: &[MutualInductorSemanticRecord],
 ) -> Result<(), ParseError> {
+    finish_non_aborting_parse(validate_mutual_inductor_semantic_records_with_abort(
+        records, &NoAbort,
+    ))
+}
+
+pub(crate) fn validate_mutual_inductor_semantic_records_with_abort(
+    records: &[MutualInductorSemanticRecord],
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let mut inductors_by_scope = HashMap::<Option<String>, HashSet<String>>::new();
-    for record in records {
+    for (record_index, record) in records.iter().enumerate() {
+        poll_parse_abort(abort, record_index)?;
         if let MutualInductorSemanticRecord::Inductor {
             scope_name,
             authored_name,
@@ -113,7 +128,9 @@ pub(crate) fn validate_mutual_inductor_semantic_records(
         }
     }
 
-    for record in records {
+    ensure_parse_not_aborted(abort)?;
+    for (record_index, record) in records.iter().enumerate() {
+        poll_parse_abort(abort, record_index)?;
         let MutualInductorSemanticRecord::Coupling {
             scope_name,
             authored_name,
@@ -125,8 +142,17 @@ pub(crate) fn validate_mutual_inductor_semantic_records(
         };
         let canonical_scope_name = canonical_scope(scope_name.as_deref());
         let local_inductors = inductors_by_scope.get(&canonical_scope_name);
+        let mut ordered_references = BTreeMap::<String, (usize, &str)>::new();
         for (index, inductor_name) in referenced_inductors.iter().enumerate() {
-            let canonical_inductor_name = inductor_name.to_ascii_uppercase();
+            poll_parse_abort(abort, index)?;
+            ordered_references
+                .entry(inductor_name.to_ascii_uppercase())
+                .or_insert((index, inductor_name));
+        }
+        for (ordered_index, (canonical_inductor_name, (first_index, inductor_name))) in
+            ordered_references.into_iter().enumerate()
+        {
+            poll_parse_abort(abort, ordered_index)?;
             if local_inductors.is_some_and(|names| names.contains(&canonical_inductor_name)) {
                 continue;
             }
@@ -137,16 +163,18 @@ pub(crate) fn validate_mutual_inductor_semantic_records(
                     authored_coupling_name: authored_name.clone(),
                     canonical_coupling_name: authored_name.to_ascii_uppercase(),
                     qualified_coupling_name: qualify(scope_name.as_deref(), authored_name),
-                    authored_inductor_name: inductor_name.clone(),
+                    authored_inductor_name: inductor_name.to_string(),
                     canonical_inductor_name,
                     qualified_inductor_name: qualify(scope_name.as_deref(), inductor_name),
                     scope_name: scope_name.clone(),
-                    reference_position: index + 1,
+                    reference_position: first_index + 1,
                 },
-            )));
+            ))
+            .into());
         }
     }
 
+    ensure_parse_not_aborted(abort)?;
     Ok(())
 }
 
@@ -237,6 +265,18 @@ fn authored_tokens(source_line: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct AbortAfterChecks {
+        checks_before_abort: usize,
+        checks: AtomicUsize,
+    }
+
+    impl AbortSignal for AbortAfterChecks {
+        fn is_aborted(&self) -> bool {
+            self.checks.fetch_add(1, Ordering::Relaxed) >= self.checks_before_abort
+        }
+    }
 
     fn undefined_error(source: &str) -> Box<UndefinedMutualInductorReferenceError> {
         match Netlist::parse(source).expect_err("undefined mutual reference must fail") {
@@ -368,6 +408,44 @@ mod tests {
     }
 
     #[test]
+    fn references_within_one_card_use_canonical_lexical_order_and_deduplicate() {
+        let error = undefined_error(
+            "canonical K reference map\n\
+             K1 lz LA la LZ 0.5\n\
+             .end\n",
+        );
+        assert_eq!(error.authored_inductor_name, "LA");
+        assert_eq!(error.canonical_inductor_name, "LA");
+        assert_eq!(error.reference_position, 2);
+    }
+
+    #[test]
+    fn semantic_scan_observes_abort_during_large_two_pass_validation() {
+        let mut records = Vec::new();
+        for index in 0..130 {
+            records.push(MutualInductorSemanticRecord::Inductor {
+                scope_name: None,
+                authored_name: format!("L{index}"),
+            });
+        }
+        records.push(MutualInductorSemanticRecord::Coupling {
+            scope_name: None,
+            authored_name: "K1".into(),
+            referenced_inductors: vec!["L0".into(), "L1".into()],
+            origin: NetlistSourceLocation::in_memory(132),
+        });
+        let abort = AbortAfterChecks {
+            checks_before_abort: 5,
+            checks: AtomicUsize::new(0),
+        };
+
+        assert!(matches!(
+            validate_mutual_inductor_semantic_records_with_abort(&records, &abort),
+            Err(ParseWithAbortError::Aborted)
+        ));
+    }
+
+    #[test]
     fn explicit_ast_validation_catches_post_parse_mutation() {
         let mut netlist = Netlist::parse(
             "valid before mutation\n\
@@ -420,6 +498,44 @@ mod tests {
         };
         assert_eq!(error.origin.path.as_deref(), Some(path.as_path()));
         assert_eq!(error.origin.line, 3);
+    }
+
+    #[test]
+    fn included_coupling_failure_retains_child_file_provenance() {
+        let unique = format!(
+            "rspice-bug75-include-origin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after Unix epoch")
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).expect("temporary fixture directory creates");
+        let deck = dir.join("deck.cir");
+        let child = dir.join("child.inc");
+        std::fs::write(
+            &deck,
+            "included mutual reference\n.include child.inc\n.end\n",
+        )
+        .expect("owner deck writes");
+        std::fs::write(&child, "L1 1 0 1u\nK3 L1 L2 0\n").expect("included deck writes");
+
+        let result = Netlist::parse_file(&deck);
+        let canonical_child = child.canonicalize().expect("child canonicalizes");
+        let _ = std::fs::remove_dir_all(&dir);
+        let ParseError::UndefinedMutualInductorReference(error) =
+            result.expect_err("included undefined reference must fail")
+        else {
+            panic!("unexpected error");
+        };
+        assert_eq!(
+            error.origin.path.as_deref(),
+            Some(canonical_child.as_path())
+        );
+        assert_eq!(error.origin.line, 2);
+        assert_eq!(error.canonical_coupling_name, "K3");
+        assert_eq!(error.canonical_inductor_name, "L2");
     }
 
     #[test]
