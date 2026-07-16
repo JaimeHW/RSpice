@@ -74,6 +74,7 @@ class ParseError(RSpiceError):
         "missing_subcircuit_ends",
         "duplicate_subcircuit_port_binding",
         "global_subcircuit_port_binding",
+        "undefined_mutual_inductor_reference",
         "device_initial_condition_duplicate_directive",
         "device_initial_condition_missing_information",
         "device_initial_condition_malformed_directive",
@@ -88,7 +89,11 @@ class ParseError(RSpiceError):
         "invalid_value",
         "io",
     ]
-    category: Literal["device_initial_condition", "subcircuit_binding"] | None
+    category: Literal[
+        "device_initial_condition",
+        "subcircuit_binding",
+        "mutual_inductor_reference",
+    ] | None
     line: int | None
     detail: str | None
     source: str | None
@@ -114,6 +119,14 @@ class ParseError(RSpiceError):
     conflicting_actual_node: str | None
     position: int | None
     actual_node: str | None
+    authored_coupling_name: str | None
+    canonical_coupling_name: str | None
+    qualified_coupling_name: str | None
+    authored_inductor_name: str | None
+    canonical_inductor_name: str | None
+    qualified_inductor_name: str | None
+    scope_name: str | None
+    reference_position: int | None
     device: str | None
     requested_path: str | None
     value_index: int | None

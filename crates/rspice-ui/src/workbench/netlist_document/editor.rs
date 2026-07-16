@@ -441,6 +441,17 @@ fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic
             error.position,
             error.actual_node,
         )),
+        ParseError::UndefinedMutualInductorReference(error) => Diagnostic::error(format!(
+            "{}\nCoupling: {} (canonical {}) · missing inductor: {} (canonical {}) · scope: {} · reference position {}",
+            error,
+            error.qualified_coupling_name,
+            error.canonical_coupling_name,
+            error.qualified_inductor_name,
+            error.canonical_inductor_name,
+            error.scope_name.as_deref().unwrap_or("top level"),
+            error.reference_position,
+        ))
+        .with_line(error.origin.line.checked_sub(1)),
         ParseError::DeviceInitialCondition(error) => {
             let origin = device_initial_condition_diagnostic_origin(&error);
             Diagnostic::error(error.to_string()).with_line(origin.line.checked_sub(1))
@@ -601,6 +612,32 @@ mod tests {
         );
         assert!(diagnostic.message.contains("TOP.X1"));
         assert!(diagnostic.message.contains("effective node LOCAL"));
+    }
+
+    #[test]
+    fn undefined_mutual_inductor_diagnostic_preserves_origin_and_identity() {
+        let diagnostic = parse_error_diagnostic(
+            rspice_core::netlist::ParseError::UndefinedMutualInductorReference(Box::new(
+                rspice_core::netlist::UndefinedMutualInductorReferenceError {
+                    origin: rspice_core::netlist::NetlistSourceLocation::in_file("bug75.cir", 12),
+                    authored_coupling_name: "K3".into(),
+                    canonical_coupling_name: "K3".into(),
+                    qualified_coupling_name: "K3".into(),
+                    authored_inductor_name: "L2".into(),
+                    canonical_inductor_name: "L2".into(),
+                    qualified_inductor_name: "L2".into(),
+                    scope_name: None,
+                    reference_position: 2,
+                },
+            )),
+        );
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostic.line, Some(11));
+        assert!(diagnostic.message.contains("Undefined inductor L2"));
+        assert!(diagnostic.message.contains("Coupling: K3 (canonical K3)"));
+        assert!(diagnostic.message.contains("scope: top level"));
+        assert!(diagnostic.message.contains("reference position 2"));
     }
 
     #[test]

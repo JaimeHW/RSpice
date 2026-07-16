@@ -42,6 +42,14 @@ struct ParseErrorAttributes {
     conflicting_actual_node: Option<String>,
     position: Option<usize>,
     actual_node: Option<String>,
+    authored_coupling_name: Option<String>,
+    canonical_coupling_name: Option<String>,
+    qualified_coupling_name: Option<String>,
+    authored_inductor_name: Option<String>,
+    canonical_inductor_name: Option<String>,
+    qualified_inductor_name: Option<String>,
+    scope_name: Option<String>,
+    reference_position: Option<usize>,
     device: Option<String>,
     requested_path: Option<String>,
     value_index: Option<usize>,
@@ -117,6 +125,27 @@ fn global_subcircuit_binding_attributes(
     attributes.formal_port = Some(error.formal_port.clone());
     attributes.position = Some(error.position);
     attributes.actual_node = Some(error.actual_node.clone());
+    attributes
+}
+
+fn undefined_mutual_inductor_reference_attributes(
+    error: &rspice_core::netlist::UndefinedMutualInductorReferenceError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("undefined_mutual_inductor_reference");
+    attributes.category = Some("mutual_inductor_reference");
+    attributes.set_primary(&error.origin);
+    attributes.detail = Some(error.authored_inductor_name.clone());
+    attributes.authored_name = Some(error.authored_coupling_name.clone());
+    attributes.canonical_name = Some(error.canonical_coupling_name.clone());
+    attributes.qualified_name = Some(error.qualified_coupling_name.clone());
+    attributes.authored_coupling_name = Some(error.authored_coupling_name.clone());
+    attributes.canonical_coupling_name = Some(error.canonical_coupling_name.clone());
+    attributes.qualified_coupling_name = Some(error.qualified_coupling_name.clone());
+    attributes.authored_inductor_name = Some(error.authored_inductor_name.clone());
+    attributes.canonical_inductor_name = Some(error.canonical_inductor_name.clone());
+    attributes.qualified_inductor_name = Some(error.qualified_inductor_name.clone());
+    attributes.scope_name = error.scope_name.clone();
+    attributes.reference_position = Some(error.reference_position);
     attributes
 }
 
@@ -233,6 +262,9 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         }
         CoreParseError::GlobalSubcircuitPortBinding(error) => {
             global_subcircuit_binding_attributes(error)
+        }
+        CoreParseError::UndefinedMutualInductorReference(error) => {
+            undefined_mutual_inductor_reference_attributes(error)
         }
         CoreParseError::DeviceInitialCondition(error) => {
             let mut attributes = ParseErrorAttributes::new("device_initial_condition");
@@ -380,6 +412,26 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         )?;
         value.setattr("position", attributes.position)?;
         value.setattr("actual_node", attributes.actual_node)?;
+        value.setattr("authored_coupling_name", attributes.authored_coupling_name)?;
+        value.setattr(
+            "canonical_coupling_name",
+            attributes.canonical_coupling_name,
+        )?;
+        value.setattr(
+            "qualified_coupling_name",
+            attributes.qualified_coupling_name,
+        )?;
+        value.setattr("authored_inductor_name", attributes.authored_inductor_name)?;
+        value.setattr(
+            "canonical_inductor_name",
+            attributes.canonical_inductor_name,
+        )?;
+        value.setattr(
+            "qualified_inductor_name",
+            attributes.qualified_inductor_name,
+        )?;
+        value.setattr("scope_name", attributes.scope_name)?;
+        value.setattr("reference_position", attributes.reference_position)?;
         value.setattr("device", attributes.device)?;
         value.setattr("requested_path", attributes.requested_path)?;
         value.setattr("value_index", attributes.value_index)?;
@@ -422,6 +474,7 @@ mod tests {
     use super::*;
     use rspice_core::netlist::{
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
+        NetlistSourceLocation, UndefinedMutualInductorReferenceError,
     };
 
     #[test]
@@ -474,5 +527,29 @@ mod tests {
         );
         assert_eq!(attributes.formal_port.as_deref(), Some("$G_SHARED"));
         assert_eq!(attributes.actual_node.as_deref(), Some("LOCAL"));
+    }
+
+    #[test]
+    fn undefined_mutual_inductor_exposes_structured_python_attributes() {
+        let error = UndefinedMutualInductorReferenceError {
+            origin: NetlistSourceLocation::in_file("bug75.cir", 12),
+            authored_coupling_name: "K3".into(),
+            canonical_coupling_name: "K3".into(),
+            qualified_coupling_name: "K3".into(),
+            authored_inductor_name: "L2".into(),
+            canonical_inductor_name: "L2".into(),
+            qualified_inductor_name: "L2".into(),
+            scope_name: None,
+            reference_position: 2,
+        };
+        let attributes = undefined_mutual_inductor_reference_attributes(&error);
+
+        assert_eq!(attributes.kind, "undefined_mutual_inductor_reference");
+        assert_eq!(attributes.category, Some("mutual_inductor_reference"));
+        assert_eq!(attributes.line, Some(12));
+        assert_eq!(attributes.source.as_deref(), Some("bug75.cir"));
+        assert_eq!(attributes.authored_coupling_name.as_deref(), Some("K3"));
+        assert_eq!(attributes.authored_inductor_name.as_deref(), Some("L2"));
+        assert_eq!(attributes.reference_position, Some(2));
     }
 }
