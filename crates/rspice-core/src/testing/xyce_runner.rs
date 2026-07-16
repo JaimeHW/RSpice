@@ -20,8 +20,8 @@ use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
-    ParametricValue, ParseError, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
-    SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, StatisticalParamMode, StepCommand,
+    StepSweep, StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -243,6 +243,7 @@ struct XyceStaticDcPlan {
     execution_dir: Option<PathBuf>,
     source: String,
     expression_dialect: ExpressionDialect,
+    parameter_redefinition_policy: ParameterRedefinitionPolicy,
     print: XycePrintRequest,
     print_format: Option<String>,
     dc: XyceDcSweep,
@@ -696,6 +697,40 @@ struct XyceSharedSteppedDcFamilyContract {
     prn_reference_path: PathBuf,
     res_reference_path: PathBuf,
     role: XyceSharedSteppedDcFamilyRole,
+}
+
+#[derive(Debug, Clone)]
+struct XyceNumberedRedefinitionDcFamilyContract {
+    family: String,
+    owner_path: PathBuf,
+    baseline_path: PathBuf,
+    member_paths: Vec<PathBuf>,
+    parameter_redefinition_policy: ParameterRedefinitionPolicy,
+    role: XyceNumberedRedefinitionDcFamilyRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceNumberedRedefinitionDcFamilyRole {
+    Owner,
+    Baseline,
+    Member(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceNumberedRedefinitionRepresentation {
+    LiteralBaseline,
+    DependentFormalExpression,
+    DependentInstanceExpression,
+}
+
+impl XyceNumberedRedefinitionDcFamilyRole {
+    fn contract(self) -> &'static str {
+        match self {
+            Self::Owner => "numbered_redefinition_dc_family_owner",
+            Self::Baseline => "numbered_redefinition_dc_family_baseline",
+            Self::Member(_) => "numbered_redefinition_dc_family_member",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2302,6 +2337,22 @@ impl XyceTestRunner {
         expression_dialect: ExpressionDialect,
         execution_dir: Option<&Path>,
     ) -> Result<Netlist, crate::netlist::ParseError> {
+        Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+            source,
+            deck_path,
+            expression_dialect,
+            ParameterRedefinitionPolicy::UseLast,
+            execution_dir,
+        )
+    }
+
+    fn parse_netlist_with_expression_dialect_policy_and_execution_dir(
+        source: &str,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+        parameter_redefinition_policy: ParameterRedefinitionPolicy,
+        execution_dir: Option<&Path>,
+    ) -> Result<Netlist, crate::netlist::ParseError> {
         let options = NetlistParseOptions {
             statistical_mode: StatisticalParamMode::Nominal,
             expression_dialect,
@@ -2309,7 +2360,7 @@ impl XyceTestRunner {
             // selection. Relational families that model Xyce's
             // `-redefined_params` modes select their policy explicitly in
             // their execution plan.
-            parameter_redefinition_policy: crate::netlist::ParameterRedefinitionPolicy::UseLast,
+            parameter_redefinition_policy,
         };
         if let Some(execution_dir) = execution_dir {
             return Netlist::parse_with_path_and_execution_dir(
@@ -2550,6 +2601,30 @@ impl XyceTestRunner {
                     start,
                     "shared_stepped_dc_oracle_family",
                     format!("shared stepped-DC family qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.numbered_redefinition_dc_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_numbered_redefinition_dc_family_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "numbered_redefinition_dc_family",
+                    format!("numbered redefinition DC family qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -4248,6 +4323,23 @@ impl XyceTestRunner {
         self.static_dc_plan_for_path_with_execution_dir(deck_path, expression_dialect, None)
     }
 
+    fn static_dc_plan_for_path_with_redefinition_policy(
+        &self,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+        parameter_redefinition_policy: ParameterRedefinitionPolicy,
+    ) -> Result<XyceStaticDcPlan, String> {
+        let source =
+            fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
+        self.static_dc_plan_for_source_with_execution_dir_and_redefinition_policy(
+            deck_path,
+            source,
+            expression_dialect,
+            parameter_redefinition_policy,
+            None,
+        )
+    }
+
     fn static_dc_plan_for_path_with_execution_dir(
         &self,
         deck_path: &Path,
@@ -4269,6 +4361,23 @@ impl XyceTestRunner {
         deck_path: &Path,
         source: String,
         expression_dialect: ExpressionDialect,
+        execution_dir: Option<&Path>,
+    ) -> Result<XyceStaticDcPlan, String> {
+        self.static_dc_plan_for_source_with_execution_dir_and_redefinition_policy(
+            deck_path,
+            source,
+            expression_dialect,
+            ParameterRedefinitionPolicy::UseLast,
+            execution_dir,
+        )
+    }
+
+    fn static_dc_plan_for_source_with_execution_dir_and_redefinition_policy(
+        &self,
+        deck_path: &Path,
+        source: String,
+        expression_dialect: ExpressionDialect,
+        parameter_redefinition_policy: ParameterRedefinitionPolicy,
         execution_dir: Option<&Path>,
     ) -> Result<XyceStaticDcPlan, String> {
         if Self::contains_control_block(&source) {
@@ -4293,10 +4402,11 @@ impl XyceTestRunner {
         let print = XycePrintRequest {
             probes: print_output.probes,
         };
-        let netlist = Self::parse_netlist_with_expression_dialect_and_execution_dir(
+        let netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
             &source,
             deck_path,
             expression_dialect,
+            parameter_redefinition_policy,
             execution_dir,
         )
         .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
@@ -4318,6 +4428,7 @@ impl XyceTestRunner {
             execution_dir: execution_dir.map(Path::to_path_buf),
             source,
             expression_dialect,
+            parameter_redefinition_policy,
             print,
             print_format: print_output.format,
             dc,
@@ -10010,6 +10121,205 @@ impl XyceTestRunner {
             .parent()
             .ok_or_else(|| "primary reference path has no parent directory".to_string())?;
         Ok(parent.join(side_path))
+    }
+
+    fn run_numbered_redefinition_dc_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceNumberedRedefinitionDcFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract_name = contract.role.contract();
+        if contract
+            .member_paths
+            .first()
+            .is_none_or(|path| !Self::same_path(path, &contract.baseline_path))
+            || contract.member_paths.len() != 3
+            || !contract.owner_path.is_file()
+        {
+            return self.failure_result(
+                deck,
+                start,
+                contract_name,
+                "numbered redefinition family lost its qualified owner/baseline/member invariants"
+                    .to_string(),
+                Vec::new(),
+            );
+        }
+
+        let baseline_plan = match self.static_dc_plan_for_path_with_redefinition_policy(
+            &contract.baseline_path,
+            ExpressionDialect::Xyce,
+            contract.parameter_redefinition_policy,
+        ) {
+            Ok(plan) => plan,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract_name,
+                    format!(
+                        "family '{}' baseline no longer plans: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        let (baseline_netlist, baseline_results) =
+            match self.run_static_dc_results(&baseline_plan, start) {
+                Ok(run) => run,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "family '{}' baseline failed after qualification: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        let baseline_table = match self.dc_results_to_prn_table(
+            &baseline_plan,
+            &baseline_netlist,
+            &baseline_results,
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract_name,
+                    format!(
+                        "family '{}' baseline output conversion failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let targets = match contract.role {
+            XyceNumberedRedefinitionDcFamilyRole::Owner
+            | XyceNumberedRedefinitionDcFamilyRole::Baseline => {
+                contract.member_paths.iter().skip(1).cloned().collect()
+            }
+            XyceNumberedRedefinitionDcFamilyRole::Member(index) => {
+                let Some(path) = contract.member_paths.get(index) else {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        "qualified member index is outside the family".to_string(),
+                        Vec::new(),
+                    );
+                };
+                vec![path.clone()]
+            }
+        };
+        let mut all_mismatches = Vec::new();
+        for target_path in targets {
+            let target_plan = match self.static_dc_plan_for_path_with_redefinition_policy(
+                &target_path,
+                ExpressionDialect::Xyce,
+                contract.parameter_redefinition_policy,
+            ) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "family '{}' member '{}' no longer plans: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let (target_netlist, target_results) =
+                match self.run_static_dc_results(&target_plan, start) {
+                    Ok(run) => run,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract_name,
+                            format!(
+                                "family '{}' member '{}' failed after qualification: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            let target_table = match self.dc_results_to_prn_table(
+                &target_plan,
+                &target_netlist,
+                &target_results,
+            ) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract_name,
+                        format!(
+                            "family '{}' member '{}' output conversion failed: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mut mismatches =
+                match self.compare_serialized_default_prn_tables(&baseline_table, &target_table) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract_name,
+                            format!(
+                                "family '{}' member '{}' exact comparison failed: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{} {}", self.display_path(&target_path), mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        if all_mismatches.is_empty() {
+            self.passed_result(deck, start, contract_name)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract_name,
+                format!(
+                    "{} exact default-PRN mismatch(es) in family '{}'",
+                    all_mismatches.len(),
+                    contract.family
+                ),
+                all_mismatches,
+            )
+        }
     }
 
     fn run_shared_stepped_dc_family_contract(
@@ -25107,10 +25417,12 @@ impl XyceTestRunner {
                 ".STEP static DC execution requires the stepped .prn contract".to_string(),
             ));
         }
-        let netlist = Self::parse_netlist_with_expression_dialect(
+        let netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
             &plan.source,
             &plan.deck_path,
             plan.expression_dialect,
+            plan.parameter_redefinition_policy,
+            plan.execution_dir.as_deref(),
         )
         .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
         let engine = self.create_dc_engine();
@@ -40480,6 +40792,678 @@ impl XyceTestRunner {
         })
     }
 
+    fn numbered_redefinition_dc_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceNumberedRedefinitionDcFamilyContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative.starts_with("netlists/") {
+            return None;
+        }
+        let relative_parent = relative.rsplit_once('/')?.0;
+        let deck_stem = deck.path.file_stem()?.to_str()?.to_ascii_lowercase();
+        let manifest_anchors = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter_map(|path| {
+                let (parent, file_name) = path.rsplit_once('/')?;
+                if parent != relative_parent {
+                    return None;
+                }
+                let stem = file_name.strip_suffix(".cir")?;
+                Some((file_name, stem.to_ascii_lowercase()))
+            })
+            .collect::<Vec<_>>();
+        let manifest_named_candidate = manifest_anchors.len() == 2
+            && manifest_anchors.iter().any(|(_, anchor)| {
+                deck_stem == *anchor
+                    || deck_stem.strip_prefix(anchor).is_some_and(|suffix| {
+                        suffix.len() == 1 && suffix.as_bytes()[0].is_ascii_digit()
+                    })
+            });
+        if !manifest_named_candidate {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let candidate_stems = fs::read_dir(parent)
+            .ok()?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().ok().is_some_and(|kind| kind.is_file()))
+            .filter_map(|entry| {
+                let path = entry.path();
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                    .then(|| {
+                        path.file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .map(str::to_ascii_lowercase)
+                    })
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        let numbered_counts = manifest_anchors
+            .iter()
+            .map(|(_, anchor)| {
+                candidate_stems
+                    .iter()
+                    .filter(|stem| {
+                        stem.strip_prefix(anchor).is_some_and(|suffix| {
+                            suffix.len() == 1 && suffix.as_bytes()[0].is_ascii_digit()
+                        })
+                    })
+                    .count()
+            })
+            .collect::<Vec<_>>();
+        if numbered_counts.len() != 2
+            || numbered_counts.iter().any(|count| !(2..=3).contains(count))
+        {
+            return None;
+        }
+
+        Some((|| {
+            let entries = fs::read_dir(parent)
+                .map_err(|err| format!("failed to read candidate family directory: {err}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| format!("failed to enumerate candidate family directory: {err}"))?;
+            let mut cir_paths = Vec::new();
+            let mut source_artifacts = Vec::new();
+            let mut folded_names = BTreeSet::new();
+            for entry in entries {
+                if !entry.file_type().map_err(|err| err.to_string())?.is_file() {
+                    return Err("family directory may contain only regular files".to_string());
+                }
+                let path = entry.path();
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| "family directory contains a non-UTF-8 name".to_string())?;
+                if !folded_names.insert(name.to_ascii_lowercase()) {
+                    return Err("case-colliding family filenames are not admissible".to_string());
+                }
+                if path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                {
+                    cir_paths.push(path);
+                } else if name.to_ascii_lowercase().ends_with(".cir.res.gs") {
+                    source_artifacts.push(path);
+                } else {
+                    return Err(format!("unexpected source-side family artifact '{}'", name));
+                }
+            }
+            if cir_paths.len() != 11 || source_artifacts.len() != 1 {
+                return Err(format!(
+                    "family census requires eleven .cir files and one .cir.res.gs artifact, found {} and {}",
+                    cir_paths.len(),
+                    source_artifacts.len()
+                ));
+            }
+
+            let mut anchors = Vec::new();
+            for (file_name, _) in &manifest_anchors {
+                let path = cir_paths
+                    .iter()
+                    .find(|path| {
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.eq_ignore_ascii_case(file_name))
+                    })
+                    .cloned()
+                    .ok_or_else(|| format!("manifest anchor '{file_name}' is missing"))?;
+                let source = fs::read_to_string(&path)
+                    .map_err(|err| format!("failed to read manifest anchor: {err}"))?;
+                if !source.trim().is_empty() {
+                    return Err(format!(
+                        "manifest anchor '{}' must contain only whitespace",
+                        path.display()
+                    ));
+                }
+                anchors.push(path);
+            }
+            anchors.sort_by_key(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_ascii_lowercase())
+            });
+
+            let mut claimed = BTreeSet::new();
+            let mut groups = Vec::new();
+            for owner_path in anchors {
+                let owner_stem = owner_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .ok_or_else(|| "family anchor has a non-UTF-8 stem".to_string())?;
+                let folded_owner = owner_stem.to_ascii_lowercase();
+                let mut numbered = BTreeMap::new();
+                for path in &cir_paths {
+                    if Self::same_path(path, &owner_path) {
+                        continue;
+                    }
+                    let stem = path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .ok_or_else(|| "family member has a non-UTF-8 stem".to_string())?
+                        .to_ascii_lowercase();
+                    let Some(suffix) = stem.strip_prefix(&folded_owner) else {
+                        continue;
+                    };
+                    if suffix.len() != 1 || !suffix.as_bytes()[0].is_ascii_digit() {
+                        continue;
+                    }
+                    let index = usize::from(suffix.as_bytes()[0] - b'0');
+                    if numbered.insert(index, path.clone()).is_some() {
+                        return Err(format!(
+                            "family '{owner_stem}' has duplicate member index {index}"
+                        ));
+                    }
+                }
+                if numbered.keys().copied().ne(0..3) {
+                    return Err(format!(
+                        "family '{owner_stem}' requires contiguous members 0, 1, and 2"
+                    ));
+                }
+                let members = numbered.into_values().collect::<Vec<_>>();
+                if !claimed.insert(owner_path.clone())
+                    || members.iter().any(|path| !claimed.insert(path.clone()))
+                {
+                    return Err("a circuit is claimed by more than one numbered family".to_string());
+                }
+                groups.push((owner_path, members));
+            }
+
+            let standalone = cir_paths
+                .iter()
+                .filter(|path| !claimed.contains(*path))
+                .cloned()
+                .collect::<Vec<_>>();
+            if standalone.len() != 3 || claimed.len() != 8 {
+                return Err(
+                    "directory must contain two four-record numbered families and three standalone oracle decks"
+                        .to_string(),
+                );
+            }
+            if standalone.iter().any(|path| {
+                self.requires_upstream_wrapper(&self.relative_key(path))
+                    || fs::read_to_string(path)
+                        .ok()
+                        .is_none_or(|source| source.trim().is_empty())
+            }) {
+                return Err(
+                    "standalone oracle decks must be nonempty non-wrapper circuits".to_string(),
+                );
+            }
+            let artifact_name = source_artifacts[0]
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| "source artifact has a non-UTF-8 name".to_string())?;
+            if standalone
+                .iter()
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            artifact_name.eq_ignore_ascii_case(&format!("{name}.res.gs"))
+                        })
+                })
+                .count()
+                != 1
+            {
+                return Err(
+                    "the sole source-side .res.gs artifact must belong to exactly one standalone deck"
+                        .to_string(),
+                );
+            }
+
+            let first_reference = self
+                .static_output_reference_path(&standalone[0], "prn")
+                .ok_or_else(|| "cannot map standalone deck into OutputData".to_string())?;
+            let output_parent = first_reference
+                .parent()
+                .ok_or_else(|| "OutputData mapping has no parent".to_string())?;
+            let output_entries = fs::read_dir(output_parent)
+                .map_err(|err| format!("failed to read family OutputData directory: {err}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| format!("failed to enumerate family OutputData: {err}"))?;
+            let mut actual_outputs = BTreeSet::new();
+            for entry in output_entries {
+                if !entry.file_type().map_err(|err| err.to_string())?.is_file() {
+                    return Err("family OutputData may contain only regular files".to_string());
+                }
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                if !name.ends_with(".cir.prn") || !actual_outputs.insert(name) {
+                    return Err(
+                        "family OutputData must contain unique default-PRN artifacts only"
+                            .to_string(),
+                    );
+                }
+            }
+            let expected_outputs = standalone
+                .iter()
+                .map(|path| {
+                    format!(
+                        "{}.prn",
+                        path.file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_ascii_lowercase()
+                    )
+                })
+                .collect::<BTreeSet<_>>();
+            if actual_outputs != expected_outputs {
+                return Err(
+                    "family OutputData census must contain exactly one .prn per standalone deck"
+                        .to_string(),
+                );
+            }
+            for path in &standalone {
+                let plan = self.static_dc_plan_for_path(path, ExpressionDialect::Xyce)?;
+                if plan.print.probes.is_empty() || !plan.diagnostics.is_empty() {
+                    return Err(format!(
+                        "standalone deck '{}' is not a diagnostic-free static DC plan",
+                        path.display()
+                    ));
+                }
+            }
+
+            let mut selected_contract = None;
+            let mut selected_policies = Vec::new();
+            for (owner_path, member_paths) in groups {
+                for path in &member_paths {
+                    if self.requires_upstream_wrapper(&self.relative_key(path))
+                        || fs::read_to_string(path)
+                            .map_err(|err| format!("failed to read numbered member: {err}"))?
+                            .trim()
+                            .is_empty()
+                    {
+                        return Err(
+                            "numbered members must be nonempty non-wrapper decks".to_string()
+                        );
+                    }
+                    for extension in ["prn", "res"] {
+                        if self
+                            .static_output_reference_path(path, extension)
+                            .is_some_and(|oracle| oracle.exists())
+                        {
+                            return Err(format!(
+                                "numbered member '{}' must not own a .{extension} oracle",
+                                path.display()
+                            ));
+                        }
+                    }
+                }
+
+                let baseline_source = fs::read_to_string(&member_paths[0])
+                    .map_err(|err| format!("failed to read numbered baseline: {err}"))?;
+                if !Self::top_level_literal_parameter_definitions(&baseline_source)?.is_empty() {
+                    return Err(
+                        "numbered baseline must not define top-level literal parameters"
+                            .to_string(),
+                    );
+                }
+                let first_definitions = Self::top_level_literal_parameter_definitions(
+                    &fs::read_to_string(&member_paths[1]).map_err(|err| err.to_string())?,
+                )?;
+                let second_definitions = Self::top_level_literal_parameter_definitions(
+                    &fs::read_to_string(&member_paths[2]).map_err(|err| err.to_string())?,
+                )?;
+                if first_definitions != second_definitions
+                    || first_definitions
+                        .values()
+                        .filter(|values| {
+                            values.len() == 2 && values[0].to_bits() != values[1].to_bits()
+                        })
+                        .count()
+                        != 1
+                    || first_definitions
+                        .values()
+                        .any(|values| values.is_empty() || values.len() > 2)
+                {
+                    return Err(
+                        "parameterized members must share one literal-definition map with exactly one distinct two-value duplicate"
+                            .to_string(),
+                    );
+                }
+
+                let mut matching_policies = Vec::new();
+                for policy in [
+                    ParameterRedefinitionPolicy::UseFirst,
+                    ParameterRedefinitionPolicy::UseLast,
+                ] {
+                    let mut plans = Vec::new();
+                    let mut snapshots = Vec::new();
+                    let mut representations = Vec::new();
+                    for path in &member_paths {
+                        let plan = self.static_dc_plan_for_path_with_redefinition_policy(
+                            path,
+                            ExpressionDialect::Xyce,
+                            policy,
+                        )?;
+                        Self::validate_numbered_redefinition_dc_plan(&plan)?;
+                        let netlist =
+                            Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+                                &plan.source,
+                                path,
+                                ExpressionDialect::Xyce,
+                                policy,
+                                None,
+                            )
+                            .map_err(|err| format!("failed to parse numbered member: {err}"))?;
+                        representations.push(Self::numbered_redefinition_representation(&netlist)?);
+                        snapshots.push(Self::numbered_redefinition_snapshot(
+                            &netlist,
+                            &plan.dc.source,
+                        )?);
+                        plans.push(plan);
+                    }
+                    if representations
+                        != [
+                            XyceNumberedRedefinitionRepresentation::LiteralBaseline,
+                            XyceNumberedRedefinitionRepresentation::DependentFormalExpression,
+                            XyceNumberedRedefinitionRepresentation::DependentInstanceExpression,
+                        ]
+                    {
+                        return Err(
+                            "numbered members must use baseline, dependent-formal, and dependent-instance representations in order"
+                                .to_string(),
+                        );
+                    }
+                    let baseline_plan = &plans[0];
+                    if plans.iter().skip(1).any(|plan| {
+                        plan.print.probes != baseline_plan.print.probes
+                            || !Self::dc_sweeps_match_exactly(&plan.dc, &baseline_plan.dc)
+                    }) {
+                        return Err(
+                            "numbered members must share identical PRINT and DC contracts"
+                                .to_string(),
+                        );
+                    }
+                    if snapshots
+                        .iter()
+                        .skip(1)
+                        .all(|snapshot| snapshot == &snapshots[0])
+                    {
+                        matching_policies.push(policy);
+                    }
+                }
+                let [policy] = matching_policies.as_slice() else {
+                    return Err(
+                        "numbered family must select exactly one first/last redefinition policy"
+                            .to_string(),
+                    );
+                };
+                selected_policies.push(*policy);
+
+                if Self::same_path(&deck.path, &owner_path)
+                    || member_paths
+                        .iter()
+                        .any(|path| Self::same_path(path, &deck.path))
+                {
+                    let role = member_paths
+                        .iter()
+                        .position(|path| Self::same_path(path, &deck.path))
+                        .map_or(XyceNumberedRedefinitionDcFamilyRole::Owner, |index| {
+                            if index == 0 {
+                                XyceNumberedRedefinitionDcFamilyRole::Baseline
+                            } else {
+                                XyceNumberedRedefinitionDcFamilyRole::Member(index)
+                            }
+                        });
+                    selected_contract = Some(XyceNumberedRedefinitionDcFamilyContract {
+                        family: owner_path
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string(),
+                        owner_path,
+                        baseline_path: member_paths[0].clone(),
+                        member_paths,
+                        parameter_redefinition_policy: *policy,
+                        role,
+                    });
+                }
+            }
+            if selected_policies.len() != 2 || selected_policies[0] == selected_policies[1] {
+                return Err(
+                    "the two numbered families must select opposite redefinition policies"
+                        .to_string(),
+                );
+            }
+            selected_contract.ok_or_else(|| {
+                "requested deck is not claimed by either numbered family".to_string()
+            })
+        })())
+    }
+
+    fn top_level_literal_parameter_definitions(
+        source: &str,
+    ) -> Result<BTreeMap<String, Vec<Value>>, String> {
+        let mut definitions = BTreeMap::<String, Vec<Value>>::new();
+        let mut subckt_depth = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            if stripped.is_empty() {
+                continue;
+            }
+            let fields = Self::split_grouped_whitespace_fields(
+                stripped,
+                "numbered redefinition parameter statement",
+            )?;
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".subckt") {
+                subckt_depth = subckt_depth
+                    .checked_add(1)
+                    .ok_or_else(|| "subcircuit nesting depth overflow".to_string())?;
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".ends") {
+                subckt_depth = subckt_depth
+                    .checked_sub(1)
+                    .ok_or_else(|| ".ENDS without .SUBCKT in family source".to_string())?;
+                continue;
+            }
+            if subckt_depth != 0 {
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".global_param")
+                || command.eq_ignore_ascii_case(".csparam")
+            {
+                return Err(
+                    "numbered redefinition family admits top-level .PARAM literals only"
+                        .to_string(),
+                );
+            }
+            if !command.eq_ignore_ascii_case(".param") {
+                continue;
+            }
+            if fields.len() != 2 {
+                return Err(
+                    "each top-level .PARAM line must contain exactly one assignment".to_string(),
+                );
+            }
+            let (name, raw_value) = fields[1]
+                .split_once('=')
+                .ok_or_else(|| "top-level .PARAM must use NAME=VALUE syntax".to_string())?;
+            if raw_value.contains('=') || !Self::is_single_spice_identifier(name) {
+                return Err("top-level .PARAM assignment is not canonical".to_string());
+            }
+            let value = Self::single_spice_numeric_literal_value(raw_value)?;
+            if !value.is_finite() {
+                return Err("top-level .PARAM literal must be finite".to_string());
+            }
+            definitions
+                .entry(name.to_ascii_uppercase())
+                .or_default()
+                .push(value);
+        }
+        if subckt_depth != 0 {
+            return Err("unterminated .SUBCKT in family source".to_string());
+        }
+        Ok(definitions)
+    }
+
+    fn validate_numbered_redefinition_dc_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        if plan.expression_dialect != ExpressionDialect::Xyce
+            || plan.execution_dir.is_some()
+            || !plan.steps.is_empty()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+            || !plan.diagnostics.is_empty()
+            || plan.print.probes.is_empty()
+        {
+            return Err(
+                "numbered redefinition family requires one diagnostic-free, unstepped, one-dimensional linear default-PRN DC plan"
+                    .to_string(),
+            );
+        }
+        let points = plan.dc.primary_spec().points();
+        if points.len() != 1 || points.iter().any(|point| !point.is_finite()) {
+            return Err(
+                "numbered redefinition family requires exactly one finite DC sweep point"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    fn numbered_redefinition_representation(
+        netlist: &Netlist,
+    ) -> Result<XyceNumberedRedefinitionRepresentation, String> {
+        if !netlist.models.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || netlist.subcircuits.len() != 1
+            || netlist.elements.len() != 3
+        {
+            return Err(
+                "numbered redefinition member requires one three-element, one-subcircuit divider without auxiliary state"
+                    .to_string(),
+            );
+        }
+        let subcircuit = &netlist.subcircuits[0];
+        let [body_element] = subcircuit.elements.as_slice() else {
+            return Err("numbered redefinition subcircuit must contain one element".to_string());
+        };
+        let ElementKind::Resistor { value_expr, .. } = &body_element.kind else {
+            return Err("numbered redefinition subcircuit element must be a resistor".to_string());
+        };
+        let instances = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } => Some((subckt_name, params)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let [(subckt_name, instance_params)] = instances.as_slice() else {
+            return Err(
+                "numbered redefinition member must contain one subcircuit instance".to_string(),
+            );
+        };
+        if !subckt_name.eq_ignore_ascii_case(&subcircuit.name)
+            || netlist
+                .elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::VoltageSource(_)))
+                .count()
+                != 1
+            || netlist
+                .elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+                .count()
+                != 1
+        {
+            return Err(
+                "numbered redefinition member must contain one source, one series resistor, and one matching subcircuit instance"
+                    .to_string(),
+            );
+        }
+
+        let Some(load_parameter) = value_expr.as_deref() else {
+            if subcircuit.params.is_empty()
+                && subcircuit.expr_params.is_empty()
+                && subcircuit.string_params.is_empty()
+                && instance_params.is_empty()
+            {
+                return Ok(XyceNumberedRedefinitionRepresentation::LiteralBaseline);
+            }
+            return Err(
+                "literal baseline must not carry formal or instance parameters".to_string(),
+            );
+        };
+        if !Self::is_single_spice_identifier(load_parameter) {
+            return Err("parameterized subcircuit load must reference one identifier".to_string());
+        }
+        let formal_expression = subcircuit
+            .expr_params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(load_parameter));
+        let instance_expression = instance_params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(load_parameter));
+        match (formal_expression, instance_expression) {
+            (true, false) => Ok(
+                XyceNumberedRedefinitionRepresentation::DependentFormalExpression,
+            ),
+            (false, true) => Ok(
+                XyceNumberedRedefinitionRepresentation::DependentInstanceExpression,
+            ),
+            _ => Err(
+                "load parameter must be supplied by exactly one dependent formal or instance expression"
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn numbered_redefinition_snapshot(
+        netlist: &Netlist,
+        sweep_source: &str,
+    ) -> Result<Vec<XyceRelationalElementFingerprint>, String> {
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|err| format!("could not flatten numbered member: {err}"))?;
+        if flattened.elements.len() != 3 {
+            return Err(format!(
+                "numbered member must flatten to three elements, found {}",
+                flattened.elements.len()
+            ));
+        }
+        let voltage_sources = flattened
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::VoltageSource(_)))
+            .collect::<Vec<_>>();
+        if voltage_sources.len() != 1
+            || !voltage_sources[0].name.eq_ignore_ascii_case(sweep_source)
+            || flattened
+                .elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+                .count()
+                != 2
+        {
+            return Err(
+                "numbered member must flatten to the swept source and two resistors".to_string(),
+            );
+        }
+        let mut fingerprints = flattened
+            .elements
+            .iter()
+            .map(|element| Self::scoped_model_element_fingerprint(element, &netlist.params))
+            .collect::<Result<Vec<_>, _>>()?;
+        fingerprints.sort();
+        Ok(fingerprints)
+    }
+
     fn shared_stepped_dc_family_contract(
         &self,
         deck: &XyceDeck,
@@ -48341,6 +49325,7 @@ VMON 1 2 0V\n\
             execution_dir: None,
             source: res_source.to_string(),
             expression_dialect: ExpressionDialect::Xyce,
+            parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
             print: XycePrintRequest {
                 probes: vec!["V(1)".to_string(), "I(VMON)".to_string()],
             },
@@ -54640,6 +55625,186 @@ R2 2 0 1
         );
 
         fs::remove_dir_all(&temp_root).expect("remove nested-include fixture");
+    }
+
+    #[test]
+    fn numbered_redefinition_dc_family_roles_and_mutations_are_fail_closed() {
+        let corpus_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("xyce");
+        let family_relative = Path::new("Certification_Tests").join("ISSUE_405");
+        let family_dir = corpus_root.join("Netlists").join(&family_relative);
+        let output_dir = corpus_root.join("OutputData").join(&family_relative);
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let deck = |root: &Path, name: &str| XyceDeck {
+            path: root.join("Netlists").join(&family_relative).join(name),
+            relative_path: format!(
+                "Netlists/{}/{}",
+                family_relative.to_string_lossy().replace('\\', "/"),
+                name
+            ),
+            section: XyceDeckSection::Netlists,
+        };
+        let roles = [
+            (
+                "precedence_a.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Owner,
+                ParameterRedefinitionPolicy::UseFirst,
+            ),
+            (
+                "precedence_a0.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Baseline,
+                ParameterRedefinitionPolicy::UseFirst,
+            ),
+            (
+                "precedence_a1.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Member(1),
+                ParameterRedefinitionPolicy::UseFirst,
+            ),
+            (
+                "precedence_a2.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Member(2),
+                ParameterRedefinitionPolicy::UseFirst,
+            ),
+            (
+                "precedence_b.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Owner,
+                ParameterRedefinitionPolicy::UseLast,
+            ),
+            (
+                "precedence_b0.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Baseline,
+                ParameterRedefinitionPolicy::UseLast,
+            ),
+            (
+                "precedence_b1.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Member(1),
+                ParameterRedefinitionPolicy::UseLast,
+            ),
+            (
+                "precedence_b2.cir",
+                XyceNumberedRedefinitionDcFamilyRole::Member(2),
+                ParameterRedefinitionPolicy::UseLast,
+            ),
+        ];
+        for (name, role, policy) in roles {
+            let candidate = deck(&corpus_root, name);
+            let contract = runner
+                .numbered_redefinition_dc_family_contract(&candidate)
+                .expect("family recognized")
+                .expect("family qualifies");
+            assert_eq!(contract.role, role, "unexpected role for {name}");
+            assert_eq!(contract.parameter_redefinition_policy, policy);
+            let result = runner.run_discovered_test(&candidate);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "{name}: {:?}",
+                result.error
+            );
+            assert!(result.mismatches.is_empty());
+        }
+        assert!(
+            runner
+                .numbered_redefinition_dc_family_contract(&deck(&corpus_root, "test1.cir"))
+                .is_none(),
+            "standalone oracle deck must retain its direct contract"
+        );
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!(
+            "rspice-numbered-redefinition-dc-{}-{nonce}",
+            std::process::id()
+        ));
+        let temp_family = temp_root.join("Netlists").join(&family_relative);
+        let temp_output = temp_root.join("OutputData").join(&family_relative);
+        fs::create_dir_all(&temp_family).expect("create source fixture");
+        fs::create_dir_all(&temp_output).expect("create output fixture");
+        for entry in fs::read_dir(&family_dir).expect("read source family") {
+            let entry = entry.expect("read source entry");
+            fs::copy(entry.path(), temp_family.join(entry.file_name()))
+                .expect("copy source family");
+        }
+        for entry in fs::read_dir(&output_dir).expect("read output family") {
+            let entry = entry.expect("read output entry");
+            fs::copy(entry.path(), temp_output.join(entry.file_name()))
+                .expect("copy output family");
+        }
+        fs::write(
+            temp_root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/ISSUE_405/precedence_a.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/ISSUE_405/precedence_b.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write fixture manifest");
+        let anchor = deck(&temp_root, "precedence_a.cir");
+        let assert_rejected = |reason: &str| {
+            let mutated = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+            assert!(
+                matches!(
+                    mutated.numbered_redefinition_dc_family_contract(&anchor),
+                    Some(Err(_))
+                ),
+                "mutation accepted: {reason}"
+            );
+        };
+
+        let unexpected = temp_family.join("unexpected.txt");
+        fs::write(&unexpected, "unexpected").expect("write unexpected artifact");
+        assert_rejected("unexpected source artifact");
+        fs::remove_file(unexpected).expect("remove unexpected artifact");
+
+        let a2 = temp_family.join("precedence_a2.cir");
+        let a2_source = fs::read_to_string(&a2).expect("read A2");
+        fs::remove_file(&a2).expect("remove A2");
+        assert_rejected("missing contiguous member");
+        fs::write(&a2, &a2_source).expect("restore A2");
+
+        let b_owner = temp_family.join("precedence_b.cir");
+        fs::write(&b_owner, "* no longer blank\n").expect("make anchor nonblank");
+        assert_rejected("nonblank anchor");
+        fs::write(&b_owner, "   \n").expect("restore whitespace-only anchor");
+
+        let a1 = temp_family.join("precedence_a1.cir");
+        let a1_source = fs::read_to_string(&a1).expect("read A1");
+        let equal_duplicate = a1_source.replacen("barney=20.0", "barney=10.0", 1);
+        assert_ne!(equal_duplicate, a1_source);
+        fs::write(&a1, equal_duplicate).expect("collapse duplicate values");
+        assert_rejected("equal duplicate values");
+        fs::write(&a1, &a1_source).expect("restore A1");
+
+        let lost_expression = a1_source.replacen("par3='par1*par2*2.0'", "par3=48.0", 1);
+        assert_ne!(lost_expression, a1_source);
+        fs::write(&a1, lost_expression).expect("remove dependent formal expression");
+        assert_rejected("lost dependent formal expression");
+        fs::write(&a1, &a1_source).expect("restore A1 expression");
+
+        let print_drift = a1_source.replacen("v(1) v(2)", "v(2) v(1)", 1);
+        assert_ne!(print_drift, a1_source);
+        fs::write(&a1, print_drift).expect("reorder print probes");
+        assert_rejected("PRINT drift");
+        fs::write(&a1, &a1_source).expect("restore A1 print");
+
+        let member_oracle = temp_output.join("precedence_a1.cir.prn");
+        fs::write(&member_oracle, "forbidden").expect("write member oracle");
+        assert_rejected("member oracle");
+        fs::remove_file(member_oracle).expect("remove member oracle");
+
+        let standalone_oracle = temp_output.join("test1.cir.prn");
+        let standalone_oracle_data = fs::read(&standalone_oracle).expect("read standalone oracle");
+        fs::remove_file(&standalone_oracle).expect("remove standalone oracle");
+        assert_rejected("missing standalone oracle");
+        fs::write(&standalone_oracle, standalone_oracle_data).expect("restore standalone oracle");
+
+        let source_artifact = temp_family.join("test2.cir.res.gs");
+        let source_artifact_data = fs::read(&source_artifact).expect("read source artifact");
+        fs::remove_file(&source_artifact).expect("remove source artifact");
+        assert_rejected("missing source artifact");
+        fs::write(&source_artifact, source_artifact_data).expect("restore source artifact");
+
+        fs::remove_dir_all(&temp_root).expect("remove numbered family fixture");
     }
 
     #[test]
