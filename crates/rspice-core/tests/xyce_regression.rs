@@ -303,8 +303,20 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "expected_failure_duplicate_dc_source_function_parse",
         ),
         (
+            "Netlists/Certification_Tests/BUG_1578/bug_1578.cir",
+            "expected_failure_bug1578_invalid_device_type_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_198/bug_198.cir",
+            "expected_failure_bug198_unrecognized_line_parse",
+        ),
+        (
             "Netlists/Certification_Tests/BUG_204/bug204.cir",
             "expected_failure_bug204_invalid_dc_sweep_arity_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_258/bug_198.cir",
+            "expected_failure_bug258_unrecognized_line_parse",
         ),
         (
             "Netlists/Certification_Tests/BUG_281/bug_281.cir",
@@ -363,8 +375,8 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        18,
-        "the expected-failure oracle census is exactly eighteen distinct physical records"
+        21,
+        "the expected-failure oracle census is exactly twenty-one distinct physical records"
     );
 }
 
