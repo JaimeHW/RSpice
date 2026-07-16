@@ -392,6 +392,31 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
     error
 }
 
+/// Convert a simulation error to PyErr
+pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> PyErr {
+    use rspice_core::engine::SimulationError as CoreSimulationError;
+
+    let (kind, iterations) = match &err {
+        CoreSimulationError::Circuit(_) => ("circuit", None),
+        CoreSimulationError::Solver(_) => ("solver", None),
+        CoreSimulationError::Netlist(_) => ("netlist", None),
+        CoreSimulationError::ConvergenceFailed(iterations) => ("convergence", Some(*iterations)),
+        CoreSimulationError::Aborted => ("aborted", None),
+    };
+    let error = match &err {
+        CoreSimulationError::ConvergenceFailed(_) => ConvergenceError::new_err(err.to_string()),
+        CoreSimulationError::Aborted => CancelledError::new_err(err.to_string()),
+        _ => SimulationError::new_err(err.to_string()),
+    };
+    let _attribute_result = Python::attach(|py| {
+        let value = error.value(py);
+        value.setattr("kind", kind)?;
+        value.setattr("iterations", iterations)?;
+        Ok::<_, PyErr>(())
+    });
+    error
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,29 +475,4 @@ mod tests {
         assert_eq!(attributes.formal_port.as_deref(), Some("$G_SHARED"));
         assert_eq!(attributes.actual_node.as_deref(), Some("LOCAL"));
     }
-}
-
-/// Convert a simulation error to PyErr
-pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> PyErr {
-    use rspice_core::engine::SimulationError as CoreSimulationError;
-
-    let (kind, iterations) = match &err {
-        CoreSimulationError::Circuit(_) => ("circuit", None),
-        CoreSimulationError::Solver(_) => ("solver", None),
-        CoreSimulationError::Netlist(_) => ("netlist", None),
-        CoreSimulationError::ConvergenceFailed(iterations) => ("convergence", Some(*iterations)),
-        CoreSimulationError::Aborted => ("aborted", None),
-    };
-    let error = match &err {
-        CoreSimulationError::ConvergenceFailed(_) => ConvergenceError::new_err(err.to_string()),
-        CoreSimulationError::Aborted => CancelledError::new_err(err.to_string()),
-        _ => SimulationError::new_err(err.to_string()),
-    };
-    let _attribute_result = Python::attach(|py| {
-        let value = error.value(py);
-        value.setattr("kind", kind)?;
-        value.setattr("iterations", iterations)?;
-        Ok::<_, PyErr>(())
-    });
-    error
 }
