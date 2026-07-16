@@ -70,7 +70,15 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::Syntax { line, message } => ("syntax", Some(*line), Some(message.as_str())),
         CoreParseError::UnknownDevice(value) => ("unknown_device", None, Some(value.as_str())),
         CoreParseError::InvalidNode(value) => ("invalid_node", None, Some(value.as_str())),
-        CoreParseError::DuplicateName(value) => ("duplicate_name", None, Some(value.as_str())),
+        CoreParseError::DuplicateName {
+            canonical_name,
+            duplicate_line,
+            ..
+        } => (
+            "duplicate_name",
+            Some(*duplicate_line),
+            Some(canonical_name.as_str()),
+        ),
         CoreParseError::MissingParameter(value) => {
             ("missing_parameter", None, Some(value.as_str()))
         }

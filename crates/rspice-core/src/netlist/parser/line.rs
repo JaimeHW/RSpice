@@ -160,6 +160,12 @@ pub(super) fn process_line(
     line_num: usize,
     state: &mut ParseState,
 ) -> Result<(), ParseError> {
+    let authored_element_name = line
+        .split_whitespace()
+        .next()
+        .map(|name| name.trim_end_matches(','))
+        .filter(|name| !name.starts_with('.'));
+
     // HSPICE table-driven sweeps resolve through multi-run expansion
     // (`netlist::multi_run`); in a direct parse the analysis is skipped
     // with a warning instead of failing, so unexpanded decks still load.
@@ -212,6 +218,7 @@ pub(super) fn process_line(
             local_params,
             nested_aliases: HashMap::new(),
             local_model_aliases: HashMap::new(),
+            element_names: ElementNameRegistry::default(),
         });
         return Ok(());
     }
@@ -343,6 +350,13 @@ pub(super) fn process_line(
                     deferred_body_params: Some(&mut frame.def.body_expr_params),
                 },
             )?;
+            let scope = format!("SUBCIRCUIT:{}", frame.qualified_name.to_ascii_uppercase());
+            frame.element_names.register(
+                &subckt_elements,
+                authored_element_name,
+                &scope,
+                line_num,
+            )?;
             capture_subckt_body_scope(line, &mut frame.def, &frame.local_params);
             frame.def.elements.extend(subckt_elements);
             frame
@@ -355,6 +369,7 @@ pub(super) fn process_line(
     }
 
     // Normal element/command parsing
+    let first_new_element = state.elements.len();
     parse_line(
         line,
         line_num,
@@ -376,6 +391,12 @@ pub(super) fn process_line(
             spef_includes: &mut state.spef_includes,
             deferred_body_params: None,
         },
+    )?;
+    state.element_names.register(
+        &state.elements[first_new_element..],
+        authored_element_name,
+        "TOP_LEVEL",
+        line_num,
     )
 }
 
@@ -692,7 +713,7 @@ fn upsert_case_insensitive<T>(items: &mut Vec<(String, T)>, name: String, value:
 
 #[cfg(test)]
 mod tests {
-    use super::strip_inline_semicolon_comment;
+    use super::*;
 
     #[test]
     fn slash_comments_do_not_strip_urls() {
@@ -723,6 +744,23 @@ mod tests {
         assert_eq!(
             strip_inline_semicolon_comment("R1 a b 1k $ comment").trim_end(),
             "R1 a b 1k"
+        );
+    }
+
+    #[test]
+    fn process_line_registers_authored_and_synthesized_rf_port_names() {
+        let mut state = ParseState::new();
+        process_line("P1 OUT 0 DC 2 PORT=1 Z0=75", 2, &mut state)
+            .expect("real Xyce RF port parses");
+
+        assert_eq!(state.elements.len(), 2);
+        assert!(
+            state.element_names.contains_canonical("P1"),
+            "authored RF-port source name is registered"
+        );
+        assert!(
+            state.element_names.contains_canonical("__RSPICE_P1_Z0"),
+            "synthesized RF-port termination name is registered from the same append batch"
         );
     }
 }

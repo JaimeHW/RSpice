@@ -71,8 +71,17 @@ pub enum ParseError {
     #[error("Invalid node reference: {0}")]
     InvalidNode(String),
 
-    #[error("Duplicate element name: {0}")]
-    DuplicateName(String),
+    #[error(
+        "Duplicate element name '{duplicate_name}' (canonical '{canonical_name}') in scope '{scope}' at line {duplicate_line}; first declared as '{first_name}' at line {first_line}"
+    )]
+    DuplicateName {
+        canonical_name: String,
+        first_name: String,
+        duplicate_name: String,
+        scope: String,
+        first_line: usize,
+        duplicate_line: usize,
+    },
 
     #[error("Missing required parameter: {0}")]
     MissingParameter(String),
@@ -2226,6 +2235,146 @@ mod tests {
                 "directive={directive}, unexpected parse error: {error}"
             );
         }
+    }
+
+    fn assert_duplicate_element_error(
+        source: &str,
+        expected_canonical: &str,
+        expected_first: &str,
+        expected_duplicate: &str,
+        expected_scope: &str,
+        expected_first_line: usize,
+        expected_duplicate_line: usize,
+    ) {
+        let error = Netlist::parse(source).expect_err("duplicate element name must be rejected");
+        match error {
+            ParseError::DuplicateName {
+                canonical_name,
+                first_name,
+                duplicate_name,
+                scope,
+                first_line,
+                duplicate_line,
+            } => {
+                assert_eq!(canonical_name, expected_canonical);
+                assert_eq!(first_name, expected_first);
+                assert_eq!(duplicate_name, expected_duplicate);
+                assert_eq!(scope, expected_scope);
+                assert_eq!(first_line, expected_first_line);
+                assert_eq!(duplicate_line, expected_duplicate_line);
+            }
+            other => panic!("expected structured duplicate-name error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_element_names_are_rejected_case_insensitively_at_top_level() {
+        for duplicate in ["V1", "v1"] {
+            assert_duplicate_element_error(
+                &format!(
+                    "top-level duplicate\n\
+                     V1 1 0 1\n\
+                     {duplicate} 2 0 2\n\
+                     .end\n"
+                ),
+                "V1",
+                "V1",
+                duplicate,
+                "TOP_LEVEL",
+                2,
+                3,
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_element_names_are_rejected_case_insensitively_within_subcircuits() {
+        for duplicate in ["R1", "r1"] {
+            assert_duplicate_element_error(
+                &format!(
+                    "subcircuit duplicate\n\
+                     .subckt cell a b\n\
+                     R1 a b 1\n\
+                     {duplicate} b 0 2\n\
+                     .ends\n\
+                     .end\n"
+                ),
+                "R1",
+                "R1",
+                duplicate,
+                "SUBCIRCUIT:CELL",
+                3,
+                4,
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_element_error_preserves_logical_statement_line_provenance() {
+        assert_duplicate_element_error(
+            "duplicate provenance\n\
+             V1 1 0 1\n\
+             \n\
+             * intervening comment\n\
+             v1 2 0\n\
+             + DC 2\n\
+            .end\n",
+            "V1",
+            "V1",
+            "v1",
+            "TOP_LEVEL",
+            2,
+            5,
+        );
+    }
+
+    #[test]
+    fn element_names_may_be_reused_across_independent_scopes_and_instances() {
+        let netlist = Netlist::parse(
+            "legal scoped reuse\n\
+             R1 top 0 1\n\
+             .subckt left a b\n\
+             R1 a b 2\n\
+             .ends\n\
+             .subckt right a b\n\
+             r1 a b 3\n\
+             .ends\n\
+             X1 top 0 left\n\
+             X2 top 0 left\n\
+             X3 top 0 right\n\
+             .end\n",
+        )
+        .expect("element names may repeat in distinct lexical and instance scopes");
+
+        let flattened = flatten_netlist_with_models(&netlist).expect("scoped reuse flattens");
+        let names = flattened
+            .elements
+            .iter()
+            .map(|element| element.name.to_ascii_uppercase())
+            .collect::<HashSet<_>>();
+        for expected in ["R1", "X1.R1", "X2.R1", "X3.R1"] {
+            assert!(
+                names.contains(expected),
+                "flattened scoped element {expected} is preserved"
+            );
+        }
+    }
+
+    #[test]
+    fn element_names_may_be_reused_between_parent_and_nested_subcircuits() {
+        Netlist::parse(
+            "legal nested reuse\n\
+             .subckt outer a b\n\
+             R1 a b 1\n\
+             .subckt inner c d\n\
+             r1 c d 2\n\
+             .ends inner\n\
+             XINNER a b inner\n\
+             .ends outer\n\
+             XOUT 1 0 outer\n\
+             .end\n",
+        )
+        .expect("parent and nested subcircuits own independent element-name scopes");
     }
 
     #[test]

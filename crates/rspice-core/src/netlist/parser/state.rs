@@ -3,17 +3,70 @@
 use super::*;
 
 #[derive(Debug, Clone)]
+struct ElementNameOrigin {
+    spelling: String,
+    line: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct ElementNameRegistry {
+    origins: HashMap<String, ElementNameOrigin>,
+}
+
+impl ElementNameRegistry {
+    pub(super) fn register(
+        &mut self,
+        elements: &[Element],
+        authored_name: Option<&str>,
+        scope: &str,
+        line: usize,
+    ) -> Result<(), ParseError> {
+        for (index, element) in elements.iter().enumerate() {
+            let canonical_name = element.name.to_ascii_uppercase();
+            let spelling = authored_name
+                .filter(|name| index == 0 && name.eq_ignore_ascii_case(&element.name))
+                .unwrap_or(&element.name);
+            if let Some(first) = self.origins.get(&canonical_name) {
+                return Err(ParseError::DuplicateName {
+                    canonical_name,
+                    first_name: first.spelling.clone(),
+                    duplicate_name: spelling.to_string(),
+                    scope: scope.to_string(),
+                    first_line: first.line,
+                    duplicate_line: line,
+                });
+            }
+            self.origins.insert(
+                canonical_name,
+                ElementNameOrigin {
+                    spelling: spelling.to_string(),
+                    line,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn contains_canonical(&self, name: &str) -> bool {
+        self.origins.contains_key(name)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct SubcktFrame {
     pub(super) def: SubcircuitDef,
     pub(super) qualified_name: String,
     pub(super) local_params: ParamContext,
     pub(super) nested_aliases: HashMap<String, String>,
     pub(super) local_model_aliases: HashMap<String, String>,
+    pub(super) element_names: ElementNameRegistry,
 }
 
 #[derive(Debug)]
 pub(super) struct ParseState {
     pub(super) elements: Vec<Element>,
+    pub(super) element_names: ElementNameRegistry,
     pub(super) analyses: Vec<AnalysisCommand>,
     pub(super) fft_analyses: Vec<FftAnalysis>,
     pub(super) data_tables: Vec<DataTable>,
@@ -41,6 +94,7 @@ impl ParseState {
     pub(super) fn new() -> Self {
         Self {
             elements: Vec::new(),
+            element_names: ElementNameRegistry::default(),
             analyses: Vec::new(),
             fft_analyses: Vec::new(),
             data_tables: Vec::new(),
@@ -136,4 +190,63 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) spef_includes: &'a mut Vec<String>,
     pub(super) defer_scoped_values: bool,
     pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resistor(name: &str) -> Element {
+        Element {
+            name: name.to_string(),
+            kind: ElementKind::Resistor {
+                value: 1.0,
+                value_expr: None,
+                model: None,
+                instance_params: Vec::new(),
+                deferred_params: Vec::new(),
+            },
+            nodes: vec!["1".to_string(), "0".to_string()],
+        }
+    }
+
+    #[test]
+    fn element_registry_tracks_every_name_from_one_synthesized_append_batch() {
+        let mut registry = ElementNameRegistry::default();
+        registry
+            .register(
+                &[resistor("P1"), resistor("__RSPICE_P1_Z0")],
+                Some("P1"),
+                "TOP_LEVEL",
+                2,
+            )
+            .expect("authored RF port and synthesized termination register together");
+
+        let error = registry
+            .register(
+                &[resistor("__RSPICE_P1_Z0")],
+                Some("__rspice_p1_z0"),
+                "TOP_LEVEL",
+                3,
+            )
+            .expect_err("later name must collide with synthesized termination");
+        match error {
+            ParseError::DuplicateName {
+                canonical_name,
+                first_name,
+                duplicate_name,
+                scope,
+                first_line,
+                duplicate_line,
+            } => {
+                assert_eq!(canonical_name, "__RSPICE_P1_Z0");
+                assert_eq!(first_name, "__RSPICE_P1_Z0");
+                assert_eq!(duplicate_name, "__rspice_p1_z0");
+                assert_eq!(scope, "TOP_LEVEL");
+                assert_eq!(first_line, 2);
+                assert_eq!(duplicate_line, 3);
+            }
+            other => panic!("expected synthesized-name collision, got {other:?}"),
+        }
+    }
 }
