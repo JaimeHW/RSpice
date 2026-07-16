@@ -96,6 +96,10 @@ const XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD: &str =
     "netlists/abm_int_floor_ceil/int_floor_ceil_bsrc.cir";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
+const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_647_son/semic_resistor.cir";
+const XYCE_BUG647_RESISTOR_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/bug_647_son/semic_resistor_modpar.cir";
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
@@ -442,6 +446,28 @@ struct XyceResistorDtempSnapshot {
     dc_step_bits: u64,
     probes: Vec<String>,
     effective_temperature_bits: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug647ResistorRole {
+    Owner,
+    ModelParameterReference,
+}
+
+impl XyceBug647ResistorRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Owner => "bug647_resistor_relational_wrapper_owner",
+            Self::ModelParameterReference => "bug647_resistor_relational_wrapper_model_reference",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug647ResistorContract {
+    owner_plan: XyceStaticDcPlan,
+    reference_plan: XyceStaticDcPlan,
+    role: XyceBug647ResistorRole,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2679,6 +2705,28 @@ impl XyceTestRunner {
                     start,
                     "resistor_dtemp_relational_wrapper",
                     format!("resistor DTEMP relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.bug647_resistor_relational_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_bug647_resistor_relational_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "bug647_resistor_relational_wrapper",
+                    format!("BUG 647 resistor relational qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -11689,6 +11737,381 @@ impl XyceTestRunner {
             }
         }
         Ok(mismatches)
+    }
+
+    fn run_bug647_resistor_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug647ResistorContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        let tables = self.simulate_bug647_resistor_pair(
+            &contract.owner_plan,
+            &contract.reference_plan,
+            start,
+        );
+        let (owner, reference) = match tables {
+            Ok(tables) => tables,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 647 resistor paired execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mismatches = match self.compare_bug647_resistor_tables(&reference, &owner) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 647 resistor file_compare adapter failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} BUG 647 resistor mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn simulate_bug647_resistor_pair(
+        &self,
+        owner_plan: &XyceStaticDcPlan,
+        reference_plan: &XyceStaticDcPlan,
+        start: Instant,
+    ) -> Result<(XycePrnTable, XycePrnTable), String> {
+        let parse = |plan: &XyceStaticDcPlan, role: &str| {
+            Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+                &plan.source,
+                &plan.deck_path,
+                plan.expression_dialect,
+                plan.parameter_redefinition_policy,
+                plan.execution_dir.as_deref(),
+            )
+            .map_err(|err| format!("{role} parse failed: {err}"))
+        };
+        let owner_netlist = parse(owner_plan, "instance-parameter owner")?;
+        let reference_netlist = parse(reference_plan, "model-parameter reference")?;
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let engine = self.create_dc_engine();
+        let expand = |netlist: &Netlist, plan: &XyceStaticDcPlan, role: &str| {
+            Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &engine,
+                netlist,
+                &plan.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            )
+            .map_err(|err| format!("{role} STEP expansion failed: {err}"))
+        };
+        let owner_runs = expand(&owner_netlist, owner_plan, "instance-parameter owner")?;
+        let reference_runs = expand(
+            &reference_netlist,
+            reference_plan,
+            "model-parameter reference",
+        )?;
+        if owner_runs.len() != 270 || reference_runs.len() != 270 {
+            return Err(format!(
+                "paired STEP census must be 270 runs per deck, got owner={} reference={}",
+                owner_runs.len(),
+                reference_runs.len()
+            ));
+        }
+
+        let owner_grids = owner_plan
+            .steps
+            .iter()
+            .map(|step| step.sweep.values())
+            .collect::<Vec<_>>();
+        let reference_grids = reference_plan
+            .steps
+            .iter()
+            .map(|step| step.sweep.values())
+            .collect::<Vec<_>>();
+        if owner_grids.iter().map(Vec::len).collect::<Vec<_>>() != [5, 6, 3, 3]
+            || owner_grids.len() != reference_grids.len()
+            || owner_grids
+                .iter()
+                .zip(&reference_grids)
+                .any(|(owner, reference)| {
+                    owner.len() != reference.len()
+                        || owner
+                            .iter()
+                            .zip(reference)
+                            .any(|(owner, reference)| owner.to_bits() != reference.to_bits())
+                })
+        {
+            return Err(
+                "paired STEP grids are not the exact 5x6x3x3 W/TEMP/TC1/TC2 Cartesian product"
+                    .into(),
+            );
+        }
+
+        for (run_index, (owner, reference)) in owner_runs.iter().zip(&reference_runs).enumerate() {
+            let expected = [
+                owner_grids[0][run_index % 5],
+                owner_grids[1][(run_index / 5) % 6],
+                owner_grids[2][(run_index / 30) % 3],
+                owner_grids[3][(run_index / 90) % 3],
+            ];
+            if owner.step_values.len() != 4
+                || reference.step_values.len() != 4
+                || owner
+                    .step_values
+                    .iter()
+                    .zip(expected)
+                    .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+                || reference
+                    .step_values
+                    .iter()
+                    .zip(expected)
+                    .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+            {
+                return Err(format!(
+                    "paired STEP coordinate {run_index} does not preserve first-declared-fastest W/TEMP/TC1/TC2 order"
+                ));
+            }
+
+            for (parameter, coordinate_index) in
+                [("W", 0usize), ("TEMP", 1), ("TC1", 2), ("TC2", 3)]
+            {
+                let resolve = |run: &XyceStepRun, role: &str| {
+                    engine
+                        .resolved_resistor_parameter(&run.netlist, "R1", parameter)
+                        .map_err(|err| {
+                            format!(
+                                "{role} coordinate {run_index} effective {parameter} resolution failed: {err}"
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            format!(
+                                "{role} coordinate {run_index} has no effective R1:{parameter}"
+                            )
+                        })
+                };
+                let owner_value = resolve(owner, "owner")?;
+                let reference_value = resolve(reference, "reference")?;
+                if owner_value.to_bits() != reference_value.to_bits()
+                    || owner_value.to_bits() != expected[coordinate_index].to_bits()
+                {
+                    return Err(format!(
+                        "coordinate {run_index} effective R1:{parameter} differs: owner={owner_value} reference={reference_value} expected={}",
+                        expected[coordinate_index]
+                    ));
+                }
+            }
+            let owner_resistance = engine
+                .resolved_resistor_parameter(&owner.netlist, "R1", "R")
+                .map_err(|err| {
+                    format!("owner coordinate {run_index} resistance resolution failed: {err}")
+                })?
+                .ok_or_else(|| format!("owner coordinate {run_index} has no resistance"))?;
+            let reference_resistance = engine
+                .resolved_resistor_parameter(&reference.netlist, "R1", "R")
+                .map_err(|err| {
+                    format!("reference coordinate {run_index} resistance resolution failed: {err}")
+                })?
+                .ok_or_else(|| format!("reference coordinate {run_index} has no resistance"))?;
+            if owner_resistance.to_bits() != reference_resistance.to_bits() {
+                return Err(format!(
+                    "coordinate {run_index} effective resistance differs: owner={owner_resistance} reference={reference_resistance}"
+                ));
+            }
+        }
+
+        let owner_table = self.simulate_bug647_resistor_runs(
+            owner_plan,
+            owner_runs,
+            &engine,
+            &abort,
+            "instance-parameter owner",
+        )?;
+        let reference_table = self.simulate_bug647_resistor_runs(
+            reference_plan,
+            reference_runs,
+            &engine,
+            &abort,
+            "model-parameter reference",
+        )?;
+        Ok((owner_table, reference_table))
+    }
+
+    fn simulate_bug647_resistor_runs(
+        &self,
+        plan: &XyceStaticDcPlan,
+        runs: Vec<XyceStepRun>,
+        engine: &Engine,
+        abort: &DeadlineAbort,
+        role: &str,
+    ) -> Result<XycePrnTable, String> {
+        let mut columns = vec!["Index".to_string()];
+        columns.extend(plan.print.probes.iter().cloned());
+        let mut rows = Vec::with_capacity(1_620);
+        for (step_index, run) in runs.into_iter().enumerate() {
+            let netlist = run.netlist;
+            let results = engine
+                .run_dc_sweep2_spec_with_report_and_abort(
+                    &netlist,
+                    &plan.dc.source,
+                    &plan.dc.primary_spec(),
+                    plan.dc.sweep2.as_ref(),
+                    abort,
+                )
+                .map_err(|err| {
+                    format!("{role} step {} simulation failed: {err}", step_index + 1)
+                })?;
+            if results.len() != 6 {
+                return Err(format!(
+                    "{role} step {} produced {} DC points instead of six",
+                    step_index + 1,
+                    results.len()
+                ));
+            }
+            for (row_index, point) in results.iter().enumerate() {
+                let sweep_point = XyceDcSweepPoint {
+                    primary: point.sweep_value,
+                    secondary: None,
+                };
+                let mut row = vec![row_index as Value];
+                for probe in &plan.print.probes {
+                    row.push(Self::evaluate_dc_probe(
+                        probe,
+                        &netlist,
+                        &plan.dc,
+                        sweep_point,
+                        &point.result,
+                        &point.device_op_report,
+                    )?);
+                }
+                rows.push(row);
+            }
+        }
+        if rows.len() != 1_620 {
+            return Err(format!(
+                "{role} output has {} rows instead of 1620",
+                rows.len()
+            ));
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn compare_bug647_resistor_tables(
+        &self,
+        reference: &XycePrnTable,
+        owner: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        const ABS_TOL: Value = 1.0e-6;
+        const REL_TOL: Value = 0.01;
+        const ZERO_TOL: Value = 1.0e-12;
+        let reference_tokens = Self::bug647_default_prn_token_lines(reference)?;
+        let owner_tokens = Self::bug647_default_prn_token_lines(owner)?;
+        if reference_tokens.len() != 1_622
+            || owner_tokens.len() != 1_622
+            || reference_tokens[0] != owner_tokens[0]
+            || reference_tokens[1_621] != owner_tokens[1_621]
+        {
+            return Err("paired default PRNs do not have identical 1622-line header/data/footer token streams".into());
+        }
+        if reference.columns != owner.columns
+            || reference.columns.len() != 7
+            || reference.columns[0] != "Index"
+            || reference.rows.len() != 1_620
+            || owner.rows.len() != 1_620
+        {
+            return Err(format!(
+                "paired default PRNs require identical seven-column headers and 1620 rows, got reference={:?}/{} owner={:?}/{}",
+                reference.columns,
+                reference.rows.len(),
+                owner.columns,
+                owner.rows.len()
+            ));
+        }
+        let mut mismatches = Vec::new();
+        for (row_index, (expected_row, actual_row)) in
+            reference.rows.iter().zip(&owner.rows).enumerate()
+        {
+            if expected_row.len() != 7 || actual_row.len() != 7 {
+                return Err(format!("paired PRN row {row_index} is not seven columns"));
+            }
+            let expected_index = (row_index % 6) as Value;
+            if expected_row[0].to_bits() != expected_index.to_bits()
+                || actual_row[0].to_bits() != expected_index.to_bits()
+            {
+                return Err(format!(
+                    "paired PRN row {row_index} does not reset Index for each STEP coordinate"
+                ));
+            }
+            for (column_index, (&expected, &actual)) in
+                expected_row.iter().zip(actual_row).enumerate()
+            {
+                let expected = Self::xyce_default_prn_roundtrip(expected)?;
+                let actual = Self::xyce_default_prn_roundtrip(actual)?;
+                let exact = actual == expected;
+                let both_zero = actual.abs() <= ZERO_TOL && expected.abs() <= ZERO_TOL;
+                let absolute_error = (actual - expected).abs();
+                let relative_error = absolute_error / expected.abs();
+                let within_both = absolute_error < ABS_TOL && relative_error < REL_TOL;
+                // Reproduce Release 7.10 file_compare.pl literally. Its FFT
+                // phase clause omits an outer abs around `abs(value)-180`.
+                let phase_clause =
+                    (expected.abs() - 180.0) < ABS_TOL && (actual.abs() - 180.0) < ABS_TOL;
+                if exact || both_zero || within_both || phase_clause {
+                    continue;
+                }
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: reference.columns[column_index].clone(),
+                    expected,
+                    actual,
+                    relative_error,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+        }
+        Ok(mismatches)
+    }
+
+    fn bug647_default_prn_token_lines(table: &XycePrnTable) -> Result<Vec<Vec<String>>, String> {
+        if table.columns.len() != 7 || table.rows.len() != 1_620 {
+            return Err(
+                "BUG 647 default stepped PRN requires seven columns and 1620 data rows".into(),
+            );
+        }
+        let mut lines = Vec::with_capacity(1_622);
+        lines.push(table.columns.clone());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != 7 {
+                return Err(format!("BUG 647 PRN row {row_index} is not seven fields"));
+            }
+            lines.push(
+                row.iter()
+                    .map(|value| Self::xyce_default_prn_text(*value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        lines.push(
+            ["End", "of", "Xyce(TM)", "Parameter", "Sweep"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        Ok(lines)
     }
 
     fn compare_analytic_integer_dc_table(
@@ -43253,6 +43676,380 @@ impl XyceTestRunner {
         })())
     }
 
+    fn bug647_resistor_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug647ResistorContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = match relative.as_str() {
+            XYCE_BUG647_RESISTOR_OWNER_RECORD => XyceBug647ResistorRole::Owner,
+            XYCE_BUG647_RESISTOR_REFERENCE_RECORD => {
+                XyceBug647ResistorRole::ModelParameterReference
+            }
+            _ => return None,
+        };
+        Some((|| {
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| "BUG 647 resistor record has no sibling directory".to_string())?;
+            let owner_path = parent.join("semic_resistor.cir");
+            let reference_path = parent.join("semic_resistor_modpar.cir");
+            if Self::normalize_manifest_key(&self.relative_key(&owner_path))
+                != XYCE_BUG647_RESISTOR_OWNER_RECORD
+                || Self::normalize_manifest_key(&self.relative_key(&reference_path))
+                    != XYCE_BUG647_RESISTOR_REFERENCE_RECORD
+            {
+                return Err("owner/reference paths are not the exact BUG 647 sibling pair".into());
+            }
+            if !self.requires_upstream_wrapper(XYCE_BUG647_RESISTOR_OWNER_RECORD)
+                || self.requires_upstream_wrapper(XYCE_BUG647_RESISTOR_REFERENCE_RECORD)
+            {
+                return Err(
+                    "exactly semic_resistor.cir must own the removed upstream wrapper".into(),
+                );
+            }
+            for (member_role, path) in [
+                ("instance-parameter owner", &owner_path),
+                ("model-parameter reference", &reference_path),
+            ] {
+                let metadata = fs::metadata(path)
+                    .map_err(|err| format!("could not inspect {member_role}: {err}"))?;
+                if !metadata.is_file() || metadata.len() == 0 {
+                    return Err(format!("{member_role} must be a nonempty regular file"));
+                }
+                self.reject_wrapper_output_artifacts(path)
+                    .map_err(|err| format!("{member_role} {err}"))?;
+            }
+            let owner_plan = self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?;
+            let reference_plan =
+                self.static_dc_plan_for_path(&reference_path, ExpressionDialect::Xyce)?;
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_path)
+                .map_err(|err| format!("instance-parameter owner parse failed: {err}"))?;
+            let reference_netlist =
+                Self::parse_xyce_netlist(&reference_plan.source, &reference_path)
+                    .map_err(|err| format!("model-parameter reference parse failed: {err}"))?;
+            Self::validate_bug647_resistor_member(
+                &owner_plan,
+                &owner_netlist,
+                XyceBug647ResistorRole::Owner,
+            )?;
+            Self::validate_bug647_resistor_member(
+                &reference_plan,
+                &reference_netlist,
+                XyceBug647ResistorRole::ModelParameterReference,
+            )?;
+            Ok(XyceBug647ResistorContract {
+                owner_plan,
+                reference_plan,
+                role,
+            })
+        })())
+    }
+
+    fn validate_bug647_resistor_member(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        role: XyceBug647ResistorRole,
+    ) -> Result<(), String> {
+        Self::validate_bug647_resistor_statement_envelope(&plan.source)?;
+        if plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !Self::bug647_resistor_diagnostics_are_exact(&plan.diagnostics)
+            || plan.steps.len() != 4
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+            || plan.dc.start.to_bits() != 0.0f64.to_bits()
+            || plan.dc.stop.to_bits() != 5.0f64.to_bits()
+            || plan.dc.step.to_bits() != 1.0f64.to_bits()
+            || !plan.dc.source.eq_ignore_ascii_case("VIN")
+            || plan.print.probes.len() != 6
+        {
+            return Err("BUG 647 resistor member requires four nested linear STEPs, one VIN 0:1:5 DC sweep, and one default six-probe PRN".into());
+        }
+        let dc_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 5
+            || dc_count != 1
+            || step_count != 4
+            || netlist.elements.len() != 3
+            || netlist.models.len() != 1
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !Self::bug647_resistor_diagnostics_are_exact(&netlist.diagnostics)
+        {
+            return Err("BUG 647 resistor member admits only R1, VIN, VMON, RMOD, one DC analysis, and four STEP analyses".into());
+        }
+
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if probes != ["v(1)", "i(vmon)", "r1:w", "r1:tc1", "r1:tc2", "r1:temp"] {
+            return Err("BUG 647 resistor ordered probe contract changed".into());
+        }
+
+        let step = |index: usize,
+                    target: StepTarget,
+                    name: &str,
+                    parameter: Option<&str>,
+                    start: Value,
+                    stop: Value,
+                    increment: Value|
+         -> Result<(), String> {
+            let command = &plan.steps[index];
+            let StepSweep::Linear {
+                start: actual_start,
+                stop: actual_stop,
+                step: actual_step,
+            } = command.sweep
+            else {
+                return Err(format!("STEP {} is not linear", index + 1));
+            };
+            if command.target != target
+                || !command.name.eq_ignore_ascii_case(name)
+                || command.param_name.as_deref().map(str::to_ascii_lowercase)
+                    != parameter.map(str::to_ascii_lowercase)
+                || actual_start.to_bits() != start.to_bits()
+                || actual_stop.to_bits() != stop.to_bits()
+                || actual_step.to_bits() != increment.to_bits()
+            {
+                return Err(format!(
+                    "STEP {} target, order, or grid changed: actual={command:?}, expected target={target:?} name={name} parameter={parameter:?} grid=[{start}, {stop}, {increment}]",
+                    index + 1
+                ));
+            }
+            Ok(())
+        };
+        match role {
+            XyceBug647ResistorRole::Owner => {
+                step(
+                    0,
+                    StepTarget::Device,
+                    "R1",
+                    Some("W"),
+                    1e-6,
+                    5.0 * 1e-6,
+                    1e-6,
+                )?;
+                step(1, StepTarget::Device, "R1", Some("TEMP"), 30.0, 35.0, 1.0)?;
+                step(2, StepTarget::Device, "R1", Some("TC1"), 1e-2, 3e-2, 1e-2)?;
+                step(3, StepTarget::Device, "R1", Some("TC2"), 1e-4, 3e-4, 1e-4)?;
+            }
+            XyceBug647ResistorRole::ModelParameterReference => {
+                step(
+                    0,
+                    StepTarget::Device,
+                    "RMOD",
+                    Some("DEFW"),
+                    1e-6,
+                    5.0 * 1e-6,
+                    1e-6,
+                )?;
+                step(1, StepTarget::Temp, "TEMP", None, 30.0, 35.0, 1.0)?;
+                step(2, StepTarget::Device, "RMOD", Some("TC1"), 1e-2, 3e-2, 1e-2)?;
+                step(3, StepTarget::Device, "RMOD", Some("TC2"), 1e-4, 3e-4, 1e-4)?;
+            }
+        }
+
+        let resistor = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .ok_or_else(|| "BUG 647 resistor member has no R1".to_string())?;
+        if resistor.nodes != ["2", "0"] {
+            return Err("R1 topology changed".into());
+        }
+        let ElementKind::Resistor {
+            value,
+            model: Some(model),
+            instance_params,
+            deferred_params,
+            value_expr: None,
+            ..
+        } = &resistor.kind
+        else {
+            return Err("R1 must be a scalar modeled resistor".into());
+        };
+        if !model.eq_ignore_ascii_case("RMOD") || !deferred_params.is_empty() {
+            return Err("R1 model binding or deferred parameters changed".into());
+        }
+        let marker_entries = instance_params
+            .iter()
+            .filter(|(name, _)| {
+                name.eq_ignore_ascii_case(crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER)
+            })
+            .collect::<Vec<_>>();
+        if value.to_bits() != 0.0f64.to_bits()
+            || marker_entries.len() != 1
+            || marker_entries[0].1.to_bits() != 1.0f64.to_bits()
+        {
+            return Err(
+                "R1 must retain the exact value-less Xyce modeled-resistor representation".into(),
+            );
+        }
+        let mut params = instance_params
+            .iter()
+            .filter(|(name, _)| {
+                !name.eq_ignore_ascii_case(crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER)
+            })
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        params.sort();
+        let mut expected_instance = match role {
+            XyceBug647ResistorRole::Owner => vec![
+                ("l".to_string(), 1e-3f64.to_bits()),
+                ("tc1".to_string(), 1e-2f64.to_bits()),
+                ("tc2".to_string(), 1e-4f64.to_bits()),
+                ("w".to_string(), 1e-6f64.to_bits()),
+            ],
+            XyceBug647ResistorRole::ModelParameterReference => {
+                vec![("l".to_string(), 1e-3f64.to_bits())]
+            }
+        };
+        expected_instance.sort();
+        if params != expected_instance {
+            return Err(format!(
+                "R1 instance parameter representation changed: {params:?}"
+            ));
+        }
+
+        for (name, nodes, expected) in [("VIN", ["1", "0"], 5.0f64), ("VMON", ["1", "2"], 0.0f64)] {
+            let source = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("missing {name}"))?;
+            if source.nodes != nodes
+                || !matches!(
+                    source.kind,
+                    ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                        if value.to_bits() == expected.to_bits()
+                )
+            {
+                return Err(format!("{name} topology or DC value changed"));
+            }
+        }
+
+        let model = &netlist.models[0];
+        if !model.name.eq_ignore_ascii_case("RMOD")
+            || !matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "R" | "RES" | "RESISTOR"
+            )
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err("RMOD must remain one native scalar resistor model".into());
+        }
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        let mut expected_model = match role {
+            XyceBug647ResistorRole::Owner => vec![
+                ("rsh".to_string(), 1.0f64.to_bits()),
+                ("tnom".to_string(), 27.0f64.to_bits()),
+                ("w".to_string(), 1e-6f64.to_bits()),
+            ],
+            XyceBug647ResistorRole::ModelParameterReference => vec![
+                ("defw".to_string(), 1e-6f64.to_bits()),
+                ("rsh".to_string(), 1.0f64.to_bits()),
+                ("tc1".to_string(), 1e-2f64.to_bits()),
+                ("tc2".to_string(), 1e-4f64.to_bits()),
+                ("tnom".to_string(), 27.0f64.to_bits()),
+            ],
+        };
+        expected_model.sort();
+        if model_params != expected_model {
+            return Err(format!(
+                "RMOD parameter representation changed: {model_params:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn bug647_resistor_diagnostics_are_exact(
+        diagnostics: &[crate::netlist::ParseDiagnostic],
+    ) -> bool {
+        diagnostics.len() == 1
+            && diagnostics[0].code == "xyce_resistor_model_missing_value"
+            && diagnostics[0]
+                .message
+                .contains("no explicit value; model resolution may use Xyce's default 1000 ohm")
+    }
+
+    fn validate_bug647_resistor_statement_envelope(source: &str) -> Result<(), String> {
+        let body = source.split_once('\n').map_or("", |(_, body)| body);
+        let mut counts = BTreeMap::<String, usize>::new();
+        for line in Self::logical_netlist_lines(body) {
+            let statement = Self::strip_netlist_comment(&line).trim();
+            if statement.is_empty() {
+                continue;
+            }
+            let head = statement
+                .split_ascii_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let key = if head.starts_with('.') {
+                match head.as_str() {
+                    ".dc" | ".model" | ".print" | ".step" | ".end" => head,
+                    _ => return Err(format!("unrelated directive '{head}' in BUG 647 pair")),
+                }
+            } else {
+                match head.as_bytes().first().map(u8::to_ascii_lowercase) {
+                    Some(b'r') => "r".to_string(),
+                    Some(b'v') => "v".to_string(),
+                    _ => return Err(format!("unrelated element '{head}' in BUG 647 pair")),
+                }
+            };
+            *counts.entry(key).or_default() += 1;
+        }
+        for (key, expected) in [
+            ("r", 1),
+            ("v", 2),
+            (".dc", 1),
+            (".model", 1),
+            (".print", 1),
+            (".step", 4),
+            (".end", 1),
+        ] {
+            if counts.remove(key) != Some(expected) {
+                return Err(format!(
+                    "BUG 647 statement count for '{key}' must be {expected}"
+                ));
+            }
+        }
+        if !counts.is_empty() {
+            return Err(format!("BUG 647 source has extra statements: {counts:?}"));
+        }
+        Ok(())
+    }
+
     fn resistor_dtemp_snapshot(
         plan: &XyceStaticDcPlan,
         netlist: &Netlist,
@@ -49165,6 +49962,72 @@ V1 1 0 5V\n\
 .step TEMP list -55 25 72\n\
 .END\n";
 
+    const BUG647_RESISTOR_OWNER_SOURCE: &str = "Semiconductor Resistor Circuit Netlist\n\
+R1 2 0 RMOD L=1000U W=1U TC1=1e-2 TC2=1e-4\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1 TNOM=27 W=1u)\n\
+.step lin R1:W 1u 5u 1u\n\
+.step lin R1:TEMP 30 35 1\n\
+.step lin R1:TC1 1e-2 3e-2 1e-2\n\
+.step lin R1:TC2 1e-4 3e-4 1e-4\n\
+.PRINT DC V(1) I(VMON) R1:W R1:TC1 R1:TC2 R1:TEMP\n\
+.END\n";
+
+    const BUG647_RESISTOR_REFERENCE_SOURCE: &str = "Semiconductor Resistor Circuit Netlist\n\
+R1 2 0 RMOD L=1000U\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1 TNOM=27 DEFW=1u TC1=1e-2 TC2=1e-4)\n\
+.step lin RMOD:DEFW 1u 5u 1u\n\
+.step lin TEMP 30 35 1\n\
+.step lin RMOD:TC1 1e-2 3e-2 1e-2\n\
+.step lin RMOD:TC2 1e-4 3e-4 1e-4\n\
+.PRINT DC V(1) I(VMON) R1:W R1:TC1 R1:TC2 R1:TEMP\n\
+.END\n";
+
+    fn bug647_resistor_fixture(
+        label: &str,
+        owner_source: &str,
+        reference_source: &str,
+    ) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-bug647-resistor-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let family = root.join("Netlists/Certification_Tests/BUG_647_SON");
+        fs::create_dir_all(&family).expect("create BUG 647 resistor fixture directory");
+        let owner_path = family.join("semic_resistor.cir");
+        let reference_path = family.join("semic_resistor_modpar.cir");
+        fs::write(&owner_path, owner_source).expect("write BUG 647 resistor owner");
+        fs::write(&reference_path, reference_source).expect("write BUG 647 resistor reference");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_647_SON/semic_resistor.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 647 resistor wrapper provenance");
+        let owner = XyceDeck {
+            path: owner_path,
+            relative_path: "Netlists/Certification_Tests/BUG_647_SON/semic_resistor.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let reference = XyceDeck {
+            path: reference_path,
+            relative_path: "Netlists/Certification_Tests/BUG_647_SON/semic_resistor_modpar.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        (root, owner, reference, runner)
+    }
+
     fn resistor_dtemp_fixture(
         label: &str,
         owner_source: &str,
@@ -49202,6 +50065,288 @@ V1 1 0 5V\n\
         };
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         (root, owner, reference, runner)
+    }
+
+    #[test]
+    fn bug647_resistor_pair_is_manifest_owned_and_structurally_qualified() {
+        let (root, owner, reference, runner) = bug647_resistor_fixture(
+            "qualification",
+            BUG647_RESISTOR_OWNER_SOURCE,
+            BUG647_RESISTOR_REFERENCE_SOURCE,
+        );
+        let owner_contract = runner
+            .bug647_resistor_relational_contract(&owner)
+            .expect("owner is selected")
+            .expect("owner pair qualifies");
+        let reference_contract = runner
+            .bug647_resistor_relational_contract(&reference)
+            .expect("reference is selected")
+            .expect("reference pair qualifies");
+        assert_eq!(owner_contract.role, XyceBug647ResistorRole::Owner);
+        assert_eq!(
+            reference_contract.role,
+            XyceBug647ResistorRole::ModelParameterReference
+        );
+        assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+        assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+        fs::remove_dir_all(root).expect("remove BUG 647 resistor fixture");
+    }
+
+    #[test]
+    fn bug647_resistor_pair_rejects_semantic_mutations() {
+        let mutations = [
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.replace("R1 2 0", "R1 3 0"),
+                BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+                "topology",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.replace("RMOD L=1000U", "RMOD 1K L=1000U"),
+                BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+                "value-less representation",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.replace("VIN 0 5V 1V", "VIN 0 6V 1V"),
+                BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+                "DC grid",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.replace("R1:W 1u 5u", "R1:W 2u 5u"),
+                BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+                "W sweep",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.replace("R1:TEMP", "R1:DTEMP"),
+                BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+                "temperature mapping",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.to_string(),
+                BUG647_RESISTOR_REFERENCE_SOURCE.replace("RMOD:DEFW", "RMOD:W"),
+                "model width ownership",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.to_string(),
+                BUG647_RESISTOR_REFERENCE_SOURCE.replace("TC1=1e-2", "TC1=2e-2"),
+                "model TC1",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.replace("R1:W R1:TC1", "R1:TC1 R1:W"),
+                BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+                "probe order",
+            ),
+            (
+                BUG647_RESISTOR_OWNER_SOURCE.replace(".END", ".OPTIONS GMIN=1e-9\n.END"),
+                BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+                "statement envelope",
+            ),
+        ];
+        for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+            let (root, owner, _, runner) = bug647_resistor_fixture(
+                &format!("mutation-{index}"),
+                &owner_source,
+                &reference_source,
+            );
+            assert!(
+                runner
+                    .bug647_resistor_relational_contract(&owner)
+                    .expect("owner remains selected")
+                    .is_err(),
+                "{reason} mutation must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove BUG 647 resistor mutation fixture");
+        }
+    }
+
+    #[test]
+    fn bug647_resistor_pair_requires_owner_only_wrapper_provenance() {
+        let (root, owner, _, _) = bug647_resistor_fixture(
+            "manifest",
+            BUG647_RESISTOR_OWNER_SOURCE,
+            BUG647_RESISTOR_REFERENCE_SOURCE,
+        );
+        for manifest in [
+            "",
+            "Netlists/Certification_Tests/BUG_647_SON/semic_resistor_modpar.cir\trequires_upstream_wrapper\n",
+            "Netlists/Certification_Tests/BUG_647_SON/semic_resistor.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_647_SON/semic_resistor_modpar.cir\trequires_upstream_wrapper\n",
+        ] {
+            fs::write(root.join(HARNESS_MANIFEST_FILE), manifest)
+                .expect("mutate BUG 647 provenance");
+            let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+            assert!(
+                runner
+                    .bug647_resistor_relational_contract(&owner)
+                    .expect("exact owner path remains selected")
+                    .is_err(),
+                "non-owner-only provenance must fail closed"
+            );
+        }
+        fs::remove_dir_all(root).expect("remove BUG 647 provenance fixture");
+    }
+
+    #[test]
+    fn bug647_resistor_comparator_serializes_full_prn_and_reproduces_perl_predicate() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let rows = (0..1_620)
+            .map(|row| {
+                let index = (row % 6) as Value;
+                vec![index, index, 200.0, 1e-6, 1e-2, 1e-4, 30.0]
+            })
+            .collect::<Vec<_>>();
+        let reference = XycePrnTable {
+            columns: vec![
+                "Index".into(),
+                "V(1)".into(),
+                "I(VMON)".into(),
+                "R1:W".into(),
+                "R1:TC1".into(),
+                "R1:TC2".into(),
+                "R1:TEMP".into(),
+            ],
+            rows,
+        };
+        let tokens = XyceTestRunner::bug647_default_prn_token_lines(&reference)
+            .expect("canonical table serializes");
+        assert_eq!(tokens.len(), 1_622);
+        assert_eq!(tokens[0], reference.columns);
+        assert_eq!(
+            tokens[1_621],
+            ["End", "of", "Xyce(TM)", "Parameter", "Sweep"]
+        );
+        assert!(
+            runner
+                .compare_bug647_resistor_tables(&reference, &reference)
+                .expect("identical PRNs compare")
+                .is_empty()
+        );
+
+        let mut accepted_by_literal_phase_bug = reference.clone();
+        accepted_by_literal_phase_bug.rows[0][6] = 100.0;
+        assert!(
+            runner
+                .compare_bug647_resistor_tables(&reference, &accepted_by_literal_phase_bug)
+                .expect("literal Perl phase clause is evaluated")
+                .is_empty(),
+            "Release 7.10's missing outer abs accepts both magnitudes below 180"
+        );
+
+        let mut rejected = reference.clone();
+        rejected.rows[0][2] = 202.0;
+        assert_eq!(
+            runner
+                .compare_bug647_resistor_tables(&reference, &rejected)
+                .expect("out-of-tolerance values compare")
+                .len(),
+            1
+        );
+        let mut bad_index = reference.clone();
+        bad_index.rows[6][0] = 6.0;
+        assert!(
+            runner
+                .compare_bug647_resistor_tables(&reference, &bad_index)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn bug647_resistor_candidate_census_is_exactly_two_records() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let discovered = runner.discover_tests();
+        let discovered_by_path = discovered
+            .iter()
+            .map(|deck| {
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    deck,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut independent_candidates = BTreeSet::new();
+        for owner in discovered.iter().filter(|deck| {
+            runner.requires_upstream_wrapper(&deck.relative_path)
+                && deck
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("semic_resistor.cir"))
+        }) {
+            let source = fs::read_to_string(&owner.path).expect("read BUG 647 candidate owner");
+            let normalized = XyceTestRunner::normalize_probe(&source);
+            if !normalized.contains(".steplinr1:w1u5u1u")
+                || !normalized.contains(".steplinr1:temp30351")
+                || !normalized.contains("r1:wr1:tc1r1:tc2r1:temp")
+            {
+                continue;
+            }
+            let reference_key = XyceTestRunner::normalize_manifest_key(
+                &runner.relative_key(&owner.path.with_file_name("semic_resistor_modpar.cir")),
+            );
+            let Some(reference) = discovered_by_path.get(&reference_key) else {
+                continue;
+            };
+            let reference_source =
+                fs::read_to_string(&reference.path).expect("read BUG 647 candidate reference");
+            let reference_normalized = XyceTestRunner::normalize_probe(&reference_source);
+            if reference_normalized.contains(".steplinrmod:defw1u5u1u")
+                && reference_normalized.contains(".steplintemp30351")
+                && reference_normalized.contains("r1:wr1:tc1r1:tc2r1:temp")
+            {
+                independent_candidates
+                    .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+                independent_candidates.insert(reference_key);
+            }
+        }
+        let selected = discovered
+            .iter()
+            .filter_map(|deck| {
+                runner
+                    .bug647_resistor_relational_contract(deck)
+                    .map(|contract| {
+                        contract.unwrap_or_else(|err| {
+                            panic!("BUG 647 resistor candidate failed qualification: {err}")
+                        });
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(independent_candidates, selected);
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                XYCE_BUG647_RESISTOR_OWNER_RECORD.to_string(),
+                XYCE_BUG647_RESISTOR_REFERENCE_RECORD.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn bug647_resistor_relational_pair_executes_both_roles() {
+        let (root, owner, reference, runner) = bug647_resistor_fixture(
+            "execution",
+            BUG647_RESISTOR_OWNER_SOURCE,
+            BUG647_RESISTOR_REFERENCE_SOURCE,
+        );
+        for (deck, expected_contract) in [
+            (owner, "bug647_resistor_relational_wrapper_owner"),
+            (
+                reference,
+                "bug647_resistor_relational_wrapper_model_reference",
+            ),
+        ] {
+            let result = runner.run_discovered_test(&deck);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "BUG 647 resistor role must execute: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+        }
+        fs::remove_dir_all(root).expect("remove BUG 647 execution fixture");
     }
 
     #[test]
