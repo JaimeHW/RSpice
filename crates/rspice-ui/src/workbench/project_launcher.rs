@@ -147,6 +147,51 @@ struct LauncherLayout {
     status_height: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LauncherSurfaceRegions {
+    header: Rect,
+    status: Rect,
+    body: Rect,
+}
+
+impl LauncherSurfaceRegions {
+    fn resolve(surface: Rect, header_height: f32, status_height: f32) -> Self {
+        let header_bottom = (surface.top() + header_height.max(0.0)).min(surface.bottom());
+        let status_bottom = (header_bottom + status_height.max(0.0)).min(surface.bottom());
+        Self {
+            header: Rect::from_min_max(surface.min, egui::pos2(surface.right(), header_bottom)),
+            status: Rect::from_min_max(
+                egui::pos2(surface.left(), header_bottom),
+                egui::pos2(surface.right(), status_bottom),
+            ),
+            body: Rect::from_min_max(
+                egui::pos2(surface.left(), status_bottom),
+                surface.right_bottom(),
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LauncherPageRegions {
+    body: Rect,
+    footer: Rect,
+}
+
+impl LauncherPageRegions {
+    fn resolve(available: Rect, footer_height: f32) -> Self {
+        let footer_height = footer_height.clamp(0.0, available.height());
+        let footer_top = available.bottom() - footer_height;
+        Self {
+            body: Rect::from_min_max(available.min, egui::pos2(available.right(), footer_top)),
+            footer: Rect::from_min_max(
+                egui::pos2(available.left(), footer_top),
+                available.right_bottom(),
+            ),
+        }
+    }
+}
+
 impl LauncherLayout {
     fn resolve(viewport: Rect) -> Self {
         let edge_to_edge = viewport.width() <= LAUNCHER_EDGE_TO_EDGE_MAX_WIDTH;
@@ -214,6 +259,8 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
     let surface_rect = layout.surface;
     let edge_to_edge = layout.edge_to_edge;
     let size = surface_rect.size();
+    let regions =
+        LauncherSurfaceRegions::resolve(surface_rect, layout.header_height, layout.status_height);
 
     let area = egui::Area::new(Id::new("workbench.project_launcher"))
         .kind(UiKind::Modal)
@@ -246,11 +293,11 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
         );
         Frame::new()
             .fill(t.color.bg_app)
-            .stroke(if edge_to_edge {
-                Stroke::NONE
-            } else {
-                Stroke::new(1.0, t.color.border_strong)
-            })
+            // The perimeter is painted as an inside stroke after the
+            // full-bleed tracks. Keeping it out of Frame layout makes the
+            // content rect exactly equal to `surface_rect` instead of
+            // silently insetting every track by the stroke width.
+            .stroke(Stroke::NONE)
             .corner_radius(if edge_to_edge { 0.0 } else { t.radius_lg })
             .shadow(if edge_to_edge {
                 egui::epaint::Shadow::NONE
@@ -258,38 +305,43 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 t.shadow()
             })
             .show(&mut surface, |ui| {
+                // Establish the modal's immutable outer geometry before any
+                // content is measured. Header, status, and body then render in
+                // independent exact tracks and cannot consume one another.
+                ui.set_min_size(size);
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
-                let header =
-                    launcher_header(ui, layout.header_height, large_targets, layout.edge_to_edge);
-                let header_bottom = ui.cursor().top();
+                let mut header_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(regions.header)
+                        .layout(egui::Layout::top_down(Align::Min)),
+                );
+                let header = launcher_header(
+                    &mut header_ui,
+                    regions.header.height(),
+                    large_targets,
+                    layout.edge_to_edge,
+                );
                 close_control_id = Some(header.id);
                 if header.clicked() {
                     action = Some(LauncherAction::Close);
                 }
-                launcher_status(ui, app, layout.status_height, layout.compact);
-                let status_bottom = ui.cursor().top();
-                let body_rect = Rect::from_min_size(
-                    egui::pos2(ui.max_rect().left(), status_bottom),
-                    vec2(
-                        size.x,
-                        (size.y - layout.header_height - layout.status_height).max(0.0),
-                    ),
+                let mut status_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(regions.status)
+                        .layout(egui::Layout::top_down(Align::Min)),
                 );
-                launcher_layout(ui, app, &mut action, layout, body_rect);
+                launcher_status(&mut status_ui, app, regions.status.height(), layout.compact);
+                launcher_layout(ui, app, &mut action, layout, regions.body);
                 ui.painter().hline(
-                    ui.max_rect().x_range(),
-                    header_bottom,
+                    regions.header.x_range(),
+                    regions.header.bottom(),
                     Stroke::new(1.0, t.color.border),
                 );
                 ui.painter().hline(
-                    ui.max_rect().x_range(),
-                    status_bottom,
+                    regions.status.x_range(),
+                    regions.status.bottom(),
                     Stroke::new(1.0, t.color.border),
                 );
-                // Fill the modal only after its tracks have measured the
-                // original max rect. Doing this before layout reduces every
-                // subsequent `available_height()` query to zero.
-                ui.set_min_size(size);
             });
         if !edge_to_edge {
             // `Frame` backgrounds are inserted behind their children. Repaint
@@ -621,16 +673,11 @@ fn launcher_page(
     layout: LauncherLayout,
 ) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
-    // Preserve the initial remainder for the final fill. Expanding the
-    // minimum before laying out the page consumes `available_height()`, which
-    // collapses the scroll region and leaves the footer near the top.
-    let page_size = ui.available_size();
     match app.state.workbench.project_launcher_page {
         ProjectLauncherPage::Projects => launcher_body(ui, app, action, layout),
         ProjectLauncherPage::Recovery => recovery_page(ui, app, action, layout),
         ProjectLauncherPage::SafeMode => safe_mode_page(ui, app, action, layout),
     }
-    ui.set_min_size(page_size);
 }
 
 fn launcher_header(ui: &mut Ui, height: f32, large_targets: bool, edge_to_edge: bool) -> Response {
@@ -823,17 +870,17 @@ fn launcher_body(
 
     let footer_height =
         launcher_footer_reserve(ui, layout, &[("Continue without a project", false)]);
-    let (list_rect, footer_rect) = launcher_page_regions(ui, footer_height);
+    let regions = launcher_page_regions(ui, footer_height);
     let mut list_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(list_rect)
+            .max_rect(regions.body)
             .layout(egui::Layout::top_down(Align::Min)),
     );
     egui::ScrollArea::vertical()
         .id_salt("workbench.project_launcher.projects")
         .auto_shrink([false, false])
         .show(&mut list_ui, |ui| project_list(ui, app, action, layout));
-    launcher_page_footer(ui, layout, footer_rect, |ui| {
+    launcher_page_footer(ui, layout, regions.footer, |ui| {
         if Button::new("Continue without a project").show(ui).clicked() {
             *action = Some(LauncherAction::EmptyWorkbench);
         }
@@ -966,17 +1013,14 @@ fn project_group_header(ui: &mut Ui, label: &str, count: usize) {
     );
 }
 
-fn launcher_page_regions(ui: &mut Ui, footer_height: f32) -> (Rect, Rect) {
+fn launcher_page_regions(ui: &mut Ui, footer_height: f32) -> LauncherPageRegions {
     let available = ui.available_rect_before_wrap();
-    let footer_height = footer_height.clamp(0.0, available.height());
-    let footer_top = available.bottom() - footer_height;
-    let body = Rect::from_min_max(available.min, egui::pos2(available.right(), footer_top));
-    let footer = Rect::from_min_max(
-        egui::pos2(available.left(), footer_top),
-        available.right_bottom(),
-    );
+    let regions = LauncherPageRegions::resolve(available, footer_height);
+    // Reserve the full remaining page exactly once. Body and footer are
+    // independent children of this rect, so neither their content nor a
+    // scroll area's minimum can move the footer away from the lower edge.
     ui.allocate_rect(available, Sense::hover());
-    (body, footer)
+    regions
 }
 
 fn launcher_page_footer(
@@ -1070,10 +1114,10 @@ fn recovery_page(
             ("Open recovery comparison", true),
         ],
     );
-    let (body_rect, footer_rect) = launcher_page_regions(ui, footer_height);
+    let regions = launcher_page_regions(ui, footer_height);
     let mut body_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(body_rect)
+            .max_rect(regions.body)
             .layout(egui::Layout::top_down(Align::Min)),
     );
     egui::ScrollArea::vertical()
@@ -1181,7 +1225,7 @@ fn recovery_page(
         .project_launcher_recovery
         .selected()
         .cloned();
-    launcher_page_footer(ui, layout, footer_rect, |ui| {
+    launcher_page_footer(ui, layout, regions.footer, |ui| {
         let can_discard = selected
             .as_ref()
             .is_some_and(RecoveryCandidate::can_discard);
@@ -1527,10 +1571,10 @@ fn safe_mode_page(
             ("Start RSpice in safe mode", true),
         ],
     );
-    let (body_rect, footer_rect) = launcher_page_regions(ui, footer_height);
+    let regions = launcher_page_regions(ui, footer_height);
     let mut body_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(body_rect)
+            .max_rect(regions.body)
             .layout(egui::Layout::top_down(Align::Min)),
     );
     egui::ScrollArea::vertical()
@@ -1624,7 +1668,7 @@ fn safe_mode_page(
         });
 
     let options = app.state.workbench.safe_mode.draft;
-    launcher_page_footer(ui, layout, footer_rect, |ui| {
+    launcher_page_footer(ui, layout, regions.footer, |ui| {
         let diagnostics = Button::new("Open diagnostic folder")
             .enabled(diagnostics_folder_supported())
             .show(ui);
@@ -2516,6 +2560,65 @@ mod tests {
         assert_eq!(LAUNCHER_HEADER_HEIGHT, 58.0);
         assert_eq!(LAUNCHER_STATUS_HEIGHT, 30.0);
         assert_eq!(LAUNCHER_NAV_WIDTH, 184.0);
+    }
+
+    #[test]
+    fn launcher_surface_tracks_have_exact_mockup_geometry() {
+        let surface = Rect::from_min_size(egui::pos2(130.0, 125.0), vec2(1180.0, 650.0));
+        let regions = LauncherSurfaceRegions::resolve(
+            surface,
+            LAUNCHER_HEADER_HEIGHT,
+            LAUNCHER_STATUS_HEIGHT,
+        );
+
+        assert_eq!(
+            regions.header,
+            Rect::from_min_size(surface.min, vec2(1180.0, 58.0))
+        );
+        assert_eq!(regions.status.top(), regions.header.bottom());
+        assert_eq!(regions.status.height(), 30.0);
+        assert_eq!(regions.body.top(), regions.status.bottom());
+        assert_eq!(regions.body.bottom(), surface.bottom());
+        assert_eq!(
+            regions.header.height() + regions.status.height() + regions.body.height(),
+            surface.height()
+        );
+    }
+
+    #[test]
+    fn launcher_surface_tracks_clamp_without_overlap_on_short_viewports() {
+        let surface = Rect::from_min_size(egui::pos2(4.0, 7.0), vec2(390.0, 64.0));
+        let regions = LauncherSurfaceRegions::resolve(
+            surface,
+            LAUNCHER_COMPACT_HEADER_HEIGHT,
+            LAUNCHER_COMPACT_STATUS_HEIGHT,
+        );
+
+        assert_eq!(regions.header.height(), 52.0);
+        assert_eq!(regions.status.height(), 12.0);
+        assert_eq!(regions.body.height(), 0.0);
+        assert_eq!(regions.body.bottom(), surface.bottom());
+    }
+
+    #[test]
+    fn recovery_footer_is_always_anchored_to_the_page_bottom() {
+        let available = Rect::from_min_size(egui::pos2(314.0, 213.0), vec2(996.0, 486.0));
+        let regions = LauncherPageRegions::resolve(available, LAUNCHER_PAGE_FOOTER_MIN_HEIGHT);
+
+        assert_eq!(regions.body.top(), available.top());
+        assert_eq!(regions.body.bottom(), available.bottom() - 51.0);
+        assert_eq!(regions.footer.top(), regions.body.bottom());
+        assert_eq!(regions.footer.height(), 51.0);
+        assert_eq!(regions.footer.bottom(), available.bottom());
+    }
+
+    #[test]
+    fn wrapped_recovery_footer_reserve_cannot_escape_a_short_page() {
+        let available = Rect::from_min_size(egui::pos2(0.0, 80.0), vec2(390.0, 40.0));
+        let regions = LauncherPageRegions::resolve(available, 88.0);
+
+        assert_eq!(regions.body.height(), 0.0);
+        assert_eq!(regions.footer, available);
     }
 
     #[test]
