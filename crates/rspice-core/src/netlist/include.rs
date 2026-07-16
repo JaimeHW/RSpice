@@ -787,13 +787,6 @@ impl IncludeProcessor {
             let line_number = line_index + 1;
             let trimmed = line.trim();
 
-            if strip_end_cards && trimmed.eq_ignore_ascii_case(".end") {
-                result.items.push(ExpandedSourceItem::EndCard {
-                    origin: NetlistSourceLocation::in_file(current_path, line_number),
-                });
-                break;
-            }
-
             if split_directive(trimmed)
                 .is_some_and(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
             {
@@ -870,6 +863,13 @@ impl IncludeProcessor {
 
             if inline_sections.last().is_some_and(|frame| !frame.selected) {
                 continue;
+            }
+
+            if strip_end_cards && trimmed.eq_ignore_ascii_case(".end") {
+                result.items.push(ExpandedSourceItem::EndCard {
+                    origin: NetlistSourceLocation::in_file(current_path, line_number),
+                });
+                break;
             }
 
             if split_directive(trimmed).is_some_and(|(directive, _)| {
@@ -1627,6 +1627,26 @@ R1 1 0 {selected}
         assert!(!expanded.contains(".param inherited=1"), "{expanded}");
         assert!(expanded.contains("R1 1 0 {selected}"), "{expanded}");
         assert!(!expanded.contains("hidden"), "{expanded}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inactive_library_end_card_does_not_preempt_selected_section() {
+        let dir = unique_include_temp_dir("inactive-lib-end-card");
+        std::fs::create_dir_all(&dir).expect("create inactive library END fixture");
+        let library_path = dir.join("corners.lib");
+        std::fs::write(
+            &library_path,
+            ".lib SS\n.param corner=1\n.end\n.endl SS\n.lib TT\n.param corner=2\n.endl TT\n",
+        )
+        .expect("write inactive library END fixture");
+
+        let expanded = IncludeProcessor::new(&dir)
+            .process_lib("corners.lib", Some("TT"))
+            .expect("inactive SS .END must not prevent TT selection");
+
+        assert!(expanded.contains(".param corner=2"), "{expanded}");
+        assert!(!expanded.contains(".param corner=1"), "{expanded}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
