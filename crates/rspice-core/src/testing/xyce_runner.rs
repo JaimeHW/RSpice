@@ -91,6 +91,9 @@ const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET: f64 = 2.0e-3;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_STOP: f64 = 2.0e-4;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_TIMEINT_TOLERANCE: f64 = 1.0e-4;
 const XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE: f64 = 1.0e-6;
+const XYCE_ANALYTIC_FMOD_DC_RECORD: &str = "netlists/abm_nint_fmod/fmod.cir";
+const XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD: &str =
+    "netlists/abm_int_floor_ceil/int_floor_ceil_bsrc.cir";
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
@@ -375,6 +378,27 @@ struct XyceAnalyticSinusoidalRcContract {
     plan: XyceStaticTranPlan,
     specification: XyceAnalyticSinusoidalRcSpecification,
     tolerance: XyceVerifyTransientTolerance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAnalyticIntegerDcKind {
+    Fmod,
+    IntFloorCeilBehavioralSources,
+}
+
+impl XyceAnalyticIntegerDcKind {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Fmod => "analytic_fmod_dc_wrapper",
+            Self::IntFloorCeilBehavioralSources => "analytic_int_floor_ceil_bsource_dc_wrapper",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceAnalyticIntegerDcContract {
+    plan: XyceStaticDcPlan,
+    kind: XyceAnalyticIntegerDcKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2566,6 +2590,30 @@ impl XyceTestRunner {
                     start,
                     "analytic_sinusoidal_first_order_rc_tran_wrapper",
                     format!("analytic sinusoidal first-order RC qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.analytic_integer_dc_wrapper_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_analytic_integer_dc_wrapper_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "analytic_integer_dc_wrapper",
+                    format!("analytic integer DC qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -11295,6 +11343,145 @@ impl XyceTestRunner {
             ));
         }
         Ok(())
+    }
+
+    fn run_analytic_integer_dc_wrapper_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceAnalyticIntegerDcContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.kind.result_contract();
+        let (netlist, results) = match self.run_static_dc_results(&contract.plan, start) {
+            Ok(run) => run,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "analytic integer DC execution exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("analytic integer DC execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let actual = match self.dc_results_to_prn_table(&contract.plan, &netlist, &results) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("analytic integer DC output conversion failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mismatches = match self.compare_analytic_integer_dc_table(&actual, contract.kind) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("analytic integer DC exact comparison failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} analytic integer DC mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn compare_analytic_integer_dc_table(
+        &self,
+        actual: &XycePrnTable,
+        kind: XyceAnalyticIntegerDcKind,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let expected_width = match kind {
+            XyceAnalyticIntegerDcKind::Fmod => 3,
+            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => 5,
+        };
+        if actual.columns.len() != expected_width
+            || actual
+                .columns
+                .first()
+                .is_none_or(|column| column != "Index")
+            || actual.rows.is_empty()
+        {
+            return Err(format!(
+                "analytic integer DC output requires a nonempty indexed table with {expected_width} columns, got {:?} and {} row(s)",
+                actual.columns,
+                actual.rows.len()
+            ));
+        }
+
+        let mut mismatches = Vec::new();
+        for (row_index, row) in actual.rows.iter().enumerate() {
+            if row.len() != expected_width
+                || row[0].to_bits() != (row_index as Value).to_bits()
+                || row.iter().any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "analytic integer DC row {row_index} is malformed, nonfinite, or has a noncanonical index"
+                ));
+            }
+            // The Release 7.10 Perl wrappers consume whitespace-split tokens
+            // from Xyce's already-written default PRN. Round-trip every input
+            // and DUT output through that exact serialization boundary before
+            // applying their numeric-equality checks.
+            let printed_input = Self::xyce_default_prn_roundtrip(row[1])?;
+            let expected = match kind {
+                XyceAnalyticIntegerDcKind::Fmod => vec![99.5 % printed_input],
+                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => vec![
+                    printed_input.trunc(),
+                    printed_input.floor(),
+                    printed_input.ceil(),
+                ],
+            };
+            for (offset, expected_value) in expected.into_iter().enumerate() {
+                let column = offset + 2;
+                let actual_value = Self::xyce_default_prn_roundtrip(row[column])?;
+                if expected_value == actual_value {
+                    continue;
+                }
+                let scale = expected_value
+                    .abs()
+                    .max(actual_value.abs())
+                    .max(Value::MIN_POSITIVE);
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: actual.columns[column].clone(),
+                    expected: expected_value,
+                    actual: actual_value,
+                    relative_error: (expected_value - actual_value).abs() / scale,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn run_analytic_rc_wrapper_contract(
@@ -42660,6 +42847,370 @@ impl XyceTestRunner {
         })())
     }
 
+    fn analytic_integer_dc_wrapper_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceAnalyticIntegerDcContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let kind = match relative.as_str() {
+            XYCE_ANALYTIC_FMOD_DC_RECORD => XyceAnalyticIntegerDcKind::Fmod,
+            XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD => {
+                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources
+            }
+            _ => return None,
+        };
+        Some((|| {
+            if !self.requires_upstream_wrapper(&deck.relative_path) {
+                return Err("record is not owned by the wrapper provenance manifest".to_string());
+            }
+            let metadata = fs::metadata(&deck.path)
+                .map_err(|err| format!("could not inspect wrapper deck: {err}"))?;
+            if !metadata.is_file() || metadata.len() == 0 {
+                return Err("wrapper deck must be a nonempty regular file".to_string());
+            }
+            self.reject_analytic_integer_dc_artifacts(&deck.path)?;
+            let plan = self.static_dc_plan_for_path(&deck.path, ExpressionDialect::Xyce)?;
+            let netlist =
+                Self::parse_xyce_netlist(&plan.source, &plan.deck_path).map_err(|err| {
+                    format!("netlist parser rejected analytic integer DC deck: {err}")
+                })?;
+            Self::validate_analytic_integer_dc_plan(&plan, &netlist, kind)?;
+            Ok(XyceAnalyticIntegerDcContract { plan, kind })
+        })())
+    }
+
+    fn reject_analytic_integer_dc_artifacts(&self, deck_path: &Path) -> Result<(), String> {
+        let Some(output_path) = self.static_output_reference_path(deck_path, "prn") else {
+            return Err("wrapper deck is not rooted under the Xyce Netlists corpus".to_string());
+        };
+        let Some(parent) = output_path.parent() else {
+            return Err("wrapper output path has no parent directory".to_string());
+        };
+        if !parent.is_dir() {
+            return Ok(());
+        }
+        let prefix = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "wrapper deck filename is not valid UTF-8".to_string())?
+            .to_ascii_lowercase()
+            + ".";
+        let mut artifacts = fs::read_dir(parent)
+            .map_err(|err| format!("could not inspect wrapper output directory: {err}"))?
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                (entry.file_type().ok()?.is_file() && name.starts_with(&prefix))
+                    .then(|| entry.path())
+            })
+            .collect::<Vec<_>>();
+        artifacts.sort();
+        if artifacts.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "analytic wrapper must not have checked-in output artifacts: {}",
+                artifacts
+                    .iter()
+                    .map(|path| self.display_path(path))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        }
+    }
+
+    fn validate_analytic_integer_dc_plan(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        kind: XyceAnalyticIntegerDcKind,
+    ) -> Result<(), String> {
+        if plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || !plan.steps.is_empty()
+            || plan.print_format.is_some()
+            || !plan.diagnostics.is_empty()
+        {
+            return Err(
+                "analytic integer DC wrapper requires default PRN output without execution overrides, DATA, STEP, or parser diagnostics"
+                    .to_string(),
+            );
+        }
+        if netlist.analyses.len() != 1
+            || !matches!(netlist.analyses[0], AnalysisCommand::Dc { .. })
+            || plan.dc.sweep2.is_some()
+        {
+            return Err(
+                "analytic integer wrapper requires exactly one one-dimensional .DC analysis"
+                    .to_string(),
+            );
+        }
+        Self::validate_analytic_integer_dc_statement_envelope(&plan.source, kind)?;
+        match kind {
+            XyceAnalyticIntegerDcKind::Fmod => {
+                Self::validate_analytic_fmod_dc_topology(plan, netlist)
+            }
+            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => {
+                Self::validate_analytic_int_floor_ceil_dc_topology(plan, netlist)
+            }
+        }
+    }
+
+    fn validate_analytic_integer_dc_statement_envelope(
+        source: &str,
+        kind: XyceAnalyticIntegerDcKind,
+    ) -> Result<(), String> {
+        let mut counts = BTreeMap::<char, usize>::new();
+        // SPICE reserves the first physical record for the title, including
+        // when that record begins with `*`. Strip it before applying the
+        // ordinary logical-line/comment rules so both title forms preserve
+        // the exact element census.
+        let body = source.split_once('\n').map_or("", |(_, body)| body);
+        for line in Self::logical_netlist_lines(body) {
+            let statement = Self::strip_netlist_comment(&line).trim();
+            if statement.is_empty() {
+                continue;
+            }
+            let key = if statement.starts_with('.') {
+                let directive = statement
+                    .split_ascii_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                match directive.as_str() {
+                    ".dc" => 'd',
+                    ".print" => 'p',
+                    ".end" => 'e',
+                    _ => {
+                        return Err(format!(
+                            "unrelated directive '{directive}' is outside the analytic integer DC envelope"
+                        ));
+                    }
+                }
+            } else {
+                match statement.as_bytes().first().map(u8::to_ascii_lowercase) {
+                    Some(b'r') => 'r',
+                    Some(b'v') => 'v',
+                    Some(b'b') => 'b',
+                    _ => {
+                        return Err(format!(
+                            "unrelated element statement '{statement}' is outside the analytic integer DC envelope"
+                        ));
+                    }
+                }
+            };
+            *counts.entry(key).or_default() += 1;
+        }
+        let expected = match kind {
+            XyceAnalyticIntegerDcKind::Fmod => [('r', 1), ('v', 1), ('d', 1), ('p', 1), ('e', 1)],
+            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources => {
+                [('r', 4), ('v', 1), ('d', 1), ('p', 1), ('e', 1)]
+            }
+        };
+        for (key, count) in expected {
+            if counts.remove(&key) != Some(count) {
+                return Err(format!(
+                    "analytic integer DC statement count for '{key}' must be {count}"
+                ));
+            }
+        }
+        if kind == XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources {
+            if counts.remove(&'b') != Some(3) {
+                return Err("INT/FLOOR/CEIL wrapper requires exactly three B sources".to_string());
+            }
+        }
+        if !counts.is_empty() {
+            return Err("analytic integer DC source contains extra statements".to_string());
+        }
+        Ok(())
+    }
+
+    fn plain_unit_resistor_on_nodes(
+        element: &crate::netlist::Element,
+        nodes: &[String; 2],
+    ) -> bool {
+        let actual_nodes = element
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_param_expression_node_name(node))
+            .collect::<Vec<_>>();
+        matches!(
+            &element.kind,
+            ElementKind::Resistor {
+                value,
+                value_expr: None,
+                model: None,
+                instance_params,
+                deferred_params,
+            } if value.to_bits() == 1.0f64.to_bits()
+                && instance_params.is_empty()
+                && deferred_params.is_empty()
+                && actual_nodes == nodes
+        )
+    }
+
+    fn validate_analytic_fmod_dc_topology(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        if plan.dc.start.to_bits() != 1.0f64.to_bits()
+            || plan.dc.stop.to_bits() != 10.0f64.to_bits()
+            || plan.dc.step.to_bits() != 0.5f64.to_bits()
+            || netlist.elements.len() != 2
+            || plan.print.probes.len() != 2
+        {
+            return Err("FMOD wrapper requires the exact 1.0:0.5:10.0 sweep, two-element topology, and two probes".to_string());
+        }
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::VoltageSource(_)))
+            .ok_or_else(|| "FMOD wrapper has no independent voltage source".to_string())?;
+        let resistor = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+            .ok_or_else(|| "FMOD wrapper has no resistor".to_string())?;
+        let source_nodes = source
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_param_expression_node_name(node))
+            .collect::<Vec<_>>();
+        let [signal, ground] = source_nodes.as_slice() else {
+            return Err("FMOD source must be two-terminal".to_string());
+        };
+        if ground != "0"
+            || !plan.dc.source.eq_ignore_ascii_case(&source.name)
+            || !matches!(&source.kind, ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) if value.to_bits() == 1.0f64.to_bits())
+            || !Self::plain_unit_resistor_on_nodes(resistor, &[signal.clone(), ground.clone()])
+        {
+            return Err(
+                "FMOD source/resistor topology or swept-source mapping changed".to_string(),
+            );
+        }
+        let first = Self::normalize_probe(&plan.print.probes[0]);
+        let second = Self::normalize_probe(&plan.print.probes[1]);
+        if first != format!("v({signal})") || second != format!("{{fmod(99.5,v({signal}))}}") {
+            return Err(
+                "FMOD wrapper probes must be V(input) followed by fmod(99.5,V(input))".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_analytic_int_floor_ceil_dc_topology(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        if plan.dc.start.to_bits() != (-1.0f64).to_bits()
+            || plan.dc.stop.to_bits() != 1.0f64.to_bits()
+            || plan.dc.step.to_bits() != 0.1f64.to_bits()
+            || netlist.elements.len() != 8
+            || plan.print.probes.len() != 4
+        {
+            return Err("INT/FLOOR/CEIL wrapper requires the exact -1:0.1:1 sweep, eight-element topology, and four probes".to_string());
+        }
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::VoltageSource(_)))
+            .ok_or_else(|| {
+                "INT/FLOOR/CEIL wrapper has no independent voltage source".to_string()
+            })?;
+        let source_nodes = source
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_param_expression_node_name(node))
+            .collect::<Vec<_>>();
+        let [input, ground] = source_nodes.as_slice() else {
+            return Err("INT/FLOOR/CEIL input source must be two-terminal".to_string());
+        };
+        if ground != "0"
+            || !plan.dc.source.eq_ignore_ascii_case(&source.name)
+            || !matches!(&source.kind, ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) if value.to_bits() == 1.0f64.to_bits())
+        {
+            return Err("INT/FLOOR/CEIL swept source mapping changed".to_string());
+        }
+
+        let mut behavioral_nodes = BTreeMap::new();
+        for element in &netlist.elements {
+            let ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            } = &element.kind
+            else {
+                continue;
+            };
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let [output, output_ground] = nodes.as_slice() else {
+                return Err(format!(
+                    "behavioral source '{}' must be two-terminal",
+                    element.name
+                ));
+            };
+            if output_ground != "0"
+                || tc1.to_bits() != 0.0f64.to_bits()
+                || tc2.to_bits() != 0.0f64.to_bits()
+            {
+                return Err(format!(
+                    "behavioral source '{}' changed topology or temperature coefficients",
+                    element.name
+                ));
+            }
+            let normalized = Self::normalize_probe(expression);
+            let function = ["int", "floor", "ceil"]
+                .into_iter()
+                .find(|function| normalized == format!("{function}(v({input}))"))
+                .ok_or_else(|| {
+                    format!(
+                        "behavioral source '{}' is not an exact INT/FLOOR/CEIL input mapping",
+                        element.name
+                    )
+                })?;
+            if behavioral_nodes.insert(function, output.clone()).is_some() {
+                return Err(format!("duplicate {function} behavioral source"));
+            }
+        }
+        if behavioral_nodes.len() != 3 {
+            return Err(
+                "INT/FLOOR/CEIL wrapper requires one behavioral source per function".to_string(),
+            );
+        }
+
+        for node in std::iter::once(input.clone()).chain(behavioral_nodes.values().cloned()) {
+            let expected_nodes = [node.clone(), "0".to_string()];
+            let count = netlist
+                .elements
+                .iter()
+                .filter(|element| Self::plain_unit_resistor_on_nodes(element, &expected_nodes))
+                .count();
+            if count != 1 {
+                return Err(format!(
+                    "node '{node}' must have exactly one unit resistor to literal ground"
+                ));
+            }
+        }
+        let expected_probes = [
+            input.clone(),
+            behavioral_nodes["int"].clone(),
+            behavioral_nodes["floor"].clone(),
+            behavioral_nodes["ceil"].clone(),
+        ];
+        for (probe, node) in plan.print.probes.iter().zip(expected_probes) {
+            if Self::normalize_probe(probe) != format!("v({node})") {
+                return Err(
+                    "INT/FLOOR/CEIL print probes no longer map input/int/floor/ceil in order"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn passive_primary_value_composite_contract(
         &self,
         deck: &XyceDeck,
@@ -47851,6 +48402,308 @@ Vbias source 0 0\n\
 .TRAN 0 5m\n\
 .OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6\n\
 .END\n"
+    }
+
+    fn analytic_integer_dc_fixture(
+        label: &str,
+        relative: &str,
+        source: &str,
+    ) -> (PathBuf, XyceDeck, XyceTestRunner) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-analytic-integer-dc-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let deck_path = root.join(relative);
+        fs::create_dir_all(deck_path.parent().expect("fixture deck parent"))
+            .expect("create analytic integer DC fixture directory");
+        fs::write(&deck_path, source).expect("write analytic integer DC fixture");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write analytic integer DC wrapper provenance");
+        let deck = XyceDeck {
+            path: deck_path,
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        (root, deck, runner)
+    }
+
+    const ANALYTIC_FMOD_DC_SOURCE: &str = "Test of nint\n\
+        *\n\
+        R1 1 0 1\n\
+        V1 1 0 1.0\n\
+        .print dc V(1) {fmod(99.5,V(1))}\n\
+        .DC V1 1.0 10.0 0.5\n\
+        .end\n";
+
+    const ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE: &str = "* test B source with int/floor/ceil\n\
+        R1 1 0 1\n\
+        V1 1 0 DC 1\n\
+        Rint 2 0 1\n\
+        Bint 2 0 V={int(v(1))}\n\
+        Rfloor 3 0 1\n\
+        Bfloor 3 0 V={floor(v(1))}\n\
+        Rceil 4 0 1\n\
+        Bceil 4 0 V={ceil(v(1))}\n\
+        .DC V1 -1 1 .1\n\
+        .print DC V(1) v(2) v(3) v(4)\n\
+        .end\n";
+
+    #[test]
+    fn analytic_integer_dc_wrappers_are_manifest_owned_and_structurally_qualified() {
+        for (label, relative, source, expected_kind) in [
+            (
+                "fmod",
+                "Netlists/ABM_NINT_FMOD/fmod.cir",
+                ANALYTIC_FMOD_DC_SOURCE,
+                XyceAnalyticIntegerDcKind::Fmod,
+            ),
+            (
+                "int-floor-ceil",
+                "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir",
+                ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE,
+                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
+            ),
+        ] {
+            let (root, deck, runner) = analytic_integer_dc_fixture(label, relative, source);
+            let contract = runner
+                .analytic_integer_dc_wrapper_contract(&deck)
+                .expect("record is selected by its exact manifest-owned adapter")
+                .expect("canonical structural contract qualifies");
+            assert_eq!(contract.kind, expected_kind);
+            fs::remove_dir_all(root).expect("remove analytic integer DC fixture");
+        }
+    }
+
+    #[test]
+    fn analytic_fmod_dc_wrapper_rejects_semantic_mutations() {
+        let mutations = [
+            (
+                ANALYTIC_FMOD_DC_SOURCE.replace("fmod", "floor"),
+                "function name",
+            ),
+            (
+                ANALYTIC_FMOD_DC_SOURCE.replace("99.5", "99.25"),
+                "fixed oracle constant",
+            ),
+            (
+                ANALYTIC_FMOD_DC_SOURCE.replace("V1 1.0 10.0 0.5", "V1 1.0 9.0 0.5"),
+                "sweep stop",
+            ),
+            (
+                ANALYTIC_FMOD_DC_SOURCE.replace("dc V(1)", "dc V(0)"),
+                "probe mapping",
+            ),
+        ];
+        for (index, (source, reason)) in mutations.into_iter().enumerate() {
+            let (root, deck, runner) = analytic_integer_dc_fixture(
+                &format!("fmod-mutation-{index}"),
+                "Netlists/ABM_NINT_FMOD/fmod.cir",
+                &source,
+            );
+            assert!(
+                runner
+                    .analytic_integer_dc_wrapper_contract(&deck)
+                    .expect("exact manifest record remains selected")
+                    .is_err(),
+                "{reason} mutation must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove FMOD mutation fixture");
+        }
+    }
+
+    #[test]
+    fn analytic_int_floor_ceil_dc_wrapper_rejects_semantic_mutations() {
+        let mutations = [
+            (
+                ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replacen("int(v(1))", "floor(v(1))", 1),
+                "function identity",
+            ),
+            (
+                ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replace(".DC V1 -1 1 .1", ".DC V1 -2 1 .1"),
+                "sweep mapping",
+            ),
+            (
+                ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replace(
+                    ".print DC V(1) v(2) v(3) v(4)",
+                    ".print DC V(1) v(3) v(2) v(4)",
+                ),
+                "probe ordering",
+            ),
+            (
+                ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replace("Bceil 4 0", "Bceil 5 0"),
+                "behavioral topology",
+            ),
+        ];
+        for (index, (source, reason)) in mutations.into_iter().enumerate() {
+            let (root, deck, runner) = analytic_integer_dc_fixture(
+                &format!("int-floor-ceil-mutation-{index}"),
+                "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir",
+                &source,
+            );
+            assert!(
+                runner
+                    .analytic_integer_dc_wrapper_contract(&deck)
+                    .expect("exact manifest record remains selected")
+                    .is_err(),
+                "{reason} mutation must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove INT/FLOOR/CEIL mutation fixture");
+        }
+    }
+
+    #[test]
+    fn analytic_integer_dc_candidate_census_is_an_exact_manifest_bijection() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let discovered = runner.discover_tests();
+        let mut independent_candidates = discovered
+            .iter()
+            .filter_map(|deck| {
+                if !runner.requires_upstream_wrapper(&deck.relative_path) {
+                    return None;
+                }
+                let source = fs::read_to_string(&deck.path).ok()?;
+                let body = source.split_once('\n').map_or("", |(_, body)| body);
+                let normalized = XyceTestRunner::logical_netlist_lines(body)
+                    .iter()
+                    .map(|line| XyceTestRunner::normalize_probe(line))
+                    .collect::<Vec<_>>();
+                let dc_print = normalized.iter().any(|line| line.starts_with(".printdc"));
+                let fmod_print = normalized
+                    .iter()
+                    .any(|line| line.starts_with(".printdc") && line.contains("fmod("));
+                let behavioral_functions = ["int", "floor", "ceil"]
+                    .into_iter()
+                    .filter(|function| {
+                        normalized.iter().any(|line| {
+                            line.starts_with('b') && line.contains(&format!("v={{{function}(v("))
+                        })
+                    })
+                    .count();
+                (dc_print && (fmod_print || behavioral_functions == 3))
+                    .then(|| XyceTestRunner::normalize_manifest_key(&deck.relative_path))
+            })
+            .collect::<Vec<_>>();
+        independent_candidates.sort();
+
+        let mut selected = discovered
+            .into_iter()
+            .filter_map(|deck| {
+                runner
+                    .analytic_integer_dc_wrapper_contract(&deck)
+                    .map(|contract| {
+                        contract
+                            .map(|_| XyceTestRunner::normalize_manifest_key(&deck.relative_path))
+                            .unwrap_or_else(|err| panic!("candidate failed qualification: {err}"))
+                    })
+            })
+            .collect::<Vec<_>>();
+        selected.sort();
+        assert_eq!(
+            independent_candidates, selected,
+            "an independent semantic/provenance scan must biject the path-owned adapters"
+        );
+        assert_eq!(
+            selected,
+            vec![
+                XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD.to_string(),
+                XYCE_ANALYTIC_FMOD_DC_RECORD.to_string(),
+            ],
+            "the analytic adapters must own exactly the two Release 7.10 wrapper records"
+        );
+        assert!(
+            selected
+                .iter()
+                .all(|path| runner.requires_upstream_wrapper(path))
+        );
+    }
+
+    #[test]
+    fn analytic_integer_dc_corpus_records_execute_exact_release_710_wrappers() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        for (relative, expected_contract) in [
+            (
+                "Netlists/ABM_NINT_FMOD/fmod.cir",
+                "analytic_fmod_dc_wrapper",
+            ),
+            (
+                "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir",
+                "analytic_int_floor_ceil_bsource_dc_wrapper",
+            ),
+        ] {
+            let result = runner.run_test(corpus_root.join(relative));
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "{relative} did not pass its exact wrapper: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+        }
+    }
+
+    #[test]
+    fn analytic_integer_dc_comparison_uses_printed_inputs_and_exact_numeric_equality() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let table = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "V(1)".to_string(),
+                "V(2)".to_string(),
+                "V(3)".to_string(),
+                "V(4)".to_string(),
+            ],
+            rows: vec![vec![0.0, -0.9, -0.0, -1.0, -0.0]],
+        };
+        assert!(
+            runner
+                .compare_analytic_integer_dc_table(
+                    &table,
+                    XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
+                )
+                .expect("valid analytic table")
+                .is_empty(),
+            "Perl numeric equality treats signed zero as equal"
+        );
+
+        let rounded_to_integer = 0.999_999_999_6;
+        let int = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "V(1)".to_string(),
+                "INT".to_string(),
+                "FLOOR".to_string(),
+                "CEIL".to_string(),
+            ],
+            rows: vec![vec![0.0, rounded_to_integer, 1.0, 1.0, 1.0]],
+        };
+        assert!(
+            runner
+                .compare_analytic_integer_dc_table(
+                    &int,
+                    XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
+                )
+                .expect("valid integer table")
+                .is_empty(),
+            "the oracle must consume the serialized input token"
+        );
     }
 
     fn analytic_rc_test_plan(source: &str) -> XyceStaticTranPlan {
