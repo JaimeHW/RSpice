@@ -144,6 +144,21 @@ pub struct CommandSpec {
 }
 
 impl Command {
+    /// Stable product identity used by portable command profiles.
+    pub const fn stable_id(self) -> &'static str {
+        self.spec().id
+    }
+
+    /// Resolve a stable product identity through the canonical registry.
+    /// Unknown IDs are intentionally retained by profile persistence but are
+    /// never guessed into a command owned by this build.
+    pub fn from_stable_id(id: &str) -> Option<Self> {
+        COMMAND_REGISTRY
+            .iter()
+            .copied()
+            .find(|command| command.stable_id() == id)
+    }
+
     pub const fn spec(self) -> CommandSpec {
         match self {
             Self::OpenWorkspace(Workspace::Project) => {
@@ -1273,6 +1288,17 @@ mod tests {
                 id.bytes()
                     .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'),
                 "command id is not a hyphenated product action: {id}"
+            );
+            assert_eq!(Command::from_stable_id(id), Some(*command));
+        }
+        for command in COMMAND_REGISTRY
+            .iter()
+            .copied()
+            .filter(|command| !command.shortcut_bindings().is_empty())
+        {
+            assert!(
+                ids.contains(command.stable_id()),
+                "bindable command is missing a unique stable ID: {command:?}"
             );
         }
     }

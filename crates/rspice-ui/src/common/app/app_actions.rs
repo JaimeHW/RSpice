@@ -56,10 +56,7 @@ fn unique_symbol_pin_name(document: &SymbolDocument, base: &str) -> String {
     candidate
 }
 
-fn symbol_shortcut_command_allowed(
-    command: ShortcutCommand,
-    snapshot: &ShortcutInputSnapshot,
-) -> bool {
+fn symbol_shortcut_command_allowed(command: ShortcutCommand, modifiers: egui::Modifiers) -> bool {
     if matches!(
         command,
         ShortcutCommand::SelectTool
@@ -73,7 +70,7 @@ fn symbol_shortcut_command_allowed(
             | ShortcutCommand::MirrorSelectionVertical
             | ShortcutCommand::ZoomFit
     ) {
-        return snapshot.plain();
+        return modifiers.is_none();
     }
     true
 }
@@ -94,7 +91,7 @@ impl RSpiceApp {
                 continue;
             }
             let consumed =
-                ctx.input_mut(|input| input.consume_key(snapshot.modifiers(), resolved.key));
+                ctx.input_mut(|input| input.consume_key(resolved.modifiers, resolved.key));
             if !consumed {
                 continue;
             }
@@ -103,7 +100,7 @@ impl RSpiceApp {
                 continue;
             }
             if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol
-                && !symbol_shortcut_command_allowed(command, &snapshot)
+                && !symbol_shortcut_command_allowed(command, resolved.modifiers)
             {
                 continue;
             }
@@ -866,7 +863,7 @@ mod symbol_action_tests {
     fn modified_app_symbol_tool_shortcuts_are_rejected() {
         assert!(symbol_shortcut_command_allowed(
             ShortcutCommand::SelectTool,
-            &ShortcutInputSnapshot::from_modifiers_for_test(egui::Modifiers::NONE)
+            egui::Modifiers::NONE,
         ));
 
         for modifiers in [
@@ -889,21 +886,21 @@ mod symbol_action_tests {
         ] {
             assert!(!symbol_shortcut_command_allowed(
                 ShortcutCommand::SelectTool,
-                &ShortcutInputSnapshot::from_modifiers_for_test(modifiers)
+                modifiers,
             ));
             assert!(!symbol_shortcut_command_allowed(
                 ShortcutCommand::Place(crate::state::ComponentType::Capacitor),
-                &ShortcutInputSnapshot::from_modifiers_for_test(modifiers)
+                modifiers,
             ));
         }
 
         assert!(symbol_shortcut_command_allowed(
             ShortcutCommand::Copy,
-            &ShortcutInputSnapshot::from_modifiers_for_test(egui::Modifiers {
+            egui::Modifiers {
                 ctrl: true,
                 command: true,
                 ..egui::Modifiers::NONE
-            })
+            },
         ));
     }
 }

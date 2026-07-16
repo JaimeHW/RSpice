@@ -10,6 +10,7 @@ pub(crate) enum BrowserTextImportKind {
     Netlist,
     Project,
     Schematic,
+    ShortcutProfile,
     VerilogA,
 }
 
@@ -20,7 +21,20 @@ impl BrowserTextImportKind {
             Self::Netlist => "SPICE deck",
             Self::Project => "project",
             Self::Schematic => "schematic",
+            Self::ShortcutProfile => "shortcut profile",
             Self::VerilogA => "Verilog-A source",
+        }
+    }
+
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) const fn max_bytes(self) -> u64 {
+        match self {
+            Self::ShortcutProfile => {
+                crate::common::shortcut_profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
+            }
+            Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
+                crate::io::project_io::MAX_PROJECT_FILE_BYTES
+            }
         }
     }
 }
@@ -136,6 +150,12 @@ pub(crate) fn pick_text_file(
     filter_extensions: &'static [&'static str],
     on_complete: impl FnOnce(Result<Option<PickedTextFile>, String>) + 'static,
 ) {
+    // The initiating workflow owns the active import lease. Capture its limit
+    // before starting the non-abortable browser promise so a later replacement
+    // picker cannot change the authority applied to this read.
+    let max_bytes = active_text_import_kind()
+        .map(BrowserTextImportKind::max_bytes)
+        .unwrap_or(crate::io::project_io::MAX_PROJECT_FILE_BYTES);
     wasm_bindgen_futures::spawn_local(async move {
         let file = rfd::AsyncFileDialog::new()
             .add_filter(filter_name, filter_extensions)
@@ -146,22 +166,17 @@ pub(crate) fn pick_text_file(
             Some(file) => {
                 let name = file.file_name();
                 let size = file.inner().size();
-                if !size.is_finite()
-                    || size < 0.0
-                    || size > crate::io::project_io::MAX_PROJECT_FILE_BYTES as f64
-                {
+                if !size.is_finite() || size < 0.0 || size > max_bytes as f64 {
                     Err(format!(
                         "Selected {} exceeds the supported {}-byte size limit",
-                        name,
-                        crate::io::project_io::MAX_PROJECT_FILE_BYTES
+                        name, max_bytes
                     ))
                 } else {
                     let bytes = file.read().await;
-                    if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
+                    if bytes.len() as u64 > max_bytes {
                         Err(format!(
                             "Selected {} exceeds the supported {}-byte size limit",
-                            name,
-                            crate::io::project_io::MAX_PROJECT_FILE_BYTES
+                            name, max_bytes
                         ))
                     } else {
                         String::from_utf8(bytes)

@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::shortcuts::ShortcutPreferences;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChoicePreference {
@@ -88,12 +90,22 @@ pub struct UserPreferences {
     /// keys are retained byte-semantically for a later compatible build.
     choices: BTreeMap<String, Value>,
     toggles: BTreeMap<String, Value>,
+    shortcuts: ShortcutPreferences,
     /// Forward-compatible typed domains that this build does not understand.
     #[serde(flatten)]
     unknown_domains: BTreeMap<String, Value>,
 }
 
 impl UserPreferences {
+    #[must_use]
+    pub const fn shortcuts(&self) -> &ShortcutPreferences {
+        &self.shortcuts
+    }
+
+    pub const fn shortcuts_mut(&mut self) -> &mut ShortcutPreferences {
+        &mut self.shortcuts
+    }
+
     #[must_use]
     pub fn choice(&self, key: ChoicePreference) -> usize {
         if !key.is_runtime_consumed() {
@@ -271,5 +283,50 @@ mod tests {
         assert_eq!(encoded["toggles"]["future-toggle"], false);
         assert!(encoded["choices"].get("interface-scale").is_none());
         assert!(encoded["toggles"].get("reduced-motion").is_none());
+    }
+
+    #[test]
+    fn shortcut_profile_round_trips_inside_user_preferences() {
+        let mut preferences = UserPreferences::default();
+        preferences
+            .shortcuts_mut()
+            .set_binding(
+                crate::workbench::commands::Command::Save,
+                crate::workbench::shortcuts::ShortcutBindingSlot::Primary,
+                crate::workbench::commands::CommandPlatform::ALL.to_vec(),
+                Some(crate::workbench::shortcuts::ShortcutSequence::single(
+                    crate::workbench::shortcuts::ShortcutStroke::new(
+                        egui::Key::F6,
+                        false,
+                        false,
+                        false,
+                    ),
+                )),
+            )
+            .unwrap();
+        let encoded = serde_json::to_string(&preferences).unwrap();
+        let restored: UserPreferences = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            restored
+                .shortcuts()
+                .resolved_bindings(crate::workbench::commands::Command::Save)
+                .into_iter()
+                .find(|binding| {
+                    binding.slot() == crate::workbench::shortcuts::ShortcutBindingSlot::Primary
+                })
+                .unwrap()
+                .display_label(),
+            "F6"
+        );
+    }
+
+    #[test]
+    fn future_incompatible_shortcut_root_does_not_invalidate_the_session() {
+        let mut preferences: UserPreferences = serde_json::from_str(r#"{"shortcuts":17}"#).unwrap();
+        assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
+        assert!(!preferences.shortcuts().audit().is_valid());
+
+        preferences.shortcuts_mut().reset_all();
+        assert!(serde_json::to_value(&preferences).unwrap()["shortcuts"].is_object());
     }
 }

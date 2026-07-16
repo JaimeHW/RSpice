@@ -6,13 +6,14 @@
 //! chord can never silently shadow its desktop command.
 
 use egui::Key;
+use serde::{Deserialize, Serialize};
 
 use super::Command;
 use crate::common::RSpiceApp;
-use crate::workbench::ResultViewer;
-use crate::workbench::state::{VerificationPage, Workspace};
+use crate::workbench::state::Workspace;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum CommandPlatform {
     Desktop,
     Browser,
@@ -22,6 +23,15 @@ pub enum CommandPlatform {
 
 impl CommandPlatform {
     pub const ALL: [Self; 4] = [Self::Desktop, Self::Browser, Self::Tablet, Self::Phone];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Desktop => "Desktop",
+            Self::Browser => "Browser",
+            Self::Tablet => "Tablet",
+            Self::Phone => "Phone",
+        }
+    }
 
     const fn has_browser_reserved_primary(self) -> bool {
         matches!(self, Self::Browser)
@@ -404,10 +414,10 @@ impl Command {
             Self::OpenWorkspace(Workspace::Project) => PROJECT_WORKSPACE,
             Self::OpenWorkspace(Workspace::Design) => DESIGN_WORKSPACE,
             Self::OpenWorkspace(Workspace::Simulate) => SIMULATION_WORKSPACE,
+            Self::OpenWorkspace(Workspace::Results) => RESULTS_WORKSPACE,
+            Self::OpenWorkspace(Workspace::Verify) => VERIFICATION_WORKSPACE,
             Self::OpenWorkspace(Workspace::Models) => MODELS_WORKSPACE,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
-            Self::ResultViewer(ResultViewer::Waves) => RESULTS_WORKSPACE,
-            Self::VerificationPage(VerificationPage::Yield) => VERIFICATION_WORKSPACE,
             Self::ProjectLauncher => PROJECT_LAUNCHER,
             Self::NewProject => NEW_PROJECT,
             Self::OpenProject => OPEN_PROJECT,
@@ -531,6 +541,8 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::ResultViewer;
+    use crate::workbench::state::VerificationPage;
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
         super::super::COMMAND_REGISTRY
@@ -550,29 +562,29 @@ mod tests {
         for platform in CommandPlatform::ALL {
             assert_eq!(
                 binding_owners(RESULTS_WORKSPACE[0].chord, platform),
-                vec![Command::ResultViewer(ResultViewer::Waves)]
+                vec![Command::OpenWorkspace(Workspace::Results)]
             );
             assert_eq!(
-                Command::ResultViewer(ResultViewer::Waves).shortcut_label(platform),
+                Command::OpenWorkspace(Workspace::Results).shortcut_label(platform),
                 "Alt+4"
             );
             assert_eq!(
                 binding_owners(VERIFICATION_WORKSPACE[0].chord, platform),
-                vec![Command::VerificationPage(VerificationPage::Yield)]
+                vec![Command::OpenWorkspace(Workspace::Verify)]
             );
             assert_eq!(
-                Command::VerificationPage(VerificationPage::Yield).shortcut_label(platform),
+                Command::OpenWorkspace(Workspace::Verify).shortcut_label(platform),
                 "Alt+5"
             );
         }
 
         assert!(
-            Command::OpenWorkspace(Workspace::Results)
+            Command::ResultViewer(ResultViewer::Waves)
                 .shortcut_bindings()
                 .is_empty()
         );
         assert!(
-            Command::OpenWorkspace(Workspace::Verify)
+            Command::VerificationPage(VerificationPage::Yield)
                 .shortcut_bindings()
                 .is_empty()
         );

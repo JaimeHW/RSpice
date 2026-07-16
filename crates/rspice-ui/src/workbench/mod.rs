@@ -30,6 +30,7 @@ mod preflight;
 mod project_launcher;
 mod recovery;
 mod session;
+pub mod shortcuts;
 mod surfaces;
 
 pub use availability::{
@@ -48,6 +49,13 @@ pub use session::{
     SymbolUiState, UiSessionState, UiSessionStateSer, mirror_point_h_about, mirror_point_v_about,
     mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
     symbol_shape_bounds,
+};
+pub use shortcuts::{
+    ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding,
+    ProtectedShortcutPolicy, ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
+    ShortcutPolicies, ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileError,
+    ShortcutProfileIssue, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity, ShortcutSequence,
+    ShortcutStroke, SingleKeyCanvasPolicy,
 };
 pub use state::{EngineeringProfile, WorkbenchState};
 pub use surface_catalog::{

@@ -1,4 +1,4 @@
-use egui::Key;
+use egui::{Key, Modifiers};
 
 use super::ShortcutInputSnapshot;
 use crate::workbench::commands::{COMMAND_REGISTRY, Command, CommandPlatform, ShortcutBinding};
@@ -7,13 +7,19 @@ use crate::workbench::commands::{COMMAND_REGISTRY, Command, CommandPlatform, Sho
 pub(crate) struct ResolvedShortcut {
     pub(crate) command: Command,
     pub(crate) key: Key,
+    pub(crate) modifiers: Modifiers,
 }
 
-fn binding_matches(binding: ShortcutBinding, snapshot: &ShortcutInputSnapshot) -> bool {
-    snapshot.key_pressed(binding.chord.key)
-        && snapshot.primary() == binding.chord.primary
-        && snapshot.shift() == binding.chord.shift
-        && snapshot.alt() == binding.chord.alt
+fn binding_matches(
+    binding: ShortcutBinding,
+    snapshot: &ShortcutInputSnapshot,
+) -> Option<Modifiers> {
+    snapshot.matching_modifiers(
+        binding.chord.key,
+        binding.chord.primary,
+        binding.chord.alt,
+        binding.chord.shift,
+    )
 }
 
 /// Resolve the typed command registry for one platform. Context selection is
@@ -29,15 +35,19 @@ pub(crate) fn resolve_shortcuts(
         if snapshot.has_focus() && context.suppressed_by_text_focus() {
             continue;
         }
-        if let Some(binding) = command
+        if let Some((binding, modifiers)) = command
             .shortcut_bindings()
             .iter()
             .copied()
-            .find(|binding| binding.supports(platform) && binding_matches(*binding, snapshot))
+            .filter(|binding| binding.supports(platform))
+            .find_map(|binding| {
+                binding_matches(binding, snapshot).map(|modifiers| (binding, modifiers))
+            })
         {
             resolved.push(ResolvedShortcut {
                 command,
                 key: binding.chord.key,
+                modifiers,
             });
         }
     }
@@ -48,7 +58,7 @@ pub(crate) fn resolve_shortcuts(
 mod tests {
     use std::collections::HashMap;
 
-    use egui::Modifiers;
+    use egui::{Event, Modifiers};
 
     use super::*;
     use crate::workbench::commands::{ShortcutContext, ShortcutKind};
@@ -79,6 +89,24 @@ mod tests {
             .collect()
     }
 
+    fn key_event(key: Key, modifiers: Modifiers, repeat: bool) -> Event {
+        Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat,
+            modifiers,
+        }
+    }
+
+    fn resolve_event(event: Event, platform: CommandPlatform) -> Vec<Command> {
+        let snapshot = ShortcutInputSnapshot::from_events_for_test(&[event], false);
+        resolve_shortcuts(&snapshot, platform)
+            .into_iter()
+            .map(|resolved| resolved.command)
+            .collect()
+    }
+
     #[test]
     fn every_platform_context_chord_has_one_owner() {
         let mut owners = HashMap::new();
@@ -102,6 +130,125 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn every_registered_default_key_event_is_observable() {
+        for command in COMMAND_REGISTRY.iter().copied() {
+            for binding in command.shortcut_bindings() {
+                let event = key_event(
+                    binding.chord.key,
+                    modifiers(
+                        binding.chord.primary,
+                        binding.chord.alt,
+                        binding.chord.shift,
+                    ),
+                    false,
+                );
+                for platform in binding.platforms {
+                    let resolved = resolve_event(event.clone(), *platform);
+                    assert!(
+                        resolved.contains(&command),
+                        "registered binding {} for {command:?} was not observable on {platform:?}",
+                        binding.chord.label
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn alt_f4_resolves_exit_without_a_manual_key_whitelist() {
+        assert_eq!(
+            resolve_event(
+                key_event(
+                    Key::F4,
+                    Modifiers {
+                        alt: true,
+                        ..Modifiers::NONE
+                    },
+                    false,
+                ),
+                CommandPlatform::Desktop,
+            ),
+            vec![Command::Exit]
+        );
+    }
+
+    #[test]
+    fn repeated_and_release_events_do_not_dispatch_product_commands() {
+        assert!(
+            resolve_event(
+                key_event(Key::K, modifiers(true, false, false), true),
+                CommandPlatform::Desktop,
+            )
+            .is_empty()
+        );
+        let release = Event::Key {
+            key: Key::K,
+            physical_key: Some(Key::K),
+            pressed: false,
+            repeat: false,
+            modifiers: modifiers(true, false, false),
+        };
+        assert!(resolve_event(release, CommandPlatform::Desktop).is_empty());
+    }
+
+    #[test]
+    fn primary_and_physical_control_sources_match_without_leaking_into_plain_keys() {
+        let windows_primary = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(
+            resolve_event(
+                key_event(Key::K, windows_primary, false),
+                CommandPlatform::Desktop,
+            ),
+            vec![Command::CommandPalette]
+        );
+
+        let mac_primary = Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(
+            resolve_event(
+                key_event(Key::K, mac_primary, false),
+                CommandPlatform::Desktop,
+            ),
+            vec![Command::CommandPalette]
+        );
+
+        let mac_physical_control = Modifiers {
+            ctrl: true,
+            ..Modifiers::NONE
+        };
+        assert!(
+            resolve_event(
+                key_event(Key::W, mac_physical_control, false),
+                CommandPlatform::Desktop,
+            )
+            .is_empty(),
+            "physical Control must not trigger the plain W canvas tool"
+        );
+
+        let mac_command_plus_control = Modifiers {
+            ctrl: true,
+            mac_cmd: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        assert!(
+            resolve_event(
+                key_event(Key::K, mac_command_plus_control, false),
+                CommandPlatform::Desktop,
+            )
+            .is_empty(),
+            "Cmd+Ctrl+K must not collapse into the primary-only binding"
+        );
     }
 
     #[test]
@@ -242,7 +389,9 @@ mod tests {
                 false,
                 CommandPlatform::Desktop
             ),
-            vec![Command::ResultViewer(crate::workbench::ResultViewer::Waves)]
+            vec![Command::OpenWorkspace(
+                crate::workbench::state::Workspace::Results
+            )]
         );
         assert_eq!(
             resolve(
@@ -253,8 +402,8 @@ mod tests {
                 false,
                 CommandPlatform::Desktop
             ),
-            vec![Command::VerificationPage(
-                crate::workbench::state::VerificationPage::Yield
+            vec![Command::OpenWorkspace(
+                crate::workbench::state::Workspace::Verify
             )]
         );
 
