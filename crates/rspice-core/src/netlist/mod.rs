@@ -2171,38 +2171,22 @@ mod tests {
     }
 
     #[test]
-    fn dc_sweep_accepts_omitted_step_for_equal_bounds() {
-        let netlist = Netlist::parse(
+    fn dc_sweep_rejects_omitted_step_for_equal_bounds() {
+        let error = Netlist::parse(
             "single point dc\n\
              VIN 1 0 DC 5\n\
              R1 1 0 1k\n\
              .dc VIN 5 5\n\
              .end\n",
         )
-        .expect("equal-bound .DC sweep may omit the step value");
+        .expect_err("equal-bound .DC sweep still requires an explicit step value");
 
-        let dc = netlist
-            .analyses
-            .iter()
-            .find_map(|analysis| match analysis {
-                AnalysisCommand::Dc {
-                    source,
-                    start,
-                    stop,
-                    step,
-                    mode,
-                    sweep2,
-                } => Some((source, *start, *stop, *step, mode, sweep2)),
-                _ => None,
-            })
-            .expect(".DC analysis exists");
-
-        assert_eq!(dc.0, "VIN");
-        assert_eq!(dc.1, 5.0);
-        assert_eq!(dc.2, 5.0);
-        assert_eq!(dc.3, 1.0);
-        assert!(matches!(dc.4, DcSweepMode::Linear));
-        assert!(dc.5.is_none());
+        assert!(
+            error
+                .to_string()
+                .contains(".DC linear sweep requires a step value"),
+            "unexpected parse error: {error}"
+        );
     }
 
     #[test]
@@ -2217,9 +2201,31 @@ mod tests {
         .expect_err("distinct-bound .DC sweep still requires a step value");
 
         assert!(
-            err.to_string().contains("requires a step value"),
+            err.to_string()
+                .contains(".DC linear sweep requires a step value"),
             "unexpected parse error: {err}"
         );
+    }
+
+    #[test]
+    fn dc_sweep_rejects_omitted_step_for_explicit_linear_modes() {
+        for directive in [".dc LIN VIN 5 5", ".dc VIN LIN 5 5"] {
+            let error = Netlist::parse(&format!(
+                "invalid explicit linear dc\n\
+                 VIN 1 0 DC 5\n\
+                 R1 1 0 1k\n\
+                 {directive}\n\
+                 .end\n"
+            ))
+            .expect_err("explicit LIN .DC sweep requires a step value");
+
+            assert!(
+                error
+                    .to_string()
+                    .contains(".DC linear sweep requires a step value"),
+                "directive={directive}, unexpected parse error: {error}"
+            );
+        }
     }
 
     #[test]
