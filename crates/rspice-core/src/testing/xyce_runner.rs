@@ -127,6 +127,8 @@ const XYCE_BUG726_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_726/adjacent.cir";
 const XYCE_BUG744_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_744/bad_dc_op.cir";
+const XYCE_BUG75_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_75_son/bug75.cir";
 const XYCE_BUG387_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_387_son/bug_387.cir";
 const XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD: &str =
@@ -211,6 +213,8 @@ const XYCE_BUG726_SOURCE_BLAKE3: &str =
     "e55050584c69086bd34d84be82c885902a94eb212ffb6973f1d7786dd8b8ab2f";
 const XYCE_BUG744_SOURCE_BLAKE3: &str =
     "b0c2ba9e38e293eb0d9d53cc14713921890e81330e6b06c64d3fc8f0df26afda";
+const XYCE_BUG75_SOURCE_BLAKE3: &str =
+    "eab31dd9fba0e2020d8ec5f40d5cfd4f3232aac87a54e7c19ced83a20fb9886f";
 const XYCE_BUG387_SOURCE_BLAKE3: &str =
     "4cf9e5605ea32387fb6e670928e057940236b92fe3c240ee64b8b9bdce60e1b0";
 const XYCE_SUBCKT_NONAME_SOURCE_BLAKE3: &str =
@@ -320,6 +324,20 @@ const XYCE_BUG769_PHYSICAL_CENSUS_BLAKE3: &str =
     "fd6b0fc758230e97ae8b2ed878e0a981a5c2d918ac1916408fa5c2b75eb93008";
 const XYCE_BUG769_MANIFEST_CENSUS_BLAKE3: &str =
     "5dcd16e7d0b7fb3676533549a171865ac6b2a9aeb338f7f14ef10d73ec75dbc8";
+const XYCE_BUG75_PHYSICAL_CENSUS_BLAKE3: &str =
+    "5fba33cadd7946f239fa8ca6706f30dbf76ae63c4f5bba9d44278b555682b4fd";
+const XYCE_BUG75_MANIFEST_CENSUS_BLAKE3: &str =
+    "7edf926587419e6fba45e31c3d50b31c2a1a1d149bd8c2828d03661e04f43759";
+const XYCE_BUG75_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
+    "516d58926a25ccc21284c72c2bc6fb5cf624f69ab056eadfd1d6b069eadb0e1a";
+const XYCE_BUG75_EMPTY_OUTPUT_CENSUS_BLAKE3: &str =
+    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
+const XYCE_BUG75_README_BLAKE3: &str =
+    "11eb1f7062b3bb83509aa469fb6101ccb29a4c7681fcaaf5e93dada0f869bdea";
+const XYCE_BUG75_README_BYTES: usize = 414;
+const XYCE_BUG75_OPTIONS_BLAKE3: &str =
+    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
+const XYCE_BUG75_OPTIONS_BYTES: usize = 14;
 const XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
     "bcd3e366443f97db8ccb98d5d9f0102cbb67a5903657382da3ea7770ed666afc";
 const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
@@ -383,6 +401,7 @@ enum XyceExpectedFailureKind {
     Bug671InvalidPwlFile,
     Bug726AdjacentCouplings,
     Bug744DcOperatingPoint,
+    Bug75UndefinedMutualInductorReference,
     Bug387MissingLibraryEndl,
     MessageSubcircuitMissingName,
     MessageSubcircuitMissingEndsEndCard,
@@ -533,6 +552,7 @@ impl XyceExpectedFailureKind {
             XYCE_BUG671_EXPECTED_FAILURE_RECORD => Some(Self::Bug671InvalidPwlFile),
             XYCE_BUG726_EXPECTED_FAILURE_RECORD => Some(Self::Bug726AdjacentCouplings),
             XYCE_BUG744_EXPECTED_FAILURE_RECORD => Some(Self::Bug744DcOperatingPoint),
+            XYCE_BUG75_EXPECTED_FAILURE_RECORD => Some(Self::Bug75UndefinedMutualInductorReference),
             XYCE_BUG387_EXPECTED_FAILURE_RECORD => Some(Self::Bug387MissingLibraryEndl),
             XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD => Some(Self::MessageSubcircuitMissingName),
             XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD => {
@@ -622,6 +642,7 @@ impl XyceExpectedFailureKind {
             Self::Bug671InvalidPwlFile => XYCE_BUG671_EXPECTED_FAILURE_RECORD,
             Self::Bug726AdjacentCouplings => XYCE_BUG726_EXPECTED_FAILURE_RECORD,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_EXPECTED_FAILURE_RECORD,
+            Self::Bug75UndefinedMutualInductorReference => XYCE_BUG75_EXPECTED_FAILURE_RECORD,
             Self::Bug387MissingLibraryEndl => XYCE_BUG387_EXPECTED_FAILURE_RECORD,
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD,
             Self::MessageSubcircuitMissingEndsEndCard => {
@@ -694,6 +715,7 @@ impl XyceExpectedFailureKind {
             Self::Bug671InvalidPwlFile => XYCE_BUG671_SOURCE_BLAKE3,
             Self::Bug726AdjacentCouplings => XYCE_BUG726_SOURCE_BLAKE3,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_SOURCE_BLAKE3,
+            Self::Bug75UndefinedMutualInductorReference => XYCE_BUG75_SOURCE_BLAKE3,
             Self::Bug387MissingLibraryEndl => XYCE_BUG387_SOURCE_BLAKE3,
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_SOURCE_BLAKE3,
             Self::MessageSubcircuitMissingEndsEndCard => {
@@ -750,6 +772,9 @@ impl XyceExpectedFailureKind {
             Self::Bug671InvalidPwlFile => "expected_failure_external_pwl_load",
             Self::Bug726AdjacentCouplings => "expected_failure_adjacent_coupling_parse",
             Self::Bug744DcOperatingPoint => "expected_failure_dc_operating_point",
+            Self::Bug75UndefinedMutualInductorReference => {
+                "expected_failure_bug75_undefined_mutual_inductor_reference_parse"
+            }
             Self::Bug387MissingLibraryEndl => "expected_failure_missing_library_endl_parse",
             Self::MessageSubcircuitMissingName => "expected_failure_missing_subcircuit_name_parse",
             Self::MessageSubcircuitMissingEndsEndCard => {
@@ -847,6 +872,9 @@ impl XyceExpectedFailureKind {
                 "Specified model not found for device K1",
             ][..],
             Self::Bug744DcOperatingPoint => &["DC Operating Point Failed"][..],
+            Self::Bug75UndefinedMutualInductorReference => {
+                &["Undefined inductor L2 in mutual inductor K3 definition"][..]
+            }
             Self::Bug387MissingLibraryEndl => {
                 &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..]
             }
@@ -966,6 +994,21 @@ impl XyceExpectedFailureKind {
                 stage: XyceExpectedFailureStage::DcOperatingPoint,
                 category: XyceExpectedFailureCategory::ConflictingIdealVoltageConstraints,
                 identifiers: vec!["Vsrc1".to_string(), "Vsrc2".to_string(), "1".to_string()],
+            },
+            Self::Bug75UndefinedMutualInductorReference => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::UndefinedMutualInductorReference,
+                identifiers: vec![
+                    "K3".to_string(),
+                    "K3".to_string(),
+                    "K3".to_string(),
+                    "L2".to_string(),
+                    "L2".to_string(),
+                    "L2".to_string(),
+                    "TOP_LEVEL".to_string(),
+                    "2".to_string(),
+                    "line 12".to_string(),
+                ],
             },
             Self::Bug387MissingLibraryEndl => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::NetlistParse,
@@ -1340,6 +1383,13 @@ impl XyceExpectedFailureKind {
                 manifest_records_blake3: XYCE_BUG769_MANIFEST_CENSUS_BLAKE3,
                 require_manifest_bijection: true,
             }),
+            Self::Bug75UndefinedMutualInductorReference => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 1,
+                physical_names_blake3: XYCE_BUG75_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 1,
+                manifest_records_blake3: XYCE_BUG75_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            }),
             _ => None,
         }
     }
@@ -1358,7 +1408,8 @@ impl XyceExpectedFailureKind {
     fn rejects_source_directory_sidecars(self) -> bool {
         matches!(
             self,
-            Self::MessageAcUnsupportedSweepType
+            Self::Bug75UndefinedMutualInductorReference
+                | Self::MessageAcUnsupportedSweepType
                 | Self::MessageNoiseUnsupportedSweepType
                 | Self::MessageSubcircuitDuplicateBindingA2
                 | Self::MessageSubcircuitDuplicateBindingJ1
@@ -1378,6 +1429,10 @@ impl XyceExpectedFailureKind {
                 | Self::Bug702MalformedInitcondFile
                 | Self::Bug702MissingInitcondFile
         )
+    }
+
+    fn is_bug75(self) -> bool {
+        self == Self::Bug75UndefinedMutualInductorReference
     }
 }
 
@@ -1417,6 +1472,7 @@ enum XyceExpectedFailureCategory {
     UnknownDeviceType,
     InvalidNetlistLinePrefix,
     InvalidNumericNotation,
+    UndefinedMutualInductorReference,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4728,6 +4784,141 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn validate_bug75_complete_family_provenance(&self, family_dir: &Path) -> Result<(), String> {
+        let expected_family = self.root.join("Netlists/Certification_Tests/BUG_75_SON");
+        if family_dir.canonicalize().ok() != expected_family.canonicalize().ok() {
+            return Err(format!(
+                "BUG75 family resolved outside its canonical corpus directory: {}",
+                family_dir.display()
+            ));
+        }
+
+        let mut source_names = BTreeSet::new();
+        for entry in fs::read_dir(family_dir).map_err(|error| {
+            format!(
+                "failed to inspect complete BUG75 source family {}: {error}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect complete BUG75 source entry in {}: {error}",
+                    family_dir.display()
+                )
+            })?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| "BUG75 source filename is not UTF-8".to_string())?
+                .to_ascii_lowercase();
+            if !source_names.insert(name.clone()) {
+                return Err(format!(
+                    "BUG75 source family has case-colliding name {name:?}"
+                ));
+            }
+        }
+        let source_names = source_names.into_iter().collect::<Vec<_>>();
+        let source_hash = blake3::hash(source_names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if source_names.len() != 3 || source_hash != XYCE_BUG75_SOURCE_DIRECTORY_CENSUS_BLAKE3 {
+            return Err(format!(
+                "BUG75 complete source-directory census changed: expected 3 / {}, got {} / {}",
+                XYCE_BUG75_SOURCE_DIRECTORY_CENSUS_BLAKE3,
+                source_names.len(),
+                source_hash
+            ));
+        }
+
+        for (file_name, expected_bytes, expected_hash) in [
+            ("README", XYCE_BUG75_README_BYTES, XYCE_BUG75_README_BLAKE3),
+            (
+                "options",
+                XYCE_BUG75_OPTIONS_BYTES,
+                XYCE_BUG75_OPTIONS_BLAKE3,
+            ),
+        ] {
+            let path = family_dir.join(file_name);
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!(
+                    "failed to inspect BUG75 retained source {}: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "BUG75 retained source {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let bytes = fs::read(&path).map_err(|error| {
+                format!(
+                    "failed to read BUG75 retained source {}: {error}",
+                    path.display()
+                )
+            })?;
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            if bytes.len() != expected_bytes || hash != expected_hash {
+                return Err(format!(
+                    "BUG75 retained source {file_name} changed: expected {expected_bytes} / {expected_hash}, got {} / {hash}",
+                    bytes.len()
+                ));
+            }
+        }
+
+        let output_dir = self.root.join("OutputData/Certification_Tests/BUG_75_SON");
+        let mut output_names = BTreeSet::new();
+        if output_dir.exists() {
+            let metadata = fs::symlink_metadata(&output_dir).map_err(|error| {
+                format!(
+                    "failed to inspect BUG75 OutputData path {}: {error}",
+                    output_dir.display()
+                )
+            })?;
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "BUG75 OutputData path {} must be a regular non-symlink directory",
+                    output_dir.display()
+                ));
+            }
+            for entry in fs::read_dir(&output_dir).map_err(|error| {
+                format!(
+                    "failed to inspect BUG75 OutputData directory {}: {error}",
+                    output_dir.display()
+                )
+            })? {
+                let entry = entry.map_err(|error| {
+                    format!(
+                        "failed to inspect BUG75 OutputData entry in {}: {error}",
+                        output_dir.display()
+                    )
+                })?;
+                let name = entry
+                    .file_name()
+                    .to_str()
+                    .ok_or_else(|| "BUG75 OutputData filename is not UTF-8".to_string())?
+                    .to_ascii_lowercase();
+                if !output_names.insert(name.clone()) {
+                    return Err(format!("BUG75 OutputData has case-colliding name {name:?}"));
+                }
+            }
+        }
+        let output_names = output_names.into_iter().collect::<Vec<_>>();
+        let output_hash = blake3::hash(output_names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if !output_names.is_empty() || output_hash != XYCE_BUG75_EMPTY_OUTPUT_CENSUS_BLAKE3 {
+            return Err(format!(
+                "BUG75 OutputData census changed: expected 0 / {}, got {} / {}",
+                XYCE_BUG75_EMPTY_OUTPUT_CENSUS_BLAKE3,
+                output_names.len(),
+                output_hash
+            ));
+        }
+
+        Ok(())
+    }
+
     fn validate_bug702_complete_family_provenance(&self, family_dir: &Path) -> Result<(), String> {
         let expected_family = self.root.join("Netlists/Certification_Tests/BUG_702");
         if family_dir.canonicalize().ok() != expected_family.canonicalize().ok() {
@@ -5437,6 +5628,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             XyceExpectedFailureKind::Bug744DcOperatingPoint => {
                 self.observe_bug744_dc_operating_point_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference => {
+                Self::observe_bug75_undefined_mutual_inductor_reference_failure(source, &deck.path)?
+            }
             XyceExpectedFailureKind::Bug387MissingLibraryEndl => {
                 Self::observe_bug387_missing_library_endl_failure(source, &deck.path)?
             }
@@ -5683,6 +5877,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         if kind.is_bug702_family() {
             self.validate_bug702_complete_family_provenance(family_dir)?;
+        }
+        if kind.is_bug75() {
+            self.validate_bug75_complete_family_provenance(family_dir)?;
         }
         Self::validate_expected_failure_source_sidecars(kind, &deck.path)?;
 
@@ -8369,6 +8566,96 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string(),
             ),
         }
+    }
+
+    fn observe_bug75_undefined_mutual_inductor_reference_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        const LABEL: &str = "BUG 75";
+        Self::require_expected_failure_file_name(LABEL, deck_path, "bug75.cir")?;
+        Self::require_expected_failure_source_lines(
+            LABEL,
+            source,
+            15,
+            &[
+                (
+                    1,
+                    "Test error message capability when a mutual inductor references an undefined",
+                ),
+                (2, "*inductor"),
+                (4, "R1 1 2 1"),
+                (5, "L1 2 0 1"),
+                (6, "*L2 2 3 1"),
+                (7, "L3 2 0 1"),
+                (8, "V1 1 0 DC 1"),
+                (10, "K1 L1 L3 0.1"),
+                (11, "K2 L1 L3 0"),
+                (12, "K3 L1 L2 0"),
+                (14, ".DC V1 1 1 0.1"),
+                (15, ".end"),
+            ],
+        )?;
+
+        let error = match Self::parse_xyce_netlist(source, deck_path) {
+            Err(ParseError::UndefinedMutualInductorReference(error)) => error,
+            Err(error) => {
+                return Err(format!(
+                    "{LABEL} produced the wrong typed parser failure: {error:?}"
+                ));
+            }
+            Ok(_) => {
+                return Err(format!(
+                    "{LABEL} unexpectedly parsed; the undefined L2 reference is absent"
+                ));
+            }
+        };
+
+        let expected_path = deck_path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize {LABEL} deck {}: {error}",
+                deck_path.display()
+            )
+        })?;
+        let origin_path = error
+            .origin
+            .path
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} typed failure lost its source path"))?
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize {LABEL} error origin: {error}"))?;
+        if origin_path != expected_path
+            || error.origin.line != 12
+            || error.authored_coupling_name != "K3"
+            || error.canonical_coupling_name != "K3"
+            || error.qualified_coupling_name != "K3"
+            || error.authored_inductor_name != "L2"
+            || error.canonical_inductor_name != "L2"
+            || error.qualified_inductor_name != "L2"
+            || error.scope_name.is_some()
+            || error.reference_position != 2
+            || error.to_string() != "Undefined inductor L2 in mutual inductor K3 definition."
+        {
+            return Err(format!(
+                "{LABEL} typed undefined-mutual-inductor payload changed: {error:?}"
+            ));
+        }
+
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::UndefinedMutualInductorReference,
+            identifiers: vec![
+                error.authored_coupling_name.clone(),
+                error.canonical_coupling_name.clone(),
+                error.qualified_coupling_name.clone(),
+                error.authored_inductor_name.clone(),
+                error.canonical_inductor_name.clone(),
+                error.qualified_inductor_name.clone(),
+                "TOP_LEVEL".to_string(),
+                error.reference_position.to_string(),
+                format!("line {}", error.origin.line),
+            ],
+        })
     }
 
     fn run_connectivity_diagnostic_contract(
@@ -68806,6 +69093,10 @@ R2 2 0 1
                 &["DC Operating Point Failed"][..],
             ),
             (
+                XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference,
+                &["Undefined inductor L2 in mutual inductor K3 definition"][..],
+            ),
+            (
                 XyceExpectedFailureKind::Bug387MissingLibraryEndl,
                 &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..],
             ),
@@ -69017,7 +69308,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_thirty_nine_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_forty_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -69117,6 +69408,10 @@ R2 2 0 1
                     XyceExpectedFailureKind::Bug744DcOperatingPoint,
                 ),
                 (
+                    XYCE_BUG75_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference,
+                ),
+                (
                     XYCE_BUG769_NODE_VOLTAGE_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
                 ),
@@ -69200,7 +69495,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            39,
+            40,
             "each record requires a distinct contract"
         );
     }
@@ -69225,6 +69520,10 @@ R2 2 0 1
             (
                 "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir",
                 "expected_failure_dc_operating_point",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_75_SON/bug75.cir",
+                "expected_failure_bug75_undefined_mutual_inductor_reference_parse",
             ),
             (
                 "Netlists/Certification_Tests/BUG_387_SON/bug_387.cir",
@@ -69482,6 +69781,16 @@ R2 2 0 1
         ] {
             assert_eq!(member.shared_family_census(), bug769_census);
         }
+        assert_eq!(
+            XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference.shared_family_census(),
+            Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 1,
+                physical_names_blake3: XYCE_BUG75_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 1,
+                manifest_records_blake3: XYCE_BUG75_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            })
+        );
         for singleton in [
             XyceExpectedFailureKind::Bug67BehavioralExpression,
             XyceExpectedFailureKind::Bug671InvalidPwlFile,
@@ -69980,6 +70289,181 @@ R2 2 0 1
                 "{label} must not satisfy BUG 744"
             );
         }
+    }
+
+    #[test]
+    fn bug75_expected_failure_observer_rejects_corrections_shifts_and_identity_mutations() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_75_SON/bug75.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 75");
+        XyceTestRunner::observe_bug75_undefined_mutual_inductor_reference_failure(&source, &path)
+            .expect("canonical BUG 75 failure is observed");
+
+        let corrected = source.replacen("*L2 2 3 1", "L2 2 3 1", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("BUG 75 with defined L2 genuinely parses");
+
+        for (mutated, label) in [
+            (corrected, "defined missing inductor"),
+            (
+                source.replacen("K3 L1 L2 0", "K3 L1 L9 0", 1),
+                "different missing inductor",
+            ),
+            (
+                source.replacen("K3 L1 L2 0", "K9 L1 L2 0", 1),
+                "different coupling identity",
+            ),
+            (
+                source.replacen("K3 L1 L2 0", "K3 L2 L1 0", 1),
+                "different missing-reference position",
+            ),
+            (
+                source.replacen("K3 L1 L2 0", "k3 L1 l2 0", 1),
+                "different authored casing",
+            ),
+            (
+                source.replacen("K3 L1 L2 0", "K3 L1 L2 0.5", 1),
+                "different coupling coefficient",
+            ),
+            (
+                source.replacen("K1 L1 L3 0.1", "K0 L1 Lmissing 0.1\r\nK1 L1 L3 0.1", 1),
+                "earlier undefined coupling",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change BUG 75");
+            assert!(
+                XyceTestRunner::observe_bug75_undefined_mutual_inductor_reference_failure(
+                    &mutated, &path,
+                )
+                .is_err(),
+                "{label} must not satisfy BUG 75"
+            );
+        }
+
+        let renamed = path.with_file_name("renamed.cir");
+        assert!(
+            XyceTestRunner::observe_bug75_undefined_mutual_inductor_reference_failure(
+                &source, &renamed,
+            )
+            .is_err(),
+            "renamed BUG 75 deck must fail exact record identity"
+        );
+    }
+
+    #[test]
+    fn bug75_expected_failure_provenance_mutations_fail_closed() {
+        let source_root = expected_failure_test_root();
+        let source_family = source_root.join("Netlists/Certification_Tests/BUG_75_SON");
+        let temp_root = unique_expected_failure_temp_dir("bug75-provenance");
+        let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_75_SON");
+        fs::create_dir_all(&temp_family).expect("create BUG 75 family fixture");
+        for file_name in ["bug75.cir", "README", "options"] {
+            fs::copy(source_family.join(file_name), temp_family.join(file_name))
+                .unwrap_or_else(|error| panic!("copy BUG 75 {file_name}: {error}"));
+        }
+        let canonical_manifest = format!(
+            "Netlists/Certification_Tests/BUG_75_SON/bug75.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        fs::write(&manifest_path, &canonical_manifest).expect("write BUG 75 manifest");
+        let deck_path = temp_family.join("bug75.cir");
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+        let assert_rejected = |label: &str, expected_error: &str| {
+            let result = run();
+            assert!(
+                !result.passed
+                    && result
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains(expected_error)),
+                "{label} must fail closed with {expected_error:?}: {result:?}"
+            );
+        };
+
+        let canonical = run();
+        assert!(
+            canonical.passed
+                && !canonical.expected_unsupported
+                && canonical.contract
+                    == "expected_failure_bug75_undefined_mutual_inductor_reference_parse"
+                && canonical.error.is_none()
+                && canonical.mismatches.is_empty(),
+            "canonical copied BUG 75 family must pass: {canonical:?}"
+        );
+
+        let source = fs::read(&deck_path).expect("read copied BUG 75 deck");
+        let mut mutated_source = source.clone();
+        mutated_source.extend_from_slice(b"\r\n");
+        fs::write(&deck_path, mutated_source).expect("mutate BUG 75 source digest");
+        assert_rejected("source digest mutation", "source digest changed");
+        fs::write(&deck_path, &source).expect("restore BUG 75 deck");
+
+        let extra_circuit = temp_family.join("other.cir");
+        fs::write(&extra_circuit, "extra\n.end\n").expect("add BUG 75 circuit sibling");
+        assert_rejected("added circuit sibling", "physical .cir census changed");
+        fs::remove_file(extra_circuit).expect("remove BUG 75 circuit sibling");
+
+        let duplicate_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_75_SON/BUG75.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, duplicate_manifest).expect("duplicate BUG 75 manifest owner");
+        assert_rejected(
+            "case-colliding manifest owner",
+            "duplicate or case-colliding record",
+        );
+
+        let wrong_contract =
+            canonical_manifest.replace(REQUIRES_UPSTREAM_WRAPPER_CONTRACT, "wrong_contract");
+        fs::write(&manifest_path, wrong_contract).expect("change BUG 75 manifest contract");
+        assert_rejected("wrong manifest contract", "manifest provenance");
+
+        let prefix_isolation_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_75_SON_EXTRA/unrelated.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, prefix_isolation_manifest)
+            .expect("write BUG 75 prefix-isolation owner");
+        let prefix_isolated = run();
+        assert!(
+            prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+            "adjacent manifest prefixes must not enter BUG 75 provenance: {prefix_isolated:?}"
+        );
+        fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 75 manifest");
+
+        for file_name in ["README", "options"] {
+            let path = temp_family.join(file_name);
+            let bytes =
+                fs::read(&path).unwrap_or_else(|error| panic!("read BUG 75 {file_name}: {error}"));
+            let mut mutated = bytes.clone();
+            mutated.extend_from_slice(b"mutation");
+            fs::write(&path, mutated)
+                .unwrap_or_else(|error| panic!("mutate BUG 75 {file_name}: {error}"));
+            assert_rejected(&format!("mutated {file_name}"), "retained source");
+            fs::write(&path, bytes)
+                .unwrap_or_else(|error| panic!("restore BUG 75 {file_name}: {error}"));
+        }
+
+        for extra_name in ["count.pl", "tags", "bug75.cir.sh"] {
+            let path = temp_family.join(extra_name);
+            fs::write(&path, "forbidden")
+                .unwrap_or_else(|error| panic!("add BUG 75 {extra_name}: {error}"));
+            assert_rejected(
+                &format!("added removed sidecar {extra_name}"),
+                "source-directory census changed",
+            );
+            fs::remove_file(path)
+                .unwrap_or_else(|error| panic!("remove BUG 75 {extra_name}: {error}"));
+        }
+
+        let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_75_SON");
+        fs::create_dir_all(&output_dir).expect("create BUG 75 OutputData fixture");
+        fs::write(output_dir.join("unrelated.txt"), "forbidden")
+            .expect("write BUG 75 forbidden output");
+        assert_rejected("added OutputData entry", "OutputData census changed");
+
+        fs::remove_dir_all(temp_root).expect("remove BUG 75 provenance fixture");
     }
 
     #[test]
