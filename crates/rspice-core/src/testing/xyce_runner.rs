@@ -158,6 +158,7 @@ const XYCE_BUG198_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_198/bug_198.cir";
 const XYCE_BUG258_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_258/bug_198.cir";
+const XYCE_BUG587_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_587/587.cir";
 const XYCE_BUG67_SOURCE_BLAKE3: &str =
     "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
 const XYCE_BUG671_SOURCE_BLAKE3: &str =
@@ -200,6 +201,8 @@ const XYCE_BUG198_SOURCE_BLAKE3: &str =
     "985f4d4efa9b59842c268b526496f40e9f04988a9fc425e5a945bc16c6e24da7";
 const XYCE_BUG258_SOURCE_BLAKE3: &str =
     "985f4d4efa9b59842c268b526496f40e9f04988a9fc425e5a945bc16c6e24da7";
+const XYCE_BUG587_SOURCE_BLAKE3: &str =
+    "c96b62b4de9ca3a7bd65910c29c505394c7d4047ec71e03b3657c7cb351cd4ac";
 const XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3: &str =
     "ccdc1cb4b46160d2c993d155a6816c81e5671aecd700bd364ab8b7d512320a13";
 const XYCE_BUG401_MANIFEST_CENSUS_BLAKE3: &str =
@@ -274,6 +277,7 @@ enum XyceExpectedFailureKind {
     Bug1578InvalidDeviceType,
     Bug198UnrecognizedLine,
     Bug258UnrecognizedLine,
+    Bug587InvalidNumericNotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -326,6 +330,7 @@ impl XyceExpectedFailureKind {
             XYCE_BUG1578_EXPECTED_FAILURE_RECORD => Some(Self::Bug1578InvalidDeviceType),
             XYCE_BUG198_EXPECTED_FAILURE_RECORD => Some(Self::Bug198UnrecognizedLine),
             XYCE_BUG258_EXPECTED_FAILURE_RECORD => Some(Self::Bug258UnrecognizedLine),
+            XYCE_BUG587_EXPECTED_FAILURE_RECORD => Some(Self::Bug587InvalidNumericNotation),
             _ => None,
         }
     }
@@ -355,6 +360,7 @@ impl XyceExpectedFailureKind {
             Self::Bug1578InvalidDeviceType => XYCE_BUG1578_EXPECTED_FAILURE_RECORD,
             Self::Bug198UnrecognizedLine => XYCE_BUG198_EXPECTED_FAILURE_RECORD,
             Self::Bug258UnrecognizedLine => XYCE_BUG258_EXPECTED_FAILURE_RECORD,
+            Self::Bug587InvalidNumericNotation => XYCE_BUG587_EXPECTED_FAILURE_RECORD,
         }
     }
 
@@ -381,6 +387,7 @@ impl XyceExpectedFailureKind {
             Self::Bug1578InvalidDeviceType => XYCE_BUG1578_SOURCE_BLAKE3,
             Self::Bug198UnrecognizedLine => XYCE_BUG198_SOURCE_BLAKE3,
             Self::Bug258UnrecognizedLine => XYCE_BUG258_SOURCE_BLAKE3,
+            Self::Bug587InvalidNumericNotation => XYCE_BUG587_SOURCE_BLAKE3,
         }
     }
 
@@ -423,6 +430,9 @@ impl XyceExpectedFailureKind {
             Self::Bug1578InvalidDeviceType => "expected_failure_bug1578_invalid_device_type_parse",
             Self::Bug198UnrecognizedLine => "expected_failure_bug198_unrecognized_line_parse",
             Self::Bug258UnrecognizedLine => "expected_failure_bug258_unrecognized_line_parse",
+            Self::Bug587InvalidNumericNotation => {
+                "expected_failure_bug587_invalid_numeric_notation_parse"
+            }
         }
     }
 
@@ -487,6 +497,10 @@ impl XyceExpectedFailureKind {
             Self::Bug198UnrecognizedLine | Self::Bug258UnrecognizedLine => {
                 &["in file bug_198.cir at or near line 3", "Unrecognized line"][..]
             }
+            Self::Bug587InvalidNumericNotation => &[
+                "in file 587.cir at or near line 43",
+                "Invalid notation encountered",
+            ][..],
         };
         XyceUpstreamExpectedErrorPolicy {
             requires_nonzero_exit: true,
@@ -634,6 +648,16 @@ impl XyceExpectedFailureKind {
                     identifiers: vec!["#".to_string(), "line 3".to_string()],
                 }
             }
+            Self::Bug587InvalidNumericNotation => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::InvalidNumericNotation,
+                identifiers: vec![
+                    "R1".to_string(),
+                    "2.0e+".to_string(),
+                    "PRIMARY".to_string(),
+                    "line 43".to_string(),
+                ],
+            },
         }
     }
 
@@ -723,6 +747,7 @@ enum XyceExpectedFailureCategory {
     ParameterLeadCurrent,
     UnknownDeviceType,
     InvalidNetlistLinePrefix,
+    InvalidNumericNotation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4037,6 +4062,9 @@ impl XyceTestRunner {
                     XyceExpectedFailureKind::Bug258UnrecognizedLine,
                 )?
             }
+            XyceExpectedFailureKind::Bug587InvalidNumericNotation => {
+                Self::observe_bug587_invalid_numeric_notation_failure(source, &deck.path)?
+            }
         };
         let expected = kind.expected_observation();
         if observation != expected {
@@ -4728,6 +4756,49 @@ impl XyceTestRunner {
             stage: XyceExpectedFailureStage::NetlistParse,
             category: XyceExpectedFailureCategory::InvalidNetlistLinePrefix,
             identifiers: vec!["#".to_string(), "line 3".to_string()],
+        })
+    }
+
+    fn observe_bug587_invalid_numeric_notation_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 587",
+            source,
+            81,
+            &[
+                (26, ".param secondary=10"),
+                (27, ".param primary={13-secondary}"),
+                (
+                    38,
+                    "* The broken code would separate value into two fields 2.0e+ and {primary}.",
+                ),
+                (43, "R1 1 2 2.0e+{primary}"),
+                (75, "D1 3 0 DMOD"),
+                (76, "VMON 2 3 0"),
+                (77, ".MODEL DMOD D (IS=100FA)"),
+                (78, ".DC VIN 5 5 1"),
+                (79, ".PRINT DC I(VMON) V(3)"),
+                (81, ".END"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "BUG 587",
+            source,
+            deck_path,
+            43,
+            "Invalid number '2.0e+' at line 1",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::InvalidNumericNotation,
+            identifiers: vec![
+                "R1".to_string(),
+                "2.0e+".to_string(),
+                "PRIMARY".to_string(),
+                "line 43".to_string(),
+            ],
         })
     }
 
@@ -66115,6 +66186,13 @@ R2 2 0 1
                 &["in file bug_198.cir at or near line 3", "Unrecognized line"][..],
             ),
             (
+                XyceExpectedFailureKind::Bug587InvalidNumericNotation,
+                &[
+                    "in file 587.cir at or near line 43",
+                    "Invalid notation encountered",
+                ][..],
+            ),
+            (
                 XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
                 &[
                     "in file bug204.cir at or near line 14",
@@ -66201,10 +66279,14 @@ R2 2 0 1
             XyceExpectedFailureKind::Bug281InvalidDcSweepArity.retained_non_oracle_artifact(),
             None
         );
+        assert_eq!(
+            XyceExpectedFailureKind::Bug587InvalidNumericNotation.retained_non_oracle_artifact(),
+            None
+        );
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_twenty_one_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_twenty_two_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -66258,6 +66340,10 @@ R2 2 0 1
                 (
                     XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug401WorseDeviceLine,
+                ),
+                (
+                    XYCE_BUG587_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug587InvalidNumericNotation,
                 ),
                 (
                     XYCE_BUG67_EXPECTED_FAILURE_RECORD.to_string(),
@@ -66315,7 +66401,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            21,
+            22,
             "each record requires a distinct contract"
         );
     }
@@ -66372,6 +66458,10 @@ R2 2 0 1
             (
                 "Netlists/Certification_Tests/BUG_258/bug_198.cir",
                 "expected_failure_bug258_unrecognized_line_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_587/587.cir",
+                "expected_failure_bug587_invalid_numeric_notation_parse",
             ),
             (
                 "Netlists/Certification_Tests/BUG_281/bug_281.cir",
@@ -66494,6 +66584,7 @@ R2 2 0 1
             XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
             XyceExpectedFailureKind::Bug258UnrecognizedLine,
             XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
+            XyceExpectedFailureKind::Bug587InvalidNumericNotation,
         ] {
             assert_eq!(
                 singleton.shared_family_census(),
@@ -67175,6 +67266,123 @@ R2 2 0 1
                 );
             }
         }
+    }
+
+    #[test]
+    fn bug587_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Certification_Tests/BUG_587/587.cir");
+        let source = fs::read_to_string(&path).expect("read BUG 587");
+        XyceTestRunner::observe_bug587_invalid_numeric_notation_failure(&source, &path)
+            .expect("canonical BUG 587 failure is observed");
+
+        let corrected = source.replacen("R1 1 2 2.0e+{primary}", "R1 1 2 2K", 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("corrected BUG 587 numeric notation genuinely parses");
+
+        for (mutated, label) in [
+            (corrected, "corrected resistor value"),
+            (
+                source.replacen("R1 1 2 2.0e+{primary}", "R1 1 2 2.1e+{primary}", 1),
+                "different invalid mantissa",
+            ),
+            (
+                source.replacen(".param primary={13-secondary}", ".param primary=4", 1),
+                "changed parameter relationship",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change BUG 587");
+            assert!(
+                XyceTestRunner::observe_bug587_invalid_numeric_notation_failure(&mutated, &path)
+                    .is_err(),
+                "{label} must not satisfy BUG 587"
+            );
+        }
+    }
+
+    #[test]
+    fn bug587_expected_failure_provenance_mutations_fail_closed() {
+        let source_root = expected_failure_test_root();
+        let source_path = source_root.join("Netlists/Certification_Tests/BUG_587/587.cir");
+        let source = fs::read(&source_path).expect("read canonical BUG 587 source");
+        let temp_root = unique_expected_failure_temp_dir("bug587-provenance");
+        let family_dir = temp_root.join("Netlists/Certification_Tests/BUG_587");
+        let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_587");
+        fs::create_dir_all(&family_dir).expect("create temporary BUG 587 family");
+        fs::create_dir_all(&output_dir).expect("create temporary BUG 587 OutputData");
+        let deck_path = family_dir.join("587.cir");
+        fs::write(&deck_path, &source).expect("copy canonical BUG 587 source");
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        let canonical_manifest = format!(
+            "Netlists/Certification_Tests/BUG_587/587.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, &canonical_manifest).expect("write canonical BUG 587 manifest");
+
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+        let canonical = run();
+        assert!(
+            canonical.passed && !canonical.expected_unsupported,
+            "canonical temporary BUG 587 fixture must pass: {canonical:?}"
+        );
+
+        let mutated_source = String::from_utf8(source.clone()).expect("BUG 587 source is UTF-8")
+            + "* digest mutation\n";
+        fs::write(&deck_path, mutated_source).expect("write BUG 587 digest mutation");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("source digest changed")),
+            "BUG 587 source digest mutation must fail closed: {result:?}"
+        );
+        fs::write(&deck_path, &source).expect("restore canonical BUG 587 source");
+
+        let extra_sibling = family_dir.join("other.cir");
+        fs::write(&extra_sibling, "extra sibling\n.end\n").expect("write BUG 587 sibling");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("exactly its one qualified .cir record")),
+            "BUG 587 extra circuit sibling must fail closed: {result:?}"
+        );
+        fs::remove_file(extra_sibling).expect("remove BUG 587 sibling");
+
+        let artifact = output_dir.join("587.CIR.ERR");
+        fs::write(&artifact, "forbidden").expect("write BUG 587 output artifact");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("must not own checked-in output artifacts")),
+            "BUG 587 output artifact must fail closed: {result:?}"
+        );
+        fs::remove_file(artifact).expect("remove BUG 587 output artifact");
+
+        let extra_owner = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_587/other.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, extra_owner).expect("write extra BUG 587 manifest owner");
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("exactly one manifest owner")),
+            "BUG 587 extra manifest owner must fail closed: {result:?}"
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove BUG 587 provenance fixture");
     }
 
     #[test]
