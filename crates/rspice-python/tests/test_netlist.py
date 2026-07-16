@@ -108,6 +108,52 @@ class TestParseFile:
         assert error.qualified_name == "TESTSUB"
         assert error.detail == "TESTSUB"
 
+    def test_initcond_duplicate_exposes_typed_primary_and_related_origins(self):
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse_spice(
+                "duplicate initcond\n"
+                ".INITCOND C1 IC=1\n"
+                ".INITCOND malformed second card\n"
+                "C1 1 0 1u\n"
+                ".END\n"
+            )
+
+        error = exc_info.value
+        assert error.kind == "device_initial_condition_duplicate_directive"
+        assert error.category == "device_initial_condition"
+        assert error.line == 3
+        assert error.primary_line == 3
+        assert error.source is None
+        assert error.primary_source is None
+        assert error.related_line == 2
+        assert error.related_source is None
+        assert error.device is None
+        assert error.requested_path is None
+
+    def test_initcond_source_failure_exposes_requested_path_and_source(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        deck = tmp_path / "missing-initcond.cir"
+        deck.write_text(
+            "missing initcond\n"
+            ".INITCOND FILE absent-initcond.dat\n"
+            "C1 1 0 1u\n"
+            ".END\n"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse_file(deck)
+
+        error = exc_info.value
+        assert error.kind == "device_initial_condition_source_unavailable"
+        assert error.category == "device_initial_condition"
+        assert error.line == 2
+        assert error.primary_line == 2
+        assert pathlib.Path(error.source).resolve() == deck.resolve()
+        assert pathlib.Path(error.primary_source).resolve() == deck.resolve()
+        assert error.requested_path == "absent-initcond.dat"
+
 
 class TestIntrospection:
     def test_counts_and_names(self):

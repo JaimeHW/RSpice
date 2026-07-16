@@ -415,7 +415,32 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
             ],
             None,
         ),
+        Err(rspice_core::netlist::ParseError::DeviceInitialCondition(error)) => {
+            let origin = device_initial_condition_diagnostic_origin(&error);
+            (
+                vec![Diagnostic::error(error.to_string()).with_line(origin.line.checked_sub(1))],
+                None,
+            )
+        }
         Err(other) => (vec![Diagnostic::error(other.to_string())], None),
+    }
+}
+
+fn device_initial_condition_diagnostic_origin(
+    error: &rspice_core::netlist::DeviceInitialConditionError,
+) -> &rspice_core::netlist::NetlistSourceLocation {
+    use rspice_core::netlist::DeviceInitialConditionError;
+
+    match error {
+        DeviceInitialConditionError::DuplicateDirective { duplicate, .. } => duplicate,
+        DeviceInitialConditionError::MalformedSource { record_origin, .. } => record_origin,
+        DeviceInitialConditionError::MissingInformation { origin }
+        | DeviceInitialConditionError::MalformedDirective { origin, .. }
+        | DeviceInitialConditionError::SourceUnavailable { origin, .. }
+        | DeviceInitialConditionError::NonFiniteValue { origin, .. }
+        | DeviceInitialConditionError::UnresolvedSource { origin, .. }
+        | DeviceInitialConditionError::InvalidArity { origin, .. }
+        | DeviceInitialConditionError::UnsupportedTarget { origin, .. } => origin,
     }
 }
 
@@ -477,6 +502,24 @@ mod tests {
         assert_eq!(diagnostic.line, Some(1));
         assert!(diagnostic.message.contains("Subcircuit CELL missing .ENDS"));
         assert!(diagnostic.message.contains("reached .END"));
+    }
+
+    #[test]
+    fn parse_buffer_maps_initcond_duplicate_to_duplicate_card_line() {
+        let source = "duplicate initcond\n\
+                      .INITCOND C1 IC=1\n\
+                      .INITCOND malformed second card\n\
+                      C1 1 0 1u\n\
+                      .END\n";
+
+        let (diagnostics, symbols) = parse_buffer(source);
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostic.line, Some(2));
+        assert!(diagnostic.message.contains("may appear only once"));
     }
 
     #[test]

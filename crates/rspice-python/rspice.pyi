@@ -66,16 +66,47 @@ class RSpiceError(Exception):
 class ParseError(RSpiceError):
     """Raised when netlist parsing fails due to syntax or semantic errors."""
 
-    kind: str
+    kind: Literal[
+        "syntax",
+        "unknown_device",
+        "invalid_node",
+        "duplicate_name",
+        "missing_subcircuit_ends",
+        "device_initial_condition_duplicate_directive",
+        "device_initial_condition_missing_information",
+        "device_initial_condition_malformed_directive",
+        "device_initial_condition_source_unavailable",
+        "device_initial_condition_malformed_source",
+        "device_initial_condition_nonfinite_value",
+        "device_initial_condition_unresolved_source",
+        "device_initial_condition_invalid_arity",
+        "device_initial_condition_unsupported_target",
+        "missing_parameter",
+        "undefined_parameter",
+        "invalid_value",
+        "io",
+    ]
+    category: Literal["device_initial_condition"] | None
     line: int | None
     detail: str | None
     source: str | None
+    primary_line: int | None
+    primary_source: str | None
+    related_line: int | None
+    related_source: str | None
     detected_line: int | None
     detected_source: str | None
     boundary: Literal["end_card", "alter_card", "end_of_source"] | None
     authored_name: str | None
     canonical_name: str | None
     qualified_name: str | None
+    device: str | None
+    requested_path: str | None
+    value_index: int | None
+    value: float | None
+    expected: str | None
+    actual: int | None
+    device_type: str | None
 
 class SimulationError(RSpiceError):
     """Raised when simulation fails due to circuit or solver errors."""
