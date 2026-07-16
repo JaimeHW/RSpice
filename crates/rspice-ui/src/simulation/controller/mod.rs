@@ -30,6 +30,7 @@ use crate::simulation::multi_run::{
     AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
     OptimizationGoal, OptimizationVariable, SpPort,
 };
+use crate::simulation::output_contract::{PreparedSavedOutput, materialize_saved_outputs};
 use crate::simulation::runner::SimulationError;
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
@@ -84,6 +85,9 @@ pub struct SimulationController {
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
     current_provenance: Option<AnalysisResultProvenance>,
+    /// Immutable output contracts authenticated with the current task before
+    /// its dispatch token is moved into the runner.
+    current_saved_output_contracts: Vec<PreparedSavedOutput>,
     /// Source domain authenticated by the active run dispatch. Manual-deck
     /// task IDs are deterministic source projections, not plan-owned IDs.
     current_source_domain: AnalysisResultSourceDomain,
@@ -132,6 +136,7 @@ impl SimulationController {
             current_config: None,
             current_spec: None,
             current_provenance: None,
+            current_saved_output_contracts: Vec::new(),
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
             pending_analyses: VecDeque::new(),
@@ -180,6 +185,7 @@ impl SimulationController {
             self.current_config = None;
             self.current_spec = None;
             self.current_provenance = None;
+            self.current_saved_output_contracts.clear();
             self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
             self.current_run_id = None;
             self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -306,6 +312,7 @@ impl SimulationController {
             || self.current_spec.is_some()
             || self.current_config.is_some()
             || self.current_provenance.is_some()
+            || !self.current_saved_output_contracts.is_empty()
             || self.total_analyses != 0
             || !self.pending_analyses.is_empty()
             || !self.runner.can_accept_prepared_task()
@@ -337,6 +344,7 @@ impl SimulationController {
         self.current_config = None;
         self.current_spec = None;
         self.current_provenance = None;
+        self.current_saved_output_contracts.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -365,6 +373,7 @@ impl SimulationController {
         self.current_config = None;
         self.current_spec = None;
         self.current_provenance = None;
+        self.current_saved_output_contracts.clear();
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
 
         let mut skipped_blocked_task = false;
@@ -422,13 +431,14 @@ impl SimulationController {
                     return;
                 }
             };
-            let failed = AnalysisResult::failed(
+            let mut failed = AnalysisResult::failed(
                 1,
                 self.spec_to_analysis_type(candidate.spec()),
                 analysis_name,
                 message.clone(),
             )
             .with_provenance(provenance);
+            materialize_saved_outputs(&mut failed, candidate.saved_output_contracts());
             if let Some(run_id) = self.target_run_id(state)
                 && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
             {
@@ -481,6 +491,7 @@ impl SimulationController {
         self.current_config = config.clone();
         self.current_spec = Some(spec.clone());
         self.current_provenance = Some(provenance);
+        self.current_saved_output_contracts = next_analysis.saved_output_contracts().to_vec();
 
         // Update status with multi-analysis progress
         let status_msg = if self.total_analyses > 1 {
@@ -519,6 +530,10 @@ impl SimulationController {
             let failed_analysis = self.current_provenance.take().map(|provenance| {
                 AnalysisResult::failed(1, self.spec_to_analysis_type(&spec), analysis_name, message)
                     .with_provenance(provenance)
+            });
+            let failed_analysis = failed_analysis.map(|mut analysis| {
+                self.materialize_current_saved_outputs(&mut analysis);
+                analysis
             });
             if let Some(run_id) = target_run_id
                 && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
@@ -560,6 +575,10 @@ impl SimulationController {
                     )
                     .with_provenance(provenance)
                 });
+                let failed_analysis = failed_analysis.map(|mut analysis| {
+                    self.materialize_current_saved_outputs(&mut analysis);
+                    analysis
+                });
                 if let Some(run_id) = target_run_id
                     && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                 {
@@ -581,6 +600,11 @@ impl SimulationController {
     fn target_run_id(&self, state: &AppState) -> Option<u64> {
         self.current_run_id
             .or_else(|| state.simulation.runs.first().map(|run| run.id))
+    }
+
+    fn materialize_current_saved_outputs(&mut self, analysis: &mut AnalysisResult) {
+        let contracts = std::mem::take(&mut self.current_saved_output_contracts);
+        materialize_saved_outputs(analysis, &contracts);
     }
 
     /// Finish the simulation batch and clean up state
@@ -607,6 +631,7 @@ impl SimulationController {
         self.current_config = None;
         self.current_spec = None;
         self.current_provenance = None;
+        self.current_saved_output_contracts.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -948,7 +973,7 @@ impl SimulationController {
                         state.simulation.soa_violations = violations.clone();
                     }
 
-                    let analysis_result = if let Some(config) = &self.current_config {
+                    let mut analysis_result = if let Some(config) = &self.current_config {
                         self.convert_to_analysis_result_owned(sim_result, config)
                     } else {
                         self.convert_to_analysis_result_with_metadata_owned(
@@ -957,6 +982,7 @@ impl SimulationController {
                             current_label,
                         )
                     };
+                    self.materialize_current_saved_outputs(&mut analysis_result);
                     if let Some(provenance) = self.current_provenance.take() {
                         let completed_instance = provenance.source_instance_id();
                         let analysis_result = analysis_result.with_provenance(provenance);
@@ -1023,6 +1049,7 @@ impl SimulationController {
                     self.current_config = None;
                     self.current_spec = None;
                     self.current_provenance = None;
+                    self.current_saved_output_contracts.clear();
                     self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
                     self.current_run_id = None;
                     self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -1058,10 +1085,11 @@ impl SimulationController {
                         .unwrap_or(AnalysisType::DcOp);
                     let target_run_id = self.target_run_id(state);
                     let failed_analysis = if let Some(provenance) = self.current_provenance.take() {
-                        Some(
+                        let mut analysis =
                             AnalysisResult::failed(1, failed_type, failed_label, e.to_string())
-                                .with_provenance(provenance),
-                        )
+                                .with_provenance(provenance);
+                        self.materialize_current_saved_outputs(&mut analysis);
+                        Some(analysis)
                     } else {
                         let message =
                             "Internal error: failed analysis has no prepared-task provenance";

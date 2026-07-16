@@ -15,6 +15,11 @@ pub mod netlist_gen;
 pub mod netlist_viewer;
 pub mod optimizer;
 pub mod options_translator;
+pub(crate) mod output_contract;
+pub use output_contract::{
+    SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,
+    materialize_deferred_saved_output,
+};
 pub mod plan;
 pub mod reliability_engine;
 pub mod results;

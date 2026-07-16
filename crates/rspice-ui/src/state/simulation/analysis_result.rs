@@ -182,6 +182,10 @@ pub struct AnalysisResult {
     pub noise_summary: Option<NoiseSummary>,
     /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
     pub measurements: Vec<rspice_core::MeasureResult>,
+    /// Authenticated application receipts for plan-owned saved-output
+    /// contracts. The materialized waveform remains in `waveforms`; the
+    /// receipt proves why it exists and records deferred/suppressed outcomes.
+    pub saved_output_receipts: Vec<SavedOutputReceipt>,
     /// Whether this analysis completed successfully
     pub success: bool,
     /// Error message if analysis failed
@@ -204,6 +208,7 @@ impl AnalysisResult {
             device_op: None,
             noise_summary: None,
             measurements: Vec::new(),
+            saved_output_receipts: Vec::new(),
             success: true,
             error_message: None,
             provenance: None,
@@ -227,6 +232,7 @@ impl AnalysisResult {
             device_op: None,
             noise_summary: None,
             measurements: Vec::new(),
+            saved_output_receipts: Vec::new(),
             success: false,
             error_message: Some(error.into()),
             provenance: None,
@@ -264,6 +270,13 @@ impl AnalysisResult {
     /// Attach evaluated `.MEAS` results.
     pub fn with_measurements(mut self, measurements: Vec<rspice_core::MeasureResult>) -> Self {
         self.measurements = measurements;
+        self
+    }
+
+    /// Attach the exact output-contract receipts produced during completion.
+    #[must_use]
+    pub fn with_saved_output_receipts(mut self, receipts: Vec<SavedOutputReceipt>) -> Self {
+        self.saved_output_receipts = receipts;
         self
     }
 

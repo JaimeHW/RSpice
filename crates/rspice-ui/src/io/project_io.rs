@@ -25,8 +25,8 @@ use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     CellViewRef, DcOpResult, LibraryManager, NoiseContributorRow, NoiseSummary,
     OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-    ProjectWorkspace, SimulationRun, SimulationRunProvenance, SimulationState, ViewType,
-    WaveformData,
+    ProjectWorkspace, SavedOutputMaterializationStatus, SavedOutputReceipt, SimulationRun,
+    SimulationRunProvenance, SimulationState, ViewType, WaveformData,
 };
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -1910,6 +1910,10 @@ pub struct ProjectAnalysisResult {
     pub noise_summary: Option<ProjectNoiseSummary>,
     #[serde(default)]
     pub measurements: Vec<ProjectMeasurement>,
+    /// Authenticated outcomes for the immutable saved-output contracts that
+    /// applied to this analysis. Older project files legitimately omit it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_output_receipts: Vec<SavedOutputReceipt>,
     #[serde(default = "default_true")]
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1981,7 +1985,7 @@ impl ProjectAnalysisResult {
             .provenance
             .map(ProjectAnalysisResultProvenance::into_provenance)
             .transpose()?;
-        Ok(AnalysisResult {
+        let mut analysis = AnalysisResult {
             id: self.id,
             analysis_type,
             label: self.label,
@@ -2001,10 +2005,31 @@ impl ProjectAnalysisResult {
                 .into_iter()
                 .map(ProjectMeasurement::into_measurement)
                 .collect(),
+            saved_output_receipts: self.saved_output_receipts,
             success: self.success,
             error_message: self.error_message,
             provenance,
-        })
+        };
+        for receipt in &analysis.saved_output_receipts {
+            let SavedOutputMaterializationStatus::Materialized { waveform_name, .. } =
+                &receipt.status
+            else {
+                continue;
+            };
+            if (receipt.stored_precision
+                == crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
+                || receipt.streaming
+                    == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation)
+                && let Some(waveform) = analysis
+                    .waveforms
+                    .iter_mut()
+                    .find(|waveform| waveform.name == *waveform_name)
+            {
+                waveform
+                    .rebuild_display_cache(crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+            }
+        }
+        Ok(analysis)
     }
 
     fn validate(&self, run_idx: usize, analysis_idx: usize) -> Result<(), String> {
@@ -2038,6 +2063,95 @@ impl ProjectAnalysisResult {
         for (measurement_idx, measurement) in self.measurements.iter().enumerate() {
             measurement.validate(&format!("{prefix}.measurements[{measurement_idx}]"))?;
         }
+        let mut receipt_ids = HashSet::new();
+        let mut receipt_digests = HashSet::new();
+        for (receipt_idx, receipt) in self.saved_output_receipts.iter().enumerate() {
+            let receipt_prefix = format!("{prefix}.saved_output_receipts[{receipt_idx}]");
+            if !receipt_ids.insert(receipt.output_id) {
+                return Err(format!(
+                    "{prefix} has duplicate saved-output identity {}",
+                    receipt.output_id
+                ));
+            }
+            if !receipt_digests.insert(receipt.contract_digest) {
+                return Err(format!(
+                    "{prefix} has duplicate saved-output contract digest {}",
+                    receipt.contract_digest
+                ));
+            }
+            if receipt.name.trim().is_empty() || receipt.source_expression.trim().is_empty() {
+                return Err(format!(
+                    "{receipt_prefix} has an empty name or source expression"
+                ));
+            }
+            if let Some(provenance) = &self.provenance
+                && receipt.analysis_id != provenance.source_instance_id
+            {
+                return Err(format!(
+                    "{receipt_prefix} analysis identity does not match result provenance"
+                ));
+            }
+            match &receipt.status {
+                SavedOutputMaterializationStatus::Materialized {
+                    waveform_name,
+                    sample_count,
+                } => {
+                    if self.success
+                        && receipt.save_policy
+                            == crate::state::SavedOutputPolicy::FailureDiagnosticsOnly
+                    {
+                        return Err(format!(
+                            "{receipt_prefix} materializes failure-only data on a successful analysis"
+                        ));
+                    }
+                    let waveform = self
+                        .waveforms
+                        .iter()
+                        .find(|waveform| waveform.name == *waveform_name)
+                        .ok_or_else(|| {
+                            format!(
+                                "{receipt_prefix} names absent materialized waveform '{waveform_name}'"
+                            )
+                        })?;
+                    if usize::try_from(*sample_count).ok() != Some(waveform.x.len()) {
+                        return Err(format!(
+                            "{receipt_prefix} sample count does not match waveform '{waveform_name}'"
+                        ));
+                    }
+                }
+                SavedOutputMaterializationStatus::SuppressedOnSuccess if !self.success => {
+                    return Err(format!(
+                        "{receipt_prefix} suppresses failure diagnostics on a failed analysis"
+                    ));
+                }
+                SavedOutputMaterializationStatus::SuppressedOnSuccess
+                    if receipt.save_policy
+                        != crate::state::SavedOutputPolicy::FailureDiagnosticsOnly =>
+                {
+                    return Err(format!(
+                        "{receipt_prefix} uses success suppression for a non-diagnostic save policy"
+                    ));
+                }
+                SavedOutputMaterializationStatus::Deferred
+                    if receipt.save_policy
+                        != crate::state::SavedOutputPolicy::OnDemandFromRetainedState =>
+                {
+                    return Err(format!(
+                        "{receipt_prefix} defers a save policy that requires immediate materialization"
+                    ));
+                }
+                SavedOutputMaterializationStatus::Unavailable { reason }
+                    if reason.trim().is_empty() =>
+                {
+                    return Err(format!(
+                        "{receipt_prefix} has an empty unavailability reason"
+                    ));
+                }
+                SavedOutputMaterializationStatus::Deferred
+                | SavedOutputMaterializationStatus::SuppressedOnSuccess
+                | SavedOutputMaterializationStatus::Unavailable { .. } => {}
+            }
+        }
         if let Some(provenance) = &self.provenance {
             provenance
                 .validate()
@@ -2070,6 +2184,7 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
                 .iter()
                 .map(ProjectMeasurement::from)
                 .collect(),
+            saved_output_receipts: analysis.saved_output_receipts.clone(),
             success: analysis.success,
             error_message: analysis.error_message.clone(),
             provenance: analysis
@@ -4666,6 +4781,7 @@ mod tests {
                     device_op: None,
                     noise_summary: None,
                     measurements: Vec::new(),
+                    saved_output_receipts: Vec::new(),
                     success: true,
                     error_message: None,
                     provenance: None,
@@ -4724,6 +4840,7 @@ mod tests {
                     device_op: None,
                     noise_summary: None,
                     measurements: Vec::new(),
+                    saved_output_receipts: Vec::new(),
                     success: true,
                     error_message: None,
                     provenance: None,
@@ -4792,6 +4909,7 @@ mod tests {
                         band: (1.0, 1.0e6),
                     }),
                     measurements: Vec::new(),
+                    saved_output_receipts: Vec::new(),
                     success: true,
                     error_message: None,
                     provenance: None,

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -164,6 +165,15 @@ impl SimulationController {
         let plan = self.build_analysis_plan(state).map_err(|errors| {
             PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
         })?;
+        let plan_payload = state.workspace.active_plan_data(plan.plan_id()).ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Simulation plan {} has no plan-owned variables, outputs, and specifications payload",
+                    plan.plan_id()
+                ),
+            )
+        })?;
         let sealed_models = state
             .model_library_manager
             .seal_execution_sources()
@@ -173,6 +183,7 @@ impl SimulationController {
             .map_err(|errors| {
                 PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
             })?;
+        let tasks = attach_saved_output_contracts(tasks, &plan_payload.saved_outputs)?;
         if tasks.is_empty() {
             return Err(PreparationError::new(
                 PreparationStage::AnalysisPlan,
@@ -194,15 +205,6 @@ impl SimulationController {
             .iter()
             .map(crate::simulation::plan::FrozenAnalysisInstance::id)
             .collect::<Vec<_>>();
-        let plan_payload = state.workspace.active_plan_data(plan.plan_id()).ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                format!(
-                    "Simulation plan {} has no plan-owned variables, outputs, and specifications payload",
-                    plan.plan_id()
-                ),
-            )
-        })?;
         let generated =
             crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
                 &state.schematic,
@@ -393,6 +395,40 @@ impl SimulationController {
             })
             .collect()
     }
+}
+
+fn attach_saved_output_contracts(
+    tasks: Vec<PreparedTask>,
+    outputs: &[crate::state::SavedOutput],
+) -> Result<Vec<PreparedTask>, PreparationError> {
+    if outputs.is_empty() {
+        return Ok(tasks);
+    }
+    let analyses = tasks
+        .iter()
+        .map(|task| (task.instance_id(), &task.queued_analysis().spec))
+        .collect::<Vec<_>>();
+    let mut by_analysis = HashMap::with_capacity(tasks.len());
+    for output in outputs {
+        let contracts = crate::simulation::output_contract::compile_saved_output_contracts(
+            output,
+            analyses.iter().copied(),
+        )
+        .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
+        for contract in contracts {
+            by_analysis
+                .entry(contract.analysis_id())
+                .or_insert_with(Vec::new)
+                .push(contract);
+        }
+    }
+    Ok(tasks
+        .into_iter()
+        .map(|task| {
+            let contracts = by_analysis.remove(&task.instance_id()).unwrap_or_default();
+            task.with_saved_output_contracts(contracts)
+        })
+        .collect())
 }
 
 fn expand_manual_dependencies(
@@ -826,6 +862,42 @@ mod tests {
             .expect("prepare changed snapshot");
         assert_eq!(state.schematic.topology_version(), topology);
         assert_ne!(prepared.digest(), changed.digest());
+    }
+
+    #[test]
+    fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
+        let mut state = runnable_state();
+        let controller = SimulationController::new();
+        let without_output = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare baseline snapshot");
+        assert_eq!(without_output.metadata().saved_output_contract_count, 0);
+
+        let plan_id = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .id();
+        let output = crate::state::SavedOutput::new(
+            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+            "output_voltage",
+            "V(1)",
+            crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+            crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
+            crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+            crate::state::SavedOutputStreaming::StoreOnly,
+        )
+        .expect("valid output");
+        state
+            .workspace
+            .add_saved_output(plan_id, output)
+            .expect("plan owns output");
+
+        let with_output = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare output snapshot");
+        assert_eq!(with_output.metadata().saved_output_contract_count, 1);
+        assert_ne!(without_output.digest(), with_output.digest());
     }
 
     #[test]

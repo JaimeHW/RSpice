@@ -16,6 +16,7 @@ mod analysis_type;
 mod cross_probe;
 mod run;
 mod run_receipt;
+mod saved_output;
 mod state_impl;
 mod state_model;
 mod waveform;
@@ -36,5 +37,9 @@ pub use run::SimulationRun;
 pub use run_receipt::{
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunProvenance,
 };
+pub use saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
 pub use state_model::{SimulationRunIntent, SimulationState};
-pub use waveform::{SharedWaveformValues, WaveformData};
+pub use waveform::{
+    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DisplayWaveformCache, SharedWaveformValues,
+    WaveformData,
+};

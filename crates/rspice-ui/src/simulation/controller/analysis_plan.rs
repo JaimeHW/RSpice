@@ -3,6 +3,61 @@ use crate::simulation::execution::PreparedTask;
 use crate::simulation::plan::FrozenSimulationPlan;
 
 impl SimulationController {
+    /// Compile a candidate saved output through the same frozen-plan and
+    /// prepared-task path used by run preflight. This intentionally does not
+    /// consult mutable draft rows after the task specs have been prepared.
+    pub fn saved_output_preflight(
+        &self,
+        state: &AppState,
+        output: &crate::state::SavedOutput,
+    ) -> crate::simulation::SavedOutputPreflightReport {
+        self.saved_outputs_preflight(state, std::slice::from_ref(output))
+            .pop()
+            .expect("single-output preflight always returns one report")
+    }
+
+    /// Compile an output table against one frozen plan/task projection. Model
+    /// source sealing and spec construction happen once, independent of the
+    /// number of rows rendered by Simulation Studio.
+    pub fn saved_outputs_preflight(
+        &self,
+        state: &AppState,
+        outputs: &[crate::state::SavedOutput],
+    ) -> Vec<crate::simulation::SavedOutputPreflightReport> {
+        if outputs.is_empty() {
+            return Vec::new();
+        }
+        let plan = match self.build_analysis_plan(state) {
+            Ok(plan) => plan,
+            Err(errors) => {
+                return invalid_saved_output_reports(outputs.len(), errors.join("; "));
+            }
+        };
+        let sealed_models = match state.model_library_manager.seal_execution_sources() {
+            Ok(sealed) => sealed,
+            Err(error) => {
+                return invalid_saved_output_reports(outputs.len(), error);
+            }
+        };
+        let tasks = match self.build_queue_from_plan(state, &plan, &sealed_models) {
+            Ok(tasks) => tasks,
+            Err(errors) => {
+                return invalid_saved_output_reports(outputs.len(), errors.join("; "));
+            }
+        };
+        outputs
+            .iter()
+            .map(|output| {
+                crate::simulation::output_contract::preflight_saved_output(
+                    output,
+                    tasks
+                        .iter()
+                        .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn build_analysis_plan(
         &self,
         state: &AppState,
@@ -274,6 +329,14 @@ impl SimulationController {
             }),
         }
     }
+}
+
+fn invalid_saved_output_reports(
+    count: usize,
+    reason: impl Into<String>,
+) -> Vec<crate::simulation::SavedOutputPreflightReport> {
+    let report = crate::simulation::SavedOutputPreflightReport::invalid(reason);
+    vec![report; count]
 }
 
 #[cfg(test)]

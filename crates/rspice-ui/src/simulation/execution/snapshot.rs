@@ -7,6 +7,9 @@ use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, Simulati
 use crate::simulation::controller::QueuedAnalysis;
 use crate::simulation::dialog::corner::ProcessCorner;
 use crate::simulation::multi_run::AnalysisSpec;
+use crate::simulation::output_contract::{
+    PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,
+};
 use crate::state::{
     AnalysisResultSourceDomain, Point, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, SimulationRunIntent,
@@ -330,6 +333,7 @@ pub(in crate::simulation) struct PreparedTask {
     label: String,
     config_digest: ContentDigest,
     task: QueuedAnalysis,
+    saved_output_contracts: Vec<PreparedSavedOutput>,
     /// Explicit per-instance override. Stable plan tasks always set this for
     /// S-parameter analyses; manual-deck tasks inherit the run-level policy.
     touchstone_export: Option<TouchstoneExportPolicy>,
@@ -356,8 +360,17 @@ impl PreparedTask {
             label: label.into(),
             config_digest,
             task,
+            saved_output_contracts: Vec::new(),
             touchstone_export: None,
         }
+    }
+
+    pub(in crate::simulation) fn with_saved_output_contracts(
+        mut self,
+        contracts: Vec<PreparedSavedOutput>,
+    ) -> Self {
+        self.saved_output_contracts = contracts;
+        self
     }
 
     pub(in crate::simulation) fn with_touchstone_export_policy(
@@ -368,7 +381,6 @@ impl PreparedTask {
         self
     }
 
-    #[cfg(test)]
     pub(in crate::simulation) const fn instance_id(&self) -> AnalysisInstanceId {
         self.instance_id
     }
@@ -460,6 +472,7 @@ pub(crate) struct PreparedRunMetadata {
     pub(crate) topology_revision: u64,
     pub(crate) analysis_ids: Vec<ContentDigest>,
     pub(crate) task_count: usize,
+    pub(crate) saved_output_contract_count: usize,
     pub(crate) pvt_point_count: usize,
     pub(crate) target: &'static str,
     pub(crate) save_policy: &'static str,
@@ -495,6 +508,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     label: String,
     config_digest: ContentDigest,
     task: QueuedAnalysis,
+    saved_output_contracts: Vec<PreparedSavedOutput>,
     executable_netlist: Arc<str>,
     touchstone_export: TouchstoneExportPolicy,
 }
@@ -608,6 +622,10 @@ impl AuthorizedTaskDispatch {
 
     pub(in crate::simulation) fn config(&self) -> Option<&crate::simulation::AnalysisConfig> {
         self.task.config.as_ref()
+    }
+
+    pub(in crate::simulation) fn saved_output_contracts(&self) -> &[PreparedSavedOutput] {
+        &self.saved_output_contracts
     }
 
     pub(in crate::simulation) fn into_runner_parts(self) -> (QueuedAnalysis, Arc<str>) {
@@ -740,6 +758,34 @@ impl PreparedRunSnapshot {
                     ),
                 ));
             }
+            let mut output_ids = HashSet::with_capacity(task.saved_output_contracts.len());
+            let mut output_names = HashSet::with_capacity(task.saved_output_contracts.len());
+            let mut output_digests = HashSet::with_capacity(task.saved_output_contracts.len());
+            for contract in &task.saved_output_contracts {
+                if contract.analysis_id() != task.instance_id {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared saved output {} targets analysis {}, not its owning task {}",
+                            contract.output_id(),
+                            contract.analysis_id(),
+                            task.instance_id
+                        ),
+                    ));
+                }
+                if !output_ids.insert(contract.output_id())
+                    || !output_names.insert(contract.name())
+                    || !output_digests.insert(contract.digest())
+                {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared task {} contains duplicate saved-output identity, name, or contract digest",
+                            task.instance_id
+                        ),
+                    ));
+                }
+            }
         }
 
         for task in &parts.tasks {
@@ -866,6 +912,11 @@ impl PreparedRunSnapshot {
                 .map(|task| analysis_id_metadata_digest(task.instance_id))
                 .collect(),
             task_count: self.tasks.len(),
+            saved_output_contract_count: self
+                .tasks
+                .iter()
+                .map(|task| task.saved_output_contracts.len())
+                .sum(),
             pvt_point_count: self.pvt_points.len(),
             target: self.target.label(),
             save_policy: self.save_policy.label(),
@@ -910,6 +961,7 @@ impl PreparedRunSnapshot {
                     label: prepared.label,
                     config_digest: prepared.config_digest,
                     task: prepared.task,
+                    saved_output_contracts: prepared.saved_output_contracts,
                     executable_netlist: Arc::clone(&executable_netlist),
                     touchstone_export,
                 }
@@ -1120,7 +1172,7 @@ fn snapshot_digest(
     touchstone_export: &TouchstoneExportPolicy,
     executable_netlist: &str,
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v5");
+    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v6");
     writer.domain("run-intent");
     writer.u8(match intent {
         SimulationRunIntent::SimulateRunSet => 0,
@@ -1160,6 +1212,25 @@ fn snapshot_digest(
         writer.sequence(task.dependencies.len());
         for dependency in &task.dependencies {
             writer.uuid(dependency.as_uuid());
+        }
+        writer.domain("saved-output-contracts");
+        writer.sequence(task.saved_output_contracts.len());
+        for contract in &task.saved_output_contracts {
+            writer.uuid(contract.output_id().as_uuid());
+            writer.u64(contract.output_revision().get());
+            writer.uuid(contract.analysis_id().as_uuid());
+            writer.digest(contract.digest());
+            writer.u8(output_kind_tag(contract.kind()));
+            writer.string(contract.name());
+            writer.string(contract.source_expression());
+            writer.u8(policy_tag(contract.policy()));
+            writer.u8(precision_tag(contract.precision()));
+            writer.u8(streaming_tag(contract.streaming()));
+            writer.option(contract.selection_grid().as_ref(), |writer, grid| {
+                writer.f64(grid.start);
+                writer.f64(grid.step);
+                writer.f64(grid.stop);
+            });
         }
     }
 
