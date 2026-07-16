@@ -421,6 +421,21 @@ pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     hash_field(&mut hasher, "global_nodes", global_nodes);
     hash_field(&mut hasher, "measurements", &netlist.measurements);
     hash_field(&mut hasher, "saves", &netlist.saves);
+    hash_field(
+        &mut hasher,
+        "output_requests",
+        netlist
+            .output_requests
+            .iter()
+            .map(|request| {
+                (
+                    request.directive,
+                    request.name.as_deref(),
+                    request.dependencies.as_slice(),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
     hash_field(&mut hasher, "options", &netlist.options);
     hash_field(&mut hasher, "veriloga_includes", &netlist.veriloga_includes);
     hash_field(&mut hasher, "spef_includes", &netlist.spef_includes);
@@ -2093,6 +2108,27 @@ mod tests {
             netlist_checkpoint_identity(&external),
             netlist_checkpoint_identity(&changed_content),
             "external content that changes the effective IC value must change identity"
+        );
+    }
+
+    #[test]
+    fn replaceground_false_is_default_identity_while_true_is_semantic() {
+        let base = "checkpoint replaceground\nR1 out 0 1k\n.print dc V(out)\n.end\n";
+        let explicit_false = "checkpoint replaceground\nR1 out 0 1k\n.print dc V(out)\n.end\n.PREPROCESS REPLACEGROUND FALSE\n";
+        let enabled = "checkpoint replaceground\nR1 out 0 1k\n.print dc V(out)\n.end\n.PREPROCESS REPLACEGROUND TRUE\n";
+        let base = Netlist::parse(base).expect("base deck parses");
+        let explicit_false = Netlist::parse(explicit_false).expect("FALSE deck parses");
+        let enabled = Netlist::parse(enabled).expect("TRUE deck parses");
+
+        assert_eq!(
+            netlist_checkpoint_identity(&base),
+            netlist_checkpoint_identity(&explicit_false),
+            "explicit FALSE is the omitted semantic default"
+        );
+        assert_ne!(
+            netlist_checkpoint_identity(&base),
+            netlist_checkpoint_identity(&enabled),
+            "enabled REPLACEGROUND changes checkpoint semantic identity"
         );
     }
 
