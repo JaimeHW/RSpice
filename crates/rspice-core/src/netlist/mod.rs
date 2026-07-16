@@ -21,6 +21,7 @@ mod initcond;
 pub mod lexer;
 pub mod multi_run;
 mod mutual_inductor;
+mod output_symbols;
 pub mod param_scope;
 mod parser;
 pub mod source_map;
@@ -47,6 +48,11 @@ pub use initcond::{
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
 };
 pub use mutual_inductor::validate_mutual_inductor_references;
+pub use output_symbols::{
+    OutputDirectiveKind, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
+    OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_symbols,
+    validate_output_symbols_with_abort,
+};
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
@@ -306,6 +312,9 @@ pub enum ParseError {
     UndefinedMutualInductorReference(Box<UndefinedMutualInductorReferenceError>),
 
     #[error(transparent)]
+    OutputSymbolValidation(Box<OutputSymbolValidationError>),
+
+    #[error(transparent)]
     DeviceInitialCondition(Box<DeviceInitialConditionError>),
 
     #[error("Missing required parameter: {0}")]
@@ -406,6 +415,188 @@ use crate::analysis::MeasureStatement;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+/// Effective dialect-specific node-zero alias policy after parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroundPolicy {
+    /// Only the canonical node name `0` is ground.
+    OnlyZero,
+    /// ngspice's default automatic `GND` alias.
+    NgspiceGnd,
+    /// Xyce `.PREPROCESS REPLACEGROUND TRUE` aliases.
+    XyceReplace,
+}
+
+impl GroundPolicy {
+    /// Return the canonical execution node name for this dialect policy.
+    /// Non-ground names retain their authored spelling.
+    pub fn canonical_node<'a>(self, node: &'a str) -> &'a str {
+        let canonical = node.trim().to_ascii_uppercase();
+        let aliases_ground = match self {
+            Self::OnlyZero => false,
+            Self::NgspiceGnd => canonical == "GND",
+            Self::XyceReplace => matches!(canonical.as_str(), "GND" | "GND!" | "GROUND"),
+        };
+        if canonical == "0" || aliases_ground {
+            "0"
+        } else {
+            node
+        }
+    }
+
+    pub fn is_ground(self, node: &str) -> bool {
+        self.canonical_node(node) == "0"
+    }
+}
+
+/// Rewrite node-zero aliases only where they are used as atomic arguments to
+/// node-probe accessors. The source AST remains available verbatim through
+/// `Netlist::source_text`; this transformation is for execution-facing typed
+/// fields, including braced and quoted expressions.
+pub(crate) fn apply_ground_policy_to_probe_references(input: &str, policy: GroundPolicy) -> String {
+    fn is_identifier_start(character: char) -> bool {
+        character.is_ascii_alphabetic() || character == '_'
+    }
+
+    fn is_identifier_continue(character: char) -> bool {
+        character.is_ascii_alphanumeric() || character == '_'
+    }
+
+    fn is_node_probe(operator: &str) -> bool {
+        matches!(
+            operator.to_ascii_uppercase().as_str(),
+            "V" | "VR" | "VI" | "VM" | "VP" | "VDB" | "N"
+        )
+    }
+
+    fn matching_parenthesis(input: &str, open: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        let mut single_quote = false;
+        let mut double_quote = false;
+        for (offset, character) in input[open..].char_indices() {
+            match character {
+                '\'' if !double_quote => single_quote = !single_quote,
+                '"' if !single_quote => double_quote = !double_quote,
+                '(' if !single_quote && !double_quote => depth += 1,
+                ')' if !single_quote && !double_quote => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(open + offset);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn split_arguments(input: &str) -> Vec<&str> {
+        let mut arguments = Vec::new();
+        let mut start = 0usize;
+        let mut parentheses = 0usize;
+        let mut braces = 0usize;
+        let mut single_quote = false;
+        let mut double_quote = false;
+        for (index, character) in input.char_indices() {
+            match character {
+                '\'' if !double_quote => single_quote = !single_quote,
+                '"' if !single_quote => double_quote = !double_quote,
+                '(' if !single_quote && !double_quote => parentheses += 1,
+                ')' if !single_quote && !double_quote => {
+                    parentheses = parentheses.saturating_sub(1);
+                }
+                '{' if !single_quote && !double_quote => braces += 1,
+                '}' if !single_quote && !double_quote => braces = braces.saturating_sub(1),
+                ',' if parentheses == 0 && braces == 0 && !single_quote && !double_quote => {
+                    arguments.push(&input[start..index]);
+                    start = index + character.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        arguments.push(&input[start..]);
+        arguments
+    }
+
+    fn replace_atomic_argument(argument: &str, policy: GroundPolicy) -> String {
+        let trimmed = argument.trim();
+        if !policy.is_ground(trimmed) || trimmed == "0" {
+            return argument.to_string();
+        }
+        let leading = argument.len() - argument.trim_start().len();
+        let trailing = argument.len() - argument.trim_end().len();
+        format!(
+            "{}0{}",
+            &argument[..leading],
+            &argument[argument.len() - trailing..]
+        )
+    }
+
+    fn rewrite(input: &str, policy: GroundPolicy) -> String {
+        let mut output = String::with_capacity(input.len());
+        let mut cursor = 0usize;
+        while cursor < input.len() {
+            let character = input[cursor..]
+                .chars()
+                .next()
+                .expect("cursor remains on a character boundary");
+            if !is_identifier_start(character) {
+                output.push(character);
+                cursor += character.len_utf8();
+                continue;
+            }
+
+            let identifier_start = cursor;
+            cursor += character.len_utf8();
+            while cursor < input.len() {
+                let next = input[cursor..]
+                    .chars()
+                    .next()
+                    .expect("cursor remains on a character boundary");
+                if !is_identifier_continue(next) {
+                    break;
+                }
+                cursor += next.len_utf8();
+            }
+            let identifier = &input[identifier_start..cursor];
+            let mut open = cursor;
+            while open < input.len() {
+                let whitespace = input[open..]
+                    .chars()
+                    .next()
+                    .expect("cursor remains on a character boundary");
+                if !whitespace.is_whitespace() {
+                    break;
+                }
+                open += whitespace.len_utf8();
+            }
+            if !is_node_probe(identifier)
+                || !input[open..].starts_with('(')
+                || matching_parenthesis(input, open).is_none()
+            {
+                output.push_str(&input[identifier_start..cursor]);
+                continue;
+            }
+
+            let close =
+                matching_parenthesis(input, open).expect("matching parenthesis was checked above");
+            output.push_str(&input[identifier_start..=open]);
+            let rewritten_inner = rewrite(&input[open + 1..close], policy);
+            let arguments = split_arguments(&rewritten_inner);
+            for (index, argument) in arguments.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                output.push_str(&replace_atomic_argument(argument, policy));
+            }
+            output.push(')');
+            cursor = close + 1;
+        }
+        output
+    }
+
+    rewrite(input, policy)
+}
+
 /// Represents a parsed netlist ready for circuit construction
 #[derive(Debug, Clone)]
 pub struct Netlist {
@@ -439,6 +630,10 @@ pub struct Netlist {
     pub measurements: Vec<MeasureStatement>,
     /// Output selection from .SAVE/.PROBE/.PRINT/.PLOT commands
     pub saves: SaveSet,
+    /// Typed source/provenance sidecar for every output-producing directive.
+    /// Execution continues to use `saves`, `measurements`, and `.FOUR`
+    /// analysis commands; this ordered sidecar owns semantic validation.
+    pub output_requests: Vec<OutputRequest>,
     /// Simulation options from .OPTIONS commands
     pub options: SimulationOptions,
     /// Verilog-A model includes from .VERILOGA statements
@@ -456,6 +651,20 @@ pub struct Netlist {
     /// Optional source path for the netlist used to resolve relative includes
     /// and model-file references during reparsing workflows.
     pub source_path: Option<PathBuf>,
+}
+
+impl Netlist {
+    /// Effective ground policy shared by elaboration, validation, and output
+    /// execution. This is semantic state, independent of source spelling.
+    pub fn ground_policy(&self) -> GroundPolicy {
+        if self.options.replace_ground.unwrap_or(false) {
+            GroundPolicy::XyceReplace
+        } else if self.params.expression_dialect() == ExpressionDialect::Xyce {
+            GroundPolicy::OnlyZero
+        } else {
+            GroundPolicy::NgspiceGnd
+        }
+    }
 }
 
 /// Severity for parser diagnostics that do not abort parsing.
@@ -509,6 +718,24 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_abort(input, &NoAbort))
     }
 
+    /// Parse and immediately validate every output-symbol dependency.
+    ///
+    /// Ordinary [`Self::parse`] intentionally supports incomplete ASTs used by
+    /// editors and synthetic-result evaluators. Strict execution frontends can
+    /// use this convenience entry point to receive a typed semantic
+    /// [`ParseError`] before circuit construction.
+    pub fn parse_validated(input: &str) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_validated_with_abort(input, &NoAbort))
+    }
+
+    /// Parse and validate output symbols with cooperative cancellation.
+    pub fn parse_validated_with_abort(
+        input: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_validated_with_options_and_abort(input, NetlistParseOptions::default(), abort)
+    }
+
     /// Parse a netlist from a string with cooperative cancellation.
     pub fn parse_with_abort(
         input: &str,
@@ -523,6 +750,28 @@ impl Netlist {
         options: NetlistParseOptions,
     ) -> Result<Self, ParseError> {
         finish_non_aborting_parse(Self::parse_with_options_and_abort(input, options, &NoAbort))
+    }
+
+    /// Parse with explicit options and validate output symbols.
+    pub fn parse_validated_with_options(
+        input: &str,
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_validated_with_options_and_abort(
+            input, options, &NoAbort,
+        ))
+    }
+
+    /// Parse with explicit options, validate output symbols, and cooperatively
+    /// observe cancellation throughout both phases.
+    pub fn parse_validated_with_options_and_abort(
+        input: &str,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let netlist = Self::parse_with_options_and_abort(input, options, abort)?;
+        validate_output_symbols_with_abort(&netlist, abort)?;
+        Ok(netlist)
     }
 
     /// Parse a netlist from a string with explicit options and cooperative
@@ -554,6 +803,31 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
     }
 
+    /// Parse with include resolution and validate output symbols.
+    pub fn parse_validated_with_path(
+        input: &str,
+        file_path: &std::path::Path,
+    ) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_validated_with_path_and_abort(
+            input, file_path, &NoAbort,
+        ))
+    }
+
+    /// Parse with include resolution, validate output symbols, and observe
+    /// cooperative cancellation.
+    pub fn parse_validated_with_path_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_validated_with_path_and_options_and_abort(
+            input,
+            file_path,
+            NetlistParseOptions::default(),
+            abort,
+        )
+    }
+
     /// Parse a netlist with include resolution and cooperative cancellation.
     pub fn parse_with_path_and_abort(
         input: &str,
@@ -577,6 +851,32 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_options_and_abort(
             input, file_path, options, &NoAbort,
         ))
+    }
+
+    /// Parse with include resolution and explicit options, then validate
+    /// output symbols.
+    pub fn parse_validated_with_path_and_options(
+        input: &str,
+        file_path: &std::path::Path,
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_validated_with_path_and_options_and_abort(
+            input, file_path, options, &NoAbort,
+        ))
+    }
+
+    /// Parse with include resolution and explicit options, then validate
+    /// output symbols with cooperative cancellation.
+    pub fn parse_validated_with_path_and_options_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let netlist =
+            Self::parse_with_path_and_options_and_abort(input, file_path, options, abort)?;
+        validate_output_symbols_with_abort(&netlist, abort)?;
+        Ok(netlist)
     }
 
     /// Parse a netlist with include resolution, explicit parser options, and
@@ -1870,6 +2170,7 @@ impl Default for Netlist {
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
             saves: SaveSet::default(),
+            output_requests: Vec::new(),
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
             spef_includes: Vec::new(),

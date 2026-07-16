@@ -1119,14 +1119,7 @@ pub(super) fn warn_floating_nodes(flat_elements: &[crate::netlist::Element]) {
         return;
     }
 
-    let canonical = |node: &str| -> String {
-        let lower = node.to_ascii_lowercase();
-        if lower == "gnd" {
-            "0".to_string()
-        } else {
-            lower
-        }
-    };
+    let canonical = |node: &str| -> String { node.to_ascii_lowercase() };
 
     let mut parent: HashMap<String, String> = HashMap::new();
     fn find(parent: &mut HashMap<String, String>, node: &str) -> String {

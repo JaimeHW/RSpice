@@ -5,8 +5,6 @@ impl CircuitData {
         let mut node_map = HashMap::new();
         // Ground is always node 0
         node_map.insert("0".to_string(), 0);
-        node_map.insert("gnd".to_string(), 0);
-        node_map.insert("GND".to_string(), 0);
 
         Self {
             node_map,

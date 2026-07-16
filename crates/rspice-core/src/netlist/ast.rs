@@ -536,6 +536,29 @@ impl SaveSet {
         self.signals.is_empty()
     }
 
+    pub(crate) fn apply_ground_policy(&mut self, policy: super::GroundPolicy) {
+        fn replace(node: &mut String, policy: super::GroundPolicy) {
+            let canonical = policy.canonical_node(node);
+            if canonical != node {
+                *node = canonical.to_string();
+            }
+        }
+        for signal in &mut self.signals {
+            match signal {
+                SaveSignal::Voltage(node) => replace(node, policy),
+                SaveSignal::Raw(raw) => {
+                    *raw = super::apply_ground_policy_to_probe_references(raw, policy);
+                    replace(raw, policy);
+                }
+                SaveSignal::VoltageDiff(pos, neg) => {
+                    replace(pos, policy);
+                    replace(neg, policy);
+                }
+                SaveSignal::All | SaveSignal::Current(_) | SaveSignal::DeviceParam { .. } => {}
+            }
+        }
+    }
+
     /// `true` when every vector should be kept (no directive, or `all`).
     pub fn keeps_everything(&self) -> bool {
         self.is_empty() || self.signals.iter().any(|s| matches!(s, SaveSignal::All))
@@ -2347,6 +2370,10 @@ impl NonlinearContinuationMode {
 /// All fields are optional - unspecified values use engine defaults.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationOptions {
+    /// Xyce `.PREPROCESS REPLACEGROUND TRUE|FALSE`. When enabled, the exact
+    /// case-insensitive fields `GND`, `GND!`, and `GROUND` are node-zero
+    /// aliases throughout circuit elaboration and output expressions.
+    pub replace_ground: Option<bool>,
     /// Xyce `.OPTIONS MEASURE MEASFAIL`: emit `FAILED` rather than the
     /// calculation default value in machine-readable measurement files.
     /// Xyce defaults this to enabled.
@@ -2467,6 +2494,9 @@ impl SimulationOptions {
 
     /// Merge another options set, preferring values from `other`
     pub fn merge(&mut self, other: &SimulationOptions) {
+        if other.replace_ground.is_some() {
+            self.replace_ground = other.replace_ground;
+        }
         if other.measure_fail_output.is_some() {
             self.measure_fail_output = other.measure_fail_output;
         }

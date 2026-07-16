@@ -19,12 +19,13 @@ use super::{
     Element, ElementKind, ExpressionDialect, FftAnalysis, FftFormat, FftOutput, FftWindow,
     FreqVariation, InitialCondition, JfetType, MesfetType, MissingSubcircuitEndsBoundary,
     MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
-    Netlist, NetlistSourceLocation, NodeSet, ParamContext, ParameterRedefinitionPolicy,
-    ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError, PoleZeroAnalysisType,
-    PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal,
-    SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
-    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
+    Netlist, NetlistSourceLocation, NodeSet, OutputDirectiveKind, OutputRequest, ParamContext,
+    ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
+    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
+    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
+    VerilogAInclude, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
+    poll_parse_text,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -345,19 +346,37 @@ fn parse_netlist_impl(
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
-    let mut lines: Vec<&str> = Vec::new();
+    let mut original_lines: Vec<&str> = Vec::new();
     for (index, line) in input.lines().enumerate() {
         poll_parse_abort(abort, index)?;
-        lines.push(line);
+        original_lines.push(line);
     }
 
-    if lines.is_empty() {
+    if original_lines.is_empty() {
         return Ok(Netlist::default());
     }
+    let (replace_ground, replace_ground_extra_lines) =
+        prescan_root_replaceground(&original_lines, source_schedule.as_ref(), abort)?;
+    let transformed_input = apply_root_preprocessing(
+        input,
+        &original_lines,
+        source_schedule.as_ref(),
+        replace_ground == Some(true),
+        abort,
+    )?;
+    let parse_input = transformed_input.as_str();
+    let lines = parse_input.lines().collect::<Vec<_>>();
 
     // First line is the title
     let title = lines[0].to_string();
     let mut state = ParseState::new();
+    for line in replace_ground_extra_lines {
+        state.diagnostics.push(ParseDiagnostic::warning(
+            line,
+            "replaceground-extra-parameters",
+            "Additional parameters in .PREPROCESS REPLACEGROUND statement; ignoring them",
+        ));
+    }
     state.params.set_statistical_mode(options.statistical_mode);
     state
         .params
@@ -365,6 +384,7 @@ fn parse_netlist_impl(
     state
         .params
         .set_parameter_redefinition_policy(options.parameter_redefinition_policy);
+    state.options.replace_ground = replace_ground;
 
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
@@ -592,6 +612,294 @@ fn parse_netlist_impl(
         root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
         abort,
     )
+}
+
+fn apply_root_preprocessing(
+    input: &str,
+    lines: &[&str],
+    source_schedule: Option<&SourceEventSchedule>,
+    replace_ground: bool,
+    abort: &dyn AbortSignal,
+) -> Result<String, ParseWithAbortError> {
+    let root_path = source_schedule
+        .and_then(|schedule| schedule.origin(0))
+        .and_then(|origin| origin.path.as_deref());
+    let mut transformed = String::with_capacity(input.len());
+    for (index, line) in lines.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        poll_parse_text(abort, line)?;
+        let is_root = source_schedule.is_none_or(|schedule| {
+            schedule
+                .origin(index)
+                .is_some_and(|origin| origin.path.as_deref() == root_path)
+        });
+        let is_inert_included_preprocess = !is_root
+            && strip_inline_semicolon_comment(line)
+                .split_whitespace()
+                .next()
+                .is_some_and(|head| head.eq_ignore_ascii_case(".PREPROCESS"));
+        if is_inert_included_preprocess {
+            // Xyce selects and validates preprocessing controls from the root
+            // file only. Included cards do not enable, disable, or diagnose
+            // root preprocessing.
+        } else if replace_ground && index != 0 {
+            transformed.push_str(&replace_ground_fields(line));
+        } else {
+            transformed.push_str(line);
+        }
+        if index + 1 < lines.len() || input.ends_with('\n') || input.ends_with('\r') {
+            transformed.push('\n');
+        }
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(transformed)
+}
+
+fn replace_ground_fields(line: &str) -> String {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() || trimmed.starts_with('*') {
+        return line.to_string();
+    }
+    let head = trimmed.split_whitespace().next().unwrap_or_default();
+    if matches!(
+        head.to_ascii_uppercase().as_str(),
+        ".SUBCKT"
+            | ".INCLUDE"
+            | ".INC"
+            | ".INCL"
+            | ".LIB"
+            | ".ENDL"
+            | ".SAVE"
+            | ".PROBE"
+            | ".PRINT"
+            | ".PLOT"
+            | ".MEAS"
+            | ".MEASURE"
+            | ".FOUR"
+            | ".FOURIER"
+    ) {
+        return line.to_string();
+    }
+
+    let mut output = String::with_capacity(line.len());
+    let mut token = String::new();
+    let mut braces = 0usize;
+    let mut single_quote = false;
+    let mut double_quote = false;
+    let flush = |output: &mut String, token: &mut String, protected: bool| {
+        if !protected
+            && matches!(
+                token.to_ascii_uppercase().as_str(),
+                "GND" | "GND!" | "GROUND"
+            )
+        {
+            output.push('0');
+        } else {
+            output.push_str(token);
+        }
+        token.clear();
+    };
+    for (byte_index, ch) in line.char_indices() {
+        let protected = braces != 0 || single_quote || double_quote;
+        if ch == ';' && !protected {
+            flush(&mut output, &mut token, false);
+            output.push_str(&line[byte_index..]);
+            return output;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '.' | ':' | '!') {
+            token.push(ch);
+            continue;
+        }
+        flush(&mut output, &mut token, protected);
+        output.push(ch);
+        match ch {
+            '{' if !single_quote && !double_quote => braces += 1,
+            '}' if !single_quote && !double_quote => braces = braces.saturating_sub(1),
+            '\'' if braces == 0 && !double_quote => single_quote = !single_quote,
+            '"' if braces == 0 && !single_quote => double_quote = !double_quote,
+            _ => {}
+        }
+    }
+    flush(
+        &mut output,
+        &mut token,
+        braces != 0 || single_quote || double_quote,
+    );
+    output
+}
+
+#[cfg(test)]
+mod replaceground_lexical_tests {
+    use super::replace_ground_fields;
+    use crate::netlist::Netlist;
+
+    fn temporary_include_deck(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-replaceground-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create test directory");
+        (directory.join("root.cir"), directory.join("child.inc"))
+    }
+
+    #[test]
+    fn exact_fields_replace_while_protected_source_text_is_preserved() {
+        assert_eq!(
+            replace_ground_fields("R1 GND GND! 1 ; GROUND remains a comment"),
+            "R1 0 0 1 ; GROUND remains a comment"
+        );
+        assert_eq!(
+            replace_ground_fields("B1 out 0 V={V(GND)+V(GROUND)} label='GND'"),
+            "B1 out 0 V={V(GND)+V(GROUND)} label='GND'"
+        );
+    }
+
+    #[test]
+    fn protected_directive_tails_are_not_rewritten() {
+        for source in [
+            ".SUBCKT CELL GND GROUND",
+            ".INCLUDE GND",
+            ".INC GND!",
+            ".INCL GROUND",
+            ".LIB GND SECTION",
+            ".ENDL GND",
+            ".SAVE V(GND)",
+            ".PROBE V(GROUND)",
+            ".PRINT TRAN V(GND!)",
+            ".PLOT TRAN V(GND)",
+            ".MEAS TRAN M AVG V(GROUND)",
+            ".FOUR 1k V(GND!)",
+        ] {
+            assert_eq!(replace_ground_fields(source), source);
+        }
+    }
+
+    #[test]
+    fn root_replaceground_transforms_included_content_and_ignores_child_control() {
+        let (root, child) = temporary_include_deck("root-controls-child");
+        std::fs::write(&child, ".PREPROCESS REPLACEGROUND MAYBE\nR1 out GND! 1k\n")
+            .expect("write included deck");
+        let source = "root controls preprocessing\n.include child.inc\n.PRINT OP V(out)\n.OP\n.END\n.PREPROCESS REPLACEGROUND TRUE\n";
+        let netlist = Netlist::parse_with_path(source, &root)
+            .expect("included invalid control is inert and root TRUE applies");
+        std::fs::remove_dir_all(root.parent().expect("root has parent"))
+            .expect("remove test directory");
+
+        assert_eq!(netlist.elements[0].nodes, ["OUT", "0"]);
+        assert_eq!(netlist.options.replace_ground, Some(true));
+    }
+
+    #[test]
+    fn included_replaceground_cannot_enable_root_preprocessing() {
+        let (root, child) = temporary_include_deck("child-cannot-enable");
+        std::fs::write(&child, ".PREPROCESS REPLACEGROUND TRUE\nR1 out GROUND 1k\n")
+            .expect("write included deck");
+        let source = "child control is inert\n.include child.inc\n.END\n";
+        let netlist = Netlist::parse_with_path(source, &root)
+            .expect("included control is ignored without changing its ordinary node");
+        std::fs::remove_dir_all(root.parent().expect("root has parent"))
+            .expect("remove test directory");
+
+        assert_eq!(netlist.elements[0].nodes, ["OUT", "GROUND"]);
+        assert_eq!(netlist.options.replace_ground, None);
+    }
+
+    #[test]
+    fn root_replaceground_is_validated_through_physical_eof() {
+        for source in [
+            "missing value\nR1 1 0 1k\n.END\n.PREPROCESS REPLACEGROUND\n",
+            "unknown value\nR1 1 0 1k\n.END\n.PREPROCESS REPLACEGROUND MAYBE\n",
+            "duplicate\n.PREPROCESS REPLACEGROUND FALSE\nR1 1 0 1k\n.END\n.PREPROCESS REPLACEGROUND TRUE\n",
+        ] {
+            assert!(
+                Netlist::parse(source).is_err(),
+                "invalid root control must fail even after .END: {source}"
+            );
+        }
+
+        let netlist = Netlist::parse(
+            "extra fields\nR1 1 0 1k\n.END\n.PREPROCESS REPLACEGROUND FALSE ignored\n",
+        )
+        .expect("extra fields are a warning, including after END");
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "replaceground-extra-parameters" && diagnostic.line == 4
+        }));
+    }
+}
+
+fn prescan_root_replaceground(
+    lines: &[&str],
+    source_schedule: Option<&SourceEventSchedule>,
+    abort: &dyn AbortSignal,
+) -> Result<(Option<bool>, Vec<usize>), ParseWithAbortError> {
+    let root_path = source_schedule
+        .and_then(|schedule| schedule.origin(0))
+        .and_then(|origin| origin.path.as_deref());
+    let mut selected = None;
+    let mut extra_lines = Vec::new();
+    let mut first_line = 0usize;
+    for (index, line) in lines.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        poll_parse_text(abort, line)?;
+        let mut physical_line = index + 1;
+        if let Some(schedule) = source_schedule {
+            let Some(origin) = schedule.origin(index) else {
+                continue;
+            };
+            if origin.path.as_deref() != root_path {
+                continue;
+            }
+            physical_line = origin.line;
+        }
+        let stripped = strip_inline_semicolon_comment(line).trim();
+        if stripped.is_empty() || stripped.starts_with('*') {
+            continue;
+        }
+        let fields = stripped.split_whitespace().collect::<Vec<_>>();
+        if fields.len() < 2
+            || !fields[0].eq_ignore_ascii_case(".PREPROCESS")
+            || !fields[1].eq_ignore_ascii_case("REPLACEGROUND")
+        {
+            continue;
+        }
+        if selected.is_some() {
+            return Err(ParseError::Syntax {
+                line: physical_line,
+                message: format!(
+                    "Multiple .PREPROCESS REPLACEGROUND statements (first at line {first_line})"
+                ),
+            }
+            .into());
+        }
+        let Some(value) = fields.get(2) else {
+            return Err(ParseError::Syntax {
+                line: physical_line,
+                message: ".PREPROCESS REPLACEGROUND requires TRUE or FALSE".to_string(),
+            }
+            .into());
+        };
+        selected = Some(if value.eq_ignore_ascii_case("TRUE") {
+            true
+        } else if value.eq_ignore_ascii_case("FALSE") {
+            false
+        } else {
+            return Err(ParseError::Syntax {
+                line: physical_line,
+                message: format!("Unknown argument {value} in .PREPROCESS REPLACEGROUND statement"),
+            }
+            .into());
+        });
+        if fields.len() > 3 {
+            extra_lines.push(physical_line);
+        }
+        first_line = physical_line;
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok((selected, extra_lines))
 }
 
 #[allow(clippy::too_many_arguments)]

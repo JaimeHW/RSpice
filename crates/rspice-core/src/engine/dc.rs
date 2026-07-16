@@ -913,6 +913,39 @@ R1 out 0 1k
     }
 
     #[test]
+    fn replaceground_applies_inside_behavioral_voltage_probes() {
+        let deck = "\
+behavioral ground aliases
+V1 one 0 2
+R1 one out_gnd 0.5
+B1 out_gnd 0 I={2*V(out_gnd,gNd)}
+V2 two 0 2
+R2 two out_ground 0.5
+B2 out_ground 0 I={2*V(out_ground,GROUND)}
+V3 three 0 2
+R3 three out_bang 0.5
+B3 out_bang 0 I={2*V(out_bang,gnd!)}
+.PREPROCESS REPLACEGROUND TRUE
+.op
+.end
+";
+        let netlist = Netlist::parse(deck).expect("ground-alias behavioral deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("ground-alias behavioral deck solves");
+
+        for node in ["out_gnd", "out_ground", "out_bang"] {
+            let actual = result
+                .try_voltage_named(node)
+                .unwrap_or_else(|| panic!("{node} voltage is present"));
+            assert!(
+                (actual - 1.0).abs() < 1.0e-10,
+                "expected {node}=1 V, got {actual}"
+            );
+        }
+    }
+
+    #[test]
     fn xspice_integrator_initial_condition_is_initialized_before_dc_op() {
         let deck = r#"
 * xspice integrator initial condition

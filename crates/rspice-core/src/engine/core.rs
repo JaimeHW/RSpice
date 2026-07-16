@@ -175,6 +175,10 @@ impl Engine {
     }
 
     pub(crate) fn node_lookup_candidates(netlist: &Netlist, node_name: &str) -> Vec<String> {
+        let canonical = netlist.ground_policy().canonical_node(node_name);
+        if canonical == "0" {
+            return vec![canonical.to_string()];
+        }
         let mut candidates = Vec::new();
         Self::push_unique_node_lookup_candidate(&mut candidates, node_name.to_string());
 
@@ -333,7 +337,7 @@ impl Engine {
         node_map: &HashMap<String, String>,
         global_nodes: &HashSet<String>,
     ) -> String {
-        if node == "0" || node.eq_ignore_ascii_case("gnd") {
+        if node == "0" {
             return "0".to_string();
         }
 

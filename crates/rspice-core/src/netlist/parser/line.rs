@@ -319,6 +319,7 @@ pub(super) fn process_line(
             let device_initial_conditions = &mut state.device_initial_conditions;
             let global_nodes = &mut state.global_nodes;
             let saves = &mut state.saves;
+            let output_requests = &mut state.output_requests;
             let options = &mut state.options;
             let diagnostics = &mut state.diagnostics;
             let spef_includes = &mut state.spef_includes;
@@ -348,6 +349,7 @@ pub(super) fn process_line(
                     node_sets: &mut subckt_node_sets,
                     global_nodes,
                     saves,
+                    output_requests,
                     options,
                     diagnostics,
                     spef_includes,
@@ -399,6 +401,7 @@ pub(super) fn process_line(
             node_sets: &mut state.node_sets,
             global_nodes: &mut state.global_nodes,
             saves: &mut state.saves,
+            output_requests: &mut state.output_requests,
             options: &mut state.options,
             diagnostics: &mut state.diagnostics,
             spef_includes: &mut state.spef_includes,
@@ -441,6 +444,7 @@ pub(super) fn parse_line(
         node_sets,
         global_nodes,
         saves,
+        output_requests,
         options,
         diagnostics,
         spef_includes,
@@ -487,6 +491,7 @@ pub(super) fn parse_line(
                 global_nodes,
                 measurements,
                 saves,
+                output_requests,
                 options,
                 diagnostics,
                 spef_includes,

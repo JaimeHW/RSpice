@@ -21,6 +21,7 @@ pub(super) fn parse_command(
         global_nodes,
         measurements,
         saves,
+        output_requests,
         options,
         diagnostics,
         spef_includes,
@@ -222,6 +223,7 @@ pub(super) fn parse_command(
         }
         ".FOUR" | ".FOURIER" => {
             let (fundamental, outputs) = parse_four_command(stream, line_num, params)?;
+            output_requests.push(OutputRequest::from_four(outputs.as_slice(), origin.clone()));
             analyses.push(AnalysisCommand::Four {
                 fundamental,
                 outputs,
@@ -300,6 +302,7 @@ pub(super) fn parse_command(
         ".TF" => {
             analyses.push(parse_tf_command(stream, line_num)?);
         }
+        ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
         ".OPTIONS" | ".OPTION" | ".OPT" => parse_options_command(
             stream,
             line_num,
@@ -317,6 +320,13 @@ pub(super) fn parse_command(
             {
                 let previous_name = measurements[previous].name.clone();
                 measurements.remove(previous);
+                output_requests.retain(|request| {
+                    request.directive != OutputDirectiveKind::Measure
+                        || request
+                            .name
+                            .as_deref()
+                            .is_none_or(|name| !name.eq_ignore_ascii_case(&previous_name))
+                });
                 let message = format!(
                     "measure '{previous_name}' redefined as '{}'; ignoring the previous definition",
                     statement.name
@@ -328,14 +338,35 @@ pub(super) fn parse_command(
                     message,
                 ));
             }
+            output_requests.push(OutputRequest::from_measure(&statement, origin.clone()));
             measurements.push(statement);
         }
         ".SAVE" | ".PROBE" => {
+            let directive = if cmd == ".SAVE" {
+                OutputDirectiveKind::Save
+            } else {
+                OutputDirectiveKind::Probe
+            };
+            output_requests.push(OutputRequest::from_source(
+                directive,
+                origin.clone(),
+                &remaining_command_source(stream),
+            ));
             parse_save_command(stream, line_num, saves, false)?;
         }
         ".PRINT" | ".PLOT" => {
             // .PRINT/.PLOT take an optional leading analysis type before the
             // probe list; the probes feed the same output-selection set.
+            let directive = if cmd == ".PRINT" {
+                OutputDirectiveKind::Print
+            } else {
+                OutputDirectiveKind::Plot
+            };
+            output_requests.push(OutputRequest::from_source(
+                directive,
+                origin.clone(),
+                &remaining_command_source(stream),
+            ));
             parse_save_command(stream, line_num, saves, true)?;
         }
         _ => {
@@ -362,6 +393,62 @@ pub(super) fn parse_command(
         reject_unconsumed_command_tokens(stream, line_num, &cmd)?;
     }
 
+    Ok(())
+}
+
+fn remaining_command_source(stream: &TokenStream) -> String {
+    let mut copy = stream.clone();
+    copy.collect_line()
+        .into_iter()
+        .map(|token| token.lexeme)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn parse_preprocess_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Result<(), ParseError> {
+    let operation = expect_ident(stream, line_num).map_err(|_| ParseError::Syntax {
+        line: line_num,
+        message: ".PREPROCESS requires an operation".to_string(),
+    })?;
+    if !operation.eq_ignore_ascii_case("REPLACEGROUND") {
+        if !matches!(
+            operation.to_ascii_uppercase().as_str(),
+            "REMOVEUNUSED" | "ADDRESISTORS"
+        ) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unknown .PREPROCESS operation '{operation}'"),
+            });
+        }
+        let message = format!("unsupported .PREPROCESS operation '{operation}' ignored");
+        diagnostics.push(ParseDiagnostic::warning(
+            line_num,
+            "unsupported-preprocess-operation",
+            message,
+        ));
+        stream.skip_to_eol();
+        return Ok(());
+    }
+    let value = expect_ident(stream, line_num).map_err(|_| ParseError::Syntax {
+        line: line_num,
+        message: ".PREPROCESS REPLACEGROUND requires TRUE or FALSE".to_string(),
+    })?;
+    match value.to_ascii_uppercase().as_str() {
+        "TRUE" | "FALSE" => {}
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unknown argument {value} in .PREPROCESS REPLACEGROUND statement"),
+            });
+        }
+    }
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        stream.skip_to_eol();
+    }
     Ok(())
 }
 

@@ -3065,6 +3065,8 @@ impl Engine {
 
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
+        crate::netlist::validate_output_symbols(netlist)
+            .map_err(|error| SimulationError::Netlist(error.to_string()))?;
         let mut circuit = CircuitData::new();
         circuit.b3soi_gmin_scale = if self.config.b3soi_gmin_scaling {
             1.0e-6

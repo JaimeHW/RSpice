@@ -167,6 +167,8 @@ pub struct Flattener<'a> {
     external_subckts: HashSet<String>,
     /// Global nodes that must not be renamed while flattening hierarchy.
     global_nodes: HashSet<String>,
+    /// Xyce's explicit ground-synonym preprocessing policy.
+    ground_policy: super::GroundPolicy,
     /// Definitions currently being expanded, outermost first. A definition
     /// re-entered while still on this stack is a recursive instantiation,
     /// reported with the full cycle instead of running into `max_depth`.
@@ -223,6 +225,7 @@ impl<'a> Flattener<'a> {
             instance_metadata: Vec::new(),
             external_subckts: HashSet::new(),
             global_nodes: HashSet::new(),
+            ground_policy: super::GroundPolicy::OnlyZero,
             expansion_stack: Vec::new(),
             random: RandomState::default(),
             scoped_models: Vec::new(),
@@ -250,6 +253,7 @@ impl<'a> Flattener<'a> {
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.global_nodes = netlist.global_nodes.clone();
+        self.ground_policy = netlist.ground_policy();
         self.expansion_stack.clear();
         self.scoped_models.clear();
         self.scoped_initial_conditions.clear();
@@ -378,7 +382,7 @@ impl<'a> Flattener<'a> {
         }
 
         let mut push_node = |node: &str| {
-            if !is_ground_node_name(node) {
+            if !self.ground_policy.is_ground(node) {
                 self.xspice_auto_bridge_node_hints
                     .push(XspiceAutoBridgeNodeHint {
                         node: node.to_string(),
@@ -896,8 +900,9 @@ impl<'a> Flattener<'a> {
     /// Remap a single node name
     fn remap_node(&self, node: &str, prefix: &str, node_map: &HashMap<String, String>) -> String {
         // Ground is never renamed
-        if node == "0" || node.eq_ignore_ascii_case("gnd") {
-            return "0".to_string();
+        let canonical = self.ground_policy.canonical_node(node);
+        if canonical == "0" {
+            return canonical.to_string();
         }
 
         // Explicit .GLOBAL nodes and Xyce's implicit $G* global-node names
@@ -2891,10 +2896,6 @@ pub fn flatten_netlist_with_models(netlist: &Netlist) -> Result<FlattenedNetlist
     })
 }
 
-fn is_ground_node_name(node: &str) -> bool {
-    node == "0" || node.eq_ignore_ascii_case("gnd")
-}
-
 fn xspice_auto_bridge_family(
     string_params: &[(String, String)],
     scope: &ParamContext,
@@ -3016,7 +3017,7 @@ fn remap_probe_node(
 
 fn is_simple_probe_name(s: &str) -> bool {
     s.chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':')
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '!'))
 }
 
 #[cfg(test)]

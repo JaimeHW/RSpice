@@ -82,6 +82,7 @@ pub(super) struct ParseState {
     pub(super) spef_includes: Vec<String>,
     pub(super) measurements: Vec<MeasureStatement>,
     pub(super) saves: SaveSet,
+    pub(super) output_requests: Vec<OutputRequest>,
     pub(super) options: super::SimulationOptions,
     pub(super) diagnostics: Vec<ParseDiagnostic>,
     pub(super) subckt_stack: Vec<SubcktFrame>,
@@ -112,6 +113,7 @@ impl ParseState {
             spef_includes: Vec::new(),
             measurements: Vec::new(),
             saves: SaveSet::default(),
+            output_requests: Vec::new(),
             options: super::SimulationOptions::default(),
             diagnostics: Vec::new(),
             subckt_stack: Vec::new(),
@@ -146,7 +148,13 @@ impl ParseState {
 
         validate_mutual_inductor_semantic_records_with_abort(&self.mutual_inductor_records, abort)?;
 
-        Ok(Netlist {
+        let mut options = self.options;
+        if options.replace_ground == Some(false) {
+            // FALSE is the semantic default; explicit spelling must not split
+            // transient checkpoint identity from an omitted directive.
+            options.replace_ground = None;
+        }
+        let mut netlist = Netlist {
             title,
             elements: self.elements,
             analyses: self.analyses,
@@ -161,13 +169,30 @@ impl ParseState {
             global_nodes: self.global_nodes,
             measurements: self.measurements,
             saves: self.saves,
-            options: self.options,
+            output_requests: self.output_requests,
+            options,
             veriloga_includes: self.veriloga_includes,
             spef_includes: self.spef_includes,
             diagnostics: self.diagnostics,
             source_text: Some(input.to_string()),
             source_path: None,
-        })
+        };
+        let ground_policy = netlist.ground_policy();
+        netlist.saves.apply_ground_policy(ground_policy);
+        for measurement in &mut netlist.measurements {
+            measurement.apply_ground_policy(ground_policy);
+        }
+        for analysis in &mut netlist.analyses {
+            if let AnalysisCommand::Four { outputs, .. } = analysis {
+                for output in outputs {
+                    *output = super::super::apply_ground_policy_to_probe_references(
+                        output,
+                        ground_policy,
+                    );
+                }
+            }
+        }
+        Ok(netlist)
     }
 
     pub(super) fn missing_subcircuit_ends(
@@ -206,6 +231,7 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) node_sets: &'a mut Vec<NodeSet>,
     pub(super) global_nodes: &'a mut HashSet<String>,
     pub(super) saves: &'a mut SaveSet,
+    pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) spef_includes: &'a mut Vec<String>,
@@ -225,6 +251,7 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) global_nodes: &'a mut HashSet<String>,
     pub(super) measurements: &'a mut Vec<MeasureStatement>,
     pub(super) saves: &'a mut SaveSet,
+    pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) spef_includes: &'a mut Vec<String>,

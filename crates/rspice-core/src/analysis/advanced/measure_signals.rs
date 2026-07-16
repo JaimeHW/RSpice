@@ -1241,7 +1241,7 @@ fn measurement_node_waveform(
     point_count: usize,
     signals: &HashMap<String, &[Value]>,
 ) -> Option<Vec<Value>> {
-    if matches!(node.to_ascii_lowercase().as_str(), "0" | "gnd" | "ground") {
+    if node == "0" {
         return Some(vec![0.0; point_count]);
     }
     signals

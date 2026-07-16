@@ -230,7 +230,7 @@ fn source_nodes(netlist: &Netlist, name: &str) -> Result<(String, String), Simul
 }
 
 fn is_ground(node: &str) -> bool {
-    node == "0" || node.eq_ignore_ascii_case("gnd")
+    node == "0"
 }
 
 fn node_voltage(solution: &AcResult, node: &str) -> Result<Value, SimulationError> {

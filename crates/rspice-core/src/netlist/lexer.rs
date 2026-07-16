@@ -235,8 +235,12 @@ impl<'a> Lexer<'a> {
     /// Parse an identifier
     fn parse_ident(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         let mut end = 0;
+        let allow_trailing_bang = input
+            .chars()
+            .next()
+            .is_some_and(|first| !first.is_ascii_digit());
         for c in input.chars() {
-            if is_ident_char(c) {
+            if is_ident_char(c) || (c == '!' && allow_trailing_bang) {
                 end += c.len_utf8();
             } else {
                 break;
@@ -534,7 +538,7 @@ fn is_ident_start(c: char) -> bool {
 
 /// Check if character can be part of an identifier
 fn is_ident_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':' || c == '%'
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '%')
 }
 
 /// Check if an otherwise-special character should remain available to parsers.
@@ -1036,6 +1040,14 @@ mod tests {
                 "missing Other({ch:?}) token in {tokens:?}"
             );
         }
+    }
+
+    #[test]
+    fn trailing_bang_is_part_of_a_node_identifier() {
+        let tokens = tokenize("R1 out GND! 1k\n").expect("tokenize GND! node");
+        assert!(tokens.iter().any(|token| {
+            token.kind == TokenKind::Ident("GND!".to_string()) && token.lexeme == "GND!"
+        }));
     }
 
     #[test]

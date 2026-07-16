@@ -329,6 +329,69 @@ pub struct MeasureStatement {
     pub print_policy: MeasurePrintPolicy,
 }
 
+impl MeasureStatement {
+    /// Normalize dialect-specific node-zero aliases in execution-facing
+    /// waveform and expression fields. Authored spelling remains available in
+    /// the netlist source and output-provenance sidecar.
+    pub(crate) fn apply_ground_policy(&mut self, policy: crate::netlist::GroundPolicy) {
+        fn rewrite(value: &mut String, policy: crate::netlist::GroundPolicy) {
+            *value = crate::netlist::apply_ground_policy_to_probe_references(value, policy);
+        }
+
+        fn rewrite_operand(operand: &mut MeasureOperand, policy: crate::netlist::GroundPolicy) {
+            if let MeasureOperand::Waveform(value) = operand {
+                rewrite(value, policy);
+            }
+        }
+
+        fn rewrite_condition(condition: &mut WhenCondition, policy: crate::netlist::GroundPolicy) {
+            rewrite(&mut condition.left, policy);
+            rewrite_operand(&mut condition.right, policy);
+        }
+
+        fn rewrite_trigger(trigger: &mut TrigSpec, policy: crate::netlist::GroundPolicy) {
+            if let TriggerEvent::When(condition) = &mut trigger.event {
+                rewrite_condition(condition, policy);
+            }
+        }
+
+        match &mut self.measure_type {
+            MeasureType::Delay { trig, targ } => {
+                rewrite_trigger(trig, policy);
+                rewrite_trigger(targ, policy);
+            }
+            MeasureType::Find { signal, when, .. }
+            | MeasureType::Derivative { signal, when, .. } => {
+                rewrite(signal, policy);
+                if let Some(condition) = when {
+                    rewrite_condition(condition, policy);
+                }
+            }
+            MeasureType::When { condition, .. } => rewrite_condition(condition, policy),
+            MeasureType::Param { expression } | MeasureType::Equation { expression, .. } => {
+                rewrite(expression, policy);
+            }
+            MeasureType::ErrorFunction {
+                measured,
+                comparison,
+                ..
+            } => {
+                rewrite(measured, policy);
+                rewrite(comparison, policy);
+            }
+            MeasureType::FileError { signal, .. }
+            | MeasureType::Min { signal, .. }
+            | MeasureType::Max { signal, .. }
+            | MeasureType::PeakToPeak { signal, .. }
+            | MeasureType::Avg { signal, .. }
+            | MeasureType::Rms { signal, .. }
+            | MeasureType::RiseTime { signal, .. }
+            | MeasureType::FallTime { signal, .. }
+            | MeasureType::Integ { signal, .. } => rewrite(signal, policy),
+        }
+    }
+}
+
 /// Result of a measurement
 #[derive(Debug, Clone)]
 pub struct MeasureResult {

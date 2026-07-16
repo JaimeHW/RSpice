@@ -22522,6 +22522,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         lte_reference: Option<TransientLteReference>,
     ) -> bool {
         let crate::netlist::SimulationOptions {
+            replace_ground: _,
             measure_fail_output: _,
             measure_default_value: _,
             measure_use_cont_files: _,
@@ -22713,7 +22714,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut elements = BTreeMap::new();
         for element in &netlist.elements {
             if let Some(alias) = element.nodes.iter().find(|node| {
-                crate::compat::ground::is_spice_ground_name(node)
+                Self::xyce_ground_alias_name(node)
                     && !Self::passive_primary_name_is_literal_ground(node)
             }) {
                 return Err(format!(
@@ -23554,7 +23555,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut elements = BTreeMap::new();
         for element in &netlist.elements {
             if let Some(alias) = element.nodes.iter().find(|node| {
-                crate::compat::ground::is_spice_ground_name(node)
+                Self::xyce_ground_alias_name(node)
                     && !Self::passive_primary_name_is_literal_ground(node)
             }) {
                 return Err(format!(
@@ -24429,9 +24430,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         for element in &netlist.elements {
             if element.nodes.len() != 2
                 || element.nodes.iter().any(|node| node.trim().is_empty())
-                || element.nodes.iter().any(|node| {
-                    crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0"
-                })
+                || element
+                    .nodes
+                    .iter()
+                    .any(|node| Self::xyce_ground_alias_name(node) && node.trim() != "0")
             {
                 return Err(format!(
                     "{LABEL} top-level element '{}' must use two explicit nodes and literal ground",
@@ -24646,9 +24648,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         for element in &flattened.elements {
             if element.nodes.len() != 2
                 || element.nodes.iter().any(|node| node.trim().is_empty())
-                || element.nodes.iter().any(|node| {
-                    crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0"
-                })
+                || element
+                    .nodes
+                    .iter()
+                    .any(|node| Self::xyce_ground_alias_name(node) && node.trim() != "0")
             {
                 return Err(format!(
                     "{LABEL} flattened element '{}' has unqualified nodes",
@@ -24784,7 +24787,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         for element in &netlist.elements {
             if let Some(alias) = element.nodes.iter().find(|node| {
-                crate::compat::ground::is_spice_ground_name(node)
+                Self::xyce_ground_alias_name(node)
                     && !Self::passive_primary_name_is_literal_ground(node)
             }) {
                 return Err(format!(
@@ -26265,7 +26268,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if element
                 .nodes
                 .iter()
-                .any(|node| crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0")
+                .any(|node| Self::xyce_ground_alias_name(node) && node.trim() != "0")
             {
                 return Err(format!(
                     "{LABEL} element '{}' uses a ground alias; literal node 0 is required",
@@ -27133,7 +27136,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if element
                 .nodes
                 .iter()
-                .any(|node| crate::compat::ground::is_spice_ground_name(node) && node.trim() != "0")
+                .any(|node| Self::xyce_ground_alias_name(node) && node.trim() != "0")
             {
                 return Err(format!(
                     "{LABEL} element '{}' uses a ground alias; literal node 0 is required",
@@ -27665,7 +27668,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 || nodes.iter().any(String::is_empty)
                 || nodes
                     .iter()
-                    .any(|node| crate::compat::ground::is_spice_ground_name(node) && node != "0")
+                    .any(|node| Self::xyce_ground_alias_name(node) && node != "0")
             {
                 return Err(format!(
                     "{LABEL} element '{}' must have two explicit nodes and literal ground",
@@ -30624,7 +30627,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut source = None;
         for element in &netlist.elements {
             if let Some(alias) = element.nodes.iter().find(|node| {
-                crate::compat::ground::is_spice_ground_name(node)
+                Self::xyce_ground_alias_name(node)
                     && !Self::sin_expression_name_is_literal_ground(node)
             }) {
                 return Err(format!(
@@ -30939,9 +30942,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .collect::<Vec<_>>();
         let distinct_ports = subcircuit_ports.iter().cloned().collect::<BTreeSet<_>>();
         if distinct_ports.len() != 6
-            || subcircuit.ports.iter().any(|port| {
-                crate::compat::ground::is_spice_ground_name(port) || port.trim().is_empty()
-            })
+            || subcircuit
+                .ports
+                .iter()
+                .any(|port| Self::xyce_ground_alias_name(port) || port.trim().is_empty())
         {
             return Err(format!(
                 "{LABEL} subcircuit ports must be six distinct non-ground names"
@@ -30999,7 +31003,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut voltage_source = None;
         for element in &netlist.elements {
             if let Some(alias) = element.nodes.iter().find(|node| {
-                crate::compat::ground::is_spice_ground_name(node)
+                Self::xyce_ground_alias_name(node)
                     && !Self::param_expression_name_is_literal_ground(node)
             }) {
                 return Err(format!(
@@ -31069,7 +31073,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         ];
         if signal_nodes
             .iter()
-            .any(|node| node == "0" || crate::compat::ground::is_spice_ground_name(node))
+            .any(|node| node == "0" || Self::xyce_ground_alias_name(node))
             || signal_nodes.iter().cloned().collect::<BTreeSet<_>>().len() != 3
         {
             return Err(format!(
@@ -31176,7 +31180,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut flattened_behavioral_count = 0usize;
         for element in &flattened.elements {
             if let Some(alias) = element.nodes.iter().find(|node| {
-                crate::compat::ground::is_spice_ground_name(node)
+                Self::xyce_ground_alias_name(node)
                     && !Self::param_expression_name_is_literal_ground(node)
             }) {
                 return Err(format!(
@@ -31624,6 +31628,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         node.trim() == "0"
     }
 
+    /// Xyce's lexical ground spellings used by exact-oracle admission guards.
+    /// These guards inspect authored decks before REPLACEGROUND policy is
+    /// applied, so they must not use the execution layer's canonical-only
+    /// ground predicate.
+    fn xyce_ground_alias_name(node: &str) -> bool {
+        matches!(
+            node.trim().to_ascii_uppercase().as_str(),
+            "0" | "GND" | "GND!" | "GROUND"
+        )
+    }
+
     fn canonical_bjt_external_node_name(node: &str) -> String {
         if Self::bjt_external_node_name_is_literal_ground(node) {
             "0".to_string()
@@ -31716,7 +31731,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         for element in &netlist.elements {
             let key = Self::normalize_device_instance_name(&element.name);
             if let Some(alias) = element.nodes.iter().find(|node| {
-                crate::compat::ground::is_spice_ground_name(node)
+                Self::xyce_ground_alias_name(node)
                     && !Self::bjt_external_node_name_is_literal_ground(node)
             }) {
                 return Err(format!(
@@ -34301,8 +34316,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         wrapper_tolerance: Option<XyceComparisonTolerance>,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         let layout = Self::transient_reference_layout(reference)?;
-        let data_columns =
-            Self::reference_tran_data_columns(reference, print, layout.data_column_offset)?;
+        let data_columns = Self::reference_tran_data_columns(
+            reference,
+            print,
+            netlist,
+            layout.data_column_offset,
+        )?;
         let comp_columns = data_columns
             .iter()
             .map(|probe| XyceReferenceColumn::Probe {
@@ -34931,6 +34950,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     fn reference_tran_data_columns(
         reference: &XycePrnTable,
         print: &XycePrintRequest,
+        netlist: &Netlist,
         first_data_column: usize,
     ) -> Result<Vec<String>, String> {
         let mut data_columns =
@@ -34938,7 +34958,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut probe_index = 0usize;
         for column in reference.columns.iter().skip(first_data_column) {
             if let Some(probe) = print.probes.get(probe_index)
-                && Self::reference_column_matches_probe(column, probe)
+                && Self::reference_column_matches_probe(column, probe, netlist.ground_policy())
             {
                 data_columns.push(probe.clone());
                 probe_index += 1;
@@ -35916,7 +35936,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             column
                         ));
                     };
-                    if Self::reference_column_matches_probe(column, probe) {
+                    if Self::reference_column_matches_probe(column, probe, netlist.ground_policy())
+                    {
                         break probe;
                     }
                     if Self::dc_probe_is_omitted_empty_wildcard(probe, netlist) {
@@ -35945,7 +35966,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 let Some((index, probe)) =
                     print.probes.iter().enumerate().find(|(index, probe)| {
                         !used_probe_indices.contains(index)
-                            && Self::reference_column_matches_probe(column, probe)
+                            && Self::reference_column_matches_probe(
+                                column,
+                                probe,
+                                netlist.ground_policy(),
+                            )
                     })
                 else {
                     return Err(format!(
@@ -35994,15 +36019,22 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .unwrap_or(trimmed)
     }
 
-    fn canonical_reference_node_name(node: &str) -> &str {
-        if node.eq_ignore_ascii_case("gnd") {
+    fn canonical_reference_node_name(
+        node: &str,
+        ground_policy: crate::netlist::GroundPolicy,
+    ) -> &str {
+        if ground_policy.is_ground(node) {
             "0"
         } else {
             node
         }
     }
 
-    fn reference_voltage_column_matches_probe(column: &str, probe: &str) -> bool {
+    fn reference_voltage_column_matches_probe(
+        column: &str,
+        probe: &str,
+        ground_policy: crate::netlist::GroundPolicy,
+    ) -> bool {
         let Some(column_probe) = Self::parse_tran_voltage_probe(column) else {
             return false;
         };
@@ -36010,19 +36042,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return false;
         };
         column_probe.accessor == requested_probe.accessor
-            && Self::canonical_reference_node_name(&column_probe.node_pos)
-                == Self::canonical_reference_node_name(&requested_probe.node_pos)
+            && Self::canonical_reference_node_name(&column_probe.node_pos, ground_policy)
+                == Self::canonical_reference_node_name(&requested_probe.node_pos, ground_policy)
             && column_probe
                 .node_neg
                 .as_deref()
-                .map(Self::canonical_reference_node_name)
+                .map(|node| Self::canonical_reference_node_name(node, ground_policy))
                 == requested_probe
                     .node_neg
                     .as_deref()
-                    .map(Self::canonical_reference_node_name)
+                    .map(|node| Self::canonical_reference_node_name(node, ground_policy))
     }
 
-    fn reference_column_matches_probe(column: &str, probe: &str) -> bool {
+    fn reference_column_matches_probe(
+        column: &str,
+        probe: &str,
+        ground_policy: crate::netlist::GroundPolicy,
+    ) -> bool {
         let normalized_column = Self::normalize_probe(column);
         let normalized_probe = Self::normalize_probe(probe);
         if normalized_column == normalized_probe {
@@ -36036,7 +36072,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if normalized_column == normalized_probe {
             return true;
         }
-        if Self::reference_voltage_column_matches_probe(&normalized_column, &normalized_probe) {
+        if Self::reference_voltage_column_matches_probe(
+            &normalized_column,
+            &normalized_probe,
+            ground_policy,
+        ) {
             return true;
         }
         if let Some(mapped_probe) = Self::compact_reference_probe_alias(&normalized_column) {
@@ -42576,10 +42616,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         node_name: &str,
     ) -> Option<Complex64> {
-        if matches!(
-            node_name.to_ascii_lowercase().as_str(),
-            "0" | "gnd" | "ground"
-        ) {
+        if netlist.ground_policy().is_ground(node_name) {
             return Some(Complex64::new(0.0, 0.0));
         }
         Self::node_lookup_candidates(netlist, node_name)
@@ -55872,10 +55909,16 @@ R3 1 0 {RVAL}
         };
         let layout = XyceTestRunner::transient_reference_layout(&table)
             .expect("TIME-prefixed transient reference should parse");
+        let netlist = Netlist::parse("reference columns\nR1 1 0 1k\n.end\n")
+            .expect("reference-column deck parses");
 
-        let data_columns =
-            XyceTestRunner::reference_tran_data_columns(&table, &print, layout.data_column_offset)
-                .expect("snapshot-added source current column should be accepted");
+        let data_columns = XyceTestRunner::reference_tran_data_columns(
+            &table,
+            &print,
+            &netlist,
+            layout.data_column_offset,
+        )
+        .expect("snapshot-added source current column should be accepted");
 
         assert_eq!(data_columns, vec!["{I(V1)}", "V(1)", "V(2)"]);
     }
@@ -55883,16 +55926,34 @@ R3 1 0 {RVAL}
     #[test]
     fn reference_column_matching_preserves_braced_expressions() {
         assert!(XyceTestRunner::reference_column_matches_probe(
-            "{R0}", "{r0}"
+            "{R0}",
+            "{r0}",
+            crate::netlist::GroundPolicy::NgspiceGnd,
         ));
         assert!(XyceTestRunner::reference_column_matches_probe(
-            "{V(1)}", "V(1)"
+            "{V(1)}",
+            "V(1)",
+            crate::netlist::GroundPolicy::NgspiceGnd,
         ));
         assert!(XyceTestRunner::reference_column_matches_probe(
-            "V(0,3)", "V(GND,3)"
+            "V(0,3)",
+            "V(GND,3)",
+            crate::netlist::GroundPolicy::NgspiceGnd,
         ));
         assert!(XyceTestRunner::reference_column_matches_probe(
-            "N(0)", "N(GND)"
+            "N(0)",
+            "N(GND)",
+            crate::netlist::GroundPolicy::NgspiceGnd,
+        ));
+        assert!(!XyceTestRunner::reference_column_matches_probe(
+            "V(0)",
+            "V(GND)",
+            crate::netlist::GroundPolicy::OnlyZero,
+        ));
+        assert!(XyceTestRunner::reference_column_matches_probe(
+            "V(0)",
+            "V(GND!)",
+            crate::netlist::GroundPolicy::XyceReplace,
         ));
     }
 
@@ -58118,6 +58179,41 @@ R2 b out 1
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case("X2.B")),
             "nested sibling subcircuit probe should resolve to flattened interface node, got {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn node_lookup_candidates_follow_effective_ground_policy() {
+        let ngspice =
+            Netlist::parse("ngspice ground\nR1 1 0 1k\n.END\n").expect("ngspice deck parses");
+        assert_eq!(
+            XyceTestRunner::node_lookup_candidates(&ngspice, "GND"),
+            ["0"]
+        );
+        assert_ne!(
+            XyceTestRunner::node_lookup_candidates(&ngspice, "GND!"),
+            ["0"]
+        );
+
+        let xyce_options = crate::netlist::NetlistParseOptions {
+            expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+            ..Default::default()
+        };
+        let xyce = Netlist::parse_with_options(
+            "Xyce ordinary GND\nR1 GND 0 1k\n.END\n",
+            xyce_options.clone(),
+        )
+        .expect("Xyce deck without replacement parses");
+        assert_ne!(XyceTestRunner::node_lookup_candidates(&xyce, "GND"), ["0"]);
+
+        let replaced = Netlist::parse_with_options(
+            "Xyce replaced ground\nR1 1 GND! 1k\n.PREPROCESS REPLACEGROUND TRUE\n.END\n",
+            xyce_options,
+        )
+        .expect("Xyce replacement deck parses");
+        assert_eq!(
+            XyceTestRunner::node_lookup_candidates(&replaced, "GND!"),
+            ["0"]
         );
     }
 
