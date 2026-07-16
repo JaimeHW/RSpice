@@ -14,9 +14,9 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::super::super::design_system::{WorkbenchIcon, section_header};
+use super::super::super::design_system::{PANEL_TABS_H, WorkbenchIcon, section_header};
 use super::super::super::state::DesignPanel;
-use super::nav_row;
+use super::{nav_row, nav_row_indented, nav_row_indented_mono, panel_search};
 
 const PRIMITIVE_GROUPS: [(&str, &[&str]); 4] = [
     ("Passives", &["Passives"]),
@@ -27,6 +27,15 @@ const PRIMITIVE_GROUPS: [(&str, &[&str]); 4] = [
     ),
     ("Mixed signal / XSPICE", &["Behavioral (XSPICE)"]),
 ];
+const PANEL_TABS_PADDING_X: f32 = 8.0;
+
+fn panel_tabs_content_rect(rect: egui::Rect) -> egui::Rect {
+    let padding = PANEL_TABS_PADDING_X.min(rect.width() * 0.5);
+    egui::Rect::from_min_max(
+        egui::pos2(rect.left() + padding, rect.top()),
+        egui::pos2(rect.right() - padding, rect.bottom()),
+    )
+}
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     tabs(ui, app);
@@ -38,29 +47,76 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn tabs(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        for (panel, label) in [
-            (DesignPanel::Navigator, "Navigator"),
-            (DesignPanel::ComponentShelf, "Component shelf"),
-        ] {
-            let selected = app.state.workbench.design_panel == panel;
-            let response = ui.selectable_label(
+    let height = PANEL_TABS_H.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::hover(),
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    let entries = [
+        (DesignPanel::Navigator, "Navigator"),
+        (DesignPanel::ComponentShelf, "Component shelf"),
+    ];
+    let content_rect = panel_tabs_content_rect(rect);
+    let tab_width = content_rect.width() / entries.len() as f32;
+    for (index, (panel, label)) in entries.into_iter().enumerate() {
+        let tab_rect = egui::Rect::from_min_max(
+            egui::pos2(
+                content_rect.left() + tab_width * index as f32,
+                content_rect.top(),
+            ),
+            egui::pos2(
+                content_rect.left() + tab_width * (index + 1) as f32,
+                content_rect.bottom(),
+            ),
+        );
+        let response = ui.interact(
+            tab_rect,
+            ui.id().with(("design-panel-tab", index)),
+            egui::Sense::click(),
+        );
+        let selected = app.state.workbench.design_panel == panel;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
                 selected,
-                egui::RichText::new(label)
-                    .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                    .color(if selected {
-                        t.color.text
-                    } else {
-                        t.color.text_dim
-                    }),
-            );
-            if response.clicked() {
-                app.state.workbench.design_panel = panel;
-            }
+                label,
+            )
+        });
+        if response.hovered() {
+            ui.painter().rect_filled(tab_rect, 0.0, t.color.bg_hover);
         }
-    });
-    ui.add_space(4.0);
+        ui.painter().text(
+            tab_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            theme::sans(tokens::FS_0, FontWeight::Medium),
+            if selected {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+        if selected {
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(tab_rect.left() + 6.0, tab_rect.bottom() - 2.0),
+                    egui::pos2(tab_rect.right() - 6.0, tab_rect.bottom()),
+                ),
+                0.0,
+                t.color.accent,
+            );
+        }
+        theme::paint_focus_ring(ui, &response, tab_rect);
+        if response.clicked() {
+            app.state.workbench.design_panel = panel;
+        }
+    }
 }
 
 fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -74,13 +130,25 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .collect::<Vec<_>>()
         .join(" / ");
     let t = Tokens::get(ui.ctx());
-    ui.add_space(2.0);
-    ui.label(
-        egui::RichText::new(format!("/ {path}"))
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_faint),
+    let path_frame = egui::Frame::new()
+        .fill(t.color.bg_inset)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(1.0));
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("/ {path}"))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
+        });
+    ui.painter().hline(
+        path_frame.response.rect.x_range(),
+        path_frame.response.rect.bottom(),
+        egui::Stroke::new(1.0, t.color.border),
     );
-    ui.add_space(4.0);
 
     ScrollArea::vertical()
         .id_salt("workbench.design.navigator")
@@ -92,19 +160,13 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn navigator_search(ui: &mut Ui, app: &mut RSpiceApp) {
-    ui.horizontal(|ui| {
-        ui.add_space(8.0);
-        let response = ui.add_sized(
-            [ui.available_width() - 16.0, 28.0],
-            egui::TextEdit::singleline(&mut app.state.workbench.navigator_query)
-                .id_salt("workbench.design.navigator.search")
-                .hint_text("Find instance, net or port…")
-                .margin(egui::Margin::symmetric(8, 5)),
-        );
-        if std::mem::take(&mut app.state.workbench.focus_navigator_search) {
-            response.request_focus();
-        }
-    });
+    panel_search(
+        ui,
+        &mut app.state.workbench.navigator_query,
+        "workbench.design.navigator.search",
+        "Find instance, net or port…",
+        &mut app.state.workbench.focus_navigator_search,
+    );
 }
 
 fn instance_section(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -135,32 +197,28 @@ fn instance_section(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect::<Vec<_>>();
 
-    section_header(ui, "Instances", Some(&components.len().to_string()));
+    navigator_section_header(ui, "Instances", &components.len().to_string());
+    ui.add_space(4.0);
     let root = app.state.workspace.active_view.cell.clone();
     if nav_row(ui, WorkbenchIcon::Design, &root, false, Some("schematic")) {
         app.state.schematic.selection.clear();
         app.state.schematic.net_highlight.clear();
         app.state.schematic.needs_fit = true;
     }
-    for (id, name, value, kind, position) in components {
+    for (id, name, value, _kind, position) in components {
         let label = if value.trim().is_empty() {
             name
         } else {
             format!("{name} · {value}")
         };
         let selected = app.state.schematic.selection.has_component(id);
-        if nav_row(
-            ui,
-            WorkbenchIcon::Design,
-            &label,
-            selected,
-            Some(kind.display_name()),
-        ) {
+        if nav_row_indented(ui, WorkbenchIcon::Design, &label, selected, None, 1) {
             app.state.schematic.selection.select_only_component(id);
             app.state.schematic.net_highlight.clear();
             app.state.schematic.center_request = Some(position);
         }
     }
+    ui.add_space(7.0);
 }
 
 fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -175,14 +233,15 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|label| matches_query(&query, &[&label.name]))
         .map(|label| (label.name.clone(), label.pos, label.is_ground()))
         .collect::<Vec<_>>();
-    section_header(ui, "Nets", Some(&labels.len().to_string()));
+    navigator_section_header(ui, "Nets", &labels.len().to_string());
+    ui.add_space(4.0);
     let graph = NetGraph::build(&app.state.schematic.wires, &app.state.schematic.junctions);
     for (name, position, ground) in labels {
         let connected = graph.find_connected_wires(position);
         let selected = !connected.is_empty()
             && connected == app.state.schematic.net_highlight.highlighted_wires;
         let count = connected.len().to_string();
-        if nav_row(
+        if nav_row_indented_mono(
             ui,
             if ground {
                 WorkbenchIcon::Project
@@ -192,6 +251,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             &name,
             selected,
             Some(if ground { "gnd" } else { &count }),
+            1,
         ) {
             app.state.schematic.selection.clear();
             for wire in &connected {
@@ -201,6 +261,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.schematic.center_request = Some(position);
         }
     }
+    ui.add_space(7.0);
 }
 
 fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -217,14 +278,16 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .filter(|(_, _, port)| matches_query(&query, &[&port.name, port.direction.keyword()]))
         .collect::<Vec<_>>();
-    section_header(ui, "Named signals", Some(&ports.len().to_string()));
+    navigator_section_header(ui, "Named signals", &ports.len().to_string());
+    ui.add_space(4.0);
     for (component_id, position, port) in ports {
-        if nav_row(
+        if nav_row_indented_mono(
             ui,
             WorkbenchIcon::Probe,
             &port.name,
             app.state.schematic.selection.has_component(component_id),
             Some(port.direction.keyword()),
+            1,
         ) {
             app.state
                 .schematic
@@ -233,6 +296,7 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.schematic.center_request = Some(position);
         }
     }
+    ui.add_space(7.0);
 }
 
 fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -253,20 +317,59 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
-    ui.horizontal(|ui| {
-        ui.add_space(8.0);
-        let response = ui.add_sized(
-            [ui.available_width() - 16.0, 28.0],
-            egui::TextEdit::singleline(&mut app.state.workbench.placement_query)
-                .id_salt("workbench.design.component_shelf.search")
-                .hint_text("Place component or cell…")
-                .margin(egui::Margin::symmetric(8, 5)),
-        );
-        if std::mem::take(&mut app.state.workbench.focus_placement_search) {
-            response.request_focus();
-        }
-    });
-    ui.add_space(4.0);
+    panel_search(
+        ui,
+        &mut app.state.workbench.placement_query,
+        "workbench.design.component_shelf.search",
+        "Place component or cell…",
+        &mut app.state.workbench.focus_placement_search,
+    );
+}
+
+fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 29.0), egui::Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        egui::Color32::from_rgba_unmultiplied(
+            t.color.bg_panel_2.r(),
+            t.color.bg_panel_2.g(),
+            t.color.bg_panel_2.b(),
+            204,
+        ),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "⌄",
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 26.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title.to_uppercase(),
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
+    );
+    let count_galley = ui.painter().layout_no_wrap(
+        count.to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.text_dim,
+    );
+    let count_x = rect.right() - 10.0 - count_galley.size().x;
+    ui.painter().circle_filled(
+        egui::pos2(count_x - 9.0, rect.center().y),
+        2.5,
+        t.color.text_faint,
+    );
+    ui.painter().galley(
+        egui::pos2(count_x, rect.center().y - count_galley.size().y * 0.5),
+        count_galley,
+        t.color.text_dim,
+    );
 }
 
 fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
@@ -276,38 +379,93 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     }
     section_header(ui, "Pinned", Some("Shift+I"));
     let mut selected = None;
-    ui.horizontal_wrapped(|ui| {
-        for (kind, glyph) in [
-            (ComponentType::Resistor, "R"),
-            (ComponentType::Capacitor, "C"),
-            (ComponentType::Ground, "⏚"),
-        ] {
-            if place_chip(
-                ui,
-                kind,
-                glyph,
-                app.state.schematic.tool == Tool::Place(kind),
-            ) {
-                selected = Some(kind);
-            }
-        }
-    });
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: 8,
+            right: 8,
+            top: 7,
+            bottom: 8,
+        })
+        .show(ui, |ui| {
+            egui::ScrollArea::horizontal()
+                .id_salt("workbench.design.pinned.scroll")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 5.0;
+                        for (kind, glyph) in [
+                            (ComponentType::Resistor, "R"),
+                            (ComponentType::Capacitor, "C"),
+                            (ComponentType::Ground, "⏚"),
+                        ] {
+                            if place_chip(
+                                ui,
+                                kind,
+                                glyph,
+                                app.state.schematic.tool == Tool::Place(kind),
+                            ) {
+                                selected = Some(kind);
+                            }
+                        }
+                    });
+                });
+        });
     selected
 }
 
 fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> bool {
     let t = Tokens::get(ui.ctx());
-    let label = format!("{glyph}  {}", kind.display_name());
-    let response = ui.selectable_label(
-        selected,
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-            .color(if selected {
-                t.color.text
-            } else {
-                t.color.text_dim
-            }),
+    let label = kind.display_name();
+    let label_galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
     );
+    let touch = t.metrics.ctl_h >= 44.0;
+    let width = (14.0 + 17.0 + 5.0 + label_galley.size().x).max(if touch { 44.0 } else { 0.0 });
+    let height = if touch { 44.0 } else { 23.0 };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    let fill = if selected {
+        t.color.bg_active
+    } else if response.hovered() {
+        t.color.bg_hover
+    } else {
+        t.color.bg_inset
+    };
+    ui.painter().rect(
+        rect,
+        3.0,
+        fill,
+        egui::Stroke::new(
+            1.0,
+            if selected || response.hovered() {
+                t.color.border_strong
+            } else {
+                t.color.border
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 7.0 + 8.5, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.symbol,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.left() + 7.0 + 17.0 + 5.0,
+            rect.center().y - label_galley.size().y * 0.5,
+        ),
+        label_galley,
+        if selected {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    theme::paint_focus_ring_outset(ui, &response, rect);
     response
         .on_hover_text(format!("Arm {} placement", kind.display_name()))
         .clicked()
@@ -326,15 +484,18 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
             continue;
         }
         if query.is_empty() {
-            egui::CollapsingHeader::new(format!("{group}   {}", entries.len()))
-                .id_salt(("component-shelf", group))
-                .default_open(false)
-                .show(ui, |ui| {
-                    armed = primitive_rows(ui, app, &entries).or(armed);
-                });
+            if catalog_group_row(
+                ui,
+                ("component-shelf", group),
+                WorkbenchIcon::Design,
+                group,
+                entries.len(),
+            ) {
+                armed = primitive_rows(ui, app, &entries, 2).or(armed);
+            }
         } else {
             section_header(ui, group, Some(&entries.len().to_string()));
-            armed = primitive_rows(ui, app, &entries).or(armed);
+            armed = primitive_rows(ui, app, &entries, 0).or(armed);
         }
     }
     armed
@@ -344,15 +505,17 @@ fn primitive_rows(
     ui: &mut Ui,
     app: &RSpiceApp,
     entries: &[ComponentPaletteEntry],
+    level: usize,
 ) -> Option<ComponentType> {
     let mut armed = None;
     for entry in entries {
-        if nav_row(
+        if nav_row_indented(
             ui,
             WorkbenchIcon::Design,
             entry.label,
             app.state.schematic.tool == Tool::Place(entry.kind),
             Some(entry.kind.spice_prefix()),
+            level,
         ) {
             armed = Some(entry.kind);
         }
@@ -381,21 +544,24 @@ fn project_library(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> 
     let mut armed = None;
     for (library, cells) in grouped {
         if query.is_empty() {
-            egui::CollapsingHeader::new(format!("{library}   {}", cells.len()))
-                .id_salt(("component-shelf-library", &library))
-                .default_open(false)
-                .show(ui, |ui| {
-                    armed = cell_rows(ui, &cells).or_else(|| armed.take());
-                });
+            if catalog_group_row(
+                ui,
+                ("component-shelf-library", library.as_str()),
+                WorkbenchIcon::Models,
+                &library,
+                cells.len(),
+            ) {
+                armed = cell_rows(ui, &cells, 2).or_else(|| armed.take());
+            }
         } else {
             section_header(ui, &library, Some(&cells.len().to_string()));
-            armed = cell_rows(ui, &cells).or(armed);
+            armed = cell_rows(ui, &cells, 0).or(armed);
         }
     }
     armed
 }
 
-fn cell_rows(ui: &mut Ui, cells: &[CellCandidate]) -> Option<LibraryCellInstance> {
+fn cell_rows(ui: &mut Ui, cells: &[CellCandidate], level: usize) -> Option<LibraryCellInstance> {
     let mut armed = None;
     for candidate in cells {
         let meta = if candidate.ready {
@@ -405,12 +571,13 @@ fn cell_rows(ui: &mut Ui, cells: &[CellCandidate]) -> Option<LibraryCellInstance
         };
         let clicked = ui
             .add_enabled_ui(candidate.ready, |ui| {
-                nav_row(
+                nav_row_indented(
                     ui,
                     WorkbenchIcon::Models,
                     &candidate.cell,
                     false,
                     Some(meta),
+                    level,
                 )
             })
             .inner;
@@ -419,6 +586,74 @@ fn cell_rows(ui: &mut Ui, cells: &[CellCandidate]) -> Option<LibraryCellInstance
         }
     }
     armed
+}
+
+/// Mockup-native expandable tree row used by the component shelf.
+///
+/// `egui::CollapsingHeader` carries stock indentation, typography, and
+/// animation that do not match the workbench's 31 px tree-row contract.  The
+/// shelf keeps only the persisted disclosure state and paints the same row
+/// geometry as the rest of the navigator.
+fn catalog_group_row(
+    ui: &mut Ui,
+    key: impl std::hash::Hash,
+    icon: WorkbenchIcon,
+    label: &str,
+    count: usize,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let id = ui.make_persistent_id(key);
+    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(false));
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), t.metrics.row_h),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+
+    ui.painter().text(
+        egui::pos2(rect.left() + 26.5, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        if open { "⌄" } else { "›" },
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    icon.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 46.5, rect.center().y),
+            egui::vec2(15.0, 15.0),
+        ),
+        t.color.text_faint,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 60.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    ui.painter().text(
+        egui::pos2(rect.right() - 8.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        count.to_string(),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    theme::paint_focus_ring(ui, &response, rect);
+
+    if response.clicked() {
+        open = !open;
+        ui.data_mut(|data| data.insert_persisted(id, open));
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_expanded(open);
+    });
+    open
 }
 
 #[derive(Clone)]
@@ -598,6 +833,16 @@ fn matches_query(query: &str, values: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn design_tabs_keep_the_mockup_horizontal_inset() {
+        let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 33.0));
+        let content = panel_tabs_content_rect(outer);
+
+        assert_eq!(PANEL_TABS_PADDING_X, 8.0);
+        assert_eq!(content.left(), 8.0);
+        assert_eq!(content.right(), 252.0);
+    }
 
     #[test]
     fn mockup_primitive_groups_cover_every_placeable_palette_entry_once() {

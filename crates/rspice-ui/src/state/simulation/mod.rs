@@ -4,7 +4,7 @@
 
 use super::schematic::Point;
 use crate::services::safety::SoAViolation;
-use crate::services::yield_manager::YieldResult;
+use crate::services::yield_manager::{YieldAnalysisProvenance, YieldResult};
 use crate::simulation::optimizer::OptimizerState;
 use crate::simulation::reliability_engine::ReliabilityResult;
 use rspice_core::Value;

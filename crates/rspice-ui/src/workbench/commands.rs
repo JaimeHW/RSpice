@@ -391,23 +391,20 @@ impl Command {
                 spec("verification-history", "Run history", "", "Verify")
             }
             Self::ProjectPage(_) => spec("project-page", "Open project page", "", "Project"),
-            Self::ModelsPage(ModelsPage::Catalog) => {
+            Self::ModelsPage(ModelsPage::Models) => {
                 spec("models-catalog", "Model & library catalog", "", "Models")
             }
-            Self::ModelsPage(ModelsPage::Libraries) => spec(
-                "library-cellview-manager",
-                "Libraries and cellviews",
-                "",
-                "Models",
-            ),
-            Self::ModelsPage(ModelsPage::Pdk) => {
-                spec("model-pdk", "PDK configuration", "", "Models")
+            Self::ModelsPage(ModelsPage::Symbols) => {
+                spec("symbols-cdf", "Symbols & CDF", "", "Models")
             }
-            Self::ModelsPage(ModelsPage::Behavioral) => {
-                spec("model-behavioral", "Verilog-A / AMS", "", "Models")
+            Self::ModelsPage(ModelsPage::Corners) => {
+                spec("corner-sections", "Corners & sections", "", "Models")
+            }
+            Self::ModelsPage(ModelsPage::Include) => {
+                spec("include-graph", "Include graph", "", "Models")
             }
             Self::ModelsPage(ModelsPage::Qualification) => {
-                spec("model-qualification", "Qualification", "", "Models")
+                spec("model-metadata-audit", "Metadata audit", "", "Models")
             }
             Self::ModelBrowser => spec("model-browser", "Model browser…", "", "Models"),
             Self::PdkSettings => spec("pdk-settings", "PDK and model paths…", "", "Models"),
@@ -587,7 +584,7 @@ impl Command {
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
             Self::CloseProject => file_action(app, FileMenuAction::CloseProject),
-            Self::NewCell => file_action(app, FileMenuAction::New),
+            Self::NewCell => open_new_cell_dialog(app),
             Self::OpenDocument => file_action(app, FileMenuAction::Open),
             Self::ImportNetlist => {
                 file_action(app, FileMenuAction::ImportNetlist);
@@ -1076,6 +1073,39 @@ fn reset_active_view(app: &mut RSpiceApp) {
     }
 }
 
+fn open_new_cell_dialog(app: &mut RSpiceApp) {
+    let selected = app
+        .state
+        .library_manager
+        .selected_library
+        .as_ref()
+        .and_then(|name| {
+            app.state
+                .library_manager
+                .get_library(name)
+                .filter(|library| !library.read_only)
+                .map(|library| library.name.clone())
+        });
+    let target_library = selected.or_else(|| {
+        app.state
+            .library_manager
+            .libraries_sorted()
+            .into_iter()
+            .find(|library| !library.read_only)
+            .map(|library| library.name.clone())
+    });
+
+    let dialogs = &mut app.state.dialogs;
+    dialogs.new_cell_library = target_library.unwrap_or_default();
+    dialogs.new_cell_name.clear();
+    dialogs.new_cell_description.clear();
+    dialogs.new_cell_create_schematic = true;
+    dialogs.new_cell_create_symbol = false;
+    dialogs.new_cell_create_testbench = false;
+    dialogs.new_cell_error = None;
+    dialogs.new_cell_dialog = true;
+}
+
 fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
     dispatch_file_menu_action(
         &mut app.state,
@@ -1121,7 +1151,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Netlist),
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
     Command::VerificationPage(VerificationPage::Cockpit),
-    Command::ModelsPage(ModelsPage::Catalog),
+    Command::ModelsPage(ModelsPage::Models),
     Command::ZoomIn,
     Command::ZoomOut,
     Command::ZoomFit,
@@ -1253,7 +1283,7 @@ mod tests {
             "Open automation workspace"
         );
         assert_eq!(
-            Command::ModelsPage(ModelsPage::Catalog).spec().label,
+            Command::ModelsPage(ModelsPage::Models).spec().label,
             "Model & library catalog"
         );
     }

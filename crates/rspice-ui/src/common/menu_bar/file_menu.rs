@@ -16,7 +16,6 @@ pub(crate) enum FileMenuAction {
     RevertActiveDocument,
     CloseActiveDocument,
     CloseProject,
-    New,
     Open,
     Save,
     ImportNetlist,
@@ -62,12 +61,6 @@ pub(crate) fn dispatch_file_menu_action(
         }
         FileMenuAction::CloseProject => {
             crate::common::project_workflow::request_close_project(state);
-        }
-        FileMenuAction::New => {
-            if require_save_confirmation_if_dirty(state, ConfirmationAction::FileNew) {
-                return;
-            }
-            crate::common::file_actions::action_file_new(state);
         }
         FileMenuAction::Open => {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen) {

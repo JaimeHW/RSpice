@@ -13,6 +13,8 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct MonteCarloVariableData {
     pub name: String,
+    /// Exact finite values retained in engine execution order.
+    pub samples: Vec<Value>,
     pub mean: Value,
     pub std_dev: Value,
     pub min: Value,
@@ -24,6 +26,9 @@ pub struct MonteCarloVariableData {
 /// Monte Carlo analysis data.
 #[derive(Debug, Clone)]
 pub struct MonteCarloData {
+    /// Effective random seed used for this analysis, including the default
+    /// when `.MC` did not specify one.
+    pub seed: u64,
     pub runs_requested: usize,
     pub runs_completed: usize,
     pub num_failures: usize,
@@ -109,6 +114,7 @@ pub fn run_monte_carlo_analysis_with_source_path_and_abort(
         poll_periodically(abort, index)?;
         variables.push(MonteCarloVariableData {
             name: stats.name,
+            samples: stats.samples,
             mean: stats.mean,
             std_dev: stats.std_dev,
             min: stats.min,
@@ -122,6 +128,7 @@ pub fn run_monte_carlo_analysis_with_source_path_and_abort(
     ensure_not_aborted(abort)?;
 
     Ok(MonteCarloData {
+        seed,
         runs_requested: mc_cmd.runs,
         runs_completed: result.num_runs,
         num_failures: result.num_failures,
@@ -166,6 +173,16 @@ R2 out 0 1k
 .end
 ";
 
+    const RETENTION_DECK: &str = "\
+Monte Carlo retention
+.param rload=1k
+V1 in 0 1
+R1 in out {rload}
+R2 out 0 1k
+.mc 6 gauss 0.1 seed 19 params rload
+.end
+";
+
     #[test]
     fn monte_carlo_honors_early_abort_before_invalid_input() {
         let abort = AbortOnPoll::new(1);
@@ -181,5 +198,21 @@ R2 out 0 1k
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 8);
+    }
+
+    #[test]
+    fn monte_carlo_retains_effective_seed_and_exact_samples() {
+        let result = run_monte_carlo_analysis(RETENTION_DECK).expect("analysis succeeds");
+
+        assert_eq!(result.seed, 19);
+        assert_eq!(result.runs_requested, 6);
+        assert_eq!(result.runs_completed + result.num_failures, 6);
+        assert!(!result.variables.is_empty());
+        for variable in &result.variables {
+            assert_eq!(variable.samples.len(), result.runs_completed);
+            assert!(variable.samples.iter().all(|sample| sample.is_finite()));
+            let exact_mean = variable.samples.iter().sum::<f64>() / variable.samples.len() as f64;
+            assert_eq!(variable.mean, exact_mean);
+        }
     }
 }

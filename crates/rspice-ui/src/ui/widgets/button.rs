@@ -163,9 +163,12 @@ impl<'a> Button<'a> {
         let hint_w = hint_galley.as_ref().map_or(0.0, |g| g.size().x + 5.0);
         let content_width = galley.size().x + icon_w + hint_w;
         let unconstrained_width = (content_width + 20.0).max(self.min_width);
-        let width = self.max_width.map_or(unconstrained_width, |max_width| {
-            unconstrained_width.min(max_width)
-        });
+        let width = self
+            .max_width
+            .map_or(unconstrained_width, |max_width| {
+                unconstrained_width.min(max_width)
+            })
+            .max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });
         let height = t
             .metrics
             .ctl_h
@@ -263,7 +266,7 @@ impl<'a> Button<'a> {
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         }
-        theme::paint_focus_ring(ui, &response, rect);
+        theme::paint_focus_ring_outset(ui, &response, rect);
         response
     }
 }
@@ -330,9 +333,14 @@ impl<'a> IconButton<'a> {
     pub fn show(self, ui: &mut Ui) -> Response {
         let t = Tokens::get(ui.ctx());
         let c = &t.color;
+        let size = if t.metrics.ctl_h >= 44.0 {
+            vec2(self.size.x.max(44.0), self.size.y.max(44.0))
+        } else {
+            self.size
+        };
 
         let (rect, mut response) = ui.allocate_exact_size(
-            self.size,
+            size,
             if self.enabled {
                 Sense::click()
             } else {
@@ -396,7 +404,7 @@ impl<'a> IconButton<'a> {
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         }
-        theme::paint_focus_ring(ui, &response, rect);
+        theme::paint_focus_ring_outset(ui, &response, rect);
         response
     }
 }

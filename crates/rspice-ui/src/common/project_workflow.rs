@@ -7,6 +7,7 @@ use crate::common::project_lifecycle::{PersistenceBinding, ProjectLifecycleError
 use crate::io::ProjectFile;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::ProjectIoError;
+use crate::workbench::state::ProjectCloseDestination;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ProjectLoadOrigin<'a> {
@@ -684,6 +685,17 @@ pub(crate) fn close_active_document(state: &mut AppState) -> bool {
 }
 
 pub(crate) fn request_close_project(state: &mut AppState) -> bool {
+    request_close_project_for(state, ProjectCloseDestination::Launcher)
+}
+
+/// Request the same data-safe close review as File > Close Project, but leave
+/// the application in the mockup's explicit no-project workbench after the
+/// validated close transaction completes.
+pub(crate) fn request_close_project_to_empty_workbench(state: &mut AppState) -> bool {
+    request_close_project_for(state, ProjectCloseDestination::EmptyWorkbench)
+}
+
+fn request_close_project_for(state: &mut AppState, destination: ProjectCloseDestination) -> bool {
     if !state.project_lifecycle.project_open {
         lifecycle_error(
             state,
@@ -692,6 +704,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
         );
         return false;
     }
+    state.workbench.begin_project_close(destination);
     state.dialogs.project_review_dialog.show_close_project();
     true
 }
@@ -717,7 +730,15 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.model_library_manager = crate::common::app::default_model_library_manager();
     state.browser_project_save_name = None;
     crate::common::project_lifecycle::mark_project_closed(state);
-    state.workbench.open_project_launcher();
+    match state.workbench.take_project_close_destination() {
+        ProjectCloseDestination::Launcher => state.workbench.open_project_launcher(),
+        ProjectCloseDestination::EmptyWorkbench => {
+            state.workbench.project_launcher_open = false;
+            state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Project);
+        }
+    }
     state.push_user_message(ConsoleMessage::info("Closed project"));
     true
 }
@@ -1274,6 +1295,27 @@ mod tests {
         assert_eq!(
             canonical_name.as_deref(),
             Some("canonical-project.rspiceproj")
+        );
+    }
+
+    #[test]
+    fn launcher_continue_closes_through_the_reviewed_lifecycle_into_empty_workbench() {
+        let mut state = AppState::default();
+        state.workbench.open_project_launcher();
+
+        assert!(request_close_project_to_empty_workbench(&mut state));
+        assert!(matches!(
+            state.dialogs.project_review_dialog.request,
+            Some(crate::common::app::ProjectReviewRequest::CloseProject)
+        ));
+
+        state.dialogs.project_review_dialog.close();
+        assert!(close_project_discard(&mut state));
+        assert!(!state.project_lifecycle.project_open);
+        assert!(!state.workbench.project_launcher_open);
+        assert_eq!(
+            state.workbench.workspace,
+            crate::workbench::state::Workspace::Project
         );
     }
 

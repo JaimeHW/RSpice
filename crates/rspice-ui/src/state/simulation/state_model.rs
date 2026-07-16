@@ -60,6 +60,10 @@ pub struct SimulationState {
     /// Yield analysis results from Monte Carlo runs
     pub yield_results: Vec<YieldResult>,
 
+    /// Stable identity of the run and dataset from which `yield_results` were
+    /// calculated. `None` means no yield evidence is currently retained.
+    pub yield_provenance: Option<YieldAnalysisProvenance>,
+
     /// Current optimizer state (if running)
     pub optimizer_state: Option<OptimizerState>,
 

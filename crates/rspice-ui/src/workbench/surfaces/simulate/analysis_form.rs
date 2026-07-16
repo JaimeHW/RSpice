@@ -4,18 +4,162 @@
 //! instance. The form returns a one-line note describing what the analysis
 //! does; validation is rendered by the caller.
 
-use egui::Ui;
+use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 
 use crate::simulation::plan::AnalysisDraft;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, check_row, choice_row, input_row};
-use crate::workbench::design_system::property_row;
+use crate::ui::widgets::{
+    Button, check_row as inspector_check_row, choice_row as inspector_choice_row,
+    input_row as inspector_input_row, mono_input, select,
+};
+use crate::workbench::design_system::property_row as inspector_property_row;
 
 const SWEEP_KINDS: &[&str] = &["dec", "oct", "lin"];
+const FIELD_COLUMN_GAP: f32 = 14.0;
+const FIELD_ROW_GAP: f32 = 10.0;
+const FIELD_LABEL_HEIGHT: f32 = 15.0;
+
+#[derive(Clone, Copy)]
+struct PendingCell(Rect);
+
+impl Default for PendingCell {
+    fn default() -> Self {
+        Self(Rect::NOTHING)
+    }
+}
+
+fn pending_cell_id(ui: &Ui) -> egui::Id {
+    ui.id().with("analysis-form.pending-cell")
+}
+
+fn clear_pending_cell(ui: &mut Ui) {
+    let id = pending_cell_id(ui);
+    ui.data_mut(|data| {
+        data.remove_temp::<PendingCell>(id);
+    });
+}
+
+fn uses_two_column_fields(ui: &Ui) -> bool {
+    ui.available_width() >= 420.0
+}
+
+fn next_field_cell(ui: &mut Ui) -> Rect {
+    let id = pending_cell_id(ui);
+    if let Some(PendingCell(rect)) = ui.data_mut(|data| data.remove_temp::<PendingCell>(id)) {
+        return rect;
+    }
+    let t = Tokens::get(ui.ctx());
+    let row_height = FIELD_LABEL_HEIGHT + 5.0 + t.metrics.ctl_h;
+    let (row, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), row_height), egui::Sense::hover());
+    let cell_width = ((row.width() - FIELD_COLUMN_GAP) * 0.5).max(1.0);
+    let left = Rect::from_min_size(row.min, vec2(cell_width, row.height()));
+    let right = Rect::from_min_max(
+        egui::pos2(left.right() + FIELD_COLUMN_GAP, row.top()),
+        row.max,
+    );
+    ui.data_mut(|data| data.insert_temp(id, PendingCell(right)));
+    left
+}
+
+fn field_cell<R>(ui: &mut Ui, label: &str, add_control: impl FnOnce(&mut Ui) -> R) -> R {
+    let t = Tokens::get(ui.ctx());
+    let rect = next_field_cell(ui);
+    let mut cell = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    cell.set_clip_rect(rect.intersect(ui.clip_rect()));
+    cell.spacing_mut().item_spacing.y = 5.0;
+    let (label_rect, _) = cell.allocate_exact_size(
+        vec2(cell.available_width(), FIELD_LABEL_HEIGHT),
+        egui::Sense::hover(),
+    );
+    cell.painter().text(
+        label_rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    add_control(&mut cell)
+}
+
+fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
+    if !uses_two_column_fields(ui) {
+        return inspector_input_row(ui, label, value);
+    }
+    field_cell(ui, label, |ui| mono_input(ui, value, ui.available_width()))
+}
+
+fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> bool {
+    if !uses_two_column_fields(ui) {
+        return inspector_choice_row(ui, label, options, value);
+    }
+    field_cell(ui, label, |ui| {
+        let options = options
+            .iter()
+            .map(|option| (*option).to_owned())
+            .collect::<Vec<_>>();
+        let current = options
+            .get(*value)
+            .map_or("Schema unavailable", String::as_str);
+        let salt = format!("analysis-field-{}-{label}", ui.id().value());
+        if let Some(index) = select(ui, &salt, label, current, &options, ui.available_width()) {
+            *value = index;
+            true
+        } else {
+            false
+        }
+    })
+}
+
+fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
+    if !uses_two_column_fields(ui) {
+        return inspector_check_row(ui, label, value);
+    }
+    field_cell(ui, label, |ui| {
+        ui.add_sized(
+            vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h),
+            egui::Checkbox::new(value, if *value { "Enabled" } else { "Disabled" }),
+        )
+        .changed()
+    })
+}
+
+fn property_row(ui: &mut Ui, label: &str, value: &str) {
+    if !uses_two_column_fields(ui) {
+        inspector_property_row(ui, label, value);
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    field_cell(ui, label, |ui| {
+        let (rect, _) = ui.allocate_exact_size(
+            vec2(ui.available_width(), t.metrics.ctl_h),
+            egui::Sense::hover(),
+        );
+        ui.painter().rect(
+            rect,
+            2.0,
+            t.color.bg_inset,
+            egui::Stroke::new(1.0, t.color.border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            rect.left_center() + vec2(8.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            value,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text,
+        );
+    });
+}
 
 /// Mono sub-header inside a form ("TONE 2", "PORT 1").
 fn sub_header(ui: &mut Ui, text: &str) {
+    clear_pending_cell(ui);
     let t = Tokens::get(ui.ctx());
     ui.add_space(6.0);
     let mut job = egui::text::LayoutJob::default();
@@ -34,6 +178,7 @@ fn sub_header(ui: &mut Ui, text: &str) {
 
 /// A full-width ghost add/remove action line. Returns `true` on click.
 fn action_line(ui: &mut Ui, label: &str) -> bool {
+    clear_pending_cell(ui);
     Button::new(label)
         .ghost()
         .min_width(ui.available_width())
@@ -43,7 +188,9 @@ fn action_line(ui: &mut Ui, label: &str) -> bool {
 
 /// Render the form for `draft`; returns the explanatory note.
 pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
-    match draft {
+    clear_pending_cell(ui);
+    ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;
+    let note = match draft {
         AnalysisDraft::OperatingPoint(setup) => {
             setup.ensure_initialized();
             property_row(ui, "Temperature", "PVT run set");
@@ -397,5 +544,7 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             input_row(ui, "f2/f1", &mut setup.f2_over_f1);
             "Harmonic and intermodulation distortion; empty ratio means single-tone."
         }
-    }
+    };
+    clear_pending_cell(ui);
+    note
 }

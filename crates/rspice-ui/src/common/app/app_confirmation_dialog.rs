@@ -202,6 +202,7 @@ impl RSpiceApp {
                     }
                     DialogChoice::Ghost | DialogChoice::Cancelled => {
                         self.state.dialogs.project_review_dialog.close();
+                        self.state.workbench.cancel_project_close();
                     }
                     DialogChoice::None => {}
                 }

@@ -37,6 +37,7 @@ fn run_monte_carlo(
         super::ensure_not_aborted(abort)?;
         variables.push(MonteCarloVariableResult {
             name: variable.name,
+            samples: variable.samples,
             mean: variable.mean,
             std_dev: variable.std_dev,
             min: variable.min,
@@ -47,6 +48,7 @@ fn run_monte_carlo(
     }
 
     Ok(SimulationResult::MonteCarlo {
+        seed: data.seed,
         runs_requested: data.runs_requested,
         runs_completed: data.runs_completed,
         num_failures: data.num_failures,

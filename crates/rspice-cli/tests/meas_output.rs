@@ -239,8 +239,8 @@ fn ac_measurements_evaluate() {
 fn noise_measurements_and_goal_checks() {
     let dir = test_dir("noise_goal");
     let deck = dir.join("rc_noise.sp");
-    // 1k resistor at 300.15K: sqrt(4kTR) = 4.071e-9 V/sqrt(Hz), flat well
-    // below the 1591 Hz corner.
+    // 1k resistor at 300.15K: ONOISE exposes the one-sided power spectral
+    // density, 4kTR = 1.6576e-17 V^2/Hz, flat well below the 1591 Hz corner.
     std::fs::write(
         &deck,
         "* RC noise\n\
@@ -248,7 +248,7 @@ fn noise_measurements_and_goal_checks() {
          R1 in out 1k\n\
          C1 out 0 100n\n\
          .NOISE V(out) V1 DEC 20 10 100k\n\
-         .MEAS NOISE spot FIND ONOISE AT=10 GOAL=4.07e-9 TOL=1e-11\n\
+         .MEAS NOISE spot FIND ONOISE AT=10 GOAL=1.657e-17 TOL=1e-20\n\
          .END\n",
     )
     .expect("write deck");
@@ -270,7 +270,7 @@ fn noise_measurements_and_goal_checks() {
          R1 in out 1k\n\
          C1 out 0 100n\n\
          .NOISE V(out) V1 DEC 20 10 100k\n\
-         .MEAS NOISE spot FIND ONOISE AT=10 GOAL=9e-9 TOL=1e-11\n\
+         .MEAS NOISE spot FIND ONOISE AT=10 GOAL=8.1e-17 TOL=1e-20\n\
          .END\n",
     )
     .expect("write deck");

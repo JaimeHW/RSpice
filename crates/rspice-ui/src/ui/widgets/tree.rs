@@ -321,7 +321,7 @@ impl<'a> TreeRow<'a> {
             );
         }
 
-        theme::paint_focus_ring(ui, &response, rect);
+        theme::paint_focus_ring_outset(ui, &response, rect);
 
         let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         if label_elided {

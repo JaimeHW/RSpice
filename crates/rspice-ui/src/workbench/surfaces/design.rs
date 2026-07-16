@@ -81,11 +81,7 @@ fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
             },
         );
     }
-    let maximum_frame_width = if ctx.content_rect().width() <= 820.0 {
-        (content_rect.width() - 75.0).max(80.0)
-    } else {
-        (content_rect.width() - 22.0).max(80.0)
-    };
+    let maximum_frame_width = (content_rect.width() * 0.5 - 16.0).max(80.0);
 
     egui::Area::new(Id::new("workbench.design.canvas-breadcrumb"))
         .order(Order::Middle)
@@ -94,13 +90,17 @@ fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(t.color.bg_panel)
+                .fill(with_alpha(t.color.bg_panel, 240))
                 .stroke(Stroke::new(1.0, t.color.border))
                 .corner_radius(t.radius)
-                .inner_margin(egui::Margin::symmetric(9, 5))
+                .inner_margin(egui::Margin::symmetric(9, 0))
+                .shadow(t.shadow())
                 .show(ui, |ui| {
                     ui.set_max_width((maximum_frame_width - 18.0).max(62.0));
-                    ui.add(egui::Label::new(text).truncate());
+                    ui.set_min_height(27.0);
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(text).truncate());
+                    });
                 });
         });
 }
@@ -135,13 +135,16 @@ fn canvas_check_note(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(t.color.bg_panel)
+                .fill(with_alpha(t.color.bg_panel, 245))
                 .stroke(Stroke::new(1.0, color.gamma_multiply(0.55)))
                 .corner_radius(t.radius)
-                .inner_margin(egui::Margin::symmetric(9, 5))
+                .inner_margin(egui::Margin::symmetric(8, 0))
+                .shadow(t.shadow())
                 .show(ui, |ui| {
+                    ui.set_max_width((content_rect.width() * 0.5 - 32.0).max(80.0));
+                    ui.set_min_height(27.0);
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.spacing_mut().item_spacing.x = 7.0;
                         let (icon_rect, _) =
                             ui.allocate_exact_size(egui::Vec2::splat(13.0), egui::Sense::hover());
                         match tone {
@@ -157,6 +160,10 @@ fn canvas_check_note(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
                     });
                 });
         });
+}
+
+fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
 fn check_note_content(state: &AppState) -> (String, CheckNoteTone) {

@@ -1378,4 +1378,40 @@ mod tests {
             Some("Appearance")
         );
     }
+
+    #[test]
+    fn desktop_rail_and_page_are_contained_by_the_full_preferences_surface() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_089.0, 900.0))),
+            ..Default::default()
+        };
+        let mut category = PreferenceCategory::Appearance;
+        let output = ctx.run(input, |ctx| {
+            let _ = show(ctx, &mut category, true, |ui, _| {
+                page_heading(ui, "Appearance", "Appearance preferences");
+            });
+        });
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+        let dialog = node_bounds(&nodes, egui::accesskit::Role::Dialog, "Preferences");
+        let current_category = node_bounds(&nodes, egui::accesskit::Role::Button, "Appearance");
+        let page_heading = node_bounds(&nodes, egui::accesskit::Role::Heading, "Appearance");
+
+        assert_eq!(dialog.x1 - dialog.x0, DESKTOP_WIDTH as f64);
+        assert_eq!(
+            current_category.x1 - current_category.x0,
+            CATEGORY_RAIL_WIDTH as f64
+        );
+        assert!(current_category.x0 >= dialog.x0);
+        assert!(current_category.x1 <= dialog.x1);
+        assert!(current_category.y0 >= dialog.y0 + HEADER_HEIGHT as f64);
+        assert!(page_heading.x0 >= current_category.x1);
+        assert!(page_heading.x1 <= dialog.x1);
+    }
 }

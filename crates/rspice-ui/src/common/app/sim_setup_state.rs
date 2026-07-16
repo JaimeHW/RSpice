@@ -278,6 +278,12 @@ pub struct SimSetupState {
     /// Keyboard-active row in the palette's filtered list.
     #[serde(skip)]
     pub palette_active: usize,
+    /// One-shot request to reveal the keyboard-active catalog row after open.
+    ///
+    /// The scroll area's retained viewport must not reopen halfway through the
+    /// catalog after a previous browse session.
+    #[serde(skip)]
+    pub palette_scroll_to_active: bool,
 }
 
 impl SimSetupState {
@@ -363,6 +369,7 @@ impl SimSetupState {
         self.palette_open = false;
         self.palette_query.clear();
         self.palette_active = 0;
+        self.palette_scroll_to_active = false;
         self.refresh_legacy_analysis_projections();
     }
 

@@ -112,6 +112,33 @@ mod tests {
     }
 
     #[test]
+    fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
+        let result = WorkerSimulationResult::MonteCarlo {
+            seed: 0xfedc_ba98_7654_3210,
+            runs_requested: 4,
+            runs_completed: 4,
+            num_failures: 0,
+            all_converged: true,
+            variables: vec![WorkerMonteCarloVariable {
+                name: "V(out)".to_owned(),
+                samples: vec![0.91, 0.97, 1.02, 1.08],
+                mean: 0.995,
+                std_dev: 0.073_711_6,
+                min: 0.91,
+                max: 1.08,
+                histogram: vec![1, 1, 2],
+                bin_edges: vec![0.91, 0.95, 1.0, 1.08],
+            }],
+        };
+
+        let encoded = serde_json::to_string(&result).expect("result serializes");
+        let decoded: WorkerSimulationResult =
+            serde_json::from_str(&encoded).expect("result deserializes");
+
+        assert_eq!(decoded, result);
+    }
+
+    #[test]
     fn worker_result_payload_estimate_counts_high_volume_arrays() {
         let transient = WorkerSimulationResult::Transient {
             time: vec![0.0, 1.0],
@@ -259,6 +286,37 @@ mod tests {
             }
             other => panic!("expected transient transport, got {other:?}"),
         }
+
+        assert_eq!(
+            transport.into_response().expect("transport reconstructs"),
+            response
+        );
+    }
+
+    #[test]
+    fn worker_transport_retains_monte_carlo_seed_and_samples() {
+        let response = WorkerResponse {
+            id: 91,
+            outcome: WorkerOutcome::Success(WorkerSimulationResult::MonteCarlo {
+                seed: 77,
+                runs_requested: 3,
+                runs_completed: 3,
+                num_failures: 0,
+                all_converged: true,
+                variables: vec![WorkerMonteCarloVariable {
+                    name: "V(out)".to_owned(),
+                    samples: vec![0.9, 1.0, 1.1],
+                    mean: 1.0,
+                    std_dev: 0.1,
+                    min: 0.9,
+                    max: 1.1,
+                    histogram: vec![1, 1, 1],
+                    bin_edges: vec![0.9, 0.95, 1.05, 1.1],
+                }],
+            }),
+        };
+
+        let transport = WorkerResponseTransport::from_response(response.clone());
 
         assert_eq!(
             transport.into_response().expect("transport reconstructs"),
@@ -1241,12 +1299,14 @@ mod tests {
         }
 
         let monte_carlo = SimulationResult::MonteCarlo {
+            seed: 0x1234_5678_9abc_def0,
             runs_requested: 20,
             runs_completed: 18,
             num_failures: 2,
             all_converged: false,
             variables: vec![crate::simulation::results::MonteCarloVariableResult {
                 name: "V(out)".to_string(),
+                samples: vec![0.9, 1.0, 1.1],
                 mean: 1.0,
                 std_dev: 0.05,
                 min: 0.9,
@@ -1258,17 +1318,20 @@ mod tests {
         let monte_carlo = round_trip_result(monte_carlo);
         match monte_carlo {
             SimulationResult::MonteCarlo {
+                seed,
                 runs_requested,
                 runs_completed,
                 num_failures,
                 all_converged,
                 variables,
             } => {
+                assert_eq!(seed, 0x1234_5678_9abc_def0);
                 assert_eq!(runs_requested, 20);
                 assert_eq!(runs_completed, 18);
                 assert_eq!(num_failures, 2);
                 assert!(!all_converged);
                 assert_eq!(variables[0].name, "V(out)");
+                assert_eq!(variables[0].samples, vec![0.9, 1.0, 1.1]);
                 assert_eq!(variables[0].histogram, vec![2, 10, 6]);
                 assert_eq!(variables[0].bin_edges, vec![0.9, 0.95, 1.05, 1.1]);
             }
@@ -3900,6 +3963,7 @@ pub(crate) enum WorkerSimulationResult {
         num_failures: usize,
     },
     MonteCarlo {
+        seed: u64,
         runs_requested: usize,
         runs_completed: usize,
         num_failures: usize,
@@ -4644,12 +4708,14 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 num_failures,
             }),
             SimulationResult::MonteCarlo {
+                seed,
                 runs_requested,
                 runs_completed,
                 num_failures,
                 all_converged,
                 variables,
             } => Ok(Self::MonteCarlo {
+                seed,
                 runs_requested,
                 runs_completed,
                 num_failures,
@@ -4801,12 +4867,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 num_failures,
             },
             WorkerSimulationResult::MonteCarlo {
+                seed,
                 runs_requested,
                 runs_completed,
                 num_failures,
                 all_converged,
                 variables,
             } => Self::MonteCarlo {
+                seed,
                 runs_requested,
                 runs_completed,
                 num_failures,
@@ -4945,6 +5013,7 @@ impl From<WorkerNoiseContributorRow> for NoiseContributorRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerMonteCarloVariable {
     pub name: String,
+    pub samples: Vec<f64>,
     pub mean: f64,
     pub std_dev: f64,
     pub min: f64,
@@ -4957,7 +5026,7 @@ pub(crate) struct WorkerMonteCarloVariable {
 impl WorkerMonteCarloVariable {
     fn estimated_numeric_payload_bytes(&self) -> usize {
         sum_payload_bytes([
-            f64_payload_bytes(4),
+            f64_payload_bytes(4usize.saturating_add(self.samples.len())),
             usize_payload_bytes(self.histogram.len()),
             f64_payload_bytes(self.bin_edges.len()),
         ])
@@ -4968,6 +5037,7 @@ impl From<MonteCarloVariableResult> for WorkerMonteCarloVariable {
     fn from(value: MonteCarloVariableResult) -> Self {
         Self {
             name: value.name,
+            samples: value.samples,
             mean: value.mean,
             std_dev: value.std_dev,
             min: value.min,
@@ -4982,6 +5052,7 @@ impl From<WorkerMonteCarloVariable> for MonteCarloVariableResult {
     fn from(value: WorkerMonteCarloVariable) -> Self {
         Self {
             name: value.name,
+            samples: value.samples,
             mean: value.mean,
             std_dev: value.std_dev,
             min: value.min,

@@ -93,6 +93,8 @@ pub enum SimulationResult {
 
     /// Monte Carlo statistical analysis results.
     MonteCarlo {
+        /// Effective random seed used by the Monte Carlo engine.
+        seed: u64,
         /// Number of samples requested by .MC
         runs_requested: usize,
         /// Number of converged runs completed

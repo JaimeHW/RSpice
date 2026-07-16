@@ -45,10 +45,27 @@ impl LayoutSpec {
         Self::resolve_with_pointer(viewport_width, viewport_height, false, state)
     }
 
+    #[cfg(test)]
     pub fn resolve_with_pointer(
         viewport_width: f32,
         viewport_height: f32,
         coarse_pointer: bool,
+        state: &WorkbenchState,
+    ) -> Self {
+        Self::resolve_with_pointer_and_document_strip(
+            viewport_width,
+            viewport_height,
+            coarse_pointer,
+            true,
+            state,
+        )
+    }
+
+    pub fn resolve_with_pointer_and_document_strip(
+        viewport_width: f32,
+        viewport_height: f32,
+        coarse_pointer: bool,
+        document_strip_visible: bool,
         state: &WorkbenchState,
     ) -> Self {
         let width_class = WidthClass::for_width(viewport_width);
@@ -66,10 +83,31 @@ impl LayoutSpec {
         let touch_console = compact_shell || coarse_pointer;
         let maximized = state.console_maximized && !touch_console;
         let metrics = ChromeMetrics::resolve(viewport_width, short_landscape, coarse_pointer);
+        let phone_navigation_height = if compact_shell { 54.0 } else { 0.0 };
+        let center_stack_height = (viewport_height
+            - metrics.title
+            - metrics.toolbar
+            - if document_strip_visible {
+                metrics.document
+            } else {
+                0.0
+            }
+            - metrics.status
+            - phone_navigation_height)
+            .max(metrics.console_tab);
         let (console_min_height, console_max_height, console_height) = if show_console_body {
-            let (minimum, maximum) =
-                console_height_bounds(touch_console, viewport_height, maximized);
+            let (minimum, maximum) = console_height_bounds(
+                touch_console,
+                viewport_height,
+                center_stack_height,
+                maximized,
+            );
             let requested = if maximized {
+                maximum
+            } else if touch_console {
+                // Touch compositions do not expose a splitter. Their expanded
+                // sheet therefore always uses the mockup's deterministic
+                // viewport-relative height instead of a desktop resize.
                 maximum
             } else {
                 state.console_height
@@ -133,10 +171,16 @@ impl LayoutSpec {
             // removes its splitter. Wide layouts restore the persisted dock.
             navigator_width: if matches!(width_class, WidthClass::Desktop) {
                 228.0
-            } else {
+            } else if state.navigator_width_custom {
                 state.navigator_width.clamp(220.0, 440.0)
+            } else {
+                (viewport_width * 0.18).clamp(220.0, 256.0)
             },
-            inspector_width: state.inspector_width.clamp(278.0, 440.0),
+            inspector_width: if state.inspector_width_custom {
+                state.inspector_width.clamp(278.0, 440.0)
+            } else {
+                (viewport_width * 0.22).clamp(278.0, 312.0)
+            },
             console_min_height,
             console_max_height,
             console_height,
@@ -192,20 +236,24 @@ impl ChromeMetrics {
             metrics.document = 34.0;
             metrics.status = 0.0;
         }
-        if coarse_pointer {
-            // The final coarse-pointer contract is independent of viewport
-            // width: title, toolbar, and their primary controls all retain a
-            // 44 px minimum target on wide touch workstations too.
+        if width <= 820.0 || coarse_pointer {
+            // The compact shell and a raw coarse-pointer capability both use
+            // one coherent touch-density grid.  Mixing 44 px content controls
+            // with 40/42 px title rows, a 36 px document strip, or a 31 px
+            // console strip clips borders and produces the broken vertical
+            // spacing the responsive mockup explicitly avoids.
             metrics.title = 44.0;
             metrics.toolbar = 48.0;
             metrics.toolbar_control = 44.0;
             metrics.run_control = 44.0;
             metrics.document = 44.0;
             metrics.console_tab = 44.0;
-            // The mockup's explicit tablet platform uses a 44 px status row;
-            // phone and short-landscape compositions intentionally hide it.
+            // Tablet compositions retain a touch-sized status row. Phone and
+            // short-landscape compositions intentionally hide it.
             if width > 560.0 && width <= 1200.0 && !short_landscape {
                 metrics.status = 44.0;
+            } else if width <= 560.0 || short_landscape {
+                metrics.status = 0.0;
             }
         }
 
@@ -213,22 +261,30 @@ impl ChromeMetrics {
     }
 }
 
-fn console_height_bounds(touch_layout: bool, viewport_height: f32, maximized: bool) -> (f32, f32) {
+fn console_height_bounds(
+    touch_layout: bool,
+    viewport_height: f32,
+    center_stack_height: f32,
+    maximized: bool,
+) -> (f32, f32) {
     if touch_layout {
         // Match the touch composition: 42% of viewport height capped at
         // 260 px, with the short-landscape override of 45% capped at 180 px.
         // Ninety pixels is the mockup's splitter accessibility floor.
-        let cap = if viewport_height <= 500.0 {
+        let height = if viewport_height <= 500.0 {
             (viewport_height * 0.45).min(180.0)
         } else {
             (viewport_height * 0.42).min(260.0)
-        }
-        .max(90.0);
-        (90.0, cap)
+        };
+        // Preserve the exact viewport formula even in an exceptionally short
+        // host window where the ordinary 90 px splitter floor cannot fit.
+        (height.min(90.0), height)
     } else if maximized {
-        (112.0, 520.0)
+        let available = center_stack_height.max(90.0);
+        (available, available)
     } else {
-        (112.0, 420.0)
+        let maximum = (center_stack_height - 120.0).clamp(90.0, 520.0);
+        (90.0, maximum)
     }
 }
 
@@ -250,9 +306,10 @@ mod tests {
         assert!(!spec.show_pvt_selector);
         assert_eq!(spec.toolbar_tool_limit, Some(2));
         assert!(!spec.show_status_bar);
-        assert_eq!(spec.title_bar_height, 40.0);
-        assert_eq!(spec.toolbar_height, 46.0);
-        assert_eq!(spec.document_bar_height, 36.0);
+        assert_eq!(spec.title_bar_height, 44.0);
+        assert_eq!(spec.toolbar_height, 48.0);
+        assert_eq!(spec.document_bar_height, 44.0);
+        assert_eq!(spec.console_height, 44.0);
         assert_eq!(spec.phone_navigation_height, 54.0);
     }
 
@@ -264,10 +321,13 @@ mod tests {
         assert!(spec.navigator_uses_drawer);
         assert!(spec.inspector_uses_drawer);
         assert!(!spec.workspaces_uses_drawer);
-        assert_eq!(spec.title_bar_height, 42.0);
+        assert_eq!(spec.title_bar_height, 44.0);
+        assert_eq!(spec.toolbar_height, 48.0);
         assert_eq!(spec.toolbar_control_height, 44.0);
         assert_eq!(spec.run_control_height, 44.0);
-        assert_eq!(spec.status_bar_height, 27.0);
+        assert_eq!(spec.document_bar_height, 44.0);
+        assert_eq!(spec.status_bar_height, 44.0);
+        assert_eq!(spec.console_height, 44.0);
     }
 
     #[test]
@@ -294,6 +354,101 @@ mod tests {
         assert!(spec.navigator_resizable);
         assert!(spec.inspector_resizable);
         assert!(spec.show_run_config_selector);
+        assert!((spec.navigator_width - 230.4).abs() < 0.001);
+        assert!((spec.inspector_width - 281.6).abs() < 0.001);
+    }
+
+    #[test]
+    fn responsive_dock_defaults_follow_a_1440_to_1280_viewport_change() {
+        let state = WorkbenchState::default();
+        let at_1440 = LayoutSpec::resolve(1_440.0, 900.0, &state);
+        let at_1280 = LayoutSpec::resolve(1_280.0, 900.0, &state);
+
+        assert_eq!(at_1440.navigator_width, 256.0);
+        assert_eq!(at_1440.inspector_width, 312.0);
+        assert!((at_1280.navigator_width - 230.4).abs() < 0.001);
+        assert!((at_1280.inspector_width - 281.6).abs() < 0.001);
+        assert!(!state.navigator_width_custom);
+        assert!(!state.inspector_width_custom);
+    }
+
+    #[test]
+    fn explicit_dock_resizes_override_responsive_defaults() {
+        let mut state = WorkbenchState::default();
+        state.navigator_width = 340.0;
+        state.navigator_width_custom = true;
+        state.inspector_width = 390.0;
+        state.inspector_width_custom = true;
+        let spec = LayoutSpec::resolve(1_280.0, 900.0, &state);
+
+        assert_eq!(spec.navigator_width, 340.0);
+        assert_eq!(spec.inspector_width, 390.0);
+    }
+
+    #[test]
+    fn reset_layout_restores_responsive_docks_and_collapsed_console() {
+        let mut state = WorkbenchState::default();
+        state.navigator_width = 340.0;
+        state.navigator_width_custom = true;
+        state.inspector_width = 390.0;
+        state.inspector_width_custom = true;
+        state.console_height = 410.0;
+        state.console_visible = true;
+        state.console_maximized = true;
+
+        state.reset_layout();
+        let spec = LayoutSpec::resolve(1_440.0, 900.0, &state);
+
+        assert_eq!(spec.navigator_width, 256.0);
+        assert_eq!(spec.inspector_width, 312.0);
+        assert!(!state.navigator_width_custom);
+        assert!(!state.inspector_width_custom);
+        assert!(!spec.show_console_body);
+        assert_eq!(spec.console_height, 31.0);
+    }
+
+    #[test]
+    fn desktop_console_uses_the_mockup_resize_range() {
+        let mut state = WorkbenchState::default();
+        state.console_visible = true;
+        state.console_height = 900.0;
+
+        let spec = LayoutSpec::resolve(1_440.0, 900.0, &state);
+
+        assert_eq!(spec.console_min_height, 90.0);
+        assert_eq!(spec.console_max_height, 520.0);
+        assert_eq!(spec.console_height, 520.0);
+        assert!(spec.console_resizable);
+    }
+
+    #[test]
+    fn maximized_console_consumes_the_complete_center_stack() {
+        let mut state = WorkbenchState::default();
+        state.console_maximized = true;
+
+        let spec = LayoutSpec::resolve(1_440.0, 900.0, &state);
+        let expected = 900.0 - 35.0 - 45.0 - 34.0 - 25.0;
+
+        assert_eq!(spec.console_min_height, expected);
+        assert_eq!(spec.console_max_height, expected);
+        assert_eq!(spec.console_height, expected);
+        assert!(!spec.console_resizable);
+    }
+
+    #[test]
+    fn maximized_console_recovers_hidden_single_document_strip_height() {
+        let mut state = WorkbenchState::default();
+        state.console_maximized = true;
+
+        let spec = LayoutSpec::resolve_with_pointer_and_document_strip(
+            1_440.0, 900.0, false, false, &state,
+        );
+        let expected = 900.0 - 35.0 - 45.0 - 25.0;
+
+        assert_eq!(spec.console_min_height, expected);
+        assert_eq!(spec.console_max_height, expected);
+        assert_eq!(spec.console_height, expected);
+        assert!(!spec.console_resizable);
     }
 
     #[test]
@@ -323,6 +478,30 @@ mod tests {
         assert_eq!(spec.status_bar_height, 44.0);
         assert_eq!(spec.console_height, 260.0);
         assert_eq!(spec.console_max_height, 260.0);
+        assert!(!spec.console_resizable);
+    }
+
+    #[test]
+    fn tablet_console_uses_exact_42dvh_cap_without_desktop_resize_state() {
+        let mut state = WorkbenchState::default();
+        state.console_visible = true;
+
+        let spec = LayoutSpec::resolve_with_pointer(768.0, 1_024.0, true, &state);
+
+        assert_eq!(spec.console_height, 260.0);
+        assert_eq!(spec.console_max_height, 260.0);
+        assert!(!spec.console_resizable);
+    }
+
+    #[test]
+    fn phone_console_uses_exact_uncapped_42dvh_height() {
+        let mut state = WorkbenchState::default();
+        state.console_visible = true;
+
+        let spec = LayoutSpec::resolve_with_pointer(430.0, 600.0, true, &state);
+
+        assert!((spec.console_height - 252.0).abs() < 0.001);
+        assert!((spec.console_max_height - 252.0).abs() < 0.001);
         assert!(!spec.console_resizable);
     }
 
@@ -364,6 +543,18 @@ mod tests {
         assert_eq!(spec.console_max_height, 175.5);
         assert!(!spec.show_pvt_selector);
         assert_eq!(spec.toolbar_tool_limit, Some(3));
+    }
+
+    #[test]
+    fn short_landscape_console_uses_exact_45dvh_height_by_default() {
+        let mut state = WorkbenchState::default();
+        state.console_visible = true;
+
+        let spec = LayoutSpec::resolve(844.0, 390.0, &state);
+
+        assert!((spec.console_height - 175.5).abs() < 0.001);
+        assert!((spec.console_max_height - 175.5).abs() < 0.001);
+        assert!(!spec.console_resizable);
     }
 
     #[test]

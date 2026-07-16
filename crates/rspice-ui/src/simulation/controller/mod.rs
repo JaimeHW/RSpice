@@ -910,12 +910,22 @@ impl SimulationController {
                     // --- Phase 10-11-12 Integration Glue (run once per analysis) ---
 
                     // Run Yield Analysis (if MC results are present)
-                    state.simulation.yield_results = self
-                        .yield_manager
-                        .analyze(std::slice::from_ref(&sim_result))
-                        .values()
-                        .cloned()
-                        .collect();
+                    if let Some(yield_results) = self.yield_manager.analyze_monte_carlo(&sim_result)
+                    {
+                        let yield_provenance = target_run_id
+                            .and_then(|run_sequence| state.simulation.run_by_sequence(run_sequence))
+                            .and_then(|run| {
+                                crate::services::YieldAnalysisProvenance::from_monte_carlo_result(
+                                    run.run_id,
+                                    run.dataset_id,
+                                    &sim_result,
+                                )
+                            });
+                        state.simulation.replace_yield_evidence(
+                            yield_results.values().cloned().collect(),
+                            yield_provenance,
+                        );
+                    }
 
                     // Reliability results are populated by dedicated reliability analysis runs.
                     if let crate::simulation::SimulationResult::Reliability {

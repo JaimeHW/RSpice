@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::fonts;
 use super::palette::{INSTRUMENT_DARK, INSTRUMENT_LIGHT, Palette};
-use super::tokens::{self, Density, Direction, Mode, Tokens};
+use super::tokens::{self, Density, Direction, Metrics, Mode, Tokens};
 
 /// Paint the design-system keyboard focus indicator for a custom widget.
 /// Stock egui widgets draw their own focus state; painter-backed controls
@@ -219,6 +219,25 @@ impl Theme {
         ctx.set_style(build_style(&t));
         t.install(ctx);
     }
+
+    /// Re-resolve the active theme for the current input capability and
+    /// viewport. Responsive touch targets are transient layout policy, not a
+    /// persisted density preference: leaving a narrow/coarse viewport must
+    /// restore the user's Compact or Relaxed metrics immediately.
+    pub(crate) fn apply_responsive_metrics(self, ctx: &Context, touch_targets: bool) {
+        let mut effective = self;
+        effective.mode = self.mode.effective(ctx);
+        let mut t = effective.tokens();
+        if touch_targets {
+            t.metrics = Metrics {
+                ctl_h: 44.0,
+                row_h: 44.0,
+                bar_pad: 9.0,
+            };
+        }
+        ctx.set_style(build_style(&t));
+        t.install(ctx);
+    }
 }
 
 fn apply_engineering_canvas_palette(tokens: &mut Tokens, canvas: Palette) {
@@ -291,7 +310,7 @@ fn build_style(t: &Tokens) -> egui::Style {
     style.spacing.menu_margin = egui::Margin::same(5);
     style.spacing.window_margin = egui::Margin::same(tokens::SP_5 as i8);
     style.spacing.indent = 16.0;
-    style.spacing.interact_size = egui::vec2(40.0, m.ctl_h);
+    style.spacing.interact_size = egui::vec2(40.0_f32.max(m.ctl_h), m.ctl_h);
     style.spacing.combo_height = 260.0;
     style.spacing.icon_width = 14.0;
     style.spacing.icon_width_inner = 8.0;
@@ -465,6 +484,26 @@ mod tests {
         assert_eq!(style.visuals.selection.bg_fill, t.color.accent_dim);
         assert_eq!(style.visuals.hyperlink_color, t.color.accent);
         assert!(style.visuals.dark_mode);
+    }
+
+    #[test]
+    fn responsive_touch_metrics_are_transient_and_restore_user_density() {
+        let ctx = Context::default();
+        let theme = Theme {
+            density: Density::Relaxed,
+            ..Theme::default()
+        };
+
+        theme.apply_responsive_metrics(&ctx, true);
+        assert_eq!(Tokens::get(&ctx).metrics.ctl_h, 44.0);
+        assert_eq!(Tokens::get(&ctx).metrics.row_h, 44.0);
+        assert_eq!(ctx.style().spacing.interact_size.y, 44.0);
+        assert_eq!(ctx.style().spacing.interact_size.x, 44.0);
+
+        theme.apply_responsive_metrics(&ctx, false);
+        assert_eq!(Tokens::get(&ctx).metrics.ctl_h, 32.0);
+        assert_eq!(Tokens::get(&ctx).metrics.row_h, 33.0);
+        assert_eq!(ctx.style().spacing.interact_size.y, 32.0);
     }
 
     #[test]

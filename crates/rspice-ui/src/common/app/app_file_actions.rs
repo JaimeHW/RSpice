@@ -38,7 +38,9 @@ impl RSpiceApp {
 
         match response {
             ConfirmationResponse::Cancel => {
-                // User cancelled - do nothing
+                if pending == Some(ConfirmationAction::CloseProject) {
+                    self.state.workbench.cancel_project_close();
+                }
             }
             ConfirmationResponse::No => {
                 // Discard changes and proceed

@@ -63,12 +63,16 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                 // keeps navigator/run/inspector controls reachable and lets
                 // this lane scroll when a dense engineering toolbar exceeds
                 // the tablet or phone budget.
+                let run_width = reserved_run_control_width(ui, app, layout);
+                let pvt_width = reserved_pvt_selector_width(ui, app);
                 let context_width = context_tools_width(
                     ui.available_width(),
                     layout,
                     padding,
                     outer_gap,
                     show_simulation_context,
+                    run_width,
+                    pvt_width,
                 );
                 egui::ScrollArea::horizontal()
                     .id_salt("workbench.context_toolbar.tools")
@@ -163,15 +167,72 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
     if viewport_width <= 560.0 { 2.0 } else { 5.0 }
 }
 
+fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec) -> f32 {
+    let label = if app.state.simulation.is_running {
+        "Stop".to_owned()
+    } else if layout.compact_shell {
+        format!(
+            "Run · {}",
+            app.state.sim_setup.reference_pvt.process.short_name()
+        )
+    } else {
+        "Run plan".to_owned()
+    };
+    let t = Tokens::get(ui.ctx());
+    let label_width = ui
+        .painter()
+        .layout_no_wrap(
+            label,
+            theme::sans(tokens::FS_2, FontWeight::SemiBold),
+            t.color.text,
+        )
+        .size()
+        .x;
+    let primary_width = (42.0 + label_width).max(67.0);
+    let menu_width = if layout.run_control_height >= 44.0 {
+        44.0
+    } else {
+        25.0
+    };
+    primary_width + menu_width
+}
+
+fn reserved_pvt_selector_width(ui: &egui::Ui, app: &RSpiceApp) -> f32 {
+    let reference = app.state.sim_setup.reference_pvt;
+    let label = format!(
+        "{} · {} °C",
+        reference.process.short_name(),
+        pvt_temperature_label(reference.temperature_celsius),
+    );
+    let t = Tokens::get(ui.ctx());
+    ui.painter()
+        .layout_no_wrap(
+            label,
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            t.color.text_dim,
+        )
+        .size()
+        .x
+        + 42.0
+}
+
 fn context_tools_width(
     available_width: f32,
     layout: LayoutSpec,
     right_padding: f32,
     outer_gap: f32,
     show_simulation_context: bool,
+    run_width: f32,
+    pvt_width: f32,
 ) -> f32 {
     (available_width
-        - trailing_controls_width(layout, outer_gap, show_simulation_context)
+        - trailing_controls_width(
+            layout,
+            outer_gap,
+            show_simulation_context,
+            run_width,
+            pvt_width,
+        )
         - right_padding)
         .max(1.0)
 }
@@ -180,19 +241,16 @@ fn trailing_controls_width(
     layout: LayoutSpec,
     outer_gap: f32,
     show_simulation_context: bool,
+    run_width: f32,
+    pvt_width: f32,
 ) -> f32 {
-    let run_width = if layout.width_class.is_phone() {
-        100.0
-    } else {
-        132.0
-    };
     let mut width = 0.0;
     let mut controls: usize = 0;
     if show_simulation_context {
         width += run_width;
         controls += 1;
         if layout.show_pvt_selector {
-            width += 96.0;
+            width += pvt_width;
             controls += 1;
         }
         if layout.show_run_config_selector {
@@ -225,8 +283,6 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Workspace::Models => models_tools(ui, app, layout),
         Workspace::Netlist => netlist_tools(ui, app, layout),
     }
-    context_separator(ui, layout);
-    focus_mode_tool(ui, app, layout);
 }
 
 fn no_project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -412,29 +468,6 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_icon_command(ui, app, Command::RunSimulation, WorkbenchIcon::Run, layout);
 }
 
-fn focus_mode_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    if !take_projected_tool_slot(ui, layout) {
-        return;
-    }
-    let active = app.state.workbench.focus_mode;
-    let label = if active {
-        "Restore workspace layout (Ctrl+Shift+F)"
-    } else {
-        "Focus workspace (Ctrl+Shift+F)"
-    };
-    if icon_button(
-        ui,
-        WorkbenchIcon::ZoomFit,
-        label,
-        active,
-        toolbar_icon_button_size(layout),
-    )
-    .clicked()
-    {
-        Command::ToggleFocusMode.execute(app);
-    }
-}
-
 /// Render a canonical compact precision tool. The design mockup uses these
 /// for all direct canvas transforms and placement modes.
 fn toolbar_icon_command(
@@ -569,6 +602,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Run
     };
     let t = Tokens::get(ui.ctx());
+    let radius = t.radius.round().clamp(0.0, u8::MAX as f32) as u8;
     let label = if running {
         "Stop".to_owned()
     } else if layout.compact_shell {
@@ -579,87 +613,184 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     } else {
         "Run plan".to_owned()
     };
-    let width = if layout.width_class.is_phone() {
-        100.0
-    } else {
-        132.0
-    };
-    let accessibility_label = if running {
-        "Stop active simulation".to_owned()
-    } else {
-        let reference = app.state.sim_setup.reference_pvt;
-        format!(
-            "Run active simulation plan at {} · {} °C",
-            reference.process.short_name(),
-            pvt_temperature_label(reference.temperature_celsius)
+    let label_width = ui
+        .painter()
+        .layout_no_wrap(
+            label.clone(),
+            theme::sans(tokens::FS_2, FontWeight::SemiBold),
+            t.color.text,
         )
+        .size()
+        .x;
+    let more_width = if layout.run_control_height >= 44.0 {
+        44.0
+    } else {
+        25.0
     };
-    let enabled = command.is_enabled(app);
-    let (rect, response) = ui.allocate_exact_size(
+    let primary_width = (22.0 + 14.0 + 6.0 + label_width).max(67.0);
+    let width = primary_width + more_width;
+    ui.allocate_ui_with_layout(
         Vec2::new(width, layout.run_control_height),
-        if enabled {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            let accessibility_label = if running {
+                "Stop active simulation".to_owned()
+            } else {
+                let reference = app.state.sim_setup.reference_pvt;
+                format!(
+                    "Run active simulation plan at {} · {} °C",
+                    reference.process.short_name(),
+                    pvt_temperature_label(reference.temperature_celsius)
+                )
+            };
+            let enabled = command.is_enabled(app);
+            let (rect, response) = ui.allocate_exact_size(
+                Vec2::new(primary_width, layout.run_control_height),
+                if enabled {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                },
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    enabled && ui.is_enabled(),
+                    &accessibility_label,
+                )
+            });
+            let base_fill = if enabled {
+                if running { t.color.err } else { t.color.accent }
+            } else {
+                t.color.bg_inset
+            };
+            let fill = if enabled && response.hovered() {
+                brighten_srgb(base_fill, 1.06)
+            } else {
+                base_fill
+            };
+            let ink = if !enabled {
+                t.color.text_faint
+            } else if running {
+                t.color.text
+            } else {
+                t.color.accent_ink
+            };
+            ui.painter().rect_filled(
+                rect,
+                egui::CornerRadius {
+                    nw: radius,
+                    sw: radius,
+                    ne: 0,
+                    se: 0,
+                },
+                fill,
+            );
+            icon.paint(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    egui::Pos2::new(rect.left() + 16.0, rect.center().y),
+                    Vec2::splat(14.0),
+                ),
+                ink,
+            );
+            ui.painter().text(
+                egui::Pos2::new(rect.left() + 30.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                &label,
+                // The mockup run control inherits the 13 px application body type.
+                theme::sans(tokens::FS_2, FontWeight::SemiBold),
+                ink,
+            );
+            theme::paint_focus_ring_outset(ui, &response, rect);
+            if response.clicked() && enabled {
+                command.execute(app);
+            }
+            if !enabled {
+                let reason = if app.state.workbench.workspace == Workspace::Netlist {
+                    app.state.manual_deck_run_block_reason()
+                } else {
+                    app.state.simulation_run_block_reason()
+                };
+                response.on_hover_text(reason.unwrap_or_else(|| "Command unavailable".to_owned()));
+            }
+
+            let (more_response, _) = ui
+                .scope(|ui| {
+                    ui.spacing_mut().button_padding = Vec2::ZERO;
+                    MenuButton::from_button(
+                        egui::Button::new("")
+                            .frame(false)
+                            .min_size(Vec2::new(more_width, layout.run_control_height)),
+                    )
+                    .ui(ui, |ui| {
+                        ui.set_min_width(210.0);
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        let primary = if running {
+                            Command::StopSimulation
+                        } else {
+                            Command::RunSimulation
+                        };
+                        run_menu_item(ui, app, primary);
+                        run_menu_item(ui, app, Command::PreflightChecks);
+                        ui.separator();
+                        run_menu_item(ui, app, Command::SimulationOptions);
+                    })
+                })
+                .inner;
+            more_response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    "More run commands",
+                )
+            });
+            let more_fill = if more_response.hovered() {
+                brighten_srgb(base_fill, 1.06)
+            } else {
+                base_fill
+            };
+            ui.painter().rect_filled(
+                more_response.rect,
+                egui::CornerRadius {
+                    nw: 0,
+                    sw: 0,
+                    ne: radius,
+                    se: radius,
+                },
+                more_fill,
+            );
+            ui.painter().vline(
+                more_response.rect.left(),
+                more_response.rect.y_range().shrink(5.0),
+                egui::Stroke::new(1.0, ink.gamma_multiply(0.28)),
+            );
+            WorkbenchIcon::ChevronDown.paint(
+                ui.painter(),
+                egui::Rect::from_center_size(more_response.rect.center(), Vec2::splat(12.0)),
+                ink,
+            );
+            theme::paint_focus_ring_outset(ui, &more_response, more_response.rect);
         },
     );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            enabled && ui.is_enabled(),
-            &accessibility_label,
+}
+
+fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
+    let enabled = command.is_enabled(app);
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(command.spec().label).frame(false),
         )
-    });
-    let base_fill = if enabled {
-        if running { t.color.err } else { t.color.accent }
-    } else {
-        t.color.bg_inset
-    };
-    let fill = if enabled && response.hovered() {
-        brighten_srgb(base_fill, 1.06)
-    } else {
-        base_fill
-    };
-    let ink = if !enabled {
-        t.color.text_faint
-    } else if running {
-        t.color.text
-    } else {
-        t.color.accent_ink
-    };
-    ui.painter().rect_filled(rect, t.radius, fill);
-    icon.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(
-            egui::Pos2::new(rect.left() + 16.0, rect.center().y),
-            Vec2::splat(14.0),
-        ),
-        ink,
-    );
-    ui.painter().text(
-        egui::Pos2::new(rect.left() + 30.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        &label,
-        // The mockup run control inherits the 13 px application body type.
-        theme::sans(tokens::FS_2, FontWeight::SemiBold),
-        ink,
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    if response.clicked() && enabled {
+        .clicked()
+    {
         command.execute(app);
-    }
-    if !enabled {
-        let reason = if app.state.workbench.workspace == Workspace::Netlist {
-            app.state.manual_deck_run_block_reason()
-        } else {
-            app.state.simulation_run_block_reason()
-        };
-        response.on_hover_text(reason.unwrap_or_else(|| "Command unavailable".to_owned()));
+        ui.close();
     }
 }
 
 fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
-    const WIDTH: f32 = 96.0;
     let t = Tokens::get(ui.ctx());
     let reference = app.state.sim_setup.reference_pvt;
     let label = format!(
@@ -667,13 +798,23 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
         reference.process.short_name(),
         pvt_temperature_label(reference.temperature_celsius),
     );
+    let width = ui
+        .painter()
+        .layout_no_wrap(
+            label.clone(),
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            t.color.text_dim,
+        )
+        .size()
+        .x
+        + 42.0;
     let (response, _) = ui
         .scope(|ui| {
             ui.spacing_mut().button_padding = Vec2::ZERO;
             MenuButton::from_button(
                 egui::Button::new("")
                     .frame(false)
-                    .min_size(Vec2::new(WIDTH, height)),
+                    .min_size(Vec2::new(width, height)),
             )
             .ui(ui, |ui| {
                 ui.set_min_width(190.0);
@@ -754,7 +895,7 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
         ),
         t.color.text_faint,
     );
-    theme::paint_focus_ring(ui, &response, response.rect);
+    theme::paint_focus_ring_outset(ui, &response, response.rect);
 }
 
 fn brighten_srgb(color: egui::Color32, factor: f32) -> egui::Color32 {
@@ -768,12 +909,31 @@ fn brighten_srgb(color: egui::Color32, factor: f32) -> egui::Color32 {
 }
 
 fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
-    const WIDTH: f32 = 190.0;
     let t = Tokens::get(ui.ctx());
     let analysis_count = app.state.sim_setup.enabled_analysis_instance_count();
     let pvt_count = configured_pvt_count(app);
+    let summary = format!("{pvt_count} PVT · {analysis_count} analyses");
+    let title_width = ui
+        .painter()
+        .layout_no_wrap(
+            "Lab characterization".to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Medium),
+            t.color.text,
+        )
+        .size()
+        .x;
+    let summary_width = ui
+        .painter()
+        .layout_no_wrap(
+            summary.clone(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        )
+        .size()
+        .x;
+    let width = (31.0 + title_width.max(summary_width) + 22.0).min(190.0);
     let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(WIDTH, height),
+        Vec2::new(width, height),
         if ui.is_enabled() {
             egui::Sense::click()
         } else {
@@ -829,7 +989,7 @@ fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
     copy_painter.text(
         egui::Pos2::new(rect.left() + 31.0, rect.center().y + 7.0),
         egui::Align2::LEFT_CENTER,
-        format!("{pvt_count} PVT · {analysis_count} analyses"),
+        summary,
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
@@ -841,7 +1001,7 @@ fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
         ),
         t.color.text_faint,
     );
-    theme::paint_focus_ring(ui, &response, rect);
+    theme::paint_focus_ring_outset(ui, &response, rect);
     if response.clicked() {
         Command::OpenWorkspace(Workspace::Simulate).execute(app);
     }
@@ -930,16 +1090,33 @@ mod tests {
     fn responsive_toolbar_reserves_fixed_trailing_controls() {
         let tablet = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchState::default());
         let available_after_navigator = 780.0;
-        assert_eq!(trailing_controls_width(tablet, 5.0, true), 267.0);
         assert_eq!(
-            context_tools_width(available_after_navigator, tablet, 8.0, 5.0, true),
-            505.0
+            trailing_controls_width(tablet, 5.0, true, 117.0, 96.0),
+            252.0
+        );
+        assert_eq!(
+            context_tools_width(
+                available_after_navigator,
+                tablet,
+                8.0,
+                5.0,
+                true,
+                117.0,
+                96.0,
+            ),
+            520.0
         );
 
         let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
-        assert_eq!(trailing_controls_width(phone, 2.0, true), 149.0);
-        assert_eq!(trailing_controls_width(phone, 2.0, false), 46.0);
-        assert!(context_tools_width(336.0, phone, 3.0, 2.0, true) > 0.0);
+        assert_eq!(
+            trailing_controls_width(phone, 2.0, true, 136.0, 106.0),
+            185.0
+        );
+        assert_eq!(
+            trailing_controls_width(phone, 2.0, false, 136.0, 106.0),
+            46.0
+        );
+        assert!(context_tools_width(336.0, phone, 3.0, 2.0, true, 136.0, 106.0) > 0.0);
     }
 
     #[test]

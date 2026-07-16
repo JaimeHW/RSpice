@@ -24,6 +24,10 @@ const MENU_CONTENT_WIDTH: f32 = MENU_OUTER_WIDTH - 2.0 * (MENU_MARGIN + MENU_BOR
 const MENU_ROW_HEIGHT: f32 = 27.0;
 const MENU_TOUCH_ROW_HEIGHT: f32 = 44.0;
 const MENU_POPUP_GAP: f32 = 2.0;
+const SEARCH_KEYCAP_HEIGHT: f32 = 18.0;
+const SEARCH_KEYCAP_MIN_WIDTH: f32 = 19.0;
+const SEARCH_KEYCAP_INLINE_PADDING: f32 = 4.0;
+const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
 const MENU_RENDER_STATE_ID: &str = "workbench.title_menu.render_state";
 const MENU_RETURN_FOCUS_ID: &str = "workbench.title_menu.return_focus";
 const MENU_TYPEAHEAD_ID: &str = "workbench.title_menu.typeahead";
@@ -104,10 +108,22 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         ui.max_rect().y_range(),
                     ),
                     !menu_projection.shows_title_context(),
-                    menu_projection == MenuProjection::ThroughSimulate,
+                    title_context_is_left_aligned(
+                        menu_projection,
+                        viewport_width,
+                        layout.compact_shell,
+                    ),
                 );
             });
         });
+}
+
+fn title_context_is_left_aligned(
+    projection: MenuProjection,
+    viewport_width: f32,
+    compact_shell: bool,
+) -> bool {
+    projection == MenuProjection::ThroughSimulate || (compact_shell && viewport_width > 820.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -317,54 +333,44 @@ fn menus(
     }
 
     let bar_width = menu_bar_width(ui, projection, large_targets);
-    let t = Tokens::get(ui.ctx());
     let mut triggers = Vec::new();
-    ui.allocate_ui_with_layout(
+    let menu_bar = ui.allocate_ui_with_layout(
         Vec2::new(bar_width, title_bar_height),
         Layout::left_to_right(Align::Center),
         |ui| {
-            let response = egui::MenuBar::new()
-                .style(move |style: &mut egui::Style| {
-                    egui::containers::menu::menu_style(style);
-                    style.spacing.item_spacing.x = 0.0;
-                    style.spacing.button_padding = egui::vec2(7.0, 0.0);
-                    style.spacing.interact_size.y = title_bar_height;
-                    style.visuals.widgets.hovered.weak_bg_fill = t.color.bg_hover;
-                    style.visuals.widgets.active.weak_bg_fill = t.color.bg_active;
-                    style.visuals.widgets.open.weak_bg_fill = t.color.bg_active;
-                    style.visuals.widgets.inactive.fg_stroke.color = t.color.text_dim;
-                    style.visuals.widgets.hovered.fg_stroke.color = t.color.text;
-                    style.visuals.widgets.active.fg_stroke.color = t.color.text;
-                    style.visuals.widgets.open.fg_stroke.color = t.color.text;
-                })
-                .ui(ui, |ui| {
-                    for &menu in projection.visible_menus() {
-                        triggers.push(top_menu(
-                            ui,
-                            app,
-                            menu,
-                            large_targets,
-                            title_bar_height,
-                            |ui, app| menu.show(ui, app),
-                        ));
-                    }
-                    if projection.has_overflow() {
-                        triggers.push(overflow_menu_button(
-                            ui,
-                            app,
-                            projection,
-                            large_targets,
-                            title_bar_height,
-                        ));
-                    }
-                });
-            ui.ctx()
-                .accesskit_node_builder(response.response.id, |node| {
-                    node.set_role(egui::accesskit::Role::Menu);
-                    node.set_label("Application menu");
-                });
+            // These triggers own their painting and their popup contract. A
+            // second `egui::MenuBar` wrapper adds an implicit horizontal row
+            // around the already exact-height title track; under some scale
+            // factors that row can round beyond the 35 px panel and clip the
+            // menu labels to a narrow strip. Keep one exact geometry owner,
+            // matching the mockup's fixed-height `.menu-bar` flex track.
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for &menu in projection.visible_menus() {
+                triggers.push(top_menu(
+                    ui,
+                    app,
+                    menu,
+                    large_targets,
+                    title_bar_height,
+                    |ui, app| menu.show(ui, app),
+                ));
+            }
+            if projection.has_overflow() {
+                triggers.push(overflow_menu_button(
+                    ui,
+                    app,
+                    projection,
+                    large_targets,
+                    title_bar_height,
+                ));
+            }
         },
     );
+    ui.ctx()
+        .accesskit_node_builder(menu_bar.response.id, |node| {
+            node.set_role(egui::accesskit::Role::Menu);
+            node.set_label("Application menu");
+        });
     handle_menu_bar_keyboard(ui.ctx(), &triggers, !app.state.application_modal_open());
 }
 
@@ -493,7 +499,7 @@ fn overflow_menu_button(
             height,
             large_targets,
         },
-        overflow_menu,
+        move |ui, app| overflow_menu(ui, app, projection),
     )
 }
 
@@ -1161,14 +1167,27 @@ fn shortcut_for_occurrence(command: Command, shortcut_override: Option<&str>) ->
 fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::ProjectLauncher);
     menu_separator(ui);
-    command_item(ui, app, Command::OpenProject);
     command_item(ui, app, Command::NewProject);
+    command_item(ui, app, Command::OpenProject);
     command_item(ui, app, Command::RecentProjects);
+    command_item(ui, app, Command::NewCell);
+    command_item(ui, app, Command::OpenDocument);
     menu_separator(ui);
     command_item(ui, app, Command::Save);
     command_item(ui, app, Command::SaveAs);
     command_item(ui, app, Command::SaveAll);
     command_item(ui, app, Command::RevertActiveDocument);
+    menu_separator(ui);
+    command_item(ui, app, Command::ImportNetlist);
+    command_item(ui, app, Command::ImportVerilogA);
+    menu_separator(ui);
+    command_item(ui, app, Command::ExportSchematicSvg);
+    command_item(ui, app, Command::ExportWaveformsCsv);
+    command_item(
+        ui,
+        app,
+        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+    );
     menu_separator(ui);
     command_item(ui, app, Command::CloseActiveDocument);
     command_item(ui, app, Command::CloseProject);
@@ -1203,6 +1222,7 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomFit,
+        Command::ZoomOneToOne,
         Command::CycleGrid,
     ] {
         command_item(ui, app, command);
@@ -1220,6 +1240,10 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
     );
     command_item(ui, app, Command::ResetActiveView);
+    menu_separator(ui);
+    command_item(ui, app, Command::ToggleNavigator);
+    command_item(ui, app, Command::ToggleInspector);
+    command_item(ui, app, Command::ToggleConsole);
 }
 
 fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1241,6 +1265,21 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ] {
         command_item(ui, app, command);
     }
+    menu_separator(ui);
+    for command in [
+        Command::RotateSelection,
+        Command::MirrorSelectionHorizontal,
+        Command::MirrorSelectionVertical,
+        Command::ObjectProperties,
+        Command::FindInDesign,
+    ] {
+        command_item(ui, app, command);
+    }
+    menu_separator(ui);
+    command_item(ui, app, Command::RunChecks);
+    command_item(ui, app, Command::CheckAndSave);
+    command_item(ui, app, Command::ClearChecks);
+    command_item(ui, app, Command::GenerateNetlist);
 }
 
 fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1256,6 +1295,8 @@ fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
     );
     command_item(ui, app, Command::SimulationOptions);
+    command_item(ui, app, Command::GenerateNetlist);
+    command_item(ui, app, Command::EditSpecifications);
 }
 
 fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1267,7 +1308,30 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
     );
     menu_separator(ui);
+    for (viewer, label) in [
+        (crate::workbench::ResultViewer::Bode, "Bode / stability"),
+        (crate::workbench::ResultViewer::Fft, "FFT / spectrum"),
+        (crate::workbench::ResultViewer::Eye, "Eye diagram"),
+        (crate::workbench::ResultViewer::Hist, "Distribution"),
+        (crate::workbench::ResultViewer::Op, "Operating point"),
+        (
+            crate::workbench::ResultViewer::NoiseContrib,
+            "Noise contributors",
+        ),
+        (
+            crate::workbench::ResultViewer::Specs,
+            "Measurements & specifications",
+        ),
+        (crate::workbench::ResultViewer::Nyquist, "Nyquist"),
+        (crate::workbench::ResultViewer::Smith, "Smith chart"),
+        (crate::workbench::ResultViewer::PoleZero, "Pole-zero"),
+    ] {
+        command_item_as(ui, app, Command::ResultViewer(viewer), label, None);
+    }
+    menu_separator(ui);
     command_item_as(ui, app, Command::WaveformCalculator, "Calculator…", None);
+    command_item(ui, app, Command::ExportWaveformsCsv);
+    command_item(ui, app, Command::ClearResults);
 }
 
 fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1316,8 +1380,30 @@ fn automation_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    // Project only canonical overflow commands with an exact real executor.
+fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
+    if projection == MenuProjection::ThroughSimulate {
+        command_item_as(
+            ui,
+            app,
+            Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+            "Results workspace",
+            Some(""),
+        );
+        command_item_as(
+            ui,
+            app,
+            Command::VerificationPage(VerificationPage::Cockpit),
+            "Verification workspace",
+            Some(""),
+        );
+        command_item_as(
+            ui,
+            app,
+            Command::ModelsPage(ModelsPage::Catalog),
+            "Models workspace",
+            Some(""),
+        );
+    }
     command_item_as(
         ui,
         app,
@@ -1325,6 +1411,13 @@ fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         "Automation workspace",
         Some(""),
     );
+    menu_separator(ui);
+    command_item(ui, app, Command::ResetLayout);
+    command_item(ui, app, Command::ToggleFocusMode);
+    command_item(ui, app, Command::ToggleConsole);
+    menu_separator(ui);
+    command_item(ui, app, Command::KeyboardShortcuts);
+    command_item(ui, app, Command::FeatureAvailability);
 }
 
 fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1332,11 +1425,19 @@ fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::ToggleInspector);
     command_item(ui, app, Command::ToggleConsole);
     command_item(ui, app, Command::ToggleFocusMode);
+    menu_separator(ui);
+    command_item(ui, app, Command::PreviousWorkspace);
+    command_item(ui, app, Command::NextWorkspace);
+    command_item(ui, app, Command::ResetLayout);
+    command_item(ui, app, Command::ToggleFullScreen);
 }
 
 fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
+    command_item(ui, app, Command::CommandPalette);
+    command_item(ui, app, Command::KeyboardShortcuts);
     command_item(ui, app, Command::FeatureAvailability);
     command_item(ui, app, Command::InteroperabilityMatrix);
+    command_item(ui, app, Command::License);
     menu_separator(ui);
     command_item(ui, app, Command::About);
 }
@@ -1360,7 +1461,7 @@ fn paint_title_context(
         app.state.workspace.project.display_name().to_owned()
     };
     let available_text_width = (bounds.width() - 26.0).max(12.0);
-    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let painter = ui
         .painter()
         .with_clip_rect(bounds.shrink2(egui::vec2(5.0, 0.0)));
@@ -1527,9 +1628,14 @@ fn search_button(ui: &mut Ui, viewport_width: f32, large_target: bool) -> bool {
         },
     );
     if !icon_only {
+        // CSS `kbd` uses border-box sizing with 4 px inline padding and a
+        // 1 px border. Measure the invariant shortcut instead of forcing it
+        // into a 36 px box; that fixed width clips the final glyph at the
+        // workstation font metrics used by the mockup.
+        let shortcut_width = search_keycap_width(ui);
         let shortcut_rect = egui::Rect::from_center_size(
-            egui::Pos2::new(rect.right() - 25.0, rect.center().y),
-            Vec2::new(36.0, 18.0),
+            egui::Pos2::new(rect.right() - 7.0 - shortcut_width * 0.5, rect.center().y),
+            Vec2::new(shortcut_width, SEARCH_KEYCAP_HEIGHT),
         );
         let label_width = (shortcut_rect.left() - 7.0 - (rect.left() + 30.0)).max(8.0);
         let label = ellipsize(
@@ -1572,6 +1678,20 @@ fn search_button(ui: &mut Ui, viewport_width: f32, large_target: bool) -> bool {
     response
         .on_hover_text("Search and run a command (Ctrl+K)")
         .clicked()
+}
+
+fn search_keycap_width(ui: &Ui) -> f32 {
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(
+            "Ctrl K".to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x;
+    (text_width + SEARCH_KEYCAP_INLINE_PADDING * 2.0 + SEARCH_KEYCAP_BORDER_WIDTH * 2.0)
+        .max(SEARCH_KEYCAP_MIN_WIDTH)
 }
 
 fn search_button_width(viewport_width: f32, large_target: bool) -> f32 {
@@ -1749,6 +1869,16 @@ mod tests {
             MenuProjection::for_layout(844.0, true),
             MenuProjection::Hidden
         );
+        assert!(title_context_is_left_aligned(
+            MenuProjection::Hidden,
+            844.0,
+            true
+        ));
+        assert!(!title_context_is_left_aligned(
+            MenuProjection::Hidden,
+            820.0,
+            true
+        ));
     }
 
     #[test]
@@ -1808,6 +1938,10 @@ mod tests {
         assert_eq!(MENU_MARGIN, 5.0);
         assert_eq!(MENU_BORDER_WIDTH, 1.0);
         assert_eq!(MENU_POPUP_GAP, 2.0);
+        assert_eq!(SEARCH_KEYCAP_HEIGHT, 18.0);
+        assert_eq!(SEARCH_KEYCAP_MIN_WIDTH, 19.0);
+        assert_eq!(SEARCH_KEYCAP_INLINE_PADDING, 4.0);
+        assert_eq!(SEARCH_KEYCAP_BORDER_WIDTH, 1.0);
         assert_eq!(
             overflow_trigger_width(MenuProjection::ThroughSimulate, false),
             28.0
@@ -1820,6 +1954,75 @@ mod tests {
             overflow_trigger_width(MenuProjection::ThroughModels, true),
             44.0
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn desktop_menu_triggers_fill_the_title_track_without_vertical_clipping() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = title_test_app();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ctx, |ui| {
+                        menus(ui, &mut app, MenuProjection::All, false, 35.0);
+                    });
+            },
+        );
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+        for label in ["File", "Edit", "View", "Design", "Simulate", "Help"] {
+            let bounds = nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::MenuItem && node.label() == Some(label)
+                })
+                .and_then(|(_, node)| node.bounds())
+                .unwrap_or_else(|| panic!("missing application menu trigger {label}"));
+            assert_eq!(bounds.y1 - bounds.y0, 35.0, "clipped trigger {label}");
+        }
+    }
+
+    #[test]
+    fn command_keycap_uses_canonical_intrinsic_border_box_width() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut width = 0.0;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                width = search_keycap_width(ui);
+                let text_width = ui
+                    .painter()
+                    .layout_no_wrap(
+                        "Ctrl K".to_owned(),
+                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        egui::Color32::WHITE,
+                    )
+                    .size()
+                    .x;
+                assert_eq!(
+                    width,
+                    (text_width
+                        + SEARCH_KEYCAP_INLINE_PADDING * 2.0
+                        + SEARCH_KEYCAP_BORDER_WIDTH * 2.0)
+                        .max(SEARCH_KEYCAP_MIN_WIDTH)
+                );
+            });
+        });
+        assert!(width >= SEARCH_KEYCAP_MIN_WIDTH);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1925,7 +2128,7 @@ mod tests {
         let mut fitted = String::new();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let font = theme::sans(tokens::FS_0, FontWeight::Medium);
+                let font = theme::sans(tokens::FS_0, FontWeight::Regular);
                 fitted = ellipsize_to_width(
                     ui.painter(),
                     "WWW · precision-sensor-front-end",

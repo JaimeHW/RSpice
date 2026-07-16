@@ -829,13 +829,26 @@ pub(crate) fn start_local_safe_mode(
     if !options.has_effect() {
         return Err("Select at least one safe-mode isolation option".to_owned());
     }
+    if options.disable_gpu_acceleration && !software_rendering_supported() {
+        return Err(
+            "Software rendering cannot be selected after this platform renderer has started"
+                .to_owned(),
+        );
+    }
 
     app.state.sync_active_schematic_to_workspace();
     let preserved_session = serde_json::to_string(&app.state)
         .map_err(|error| format!("The current session could not be protected: {error}"))?;
 
-    if options.isolate_prior_documents {
-        crate::common::project_workflow::create_new_project(&mut app.state);
+    if options.isolate_prior_documents && app.state.project_lifecycle.project_open {
+        app.state
+            .workbench
+            .begin_project_close(super::state::ProjectCloseDestination::EmptyWorkbench);
+        if !crate::common::project_workflow::close_project_discard(&mut app.state) {
+            return Err("The current project could not be isolated safely".to_owned());
+        }
+    } else if options.isolate_prior_documents {
+        app.state.workbench.project_launcher_open = false;
     }
     if options.reset_layout {
         app.state.workbench.reset_layout();
@@ -844,11 +857,165 @@ pub(crate) fn start_local_safe_mode(
         .workbench
         .safe_mode
         .activate(options, preserved_session);
+    if options.open_project_read_only {
+        app.state.schematic.read_only = true;
+    }
     app.state.workbench.activate(Workspace::Project);
-    app.state.push_user_message(ConsoleMessage::warning(
-        "Safe mode is active for this launch; the prior session is retained for the next normal launch",
-    ));
+    let mut enforced = Vec::new();
+    if options.disable_third_party_extensions {
+        enforced.push("third-party extensions disabled");
+    }
+    if options.disable_gpu_acceleration {
+        enforced.push("software rendering");
+    }
+    if options.isolate_prior_documents {
+        enforced.push("prior documents isolated");
+    }
+    if options.reset_layout {
+        enforced.push("dock and monitor geometry reset");
+    }
+    if options.open_project_read_only {
+        enforced.push("project writes blocked");
+    }
+    app.state.push_user_message(ConsoleMessage::warning(format!(
+        "Safe mode is active for this launch ({}); the prior session is retained for the next normal launch",
+        enforced.join(", ")
+    )));
     Ok(())
+}
+
+/// eframe chooses its adapter before the application and launcher are created.
+/// A live switch is therefore unavailable until the native relaunch path can
+/// select and verify a CPU adapter before constructing `RSpiceApp`.
+pub(crate) const fn software_rendering_supported() -> bool {
+    false
+}
+
+pub(crate) const fn diagnostics_folder_supported() -> bool {
+    cfg!(all(
+        not(target_arch = "wasm32"),
+        any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux"
+        )
+    ))
+}
+
+/// Write an explicit, privacy-reviewable diagnostic snapshot and reveal its
+/// directory using the host desktop's file-manager API.
+pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, String> {
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        any(target_os = "windows", target_os = "macos", target_os = "linux")
+    ))]
+    {
+        use std::fmt::Write as _;
+
+        let directory = dirs::data_local_dir()
+            .or_else(dirs::config_dir)
+            .ok_or_else(|| {
+                "The operating system did not provide an application-data directory".to_owned()
+            })?
+            .join("rspice")
+            .join("diagnostics");
+        std::fs::create_dir_all(&directory).map_err(|error| {
+            format!(
+                "diagnostic directory '{}' could not be created: {error}",
+                directory.display()
+            )
+        })?;
+
+        let mut snapshot = String::new();
+        writeln!(snapshot, "RSpice diagnostic snapshot").expect("String writes cannot fail");
+        writeln!(snapshot, "version={}", env!("CARGO_PKG_VERSION"))
+            .expect("String writes cannot fail");
+        writeln!(snapshot, "build={}", env!("RSPICE_BUILD_HASH"))
+            .expect("String writes cannot fail");
+        writeln!(
+            snapshot,
+            "platform={} {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )
+        .expect("String writes cannot fail");
+        writeln!(snapshot, "safe_mode={}", state.workbench.safe_mode.active)
+            .expect("String writes cannot fail");
+        writeln!(
+            snapshot,
+            "project_open={}",
+            state.project_lifecycle.project_open
+        )
+        .expect("String writes cannot fail");
+        writeln!(snapshot).expect("String writes cannot fail");
+        writeln!(snapshot, "Session log").expect("String writes cannot fail");
+        for entry in state.log_buffer.entries() {
+            write!(
+                snapshot,
+                "{} [{}] [{}] {}",
+                entry.format_timestamp(),
+                entry.severity.name(),
+                entry.source.name(),
+                entry.message
+            )
+            .expect("String writes cannot fail");
+            if let Some(context) = &entry.context {
+                write!(snapshot, " | {context}").expect("String writes cannot fail");
+            }
+            writeln!(snapshot).expect("String writes cannot fail");
+        }
+
+        let snapshot_path = directory.join("current-session.log");
+        crate::io::durable_file::atomic_write_bytes(&snapshot_path, snapshot.as_bytes()).map_err(
+            |error| {
+                format!(
+                    "diagnostic snapshot '{}' could not be written atomically: {error}",
+                    snapshot_path.display()
+                )
+            },
+        )?;
+        reveal_directory(&directory)?;
+        Ok(directory)
+    }
+    #[cfg(not(all(
+        not(target_arch = "wasm32"),
+        any(target_os = "windows", target_os = "macos", target_os = "linux")
+    )))]
+    {
+        let _ = state;
+        Err("Opening a diagnostic folder is unavailable on this platform".to_owned())
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+fn reveal_directory(directory: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt as _;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("explorer.exe")
+        .arg(directory)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Windows Explorer could not be started: {error}"))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+fn reveal_directory(directory: &Path) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(directory)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Finder could not be started: {error}"))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
+fn reveal_directory(directory: &Path) -> Result<(), String> {
+    std::process::Command::new("xdg-open")
+        .arg(directory)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("The desktop file manager could not be started: {error}"))
 }
 
 #[cfg(test)]
@@ -895,8 +1062,11 @@ mod tests {
     fn safe_mode_requires_a_real_local_effect() {
         assert!(
             !LocalSafeModeOptions {
+                disable_third_party_extensions: false,
+                disable_gpu_acceleration: false,
                 isolate_prior_documents: false,
                 reset_layout: false,
+                open_project_read_only: false,
             }
             .has_effect()
         );

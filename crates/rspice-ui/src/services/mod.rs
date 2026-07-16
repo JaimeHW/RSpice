@@ -18,5 +18,6 @@ pub use simulation_runner::{
     run_simulation, run_stb_analysis,
 };
 pub use yield_manager::{
-    DistributionStats, SpecLimitType, YieldAnalysisManager, YieldResult, YieldSpec,
+    DistributionStats, MonteCarloSamplingMode, SpecLimitType, YieldAnalysisManager,
+    YieldAnalysisProvenance, YieldResult, YieldSpec,
 };

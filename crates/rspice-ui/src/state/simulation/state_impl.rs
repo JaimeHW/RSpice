@@ -2,6 +2,35 @@ use super::*;
 use crate::product::{DatasetId, RunId};
 
 impl SimulationState {
+    /// Atomically replace yield evidence and its stable dataset authority.
+    /// Empty result sets cannot retain stale provenance from a prior run.
+    pub fn replace_yield_evidence(
+        &mut self,
+        results: Vec<YieldResult>,
+        provenance: Option<YieldAnalysisProvenance>,
+    ) {
+        self.yield_provenance = if results.is_empty() { None } else { provenance };
+        self.yield_results = results;
+    }
+
+    /// Yield evidence for one exact immutable dataset, if that dataset is the
+    /// authority recorded when the evidence was calculated.
+    #[must_use]
+    pub fn yield_results_for_dataset(&self, dataset_id: DatasetId) -> Option<&[YieldResult]> {
+        self.yield_provenance
+            .is_some_and(|provenance| provenance.source_dataset_id == dataset_id)
+            .then_some(self.yield_results.as_slice())
+    }
+
+    /// Yield evidence for the currently selected result dataset. Callers use
+    /// this instead of displaying evidence from whichever run happened to
+    /// complete most recently.
+    #[must_use]
+    pub fn yield_results_for_active_dataset(&self) -> Option<&[YieldResult]> {
+        self.active_run()
+            .and_then(|run| self.yield_results_for_dataset(run.dataset_id))
+    }
+
     pub fn request_simulate_run_set(&mut self) {
         self.run_intent = SimulationRunIntent::SimulateRunSet;
         self.trigger_simulation = true;
@@ -427,6 +456,7 @@ impl SimulationState {
         self.active_run_idx = None;
         self.active_analysis_idx = None;
         self.overlay_dataset_ids.clear();
+        self.replace_yield_evidence(Vec::new(), None);
         self.sync_selected_analysis_waveforms();
         // Don't reset next_run_id to preserve uniqueness
     }
@@ -492,6 +522,7 @@ impl SimulationState {
         while self.runs.len() > MAX_RUN_HISTORY {
             self.runs.pop(); // Remove oldest (last in list)
         }
+        self.prune_yield_evidence_provenance();
     }
 
     /// Delete a specific run by index
@@ -501,6 +532,7 @@ impl SimulationState {
         if run_idx < self.runs.len() {
             self.runs.remove(run_idx);
             self.prune_overlay_dataset_ids();
+            self.prune_yield_evidence_provenance();
             self.data_version = self.data_version.wrapping_add(1);
 
             // Adjust active indices
@@ -538,6 +570,18 @@ impl SimulationState {
             .unwrap_or_default();
 
         self.replace_waveforms(selected_waveforms);
+    }
+
+    fn prune_yield_evidence_provenance(&mut self) {
+        let is_retained = self.yield_provenance.is_some_and(|provenance| {
+            self.runs.iter().any(|run| {
+                run.run_id == provenance.source_run_id
+                    && run.dataset_id == provenance.source_dataset_id
+            })
+        });
+        if self.yield_provenance.is_some() && !is_retained {
+            self.replace_yield_evidence(Vec::new(), None);
+        }
     }
 }
 
@@ -616,5 +660,78 @@ mod tests {
         assert!(state.is_dataset_overlaid(overlay_id));
         assert!(!state.toggle_dataset_overlay(overlay_id));
         assert!(!state.is_dataset_overlaid(overlay_id));
+    }
+
+    #[test]
+    fn replacing_yield_evidence_keeps_dataset_authority_in_sync() {
+        let run = SimulationRun::new(1);
+        let monte_carlo = crate::simulation::SimulationResult::MonteCarlo {
+            seed: 19,
+            runs_requested: 3,
+            runs_completed: 2,
+            num_failures: 1,
+            all_converged: false,
+            variables: Vec::new(),
+        };
+        let provenance = YieldAnalysisProvenance::from_monte_carlo_result(
+            run.run_id,
+            run.dataset_id,
+            &monte_carlo,
+        )
+        .expect("Monte Carlo result creates yield provenance");
+        let source_dataset_id = run.dataset_id;
+        let result = YieldResult {
+            spec: crate::services::YieldSpec::lower("V(out)", 0.9, "V"),
+            total_runs: 2,
+            pass_count: 1,
+            fail_count: 1,
+            yield_percent: 50.0,
+            stats: crate::services::DistributionStats::default(),
+            trail: vec![true, false],
+            samples: vec![1.0, 0.8],
+        };
+        let mut state = SimulationState::default();
+        state.runs.push(run);
+        state.active_run_idx = Some(0);
+
+        state.replace_yield_evidence(vec![result], Some(provenance));
+        assert_eq!(state.yield_provenance, Some(provenance));
+        assert_eq!(provenance.seed, 19);
+        assert_eq!(provenance.runs_requested, 3);
+        assert_eq!(provenance.runs_completed, 2);
+        assert_eq!(
+            provenance.sampling_mode,
+            crate::services::MonteCarloSamplingMode::PseudoRandom
+        );
+        assert_eq!(
+            state
+                .yield_results_for_active_dataset()
+                .expect("active dataset owns evidence")
+                .len(),
+            1
+        );
+        assert!(state.yield_results_for_dataset(DatasetId::new()).is_none());
+
+        state.replace_yield_evidence(Vec::new(), Some(provenance));
+        assert!(state.yield_results.is_empty());
+        assert_eq!(state.yield_provenance, None);
+
+        state.replace_yield_evidence(
+            vec![YieldResult {
+                spec: crate::services::YieldSpec::lower("V(out)", 0.9, "V"),
+                total_runs: 1,
+                pass_count: 1,
+                fail_count: 0,
+                yield_percent: 100.0,
+                stats: crate::services::DistributionStats::default(),
+                trail: vec![true],
+                samples: vec![1.0],
+            }],
+            Some(provenance),
+        );
+        assert!(state.yield_results_for_dataset(source_dataset_id).is_some());
+        assert!(state.delete_run(0));
+        assert!(state.yield_results.is_empty());
+        assert_eq!(state.yield_provenance, None);
     }
 }

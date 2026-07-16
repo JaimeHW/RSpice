@@ -148,6 +148,8 @@ pub(crate) enum DestinationAuthority {
 pub(crate) enum ProjectLifecycleError {
     #[error("no project is open")]
     NoProject,
+    #[error("safe mode opened this project read-only; project writes are blocked for this launch")]
+    SafeModeReadOnly,
     #[error(
         "a local simulation is running; stop it before replacing project-owned plan, model, or result state"
     )]
@@ -731,6 +733,7 @@ pub(crate) fn save_native(
     authority: DestinationAuthority,
 ) -> Result<(), ProjectLifecycleError> {
     require_open_project(state)?;
+    require_project_writable(state)?;
     let path = persistence::normalize_native_path(path)?;
     if let Some(unreadable) = state.project_lifecycle.unreadable_native_binding.as_ref()
         && unreadable.canonical_path == path
@@ -808,6 +811,7 @@ pub(crate) fn save_project_copy_native(
     path: &Path,
 ) -> Result<(), ProjectLifecycleError> {
     require_open_project(state)?;
+    require_project_writable(state)?;
     let path = persistence::normalize_native_path(path)?;
     let canonical_source = state.project_lifecycle.canonical_native_path();
     let unreadable_source = state
@@ -862,6 +866,7 @@ pub(crate) fn prepare_browser_save(
     suggested_name: String,
 ) -> Result<BrowserPreparedSave, ProjectLifecycleError> {
     require_open_project(state)?;
+    require_project_writable(state)?;
     if state.project_lifecycle.browser_restore_pending
         || state.project_lifecycle.browser_promotion_pending
     {
@@ -1596,6 +1601,12 @@ fn require_open_project(state: &AppState) -> Result<(), ProjectLifecycleError> {
         .ok_or(ProjectLifecycleError::NoProject)
 }
 
+fn require_project_writable(state: &AppState) -> Result<(), ProjectLifecycleError> {
+    (!state.workbench.safe_mode.project_read_only())
+        .then_some(())
+        .ok_or(ProjectLifecycleError::SafeModeReadOnly)
+}
+
 fn advance_accepted_generation(lifecycle: &mut ProjectLifecycleState) {
     lifecycle.accepted_generation = lifecycle.accepted_generation.wrapping_add(1).max(1);
 }
@@ -2035,6 +2046,34 @@ mod tests {
         let mut lock = path.as_os_str().to_os_string();
         lock.push(".rspice.lock");
         let _ = std::fs::remove_file(PathBuf::from(lock));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn safe_mode_read_only_policy_blocks_native_project_writes_before_publication() {
+        let path = unique_path("safe-mode-read-only");
+        let mut state = AppState::default();
+        state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions {
+                disable_third_party_extensions: false,
+                disable_gpu_acceleration: false,
+                isolate_prior_documents: false,
+                reset_layout: false,
+                open_project_read_only: true,
+            },
+            "protected session".to_owned(),
+        );
+
+        let error = save_native(
+            &mut state,
+            SaveScope::AllDocuments,
+            &path,
+            DestinationAuthority::UserSelected,
+        )
+        .expect_err("read-only safe mode must reject project writes");
+
+        assert!(matches!(error, ProjectLifecycleError::SafeModeReadOnly));
+        assert!(!path.exists());
     }
 
     #[cfg(not(target_arch = "wasm32"))]

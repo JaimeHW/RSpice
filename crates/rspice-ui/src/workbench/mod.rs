@@ -67,11 +67,24 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     synchronize_activity_stream(ctx, app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
-    let layout = LayoutSpec::resolve_with_pointer(
+    let layout = LayoutSpec::resolve_with_pointer_and_document_strip(
         viewport.x,
         viewport.y,
         app.state.workbench.coarse_pointer,
+        chrome::document_bar::is_visible(app),
         &app.state.workbench,
+    );
+    // egui persists panel rectangles independently of application state.
+    // Reconcile that cache before any command or panel is rendered so
+    // responsive defaults and Reset Layout remain authoritative.
+    docks::synchronize_panel_memory(ctx, app, layout);
+    // Match the mockup's responsive interaction contract without mutating the
+    // persisted Compact/Relaxed preference. Content controls become 44 px at
+    // narrow widths or for coarse input; explicit chrome controls continue to
+    // use LayoutSpec's more specific row/control dimensions.
+    app.state.ui.theme.apply_responsive_metrics(
+        ctx,
+        viewport.x <= 820.0 || app.state.workbench.coarse_pointer,
     );
     app.state.workbench.reconcile_drawer_mode(
         layout.navigator_uses_drawer,

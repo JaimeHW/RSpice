@@ -19,8 +19,12 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
             c.text,
         )
     });
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(galley.size().x + 18.0, 22.0), Sense::click());
+    let touch = t.metrics.ctl_h >= 44.0;
+    let size = vec2(
+        (galley.size().x + 18.0).max(if touch { 44.0 } else { 0.0 }),
+        if touch { 44.0 } else { 22.0 },
+    );
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| {
         WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), on, label)
     });

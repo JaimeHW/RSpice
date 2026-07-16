@@ -2,7 +2,7 @@
 
 mod analysis_form;
 
-use egui::{ScrollArea, Ui};
+use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::common::RSpiceApp;
 use crate::product::AnalysisInstanceId;
@@ -10,20 +10,37 @@ use crate::simulation::plan::{
     AnalysisDependency, AnalysisDraft, AnalysisKind, AnalysisLifecycleCommand,
     AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
 };
+use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::Button;
 
 use super::super::commands::Command;
-use super::super::design_system::{card, heading, property_row, status_dot};
+use super::super::design_system::{
+    WorkbenchIcon, heading, property_row, status_dot, workspace_title_row,
+};
 
 const PLAN_NAME: &str = "Lab characterization";
+const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
+const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
+const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
+const PREFLIGHT_CELL_HEIGHT: f32 = 42.0;
+const STACKED_WORKSPACE_GAP: f32 = 9.0;
+const ANALYSIS_CATALOG_MAX_WIDTH: f32 = 1_180.0;
+const ANALYSIS_CATALOG_MAX_HEIGHT: f32 = 780.0;
+const ANALYSIS_CATALOG_GROUP_HEIGHT: f32 = 29.0;
+const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
+const ANALYSIS_CATALOG_PHONE_ROW_HEIGHT: f32 = 72.0;
+const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 142.0;
+const ANALYSIS_CATALOG_WINDOW_CHROME_X: f32 = 26.0;
+const ANALYSIS_CATALOG_WINDOW_CHROME_Y: f32 = 51.0;
+const ANALYSIS_CATALOG_COMPACT_WINDOW_CHROME_Y: f32 = 66.0;
 
 #[derive(Clone)]
 struct SelectedAnalysis {
     id: AnalysisInstanceId,
     kind: AnalysisKind,
     draft: AnalysisDraft,
-    enabled: bool,
     dependencies: Vec<AnalysisDependency>,
     lifecycle: AnalysisLifecycleState,
     position: usize,
@@ -65,54 +82,89 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let t = Tokens::get(ui.ctx());
-    egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
+    egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         let surface_width = ui.available_width();
         ScrollArea::vertical()
             .id_salt("workbench.simulate.surface")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let content_width = (surface_width - 44.0).clamp(0.0, 920.0);
-                ui.add_space(18.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(22.0);
-                    ui.vertical(|ui| {
-                        // A vertical ScrollArea may otherwise size its child
-                        // from desired content width. Bind the work surface to
-                        // the actual center-pane viewport so compact layouts
-                        // cannot retain the desktop 920 px width off-screen.
-                        ui.set_width(content_width);
-                        plan_heading(ui, app);
-                        ui.add_space(16.0);
-                        plan_summary(ui, app);
-                        ui.add_space(12.0);
-                        analysis_workspace(ui, app);
-                        ui.add_space(12.0);
-                        preflight(ui, app);
-                    });
-                });
-                ui.add_space(22.0);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.set_width(surface_width);
+                workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
+                analysis_workspace(ui, app, surface_width);
             });
     });
 }
 
-fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp) {
-    if ui.available_width() >= 760.0 {
-        ui.columns(2, |columns| {
-            ordered_instance_stack(&mut columns[0], app);
-            analysis_editor(&mut columns[1], app);
+fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
+    if surface_width > SIMULATION_STACK_BREAKPOINT {
+        let divider = 1.0;
+        let available = ui.available_width();
+        let viewport_width = ui.ctx().content_rect().width();
+        let (left_width, right_width) = analysis_split_widths(available, viewport_width);
+        let column_min_height =
+            analysis_column_min_height(ui.clip_rect().bottom(), ui.cursor().top());
+        let stack_background = ui.painter().add(egui::Shape::Noop);
+        let row = ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = divider;
+            ui.allocate_ui_with_layout(vec2(left_width, 0.0), Layout::top_down(Align::Min), |ui| {
+                ui.set_min_height(column_min_height);
+                ordered_instance_stack(ui, app)
+            });
+            ui.allocate_ui_with_layout(
+                vec2(right_width, column_min_height),
+                Layout::top_down(Align::Min),
+                |ui| analysis_editor(ui, app, viewport_width),
+            );
         });
+        ui.painter().set(
+            stack_background,
+            egui::Shape::rect_filled(
+                analysis_stack_background_rect(row.response.rect, left_width),
+                0.0,
+                Tokens::get(ui.ctx()).color.bg_panel,
+            ),
+        );
     } else {
+        let viewport_width = ui.ctx().content_rect().width();
         ordered_instance_stack(ui, app);
-        ui.add_space(12.0);
-        analysis_editor(ui, app);
+        ui.add_space(STACKED_WORKSPACE_GAP);
+        analysis_editor(ui, app, viewport_width);
     }
+}
+
+fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
+    let usable = (available - 1.0).max(1.0);
+    let (left_fraction, left_min, right_min) = if viewport_width <= 1_020.0 {
+        (0.29, 175.0, 330.0)
+    } else {
+        (0.34, 190.0, 360.0)
+    };
+    let left = (usable * left_fraction)
+        .max(left_min)
+        .min((usable - right_min).max(left_min));
+    (left, (usable - left).max(1.0))
+}
+
+fn analysis_column_min_height(clip_bottom: f32, content_top: f32) -> f32 {
+    (clip_bottom - content_top).max(1.0)
+}
+
+fn analysis_stack_background_rect(row_rect: Rect, left_width: f32) -> Rect {
+    Rect::from_min_max(
+        row_rect.min,
+        egui::pos2(
+            (row_rect.left() + left_width).min(row_rect.right()),
+            row_rect.bottom(),
+        ),
+    )
 }
 
 fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
     let rows = match analysis_stack_rows(app) {
         Ok(rows) => rows,
         Err(error) => {
-            card(ui, "Ordered analyses", |ui| {
+            flat_notice(ui, |ui| {
                 status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
                 ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
             });
@@ -121,105 +173,40 @@ fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
     };
     let active = app.state.workbench.active_analysis_instance;
     let mut action = None;
-    card(ui, "Ordered analyses", |ui| {
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(format!("{} active", rows.len()))
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(Tokens::get(ui.ctx()).color.text_faint),
-            );
-            ui.add_space(4.0);
-            if ui.button("Add analysis…").clicked() {
-                app.state.sim_setup.palette_open = true;
-                app.state.sim_setup.palette_query.clear();
-                app.state.sim_setup.palette_active = 0;
-            }
-        });
-        ui.add_space(6.0);
-
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.set_width(ui.available_width());
         if rows.is_empty() {
-            status_dot(
-                ui,
-                Tokens::get(ui.ctx()).color.warn,
-                "No analysis instances",
-            );
-            ui.label("Use Add analysis to create the first stable instance.");
+            flat_notice(ui, |ui| {
+                status_dot(ui, t.color.warn, "No analysis instances");
+                ui.label("Add an analysis from the Simulation Studio navigator.");
+            });
         } else {
-            for (position, row) in rows.iter().enumerate() {
-                let selected = active == Some(row.id);
-                let t = Tokens::get(ui.ctx());
-                egui::Frame::new()
-                    .fill(if selected {
-                        t.color.accent_dim
-                    } else {
-                        t.color.bg_inset
-                    })
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        if selected {
-                            t.color.accent
-                        } else {
-                            t.color.border
-                        },
-                    ))
-                    .corner_radius(t.radius)
-                    .inner_margin(egui::Margin::symmetric(9, 7))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let label = format!(
-                                "{:02} · {} · {}",
-                                position + 1,
-                                row.kind.stable_id().to_uppercase(),
-                                row.kind.label()
-                            );
-                            if ui.selectable_label(selected, label).clicked() {
-                                action = Some(StackAction::Select(row.id));
-                            }
-                            let mut enabled = row.enabled;
-                            if ui
-                                .checkbox(&mut enabled, "Enabled")
-                                .on_hover_text(format!(
-                                    "Enable {} instance {}",
-                                    row.kind.label(),
-                                    row.id
-                                ))
-                                .changed()
-                            {
-                                action = Some(StackAction::SetEnabled(row.id, enabled));
-                            }
-                        });
-                        ui.label(
-                            egui::RichText::new(row.id.to_string())
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
-                        ui.label(
-                            egui::RichText::new(&row.summary)
-                                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        );
-                        ui.horizontal_wrapped(|ui| {
-                            status_dot(
-                                ui,
-                                if row.issue_count == 0 {
-                                    t.color.ok
-                                } else {
-                                    t.color.err
-                                },
-                                if row.issue_count == 0 {
-                                    availability_label(row.kind)
-                                } else {
-                                    "dependency blocked"
-                                },
-                            );
-                            ui.label(
-                                egui::RichText::new(format!("\u{00b7} {}", row.lifecycle))
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text_faint),
-                            );
-                        });
-                    });
-                ui.add_space(6.0);
+            let mut displayed_position = 0usize;
+            for group in [
+                "Numerical analyses",
+                "Sweeps & variation",
+                "Derived measurements",
+                "Verification analyses",
+                "Optimization analyses",
+            ] {
+                let members = rows
+                    .iter()
+                    .filter(|row| analysis_catalog_group(row.kind) == group)
+                    .collect::<Vec<_>>();
+                if members.is_empty() {
+                    continue;
+                }
+                analysis_group_header(ui, group, members.len());
+                for row in members {
+                    displayed_position += 1;
+                    if let Some(row_action) =
+                        analysis_stack_row(ui, row, displayed_position, active == Some(row.id))
+                    {
+                        action = Some(row_action);
+                    }
+                }
             }
         }
     });
@@ -236,6 +223,247 @@ fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(StackAction::Insert(kind)) => insert_analysis_instance(app, kind),
         None => {}
     }
+}
+
+fn flat_notice(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    let response = egui::Frame::new()
+        .fill(t.color.bg_app)
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, add_contents)
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn analysis_group_header(ui: &mut Ui, label: &str, count: usize) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        rect.left_center() + vec2(10.0, 0.0),
+        Align2::LEFT_CENTER,
+        label.to_uppercase(),
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_faint,
+    );
+    ui.painter().text(
+        rect.right_center() - vec2(10.0, 0.0),
+        Align2::RIGHT_CENTER,
+        count.to_string(),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+}
+
+fn analysis_stack_row(
+    ui: &mut Ui,
+    row: &AnalysisStackRow,
+    position: usize,
+    selected: bool,
+) -> Option<StackAction> {
+    let t = Tokens::get(ui.ctx());
+    let row_height = ANALYSIS_ROW_HEIGHT;
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("Select {} analysis instance {}", row.kind.label(), row.id),
+        )
+    });
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    let fill = if selected {
+        t.color.accent_dim
+    } else if response.hovered() {
+        t.color.bg_hover
+    } else {
+        Color32::TRANSPARENT
+    };
+    painter.rect_filled(rect, 0.0, fill);
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    if selected {
+        painter.vline(
+            rect.left() + 1.0,
+            rect.y_range(),
+            Stroke::new(2.0, t.color.accent),
+        );
+    }
+
+    let opacity = if row.enabled { 1.0 } else { 0.72 };
+    let index_center = egui::pos2(rect.left() + 20.0, rect.top() + 20.0);
+    painter.circle_filled(
+        index_center,
+        11.0,
+        if selected {
+            t.color.accent_dim
+        } else {
+            t.color.bg_inset
+        },
+    );
+    painter.circle_stroke(
+        index_center,
+        11.0,
+        Stroke::new(
+            1.0,
+            if selected {
+                t.color.accent
+            } else {
+                t.color.border
+            },
+        ),
+    );
+    painter.text(
+        index_center,
+        Align2::CENTER_CENTER,
+        format!("{position:02}"),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        if selected {
+            t.color.accent
+        } else {
+            t.color.text_faint.gamma_multiply(opacity)
+        },
+    );
+
+    let switch_hit_size = if t.metrics.ctl_h >= 44.0 { 44.0 } else { 30.0 };
+    let switch_hit = Rect::from_center_size(
+        egui::pos2(rect.right() - 9.0 - switch_hit_size * 0.5, rect.center().y),
+        Vec2::splat(switch_hit_size),
+    );
+    let toggle = ui.interact(switch_hit, response.id.with("enabled"), Sense::click());
+    toggle.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            ui.is_enabled(),
+            row.enabled,
+            format!("Enable {} instance {}", row.kind.label(), row.id),
+        )
+    });
+    paint_switch(ui, switch_hit.center(), row.enabled, toggle.hovered());
+
+    let text_left = rect.left() + 41.0;
+    let text_right = switch_hit.left() - 7.0;
+    let first_line = format!(
+        "{} · {}",
+        row.kind.stable_id().to_uppercase(),
+        row.kind.label()
+    );
+    let second_line = format!("{} · {}", row.id, row.summary);
+    let (status, status_color) = if row.issue_count > 0 {
+        ("dependency blocked", t.color.err)
+    } else {
+        let color = if availability_label(row.kind) == "Production" {
+            t.color.ok
+        } else {
+            t.color.warn
+        };
+        (availability_label(row.kind), color)
+    };
+    let line_top = rect.top() + 7.0;
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(text_left, line_top),
+            egui::pos2(text_right, line_top + 13.0),
+        ),
+        &first_line,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text.gamma_multiply(opacity),
+    );
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(text_left, line_top + 14.0),
+            egui::pos2(text_right, line_top + 27.0),
+        ),
+        &second_line,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint.gamma_multiply(opacity),
+    );
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(text_left, line_top + 28.0),
+            egui::pos2(text_right, rect.bottom() - 3.0),
+        ),
+        &format!("{status} · {}", row.lifecycle),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        status_color.gamma_multiply(opacity),
+    );
+    theme::paint_focus_ring_outset(ui, &response, rect);
+    theme::paint_focus_ring_outset(ui, &toggle, switch_hit);
+
+    if toggle.clicked() {
+        Some(StackAction::SetEnabled(row.id, !row.enabled))
+    } else if response.clicked() {
+        Some(StackAction::Select(row.id))
+    } else {
+        None
+    }
+}
+
+fn paint_switch(ui: &Ui, center: egui::Pos2, enabled: bool, hovered: bool) {
+    let t = Tokens::get(ui.ctx());
+    let rect = Rect::from_center_size(center, vec2(30.0, 17.0));
+    let fill = if enabled {
+        t.color.accent
+    } else if hovered {
+        t.color.bg_hover
+    } else {
+        t.color.bg_inset
+    };
+    ui.painter().rect(
+        rect,
+        8.5,
+        fill,
+        Stroke::new(
+            1.0,
+            if enabled {
+                t.color.accent
+            } else {
+                t.color.border_strong
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let knob_x = if enabled {
+        rect.right() - 7.5
+    } else {
+        rect.left() + 7.5
+    };
+    ui.painter().circle_filled(
+        egui::pos2(knob_x, rect.center().y),
+        5.5,
+        if enabled {
+            t.color.accent_ink
+        } else {
+            t.color.text_dim
+        },
+    );
+}
+
+fn paint_clipped_text(ui: &Ui, rect: Rect, text: &str, font: egui::FontId, color: Color32) {
+    ui.painter().with_clip_rect(rect).text(
+        rect.left_center(),
+        Align2::LEFT_CENTER,
+        text,
+        font,
+        color,
+    );
 }
 
 fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String> {
@@ -274,14 +502,21 @@ fn analysis_catalog_window(
     let mut active = app.state.sim_setup.palette_active;
     let mut chosen = None;
     let mut request_close = false;
-    let available_window_width = (ctx.content_rect().width() - 24.0).max(1.0);
+    let scroll_to_active = app.state.sim_setup.palette_scroll_to_active;
+    let dialog_size = analysis_catalog_content_size(ctx.content_rect().size());
+    let dialog_width = dialog_size.x;
+    let dialog_height = dialog_size.y;
+    let catalog_columns = analysis_catalog_column_count(ctx.content_rect().width());
     egui::Window::new("Add analysis")
         .id(egui::Id::new("workbench.simulate.analysis_catalog"))
         .open(&mut open)
         .collapsible(false)
-        .resizable(true)
-        .default_width(available_window_width.min(560.0))
-        .max_width(available_window_width.min(720.0))
+        .resizable(false)
+        .default_size(vec2(dialog_width, dialog_height))
+        .min_width(dialog_width)
+        .max_width(dialog_width)
+        .min_height(dialog_height)
+        .max_height(dialog_height)
         .show(ctx, |ui| {
             ui.label(
                 egui::RichText::new("ANALYSIS CATALOG")
@@ -324,11 +559,13 @@ fn analysis_catalog_window(
                 request_close = true;
             }
 
-            ui.separator();
+            ui.add_space(3.0);
             ScrollArea::vertical()
                 .id_salt("workbench.simulate.analysis_catalog.rows")
-                .max_height(440.0)
+                .auto_shrink([false, false])
+                .max_height((dialog_height - 94.0).max(160.0))
                 .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     if filtered.is_empty() {
                         ui.label(
                             egui::RichText::new("No analysis matches this search.")
@@ -336,68 +573,35 @@ fn analysis_catalog_window(
                         );
                         return;
                     }
-                    let mut previous_group = None;
-                    for (index, kind) in filtered.iter().copied().enumerate() {
-                        let group = analysis_catalog_group(kind);
-                        if previous_group != Some(group) {
-                            previous_group = Some(group);
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new(group.to_uppercase())
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                    .color(Tokens::get(ui.ctx()).color.text_faint),
-                            );
+                    for group in [
+                        "Numerical analyses",
+                        "Sweeps & variation",
+                        "Derived measurements",
+                        "Verification analyses",
+                        "Optimization analyses",
+                    ] {
+                        let members = filtered
+                            .iter()
+                            .copied()
+                            .enumerate()
+                            .filter(|(_, kind)| analysis_catalog_group(*kind) == group)
+                            .collect::<Vec<_>>();
+                        if members.is_empty() {
+                            continue;
                         }
-                        let configured = rows.iter().filter(|row| row.kind == kind).count();
-                        let disposition = if configured == 0 {
-                            "Add instance".to_owned()
-                        } else {
-                            format!("Add another · {configured} in plan")
-                        };
-                        let selected = index == active;
-                        let compact = ui.available_width() < 440.0;
-                        egui::Frame::new()
-                            .fill(if selected {
-                                Tokens::get(ui.ctx()).color.accent_dim
-                            } else {
-                                Tokens::get(ui.ctx()).color.bg_inset
-                            })
-                            .inner_margin(egui::Margin::symmetric(8, 5))
-                            .show(ui, |ui| {
-                                let mut row_content = |ui: &mut egui::Ui| {
-                                    if ui
-                                        .selectable_label(
-                                            selected,
-                                            format!(
-                                                "{} · {}",
-                                                kind.stable_id().to_uppercase(),
-                                                kind.label()
-                                            ),
-                                        )
-                                        .on_hover_text(format!(
-                                            "Add {} analysis instance",
-                                            kind.label()
-                                        ))
-                                        .clicked()
-                                    {
-                                        chosen = Some(kind);
-                                    }
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{disposition} · {}",
-                                            availability_label(kind)
-                                        ))
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                        .color(Tokens::get(ui.ctx()).color.text_faint),
-                                    );
-                                };
-                                if compact {
-                                    ui.vertical(&mut row_content);
-                                } else {
-                                    ui.horizontal_wrapped(&mut row_content);
-                                }
-                            });
+                        analysis_catalog_group_header(ui, group, members.len());
+                        if let Some(kind) = analysis_catalog_group_rows(
+                            ui,
+                            &members,
+                            rows,
+                            active,
+                            scroll_to_active,
+                            catalog_columns,
+                        ) {
+                            chosen = Some(kind);
+                        }
                     }
+                    ui.add_space(8.0);
                 });
         });
 
@@ -411,6 +615,327 @@ fn analysis_catalog_window(
     app.state.sim_setup.palette_open = open;
     app.state.sim_setup.palette_query = query;
     app.state.sim_setup.palette_active = active;
+    app.state.sim_setup.palette_scroll_to_active = false;
+}
+
+fn analysis_catalog_outer_size(viewport: Vec2) -> Vec2 {
+    let inset = if viewport.x <= TITLE_ACTION_STACK_BREAKPOINT {
+        8.0
+    } else {
+        24.0
+    };
+    vec2(
+        (viewport.x - inset).clamp(1.0, ANALYSIS_CATALOG_MAX_WIDTH),
+        (viewport.y - inset).clamp(1.0, ANALYSIS_CATALOG_MAX_HEIGHT),
+    )
+}
+
+fn analysis_catalog_content_size(viewport: Vec2) -> Vec2 {
+    let outer = analysis_catalog_outer_size(viewport);
+    let chrome_y = if viewport.x <= SIMULATION_STACK_BREAKPOINT {
+        ANALYSIS_CATALOG_COMPACT_WINDOW_CHROME_Y
+    } else {
+        ANALYSIS_CATALOG_WINDOW_CHROME_Y
+    };
+    vec2(
+        (outer.x - ANALYSIS_CATALOG_WINDOW_CHROME_X).max(1.0),
+        (outer.y - chrome_y).max(1.0),
+    )
+}
+
+const fn analysis_catalog_column_count(viewport_width: f32) -> usize {
+    if viewport_width >= 1_200.0 { 2 } else { 1 }
+}
+
+fn analysis_catalog_group_rows(
+    ui: &mut Ui,
+    members: &[(usize, AnalysisKind)],
+    rows: &[AnalysisStackRow],
+    active: usize,
+    scroll_to_active: bool,
+    columns: usize,
+) -> Option<AnalysisKind> {
+    let mut chosen = None;
+    for chunk in members.chunks(columns) {
+        if columns == 1 {
+            let (index, kind) = chunk[0];
+            let disposition = analysis_catalog_disposition(rows, kind);
+            if analysis_catalog_row(ui, kind, &disposition, index == active, scroll_to_active) {
+                chosen = Some(kind);
+            }
+            continue;
+        }
+
+        let gap = 1.0;
+        let column_width = ((ui.available_width() - gap) / 2.0).max(1.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for &(index, kind) in chunk {
+                let disposition = analysis_catalog_disposition(rows, kind);
+                ui.allocate_ui_with_layout(
+                    vec2(column_width, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(column_width);
+                        if analysis_catalog_row(
+                            ui,
+                            kind,
+                            &disposition,
+                            index == active,
+                            scroll_to_active,
+                        ) {
+                            chosen = Some(kind);
+                        }
+                    },
+                );
+            }
+            if chunk.len() == 1 {
+                ui.allocate_exact_size(
+                    vec2(column_width, ANALYSIS_CATALOG_ROW_HEIGHT),
+                    Sense::hover(),
+                );
+            }
+        });
+    }
+    chosen
+}
+
+fn analysis_catalog_disposition(rows: &[AnalysisStackRow], kind: AnalysisKind) -> String {
+    let configured = rows.iter().filter(|row| row.kind == kind).count();
+    if configured == 0 {
+        "Add instance".to_owned()
+    } else {
+        format!("Add another · {configured} in plan")
+    }
+}
+
+fn analysis_catalog_group_header(ui: &mut Ui, group: &str, count: usize) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), ANALYSIS_CATALOG_GROUP_HEIGHT),
+        Sense::hover(),
+    );
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.rect_filled(rect, 0.0, t.color.bg_panel_2);
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    painter.text(
+        rect.left_center() + vec2(12.0, 0.0),
+        Align2::LEFT_CENTER,
+        group.to_uppercase(),
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
+    );
+    painter.text(
+        rect.right_center() - vec2(12.0, 0.0),
+        Align2::RIGHT_CENTER,
+        count,
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.text_faint,
+    );
+}
+
+fn analysis_catalog_row(
+    ui: &mut Ui,
+    kind: AnalysisKind,
+    disposition: &str,
+    selected: bool,
+    scroll_to_active: bool,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let compact = ui.ctx().content_rect().width() <= TITLE_ACTION_STACK_BREAKPOINT;
+    let height = if compact {
+        ANALYSIS_CATALOG_PHONE_ROW_HEIGHT
+    } else {
+        ANALYSIS_CATALOG_ROW_HEIGHT
+    };
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    if selected && scroll_to_active {
+        let reveal = Rect::from_min_max(
+            egui::pos2(rect.left(), rect.top() - ANALYSIS_CATALOG_GROUP_HEIGHT),
+            rect.max,
+        );
+        ui.scroll_to_rect(reveal, Some(Align::Min));
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("Add {} analysis instance", kind.label()),
+        )
+    });
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.rect_filled(
+        rect,
+        0.0,
+        if selected {
+            t.color.bg_panel
+        } else if response.hovered() {
+            t.color.bg_hover
+        } else {
+            t.color.bg_app
+        },
+    );
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    if selected {
+        painter.vline(
+            rect.left() + 1.0,
+            rect.y_range(),
+            Stroke::new(2.0, t.color.accent),
+        );
+    }
+
+    let code_right = rect.left() + if compact { 54.0 } else { 70.0 };
+    painter.vline(
+        code_right,
+        rect.y_range().shrink(7.0),
+        Stroke::new(1.0, t.color.border),
+    );
+    painter.text(
+        rect.left_center() + vec2(12.0, 0.0),
+        Align2::LEFT_CENTER,
+        kind.stable_id().to_uppercase(),
+        theme::mono(tokens::FS_0, FontWeight::SemiBold),
+        t.color.accent,
+    );
+
+    let copy_left = code_right + if compact { 9.0 } else { 12.0 };
+    let (copy_right, readiness_left) = if compact {
+        (rect.right() - 10.0, copy_left)
+    } else {
+        let readiness_left =
+            (rect.right() - ANALYSIS_CATALOG_READINESS_WIDTH).max(copy_left + 96.0);
+        (readiness_left - 12.0, readiness_left)
+    };
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(copy_left, rect.top() + 7.0),
+            egui::pos2(copy_right, rect.top() + 27.0),
+        ),
+        kind.label(),
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+    );
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(copy_left, rect.top() + 28.0),
+            egui::pos2(
+                copy_right,
+                if compact {
+                    rect.top() + 46.0
+                } else {
+                    rect.bottom() - 6.0
+                },
+            ),
+        ),
+        analysis_catalog_group(kind),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+
+    if !compact {
+        painter.vline(
+            readiness_left,
+            rect.y_range().shrink(7.0),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
+    let preview = availability_label(kind) != "Production";
+    let readiness_top = if compact {
+        rect.top() + 45.0
+    } else {
+        rect.top() + 8.0
+    };
+    painter.circle_filled(
+        egui::pos2(readiness_left + 12.0, readiness_top + 5.0),
+        2.5,
+        if availability_label(kind) == "Production" {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+    );
+    let readiness_text_width = (rect.right() - 10.0 - readiness_left - 21.0).max(1.0);
+    if compact {
+        paint_clipped_text(
+            ui,
+            Rect::from_min_max(
+                egui::pos2(readiness_left + 21.0, readiness_top),
+                egui::pos2(rect.right() - 10.0, readiness_top + 14.0),
+            ),
+            disposition,
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            t.color.text_dim,
+        );
+        if preview {
+            paint_clipped_text(
+                ui,
+                Rect::from_min_max(
+                    egui::pos2(readiness_left + 21.0, readiness_top + 13.0),
+                    egui::pos2(rect.right() - 10.0, readiness_top + 26.0),
+                ),
+                analysis_catalog_readiness(kind).unwrap_or_default(),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+            );
+        }
+    } else {
+        let action_galley = ui.painter().layout(
+            disposition.to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            t.color.text_dim,
+            readiness_text_width,
+        );
+        let action_height = action_galley.size().y;
+        painter.galley(
+            egui::pos2(readiness_left + 21.0, readiness_top),
+            action_galley,
+            t.color.text_dim,
+        );
+        if preview {
+            let detail_galley = ui.painter().layout(
+                analysis_catalog_readiness(kind)
+                    .unwrap_or_default()
+                    .to_owned(),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+                readiness_text_width,
+            );
+            painter.galley(
+                egui::pos2(readiness_left + 21.0, readiness_top + action_height),
+                detail_galley,
+                t.color.text_faint,
+            );
+        }
+    }
+    theme::paint_focus_ring_outset(ui, &response, rect);
+    response
+        .on_hover_text(format!("Add {} analysis instance", kind.label()))
+        .clicked()
+}
+
+const fn analysis_catalog_readiness(kind: AnalysisKind) -> Option<&'static str> {
+    match kind {
+        AnalysisKind::Pac
+        | AnalysisKind::Pnoise
+        | AnalysisKind::Pxf
+        | AnalysisKind::Pstb
+        | AnalysisKind::Envelope
+        | AnalysisKind::Reliability => Some("Preview engine · non-sign-off"),
+        AnalysisKind::Disto => Some("Compatibility path · non-sign-off"),
+        _ => None,
+    }
 }
 
 fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
@@ -443,7 +968,7 @@ fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
     .collect()
 }
 
-fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp) {
+fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let (eyebrow, description, plan_available) = match app.state.sim_setup.stable_analysis_plan() {
         Ok(plan) => {
             let enabled = plan
@@ -474,22 +999,30 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp) {
     };
 
     let mut validate = false;
-    if ui.available_width() >= 520.0 {
+    if surface_width > TITLE_ACTION_STACK_BREAKPOINT {
         ui.horizontal_top(|ui| {
-            let heading_width = (ui.available_width() - 132.0).max(220.0);
-            ui.vertical(|ui| {
-                ui.set_width(heading_width);
-                heading(ui, &eyebrow, PLAN_NAME, &description);
-            });
-            validate = ui
-                .add_enabled(plan_available, egui::Button::new("Validate plan"))
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let heading_width = (ui.available_width() - 108.0).max(220.0);
+            ui.allocate_ui_with_layout(
+                vec2(heading_width, 0.0),
+                Layout::top_down(Align::Min),
+                |ui| heading(ui, &eyebrow, PLAN_NAME, &description),
+            );
+            validate = Button::new("Validate plan")
+                .icon(Icon::Check)
+                .accent()
+                .enabled(plan_available)
+                .show(ui)
                 .clicked();
         });
     } else {
         heading(ui, &eyebrow, PLAN_NAME, &description);
         ui.add_space(6.0);
-        validate = ui
-            .add_enabled(plan_available, egui::Button::new("Validate plan"))
+        validate = Button::new("Validate plan")
+            .icon(Icon::Check)
+            .accent()
+            .enabled(plan_available)
+            .show(ui)
             .clicked();
     }
     if validate {
@@ -497,103 +1030,30 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn plan_summary(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Active plan", |ui| {
-        match app.state.sim_setup.stable_analysis_plan() {
-            Ok(plan) => {
-                property_row(ui, "Plan name", PLAN_NAME);
-                property_row(ui, "Stable plan identity", &plan.id().to_string());
-                property_row(ui, "Plan revision", &plan.revision().get().to_string());
-                let run_order = plan
-                    .instances()
-                    .iter()
-                    .filter(|instance| instance.enabled())
-                    .map(|instance| instance.kind().label())
-                    .collect::<Vec<_>>()
-                    .join(" → ");
-                property_row(
-                    ui,
-                    "Run order",
-                    if run_order.is_empty() {
-                        "No analyses enabled"
-                    } else {
-                        &run_order
-                    },
-                );
-            }
-            Err(error) => {
-                property_row(ui, "Plan name", PLAN_NAME);
-                property_row(ui, "Plan status", "Unavailable");
-                ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
-            }
-        }
-        property_row(
-            ui,
-            "Process corner",
-            app.state.sim_setup.reference_pvt.process.short_name(),
-        );
-        property_row(
-            ui,
-            "Temperature",
-            &format!(
-                "{} °C",
-                app.state.sim_setup.reference_pvt.temperature_celsius
-            ),
-        );
-        property_row(
-            ui,
-            "Model libraries",
-            &app.state.model_library_manager.library_count().to_string(),
-        );
-        ui.horizontal_wrapped(|ui| {
-            let command = if app.state.simulation.is_running {
-                Command::StopSimulation
-            } else {
-                Command::RunSimulation
-            };
-            let run = if app.state.simulation.is_running {
-                "Stop active run"
-            } else {
-                "Run active plan"
-            };
-            if ui
-                .add_enabled(command.is_enabled(app), egui::Button::new(run))
-                .clicked()
-            {
-                command.execute(app);
-            }
-            if ui.button("Global solver and convergence…").clicked() {
-                Command::SimulationOptions.execute(app);
-            }
-            if ui.button("Inspect generated netlist").clicked() {
-                Command::GenerateNetlist.execute(app);
-            }
-        });
-    });
-}
-
-fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp) {
+fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
     let selected = match selected_analysis(app) {
         Ok(Some(selected)) => selected,
         Ok(None) => {
-            card(ui, "Analysis instance", |ui| {
+            flat_notice(ui, |ui| {
                 status_dot(
                     ui,
                     Tokens::get(ui.ctx()).color.err,
                     "No active analysis instance",
                 );
-                ui.label("The stable plan is empty. Add an analysis from the plan navigator.");
+                ui.label("The stable plan is empty. Add an analysis from Simulation Studio.");
             });
-            lifecycle_receipt(ui, app);
+            lifecycle_receipt_strip(ui, app);
+            preflight_strip(ui, app, viewport_width <= 820.0);
             return;
         }
         Err(error) => {
             record_failure(app, "Analysis editor", &error);
-            card(ui, "Analysis instance", |ui| {
+            flat_notice(ui, |ui| {
                 status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
                 ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
             });
-            lifecycle_receipt(ui, app);
+            lifecycle_receipt_strip(ui, app);
+            preflight_strip(ui, app, viewport_width <= 820.0);
             return;
         }
     };
@@ -606,104 +1066,26 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp) {
     let serialized_before = serde_json::to_vec(&draft);
     let mut action = None;
 
-    card(ui, selected.kind.label(), |ui| {
-        // Keep the durable identity on its own line. UUID-sized values and
-        // lifecycle text otherwise collide with the Enabled control in the
-        // narrow analysis column and on phones.
-        ui.vertical(|ui| {
-            let mut enabled = selected.enabled;
-            if ui.checkbox(&mut enabled, "Enabled").changed() {
-                action = Some(AnalysisAction::SetEnabled(enabled));
+    let t = Tokens::get(ui.ctx());
+    let editor_response = egui::Frame::new()
+        .fill(t.color.bg_app)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            analysis_form_header(ui, &selected);
+            if availability_label(selected.kind) != "Production" {
+                capability_banner(ui, selected.kind);
             }
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · lifecycle {}",
-                    selected.id, selected.lifecycle
-                ))
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(Tokens::get(ui.ctx()).color.text_faint),
-            );
-        });
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Clone").clicked() {
-                action = Some(AnalysisAction::Clone);
-            }
-            if ui
-                .add_enabled(selected.position > 0, egui::Button::new("Earlier"))
-                .clicked()
-            {
-                action = Some(AnalysisAction::Earlier(selected.position - 1));
-            }
-            if ui
-                .add_enabled(
-                    selected.position + 1 < selected.plan_length,
-                    egui::Button::new("Later"),
-                )
-                .clicked()
-            {
-                action = Some(AnalysisAction::Later(selected.position + 1));
-            }
-            if ui.button("Bind dependencies").clicked() {
-                action = Some(AnalysisAction::BindDependencies);
-            }
-            if ui.button("Validate").clicked() {
-                action = Some(AnalysisAction::Validate);
-            }
-            if ui.button("Remove").clicked() {
-                action = Some(AnalysisAction::Remove);
-            }
-        });
-
-        ui.add_space(8.0);
-        property_row(ui, "Stable instance identity", &selected.id.to_string());
-        property_row(
-            ui,
-            "Ordered position",
-            &format!("{} / {}", selected.position + 1, selected.plan_length),
-        );
-        prerequisite_rows(ui, &selected);
-        property_row(ui, "Availability", availability_label(selected.kind));
-        property_row(ui, "Prior datasets", &prior_datasets);
-
-        ui.add_space(6.0);
-        if let Some(issue) = selected.issues.first() {
-            status_dot(
-                ui,
-                Tokens::get(ui.ctx()).color.err,
-                "Dependency graph blocked",
-            );
-            ui.label(
-                egui::RichText::new(format_plan_issue(issue))
-                    .color(Tokens::get(ui.ctx()).color.err),
-            );
-        } else {
-            status_dot(
-                ui,
-                Tokens::get(ui.ctx()).color.ok,
-                "Dependency identity, order, and enabled state are valid for this instance.",
-            );
-        }
-
-        ui.separator();
-        let note = analysis_form::form(ui, &mut draft);
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(note)
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
-        if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(&draft) {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
-        } else {
-            status_dot(
-                ui,
-                Tokens::get(ui.ctx()).color.ok,
-                "Analysis configuration valid",
-            );
-        }
-    });
+            lifecycle_toolbar(ui, &selected, &mut action);
+            analysis_contract(ui, &selected, &prior_datasets, viewport_width <= 760.0);
+            let note = analysis_form_body(ui, app, &mut draft);
+            form_status(ui, app, &draft, note);
+        })
+        .response;
+    ui.painter().hline(
+        editor_response.rect.x_range(),
+        editor_response.rect.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
 
     let draft_changed = match (serialized_before, serde_json::to_vec(&draft)) {
         (Ok(before), Ok(after)) => before != after,
@@ -713,7 +1095,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp) {
                 "Analysis edit",
                 &format!("the draft could not be serialized exactly: {error}"),
             );
-            lifecycle_receipt(ui, app);
+            lifecycle_receipt_strip(ui, app);
             return;
         }
     };
@@ -724,7 +1106,290 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(action) = action {
         apply_analysis_action(app, selected.id, action);
     }
-    lifecycle_receipt(ui, app);
+    lifecycle_receipt_strip(ui, app);
+    preflight_strip(ui, app, viewport_width <= 820.0);
+    specification_table(ui, app);
+}
+
+fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let icon_rect = Rect::from_min_size(
+        egui::pos2(rect.left() + 11.0, rect.center().y - 12.0),
+        Vec2::splat(24.0),
+    );
+    ui.painter().rect_filled(icon_rect, 3.0, t.color.accent_dim);
+    analysis_icon(selected.kind).paint(ui.painter(), icon_rect.shrink(4.0), t.color.accent);
+    let text_left = icon_rect.right() + 9.0;
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(text_left, rect.top() + 5.0),
+            egui::pos2(rect.right() - 120.0, rect.top() + 22.0),
+        ),
+        selected.kind.label(),
+        theme::sans(tokens::FS_1, FontWeight::SemiBold),
+        t.color.text,
+    );
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(text_left, rect.top() + 21.0),
+            egui::pos2(rect.right() - 120.0, rect.bottom() - 3.0),
+        ),
+        &format!("{} · lifecycle {}", selected.id, selected.lifecycle),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    let (status, color) = if selected.issues.is_empty() {
+        (
+            availability_label(selected.kind),
+            if availability_label(selected.kind) == "Production" {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        )
+    } else {
+        ("preflight blocked", t.color.err)
+    };
+    ui.painter().text(
+        rect.right_center() - vec2(11.0, 0.0),
+        Align2::RIGHT_CENTER,
+        status,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        color,
+    );
+}
+
+fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
+    match kind {
+        AnalysisKind::OperatingPoint
+        | AnalysisKind::PoleZero
+        | AnalysisKind::Stb
+        | AnalysisKind::SParameter
+        | AnalysisKind::Optimization
+        | AnalysisKind::Soa => WorkbenchIcon::Target,
+        AnalysisKind::MonteCarlo | AnalysisKind::Temperature | AnalysisKind::Corner => {
+            WorkbenchIcon::Grid
+        }
+        AnalysisKind::Reliability => WorkbenchIcon::Verify,
+        AnalysisKind::Ac
+        | AnalysisKind::DcSweep
+        | AnalysisKind::Fourier
+        | AnalysisKind::TransferFunction
+        | AnalysisKind::Disto => WorkbenchIcon::Results,
+        AnalysisKind::Transient
+        | AnalysisKind::Noise
+        | AnalysisKind::Sensitivity
+        | AnalysisKind::Pss
+        | AnalysisKind::HarmonicBalance
+        | AnalysisKind::Pac
+        | AnalysisKind::Pnoise
+        | AnalysisKind::Pxf
+        | AnalysisKind::Pstb
+        | AnalysisKind::Envelope => WorkbenchIcon::Simulate,
+    }
+}
+
+fn capability_banner(ui: &mut Ui, kind: AnalysisKind) {
+    let t = Tokens::get(ui.ctx());
+    let response = egui::Frame::new()
+        .fill(t.color.accent_dim)
+        .inner_margin(egui::Margin::symmetric(8, 7))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} is retained for design review and produces non-sign-off data.",
+                    availability_label(kind)
+                ))
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+            );
+        })
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn lifecycle_toolbar(
+    ui: &mut Ui,
+    selected: &SelectedAnalysis,
+    action: &mut Option<AnalysisAction>,
+) {
+    let t = Tokens::get(ui.ctx());
+    let response = egui::Frame::new()
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().item_spacing.y = 6.0;
+            ui.horizontal_wrapped(|ui| {
+                if Button::new("Clone").show(ui).clicked() {
+                    *action = Some(AnalysisAction::Clone);
+                }
+                if Button::new("Earlier")
+                    .enabled(selected.position > 0)
+                    .show(ui)
+                    .clicked()
+                {
+                    *action = Some(AnalysisAction::Earlier(selected.position - 1));
+                }
+                if Button::new("Later")
+                    .enabled(selected.position + 1 < selected.plan_length)
+                    .show(ui)
+                    .clicked()
+                {
+                    *action = Some(AnalysisAction::Later(selected.position + 1));
+                }
+                if Button::new("Bind dependencies").show(ui).clicked() {
+                    *action = Some(AnalysisAction::BindDependencies);
+                }
+                if Button::new("Validate").icon(Icon::Check).show(ui).clicked() {
+                    *action = Some(AnalysisAction::Validate);
+                }
+                if Button::new("Remove").show(ui).clicked() {
+                    *action = Some(AnalysisAction::Remove);
+                }
+            });
+        })
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn analysis_contract(
+    ui: &mut Ui,
+    selected: &SelectedAnalysis,
+    prior_datasets: &str,
+    stacked: bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let response = egui::Frame::new()
+        .fill(t.color.bg_inset)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let properties = |ui: &mut Ui| {
+                property_row(ui, "Stable instance identity", &selected.id.to_string());
+                property_row(
+                    ui,
+                    "Ordered position",
+                    &format!("{} / {}", selected.position + 1, selected.plan_length),
+                );
+                prerequisite_rows(ui, selected);
+                property_row(ui, "Availability", availability_label(selected.kind));
+                property_row(ui, "Prior datasets", prior_datasets);
+            };
+            let evidence = |ui: &mut Ui| {
+                let (color, title, detail) = if let Some(issue) = selected.issues.first() {
+                    (
+                        t.color.err,
+                        "Dependency graph blocked",
+                        format_plan_issue(issue),
+                    )
+                } else {
+                    (
+                        t.color.ok,
+                        "Dependency graph valid",
+                        "Dependency identity, order, and enabled state are valid for this instance."
+                            .to_owned(),
+                    )
+                };
+                status_dot(ui, color, title);
+                ui.label(
+                    egui::RichText::new(detail)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+            };
+            if stacked {
+                properties(ui);
+                ui.add_space(8.0);
+                evidence(ui);
+            } else {
+                ui.columns(2, |columns| {
+                    properties(&mut columns[0]);
+                    evidence(&mut columns[1]);
+                });
+            }
+        })
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn analysis_form_body(ui: &mut Ui, app: &RSpiceApp, draft: &mut AnalysisDraft) -> &'static str {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .fill(t.color.bg_app)
+        .inner_margin(egui::Margin {
+            left: 8,
+            right: 8,
+            top: 7,
+            bottom: 10,
+        })
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let note = analysis_form::form(ui, draft);
+            if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(draft) {
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new(error).color(t.color.err));
+            }
+            note
+        })
+        .inner
+}
+
+fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) {
+    let t = Tokens::get(ui.ctx());
+    let valid = app
+        .state
+        .sim_setup
+        .analysis_draft_validation_error(draft)
+        .is_none();
+    let response = egui::Frame::new()
+        .fill(t.color.bg_app)
+        .inner_margin(egui::Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                status_dot(
+                    ui,
+                    if valid { t.color.ok } else { t.color.err },
+                    if valid {
+                        "Analysis configuration valid"
+                    } else {
+                        "Analysis configuration blocked"
+                    },
+                );
+                ui.label(
+                    egui::RichText::new(note)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+            });
+        })
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.top(),
+        Stroke::new(1.0, t.color.border),
+    );
 }
 
 fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) {
@@ -749,135 +1414,415 @@ fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) {
     }
 }
 
-fn lifecycle_receipt(ui: &mut Ui, app: &RSpiceApp) {
-    card(ui, "Lifecycle receipt", |ui| {
-        ui.label(
-            egui::RichText::new(&app.state.workbench.analysis_lifecycle_status)
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
-        match app.state.sim_setup.stable_analysis_plan() {
-            Ok(plan) => {
-                let latest = plan.receipts().last().map_or_else(
-                    || "No committed receipt".to_owned(),
-                    |receipt| {
-                        format!(
-                            "#{} · {} · {} · revision {}",
-                            receipt.sequence(),
-                            lifecycle_command_label(receipt.command()),
-                            receipt.outcome(),
-                            receipt.committed_revision().get()
-                        )
-                    },
-                );
-                property_row(ui, "Latest receipt", &latest);
-                property_row(ui, "Tombstones", &plan.tombstones().len().to_string());
-            }
-            Err(error) => {
-                property_row(ui, "Latest receipt", "Unavailable");
-                ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
-            }
-        }
-    });
+fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let tombstones = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map_or(0, |plan| plan.tombstones().len());
+    let width = ui.available_width().max(1.0);
+    let compact = width <= 760.0;
+    let detail = &app.state.workbench.analysis_lifecycle_status;
+    let title_width = 94.0;
+    let tombstone_width = 104.0;
+    let detail_width = if compact {
+        (width - 18.0).max(1.0)
+    } else {
+        (width - 18.0 - title_width - tombstone_width - 16.0).max(1.0)
+    };
+    let detail_galley = ui.painter().layout(
+        detail.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        detail_width,
+    );
+    let height = if compact {
+        (detail_galley.size().y + 34.0).max(52.0)
+    } else {
+        (detail_galley.size().y + 12.0).max(36.0)
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.rect_filled(rect, 0.0, t.color.bg_panel);
+    painter.hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let top_center = if compact {
+        rect.top() + 14.0
+    } else {
+        rect.center().y
+    };
+    painter.text(
+        egui::pos2(rect.left() + 9.0, top_center),
+        Align2::LEFT_CENTER,
+        "Lifecycle receipt",
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+    let tombstone_text = format!(
+        "{tombstones} tombstone{}",
+        if tombstones == 1 { "" } else { "s" }
+    );
+    painter.text(
+        egui::pos2(rect.right() - 9.0, top_center),
+        Align2::RIGHT_CENTER,
+        tombstone_text,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    let detail_position = if compact {
+        egui::pos2(rect.left() + 9.0, rect.top() + 27.0)
+    } else {
+        egui::pos2(rect.left() + 9.0 + title_width + 8.0, rect.top() + 6.0)
+    };
+    painter.galley(detail_position, detail_galley, t.color.text_dim);
+    response.on_hover_text(detail);
 }
 
-fn preflight(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Preflight", |ui| {
-        let topology_ok = !app.state.schematic.components.is_empty();
-        let checks_ok = app.state.current_blocking_drc_result().is_none();
-        let (analyses_ok, configurations_ok, graph_ok, plan_error) =
-            match app.state.sim_setup.stable_analysis_plan() {
-                Ok(plan) => {
-                    let enabled = plan
-                        .instances()
-                        .iter()
-                        .filter(|instance| instance.enabled())
-                        .collect::<Vec<_>>();
-                    (
-                        !enabled.is_empty(),
-                        enabled.iter().all(|instance| {
-                            app.state
-                                .sim_setup
-                                .analysis_draft_validation_error(instance.draft())
-                                .is_none()
-                        }),
-                        plan.validation_issues().is_empty(),
-                        None,
-                    )
-                }
-                Err(error) => (false, false, false, Some(error)),
-            };
-        preflight_row(
-            ui,
-            topology_ok,
-            "Design topology",
-            if topology_ok {
-                "Circuit contains devices"
+fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
+    let topology_ok = !app.state.schematic.components.is_empty();
+    let checks_ok = app.state.current_blocking_drc_result().is_none();
+    let (enabled_count, configurations_ok, graph_ok) =
+        match app.state.sim_setup.stable_analysis_plan() {
+            Ok(plan) => {
+                let enabled = plan
+                    .instances()
+                    .iter()
+                    .filter(|instance| instance.enabled())
+                    .collect::<Vec<_>>();
+                (
+                    enabled.len(),
+                    enabled.iter().all(|instance| {
+                        app.state
+                            .sim_setup
+                            .analysis_draft_validation_error(instance.draft())
+                            .is_none()
+                    }),
+                    plan.validation_issues().is_empty(),
+                )
+            }
+            Err(_) => (0, false, false),
+        };
+    let specifications_ok = app.state.workspace.specs.iter().all(|spec| {
+        !spec.measurement.trim().is_empty()
+            && spec
+                .min
+                .zip(spec.max)
+                .is_none_or(|(minimum, maximum)| minimum <= maximum)
+    });
+    let items = [
+        (
+            topology_ok && checks_ok,
+            "Netlist",
+            if !topology_ok {
+                "design is empty".to_owned()
+            } else if !checks_ok {
+                "blocking checks".to_owned()
             } else {
-                "Add at least one component"
+                format!(
+                    "revision {} current",
+                    app.state.schematic.topology_version()
+                )
             },
-        );
-        preflight_row(
-            ui,
-            analyses_ok,
-            "Run set",
-            if analyses_ok {
-                "At least one analysis instance enabled"
-            } else {
-                "Enable an analysis instance"
-            },
-        );
-        preflight_row(
-            ui,
+        ),
+        (
             graph_ok,
             "Instance graph",
             if graph_ok {
-                "Stable dependencies are ordered"
+                format!("dependency ordered · {enabled_count} enabled")
             } else {
-                "Resolve plan lifecycle diagnostics"
+                "resolve lifecycle diagnostics".to_owned()
             },
-        );
-        preflight_row(
-            ui,
-            configurations_ok,
-            "Analysis configuration",
-            if configurations_ok {
-                "All enabled instances validate"
+        ),
+        (
+            specifications_ok,
+            "Outputs",
+            if specifications_ok {
+                format!("{} specifications valid", app.state.workspace.specs.len())
             } else {
-                "Correct invalid analysis fields"
+                "invalid specification bounds".to_owned()
             },
-        );
-        preflight_row(
-            ui,
-            checks_ok,
-            "Blocking checks",
-            if checks_ok {
-                "No current blocking violations"
+        ),
+        (
+            enabled_count > 0 && configurations_ok && graph_ok,
+            "Execution graph",
+            if enabled_count == 0 {
+                "enable an analysis instance".to_owned()
+            } else if !configurations_ok {
+                "correct invalid fields".to_owned()
+            } else if !graph_ok {
+                "dependency graph blocked".to_owned()
             } else {
-                "Resolve current schematic errors"
+                format!("{enabled_count} analysis tasks ready")
             },
+        ),
+    ];
+
+    let t = Tokens::get(ui.ctx());
+    let columns = if compact { 2 } else { 4 };
+    let rows = items.len().div_ceil(columns);
+    let cell_width = ui.available_width() / columns as f32;
+    let text_width = (cell_width - 36.0).max(1.0);
+    let row_height = items
+        .iter()
+        .map(|item| {
+            let detail = ui.painter().layout(
+                item.2.clone(),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                t.color.text_dim,
+                text_width,
+            );
+            (26.0 + detail.size().y).max(PREFLIGHT_CELL_HEIGHT)
+        })
+        .fold(PREFLIGHT_CELL_HEIGHT, f32::max);
+    let size = vec2(ui.available_width(), row_height * rows as f32);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    let cell_width = rect.width() / columns as f32;
+    for (index, item) in items.iter().enumerate() {
+        let column = index % columns;
+        let row = index / columns;
+        let cell = Rect::from_min_size(
+            rect.min + vec2(cell_width * column as f32, row_height * row as f32),
+            vec2(cell_width, row_height),
         );
-        if let Some(error) = plan_error {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
-        } else if let Some(reason) = app.state.simulation_run_block_reason() {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(reason).color(Tokens::get(ui.ctx()).color.warn));
-        }
-    });
+        preflight_cell(ui, cell, item.0, item.1, &item.2);
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
 }
 
-fn preflight_row(ui: &mut Ui, pass: bool, name: &str, detail: &str) {
+fn preflight_cell(ui: &mut Ui, rect: Rect, pass: bool, name: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        status_dot(
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.vline(
+        rect.right(),
+        rect.y_range(),
+        Stroke::new(1.0, t.color.border),
+    );
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let mark = if pass { "✓" } else { "△" };
+    painter.text(
+        rect.left_center() + vec2(9.0, 0.0),
+        Align2::LEFT_CENTER,
+        mark,
+        theme::sans(tokens::FS_1, FontWeight::Regular),
+        if pass { t.color.ok } else { t.color.err },
+    );
+    let text_left = rect.left() + 28.0;
+    paint_clipped_text(
+        ui,
+        Rect::from_min_max(
+            egui::pos2(text_left, rect.top() + 5.0),
+            egui::pos2(rect.right() - 8.0, rect.center().y + 1.0),
+        ),
+        name,
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+    );
+    let detail_galley = ui.painter().layout(
+        detail.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        (rect.right() - 8.0 - text_left).max(1.0),
+    );
+    painter.galley(
+        egui::pos2(text_left, rect.top() + 21.0),
+        detail_galley,
+        t.color.text_dim,
+    );
+}
+
+fn specification_table(ui: &mut Ui, app: &RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let row_height = output_table_row_height(ui.ctx().content_rect().width());
+    let dataset = selected_output_dataset(&app.state.simulation);
+    let dataset_context = dataset.map_or_else(
+        || "NO ACTIVE DATASET".to_owned(),
+        |run| format!("RUN {} · DATASET {}", run.id, run.dataset_id),
+    );
+    let header = ui
+        .allocate_exact_size(vec2(ui.available_width(), 37.0), Sense::hover())
+        .0;
+    ui.painter().hline(
+        header.x_range(),
+        header.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    ui.painter().hline(
+        header.x_range(),
+        header.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let title_rect = Rect::from_min_max(
+        header.left_top() + vec2(11.0, 0.0),
+        egui::pos2(header.left() + header.width() * 0.48, header.bottom()),
+    );
+    paint_clipped_text(
+        ui,
+        title_rect,
+        "Outputs & specifications",
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+    let context_rect = Rect::from_min_max(
+        egui::pos2(header.left() + header.width() * 0.50, header.top()),
+        header.right_bottom() - vec2(11.0, 0.0),
+    );
+    ui.painter().with_clip_rect(context_rect).text(
+        context_rect.right_center(),
+        Align2::RIGHT_CENTER,
+        &dataset_context,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+
+    specification_table_row(ui, "EXPRESSION", "SPEC", "STATUS", true, None, row_height);
+    if app.state.workspace.specs.is_empty() {
+        specification_table_row(
             ui,
-            if pass { t.color.ok } else { t.color.err },
-            if pass { "PASS" } else { "BLOCK" },
+            "No project specifications configured",
+            "—",
+            "optional",
+            false,
+            Some(t.color.text_faint),
+            row_height,
         );
-        ui.label(egui::RichText::new(name).strong());
-        ui.label(egui::RichText::new(detail).color(t.color.text_dim));
-    });
+    } else {
+        for spec in &app.state.workspace.specs {
+            let limit = specification_limit(spec);
+            let value =
+                dataset.and_then(|run| measurement_in_output_dataset(run, &spec.measurement));
+            let (status, color) = match value {
+                Some(value) if spec.passes(value) => ("pass".to_owned(), t.color.ok),
+                Some(_) => ("fail".to_owned(), t.color.err),
+                None => ("no evidence".to_owned(), t.color.warn),
+            };
+            specification_table_row(
+                ui,
+                &spec.measurement,
+                &limit,
+                &status,
+                false,
+                Some(color),
+                row_height,
+            );
+        }
+    }
+}
+
+fn output_table_row_height(viewport_width: f32) -> f32 {
+    if viewport_width <= TITLE_ACTION_STACK_BREAKPOINT {
+        36.0
+    } else if viewport_width <= SIMULATION_STACK_BREAKPOINT {
+        31.0
+    } else {
+        28.0
+    }
+}
+
+fn specification_table_row(
+    ui: &mut Ui,
+    expression: &str,
+    limit: &str,
+    status: &str,
+    header: bool,
+    status_color: Option<Color32>,
+    row_height: f32,
+) {
+    let t = Tokens::get(ui.ctx());
+    let height = if header { 27.0 } else { row_height };
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    if header {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let first = rect.left() + rect.width() * 0.56;
+    let second = rect.left() + rect.width() * 0.80;
+    for x in [first, second] {
+        ui.painter()
+            .vline(x, rect.y_range(), Stroke::new(1.0, t.color.border));
+    }
+    let font = if header {
+        theme::sans(tokens::FS_0, FontWeight::Medium)
+    } else {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    };
+    let color = if header {
+        t.color.text_faint
+    } else {
+        t.color.text_dim
+    };
+    for (cell, text, cell_color) in [
+        (
+            Rect::from_min_max(rect.min, egui::pos2(first, rect.bottom())),
+            expression,
+            color,
+        ),
+        (
+            Rect::from_min_max(
+                egui::pos2(first, rect.top()),
+                egui::pos2(second, rect.bottom()),
+            ),
+            limit,
+            color,
+        ),
+        (
+            Rect::from_min_max(egui::pos2(second, rect.top()), rect.max),
+            status,
+            status_color.unwrap_or(color),
+        ),
+    ] {
+        paint_clipped_text(
+            ui,
+            cell.shrink2(vec2(8.0, 0.0)),
+            text,
+            font.clone(),
+            cell_color,
+        );
+    }
+}
+
+fn specification_limit(spec: &crate::state::SpecEntry) -> String {
+    match (spec.min, spec.max) {
+        (Some(minimum), Some(maximum)) => {
+            format!("{minimum:.6}…{maximum:.6} {}", spec.unit)
+        }
+        (Some(minimum), None) => format!("≥ {minimum:.6} {}", spec.unit),
+        (None, Some(maximum)) => format!("≤ {maximum:.6} {}", spec.unit),
+        (None, None) => "waveform".to_owned(),
+    }
+}
+
+fn selected_output_dataset(
+    simulation: &crate::state::SimulationState,
+) -> Option<&crate::state::SimulationRun> {
+    simulation.active_run()
+}
+
+fn measurement_in_output_dataset(run: &crate::state::SimulationRun, name: &str) -> Option<f64> {
+    run.analyses.iter().find_map(|analysis| {
+        analysis
+            .measurements
+            .iter()
+            .find(|measurement| measurement.name.eq_ignore_ascii_case(name))
+            .and_then(|measurement| measurement.value)
+    })
 }
 
 fn resolve_active_analysis_instance(app: &mut RSpiceApp) -> Result<(), String> {
@@ -926,7 +1871,6 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
         id,
         kind: instance.kind(),
         draft: instance.draft().clone(),
-        enabled: instance.enabled(),
         dependencies: instance.dependencies().to_vec(),
         lifecycle: instance.lifecycle(),
         position,
@@ -963,6 +1907,7 @@ fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) {
     app.state.sim_setup.palette_open = false;
     app.state.sim_setup.palette_query.clear();
     app.state.sim_setup.palette_active = 0;
+    app.state.sim_setup.palette_scroll_to_active = false;
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
@@ -1424,5 +2369,135 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
         AnalysisPlanIssue::InvalidNextReceiptSequence { expected, actual } => {
             format!("Next lifecycle receipt sequence is {actual}; expected {expected}.")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
+
+    #[test]
+    fn desktop_analysis_split_matches_mockup_ratio_and_minimums() {
+        let (left, right) = analysis_split_widths(1001.0, 1_440.0);
+        assert!((left - 340.0).abs() < f32::EPSILON);
+        assert!((right - 660.0).abs() < f32::EPSILON);
+
+        let (left, right) = analysis_split_widths(551.0, 1_440.0);
+        assert!((left - 190.0).abs() < f32::EPSILON);
+        assert!((right - 360.0).abs() < f32::EPSILON);
+
+        let (left, right) = analysis_split_widths(751.0, 1_020.0);
+        assert!((left - 217.5).abs() < f32::EPSILON);
+        assert!((right - 532.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn responsive_breakpoints_match_mockup_contract() {
+        assert_eq!(SIMULATION_STACK_BREAKPOINT, 820.0);
+        assert_eq!(TITLE_ACTION_STACK_BREAKPOINT, 560.0);
+    }
+
+    #[test]
+    fn responsive_surface_geometry_matches_mockup_contract() {
+        assert_eq!(ANALYSIS_ROW_HEIGHT, 53.0);
+        assert_eq!(PREFLIGHT_CELL_HEIGHT, 42.0);
+        assert_eq!(STACKED_WORKSPACE_GAP, 9.0);
+        assert_eq!(output_table_row_height(1_440.0), 28.0);
+        assert_eq!(output_table_row_height(820.0), 31.0);
+        assert_eq!(output_table_row_height(560.0), 36.0);
+        assert_eq!(analysis_column_min_height(720.0, 148.0), 572.0);
+        assert_eq!(analysis_column_min_height(100.0, 120.0), 1.0);
+        let row_rect = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_000.0, 572.0));
+        let background = analysis_stack_background_rect(row_rect, 340.0);
+        assert_eq!(background.min, row_rect.min);
+        assert_eq!(background.width(), 340.0);
+        assert_eq!(background.height(), row_rect.height());
+    }
+
+    #[test]
+    fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
+        assert_eq!(
+            analysis_catalog_outer_size(vec2(1_440.0, 900.0)),
+            vec2(1_180.0, 780.0)
+        );
+        assert_eq!(
+            analysis_catalog_outer_size(vec2(390.0, 844.0)),
+            vec2(382.0, 780.0)
+        );
+        assert_eq!(
+            analysis_catalog_content_size(vec2(1_440.0, 900.0)),
+            vec2(1_154.0, 729.0)
+        );
+        assert_eq!(
+            analysis_catalog_content_size(vec2(390.0, 844.0)),
+            vec2(356.0, 714.0)
+        );
+        assert_eq!(ANALYSIS_CATALOG_GROUP_HEIGHT, 29.0);
+        assert_eq!(ANALYSIS_CATALOG_ROW_HEIGHT, 57.0);
+        assert_eq!(ANALYSIS_CATALOG_PHONE_ROW_HEIGHT, 72.0);
+        assert_eq!(ANALYSIS_CATALOG_READINESS_WIDTH, 142.0);
+        assert_eq!(analysis_catalog_column_count(1_199.99), 1);
+        assert_eq!(analysis_catalog_column_count(1_200.0), 2);
+        assert_eq!(
+            analysis_catalog_readiness(AnalysisKind::Pac),
+            Some("Preview engine · non-sign-off")
+        );
+        assert_eq!(analysis_catalog_readiness(AnalysisKind::Transient), None);
+    }
+
+    #[test]
+    fn analysis_catalog_search_preserves_canonical_group_order() {
+        let all = filtered_catalog_kinds("");
+        assert_eq!(all.len(), AnalysisKind::ALL.len());
+        assert_eq!(all.first(), Some(&AnalysisKind::OperatingPoint));
+        assert!(
+            all.iter()
+                .position(|kind| *kind == AnalysisKind::MonteCarlo)
+                < all
+                    .iter()
+                    .position(|kind| *kind == AnalysisKind::Reliability)
+        );
+        assert_eq!(
+            filtered_catalog_kinds("periodic noise"),
+            vec![AnalysisKind::Pnoise]
+        );
+    }
+
+    #[test]
+    fn output_specifications_never_mix_measurements_across_retained_datasets() {
+        let mut older = SimulationRun::new(1);
+        older.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "older")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
+        );
+        let mut selected = SimulationRun::new(2);
+        selected.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "selected")
+                .with_measurements(vec![rspice_core::MeasureResult::success("bandwidth", 42.0)]),
+        );
+
+        let selected_dataset = selected.dataset_id;
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![older, selected];
+        simulation.active_run_idx = Some(1);
+
+        let run = selected_output_dataset(&simulation).expect("selected dataset");
+        assert_eq!(run.dataset_id, selected_dataset);
+        assert_eq!(measurement_in_output_dataset(run, "bandwidth"), Some(42.0));
+        assert_eq!(measurement_in_output_dataset(run, "gain"), None);
+    }
+
+    #[test]
+    fn output_specifications_require_an_explicit_active_dataset() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "retained")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
+        );
+        let mut simulation = SimulationState::default();
+        simulation.runs.push(run);
+
+        assert!(selected_output_dataset(&simulation).is_none());
     }
 }

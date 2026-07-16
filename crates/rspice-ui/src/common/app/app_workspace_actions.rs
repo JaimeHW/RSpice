@@ -172,10 +172,11 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     schematic.recalculate_runtime_state();
     // Views from read-only libraries open for inspection, never for edit —
     // the docbar banner explains and every edit path checks this flag.
-    schematic.read_only = state
-        .library_manager
-        .get_library(&reference.library)
-        .is_some_and(|library| library.read_only);
+    schematic.read_only = state.workbench.safe_mode.project_read_only()
+        || state
+            .library_manager
+            .get_library(&reference.library)
+            .is_some_and(|library| library.read_only);
     schematic
 }
 

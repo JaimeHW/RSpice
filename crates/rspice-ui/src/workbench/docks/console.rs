@@ -18,11 +18,14 @@ const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
 const CONSOLE_ACTION_SIZE: f32 = 27.0;
 const CONSOLE_ACTION_MARGIN_RIGHT: f32 = 3.0;
 const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
+const CONSOLE_BODY_PADDING_BOTTOM: f32 = 7.0;
 const CONSOLE_BODY_PADDING_X: f32 = 10.0;
-const CONSOLE_ROW_HEIGHT: f32 = 17.0;
+const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
 const CONSOLE_TIME_WIDTH: f32 = 58.0;
 const CONSOLE_SOURCE_WIDTH: f32 = 62.0;
 const CONSOLE_COLUMN_GAP: f32 = 9.0;
+const EMPTY_HINT_PADDING_X: i8 = 12;
+const EMPTY_HINT_PADDING_Y: i8 = 20;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     header(ui, app, layout);
@@ -40,7 +43,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         ),
         egui::pos2(
             body_rect.right() - CONSOLE_BODY_PADDING_X,
-            body_rect.bottom(),
+            body_rect.bottom() - CONSOLE_BODY_PADDING_BOTTOM,
         ),
     );
     let body = ui.scope_builder(
@@ -70,7 +73,8 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         .map_or(0, |result| result.total_count())
         + app.state.log_buffer.count_by_severity(LogSeverity::Error)
         + app.state.log_buffer.count_by_severity(LogSeverity::Warning);
-    let header_height = if layout.coarse_pointer {
+    let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
+    let header_height = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
     } else {
         CONSOLE_HEADER_HEIGHT
@@ -80,15 +84,18 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let action_width =
-                console_trailing_actions_width(layout, app.state.workbench.console_page);
+            let action_width = console_trailing_actions_width(
+                layout,
+                app.state.workbench.console_page,
+                touch_targets,
+            );
             egui::ScrollArea::horizontal()
                 .id_salt("workbench.console.tabs.scroll")
                 .max_width((ui.available_width() - action_width).max(header_height))
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| console_tabs(ui, app, problems, header_height));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let control_size = if layout.coarse_pointer {
+                let control_size = if touch_targets {
                     CONSOLE_TOUCH_HEADER_HEIGHT
                 } else {
                     CONSOLE_ACTION_SIZE
@@ -113,7 +120,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     Command::ToggleConsole.execute(app);
                 }
                 if !layout.compact_shell {
-                    if !layout.coarse_pointer {
+                    if !touch_targets {
                         ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
                         if console_action(
                             ui,
@@ -131,23 +138,24 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             Command::ToggleConsoleMaximized.execute(app);
                         }
                     }
-                    if page_owns_clear_action(app.state.workbench.console_page) {
-                        let enabled = Command::ClearConsole.is_enabled(app);
-                        ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
-                        let response = ui
-                            .add_enabled_ui(enabled, |ui| {
-                                console_action(
-                                    ui,
-                                    ConsoleActionIcon::Clear,
-                                    "Clear console output",
-                                    false,
-                                    control_size,
-                                )
-                            })
-                            .inner;
-                        if response.clicked() {
-                            Command::ClearConsole.execute(app);
-                        }
+                    let clear = console_clear_action(
+                        app.state.workbench.console_page,
+                        Command::ClearConsole.is_enabled(app),
+                    );
+                    ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
+                    let response = ui
+                        .add_enabled_ui(clear.enabled, |ui| {
+                            console_action(
+                                ui,
+                                ConsoleActionIcon::Clear,
+                                clear.label,
+                                false,
+                                control_size,
+                            )
+                        })
+                        .inner;
+                    if response.clicked() {
+                        Command::ClearConsole.execute(app);
                     }
                 }
                 if !layout.compact_shell {
@@ -165,16 +173,23 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
 }
 
-fn console_trailing_actions_width(layout: LayoutSpec, page: ConsolePage) -> f32 {
-    let control_size = if layout.coarse_pointer {
+fn console_trailing_actions_width(
+    layout: LayoutSpec,
+    _page: ConsolePage,
+    touch_targets: bool,
+) -> f32 {
+    let control_size = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
     } else {
         CONSOLE_ACTION_SIZE
     };
     let mut actions = 1_usize;
     if !layout.compact_shell {
-        actions += usize::from(!layout.coarse_pointer);
-        actions += usize::from(page_owns_clear_action(page));
+        actions += usize::from(!touch_targets);
+        // Clear remains present for every page so switching tabs never moves
+        // Maximize or Collapse. Pages backed by immutable/derived data expose
+        // the same affordance disabled with a precise explanation.
+        actions += 1;
     }
     actions as f32 * (control_size + CONSOLE_ACTION_MARGIN_RIGHT)
 }
@@ -373,11 +388,16 @@ fn console_action(
         ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
     }
     let icon_rect = egui::Rect::from_center_size(rect.center(), Vec2::splat(16.0));
+    let icon_color = if ui.is_enabled() {
+        t.color.text_dim
+    } else {
+        t.color.text_faint
+    };
     match icon {
         ConsoleActionIcon::Workbench(icon) => {
-            icon.paint(ui.painter(), icon_rect, t.color.text_dim);
+            icon.paint(ui.painter(), icon_rect, icon_color);
         }
-        ConsoleActionIcon::Clear => paint_trash(ui.painter(), icon_rect, t.color.text_dim),
+        ConsoleActionIcon::Clear => paint_trash(ui.painter(), icon_rect, icon_color),
     }
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(label)
@@ -711,8 +731,35 @@ fn format_measure_value(value: f64) -> String {
     fmt_si(value, "", 6).trim().to_owned()
 }
 
-fn page_owns_clear_action(page: ConsolePage) -> bool {
-    matches!(page, ConsolePage::Console)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConsoleClearAction {
+    enabled: bool,
+    label: &'static str,
+}
+
+fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleClearAction {
+    match page {
+        ConsolePage::Console => ConsoleClearAction {
+            enabled: console_has_output,
+            label: if console_has_output {
+                "Clear console output"
+            } else {
+                "Console output is already empty"
+            },
+        },
+        ConsolePage::Problems => ConsoleClearAction {
+            enabled: false,
+            label: "Problems reflect current diagnostics and cannot be cleared",
+        },
+        ConsolePage::Measurements => ConsoleClearAction {
+            enabled: false,
+            label: "Measurements belong to the selected immutable dataset",
+        },
+        ConsolePage::TaskLog => ConsoleClearAction {
+            enabled: false,
+            label: "Task history is retained and cannot be cleared here",
+        },
+    }
 }
 
 fn row(
@@ -724,8 +771,18 @@ fn row(
     message_color: egui::Color32,
 ) {
     let t = Tokens::get(ui.ctx());
+    let message_x_offset =
+        CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
+    let message_width = (ui.available_width() - message_x_offset).max(1.0);
+    let message_galley = ui.painter().layout(
+        message.to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        message_color,
+        message_width,
+    );
+    let row_height = message_galley.size().y.max(CONSOLE_ROW_MIN_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), CONSOLE_ROW_HEIGHT),
+        egui::vec2(ui.available_width(), row_height),
         egui::Sense::hover(),
     );
     let time_x = rect.left();
@@ -736,7 +793,7 @@ fn row(
         egui::pos2(time_x + CONSOLE_TIME_WIDTH, rect.bottom()),
     );
     ui.painter().with_clip_rect(time_clip).text(
-        egui::pos2(time_x, rect.center().y),
+        egui::pos2(time_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
         time,
         theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -747,17 +804,24 @@ fn row(
         egui::pos2(source_x + CONSOLE_SOURCE_WIDTH, rect.bottom()),
     );
     ui.painter().with_clip_rect(source_clip).text(
-        egui::pos2(source_x, rect.center().y),
+        egui::pos2(source_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
         source,
         theme::mono(tokens::FS_0, FontWeight::Medium),
         source_color,
     );
-    ui.painter().text(
-        egui::pos2(message_x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        message,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+    let message_clip = egui::Rect::from_min_max(
+        egui::pos2(message_x, rect.top()),
+        egui::pos2(rect.right(), rect.bottom()),
+    );
+    let message_y = if message_galley.size().y <= CONSOLE_ROW_MIN_HEIGHT {
+        rect.center().y - message_galley.size().y * 0.5
+    } else {
+        rect.top()
+    };
+    ui.painter().with_clip_rect(message_clip).galley(
+        egui::pos2(message_x, message_y),
+        message_galley,
         message_color,
     );
 }
@@ -768,8 +832,25 @@ fn simulation_progress_percent(progress: f64) -> u8 {
 
 fn muted(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.add_space(10.0);
-    ui.label(egui::RichText::new(text).color(t.color.text_faint));
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: EMPTY_HINT_PADDING_X,
+            right: EMPTY_HINT_PADDING_X,
+            top: EMPTY_HINT_PADDING_Y,
+            bottom: EMPTY_HINT_PADDING_Y,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(1.0));
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                )
+                .wrap()
+                .halign(Align::Center),
+            );
+        });
 }
 
 #[cfg(test)]
@@ -780,6 +861,13 @@ mod tests {
     use crate::services::drc::{DrcResult, DrcSeverity};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
     use crate::workbench::state::WorkbenchState;
+
+    #[test]
+    fn console_empty_hints_match_mockup_spacing_and_type_scale() {
+        assert_eq!(EMPTY_HINT_PADDING_X, 12);
+        assert_eq!(EMPTY_HINT_PADDING_Y, 20);
+        assert_eq!(tokens::FS_0, 11.0);
+    }
 
     #[test]
     fn severity_tones_preserve_warning_info_and_diagnostic_meaning() {
@@ -825,11 +913,21 @@ mod tests {
     }
 
     #[test]
-    fn only_console_exposes_the_clear_action() {
-        assert!(page_owns_clear_action(ConsolePage::Console));
-        assert!(!page_owns_clear_action(ConsolePage::Problems));
-        assert!(!page_owns_clear_action(ConsolePage::Measurements));
-        assert!(!page_owns_clear_action(ConsolePage::TaskLog));
+    fn clear_affordance_is_truthful_for_every_console_page() {
+        let console = console_clear_action(ConsolePage::Console, true);
+        assert!(console.enabled);
+        assert_eq!(console.label, "Clear console output");
+        assert!(!console_clear_action(ConsolePage::Console, false).enabled);
+
+        for page in [
+            ConsolePage::Problems,
+            ConsolePage::Measurements,
+            ConsolePage::TaskLog,
+        ] {
+            let action = console_clear_action(page, true);
+            assert!(!action.enabled);
+            assert_ne!(action.label, "Clear console output");
+        }
     }
 
     #[test]
@@ -877,31 +975,32 @@ mod tests {
         assert_eq!(CONSOLE_ACTION_SIZE, 27.0);
         assert_eq!(CONSOLE_ACTION_MARGIN_RIGHT, 3.0);
         assert_eq!(CONSOLE_BODY_PADDING_TOP, 7.0);
+        assert_eq!(CONSOLE_BODY_PADDING_BOTTOM, 7.0);
         assert_eq!(CONSOLE_BODY_PADDING_X, 10.0);
         assert_eq!(CONSOLE_TIME_WIDTH, 58.0);
         assert_eq!(CONSOLE_SOURCE_WIDTH, 62.0);
         assert_eq!(CONSOLE_COLUMN_GAP, 9.0);
-        assert_eq!(CONSOLE_ROW_HEIGHT, 17.0);
+        assert_eq!(CONSOLE_ROW_MIN_HEIGHT, 16.0);
         assert_eq!(tokens::FS_0, 11.0);
     }
 
     #[test]
     fn console_tab_lane_reserves_every_visible_trailing_action() {
         let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
-        assert_eq!(
-            console_trailing_actions_width(desktop, ConsolePage::Console),
-            90.0
-        );
-        assert_eq!(
-            console_trailing_actions_width(desktop, ConsolePage::Problems),
-            60.0
-        );
+        for page in ConsolePage::ALL {
+            assert_eq!(console_trailing_actions_width(desktop, page, false), 90.0);
+        }
 
         let phone =
             LayoutSpec::resolve_with_pointer(390.0, 844.0, true, &WorkbenchState::default());
-        assert_eq!(
-            console_trailing_actions_width(phone, ConsolePage::Console),
-            47.0
-        );
+        for page in ConsolePage::ALL {
+            assert_eq!(console_trailing_actions_width(phone, page, true), 47.0);
+        }
+
+        let tablet =
+            LayoutSpec::resolve_with_pointer(1_024.0, 768.0, true, &WorkbenchState::default());
+        for page in ConsolePage::ALL {
+            assert_eq!(console_trailing_actions_width(tablet, page, true), 94.0);
+        }
     }
 }

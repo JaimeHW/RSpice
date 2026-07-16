@@ -12,12 +12,11 @@ use super::super::layout::LayoutSpec;
 use super::super::state::Workspace;
 
 const STATUS_PADDING_X: f32 = 9.0;
-const STATUS_MARK_SIZE: f32 = 14.0;
 const STATUS_MARK_GAP: f32 = 5.0;
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
-    let show_details = shows_detailed_status(ctx.content_rect().width());
+    let visibility = status_visibility(ctx.content_rect().width());
     let shown = TopBottomPanel::bottom("workbench.status_bar")
         .exact_height(layout.status_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
@@ -25,75 +24,129 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let bar_width = ui.available_width();
-            let (left_width, right_width) = status_group_widths(bar_width);
             let height = ui.available_height();
+            let check = check_summary(app);
+            let engineering = engineering_context_summary(app);
+            let selection = selection_summary(app);
+            let zoom_command = if app.state.workbench.workspace == Workspace::Results {
+                Command::ZoomFit
+            } else {
+                Command::ZoomOneToOne
+            };
+            let zoom = format!("{}%", (zoom_factor(app) * 100.0).round());
+            let (engine, engine_color) = if app.state.simulation.is_running {
+                (
+                    format!(
+                        "Engine running · {}%",
+                        simulation_progress_percent(app.state.simulation.progress)
+                    ),
+                    t.color.accent,
+                )
+            } else {
+                ("Engine ready".to_owned(), t.color.ok)
+            };
+            let engine_wash = if app.state.simulation.is_running {
+                t.color.accent_dim
+            } else {
+                semantic_wash(t.color.ok, t.mode)
+            };
+            let platform = platform_label();
+            let check_mark = StatusMark::Check(check_tone(app, &t));
+            let engine_mark = StatusMark::Dot {
+                color: engine_color,
+                wash: engine_wash,
+            };
+            let left_desired = desired_status_width(ui, &check, check_mark)
+                + if visibility.coordinates {
+                    desired_status_width(ui, &engineering, StatusMark::None)
+                } else {
+                    0.0
+                }
+                + if visibility.selection {
+                    desired_status_width(ui, &selection, StatusMark::None)
+                } else {
+                    0.0
+                };
+            let right_desired = desired_status_width(ui, &zoom, StatusMark::None)
+                + desired_status_width(ui, &engine, engine_mark)
+                + if visibility.platform {
+                    desired_status_width(ui, &platform, StatusMark::Processor)
+                } else {
+                    0.0
+                };
+            let groups = status_group_allocation(left_desired, right_desired, bar_width);
             ui.horizontal(|ui| {
                 ui.allocate_ui_with_layout(
-                    Vec2::new(left_width, height),
+                    Vec2::new(groups.left, height),
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        if status_item(
-                            ui,
-                            &check_summary(app),
-                            StatusMark::Check(check_tone(app, &t)),
-                            true,
-                        )
-                        .clicked()
-                        {
+                        let desired = [
+                            desired_status_width(ui, &check, check_mark),
+                            if visibility.coordinates {
+                                desired_status_width(ui, &engineering, StatusMark::None)
+                            } else {
+                                0.0
+                            },
+                            if visibility.selection {
+                                desired_status_width(ui, &selection, StatusMark::None)
+                            } else {
+                                0.0
+                            },
+                        ];
+                        let widths = fit_status_widths(desired, groups.left);
+                        if status_item_sized(ui, &check, check_mark, true, widths[0]).clicked() {
                             Command::OpenProblems.execute(app);
                         }
-
-                        if show_details {
-                            status_label(ui, &engineering_context_summary(app));
-                            status_label(ui, &selection_summary(app));
+                        if visibility.coordinates {
+                            status_item_sized(ui, &engineering, StatusMark::None, false, widths[1]);
+                        }
+                        if visibility.selection {
+                            status_item_sized(ui, &selection, StatusMark::None, false, widths[2]);
                         }
                     },
                 );
 
+                ui.add_space(groups.gap);
+
                 ui.allocate_ui_with_layout(
-                    Vec2::new(right_width, height),
+                    Vec2::new(groups.right, height),
                     Layout::right_to_left(Align::Center),
                     |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        let zoom_command = if app.state.workbench.workspace == Workspace::Results {
-                            Command::ZoomFit
+                        let zoom_mark = StatusMark::None;
+                        let platform_mark = StatusMark::Processor;
+                        let widths = fit_status_widths(
+                            [
+                                desired_status_width(ui, &zoom, zoom_mark),
+                                desired_status_width(ui, &engine, engine_mark),
+                                if visibility.platform {
+                                    desired_status_width(ui, &platform, platform_mark)
+                                } else {
+                                    0.0
+                                },
+                            ],
+                            groups.right,
+                        );
+                        if status_item_sized(
+                            ui,
+                            &zoom,
+                            zoom_mark,
+                            zoom_command.is_enabled(app),
+                            widths[0],
+                        )
+                        .on_hover_text(if app.state.workbench.workspace == Workspace::Results {
+                            "Fit the active result plot"
                         } else {
-                            Command::ZoomOneToOne
-                        };
-                        let zoom = format!("{}%", (zoom_factor(app) * 100.0).round());
-                        if status_item(ui, &zoom, StatusMark::None, zoom_command.is_enabled(app))
-                            .on_hover_text(if app.state.workbench.workspace == Workspace::Results {
-                                "Fit the active result plot"
-                            } else {
-                                "Reset active canvas zoom to 100%"
-                            })
-                            .clicked()
+                            "Reset active canvas zoom to 100%"
+                        })
+                        .clicked()
                         {
                             zoom_command.execute(app);
                         }
-
-                        let (engine, color) = if app.state.simulation.is_running {
-                            (
-                                format!(
-                                    "Engine running · {}%",
-                                    simulation_progress_percent(app.state.simulation.progress)
-                                ),
-                                t.color.accent,
-                            )
-                        } else {
-                            ("Engine ready".to_owned(), t.color.ok)
-                        };
-                        let wash = if app.state.simulation.is_running {
-                            t.color.accent_dim
-                        } else {
-                            semantic_wash(t.color.ok, t.mode)
-                        };
-                        let _ = status_item(ui, &engine, StatusMark::Dot { color, wash }, false);
-
-                        if show_details {
-                            let _ =
-                                status_item(ui, &platform_label(), StatusMark::Processor, false);
+                        status_item_sized(ui, &engine, engine_mark, false, widths[1]);
+                        if visibility.platform {
+                            status_item_sized(ui, &platform, platform_mark, false, widths[2]);
                         }
                     },
                 );
@@ -105,13 +158,62 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     });
 }
 
-fn shows_detailed_status(viewport_width: f32) -> bool {
-    viewport_width > 900.0
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StatusVisibility {
+    coordinates: bool,
+    selection: bool,
+    platform: bool,
 }
 
-fn status_group_widths(available_width: f32) -> (f32, f32) {
-    let left = (available_width * 0.5).floor();
-    (left, available_width - left)
+fn status_visibility(viewport_width: f32) -> StatusVisibility {
+    let show_secondary = viewport_width > 900.0;
+    StatusVisibility {
+        coordinates: show_secondary,
+        selection: show_secondary,
+        platform: show_secondary,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StatusGroupAllocation {
+    left: f32,
+    right: f32,
+    gap: f32,
+}
+
+/// Reproduce the mockup's `justify-content: space-between` status composition.
+/// Each group keeps its intrinsic content width while space is available. Only
+/// genuine overflow compresses both groups, in proportion to their content.
+fn status_group_allocation(
+    left_desired: f32,
+    right_desired: f32,
+    available_width: f32,
+) -> StatusGroupAllocation {
+    let available_width = available_width.max(0.0);
+    let left_desired = left_desired.max(0.0);
+    let right_desired = right_desired.max(0.0);
+    let desired = left_desired + right_desired;
+    if desired <= available_width {
+        return StatusGroupAllocation {
+            left: left_desired,
+            right: right_desired,
+            gap: available_width - desired,
+        };
+    }
+    if desired <= f32::EPSILON {
+        return StatusGroupAllocation {
+            left: 0.0,
+            right: 0.0,
+            gap: available_width,
+        };
+    }
+    let scale = available_width / desired;
+    let left = left_desired * scale;
+    StatusGroupAllocation {
+        left,
+        right: available_width - left,
+        gap: 0.0,
+    }
 }
 
 fn check_summary(app: &RSpiceApp) -> String {
@@ -299,30 +401,69 @@ enum StatusMark {
     Processor,
 }
 
-fn status_label(ui: &mut egui::Ui, text: &str) {
-    let _ = status_item(ui, text, StatusMark::None, false);
+fn status_padding_x(ui: &egui::Ui) -> f32 {
+    if ui.ctx().content_rect().width() <= 820.0 {
+        7.0
+    } else {
+        STATUS_PADDING_X
+    }
 }
 
-fn status_item(
+fn status_mark_size(mark: StatusMark) -> f32 {
+    match mark {
+        StatusMark::None => 0.0,
+        StatusMark::Check(_) => 14.0,
+        StatusMark::Dot { .. } => 6.0,
+        StatusMark::Processor => 16.0,
+    }
+}
+
+fn status_text_font() -> egui::FontId {
+    theme::mono(tokens::FS_0, FontWeight::Regular)
+}
+
+fn desired_status_width(ui: &egui::Ui, text: &str, mark: StatusMark) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), status_text_font(), t.color.text_dim)
+        .size()
+        .x;
+    let mark_width = if matches!(mark, StatusMark::None) {
+        0.0
+    } else {
+        status_mark_size(mark) + STATUS_MARK_GAP
+    };
+    status_padding_x(ui) * 2.0 + mark_width + text_width
+}
+
+fn fit_status_widths<const N: usize>(desired: [f32; N], available: f32) -> [f32; N] {
+    let total = desired.iter().sum::<f32>();
+    if total <= available || total <= f32::EPSILON {
+        return desired;
+    }
+    let scale = (available / total).clamp(0.0, 1.0);
+    desired.map(|width| width * scale)
+}
+
+fn status_item_sized(
     ui: &mut egui::Ui,
     text: &str,
     mark: StatusMark,
     interactive: bool,
+    width: f32,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let full_galley = ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font.clone(), t.color.text_dim);
+    let font = status_text_font();
+    let padding_x = status_padding_x(ui);
+    let mark_size = status_mark_size(mark);
     let mark_width = if matches!(mark, StatusMark::None) {
         0.0
     } else {
-        STATUS_MARK_SIZE + STATUS_MARK_GAP
+        mark_size + STATUS_MARK_GAP
     };
-    let available_width = ui.available_width().max(0.0);
-    let desired_width = STATUS_PADDING_X * 2.0 + mark_width + full_galley.size().x;
-    let width = desired_width.min(available_width);
-    let text_width = (width - STATUS_PADDING_X * 2.0 - mark_width).max(0.0);
+    let width = width.min(ui.available_width().max(0.0));
+    let text_width = (width - padding_x * 2.0 - mark_width).max(0.0);
     let painted_text = ellipsize_status_text(ui.painter(), text, &font, text_width);
     let galley = ui
         .painter()
@@ -354,11 +495,11 @@ fn status_item(
         egui::Stroke::new(1.0, t.color.border),
     );
 
-    let mut text_x = rect.left() + STATUS_PADDING_X;
+    let mut text_x = rect.left() + padding_x;
     if !matches!(mark, StatusMark::None) {
         let mark_rect = egui::Rect::from_center_size(
-            egui::pos2(text_x + STATUS_MARK_SIZE * 0.5, rect.center().y),
-            Vec2::splat(STATUS_MARK_SIZE),
+            egui::pos2(text_x + mark_size * 0.5, rect.center().y),
+            Vec2::splat(mark_size),
         );
         match mark {
             StatusMark::Check(color) => {
@@ -486,8 +627,22 @@ mod tests {
 
     #[test]
     fn dense_status_metadata_follows_the_mockup_nine_hundred_pixel_cutoff() {
-        assert!(!shows_detailed_status(900.0));
-        assert!(shows_detailed_status(901.0));
+        assert_eq!(
+            status_visibility(900.0),
+            StatusVisibility {
+                coordinates: false,
+                selection: false,
+                platform: false,
+            }
+        );
+        assert_eq!(
+            status_visibility(901.0),
+            StatusVisibility {
+                coordinates: true,
+                selection: true,
+                platform: true,
+            }
+        );
     }
 
     #[test]
@@ -495,13 +650,30 @@ mod tests {
         assert_eq!(STATUS_PADDING_X, 9.0);
         assert_eq!(STATUS_MARK_GAP, 5.0);
         assert_eq!(tokens::FS_0, 11.0);
+        assert_eq!(
+            status_text_font(),
+            theme::mono(tokens::FS_0, FontWeight::Regular)
+        );
     }
 
     #[test]
-    fn status_groups_keep_the_mockup_fifty_fifty_stress_partition() {
-        assert_eq!(status_group_widths(1_440.0), (720.0, 720.0));
-        assert_eq!(status_group_widths(901.0), (450.0, 451.0));
-        assert_eq!(status_group_widths(390.0), (195.0, 195.0));
+    fn status_groups_use_intrinsic_widths_and_space_between() {
+        assert_eq!(
+            status_group_allocation(420.0, 310.0, 1_440.0),
+            StatusGroupAllocation {
+                left: 420.0,
+                right: 310.0,
+                gap: 710.0,
+            }
+        );
+    }
+
+    #[test]
+    fn status_groups_compress_proportionally_only_when_they_overlap() {
+        let allocation = status_group_allocation(600.0, 400.0, 900.0);
+        assert!((allocation.left - 540.0).abs() < f32::EPSILON);
+        assert!((allocation.right - 360.0).abs() < f32::EPSILON);
+        assert_eq!(allocation.gap, 0.0);
     }
 
     #[test]

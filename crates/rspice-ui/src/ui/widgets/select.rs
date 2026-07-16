@@ -19,6 +19,7 @@ pub fn select(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
+    let width = width.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
     response.widget_info(|| {
         WidgetInfo::labeled(WidgetType::ComboBox, ui.is_enabled(), accessible_label)
@@ -56,7 +57,7 @@ pub fn select(
         ],
         Stroke::new(1.4, c.text_dim),
     ));
-    theme::paint_focus_ring(ui, &response, rect);
+    theme::paint_focus_ring_outset(ui, &response, rect);
 
     let popup_id = ui.make_persistent_id(("rspice.select", id_salt));
     if response.clicked() {

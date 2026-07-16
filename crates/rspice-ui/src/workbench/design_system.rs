@@ -16,6 +16,9 @@ pub const STATUS_BAR_H: f32 = 25.0;
 pub const ACTIVITY_RAIL_W: f32 = 51.0;
 pub const PHONE_NAV_H: f32 = 54.0;
 pub const TOUCH_TARGET: f32 = 44.0;
+pub const PANEL_HEADER_H: f32 = 39.0;
+pub const PANEL_TABS_H: f32 = 31.0;
+pub const PANEL_SECTION_H: f32 = 29.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkbenchIcon {
@@ -493,7 +496,7 @@ pub fn icon_button(
                 t.color.text_dim
             },
         );
-        theme::paint_focus_ring(ui, &response, rect);
+        theme::paint_focus_ring_outset(ui, &response, rect);
     }
     response.on_hover_text(label)
 }
@@ -568,22 +571,31 @@ pub fn labeled_icon_button_sized(
                 t.color.text_dim
             },
         );
-        theme::paint_focus_ring(ui, &response, rect);
+        theme::paint_focus_ring_outset(ui, &response, rect);
     }
     response
 }
 
 pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), PANEL_SECTION_H),
+        Sense::hover(),
     );
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        Color32::from_rgba_unmultiplied(
+            t.color.bg_panel_2.r(),
+            t.color.bg_panel_2.g(),
+            t.color.bg_panel_2.b(),
+            204,
+        ),
+    );
+    ui.painter()
+        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
     ui.painter().text(
-        Pos2::new(rect.left() + 12.0, rect.center().y),
+        Pos2::new(rect.left() + 10.0, rect.center().y),
         Align2::LEFT_CENTER,
         title.to_uppercase(),
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
@@ -591,7 +603,7 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     );
     if let Some(meta) = meta {
         ui.painter().text(
-            Pos2::new(rect.right() - 12.0, rect.center().y),
+            Pos2::new(rect.right() - 10.0, rect.center().y),
             Align2::RIGHT_CENTER,
             meta,
             theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -602,59 +614,32 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    let label_font = theme::sans(tokens::FS_1, FontWeight::Regular);
-    let value_font = theme::mono(tokens::FS_1, FontWeight::Medium);
-    let label_width = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), label_font.clone(), t.color.text_dim)
-        .size()
-        .x;
-    let value_width = ui
-        .painter()
-        .layout_no_wrap(value.to_owned(), value_font.clone(), t.color.text)
-        .size()
-        .x;
-    let stacked = label_width + value_width + 48.0 > ui.available_width();
-    let height = if stacked { 42.0 } else { 25.0 };
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-    }
-    ui.painter().text(
-        Pos2::new(
-            rect.left() + 12.0,
-            if stacked {
-                rect.top() + 11.0
-            } else {
-                rect.center().y
-            },
-        ),
-        Align2::LEFT_CENTER,
-        label,
-        label_font,
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let width = ui.available_width().max(1.0);
+    let inner_width = (width - 20.0).max(1.0);
+    let gap = 8.0_f32.min(inner_width);
+    let columns_width = (inner_width - gap).max(1.0);
+    let label_column = columns_width * 0.4;
+    let value_column = (columns_width - label_column).max(1.0);
+    let label_galley =
+        ui.painter()
+            .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
+    let value_galley =
+        ui.painter()
+            .layout(value.to_owned(), value_font, t.color.text, value_column);
+    let content_height = label_galley.size().y.max(value_galley.size().y);
+    let height = (content_height + 12.0).max(29.0);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let text_top = rect.top() + 6.0;
+    ui.painter().galley(
+        Pos2::new(rect.left() + 10.0, text_top),
+        label_galley,
         t.color.text_dim,
     );
-    ui.painter().text(
-        Pos2::new(
-            if stacked {
-                rect.left() + 12.0
-            } else {
-                rect.right() - 12.0
-            },
-            if stacked {
-                rect.bottom() - 11.0
-            } else {
-                rect.center().y
-            },
-        ),
-        if stacked {
-            Align2::LEFT_CENTER
-        } else {
-            Align2::RIGHT_CENTER
-        },
-        value,
-        value_font,
+    ui.painter().galley(
+        Pos2::new(rect.left() + 10.0 + label_column + gap, text_top),
+        value_galley,
         t.color.text,
     );
     response
@@ -662,25 +647,30 @@ pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
 
 pub fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (head_rect, _) = ui.allocate_exact_size(Vec2::new(width, 37.0), Sense::hover());
+    ui.painter().hline(
+        head_rect.x_range(),
+        head_rect.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    ui.painter().hline(
+        head_rect.x_range(),
+        head_rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        Pos2::new(head_rect.left() + 11.0, head_rect.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
     egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .corner_radius(t.radius_lg)
-        .inner_margin(egui::Margin::same(14))
+        .inner_margin(egui::Margin::same(11))
         .show(ui, |ui| {
-            // A card is always a top-down content surface, even when its
-            // parent lays several cards out in a horizontal/wrapping row.
-            // Inheriting the parent's layout causes headings, values, and
-            // controls to paint over one another at desktop and tablet widths.
-            ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(title)
-                        .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
-                        .color(t.color.text),
-                );
-                ui.add_space(8.0);
-                body(ui);
-            });
+            ui.set_width((width - 22.0).max(1.0));
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), body);
         });
 }
 
@@ -715,18 +705,34 @@ pub fn heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
     ui.label(
         egui::RichText::new(eyebrow.to_uppercase())
             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.accent),
+            .color(t.color.text_faint),
     );
     ui.add_space(2.0);
     ui.label(
         egui::RichText::new(title)
-            .font(theme::sans(22.0, FontWeight::SemiBold))
+            .font(theme::sans(15.0, FontWeight::SemiBold))
             .color(t.color.text),
     );
     ui.label(
         egui::RichText::new(description)
-            .font(theme::sans(tokens::FS_2, FontWeight::Regular))
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(t.color.text_dim),
+    );
+}
+
+/// Full-width title row used by non-project workspaces in the reference shell.
+pub fn workspace_title_row(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    let shown = egui::Frame::new()
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(1.0));
+            content(ui);
+        });
+    ui.painter().hline(
+        shown.response.rect.x_range(),
+        shown.response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
     );
 }
 

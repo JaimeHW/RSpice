@@ -94,7 +94,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             let drawer_layer = area.layer();
             let mut close_id = None;
             let shown = area.show(ctx, |ui| {
-                drawer_frame(&t).show(ui, |ui| {
+                drawer_frame(&t, DrawerBorder::Box).show(ui, |ui| {
                     ui.set_width(width);
                     ui.set_height(available_height);
                     super::navigator::show(ui, app);
@@ -131,8 +131,9 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                 .fixed_pos(egui::pos2(screen.right() - width, screen.top() + top));
             let drawer_layer = area.layer();
             let mut close_id = None;
+            let border = drawer_border(layout, Drawer::Inspector);
             let shown = area.show(ctx, |ui| {
-                drawer_frame(&t).show(ui, |ui| {
+                let framed = drawer_frame(&t, border).show(ui, |ui| {
                     ui.set_width(width);
                     ui.set_height(available_height);
                     super::inspector::show(ui, app);
@@ -147,6 +148,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         return_drawer_focus(ctx, Drawer::Inspector);
                     }
                 });
+                paint_drawer_inner_edge(ui, framed.response.rect, &t, border);
             });
             if app.state.workbench.drawer == Some(Drawer::Inspector) {
                 reclaim_side_drawer_focus(ctx, drawer_layer, close_id);
@@ -269,7 +271,7 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 7] = [
         command: Command::OpenWorkspace(Workspace::Models),
         icon: WorkbenchIcon::Models,
         label: "Model & libraries",
-        detail: "Sources, sections, symbols and qualification",
+        detail: "Sources, sections, symbols and metadata audit",
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Netlist),
@@ -334,13 +336,17 @@ fn mobile_navigation_natural_height(columns: usize) -> f32 {
         + MOBILE_NAV_GRID_GAP * rows.saturating_sub(1) as f32
 }
 
+fn mobile_navigation_width(screen_width: f32) -> f32 {
+    MOBILE_NAV_MAX_WIDTH.min((screen_width - MOBILE_NAV_GUTTER * 2.0).max(0.0))
+}
+
 fn mobile_navigation_dialog(
     ctx: &Context,
     app: &mut RSpiceApp,
     screen: egui::Rect,
     tokens: &Tokens,
 ) {
-    let width = MOBILE_NAV_MAX_WIDTH.min((screen.width() - MOBILE_NAV_GUTTER * 2.0).max(280.0));
+    let width = mobile_navigation_width(screen.width());
     let columns = if width <= MOBILE_NAV_BREAKPOINT { 1 } else { 2 };
     let natural_height = mobile_navigation_natural_height(columns);
     let height = natural_height
@@ -693,11 +699,38 @@ fn mobile_navigation_card(
     response
 }
 
-fn drawer_frame(tokens: &Tokens) -> Frame {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrawerBorder {
+    Box,
+    InnerLeft,
+}
+
+fn drawer_border(layout: LayoutSpec, drawer: Drawer) -> DrawerBorder {
+    match (drawer, layout.compact_shell) {
+        (Drawer::Inspector, false) => DrawerBorder::InnerLeft,
+        (Drawer::Navigator | Drawer::Inspector | Drawer::Workspaces, true)
+        | (Drawer::Navigator | Drawer::Workspaces, false) => DrawerBorder::Box,
+    }
+}
+
+fn drawer_frame(tokens: &Tokens, border: DrawerBorder) -> Frame {
     Frame::new()
         .fill(tokens.color.bg_panel)
-        .stroke(egui::Stroke::new(1.0, tokens.color.border_strong))
+        .stroke(match border {
+            DrawerBorder::Box => egui::Stroke::new(1.0, tokens.color.border_strong),
+            DrawerBorder::InnerLeft => egui::Stroke::NONE,
+        })
         .shadow(tokens.shadow())
+}
+
+fn paint_drawer_inner_edge(ui: &egui::Ui, rect: egui::Rect, tokens: &Tokens, border: DrawerBorder) {
+    if border == DrawerBorder::InnerLeft {
+        ui.painter().vline(
+            rect.left(),
+            rect.y_range(),
+            egui::Stroke::new(1.0, tokens.color.border_strong),
+        );
+    }
 }
 
 fn drawer_scrim_color(tokens: &Tokens) -> egui::Color32 {
@@ -876,6 +909,13 @@ mod tests {
     }
 
     #[test]
+    fn mobile_navigation_never_overflows_an_exceptionally_narrow_viewport() {
+        assert_eq!(mobile_navigation_width(298.0), 280.0);
+        assert_eq!(mobile_navigation_width(280.0), 262.0);
+        assert_eq!(mobile_navigation_width(12.0), 0.0);
+    }
+
+    #[test]
     fn drawer_close_targets_follow_pointer_and_breakpoint_cascade() {
         let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
         assert_eq!(drawer_close_geometry(compact), (44.0, 5.0));
@@ -886,6 +926,23 @@ mod tests {
         let coarse =
             LayoutSpec::resolve_with_pointer(834.0, 1_112.0, true, &WorkbenchState::default());
         assert_eq!(drawer_close_geometry(coarse), (44.0, 0.0));
+    }
+
+    #[test]
+    fn intermediate_inspector_drawer_uses_only_its_inner_edge() {
+        let state = WorkbenchState::default();
+        let compact = LayoutSpec::resolve(390.0, 844.0, &state);
+        let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &state);
+
+        assert_eq!(drawer_border(compact, Drawer::Inspector), DrawerBorder::Box);
+        assert_eq!(
+            drawer_border(intermediate, Drawer::Inspector),
+            DrawerBorder::InnerLeft
+        );
+        assert_eq!(
+            drawer_border(intermediate, Drawer::Navigator),
+            DrawerBorder::Box
+        );
     }
 
     #[test]

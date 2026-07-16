@@ -605,6 +605,7 @@ impl RSpiceApp {
     }
 
     fn prepare_frame(&mut self, ctx: &Context) {
+        let initializing_frame = self.first_frame;
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
         let system_mode_changed = self.state.ui.theme.mode == crate::ui::Mode::System
@@ -616,6 +617,13 @@ impl RSpiceApp {
             self.state.ui.theme.apply(ctx);
             self.applied_theme = Some(self.state.ui.theme);
             self.first_frame = false;
+        }
+        // The first egui pass establishes font metrics and persistent panel
+        // rectangles. Request the settled pass explicitly; otherwise a WASM
+        // deep link can remain provisional until the first user input,
+        // leaving painter-owned title text absent while icons are visible.
+        if initializing_frame {
+            ctx.request_repaint();
         }
 
         #[cfg(target_arch = "wasm32")]

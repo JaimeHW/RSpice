@@ -13,7 +13,7 @@ use egui::{
 };
 
 use crate::common::RSpiceApp;
-use crate::common::app::{RecentFile, RecentKind};
+use crate::common::app::{ConsoleMessage, RecentFile, RecentKind};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -22,11 +22,14 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, IconButton, s
 use super::commands::Command;
 use super::design_system::WorkbenchIcon;
 use super::recovery::{
-    RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, discard_checkpoint, open_comparison,
-    recovery_replacement_block_reason, refresh_catalog_if_requested, start_local_safe_mode,
+    RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
+    discard_checkpoint, open_comparison, open_diagnostics_folder,
+    recovery_replacement_block_reason, refresh_catalog_if_requested, software_rendering_supported,
+    start_local_safe_mode,
 };
 use super::state::{
     LocalSafeModeOptions, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
+    Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,12 +104,14 @@ impl Drop for LauncherControlHeightOverride {
 
 enum LauncherAction {
     Close,
+    EmptyWorkbench,
     Browse,
     NewProject,
     Open(RecentFile),
     Page(ProjectLauncherPage),
     Recover(RecoveryCandidate),
     RequestDiscard(RecoveryCandidate),
+    OpenDiagnosticsFolder,
     StartSafeMode(LocalSafeModeOptions),
 }
 
@@ -253,7 +258,6 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 t.shadow()
             })
             .show(&mut surface, |ui| {
-                ui.set_min_size(size);
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 let header =
                     launcher_header(ui, layout.header_height, large_targets, layout.edge_to_edge);
@@ -264,7 +268,14 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 }
                 launcher_status(ui, app, layout.status_height, layout.compact);
                 let status_bottom = ui.cursor().top();
-                launcher_layout(ui, app, &mut action, layout);
+                let body_rect = Rect::from_min_size(
+                    egui::pos2(ui.max_rect().left(), status_bottom),
+                    vec2(
+                        size.x,
+                        (size.y - layout.header_height - layout.status_height).max(0.0),
+                    ),
+                );
+                launcher_layout(ui, app, &mut action, layout, body_rect);
                 ui.painter().hline(
                     ui.max_rect().x_range(),
                     header_bottom,
@@ -275,6 +286,10 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     status_bottom,
                     Stroke::new(1.0, t.color.border),
                 );
+                // Fill the modal only after its tracks have measured the
+                // original max rect. Doing this before layout reduces every
+                // subsequent `available_height()` query to zero.
+                ui.set_min_size(size);
             });
         if !edge_to_edge {
             // `Frame` backgrounds are inserted behind their children. Repaint
@@ -315,6 +330,16 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if let Some(action) = action {
         match action {
             LauncherAction::Close => app.state.workbench.project_launcher_open = false,
+            LauncherAction::EmptyWorkbench => {
+                if app.state.project_lifecycle.project_open {
+                    crate::common::project_workflow::request_close_project_to_empty_workbench(
+                        &mut app.state,
+                    );
+                } else {
+                    app.state.workbench.project_launcher_open = false;
+                    app.state.workbench.activate(Workspace::Project);
+                }
+            }
             LauncherAction::Browse => {
                 app.state.workbench.project_launcher_open = false;
                 Command::OpenProject.execute(app);
@@ -346,6 +371,15 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     .project_launcher_recovery
                     .pending_discard = Some(candidate);
             }
+            LauncherAction::OpenDiagnosticsFolder => match open_diagnostics_folder(&app.state) {
+                Ok(path) => app.state.push_user_message(ConsoleMessage::info(format!(
+                    "Opened diagnostic folder: {}",
+                    path.display()
+                ))),
+                Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
+                    "Diagnostic folder could not be opened: {error}"
+                ))),
+            },
             LauncherAction::StartSafeMode(options) => match start_local_safe_mode(app, options) {
                 Ok(()) => app.state.workbench.project_launcher_open = false,
                 Err(error) => app.state.workbench.project_launcher_recovery.warning(error),
@@ -364,65 +398,101 @@ fn launcher_layout(
     app: &mut RSpiceApp,
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
+    rect: Rect,
 ) {
+    let t = Tokens::get(ui.ctx());
     if layout.compact {
-        Frame::new()
-            .fill(Tokens::get(ui.ctx()).color.bg_panel)
-            .inner_margin(Margin::ZERO)
-            .show(ui, |ui| {
-                ui.set_min_height(
-                    LAUNCHER_COMPACT_NAV_HEIGHT.max(Tokens::get(ui.ctx()).metrics.ctl_h),
-                );
-                ui.spacing_mut().item_spacing = Vec2::ZERO;
-                let navigation = egui::ScrollArea::horizontal()
-                    .id_salt("project-launcher-mobile-navigation")
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| ui.scope(|ui| launcher_nav(ui, app, action, true)));
-                ui.ctx()
-                    .accesskit_node_builder(navigation.inner.response.id, |node| {
-                        node.set_role(egui::accesskit::Role::Navigation);
-                        node.set_label("Startup pages");
-                    });
-            });
-        let nav_bottom = ui.cursor().top();
-        launcher_page(ui, app, action, layout);
-        ui.painter().hline(
-            ui.max_rect().x_range(),
-            nav_bottom,
-            Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+        let nav_height = LAUNCHER_COMPACT_NAV_HEIGHT.max(t.metrics.ctl_h);
+        let nav_rect = Rect::from_min_max(
+            rect.min,
+            egui::pos2(rect.right(), (rect.top() + nav_height).min(rect.bottom())),
         );
+        let page_rect = Rect::from_min_max(nav_rect.left_bottom(), rect.right_bottom());
+        ui.painter().rect_filled(nav_rect, 0.0, t.color.bg_panel);
+        let mut nav_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(nav_rect)
+                .layout(egui::Layout::top_down(Align::Min)),
+        );
+        nav_ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let navigation = egui::ScrollArea::horizontal()
+            .id_salt("project-launcher-mobile-navigation")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(&mut nav_ui, |ui| {
+                ui.scope(|ui| launcher_nav(ui, app, action, true))
+            });
+        ui.ctx()
+            .accesskit_node_builder(navigation.inner.response.id, |node| {
+                node.set_role(egui::accesskit::Role::Navigation);
+                node.set_label("Startup pages");
+            });
+        let mut page_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(page_rect)
+                .layout(egui::Layout::top_down(Align::Min)),
+        );
+        launcher_page(&mut page_ui, app, action, layout);
+        ui.painter().hline(
+            rect.x_range(),
+            nav_rect.bottom(),
+            Stroke::new(1.0, t.color.border),
+        );
+        ui.allocate_rect(rect, Sense::hover());
         return;
     }
 
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        Frame::new()
-            .fill(Tokens::get(ui.ctx()).color.bg_panel)
-            .inner_margin(Margin::ZERO)
-            .corner_radius(egui::CornerRadius {
+    let nav_rect = Rect::from_min_max(
+        rect.min,
+        egui::pos2(
+            (rect.left() + LAUNCHER_NAV_WIDTH).min(rect.right()),
+            rect.bottom(),
+        ),
+    );
+    let page_rect = Rect::from_min_max(nav_rect.right_top(), rect.right_bottom());
+    ui.painter().rect_filled(nav_rect, 0.0, t.color.bg_panel);
+    let mut nav_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(nav_rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+    );
+    let navigation = nav_ui.scope(|ui| launcher_nav(ui, app, action, false));
+    ui.ctx()
+        .accesskit_node_builder(navigation.response.id, |node| {
+            node.set_role(egui::accesskit::Role::Navigation);
+            node.set_label("Startup pages");
+        });
+    let mut page_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(page_rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+    );
+    launcher_page(&mut page_ui, app, action, layout);
+    ui.painter().vline(
+        nav_rect.right(),
+        rect.y_range(),
+        Stroke::new(1.0, t.color.border),
+    );
+    if !layout.edge_to_edge {
+        ui.painter().rect_filled(
+            Rect::from_min_max(
+                egui::pos2(nav_rect.left(), nav_rect.bottom() - t.radius_lg),
+                nav_rect.right_bottom(),
+            ),
+            egui::CornerRadius {
                 nw: 0,
                 ne: 0,
-                sw: if layout.edge_to_edge { 0 } else { 6 },
+                sw: t.radius_lg.clamp(0.0, u8::MAX as f32) as u8,
                 se: 0,
-            })
-            .show(ui, |ui| {
-                ui.set_width(LAUNCHER_NAV_WIDTH);
-                ui.set_min_height(ui.available_height());
-                let navigation = ui.scope(|ui| launcher_nav(ui, app, action, false));
-                ui.ctx()
-                    .accesskit_node_builder(navigation.response.id, |node| {
-                        node.set_role(egui::accesskit::Role::Navigation);
-                        node.set_label("Startup pages");
-                    });
-            });
-        let nav_right = ui.cursor().left();
-        launcher_page(ui, app, action, layout);
-        ui.painter().vline(
-            nav_right,
-            ui.max_rect().y_range(),
-            Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+            },
+            t.color.bg_panel,
         );
-    });
+        ui.painter().vline(
+            nav_rect.right(),
+            rect.y_range(),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
+    ui.allocate_rect(rect, Sense::hover());
 }
 
 fn launcher_nav(ui: &mut Ui, app: &RSpiceApp, action: &mut Option<LauncherAction>, compact: bool) {
@@ -551,12 +621,16 @@ fn launcher_page(
     layout: LauncherLayout,
 ) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
-    ui.set_min_size(ui.available_size());
+    // Preserve the initial remainder for the final fill. Expanding the
+    // minimum before laying out the page consumes `available_height()`, which
+    // collapses the scroll region and leaves the footer near the top.
+    let page_size = ui.available_size();
     match app.state.workbench.project_launcher_page {
         ProjectLauncherPage::Projects => launcher_body(ui, app, action, layout),
         ProjectLauncherPage::Recovery => recovery_page(ui, app, action, layout),
         ProjectLauncherPage::SafeMode => safe_mode_page(ui, app, action, layout),
     }
+    ui.set_min_size(page_size);
 }
 
 fn launcher_header(ui: &mut Ui, height: f32, large_targets: bool, edge_to_edge: bool) -> Response {
@@ -572,7 +646,10 @@ fn launcher_header(ui: &mut Ui, height: f32, large_targets: bool, edge_to_edge: 
         })
         .inner_margin(Margin::symmetric(15, 0))
         .show(ui, |ui| {
-            ui.set_min_height(height);
+            // This is a fixed launcher track. A minimum alone leaves the
+            // child UI with the modal's full remaining height, so centered
+            // contents drift into the middle of the 650 px surface.
+            ui.set_height(height);
             ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
                 let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(27.0), Sense::hover());
                 paint_brand_logo(ui.painter(), icon_rect);
@@ -655,7 +732,7 @@ fn launcher_status(ui: &mut Ui, app: &RSpiceApp, height: f32, compact: bool) {
         .fill(t.color.bg_inset)
         .inner_margin(Margin::symmetric(15, 0))
         .show(ui, |ui| {
-            ui.set_min_height(height);
+            ui.set_height(height);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
                 let (dot, _) = ui.allocate_exact_size(Vec2::splat(9.0), Sense::hover());
@@ -714,7 +791,7 @@ fn launcher_body(
             Margin::symmetric(16, 10)
         })
         .show(ui, |ui| {
-            ui.set_min_height(
+            ui.set_height(
                 (if layout.phone {
                     LAUNCHER_PHONE_HEADING_MIN_HEIGHT
                 } else {
@@ -744,22 +821,21 @@ fn launcher_body(
 
     launcher_toolbar(ui, app, layout);
 
-    let list_height = (ui.available_height()
-        - launcher_footer_reserve(ui, layout, &[("Continue without a project", false)]))
-    .max(0.0);
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), list_height),
-        egui::Layout::top_down(Align::Min),
-        |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("workbench.project_launcher.projects")
-                .auto_shrink([false, false])
-                .show(ui, |ui| project_list(ui, app, action, layout));
-        },
+    let footer_height =
+        launcher_footer_reserve(ui, layout, &[("Continue without a project", false)]);
+    let (list_rect, footer_rect) = launcher_page_regions(ui, footer_height);
+    let mut list_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(list_rect)
+            .layout(egui::Layout::top_down(Align::Min)),
     );
-    launcher_page_footer(ui, layout, |ui| {
+    egui::ScrollArea::vertical()
+        .id_salt("workbench.project_launcher.projects")
+        .auto_shrink([false, false])
+        .show(&mut list_ui, |ui| project_list(ui, app, action, layout));
+    launcher_page_footer(ui, layout, footer_rect, |ui| {
         if Button::new("Continue without a project").show(ui).clicked() {
-            *action = Some(LauncherAction::Close);
+            *action = Some(LauncherAction::EmptyWorkbench);
         }
     });
 }
@@ -867,7 +943,7 @@ fn project_group_header(ui: &mut Ui, label: &str, count: usize) {
         .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(13, 0))
         .show(ui, |ui| {
-            ui.set_min_height(LAUNCHER_GROUP_HEIGHT);
+            ui.set_height(LAUNCHER_GROUP_HEIGHT);
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(label)
@@ -890,30 +966,50 @@ fn project_group_header(ui: &mut Ui, label: &str, count: usize) {
     );
 }
 
-fn launcher_page_footer(ui: &mut Ui, layout: LauncherLayout, add: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let top = ui.cursor().top();
-    Frame::new()
-        .fill(t.color.bg_panel)
-        .corner_radius(egui::CornerRadius {
-            nw: 0,
-            ne: 0,
-            sw: 0,
-            se: if layout.edge_to_edge { 0 } else { 6 },
-        })
-        .inner_margin(Margin::symmetric(if layout.phone { 9 } else { 16 }, 8))
-        .show(ui, |ui| {
-            ui.set_min_height(LAUNCHER_PAGE_FOOTER_MIN_HEIGHT - 16.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                add(ui);
-            });
-        });
-    ui.painter().hline(
-        ui.max_rect().x_range(),
-        top,
-        Stroke::new(1.0, t.color.border),
+fn launcher_page_regions(ui: &mut Ui, footer_height: f32) -> (Rect, Rect) {
+    let available = ui.available_rect_before_wrap();
+    let footer_height = footer_height.clamp(0.0, available.height());
+    let footer_top = available.bottom() - footer_height;
+    let body = Rect::from_min_max(available.min, egui::pos2(available.right(), footer_top));
+    let footer = Rect::from_min_max(
+        egui::pos2(available.left(), footer_top),
+        available.right_bottom(),
     );
+    ui.allocate_rect(available, Sense::hover());
+    (body, footer)
+}
+
+fn launcher_page_footer(
+    ui: &mut Ui,
+    layout: LauncherLayout,
+    rect: Rect,
+    add: impl FnOnce(&mut Ui),
+) {
+    let t = Tokens::get(ui.ctx());
+    let corner_radius = egui::CornerRadius {
+        nw: 0,
+        ne: 0,
+        sw: 0,
+        se: if layout.edge_to_edge { 0 } else { 6 },
+    };
+    ui.painter()
+        .rect_filled(rect, corner_radius, t.color.bg_panel);
+    let horizontal_margin = if layout.phone { 9.0 } else { 16.0 };
+    let content_rect = Rect::from_min_max(
+        rect.min + vec2(horizontal_margin, 8.0),
+        rect.max - vec2(horizontal_margin, 8.0),
+    );
+    let mut footer_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content_rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+    );
+    footer_ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        add(ui);
+    });
+    ui.painter()
+        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
 }
 
 fn launcher_footer_reserve(ui: &Ui, layout: LauncherLayout, buttons: &[(&str, bool)]) -> f32 {
@@ -965,25 +1061,25 @@ fn recovery_page(
         "Recovery opens comparison copies. It never overwrites the saved project, immutable results, or approved evidence until you explicitly accept changes.",
         layout,
     );
-    let body_height = (ui.available_height()
-        - launcher_footer_reserve(
-            ui,
-            layout,
-            &[
-                ("Discard selected checkpoint…", false),
-                ("Recovery options", false),
-                ("Open recovery comparison", true),
-            ],
-        ))
-    .max(0.0);
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), body_height),
-        egui::Layout::top_down(Align::Min),
-        |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("workbench.project_launcher.recovery")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
+    let footer_height = launcher_footer_reserve(
+        ui,
+        layout,
+        &[
+            ("Discard selected checkpoint…", false),
+            ("Recovery options", false),
+            ("Open recovery comparison", true),
+        ],
+    );
+    let (body_rect, footer_rect) = launcher_page_regions(ui, footer_height);
+    let mut body_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(body_rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+    );
+    egui::ScrollArea::vertical()
+        .id_salt("workbench.project_launcher.recovery")
+        .auto_shrink([false, false])
+        .show(&mut body_ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     if let Some(notice) =
                         app.state.workbench.project_launcher_recovery.notice.clone()
@@ -1077,9 +1173,7 @@ fn recovery_page(
                     {
                         recovery_contract(ui, &candidate, layout);
                     }
-                });
-        },
-    );
+        });
 
     let selected = app
         .state
@@ -1087,7 +1181,7 @@ fn recovery_page(
         .project_launcher_recovery
         .selected()
         .cloned();
-    launcher_page_footer(ui, layout, |ui| {
+    launcher_page_footer(ui, layout, footer_rect, |ui| {
         let can_discard = selected
             .as_ref()
             .is_some_and(RecoveryCandidate::can_discard);
@@ -1153,7 +1247,7 @@ fn recovery_row(
         .inner_margin(Margin::ZERO)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.set_min_height(54.0);
+            ui.set_height(54.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 11.0;
                 let (radio_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
@@ -1420,22 +1514,29 @@ fn safe_mode_page(
     launcher_page_heading(
         ui,
         "SAFE MODE · STARTUP ISOLATION",
-        "Start with recoverable session state isolated",
-        "Safe mode changes only the current launch. The prior session remains the source of truth for the next normal launch.",
+        "Start with optional subsystems disabled",
+        "Safe mode changes only the current launch. It is intended for crash isolation, display recovery, extension diagnosis, and project repair.",
         layout,
     );
     let active = app.state.workbench.safe_mode.active;
-    let body_height = (ui.available_height()
-        - launcher_footer_reserve(ui, layout, &[("Start RSpice in safe mode", true)]))
-    .max(0.0);
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), body_height),
-        egui::Layout::top_down(Align::Min),
-        |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("workbench.project_launcher.safe-mode")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
+    let footer_height = launcher_footer_reserve(
+        ui,
+        layout,
+        &[
+            ("Open diagnostic folder", false),
+            ("Start RSpice in safe mode", true),
+        ],
+    );
+    let (body_rect, footer_rect) = launcher_page_regions(ui, footer_height);
+    let mut body_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(body_rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+    );
+    egui::ScrollArea::vertical()
+        .id_salt("workbench.project_launcher.safe-mode")
+        .auto_shrink([false, false])
+        .show(&mut body_ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     if active {
                         Frame::new()
@@ -1467,25 +1568,76 @@ fn safe_mode_page(
                                         .workbench
                                         .safe_mode
                                         .draft
+                                        .disable_third_party_extensions,
+                                    "Disable third-party extensions",
+                                    "Built-in signed components remain available.",
+                                    None,
+                                );
+                                safe_mode_option(
+                                    ui,
+                                    &mut app
+                                        .state
+                                        .workbench
+                                        .safe_mode
+                                        .draft
+                                        .disable_gpu_acceleration,
+                                    "Disable GPU acceleration",
+                                    "Use software rendering and conservative canvas limits.",
+                                    (!software_rendering_supported()).then_some(
+                                        "This renderer was selected before the launcher opened and cannot switch to a verified software adapter in this build.",
+                                    ),
+                                );
+                                safe_mode_option(
+                                    ui,
+                                    &mut app
+                                        .state
+                                        .workbench
+                                        .safe_mode
+                                        .draft
                                         .isolate_prior_documents,
                                     "Do not reopen prior documents",
-                                    "Start with a new unsaved project. The complete prior session is restored on the next normal launch.",
+                                    "Start in the empty workbench with project files closed.",
+                                    None,
                                 );
                                 safe_mode_option(
                                     ui,
                                     &mut app.state.workbench.safe_mode.draft.reset_layout,
                                     "Reset dock and monitor geometry",
-                                    "Restore navigator, inspector, console, and dock dimensions to the primary workbench layout.",
+                                    "Recover panels and windows to the primary display.",
+                                    None,
+                                );
+                                safe_mode_option(
+                                    ui,
+                                    &mut app
+                                        .state
+                                        .workbench
+                                        .safe_mode
+                                        .draft
+                                        .open_project_read_only,
+                                    "Open project read-only",
+                                    "Prevent working-document writes while diagnosing content.",
+                                    None,
                                 );
                             });
                         });
 
-                });
-        },
-    );
+        });
 
     let options = app.state.workbench.safe_mode.draft;
-    launcher_page_footer(ui, layout, |ui| {
+    launcher_page_footer(ui, layout, footer_rect, |ui| {
+        let diagnostics = Button::new("Open diagnostic folder")
+            .enabled(diagnostics_folder_supported())
+            .show(ui);
+        let diagnostics = if diagnostics_folder_supported() {
+            diagnostics
+        } else {
+            diagnostics.on_hover_text(
+                "Diagnostic folders can be revealed only by supported desktop file managers",
+            )
+        };
+        if diagnostics.clicked() {
+            *action = Some(LauncherAction::OpenDiagnosticsFolder);
+        }
         let response = Button::new("Start RSpice in safe mode")
             .accent()
             .enabled(!active && options.has_effect())
@@ -1503,14 +1655,25 @@ fn safe_mode_page(
     });
 }
 
-fn safe_mode_option(ui: &mut Ui, checked: &mut bool, title: &str, detail: &str) {
+fn safe_mode_option(
+    ui: &mut Ui,
+    checked: &mut bool,
+    title: &str,
+    detail: &str,
+    unavailable_reason: Option<&str>,
+) {
     let t = Tokens::get(ui.ctx());
-    let enabled = ui.is_enabled();
+    let enabled = ui.is_enabled() && unavailable_reason.is_none();
+    let text_color = if enabled {
+        t.color.text
+    } else {
+        t.color.text_faint
+    };
     let response = Frame::new()
         .inner_margin(Margin::ZERO)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.set_min_height(54.0);
+            ui.set_height(54.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 11.0;
                 let (check_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
@@ -1541,12 +1704,16 @@ fn safe_mode_option(ui: &mut Ui, checked: &mut bool, title: &str, detail: &str) 
                     ui.label(
                         egui::RichText::new(title)
                             .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                            .color(t.color.text),
+                            .color(text_color),
                     );
                     ui.label(
                         egui::RichText::new(detail)
                             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
+                            .color(if enabled {
+                                t.color.text_dim
+                            } else {
+                                t.color.text_faint
+                            }),
                     );
                 });
             });
@@ -1561,6 +1728,11 @@ fn safe_mode_option(ui: &mut Ui, checked: &mut bool, title: &str, detail: &str) 
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_description(detail);
     });
+    let response = if let Some(reason) = unavailable_reason {
+        response.on_hover_text(reason)
+    } else {
+        response
+    };
     theme::paint_focus_ring(ui, &response, response.rect);
     if enabled && response_activated(ui, &response) {
         *checked = !*checked;
@@ -1587,7 +1759,7 @@ fn launcher_page_heading(
             Margin::symmetric(16, 10)
         })
         .show(ui, |ui| {
-            ui.set_min_height(
+            ui.set_height(
                 (if layout.phone {
                     LAUNCHER_PHONE_HEADING_MIN_HEIGHT
                 } else {
@@ -1710,35 +1882,12 @@ fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp, layout: LauncherLayout) {
                 let gaps = (control_count.saturating_sub(1) as f32) * 8.0;
                 let search_width = (ui.available_width() - filter_width - sort_width - gaps)
                     .clamp(1.0, LAUNCHER_SEARCH_MAX_WIDTH);
-                let search = ui.add_sized(
-                    [search_width, t.metrics.ctl_h],
-                    egui::TextEdit::singleline(&mut app.state.workbench.project_launcher_query)
-                        .id(project_search_id())
-                        .hint_text("Project, path, owner, tag…")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .margin(Margin {
-                            left: 29,
-                            right: 8,
-                            top: 0,
-                            bottom: 0,
-                        })
-                        .vertical_align(Align::Center),
+                launcher_search_field(
+                    ui,
+                    &mut app.state.workbench.project_launcher_query,
+                    search_width,
+                    std::mem::take(&mut app.state.workbench.focus_project_launcher_search),
                 );
-                let icon_rect = Rect::from_center_size(
-                    egui::pos2(search.rect.left() + 13.5, search.rect.center().y),
-                    Vec2::splat(13.0),
-                );
-                WorkbenchIcon::Search.paint(ui.painter(), icon_rect, t.color.text_faint);
-                search.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::TextEdit,
-                        ui.is_enabled(),
-                        "Project, path, owner, tag",
-                    )
-                });
-                if std::mem::take(&mut app.state.workbench.focus_project_launcher_search) {
-                    search.request_focus();
-                }
 
                 if !layout.compact {
                     launcher_filter_segments(ui, &mut app.state.workbench.project_launcher_filter);
@@ -2114,6 +2263,95 @@ fn empty_project_list(ui: &mut Ui, query_empty: bool) {
         });
 }
 
+fn launcher_search_field(
+    ui: &mut Ui,
+    query: &mut String,
+    width: f32,
+    request_focus: bool,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, outer_response) =
+        ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
+    ui.painter().rect_filled(rect, t.radius, t.color.bg_inset);
+    // Give the glyph and text separate deterministic rectangles. TextEdit's
+    // internal margin can collapse when an outer add_sized call constrains it,
+    // which previously let the hint cover the glyph at compact breakpoints.
+    let content_rect = Rect::from_min_max(
+        egui::pos2(rect.left() + 29.0, rect.top()),
+        egui::pos2((rect.right() - 8.0).max(rect.left() + 29.0), rect.bottom()),
+    );
+    let mut edit_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content_rect)
+            .layout(egui::Layout::left_to_right(Align::Center)),
+    );
+    let edit_response = edit_ui.add_sized(
+        content_rect.size(),
+        egui::TextEdit::singleline(query)
+            .id(project_search_id())
+            .hint_text("Project, path, owner, tag…")
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .margin(Margin::ZERO)
+            .vertical_align(Align::Center)
+            .frame(Frame::NONE),
+    );
+    if request_focus || outer_response.clicked() {
+        edit_response.request_focus();
+    }
+    let focused = request_focus || edit_response.has_focus();
+    ui.painter().rect_stroke(
+        rect,
+        t.radius,
+        Stroke::new(
+            1.0,
+            if focused {
+                launcher_search_focus_border(&t)
+            } else {
+                t.color.border
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    if focused {
+        ui.painter().rect_filled(
+            Rect::from_min_max(
+                rect.min + vec2(1.0, 1.0),
+                egui::pos2(rect.left() + 3.0, rect.bottom() - 1.0),
+            ),
+            0.0,
+            t.color.accent,
+        );
+    }
+    let icon_rect = Rect::from_center_size(
+        egui::pos2(rect.left() + 13.5, rect.center().y),
+        Vec2::splat(13.0),
+    );
+    WorkbenchIcon::Search.paint(ui.painter(), icon_rect, t.color.text_faint);
+    let response = outer_response.union(edit_response);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::TextEdit,
+            ui.is_enabled(),
+            "Project, path, owner, tag",
+        )
+    });
+    response
+}
+
+fn launcher_search_focus_border(t: &Tokens) -> Color32 {
+    let alpha = if t.mode == crate::ui::Mode::Light {
+        97
+    } else {
+        110
+    };
+    Color32::from_rgba_unmultiplied(
+        t.color.accent.r(),
+        t.color.accent.g(),
+        t.color.accent.b(),
+        alpha,
+    )
+}
+
 fn project_name_from_path(path: &Path) -> String {
     path.file_stem()
         .and_then(|name| name.to_str())
@@ -2125,7 +2363,9 @@ fn project_name_from_path(path: &Path) -> String {
 const fn project_matches_filter(filter: ProjectLauncherFilter, pinned: bool, shared: bool) -> bool {
     match filter {
         ProjectLauncherFilter::All => true,
-        ProjectLauncherFilter::Recent => !pinned && !shared,
+        // The mockup's Recent view is chronological, not a mutually-exclusive
+        // group: pinned and shared records remain recent work.
+        ProjectLauncherFilter::Recent => true,
         ProjectLauncherFilter::Pinned => pinned,
         ProjectLauncherFilter::Shared => shared,
     }
@@ -2385,10 +2625,15 @@ mod tests {
             false,
             false
         ));
-        assert!(!project_matches_filter(
+        assert!(project_matches_filter(
             ProjectLauncherFilter::Recent,
             true,
             false
+        ));
+        assert!(project_matches_filter(
+            ProjectLauncherFilter::Recent,
+            false,
+            true
         ));
         assert!(project_matches_filter(
             ProjectLauncherFilter::Pinned,
@@ -2403,5 +2648,23 @@ mod tests {
         assert_eq!(project_group(true, true), ProjectGroup::Pinned);
         assert_eq!(project_group(false, true), ProjectGroup::Shared);
         assert_eq!(project_group(false, false), ProjectGroup::Recent);
+    }
+
+    #[test]
+    fn launcher_search_focus_border_uses_the_mockup_accent_in_each_mode() {
+        for (mode, expected_alpha) in [(crate::ui::Mode::Dark, 110), (crate::ui::Mode::Light, 97)] {
+            let tokens = Tokens::new(
+                crate::ui::Direction::Instrument,
+                mode,
+                crate::ui::Density::Compact,
+            );
+            let border = launcher_search_focus_border(&tokens).to_srgba_unmultiplied();
+            let accent = tokens.color.accent.to_srgba_unmultiplied();
+
+            for channel in 0..3 {
+                assert!(border[channel].abs_diff(accent[channel]) <= 1);
+            }
+            assert_eq!(border[3], expected_alpha);
+        }
     }
 }

@@ -204,6 +204,7 @@ impl SimulationController {
             }
 
             SimulationResult::MonteCarlo {
+                seed,
                 runs_requested,
                 runs_completed,
                 num_failures,
@@ -213,8 +214,8 @@ impl SimulationController {
                 self.populate_monte_carlo_histograms(state, variables);
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Monte Carlo: {}/{} runs converged ({} failed), all_converged={}",
-                    runs_completed, runs_requested, num_failures, all_converged
+                    "Monte Carlo: {}/{} runs converged ({} failed), seed={}, all_converged={}",
+                    runs_completed, runs_requested, num_failures, seed, all_converged
                 )));
 
                 for var in variables.iter().take(8) {

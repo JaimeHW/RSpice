@@ -3,6 +3,8 @@
 pub struct MonteCarloVariableResult {
     /// Variable name (e.g., V(out), I(V1))
     pub name: String,
+    /// Exact finite sample values in engine execution order.
+    pub samples: Vec<f64>,
     /// Arithmetic mean over converged runs
     pub mean: f64,
     /// Standard deviation

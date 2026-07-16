@@ -4,6 +4,8 @@
 //! for navigation, dock visibility, responsive drawers, and the selection of
 //! the task surface inside each canonical workspace.
 
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -97,6 +99,88 @@ impl Workspace {
             Self::Verify => "Evidence inspector",
             Self::Models => "Model inspector",
             Self::Netlist => "Source inspector",
+        }
+    }
+}
+
+/// Stable identity of one document presentation in the seven workspaces.
+///
+/// These IDs point only at authoritative project objects. Closing a tab
+/// removes its presentation from the local session; it never deletes the
+/// cell view, configured analysis, or immutable result dataset behind it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WorkspaceDocumentId {
+    Project,
+    CellView(crate::state::CellViewRef),
+    SimulationPlan,
+    AnalysisSetup(crate::product::AnalysisInstanceId),
+    ResultDataset(crate::product::DatasetId),
+    Verification,
+    Models,
+    NetlistSource,
+}
+
+impl WorkspaceDocumentId {
+    pub const fn workspace(&self) -> Workspace {
+        match self {
+            Self::Project => Workspace::Project,
+            Self::CellView(_) => Workspace::Design,
+            Self::SimulationPlan | Self::AnalysisSetup(_) => Workspace::Simulate,
+            Self::ResultDataset(_) => Workspace::Results,
+            Self::Verification => Workspace::Verify,
+            Self::Models => Workspace::Models,
+            Self::NetlistSource => Workspace::Netlist,
+        }
+    }
+}
+
+/// Device-local open-document session. Engineering content continues to live
+/// in its owning project models; this registry retains only active/closed tab
+/// presentation state for each workspace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorkspaceDocumentRegistry {
+    #[serde(default)]
+    active: HashMap<Workspace, WorkspaceDocumentId>,
+    #[serde(default)]
+    closed: HashSet<WorkspaceDocumentId>,
+}
+
+impl WorkspaceDocumentRegistry {
+    pub fn active(&self, workspace: Workspace) -> Option<&WorkspaceDocumentId> {
+        self.active.get(&workspace)
+    }
+
+    pub fn activate(&mut self, document: WorkspaceDocumentId) {
+        let workspace = document.workspace();
+        self.closed.remove(&document);
+        self.active.insert(workspace, document);
+    }
+
+    pub fn close(&mut self, document: &WorkspaceDocumentId) {
+        self.closed.insert(document.clone());
+        if self.active.get(&document.workspace()) == Some(document) {
+            self.active.remove(&document.workspace());
+        }
+    }
+
+    pub fn is_closed(&self, document: &WorkspaceDocumentId) -> bool {
+        self.closed.contains(document)
+    }
+
+    pub fn retain_available(
+        &mut self,
+        workspace: Workspace,
+        available: impl IntoIterator<Item = WorkspaceDocumentId>,
+    ) {
+        let available = available.into_iter().collect::<HashSet<_>>();
+        self.closed
+            .retain(|document| document.workspace() != workspace || available.contains(document));
+        if self
+            .active
+            .get(&workspace)
+            .is_some_and(|document| !available.contains(document))
+        {
+            self.active.remove(&workspace);
         }
     }
 }
@@ -308,27 +392,53 @@ impl ProjectLauncherPage {
     }
 }
 
-/// Safe-mode controls that can be enforced locally without an extension,
-/// account, renderer-restart, or platform service.
+/// Safe-mode controls requested for this process. Capability-gated options are
+/// rejected before activation, so every applied bit represents an enforced
+/// runtime policy rather than presentation-only state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalSafeModeOptions {
+    pub disable_third_party_extensions: bool,
+    pub disable_gpu_acceleration: bool,
     pub isolate_prior_documents: bool,
     pub reset_layout: bool,
+    pub open_project_read_only: bool,
 }
 
 impl Default for LocalSafeModeOptions {
     fn default() -> Self {
         Self {
+            disable_third_party_extensions: true,
+            // eframe selects the graphics adapter before this launcher exists.
+            // The UI capability-gates this option until a software adapter can
+            // actually be selected for the current platform.
+            disable_gpu_acceleration: false,
             isolate_prior_documents: true,
             reset_layout: false,
+            open_project_read_only: false,
         }
     }
 }
 
 impl LocalSafeModeOptions {
     pub const fn has_effect(self) -> bool {
-        self.isolate_prior_documents || self.reset_layout
+        self.disable_third_party_extensions
+            || self.disable_gpu_acceleration
+            || self.isolate_prior_documents
+            || self.reset_layout
+            || self.open_project_read_only
     }
+}
+
+/// Where the validated close-project transaction should leave the user.
+///
+/// This is runtime-only intent. Keeping it beside the launcher state lets a
+/// browser canonical-save continuation complete the exact originally requested
+/// transition without inferring intent from whichever surface is visible later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ProjectCloseDestination {
+    #[default]
+    Launcher,
+    EmptyWorkbench,
 }
 
 /// Current-launch safe-mode state. The serialized pre-safe-mode session is
@@ -352,6 +462,10 @@ impl LocalSafeModeState {
 
     pub(crate) fn preserved_session(&self) -> Option<&str> {
         self.preserved_session.as_deref()
+    }
+
+    pub(crate) const fn project_read_only(&self) -> bool {
+        self.active && self.applied.open_project_read_only
     }
 }
 
@@ -437,31 +551,51 @@ impl VerificationPage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ModelsPage {
     #[default]
-    Catalog,
-    Libraries,
-    Pdk,
-    Behavioral,
+    #[serde(alias = "Catalog")]
+    Models,
+    #[serde(alias = "Libraries")]
+    Symbols,
+    #[serde(alias = "Pdk")]
+    Corners,
+    #[serde(alias = "Behavioral")]
+    Include,
     Qualification,
 }
 
 impl ModelsPage {
     pub const ALL: [Self; 5] = [
-        Self::Catalog,
-        Self::Libraries,
-        Self::Pdk,
-        Self::Behavioral,
+        Self::Models,
+        Self::Symbols,
+        Self::Corners,
+        Self::Include,
         Self::Qualification,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Catalog => "Model catalog",
-            Self::Libraries => "Libraries and cellviews",
-            Self::Pdk => "PDK configuration",
-            Self::Behavioral => "Verilog-A / AMS",
-            Self::Qualification => "Qualification",
+            Self::Models => "Models",
+            Self::Symbols => "Symbols & CDF",
+            Self::Corners => "Corners & sections",
+            Self::Include => "Include graph",
+            Self::Qualification => "Metadata audit",
         }
     }
+
+    // Transitional source aliases keep code outside the new shell compiling
+    // while persisted sessions migrate through the serde aliases above. They
+    // are intentionally excluded from `ALL`, command routing, and rendering.
+    #[doc(hidden)]
+    #[allow(non_upper_case_globals)]
+    pub const Catalog: Self = Self::Models;
+    #[doc(hidden)]
+    #[allow(non_upper_case_globals)]
+    pub const Libraries: Self = Self::Symbols;
+    #[doc(hidden)]
+    #[allow(non_upper_case_globals)]
+    pub const Pdk: Self = Self::Corners;
+    #[doc(hidden)]
+    #[allow(non_upper_case_globals)]
+    pub const Behavioral: Self = Self::Include;
 }
 
 /// Destination that can resolve a blocking simulation-preflight finding.
@@ -793,19 +927,36 @@ pub struct WorkbenchState {
     /// persisted source of truth for the next ordinary launch.
     #[serde(skip)]
     pub safe_mode: LocalSafeModeState,
+    /// Destination owned by an in-flight close-project review. It survives an
+    /// asynchronous canonical-save continuation but is never persisted.
+    #[serde(skip)]
+    pub(crate) project_close_destination: ProjectCloseDestination,
     /// Focus is requested only on the frame in which the launcher opens.
     #[serde(skip)]
     pub focus_project_launcher_search: bool,
     #[serde(default = "default_navigator_width")]
     pub navigator_width: f32,
+    /// True after the user explicitly resizes the navigator. Until then the
+    /// mockup's responsive 18vw clamp remains authoritative.
+    #[serde(default)]
+    pub navigator_width_custom: bool,
     #[serde(default = "default_inspector_width")]
     pub inspector_width: f32,
+    /// True after the user explicitly resizes the inspector. Until then the
+    /// mockup's responsive 22vw clamp remains authoritative.
+    #[serde(default)]
+    pub inspector_width_custom: bool,
     #[serde(default = "default_console_height")]
     pub console_height: f32,
     #[serde(default)]
     pub console_page: ConsolePage,
     #[serde(default)]
     pub design_panel: DesignPanel,
+    /// Active and locally closed document presentations in each workspace.
+    /// Stable object IDs ensure a reordered run history or analysis plan does
+    /// not silently retarget a restored tab.
+    #[serde(default)]
+    pub documents: WorkspaceDocumentRegistry,
     #[serde(default)]
     pub project_page: ProjectPage,
     #[serde(default)]
@@ -912,15 +1063,19 @@ impl Default for WorkbenchState {
             project_launcher_page: ProjectLauncherPage::Projects,
             project_launcher_recovery: super::recovery::RecoveryCatalog::default(),
             safe_mode: LocalSafeModeState::default(),
+            project_close_destination: ProjectCloseDestination::Launcher,
             focus_project_launcher_search: false,
             navigator_width: default_navigator_width(),
+            navigator_width_custom: false,
             inspector_width: default_inspector_width(),
+            inspector_width_custom: false,
             console_height: default_console_height(),
             console_page: ConsolePage::Console,
             design_panel: DesignPanel::Navigator,
+            documents: WorkspaceDocumentRegistry::default(),
             project_page: ProjectPage::Dashboard,
             verification_page: VerificationPage::Cockpit,
-            models_page: ModelsPage::Catalog,
+            models_page: ModelsPage::Models,
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,
             analysis_lifecycle_status: "No lifecycle command has been committed this session."
@@ -963,6 +1118,18 @@ impl WorkbenchState {
         self.project_launcher_page = ProjectLauncherPage::Projects;
         self.project_launcher_recovery.request_refresh();
         self.focus_project_launcher_search = true;
+    }
+
+    pub(crate) fn begin_project_close(&mut self, destination: ProjectCloseDestination) {
+        self.project_close_destination = destination;
+    }
+
+    pub(crate) fn cancel_project_close(&mut self) {
+        self.project_close_destination = ProjectCloseDestination::Launcher;
+    }
+
+    pub(crate) fn take_project_close_destination(&mut self) -> ProjectCloseDestination {
+        std::mem::take(&mut self.project_close_destination)
     }
 
     pub fn activate(&mut self, workspace: Workspace) {
@@ -1257,7 +1424,9 @@ impl WorkbenchState {
         self.console_maximized = false;
         self.focus_mode = false;
         self.navigator_width = default_navigator_width();
+        self.navigator_width_custom = false;
         self.inspector_width = default_inspector_width();
+        self.inspector_width_custom = false;
         self.console_height = default_console_height();
         self.close_drawer();
     }
