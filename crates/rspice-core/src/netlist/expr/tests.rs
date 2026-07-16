@@ -1065,6 +1065,90 @@ fn global_parameter_expression_validation_rejects_cycles_and_circuit_probes() {
 }
 
 #[test]
+fn parameter_circuit_probe_classifier_matches_xyce_classes_and_precedence() {
+    for (expression, expected_kind, expected_reference) in [
+        ("76k+v(3)", ParameterCircuitProbeKind::NodeVoltage, "V(3)"),
+        ("v(2e+3)", ParameterCircuitProbeKind::NodeVoltage, "V(2E+3)"),
+        (
+            "76k+i(v2)",
+            ParameterCircuitProbeKind::DeviceCurrent,
+            "I(V2)",
+        ),
+        ("76k+i(c2)", ParameterCircuitProbeKind::LeadCurrent, "I(C2)"),
+        (
+            "i(X1:v2)",
+            ParameterCircuitProbeKind::DeviceCurrent,
+            "I(X1:V2)",
+        ),
+        (
+            "i(X1:c2)",
+            ParameterCircuitProbeKind::LeadCurrent,
+            "I(X1:C2)",
+        ),
+        (
+            "i(foo:V1)",
+            ParameterCircuitProbeKind::LeadCurrent,
+            "I(FOO:V1)",
+        ),
+        (
+            "i(v1.p)",
+            ParameterCircuitProbeKind::DeviceCurrent,
+            "I(V1.P)",
+        ),
+        ("i(c1.p)", ParameterCircuitProbeKind::LeadCurrent, "I(C1.P)"),
+    ] {
+        assert_eq!(
+            parameter_expression_circuit_probe(expression),
+            Some(ParameterCircuitProbe {
+                kind: expected_kind,
+                reference: expected_reference.to_string(),
+            }),
+            "{expression}"
+        );
+    }
+
+    for designator in ["v", "e", "H", "l"] {
+        let expression = format!("i({designator}dev)");
+        assert_eq!(
+            parameter_expression_circuit_probe(&expression)
+                .expect("branch-bearing device current is classified")
+                .kind,
+            ParameterCircuitProbeKind::DeviceCurrent,
+            "{expression}"
+        );
+    }
+    assert_eq!(
+        parameter_expression_circuit_probe("i(Bdev)")
+            .expect("behavioral-source current is classified")
+            .kind,
+        ParameterCircuitProbeKind::LeadCurrent,
+        "Xyce's lead-current vector wins for B sources"
+    );
+    assert_eq!(
+        parameter_expression_circuit_probe("v(1)+i(v2)+i(c2)"),
+        Some(ParameterCircuitProbe {
+            kind: ParameterCircuitProbeKind::LeadCurrent,
+            reference: "I(C2)".to_string(),
+        }),
+        "Xyce diagnostic precedence is Lead > Device > Node"
+    );
+    assert_eq!(
+        parameter_expression_circuit_probe("time+freq+temper"),
+        None,
+        "valid non-probe runtime symbols must not be over-classified"
+    );
+    for malformed in [
+        "V()", "V(a,b,c)", "V(1+2)", "I()", "I(v1,v2)", "I(3)", "I(v1+v2)",
+    ] {
+        assert_eq!(
+            parameter_expression_circuit_probe(malformed),
+            None,
+            "malformed probe syntax must retain ordinary parser error ordering: {malformed}"
+        );
+    }
+}
+
+#[test]
 fn global_parameter_validation_accepts_static_statistical_projections() {
     let mut params = ParamContext::new();
     for (name, expression, value) in [

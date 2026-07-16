@@ -3285,6 +3285,7 @@ fn parse_param_assignment_value(
         }
         _ if param_rhs_continues(stream) => {
             let expr = collect_param_rhs_expression(stream, line_num, &name)?;
+            reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
             match eval_expression_complex(&expr, params) {
                 Ok(value) => {
                     if retain_global_expression {
@@ -3319,6 +3320,7 @@ fn parse_param_assignment_value(
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
             stream.advance();
+            reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
             match eval_expression_complex(&expr, params) {
                 Ok(value) => {
                     if retain_global_expression {
@@ -3382,6 +3384,7 @@ fn parse_param_assignment_value(
                 }
                 Err(err) => {
                     let expr = collect_param_rhs_expression(stream, line_num, &name)?;
+                    reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
                     defer_param_expression_or_error(
                         deferred_params,
                         params,
@@ -3395,6 +3398,28 @@ fn parse_param_assignment_value(
         }
     }
     Ok(())
+}
+
+fn reject_parameter_expression_circuit_probe(
+    name: &str,
+    expression: &str,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let prepared = crate::netlist::expr::prepare_behavioral_expression(expression, params)
+        .unwrap_or_else(|_| expression.to_string());
+    let Some(probe) = crate::netlist::expr::parameter_expression_circuit_probe(&prepared) else {
+        return Ok(());
+    };
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "{} may not be used in parameter expression ({}): {}",
+            probe.kind.diagnostic_label(),
+            name.to_ascii_uppercase(),
+            probe.reference
+        ),
+    })
 }
 
 fn upsert_deferred_param_expression(

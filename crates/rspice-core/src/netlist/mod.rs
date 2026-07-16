@@ -2237,6 +2237,132 @@ mod tests {
         }
     }
 
+    fn assert_parameter_probe_error(directive: &str, expected_line: usize, expected_message: &str) {
+        let error = Netlist::parse(&format!(
+            "invalid parameter probe\n\
+             {directive}\n\
+             V1 1 0 1\n\
+             .end\n"
+        ))
+        .expect_err("circuit probes in parameter expressions must be rejected");
+        match error {
+            ParseError::Syntax { line, message } => {
+                assert_eq!(line, expected_line);
+                assert_eq!(message, expected_message);
+            }
+            other => panic!("expected structured parameter-probe syntax error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parameter_directives_reject_xyce_circuit_probe_classes() {
+        for (directive, expected_message) in [
+            (
+                ".param RVAL={76K+v(3)}",
+                "Node Voltage may not be used in parameter expression (RVAL): V(3)",
+            ),
+            (
+                ".csparam rval={76K+i(v2)}",
+                "Device Current may not be used in parameter expression (RVAL): I(V2)",
+            ),
+            (
+                ".global_param Rval={76K+i(c2)}",
+                "Lead Current may not be used in parameter expression (RVAL): I(C2)",
+            ),
+        ] {
+            assert_parameter_probe_error(directive, 2, expected_message);
+        }
+    }
+
+    #[test]
+    fn malformed_parameter_probe_calls_preserve_ordinary_error_ordering() {
+        for expression in [
+            "V()", "V(a,b,c)", "V(1+2)", "I()", "I(v1,v2)", "I(3)", "I(v1+v2)",
+        ] {
+            let error = Netlist::parse(&format!(
+                "malformed parameter call\n\
+                 .param RVAL={{{expression}}}\n\
+                 V1 1 0 1\n\
+                 .end\n"
+            ))
+            .expect_err("malformed V/I call must fail through ordinary expression validation");
+            assert!(
+                matches!(
+                    error,
+                    ParseError::Syntax { .. }
+                        | ParseError::InvalidValue(_)
+                        | ParseError::UndefinedParameter(_)
+                ),
+                "unexpected malformed-call error for {expression}: {error:?}"
+            );
+            assert!(
+                !error
+                    .to_string()
+                    .contains("may not be used in parameter expression"),
+                "malformed {expression} must not be reclassified as a valid circuit probe: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn parameter_function_definitions_may_retain_probes_for_behavioral_use() {
+        Netlist::parse(
+            "valid parameter function probe\n\
+             .param F(x)={x+v(1)}\n\
+             V1 1 0 1\n\
+             B1 2 0 V={F(2)}\n\
+             .end\n",
+        )
+        .expect("Xyce permits probes in a .PARAM function body outside scalar assignment");
+    }
+
+    #[test]
+    fn parameter_assignments_reject_probes_expanded_from_func_bodies() {
+        let error = Netlist::parse(
+            "invalid nested function probe\n\
+             .func f(x)={x+i(c2)}\n\
+             .param RVAL={f(1)}\n\
+             V1 1 0 1\n\
+             .end\n",
+        )
+        .expect_err("a circuit probe expanded from .FUNC must be rejected in .PARAM");
+        match error {
+            ParseError::Syntax { line, message } => {
+                assert_eq!(line, 3);
+                assert_eq!(
+                    message,
+                    "Lead Current may not be used in parameter expression (RVAL): I(C2)"
+                );
+            }
+            other => panic!("expected structured nested parameter-probe error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parameter_probe_validation_preserves_runtime_symbols() {
+        let netlist = Netlist::parse(
+            "valid runtime global parameter\n\
+             .global_param time_only={time}\n\
+             .global_param freq_only={freq}\n\
+             .global_param combined={time+freq+temper}\n\
+             V1 1 0 1\n\
+             .end\n",
+        )
+        .expect("TIME, FREQ, and TEMPER are not circuit probes");
+        assert_eq!(
+            netlist.params.get_global_expression("TIME_ONLY"),
+            Some("time")
+        );
+        assert_eq!(
+            netlist.params.get_global_expression("FREQ_ONLY"),
+            Some("freq")
+        );
+        assert_eq!(
+            netlist.params.get_global_expression("COMBINED"),
+            Some("time+freq+temper")
+        );
+    }
+
     fn assert_duplicate_element_error(
         source: &str,
         expected_canonical: &str,

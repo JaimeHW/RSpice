@@ -10,6 +10,230 @@ use super::{
 use crate::Value;
 use std::collections::HashMap;
 
+/// Circuit-solution dependency class found in a parameter expression.
+///
+/// Xyce separates direct branch-bearing device currents (`V`, `E`, `H`, and
+/// `L` designators) from lead currents on all other device classes. Behavioral
+/// (`B`) sources enter both of Xyce's internal vectors, so lead-current
+/// precedence classifies them as lead currents. The distinction is
+/// diagnostic-only here: every class is invalid in `.PARAM`, `.CSPARAM`, and
+/// `.GLOBAL_PARAM` expressions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterCircuitProbeKind {
+    NodeVoltage,
+    DeviceCurrent,
+    LeadCurrent,
+}
+
+impl ParameterCircuitProbeKind {
+    pub fn diagnostic_label(self) -> &'static str {
+        match self {
+            Self::NodeVoltage => "Node Voltage",
+            Self::DeviceCurrent => "Device Current",
+            Self::LeadCurrent => "Lead Current",
+        }
+    }
+
+    fn precedence(self) -> u8 {
+        match self {
+            Self::NodeVoltage => 0,
+            Self::DeviceCurrent => 1,
+            Self::LeadCurrent => 2,
+        }
+    }
+}
+
+/// Typed circuit probe retained from a parsed parameter expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParameterCircuitProbe {
+    pub kind: ParameterCircuitProbeKind,
+    pub reference: String,
+}
+
+/// Classify a circuit probe in a parameter expression without evaluating it.
+///
+/// The expression is parsed through RSpice's strict behavioral grammar first
+/// and the netlist parameter grammar second. No textual or path allowlist is
+/// involved. If several probe classes occur, Xyce's diagnostic precedence is
+/// retained: lead current, then device current, then node voltage.
+pub fn parameter_expression_circuit_probe(expression: &str) -> Option<ParameterCircuitProbe> {
+    if let Ok(expression) = crate::expr::parse_expression_strict(expression) {
+        return strict_parameter_circuit_probe(&expression);
+    }
+    parse_net_expr(expression)
+        .ok()
+        .and_then(|expression| net_parameter_circuit_probe(&expression))
+}
+
+fn preferred_parameter_probe(
+    current: Option<ParameterCircuitProbe>,
+    candidate: Option<ParameterCircuitProbe>,
+) -> Option<ParameterCircuitProbe> {
+    match (current, candidate) {
+        (None, candidate) => candidate,
+        (current, None) => current,
+        (Some(current), Some(candidate))
+            if candidate.kind.precedence() > current.kind.precedence() =>
+        {
+            Some(candidate)
+        }
+        (Some(current), Some(_)) => Some(current),
+    }
+}
+
+fn strict_parameter_circuit_probe(expression: &crate::expr::Expr) -> Option<ParameterCircuitProbe> {
+    match expression {
+        crate::expr::Expr::NodeVoltage(node) => {
+            canonical_node_probe_reference(node).map(|reference| ParameterCircuitProbe {
+                kind: ParameterCircuitProbeKind::NodeVoltage,
+                reference: format!("V({reference})"),
+            })
+        }
+        crate::expr::Expr::BranchCurrent(device) => {
+            canonical_device_probe_reference(device).map(|reference| ParameterCircuitProbe {
+                kind: parameter_current_probe_kind(&reference),
+                reference: format!("I({reference})"),
+            })
+        }
+        crate::expr::Expr::Unary { operand, .. } => strict_parameter_circuit_probe(operand),
+        crate::expr::Expr::Binary { left, right, .. } => preferred_parameter_probe(
+            strict_parameter_circuit_probe(left),
+            strict_parameter_circuit_probe(right),
+        ),
+        crate::expr::Expr::Function { args, .. } => args.iter().fold(None, |current, argument| {
+            preferred_parameter_probe(current, strict_parameter_circuit_probe(argument))
+        }),
+        crate::expr::Expr::Const(_)
+        | crate::expr::Expr::StringLiteral(_)
+        | crate::expr::Expr::LookupTable(_)
+        | crate::expr::Expr::Time
+        | crate::expr::Expr::Frequency
+        | crate::expr::Expr::Temperature => None,
+    }
+}
+
+fn net_parameter_circuit_probe(expression: &NetExpr) -> Option<ParameterCircuitProbe> {
+    match expression {
+        NetExpr::UnaryOp { operand, .. } => net_parameter_circuit_probe(operand),
+        NetExpr::BinOp { left, right, .. } => preferred_parameter_probe(
+            net_parameter_circuit_probe(left),
+            net_parameter_circuit_probe(right),
+        ),
+        NetExpr::FnCall { name, args } if name.eq_ignore_ascii_case("V") => {
+            let references = args
+                .iter()
+                .map(net_atomic_node_reference)
+                .collect::<Option<Vec<_>>>()?;
+            if !matches!(references.len(), 1 | 2) {
+                return None;
+            }
+            Some(ParameterCircuitProbe {
+                kind: ParameterCircuitProbeKind::NodeVoltage,
+                reference: format!("V({})", references.join(",").to_ascii_uppercase()),
+            })
+        }
+        NetExpr::FnCall { name, args } if name.eq_ignore_ascii_case("I") => {
+            let [target] = args.as_slice() else {
+                return None;
+            };
+            let target = net_atomic_device_reference(target)?.to_ascii_uppercase();
+            Some(ParameterCircuitProbe {
+                kind: parameter_current_probe_kind(&target),
+                reference: format!("I({target})"),
+            })
+        }
+        NetExpr::FnCall { args, .. } => args.iter().fold(None, |current, argument| {
+            preferred_parameter_probe(current, net_parameter_circuit_probe(argument))
+        }),
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::Param(_) => None,
+    }
+}
+
+fn net_atomic_node_reference(expression: &NetExpr) -> Option<String> {
+    match expression {
+        NetExpr::Param(name) => canonical_atomic_node_reference(name),
+        NetExpr::Number(value) if value.is_finite() => Some(serialize_expr(expression)),
+        _ => None,
+    }
+}
+
+fn net_atomic_device_reference(expression: &NetExpr) -> Option<String> {
+    let NetExpr::Param(name) = expression else {
+        return None;
+    };
+    if !is_atomic_probe_reference_token(name) {
+        return None;
+    }
+    let local_name = name.rsplit(':').next().unwrap_or(name);
+    local_name
+        .chars()
+        .next()
+        .is_some_and(|designator| designator.is_ascii_alphabetic())
+        .then(|| name.clone())
+}
+
+fn is_atomic_probe_reference_token(reference: &str) -> bool {
+    !reference.is_empty()
+        && reference.split(':').all(|segment| !segment.is_empty())
+        && reference.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '_' | '.' | '#' | ':' | '$' | '!')
+        })
+}
+
+fn canonical_atomic_node_reference(reference: &str) -> Option<String> {
+    if is_atomic_probe_reference_token(reference) {
+        return Some(reference.to_ascii_uppercase());
+    }
+    match crate::expr::parse_expression_strict(reference) {
+        Ok(crate::expr::Expr::Const(value)) if value.is_finite() => {
+            Some(reference.to_ascii_uppercase())
+        }
+        _ => None,
+    }
+}
+
+fn canonical_node_probe_reference(reference: &str) -> Option<String> {
+    let references = reference
+        .split(',')
+        .map(str::trim)
+        .map(canonical_atomic_node_reference)
+        .collect::<Option<Vec<_>>>()?;
+    if !matches!(references.len(), 1 | 2) {
+        return None;
+    }
+    Some(references.join(","))
+}
+
+fn canonical_device_probe_reference(reference: &str) -> Option<String> {
+    if !is_atomic_probe_reference_token(reference) {
+        return None;
+    }
+    let local_name = reference.rsplit(':').next().unwrap_or(reference);
+    local_name
+        .chars()
+        .next()
+        .is_some_and(|designator| designator.is_ascii_alphabetic())
+        .then(|| reference.to_ascii_uppercase())
+}
+
+fn parameter_current_probe_kind(device: &str) -> ParameterCircuitProbeKind {
+    let device = device.trim_start();
+    let local_name = if device.starts_with('X') || device.starts_with('x') {
+        device.rsplit(':').next().unwrap_or(device)
+    } else {
+        device
+    };
+    match local_name
+        .chars()
+        .next()
+        .map(|designator| designator.to_ascii_uppercase())
+    {
+        Some('V' | 'E' | 'H' | 'L') => ParameterCircuitProbeKind::DeviceCurrent,
+        _ => ParameterCircuitProbeKind::LeadCurrent,
+    }
+}
+
 /// Match the evaluator's production recursion guard. Expansion depth counts
 /// named `.FUNC` and `.GLOBAL_PARAM` dependencies only; ordinary AST shape is
 /// not recursion and must not consume this budget.
@@ -148,7 +372,7 @@ fn net_expr_contains_circuit_probe(expression: &NetExpr) -> bool {
 
 fn first_unresolved_global_identifier(expression: &NetExpr) -> Option<&str> {
     match expression {
-        NetExpr::Param(name) if name.eq_ignore_ascii_case("TIME") => None,
+        NetExpr::Param(name) if is_behavioral_runtime_symbol(name) => None,
         NetExpr::Param(name) => Some(name.as_str()),
         NetExpr::UnaryOp { operand, .. } => first_unresolved_global_identifier(operand),
         NetExpr::BinOp { left, right, .. } => first_unresolved_global_identifier(left)
@@ -492,7 +716,7 @@ fn fold_condition_function(name: &str, args: &[NetExpr]) -> Option<NetExpr> {
 }
 
 fn is_behavioral_runtime_symbol(name: &str) -> bool {
-    name.eq_ignore_ascii_case("TIME")
+    name.eq_ignore_ascii_case("TIME") || name.eq_ignore_ascii_case("FREQ")
 }
 
 fn is_circuit_probe(name: &str) -> bool {
