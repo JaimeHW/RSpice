@@ -144,6 +144,12 @@ const XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_701/dup-toplevel.cir";
 const XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_701/dup-subcircuit.cir";
+const XYCE_BUG769_NODE_VOLTAGE_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_769/bug_769a.cir";
+const XYCE_BUG769_DEVICE_CURRENT_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_769/bug_769b.cir";
+const XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_769/bug_769c.cir";
 const XYCE_BUG67_SOURCE_BLAKE3: &str =
     "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
 const XYCE_BUG671_SOURCE_BLAKE3: &str =
@@ -174,6 +180,12 @@ const XYCE_BUG701_TOPLEVEL_SOURCE_BLAKE3: &str =
     "0131acaf84d4e1602998aa6fe62660fdbee36d819070b81a470ba697d7dc8355";
 const XYCE_BUG701_SUBCIRCUIT_SOURCE_BLAKE3: &str =
     "48e9bdb88c56c133bbbb6c5bfbe1c190b4fc8151c18be36247418d68cb8c847e";
+const XYCE_BUG769_NODE_VOLTAGE_SOURCE_BLAKE3: &str =
+    "ce0384a441aeaa20e0cce8cb6c9eb25f2965d8e674c092d823533a68c0656607";
+const XYCE_BUG769_DEVICE_CURRENT_SOURCE_BLAKE3: &str =
+    "769e5db9d7d51f1860c1e308d8c2374fb6dedc22604a47c9eb2eca1c5d5e7f59";
+const XYCE_BUG769_LEAD_CURRENT_SOURCE_BLAKE3: &str =
+    "fb46538cf279bddce942af6e7521aa276760c05d0d4211995de332be804bb60d";
 const XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3: &str =
     "ccdc1cb4b46160d2c993d155a6816c81e5671aecd700bd364ab8b7d512320a13";
 const XYCE_BUG401_MANIFEST_CENSUS_BLAKE3: &str =
@@ -182,6 +194,10 @@ const XYCE_BUG701_PHYSICAL_CENSUS_BLAKE3: &str =
     "95e3fe513d175af26352a58c721926147fa8d61a106f2725baa16875738961e6";
 const XYCE_BUG701_MANIFEST_CENSUS_BLAKE3: &str =
     "d0a587a88eb1110aa7f18e230d1be0ee6ae5e8a1f57ae5d9ab7123336c55afcc";
+const XYCE_BUG769_PHYSICAL_CENSUS_BLAKE3: &str =
+    "fd6b0fc758230e97ae8b2ed878e0a981a5c2d918ac1916408fa5c2b75eb93008";
+const XYCE_BUG769_MANIFEST_CENSUS_BLAKE3: &str =
+    "5dcd16e7d0b7fb3676533549a171865ac6b2a9aeb338f7f14ef10d73ec75dbc8";
 const XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
     "bcd3e366443f97db8ccb98d5d9f0102cbb67a5903657382da3ea7770ed666afc";
 const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
@@ -238,6 +254,9 @@ enum XyceExpectedFailureKind {
     Bug401WorseDeviceLine,
     Bug701DuplicateTopLevelDevice,
     Bug701DuplicateSubcircuitDevice,
+    Bug769ParameterNodeVoltage,
+    Bug769ParameterDeviceCurrent,
+    Bug769ParameterLeadCurrent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,6 +297,15 @@ impl XyceExpectedFailureKind {
             XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD => {
                 Some(Self::Bug701DuplicateSubcircuitDevice)
             }
+            XYCE_BUG769_NODE_VOLTAGE_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug769ParameterNodeVoltage)
+            }
+            XYCE_BUG769_DEVICE_CURRENT_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug769ParameterDeviceCurrent)
+            }
+            XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug769ParameterLeadCurrent)
+            }
             _ => None,
         }
     }
@@ -299,6 +327,11 @@ impl XyceExpectedFailureKind {
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD,
             Self::Bug701DuplicateTopLevelDevice => XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD,
             Self::Bug701DuplicateSubcircuitDevice => XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD,
+            Self::Bug769ParameterNodeVoltage => XYCE_BUG769_NODE_VOLTAGE_EXPECTED_FAILURE_RECORD,
+            Self::Bug769ParameterDeviceCurrent => {
+                XYCE_BUG769_DEVICE_CURRENT_EXPECTED_FAILURE_RECORD
+            }
+            Self::Bug769ParameterLeadCurrent => XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD,
         }
     }
 
@@ -319,6 +352,9 @@ impl XyceExpectedFailureKind {
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3,
             Self::Bug701DuplicateTopLevelDevice => XYCE_BUG701_TOPLEVEL_SOURCE_BLAKE3,
             Self::Bug701DuplicateSubcircuitDevice => XYCE_BUG701_SUBCIRCUIT_SOURCE_BLAKE3,
+            Self::Bug769ParameterNodeVoltage => XYCE_BUG769_NODE_VOLTAGE_SOURCE_BLAKE3,
+            Self::Bug769ParameterDeviceCurrent => XYCE_BUG769_DEVICE_CURRENT_SOURCE_BLAKE3,
+            Self::Bug769ParameterLeadCurrent => XYCE_BUG769_LEAD_CURRENT_SOURCE_BLAKE3,
         }
     }
 
@@ -348,6 +384,15 @@ impl XyceExpectedFailureKind {
             }
             Self::Bug701DuplicateSubcircuitDevice => {
                 "expected_failure_bug701_duplicate_subcircuit_device_parse"
+            }
+            Self::Bug769ParameterNodeVoltage => {
+                "expected_failure_bug769_parameter_node_voltage_parse"
+            }
+            Self::Bug769ParameterDeviceCurrent => {
+                "expected_failure_bug769_parameter_device_current_parse"
+            }
+            Self::Bug769ParameterLeadCurrent => {
+                "expected_failure_bug769_parameter_lead_current_parse"
             }
         }
     }
@@ -394,6 +439,18 @@ impl XyceExpectedFailureKind {
             ][..],
             Self::Bug701DuplicateTopLevelDevice => &["Duplicate device V1"][..],
             Self::Bug701DuplicateSubcircuitDevice => &["Duplicate device XVNODES:R1"][..],
+            Self::Bug769ParameterNodeVoltage => &[
+                "in file bug_769a.cir at or near line 69",
+                "Node Voltage may not be used in parameter expression [(]RVAL[)]",
+            ][..],
+            Self::Bug769ParameterDeviceCurrent => &[
+                "in file bug_769b.cir at or near line 69",
+                "Device Current may not be used in parameter expression [(]RVAL[)]",
+            ][..],
+            Self::Bug769ParameterLeadCurrent => &[
+                "in file bug_769c.cir at or near line 69",
+                "Lead Current may not be used in parameter expression [(]RVAL[)]",
+            ][..],
         };
         XyceUpstreamExpectedErrorPolicy {
             requires_nonzero_exit: true,
@@ -498,6 +555,33 @@ impl XyceExpectedFailureKind {
                     "line 8".to_string(),
                 ],
             },
+            Self::Bug769ParameterNodeVoltage => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::ParameterNodeVoltage,
+                identifiers: vec![
+                    "RVAL".to_string(),
+                    "V(3)".to_string(),
+                    "line 69".to_string(),
+                ],
+            },
+            Self::Bug769ParameterDeviceCurrent => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::ParameterDeviceCurrent,
+                identifiers: vec![
+                    "RVAL".to_string(),
+                    "I(V2)".to_string(),
+                    "line 69".to_string(),
+                ],
+            },
+            Self::Bug769ParameterLeadCurrent => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::ParameterLeadCurrent,
+                identifiers: vec![
+                    "RVAL".to_string(),
+                    "I(C2)".to_string(),
+                    "line 69".to_string(),
+                ],
+            },
         }
     }
 
@@ -535,6 +619,15 @@ impl XyceExpectedFailureKind {
                     require_manifest_bijection: true,
                 })
             }
+            Self::Bug769ParameterNodeVoltage
+            | Self::Bug769ParameterDeviceCurrent
+            | Self::Bug769ParameterLeadCurrent => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 3,
+                physical_names_blake3: XYCE_BUG769_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 3,
+                manifest_records_blake3: XYCE_BUG769_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            }),
             _ => None,
         }
     }
@@ -573,6 +666,9 @@ enum XyceExpectedFailureCategory {
     UnknownXspiceModel,
     MalformedResistorSpecification,
     DuplicateDeviceName,
+    ParameterNodeVoltage,
+    ParameterDeviceCurrent,
+    ParameterLeadCurrent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3803,6 +3899,27 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice => {
                 Self::observe_bug701_duplicate_subcircuit_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug769ParameterNodeVoltage => {
+                Self::observe_bug769_parameter_probe_failure(
+                    source,
+                    &deck.path,
+                    XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+                )?
+            }
+            XyceExpectedFailureKind::Bug769ParameterDeviceCurrent => {
+                Self::observe_bug769_parameter_probe_failure(
+                    source,
+                    &deck.path,
+                    XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+                )?
+            }
+            XyceExpectedFailureKind::Bug769ParameterLeadCurrent => {
+                Self::observe_bug769_parameter_probe_failure(
+                    source,
+                    &deck.path,
+                    XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+                )?
+            }
         };
         let expected = kind.expected_observation();
         if observation != expected {
@@ -4784,6 +4901,114 @@ impl XyceTestRunner {
                 "line 7".to_string(),
                 "line 8".to_string(),
             ],
+        })
+    }
+
+    fn require_bug769_one_line_delta_family(deck_path: &Path) -> Result<(), String> {
+        let family = deck_path
+            .parent()
+            .ok_or_else(|| "BUG 769 record has no family directory".to_string())?;
+        let members = [
+            ("bug_769a.cir", ".param RVAL={76K+v(3)}"),
+            ("bug_769b.cir", ".param RVAL={76K+i(v2)}"),
+            ("bug_769c.cir", ".param RVAL={76K+i(c2)}"),
+        ];
+        let mut sources = Vec::with_capacity(members.len());
+        for (file_name, expected_probe_line) in members {
+            let path = family.join(file_name);
+            let source = fs::read_to_string(&path).map_err(|error| {
+                format!("failed to read BUG 769 family member {path:?}: {error}")
+            })?;
+            let lines = source.lines().map(str::to_string).collect::<Vec<_>>();
+            if lines.len() != 82 {
+                return Err(format!(
+                    "BUG 769 family member {file_name} physical line count changed: expected 82, got {}",
+                    lines.len()
+                ));
+            }
+            if lines[68] != expected_probe_line {
+                return Err(format!(
+                    "BUG 769 family member {file_name} physical line 69 changed: expected {expected_probe_line:?}, got {:?}",
+                    lines[68]
+                ));
+            }
+            sources.push((file_name, lines));
+        }
+        for line_index in 0..82 {
+            if line_index == 68 {
+                continue;
+            }
+            let reference = &sources[0].1[line_index];
+            for (file_name, lines) in &sources[1..] {
+                if &lines[line_index] != reference {
+                    return Err(format!(
+                        "BUG 769 family must differ only at physical line 69; {file_name} differs at line {}",
+                        line_index + 1
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn observe_bug769_parameter_probe_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let (label, parameter_line, diagnostic, category, probe) = match kind {
+            XyceExpectedFailureKind::Bug769ParameterNodeVoltage => (
+                "BUG 769 node-voltage parameter",
+                ".param RVAL={76K+v(3)}",
+                "Node Voltage may not be used in parameter expression (RVAL): V(3)",
+                XyceExpectedFailureCategory::ParameterNodeVoltage,
+                "V(3)",
+            ),
+            XyceExpectedFailureKind::Bug769ParameterDeviceCurrent => (
+                "BUG 769 device-current parameter",
+                ".param RVAL={76K+i(v2)}",
+                "Device Current may not be used in parameter expression (RVAL): I(V2)",
+                XyceExpectedFailureCategory::ParameterDeviceCurrent,
+                "I(V2)",
+            ),
+            XyceExpectedFailureKind::Bug769ParameterLeadCurrent => (
+                "BUG 769 lead-current parameter",
+                ".param RVAL={76K+i(c2)}",
+                "Lead Current may not be used in parameter expression (RVAL): I(C2)",
+                XyceExpectedFailureCategory::ParameterLeadCurrent,
+                "I(C2)",
+            ),
+            _ => {
+                return Err(format!(
+                    "non-BUG 769 expected-failure kind passed to BUG 769 observer: {kind:?}"
+                ));
+            }
+        };
+        Self::require_bug769_one_line_delta_family(deck_path)?;
+        Self::require_expected_failure_source_lines(
+            label,
+            source,
+            82,
+            &[
+                (1, "UA555 Timer Circuit"),
+                (66, ".ENDS"),
+                (69, parameter_line),
+                (71, "C1 1 0 2140P"),
+                (72, "R2 3 1 {RVAL}"),
+                (73, "C2 5 0 .01U"),
+                (74, "X2 6 4 3 5 1 1 3 UA555"),
+                (75, "V2 6 0 PULSE(0 15 0U .1U .1U 900U 1M)"),
+                (78, ".TRAN 1U 5M"),
+                (79, ".PRINT TRAN V(4)  V(1)  V(6)"),
+                (81, ".END"),
+                (82, ""),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(label, source, deck_path, 69, diagnostic)?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category,
+            identifiers: vec!["RVAL".to_string(), probe.to_string(), "line 69".to_string()],
         })
     }
 
@@ -65521,6 +65746,27 @@ R2 2 0 1
                 XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
                 &["Duplicate device XVNODES:R1"][..],
             ),
+            (
+                XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+                &[
+                    "in file bug_769a.cir at or near line 69",
+                    "Node Voltage may not be used in parameter expression [(]RVAL[)]",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+                &[
+                    "in file bug_769b.cir at or near line 69",
+                    "Device Current may not be used in parameter expression [(]RVAL[)]",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+                &[
+                    "in file bug_769c.cir at or near line 69",
+                    "Lead Current may not be used in parameter expression [(]RVAL[)]",
+                ][..],
+            ),
         ];
 
         for (kind, patterns) in cases {
@@ -65547,7 +65793,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_fifteen_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_eighteen_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -65615,6 +65861,18 @@ R2 2 0 1
                     XyceExpectedFailureKind::Bug744DcOperatingPoint,
                 ),
                 (
+                    XYCE_BUG769_NODE_VOLTAGE_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+                ),
+                (
+                    XYCE_BUG769_DEVICE_CURRENT_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+                ),
+                (
+                    XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+                ),
+                (
                     XYCE_ISSUE455_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
                 ),
@@ -65634,7 +65892,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            15,
+            18,
             "each record requires a distinct contract"
         );
     }
@@ -65704,6 +65962,18 @@ R2 2 0 1
                 "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir",
                 "expected_failure_bug701_duplicate_subcircuit_device_parse",
             ),
+            (
+                "Netlists/Certification_Tests/BUG_769/bug_769a.cir",
+                "expected_failure_bug769_parameter_node_voltage_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_769/bug_769b.cir",
+                "expected_failure_bug769_parameter_device_current_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_769/bug_769c.cir",
+                "expected_failure_bug769_parameter_lead_current_parse",
+            ),
         ] {
             let result = runner.run_test(root.join(relative));
             assert!(
@@ -65762,6 +66032,20 @@ R2 2 0 1
             XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
         ] {
             assert_eq!(member.shared_family_census(), bug701_census);
+        }
+        let bug769_census = Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 3,
+            physical_names_blake3: XYCE_BUG769_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 3,
+            manifest_records_blake3: XYCE_BUG769_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: true,
+        });
+        for member in [
+            XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+            XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+            XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+        ] {
+            assert_eq!(member.shared_family_census(), bug769_census);
         }
         for singleton in [
             XyceExpectedFailureKind::Bug67BehavioralExpression,
@@ -66525,6 +66809,73 @@ R2 2 0 1
     }
 
     #[test]
+    fn bug769_expected_failure_observers_pin_one_line_delta_and_reject_mutations() {
+        let root = expected_failure_test_root();
+        let family = root.join("Netlists/Certification_Tests/BUG_769");
+        let family_anchor = family.join("bug_769a.cir");
+        XyceTestRunner::require_bug769_one_line_delta_family(&family_anchor)
+            .expect("canonical BUG 769 family differs only at physical line 69");
+
+        for (file_name, kind, parameter_line, corrected_line, changed_probe) in [
+            (
+                "bug_769a.cir",
+                XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+                ".param RVAL={76K+v(3)}",
+                ".param RVAL={76K+3}",
+                ".param RVAL={76K+v(4)}",
+            ),
+            (
+                "bug_769b.cir",
+                XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+                ".param RVAL={76K+i(v2)}",
+                ".param RVAL={76K+2}",
+                ".param RVAL={76K+i(v1)}",
+            ),
+            (
+                "bug_769c.cir",
+                XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+                ".param RVAL={76K+i(c2)}",
+                ".param RVAL={76K+1}",
+                ".param RVAL={76K+i(c1)}",
+            ),
+        ] {
+            let path = family.join(file_name);
+            let source = fs::read_to_string(&path).expect("read canonical BUG 769 member");
+            XyceTestRunner::observe_bug769_parameter_probe_failure(&source, &path, kind)
+                .expect("canonical BUG 769 parameter-probe failure is observed");
+
+            let corrected = source.replacen(parameter_line, corrected_line, 1);
+            assert_ne!(corrected, source);
+            XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+                .expect("corrected BUG 769 scalar parameter genuinely parses");
+            assert!(
+                XyceTestRunner::observe_bug769_parameter_probe_failure(&corrected, &path, kind)
+                    .is_err(),
+                "corrected {file_name} must not satisfy BUG 769"
+            );
+
+            for (mutated, label) in [
+                (
+                    source.replacen("RVAL", "OTHER", 1),
+                    "changed parameter identifier",
+                ),
+                (
+                    source.replacen(parameter_line, changed_probe, 1),
+                    "changed circuit probe",
+                ),
+                (format!("\r\n{source}"), "shifted physical line"),
+            ] {
+                assert_ne!(mutated, source, "{label} mutation must change source");
+                assert!(
+                    XyceTestRunner::observe_bug769_parameter_probe_failure(&mutated, &path, kind)
+                        .is_err(),
+                    "{label} must not satisfy {file_name}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn bug701_expected_failure_observers_reject_corrected_and_structural_mutations() {
         let root = expected_failure_test_root();
         let family = root.join("Netlists/Certification_Tests/BUG_701");
@@ -66717,6 +67068,148 @@ R2 2 0 1
         );
 
         fs::remove_dir_all(temp_root).expect("remove BUG 401 family fixture");
+    }
+
+    #[test]
+    fn bug769_expected_failure_family_provenance_fails_closed() {
+        let source_root = expected_failure_test_root();
+        let source_family = source_root.join("Netlists/Certification_Tests/BUG_769");
+        let temp_root = unique_expected_failure_temp_dir("bug769-family");
+        let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_769");
+        fs::create_dir_all(&temp_family).expect("create BUG 769 family fixture");
+        for file_name in ["bug_769a.cir", "bug_769b.cir", "bug_769c.cir"] {
+            fs::copy(source_family.join(file_name), temp_family.join(file_name))
+                .expect("copy BUG 769 family member");
+        }
+        let canonical_manifest = [
+            "Netlists/Certification_Tests/BUG_769/bug_769a.cir\trequires_upstream_wrapper",
+            "Netlists/Certification_Tests/BUG_769/bug_769b.cir\trequires_upstream_wrapper",
+            "Netlists/Certification_Tests/BUG_769/bug_769c.cir\trequires_upstream_wrapper",
+        ]
+        .join("\n")
+            + "\n";
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        fs::write(&manifest_path, &canonical_manifest).expect("write BUG 769 manifest");
+        let deck_path = temp_family.join("bug_769a.cir");
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+        let assert_rejected = |label: &str, expected_error: &str| {
+            let result = run();
+            assert!(
+                !result.passed
+                    && result
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains(expected_error)),
+                "{label} must fail closed with {expected_error:?}: {result:?}"
+            );
+        };
+
+        let canonical = run();
+        assert!(
+            canonical.passed
+                && !canonical.expected_unsupported
+                && canonical.contract == "expected_failure_bug769_parameter_node_voltage_parse",
+            "canonical copied BUG 769 family must pass: {canonical:?}"
+        );
+
+        let added = temp_family.join("added.cir");
+        fs::write(&added, "added\n.end\n").expect("add BUG 769 physical member");
+        assert_rejected("added physical member", "physical .cir census changed");
+        fs::remove_file(&added).expect("remove added BUG 769 member");
+
+        let removable = temp_family.join("bug_769c.cir");
+        let removable_source = fs::read(&removable).expect("read removable BUG 769 member");
+        fs::remove_file(&removable).expect("remove BUG 769 physical member");
+        assert_rejected("removed physical member", "physical .cir census changed");
+        fs::write(&removable, &removable_source).expect("restore BUG 769 member");
+
+        let altered = temp_family.join("bug_769b.cir");
+        let altered_source = fs::read_to_string(&altered).expect("read BUG 769 sibling");
+        fs::write(
+            &altered,
+            altered_source.replacen("R2 3 1 {RVAL}", "R2 3 1 {RVAL} ", 1),
+        )
+        .expect("alter BUG 769 non-probe sibling line");
+        assert_rejected(
+            "changed non-probe family line",
+            "must differ only at physical line 69",
+        );
+        fs::write(&altered, altered_source).expect("restore BUG 769 sibling");
+
+        let collision_paths = [
+            temp_family.join("RSpice_Case_Probe.cir"),
+            temp_family.join("rspice_case_probe.CIR"),
+        ];
+        fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+        fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+        let case_probe_entries = fs::read_dir(&temp_family)
+            .expect("read BUG 769 case-probe directory")
+            .map(|entry| entry.expect("read BUG 769 case-probe entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+            })
+            .collect::<Vec<_>>();
+        if case_probe_entries.len() == 2 {
+            assert_rejected("case-colliding physical members", "case-colliding");
+        }
+        for path in case_probe_entries {
+            fs::remove_file(path).expect("remove BUG 769 case probe");
+        }
+
+        let duplicate_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_769/bug_769a.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, duplicate_manifest).expect("write duplicate BUG 769 owner");
+        assert_rejected(
+            "duplicate manifest owner",
+            "duplicate or case-colliding record",
+        );
+
+        let case_variant_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_769/BUG_769A.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, case_variant_manifest).expect("write case-variant BUG 769 owner");
+        assert_rejected(
+            "case-variant manifest owner",
+            "duplicate or case-colliding record",
+        );
+
+        let non_bijective_manifest = canonical_manifest.replace(
+            "Netlists/Certification_Tests/BUG_769/bug_769c.cir",
+            "Netlists/Certification_Tests/BUG_769/missing.cir",
+        );
+        fs::write(&manifest_path, non_bijective_manifest)
+            .expect("write non-bijective BUG 769 manifest");
+        assert_rejected(
+            "non-bijective manifest owner",
+            "manifest/physical .cir census is not a bijection",
+        );
+
+        let prefix_isolation_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_769_SON/unrelated.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, prefix_isolation_manifest)
+            .expect("write BUG 769 SON prefix-isolation row");
+        let prefix_isolated = run();
+        assert!(
+            prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+            "BUG_769_SON manifest rows must not enter the BUG_769 family census: {prefix_isolated:?}"
+        );
+
+        fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 769 manifest");
+        let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_769");
+        fs::create_dir_all(&output_dir).expect("create BUG 769 OutputData fixture");
+        fs::write(output_dir.join("bug_769a.cir.prn"), "forbidden")
+            .expect("write forbidden BUG 769 artifact");
+        assert_rejected(
+            "target output artifact",
+            "must not own checked-in output artifacts",
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove BUG 769 family fixture");
     }
 
     #[test]
