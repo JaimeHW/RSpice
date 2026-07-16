@@ -158,6 +158,15 @@ impl Default for NoiseSetup {
 pub struct SimSetupState {
     /// Authoritative reference PVT point used by nominal analyses.
     pub reference_pvt: ReferencePvtPoint,
+    /// Validated project-unique name of the active simulation plan.
+    #[serde(default)]
+    pub active_plan_name: super::SimulationPlanName,
+    /// Immutable source identity and revision when the active plan is a clone.
+    #[serde(default)]
+    pub active_plan_lineage: super::SimulationPlanLineage,
+    /// Complete inactive plans retained in deterministic catalog order.
+    #[serde(default)]
+    pub inactive_plans: Vec<super::StoredSimulationPlan>,
     /// Stable, revisioned analysis-instance plan. `None` is accepted only
     /// while reading schema-3 projects/sessions and must be deterministically
     /// migrated before validation, editing, or execution.
@@ -342,6 +351,7 @@ impl SimSetupState {
         if let Some(plan) = &mut self.analysis_plan {
             plan.prepare_after_restore();
         }
+        self.prepare_plan_catalog_after_restore();
         self.op.initialized = true;
         self.pz.initialized = true;
         self.sens.initialized = true;

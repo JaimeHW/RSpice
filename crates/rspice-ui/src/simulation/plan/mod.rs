@@ -19,4 +19,5 @@ pub use model::{
     AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
     AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, AnalysisTombstone,
     FrozenAnalysisInstance, FrozenSimulationPlan, SimulationPlan,
+    SimulationPlanConfigurationReceipt,
 };

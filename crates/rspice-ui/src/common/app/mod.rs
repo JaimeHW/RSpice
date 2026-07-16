@@ -90,6 +90,11 @@ mod sim_setup_state;
 pub use sim_setup_state::{
     AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, TranSetup,
 };
+mod sim_setup_plan_catalog;
+pub use sim_setup_plan_catalog::{
+    SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
+    SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
+};
 mod sim_setup_analysis_drafts;
 
 mod app_simulation_dialogs;

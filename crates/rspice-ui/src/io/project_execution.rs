@@ -19,11 +19,12 @@ use crate::state::model_library::{
     ProcessCorner as LibraryProcessCorner, first_unreachable_source, is_portable_absolute_path,
 };
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 4;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 5;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
 const SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 3;
+const STABLE_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 4;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -82,16 +83,22 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
         }
 
         let persisted = PersistedExecutionContext::deserialize(deserializer)?;
-        if persisted.schema_version == PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION {
+        if (STABLE_ANALYSIS_PLAN_SCHEMA_VERSION..=PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION)
+            .contains(&persisted.schema_version)
+        {
             let fields = persisted.simulation_plan.as_object().ok_or_else(|| {
-                serde::de::Error::custom("schema-4 simulation_plan must be a JSON object")
+                serde::de::Error::custom(format!(
+                    "schema-{} simulation_plan must be a JSON object",
+                    persisted.schema_version
+                ))
             })?;
             if let Some(retired) = RETIRED_SINGLETON_ANALYSIS_FIELDS
                 .iter()
                 .find(|&&field| fields.contains_key(field))
             {
                 return Err(serde::de::Error::custom(format!(
-                    "schema-4 simulation_plan contains retired singleton field `{retired}`"
+                    "schema-{} simulation_plan contains retired singleton field `{retired}`",
+                    persisted.schema_version
                 )));
             }
         }
@@ -138,11 +145,11 @@ impl ProjectExecutionContext {
         model_libraries: &ModelLibraryManager,
     ) -> Result<Self, String> {
         let mut simulation_plan = simulation_plan.clone();
-        let stable_plan = simulation_plan.analysis_plan.as_mut().ok_or_else(|| {
+        simulation_plan.analysis_plan.as_ref().ok_or_else(|| {
             "current simulation state has no stable analysis plan; legacy singleton migration is load-only"
                 .to_owned()
         })?;
-        stable_plan.prepare_after_restore();
+        simulation_plan.prepare_after_restore();
 
         let context = Self {
             schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
@@ -195,13 +202,23 @@ impl ProjectExecutionContext {
             SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION => {
                 self.simulation_plan
                     .migrate_legacy_analysis_plan(project_id)?;
+                self.schema_version = STABLE_ANALYSIS_PLAN_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            STABLE_ANALYSIS_PLAN_SCHEMA_VERSION => {
+                // Schema 4 persisted one stable analysis plan but had no
+                // named-plan catalog. Serde defaults deterministically promote
+                // that plan to the canonical initial name and root lineage.
+                self.simulation_plan
+                    .validate_plan_catalog()
+                    .map_err(|error| {
+                        format!("simulation plan catalog migration failed: {error}")
+                    })?;
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
             PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION => {
-                if let Some(plan) = &mut self.simulation_plan.analysis_plan {
-                    plan.prepare_after_restore();
-                }
+                self.simulation_plan.prepare_after_restore();
                 Ok(())
             }
             version => Err(format!(
@@ -275,6 +292,27 @@ impl ProjectModelLibrary {
 }
 
 fn validate_simulation_plan(plan: &SimSetupState) -> Result<(), String> {
+    plan.validate_plan_catalog()
+        .map_err(|error| format!("simulation_plan catalog is invalid: {error}"))?;
+    validate_active_simulation_plan(plan)?;
+
+    let inactive_ids = plan
+        .inactive_plans()
+        .iter()
+        .map(crate::common::app::StoredSimulationPlan::id)
+        .collect::<Vec<_>>();
+    for id in inactive_ids {
+        let mut projection = plan.clone();
+        projection.prepare_after_restore();
+        projection.activate_plan(id).map_err(|error| {
+            format!("simulation_plan catalog entry {id} could not be activated: {error}")
+        })?;
+        validate_active_simulation_plan(&projection)?;
+    }
+    Ok(())
+}
+
+fn validate_active_simulation_plan(plan: &SimSetupState) -> Result<(), String> {
     let stable_plan = plan.stable_analysis_plan()?;
     stable_plan
         .validate_structure()
@@ -812,7 +850,7 @@ mod tests {
         ] {
             assert!(
                 plan.get(retired).is_none(),
-                "v4 must omit retired singleton field {retired}"
+                "current schema must omit retired singleton field {retired}"
             );
         }
         assert!(plan.get("analysis_plan").is_some());
@@ -831,7 +869,7 @@ mod tests {
                 .expect("simulation plan is an object")
                 .insert((*field).to_owned(), serde_json::Value::Null);
             let error = serde_json::from_value::<ProjectExecutionContext>(value)
-                .expect_err("schema 4 must reject retired singleton input")
+                .expect_err("current schema must reject retired singleton input")
                 .to_string();
             assert!(
                 error.contains(&format!("retired singleton field `{field}`")),
@@ -871,6 +909,45 @@ mod tests {
         );
         assert!(restored.simulation_plan.stable_analysis_plan().is_ok());
         restored.validate().expect("migrated context validates");
+    }
+
+    #[test]
+    fn schema_four_promotes_the_single_stable_plan_into_the_named_catalog() {
+        let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
+            .expect("baseline context validates");
+        let mut value = serde_json::to_value(context).expect("context serializes");
+        value["schema_version"] = serde_json::json!(STABLE_ANALYSIS_PLAN_SCHEMA_VERSION);
+        let persisted_plan = value["simulation_plan"]
+            .as_object_mut()
+            .expect("simulation plan is an object");
+        persisted_plan.remove("active_plan_name");
+        persisted_plan.remove("active_plan_lineage");
+        persisted_plan.remove("inactive_plans");
+        persisted_plan["analysis_plan"]
+            .as_object_mut()
+            .expect("stable analysis plan is an object")
+            .remove("configuration_receipts");
+
+        let mut restored: ProjectExecutionContext =
+            serde_json::from_value(value).expect("schema 4 remains readable");
+        restored
+            .migrate_to_current(project_id())
+            .expect("schema 4 promotes deterministically");
+
+        assert_eq!(
+            restored.schema_version,
+            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            restored.simulation_plan.active_plan_name().as_str(),
+            "Lab characterization"
+        );
+        assert_eq!(restored.simulation_plan.plan_count(), 1);
+        assert_eq!(
+            restored.simulation_plan.active_plan_lineage(),
+            crate::common::app::SimulationPlanLineage::root()
+        );
+        restored.validate().expect("promoted context validates");
     }
 
     #[test]

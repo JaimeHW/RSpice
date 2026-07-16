@@ -179,6 +179,39 @@ impl AnalysisLifecycleReceipt {
     }
 }
 
+/// Immutable receipt proving that a non-analysis plan configuration domain
+/// committed against one exact plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationPlanConfigurationReceipt {
+    sequence: u64,
+    source_revision: ObjectRevision,
+    committed_revision: ObjectRevision,
+    detail: String,
+}
+
+impl SimulationPlanConfigurationReceipt {
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    #[must_use]
+    pub const fn source_revision(&self) -> ObjectRevision {
+        self.source_revision
+    }
+
+    #[must_use]
+    pub const fn committed_revision(&self) -> ObjectRevision {
+        self.committed_revision
+    }
+
+    #[must_use]
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+}
+
 /// One stable analysis identity in presentation and execution order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -615,6 +648,7 @@ pub enum AnalysisPlanError {
         target: AnalysisInstanceId,
         dependents: Vec<AnalysisInstanceId>,
     },
+    InvalidConfigurationChangeDetail,
     ReceiptSequenceExhausted,
     Revision(RevisionError),
     InvalidPlan(Vec<AnalysisPlanIssue>),
@@ -689,6 +723,9 @@ impl fmt::Display for AnalysisPlanError {
                 }
                 formatter.write_str(".")
             }
+            Self::InvalidConfigurationChangeDetail => formatter.write_str(
+                "Plan configuration change detail must be a non-empty single line of at most 512 characters.",
+            ),
             Self::ReceiptSequenceExhausted => {
                 formatter.write_str("The analysis lifecycle receipt sequence is exhausted.")
             }
@@ -801,6 +838,8 @@ pub struct SimulationPlan {
     instances: Vec<AnalysisInstance>,
     tombstones: Vec<AnalysisTombstone>,
     receipts: Vec<AnalysisLifecycleReceipt>,
+    #[serde(default)]
+    configuration_receipts: Vec<SimulationPlanConfigurationReceipt>,
     next_receipt_sequence: u64,
 }
 
@@ -811,6 +850,24 @@ impl Default for SimulationPlan {
 }
 
 impl SimulationPlan {
+    /// Create a fresh, intentionally empty plan.
+    ///
+    /// Empty plans are valid editable documents, but cannot be frozen for
+    /// execution until at least one analysis is inserted and enabled. This is
+    /// used when a plan clone deliberately excludes the source analyses.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            id: SimulationPlanId::new(),
+            revision: ObjectRevision::INITIAL,
+            instances: Vec::new(),
+            tombstones: Vec::new(),
+            receipts: Vec::new(),
+            configuration_receipts: Vec::new(),
+            next_receipt_sequence: 1,
+        }
+    }
+
     /// Fresh plans contain one enabled transient instance.
     #[must_use]
     pub fn new() -> Self {
@@ -827,8 +884,85 @@ impl SimulationPlan {
             )],
             tombstones: Vec::new(),
             receipts: Vec::new(),
+            configuration_receipts: Vec::new(),
             next_receipt_sequence: 1,
         }
+    }
+
+    /// Deep-copy the editable analysis graph into a new plan identity.
+    ///
+    /// Every analysis receives a fresh identity and every dependency edge is
+    /// remapped to the corresponding clone. Revision and lifecycle history,
+    /// mutation receipts, tombstones, and prior result references belong to
+    /// the source plan and are intentionally not copied. Draft values,
+    /// enabled state, order, and dependency roles are preserved exactly.
+    pub fn clone_as_new(&self) -> Result<Self, AnalysisPlanError> {
+        self.ensure_structurally_valid()?;
+
+        let source_identities = self
+            .instances
+            .iter()
+            .map(|instance| instance.id)
+            .chain(self.tombstones.iter().map(|tombstone| tombstone.id))
+            .collect::<HashSet<_>>();
+        let mut cloned_identities = HashSet::with_capacity(self.instances.len());
+        let mut identity_map = HashMap::with_capacity(self.instances.len());
+        for instance in &self.instances {
+            let id = loop {
+                let candidate = AnalysisInstanceId::new();
+                if !source_identities.contains(&candidate) && cloned_identities.insert(candidate) {
+                    break candidate;
+                }
+            };
+            identity_map.insert(instance.id, id);
+        }
+
+        let revision = ObjectRevision::INITIAL;
+        let instances = self
+            .instances
+            .iter()
+            .map(|source| {
+                let id = identity_map[&source.id];
+                let dependencies = source
+                    .dependencies
+                    .iter()
+                    .map(|dependency| {
+                        let target = identity_map.get(&dependency.target).copied().ok_or(
+                            AnalysisPlanError::DependencyTargetMissing {
+                                dependent: id,
+                                target: dependency.target,
+                            },
+                        )?;
+                        Ok(AnalysisDependency::new(dependency.prerequisite, target))
+                    })
+                    .collect::<Result<Vec<_>, AnalysisPlanError>>()?;
+                Ok(AnalysisInstance::fresh(
+                    id,
+                    source.draft.clone(),
+                    source.enabled,
+                    dependencies,
+                    revision,
+                ))
+            })
+            .collect::<Result<Vec<_>, AnalysisPlanError>>()?;
+
+        let id = loop {
+            let candidate = SimulationPlanId::new();
+            if candidate != self.id {
+                break candidate;
+            }
+        };
+        let cloned = Self {
+            id,
+            revision,
+            instances,
+            tombstones: Vec::new(),
+            receipts: Vec::new(),
+            configuration_receipts: Vec::new(),
+            next_receipt_sequence: 1,
+        };
+        cloned.ensure_structurally_valid()?;
+        Ok(cloned)
     }
 
     /// Validate a deterministic supplied-ID migration in its exact order.
@@ -851,9 +985,30 @@ impl SimulationPlan {
         tombstones: Vec<AnalysisTombstone>,
         receipts: Vec<AnalysisLifecycleReceipt>,
     ) -> Result<Self, AnalysisPlanError> {
-        let next_receipt_sequence = match receipts.last() {
-            Some(receipt) => receipt
-                .sequence
+        Self::from_all_persisted_parts(id, revision, instances, tombstones, receipts, Vec::new())
+    }
+
+    /// Reconstruct every durable plan receipt domain. This is the lossless
+    /// import boundary for schema-5 and newer plan documents.
+    pub fn from_all_persisted_parts(
+        id: SimulationPlanId,
+        revision: ObjectRevision,
+        instances: Vec<AnalysisInstance>,
+        tombstones: Vec<AnalysisTombstone>,
+        receipts: Vec<AnalysisLifecycleReceipt>,
+        configuration_receipts: Vec<SimulationPlanConfigurationReceipt>,
+    ) -> Result<Self, AnalysisPlanError> {
+        let last_sequence = receipts
+            .iter()
+            .map(AnalysisLifecycleReceipt::sequence)
+            .chain(
+                configuration_receipts
+                    .iter()
+                    .map(SimulationPlanConfigurationReceipt::sequence),
+            )
+            .max();
+        let next_receipt_sequence = match last_sequence {
+            Some(sequence) => sequence
                 .checked_add(1)
                 .ok_or(AnalysisPlanError::ReceiptSequenceExhausted)?,
             None => 1,
@@ -864,6 +1019,7 @@ impl SimulationPlan {
             instances,
             tombstones,
             receipts,
+            configuration_receipts,
             next_receipt_sequence,
         };
         plan.ensure_structurally_valid()?;
@@ -893,6 +1049,74 @@ impl SimulationPlan {
     #[must_use]
     pub fn receipts(&self) -> &[AnalysisLifecycleReceipt] {
         &self.receipts
+    }
+
+    #[must_use]
+    pub fn configuration_receipts(&self) -> &[SimulationPlanConfigurationReceipt] {
+        &self.configuration_receipts
+    }
+
+    /// Whether this plan currently owns queued or executing work.
+    ///
+    /// Replacing an active plan while one of its instances owns runner state
+    /// would sever cancellation and progress authority, so plan-catalog
+    /// operations use this guard before switching or cloning the active plan.
+    #[must_use]
+    pub fn has_executing_instances(&self) -> bool {
+        self.instances
+            .iter()
+            .any(|instance| instance.lifecycle.is_executing())
+    }
+
+    /// Commit a project-owned plan configuration change without fabricating
+    /// an analysis-instance mutation.
+    ///
+    /// The plan revision advances exactly once, which invalidates preflight
+    /// artifacts pinned to the previous revision. A durable receipt shares
+    /// the same monotonic sequence as analysis lifecycle receipts. The method
+    /// is atomic and refuses to replace configuration while this plan owns
+    /// queued or executing work.
+    pub fn commit_configuration_change(
+        &mut self,
+        detail: impl Into<String>,
+    ) -> Result<SimulationPlanConfigurationReceipt, AnalysisPlanError> {
+        let detail = detail.into();
+        let detail = detail.trim();
+        if detail.is_empty()
+            || detail.chars().count() > 512
+            || detail
+                .chars()
+                .any(|character| matches!(character, '\r' | '\n'))
+        {
+            return Err(AnalysisPlanError::InvalidConfigurationChangeDetail);
+        }
+        if let Some(instance) = self
+            .instances
+            .iter()
+            .find(|instance| instance.lifecycle.is_executing())
+        {
+            return Err(AnalysisPlanError::InstanceExecuting(instance.id));
+        }
+
+        let mut candidate = self.clone();
+        let source_revision = candidate.revision;
+        let committed_revision = source_revision.next()?;
+        let next_sequence = candidate
+            .next_receipt_sequence
+            .checked_add(1)
+            .ok_or(AnalysisPlanError::ReceiptSequenceExhausted)?;
+        let receipt = SimulationPlanConfigurationReceipt {
+            sequence: candidate.next_receipt_sequence,
+            source_revision,
+            committed_revision,
+            detail: detail.to_owned(),
+        };
+        candidate.revision = committed_revision;
+        candidate.next_receipt_sequence = next_sequence;
+        candidate.configuration_receipts.push(receipt.clone());
+        candidate.ensure_structurally_valid()?;
+        *self = candidate;
+        Ok(receipt)
     }
 
     #[must_use]
@@ -1058,61 +1282,127 @@ impl SimulationPlan {
             issues.push(AnalysisPlanIssue::DependencyCycle { members });
         }
 
-        let mut expected_sequence = 1;
-        let mut previous_committed_revision = None;
-        for receipt in &self.receipts {
-            if receipt.sequence != expected_sequence {
+        enum RetainedReceipt<'a> {
+            Analysis(&'a AnalysisLifecycleReceipt),
+            Configuration(&'a SimulationPlanConfigurationReceipt),
+        }
+        impl RetainedReceipt<'_> {
+            fn sequence(&self) -> u64 {
+                match self {
+                    Self::Analysis(receipt) => receipt.sequence,
+                    Self::Configuration(receipt) => receipt.sequence,
+                }
+            }
+
+            fn source_revision(&self) -> ObjectRevision {
+                match self {
+                    Self::Analysis(receipt) => receipt.source_revision,
+                    Self::Configuration(receipt) => receipt.source_revision,
+                }
+            }
+
+            fn committed_revision(&self) -> ObjectRevision {
+                match self {
+                    Self::Analysis(receipt) => receipt.committed_revision,
+                    Self::Configuration(receipt) => receipt.committed_revision,
+                }
+            }
+
+            fn detail(&self) -> &str {
+                match self {
+                    Self::Analysis(receipt) => &receipt.detail,
+                    Self::Configuration(receipt) => &receipt.detail,
+                }
+            }
+        }
+
+        for pair in self.receipts.windows(2) {
+            if pair[0].sequence >= pair[1].sequence {
                 issues.push(AnalysisPlanIssue::InvalidReceiptSequence {
-                    sequence: receipt.sequence,
+                    sequence: pair[1].sequence,
                 });
             }
-            expected_sequence = receipt.sequence.saturating_add(1);
+        }
+        for pair in self.configuration_receipts.windows(2) {
+            if pair[0].sequence >= pair[1].sequence {
+                issues.push(AnalysisPlanIssue::InvalidReceiptSequence {
+                    sequence: pair[1].sequence,
+                });
+            }
+        }
+
+        let mut retained_receipts = self
+            .receipts
+            .iter()
+            .map(RetainedReceipt::Analysis)
+            .chain(
+                self.configuration_receipts
+                    .iter()
+                    .map(RetainedReceipt::Configuration),
+            )
+            .collect::<Vec<_>>();
+        retained_receipts.sort_by_key(RetainedReceipt::sequence);
+
+        let mut expected_sequence = 1;
+        let mut previous_committed_revision = None;
+        for retained in retained_receipts {
+            let sequence = retained.sequence();
+            let source_revision = retained.source_revision();
+            let committed_revision = retained.committed_revision();
+            if sequence != expected_sequence {
+                issues.push(AnalysisPlanIssue::InvalidReceiptSequence { sequence });
+            }
+            expected_sequence = sequence.saturating_add(1);
             let revisions_are_consecutive = matches!(
-                receipt.source_revision.next(),
-                Ok(next) if next == receipt.committed_revision
+                source_revision.next(),
+                Ok(next) if next == committed_revision
             );
             let follows_previous_receipt = match previous_committed_revision {
-                Some(previous) => previous == receipt.source_revision,
+                Some(previous) => previous == source_revision,
                 None => true,
             };
-            if receipt.source_revision >= receipt.committed_revision
-                || receipt.committed_revision > self.revision
+            if source_revision >= committed_revision
+                || committed_revision > self.revision
                 || !revisions_are_consecutive
                 || !follows_previous_receipt
             {
-                issues.push(AnalysisPlanIssue::InvalidReceiptRevision {
-                    sequence: receipt.sequence,
-                });
+                issues.push(AnalysisPlanIssue::InvalidReceiptRevision { sequence });
             }
-            let retained_kind = by_id
-                .get(&receipt.instance_id)
-                .map(|instance| instance.kind)
-                .or_else(|| {
-                    self.tombstones
-                        .iter()
-                        .find(|tombstone| tombstone.id == receipt.instance_id)
-                        .map(|tombstone| tombstone.kind)
-                });
-            match retained_kind {
-                Some(expected) if expected != receipt.kind => {
-                    issues.push(AnalysisPlanIssue::ReceiptKindMismatch {
-                        sequence: receipt.sequence,
-                        expected,
-                        actual: receipt.kind,
+            let detail = retained.detail();
+            let detail_is_empty = detail.trim().is_empty();
+            let detail_is_invalid = detail.chars().count() > 512
+                || detail
+                    .chars()
+                    .any(|character| matches!(character, '\r' | '\n'));
+            if let RetainedReceipt::Analysis(receipt) = retained {
+                let retained_kind = by_id
+                    .get(&receipt.instance_id)
+                    .map(|instance| instance.kind)
+                    .or_else(|| {
+                        self.tombstones
+                            .iter()
+                            .find(|tombstone| tombstone.id == receipt.instance_id)
+                            .map(|tombstone| tombstone.kind)
                     });
+                match retained_kind {
+                    Some(expected) if expected != receipt.kind => {
+                        issues.push(AnalysisPlanIssue::ReceiptKindMismatch {
+                            sequence,
+                            expected,
+                            actual: receipt.kind,
+                        });
+                    }
+                    Some(_) => {}
+                    None => issues.push(AnalysisPlanIssue::DanglingReceiptInstance {
+                        sequence,
+                        id: receipt.instance_id,
+                    }),
                 }
-                Some(_) => {}
-                None => issues.push(AnalysisPlanIssue::DanglingReceiptInstance {
-                    sequence: receipt.sequence,
-                    id: receipt.instance_id,
-                }),
             }
-            if receipt.detail.trim().is_empty() {
-                issues.push(AnalysisPlanIssue::EmptyReceiptDetail {
-                    sequence: receipt.sequence,
-                });
+            if detail_is_empty || detail_is_invalid {
+                issues.push(AnalysisPlanIssue::EmptyReceiptDetail { sequence });
             }
-            previous_committed_revision = Some(receipt.committed_revision);
+            previous_committed_revision = Some(committed_revision);
         }
         if self.next_receipt_sequence != expected_sequence {
             issues.push(AnalysisPlanIssue::InvalidNextReceiptSequence {
@@ -1851,6 +2141,163 @@ mod tests {
         assert_eq!(instance.kind(), AnalysisKind::Transient);
         assert!(instance.enabled());
         assert!(plan.validation_issues().is_empty());
+    }
+
+    #[test]
+    fn empty_plan_is_editable_but_not_dispatchable() {
+        let plan = SimulationPlan::empty();
+        assert_eq!(plan.revision(), ObjectRevision::INITIAL);
+        assert!(plan.instances().is_empty());
+        assert!(plan.tombstones().is_empty());
+        assert!(plan.receipts().is_empty());
+        plan.validate_structure()
+            .expect("an empty working plan is structurally valid");
+        assert!(matches!(
+            plan.freeze(),
+            Err(AnalysisPlanError::InvalidPlan(issues))
+                if issues == vec![AnalysisPlanIssue::NoEnabledInstances]
+        ));
+    }
+
+    #[test]
+    fn plan_clone_refreshes_all_identities_and_remaps_the_dependency_graph() {
+        let mut source = SimulationPlan::new();
+        let transient = source.instances()[0].id();
+        source
+            .edit(transient, |draft| {
+                let AnalysisDraft::Transient(draft) = draft else {
+                    panic!("expected transient draft");
+                };
+                draft.stop = "19u".to_owned();
+            })
+            .expect("source draft edits");
+        let (op, _) = source
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("OP inserts");
+        let (ac, _) = source.insert(AnalysisKind::Ac).expect("AC inserts");
+        source
+            .bind_dependency(ac, AnalysisKind::OperatingPoint, op)
+            .expect("dependency binds");
+        let (retired, _) = source
+            .insert(AnalysisKind::DcSweep)
+            .expect("disposable instance inserts");
+        source
+            .remove(retired, vec![RunId::new()])
+            .expect("disposable instance retires");
+        source
+            .commit_configuration_change("Design variables were updated.")
+            .expect("source configuration receipt commits");
+
+        let clone = source.clone_as_new().expect("valid source plan clones");
+
+        assert_ne!(clone.id(), source.id());
+        assert_eq!(clone.revision(), ObjectRevision::INITIAL);
+        assert!(clone.tombstones().is_empty());
+        assert!(clone.receipts().is_empty());
+        assert!(clone.configuration_receipts().is_empty());
+        assert_eq!(clone.instances().len(), source.instances().len());
+
+        let source_ids = source
+            .instances()
+            .iter()
+            .map(AnalysisInstance::id)
+            .collect::<HashSet<_>>();
+        assert!(
+            clone
+                .instances()
+                .iter()
+                .all(|instance| !source_ids.contains(&instance.id()))
+        );
+
+        for (source_instance, cloned_instance) in source.instances().iter().zip(clone.instances()) {
+            assert_eq!(cloned_instance.kind(), source_instance.kind());
+            assert_eq!(cloned_instance.enabled(), source_instance.enabled());
+            assert_eq!(
+                serde_json::to_value(cloned_instance.draft()).unwrap(),
+                serde_json::to_value(source_instance.draft()).unwrap()
+            );
+            assert_eq!(cloned_instance.created_revision(), ObjectRevision::INITIAL);
+            assert_eq!(cloned_instance.modified_revision(), ObjectRevision::INITIAL);
+            assert_eq!(
+                cloned_instance.lifecycle(),
+                if cloned_instance.enabled() {
+                    AnalysisLifecycleState::Draft
+                } else {
+                    AnalysisLifecycleState::Disabled
+                }
+            );
+        }
+
+        let cloned_op = clone
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == AnalysisKind::OperatingPoint)
+            .expect("cloned OP exists")
+            .id();
+        let cloned_ac = clone
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == AnalysisKind::Ac)
+            .expect("cloned AC exists");
+        assert_eq!(
+            cloned_ac.dependencies(),
+            &[AnalysisDependency::new(
+                AnalysisKind::OperatingPoint,
+                cloned_op
+            )]
+        );
+        clone.validate_structure().expect("clone remains valid");
+    }
+
+    #[test]
+    fn configuration_change_has_a_durable_interleaved_revision_receipt() {
+        let mut plan = SimulationPlan::new();
+        let transient = plan.instances()[0].id();
+        let (_, edit_receipt) = plan.edit(transient, |_| ()).expect("analysis edit commits");
+        let configuration_receipt = plan
+            .commit_configuration_change("Saved outputs were updated.")
+            .expect("configuration change commits");
+        let disable_receipt = plan
+            .set_enabled(transient, false)
+            .expect("subsequent analysis mutation commits");
+
+        assert_eq!(edit_receipt.sequence(), 1);
+        assert_eq!(configuration_receipt.sequence(), 2);
+        assert_eq!(disable_receipt.sequence(), 3);
+        assert_eq!(
+            configuration_receipt.source_revision(),
+            edit_receipt.committed_revision()
+        );
+        assert_eq!(
+            disable_receipt.source_revision(),
+            configuration_receipt.committed_revision()
+        );
+        assert_eq!(plan.revision(), disable_receipt.committed_revision());
+        assert_eq!(plan.configuration_receipts(), &[configuration_receipt]);
+        plan.validate_structure()
+            .expect("interleaved receipt sequence remains structurally valid");
+
+        let json = snapshot(&plan);
+        let mut restored: SimulationPlan =
+            serde_json::from_str(&json).expect("configuration receipts round-trip");
+        restored
+            .validate_structure()
+            .expect("restored receipt sequence remains valid");
+        let next = restored
+            .commit_configuration_change("Specifications were updated.")
+            .expect("restored sequence remains appendable");
+        assert_eq!(next.sequence(), 4);
+    }
+
+    #[test]
+    fn invalid_configuration_detail_is_atomic() {
+        let mut plan = SimulationPlan::new();
+        let before = snapshot(&plan);
+        assert_eq!(
+            plan.commit_configuration_change("line one\nline two"),
+            Err(AnalysisPlanError::InvalidConfigurationChangeDetail)
+        );
+        assert_eq!(snapshot(&plan), before);
     }
 
     #[test]
