@@ -1239,10 +1239,14 @@ mod tests {
         preferences
             .set_choice(ChoicePreference::InterfaceScale, 2)
             .unwrap();
+        preferences
+            .set_choice(ChoicePreference::DefaultSolverPreset, 3)
+            .unwrap();
         preferences.set_toggle(TogglePreference::ReducedMotion, true);
         let json = serde_json::to_string(&preferences).unwrap();
         let restored: UserPreferences = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.choice(ChoicePreference::InterfaceScale), 2);
+        assert_eq!(restored.choice(ChoicePreference::DefaultSolverPreset), 3);
         assert!(restored.toggle(TogglePreference::ReducedMotion));
         assert_eq!(restored.interface_scale(), 1.25);
     }

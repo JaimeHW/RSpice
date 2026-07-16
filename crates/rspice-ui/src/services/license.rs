@@ -19,9 +19,11 @@
 //!   wall clock.
 //!
 //! Key material: key id `0x01` is the **development** signer used for
-//! internal builds and the sample-key walkthrough. Production releases
-//! add ceremony keys (new ids) from the platform backend and drop the
-//! dev id. Keys are generated/issued with the `license_tool` example:
+//! internal builds and the sample-key walkthrough. Its verifier and the
+//! signed sample are compiled only for debug and test builds. Production
+//! releases fail closed and accept only ceremony keys in
+//! `PRODUCTION_VERIFYING_KEYS`. Keys are generated/issued with the
+//! `license_tool` example:
 //! `cargo run -p rspice-ui --example license_tool -- gen|issue …`.
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -38,11 +40,21 @@ pub const SIGNING_DOMAIN: &[u8] = b"rspice-license-v1";
 /// perpetual-fallback updates window. Bump per release.
 pub const RELEASE_UNIX_DAYS: u32 = 20_615; // 2026-06-11
 
-/// Signer public keys compiled into the binary, by key id.
+/// Production ceremony public keys compiled into release binaries, by key id.
 ///
-/// Id `0x01` is the development signer (see module docs); its secret is
-/// held locally by the maintainer, never in the repository.
-const VERIFYING_KEYS: &[(u8, [u8; 32])] = &[(
+/// Keep development signers out of this table. An empty table intentionally
+/// fails closed until the production issuing ceremony publishes its public
+/// verifier.
+const PRODUCTION_VERIFYING_KEYS: &[(u8, [u8; 32])] = &[];
+
+/// Development signer public keys, available only to debug and test builds.
+///
+/// Id `0x01` is the development signer (see module docs); its secret is held
+/// locally by the maintainer, never in the repository. The entire constant is
+/// absent from optimized release binaries, rather than relying on a runtime
+/// check that could accidentally be bypassed.
+#[cfg(any(test, rspice_development_build))]
+const DEVELOPMENT_VERIFYING_KEYS: &[(u8, [u8; 32])] = &[(
     0x01,
     [
         0xbd, 0x8c, 0x6d, 0x6a, 0xa9, 0xbb, 0x49, 0x1c, 0xb5, 0xcf, 0x8f, 0x08, 0xa1, 0x50, 0x8a,
@@ -54,9 +66,10 @@ const VERIFYING_KEYS: &[(u8, [u8; 32])] = &[(
 /// Revoked license ids (kept tiny; updated per release).
 const DENYLIST: &[u64] = &[];
 
-/// A well-formed sample key for the dialog's "Paste sample key"
+/// A well-formed sample key for the debug dialog's "Paste sample key"
 /// walkthrough — genuinely signed by the development key (id 0x01), so it
-/// exercises the full verification path.
+/// exercises the full verification path. It is not present in release builds.
+#[cfg(any(test, rspice_development_build))]
 pub const SAMPLE_KEY: &str = "RSPICE-K1.040MW2YJEZ0NGEMZ040011TG000F6M80003G0000047MMRB9DNJJ0NV8D5T6CTB5DHJ0.12FX61MG7FWYV6CJSBQFTGHG954N0K1FE2EQ93FG33HM6R9CPEF35VT55XFX6VYZ2SJ3WW2K34P97SRS8QPPCHM474C0M3DCNW6VW30";
 
 /// Feature bitfield labels, LSB first (spec §payload).
@@ -313,6 +326,50 @@ pub fn date_from_unix_days(days: u32) -> String {
 // Verification
 // ---------------------------------------------------------------------------
 
+/// Which signer set may authorize a key.
+///
+/// The production variant is always available. The development variant and
+/// its corresponding key material do not exist in release builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(all(rspice_development_build, not(test)), allow(dead_code))]
+enum VerificationPolicy {
+    Production,
+    #[cfg(any(test, rspice_development_build))]
+    Development,
+}
+
+const fn build_verification_policy() -> VerificationPolicy {
+    #[cfg(any(test, rspice_development_build))]
+    {
+        VerificationPolicy::Development
+    }
+    #[cfg(not(any(test, rspice_development_build)))]
+    {
+        VerificationPolicy::Production
+    }
+}
+
+fn verifying_key_bytes(key_id: u8, policy: VerificationPolicy) -> Option<&'static [u8; 32]> {
+    if let Some((_, key)) = PRODUCTION_VERIFYING_KEYS
+        .iter()
+        .find(|(id, _)| *id == key_id)
+    {
+        return Some(key);
+    }
+
+    #[cfg(any(test, rspice_development_build))]
+    if policy == VerificationPolicy::Development {
+        return DEVELOPMENT_VERIFYING_KEYS
+            .iter()
+            .find(|(id, _)| *id == key_id)
+            .map(|(_, key)| key);
+    }
+
+    #[cfg(not(any(test, rspice_development_build)))]
+    let _ = policy;
+    None
+}
+
 /// Strip cosmetic whitespace and grouping dashes from a key part.
 fn canonical(part: &str) -> String {
     part.chars()
@@ -324,6 +381,13 @@ fn canonical(part: &str) -> String {
 /// Parse and verify a pasted key: structure → signature → denylist →
 /// perpetual-fallback window.
 pub fn parse_and_verify(raw: &str) -> Result<LicenseInfo, LicenseError> {
+    parse_and_verify_with_policy(raw, build_verification_policy())
+}
+
+fn parse_and_verify_with_policy(
+    raw: &str,
+    policy: VerificationPolicy,
+) -> Result<LicenseInfo, LicenseError> {
     let cleaned: String = raw.split_whitespace().collect();
     if cleaned.is_empty() {
         return Err(LicenseError::Malformed("The key is empty."));
@@ -359,7 +423,7 @@ pub fn parse_and_verify(raw: &str) -> Result<LicenseInfo, LicenseError> {
         ));
     }
 
-    let Some((_, key_bytes)) = VERIFYING_KEYS.iter().find(|(id, _)| *id == payload.key_id) else {
+    let Some(key_bytes) = verifying_key_bytes(payload.key_id, policy) else {
         return Err(LicenseError::BadSignature);
     };
     let verifying_key =
@@ -654,6 +718,26 @@ mod tests {
         assert_eq!(info.updates_until, "2027-06-10");
         assert!(!info.updates_expired);
         assert_eq!(info.features.len(), 3);
+    }
+
+    #[test]
+    fn production_policy_rejects_development_signer() {
+        assert_eq!(
+            parse_and_verify_with_policy(SAMPLE_KEY, VerificationPolicy::Production),
+            Err(LicenseError::BadSignature)
+        );
+    }
+
+    #[test]
+    fn development_policy_accepts_development_signer() {
+        let info =
+            parse_and_verify_with_policy(SAMPLE_KEY, VerificationPolicy::Development).unwrap();
+        assert_eq!(info.tier, "PRO");
+    }
+
+    #[test]
+    fn build_policy_matches_debug_or_test_configuration() {
+        assert_eq!(build_verification_policy(), VerificationPolicy::Development);
     }
 
     #[test]

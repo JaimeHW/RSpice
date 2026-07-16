@@ -9,22 +9,25 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 use crate::common::app::SimSetupState;
 use crate::product::ProjectId;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
-    DeviceModel, ModelLibrary, ModelLibraryManager, ModelSourceEdge, ModelSourcePin,
-    ProcessCorner as LibraryProcessCorner, first_unreachable_source, is_portable_absolute_path,
+    DeviceModel, ModelLibrary, ModelLibraryManager, ModelSourceContent, ModelSourceEdge,
+    ModelSourcePin, ProcessCorner as LibraryProcessCorner, first_unreachable_source,
+    is_portable_absolute_path,
 };
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 5;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 6;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
 const SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 3;
 const STABLE_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 4;
+const PLAN_CATALOG_SCHEMA_VERSION: u32 = 5;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -127,6 +130,10 @@ pub struct ProjectModelLibrary {
     /// simulation until the user explicitly refreshes or re-imports them.
     #[serde(default)]
     pub source_closure: Vec<ModelSourcePin>,
+    /// Exact authenticated bytes retained for browser execution and
+    /// self-contained project recovery.
+    #[serde(default)]
+    pub source_contents: Vec<ModelSourceContent>,
     /// Canonical resolution graph captured with the source closure. Schema 2
     /// projects may omit this field and remain repairable, but multi-file
     /// bindings stay blocked until explicit refresh.
@@ -214,6 +221,17 @@ impl ProjectExecutionContext {
                     .map_err(|error| {
                         format!("simulation plan catalog migration failed: {error}")
                     })?;
+                self.schema_version = PLAN_CATALOG_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            PLAN_CATALOG_SCHEMA_VERSION => {
+                // Schema 5 pinned source identities and resolution edges but
+                // did not retain the authenticated bytes needed by browser
+                // execution. Leave legacy bindings repairable and fail closed
+                // until an explicit refresh captures their exact bytes.
+                for library in &mut self.model_libraries {
+                    library.source_contents.clear();
+                }
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -236,6 +254,35 @@ impl ProjectExecutionContext {
         }
         validate_simulation_plan(&self.simulation_plan)?;
         validate_model_libraries(&self.model_libraries)
+    }
+
+    /// Bind project technology metadata to the exact execution library it
+    /// governs. Descriptor and execution-context validation are intentionally
+    /// joined here so a project can never advertise one accepted technology
+    /// while executing a refreshed, removed, or substituted catalog.
+    pub(crate) fn validate_technology_binding(
+        &self,
+        binding: &crate::state::ProjectTechnologyBinding,
+    ) -> Result<(), String> {
+        let mut matches = self
+            .model_libraries
+            .iter()
+            .filter(|library| library.name == binding.model_library());
+        let library = matches.next().ok_or_else(|| {
+            format!(
+                "attached technology references missing model library '{}'",
+                binding.model_library()
+            )
+        })?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "attached technology model library '{}' is ambiguous",
+                binding.model_library()
+            ));
+        }
+        binding
+            .validate_model_library(&library.clone().into_model_library())
+            .map_err(|error| error.to_string())
     }
 
     /// Restore authoritative state and report environment-dependent model
@@ -264,6 +311,7 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             technology_node: library.technology_node.clone(),
             root_path: library.root_path.clone(),
             source_closure: library.source_closure.clone(),
+            source_contents: library.source_contents.clone(),
             source_edges: library.source_edges.clone(),
             models: library.models.clone(),
             corners: library.corners.clone(),
@@ -281,6 +329,7 @@ impl ProjectModelLibrary {
             technology_node: self.technology_node,
             root_path: self.root_path,
             source_closure: self.source_closure,
+            source_contents: self.source_contents,
             source_edges: self.source_edges,
             models: self.models,
             corners: self.corners,
@@ -475,6 +524,11 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                 "{context}.source_edges cannot exist without a pinned source_closure"
             ));
         }
+        if library.source_closure.is_empty() && !library.source_contents.is_empty() {
+            return Err(format!(
+                "{context}.source_contents cannot exist without a pinned source_closure"
+            ));
+        }
         if let Some(root_path) = &library.root_path
             && !library.source_closure.is_empty()
         {
@@ -502,6 +556,34 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.source_closure does not contain root_path '{}'",
                     root_path.display()
                 ));
+            }
+            if !library.source_contents.is_empty() {
+                if library.source_contents.len() != library.source_closure.len() {
+                    return Err(format!(
+                        "{context}.source_contents must contain exact bytes for every pinned source"
+                    ));
+                }
+                for (source_index, (pin, content)) in library
+                    .source_closure
+                    .iter()
+                    .zip(&library.source_contents)
+                    .enumerate()
+                {
+                    if pin.path != content.path {
+                        return Err(format!(
+                            "{context}.source_contents[{source_index}] does not match source_closure path '{}'",
+                            pin.path.display()
+                        ));
+                    }
+                    let digest = crate::product::ContentDigest::from_bytes(
+                        Sha256::digest(&content.bytes).into(),
+                    );
+                    if digest != pin.digest {
+                        return Err(format!(
+                            "{context}.source_contents[{source_index}] bytes do not match the pinned SHA-256"
+                        ));
+                    }
+                }
             }
             if library
                 .source_closure
@@ -1340,6 +1422,7 @@ mod tests {
                     path: root.clone(),
                     digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
                 }],
+                source_contents: Vec::new(),
                 source_edges: Vec::new(),
                 models: HashMap::new(),
                 corners: HashMap::new(),
@@ -1410,6 +1493,7 @@ mod tests {
                 technology_node: String::new(),
                 root_path: Some(root),
                 source_closure,
+                source_contents: Vec::new(),
                 source_edges,
                 models: HashMap::new(),
                 corners: HashMap::new(),

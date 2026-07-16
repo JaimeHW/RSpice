@@ -332,7 +332,7 @@ pub fn save_schematic_file(file: &SchematicFile, path: &Path) -> Result<(), Sche
         let contents = serialize_schematic_file(file)?;
         crate::common::browser_download::download_text_file(path, &contents)
             .map_err(SchematicIoError::Io)?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -5625,7 +5625,7 @@ fn emit_worker_progress_snapshot(progress: &SimulationProgress) {
 
     let global = js_sys::global();
     let Ok(post_message) = js_sys::Reflect::get(&global, &JsValue::from_str("postMessage"))
-        .and_then(|value| value.dyn_into::<js_sys::Function>().map_err(Into::into))
+        .and_then(|value| value.dyn_into::<js_sys::Function>())
     else {
         return;
     };

@@ -4,13 +4,16 @@
 //! recovery state. The surface never substitutes fixture counts or synthetic
 //! project history when a project has not produced that evidence yet.
 
-use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, vec2};
+use egui::{
+    Align, Align2, Color32, Context, Layout, Margin, Rect, ScrollArea, Sense, Stroke, Ui, vec2,
+};
 
-use crate::common::RSpiceApp;
+use crate::common::{RSpiceApp, app::ConsoleMessage};
+use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select};
 
 use super::super::commands::Command;
 use super::super::design_system::{WorkbenchIcon, card, property_card, property_row, status_dot};
@@ -30,6 +33,43 @@ const RECENT_RUN_ROW_HEIGHT: f32 = 72.0;
 const CONFIGURATION_TABLE_HEADER_HEIGHT: f32 = 27.0;
 const CONFIGURATION_TABLE_ROW_HEIGHT: f32 = 28.0;
 const CONFIGURATION_TABLE_MIN_WIDTH: f32 = 540.0;
+const TECHNOLOGY_SURFACE_TITLE: &str = "Model-library technology contract";
+const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology…";
+const TECHNOLOGY_DIALOG_TITLE: &str = "Attach model-library technology";
+const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach authenticated binding";
+const TECHNOLOGY_DIALOG_CURRENT: &str = "Binding already attached";
+const TECHNOLOGY_DIALOG_PENDING: &str = "Writing checkpoint…";
+
+#[cfg(target_arch = "wasm32")]
+struct BrowserTechnologyCheckpointCompletion {
+    project_id: String,
+    expected_revision: u64,
+    binding: ProjectTechnologyBinding,
+    result: Result<crate::common::project_checkpoint::ProjectCheckpointSummary, String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct BrowserRecoveryCatalogCompletion {
+    project_id: String,
+    result: Result<crate::common::project_checkpoint::ProjectCheckpointCatalog, String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct BrowserRecoveryCopyCompletion {
+    project_id: String,
+    filename: String,
+    result: Result<Vec<u8>, String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS: std::cell::RefCell<std::collections::VecDeque<BrowserTechnologyCheckpointCompletion>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    static BROWSER_RECOVERY_CATALOG_COMPLETIONS: std::cell::RefCell<std::collections::VecDeque<BrowserRecoveryCatalogCompletion>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    static BROWSER_RECOVERY_COPY_COMPLETIONS: std::cell::RefCell<std::collections::VecDeque<BrowserRecoveryCopyCompletion>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ProjectSurfaceLayout {
@@ -118,13 +158,19 @@ fn dashboard_card_header_height(touch_targets: bool) -> f32 {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    let ctx = ui.ctx().clone();
+    #[cfg(target_arch = "wasm32")]
+    {
+        poll_browser_technology_checkpoint(&ctx, app);
+        poll_browser_recovery_completions(&ctx, app);
+    }
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
-        let surface = ProjectSurfaceLayout::resolve(ui.available_width());
         ScrollArea::vertical()
             .id_salt("workbench.project.surface")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let surface = ProjectSurfaceLayout::resolve(ui.available_width());
                 ui.set_width(surface.content_width);
                 match app.state.workbench.project_page {
                     ProjectPage::Dashboard => dashboard(ui, app),
@@ -135,10 +181,12 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             });
     });
+    show_technology_attachment_dialog(&ctx, app);
 }
 
 fn dashboard(ui: &mut Ui, app: &mut RSpiceApp) {
-    let layout = DashboardLayout::resolve(ui.ctx().content_rect().width(), ui.available_width());
+    let surface_width = ui.available_width();
+    let layout = DashboardLayout::resolve(surface_width, surface_width);
     let revision = app.state.workspace.project.revision().get();
     let project_name = app.state.workspace.project.display_name().to_owned();
     let sheet_count = app.state.workspace.schematic_buffers.len();
@@ -862,9 +910,9 @@ fn dashboard_card_header(ui: &mut Ui, title: &str, action: Option<&str>) -> bool
 fn project_list_row(ui: &mut Ui, row: &ProjectListRow) -> bool {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let viewport_width = ui.ctx().content_rect().width();
+    let responsive_width = ui.ctx().content_rect().width().min(width);
     let layout =
-        ProjectEntryLayout::resolve(viewport_width, t.metrics.ctl_h >= TOUCH_TARGET_HEIGHT);
+        ProjectEntryLayout::resolve(responsive_width, t.metrics.ctl_h >= TOUCH_TARGET_HEIGHT);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, layout.height), egui::Sense::click());
     if response.hovered() || response.has_focus() {
@@ -884,8 +932,8 @@ fn project_list_row(ui: &mut Ui, row: &ProjectListRow) -> bool {
     row.icon
         .paint(ui.painter(), icon_rect.shrink(4.0), t.color.accent);
 
-    let show_meta = !layout.status_below_title && viewport_width > 1120.0;
-    let status_width = if viewport_width <= PROJECT_RESPONSIVE_BREAKPOINT {
+    let show_meta = !layout.status_below_title && responsive_width > 1120.0;
+    let status_width = if responsive_width <= PROJECT_RESPONSIVE_BREAKPOINT {
         76.0
     } else {
         132.0
@@ -1414,7 +1462,7 @@ fn configuration_policy_cards(ui: &mut Ui, app: &RSpiceApp) {
         });
     };
 
-    if project_header_stacks(ui.ctx().content_rect().width()) {
+    if project_header_stacks(ui.available_width()) {
         add_netlisting(ui);
         ui.add_space(PROJECT_GRID_GAP);
         add_environment(ui);
@@ -1437,31 +1485,91 @@ fn configuration_policy_cards(ui: &mut Ui, app: &RSpiceApp) {
 }
 
 fn technology(ui: &mut Ui, app: &mut RSpiceApp) {
-    let technology = app
-        .state
-        .workspace
-        .project
-        .technology
-        .clone()
-        .unwrap_or_else(|| "No technology attached".to_owned());
     header_with_actions(
         ui,
         "TECHNOLOGY ATTACHMENT",
-        "Technology and PDK contract",
-        "Versioned attachment for symbols, models, sections, and qualification evidence.",
+        TECHNOLOGY_SURFACE_TITLE,
+        "Project-owned authenticated binding for parsed models, process sections, dependency edges, and exact source bytes.",
         |ui, app| {
-            if Button::new("Attach technology…")
+            if Button::new(TECHNOLOGY_SURFACE_ACTION)
                 .accent()
                 .show(ui)
                 .clicked()
             {
-                Command::PdkSettings.execute(app);
+                open_technology_attachment_dialog(app);
             }
         },
         app,
     );
-    card(ui, "PDK resources", |ui| {
-        property_row(ui, "Attachment", &technology);
+    card(ui, "Attached model technology", |ui| {
+        let project = &app.state.workspace.project;
+        match project.technology_binding() {
+            Some(binding) => {
+                property_row(ui, "Attachment", &binding.display_label());
+                property_row(ui, "Model library", binding.model_library());
+                property_row(
+                    ui,
+                    "Root model source",
+                    &binding.root_source().display().to_string(),
+                );
+                property_row(
+                    ui,
+                    "Pinned source closure",
+                    &format!(
+                        "{} exact file{}",
+                        binding.source_closure().len(),
+                        plural(binding.source_closure().len())
+                    ),
+                );
+                property_row(
+                    ui,
+                    "Parsed device models",
+                    &binding.model_count().to_string(),
+                );
+                property_row(
+                    ui,
+                    "Process sections",
+                    &if binding.process_sections().is_empty() {
+                        "No named sections".to_owned()
+                    } else {
+                        binding.process_sections().join(", ")
+                    },
+                );
+                match app
+                    .state
+                    .model_library_manager
+                    .validate_attached_technology(Some(binding))
+                {
+                    Ok(()) => status_dot(
+                        ui,
+                        Tokens::get(ui.ctx()).color.ok,
+                        "Authoritative authenticated binding matches the execution catalog",
+                    ),
+                    Err(error) => status_dot(
+                        ui,
+                        Tokens::get(ui.ctx()).color.err,
+                        &format!("Attached binding is not executable · {error}"),
+                    ),
+                }
+            }
+            None => {
+                property_row(
+                    ui,
+                    "Attachment",
+                    project
+                        .technology
+                        .as_deref()
+                        .unwrap_or("No authenticated model technology attached"),
+                );
+                if project.technology.is_some() {
+                    status_dot(
+                        ui,
+                        Tokens::get(ui.ctx()).color.warn,
+                        "Legacy label only; reattach to pin the model-source contract",
+                    );
+                }
+            }
+        }
         property_row(
             ui,
             "Configured search paths",
@@ -1485,6 +1593,674 @@ fn technology(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         }
     });
+}
+
+#[derive(Debug, Clone)]
+struct TechnologyCandidate {
+    binding: ProjectTechnologyBinding,
+    option_label: String,
+    corner_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TechnologyCandidateDiagnostic {
+    library_name: String,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TechnologyCandidateCatalog {
+    candidates: Vec<TechnologyCandidate>,
+    diagnostics: Vec<TechnologyCandidateDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TechnologyPrimaryState {
+    label: &'static str,
+    enabled: bool,
+}
+
+const fn technology_primary_state(
+    has_candidate: bool,
+    checkpoint_pending: bool,
+    selected_is_attached: bool,
+) -> TechnologyPrimaryState {
+    if checkpoint_pending {
+        TechnologyPrimaryState {
+            label: TECHNOLOGY_DIALOG_PENDING,
+            enabled: false,
+        }
+    } else if selected_is_attached {
+        TechnologyPrimaryState {
+            label: TECHNOLOGY_DIALOG_CURRENT,
+            enabled: false,
+        }
+    } else {
+        TechnologyPrimaryState {
+            label: TECHNOLOGY_DIALOG_PRIMARY,
+            enabled: has_candidate,
+        }
+    }
+}
+
+fn technology_candidates(app: &RSpiceApp) -> TechnologyCandidateCatalog {
+    let mut catalog = TechnologyCandidateCatalog::default();
+    for library in app.state.model_library_manager.libraries_sorted() {
+        match ProjectTechnologyBinding::from_model_library(library) {
+            Ok(binding) => {
+                let option_label = format!(
+                    "{} · {} model{} · {} authenticated source{}",
+                    binding.display_label(),
+                    binding.model_count(),
+                    plural(binding.model_count()),
+                    binding.source_closure().len(),
+                    plural(binding.source_closure().len()),
+                );
+                catalog.candidates.push(TechnologyCandidate {
+                    binding,
+                    option_label,
+                    corner_count: library.corner_count(),
+                });
+            }
+            Err(error) => {
+                let library_name = if library.name.trim().is_empty() {
+                    "<unnamed configured library>".to_owned()
+                } else {
+                    library.name.clone()
+                };
+                catalog.diagnostics.push(TechnologyCandidateDiagnostic {
+                    reason: format!(
+                        "{error}. Configure, refresh, or re-import this library so it retains a canonical root, authenticated source bytes and dependency edges, and at least one parsed device model."
+                    ),
+                    library_name,
+                });
+            }
+        }
+    }
+    catalog
+}
+
+fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
+    let catalog = technology_candidates(app);
+    let candidates = &catalog.candidates;
+    let current = app
+        .state
+        .workspace
+        .project
+        .technology_binding()
+        .map(|binding| binding.model_library().to_owned());
+    let selected = current
+        .filter(|name| {
+            candidates
+                .iter()
+                .any(|candidate| candidate.binding.model_library() == name)
+        })
+        .or_else(|| {
+            candidates
+                .first()
+                .map(|candidate| candidate.binding.model_library().to_owned())
+        });
+    app.state.dialogs.technology_attachment.open(selected);
+}
+
+fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceApp) {
+    if !app.state.dialogs.technology_attachment.open {
+        return;
+    }
+
+    let catalog = technology_candidates(app);
+    let candidates = &catalog.candidates;
+    let selected_is_current = app
+        .state
+        .dialogs
+        .technology_attachment
+        .selected_library
+        .as_deref()
+        .is_some_and(|selected| {
+            candidates
+                .iter()
+                .any(|candidate| candidate.binding.model_library() == selected)
+        });
+    if !selected_is_current {
+        app.state.dialogs.technology_attachment.selected_library = candidates
+            .first()
+            .map(|candidate| candidate.binding.model_library().to_owned());
+    }
+
+    let selected_name = app
+        .state
+        .dialogs
+        .technology_attachment
+        .selected_library
+        .clone();
+    let selected_index = selected_name.as_deref().and_then(|name| {
+        candidates
+            .iter()
+            .position(|candidate| candidate.binding.model_library() == name)
+    });
+    let options = candidates
+        .iter()
+        .map(|candidate| candidate.option_label.clone())
+        .collect::<Vec<_>>();
+    let selected_label = selected_index
+        .and_then(|index| options.get(index))
+        .map(String::as_str)
+        .unwrap_or("No attachable authenticated model library");
+    let validation_error = app
+        .state
+        .dialogs
+        .technology_attachment
+        .validation_error
+        .clone();
+    let checkpoint_pending = technology_checkpoint_pending(&app.state.dialogs);
+    let selected_is_attached = selected_index
+        .and_then(|index| candidates.get(index))
+        .is_some_and(|candidate| {
+            let label = candidate.binding.display_label();
+            app.state.workspace.project.technology_binding() == Some(&candidate.binding)
+                && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
+        });
+    let primary = technology_primary_state(
+        selected_index.is_some(),
+        checkpoint_pending,
+        selected_is_attached,
+    );
+
+    let choice = Dialog::new(
+        "PROJECT · TECHNOLOGY CONTRACT",
+        TECHNOLOGY_DIALOG_TITLE,
+        primary.label,
+    )
+    .description(
+        "Choose an authenticated model library. Commit verifies its retained source identity, writes and read-back verifies a whole-project checkpoint, then records one exact project-owned binding revision.",
+    )
+    .size(DialogSize::Transaction)
+    .ghost("Cancel")
+    .primary_enabled(primary.enabled)
+    .show(ctx, |ui| {
+        technology_warning(ui);
+        technology_dialog_label(ui, "MODEL LIBRARY");
+        if let Some(index) = select(
+            ui,
+            "project-model-technology-library",
+            "Authenticated model library",
+            selected_label,
+            &options,
+            ui.available_width(),
+        ) {
+            app.state.dialogs.technology_attachment.selected_library =
+                Some(candidates[index].binding.model_library().to_owned());
+            app.state.dialogs.technology_attachment.validation_error = None;
+        }
+
+        ui.add_space(10.0);
+        technology_dialog_label(ui, "TECHNOLOGY MAPPING");
+        if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
+            property_card(ui, "Resolved authenticated model contract", |ui| {
+                property_row(
+                    ui,
+                    "Devices",
+                    &format!("{} parsed models", candidate.binding.model_count()),
+                );
+                property_row(
+                    ui,
+                    "Layers",
+                    "Not supplied by this model-library binding",
+                );
+                property_row(
+                    ui,
+                    "Corners",
+                    &format!("{} process sections", candidate.corner_count),
+                );
+                property_row(
+                    ui,
+                    "Source closure",
+                    &format!(
+                        "{} SHA-256 pinned files",
+                        candidate.binding.source_closure().len()
+                    ),
+                );
+            });
+        } else {
+            technology_unavailable_message(ui);
+        }
+
+        ui.add_space(10.0);
+        technology_dialog_label(ui, "MIGRATION MODE");
+        property_row(ui, "Mode", "Attach only · editable views unchanged");
+        muted(
+            ui,
+            "This binding changes the project's simulation model-source contract only; it does not migrate schematic or physical design data.",
+        );
+
+        ui.add_space(10.0);
+        technology_dialog_label(ui, "BINDING GATES");
+        technology_binding_gates(ui, selected_index.is_some(), checkpoint_pending);
+        if !catalog.diagnostics.is_empty() {
+            ui.add_space(10.0);
+            technology_dialog_label(ui, "LIBRARY VALIDATION");
+            for diagnostic in &catalog.diagnostics {
+                technology_error(
+                    ui,
+                    &format!(
+                        "Model library '{}' cannot be attached: {}",
+                        diagnostic.library_name, diagnostic.reason
+                    ),
+                );
+                ui.add_space(6.0);
+            }
+        }
+        if checkpoint_pending {
+            muted(
+                ui,
+                "Writing and read-back verifying the full-project recovery checkpoint…",
+            );
+        }
+        if let Some(error) = validation_error.as_deref() {
+            ui.add_space(8.0);
+            technology_error(ui, error);
+        }
+    });
+
+    match choice {
+        DialogChoice::Primary => {
+            let result = selected_index
+                .and_then(|index| candidates.get(index))
+                .ok_or_else(|| "Select an attachable authenticated model library".to_owned())
+                .and_then(|candidate| attach_technology_candidate(ctx, app, candidate));
+            match result {
+                Ok(receipt) => {
+                    if technology_checkpoint_pending(&app.state.dialogs) {
+                        app.state.push_user_message(ConsoleMessage::info(receipt));
+                        return;
+                    }
+                    app.state.dialogs.technology_attachment.close();
+                    app.state
+                        .push_user_message(ConsoleMessage::info(receipt.clone()));
+                    app.state
+                        .ui
+                        .toasts
+                        .success(ctx, "Model technology attached", receipt);
+                }
+                Err(error) => {
+                    app.state.dialogs.technology_attachment.validation_error = Some(error);
+                }
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            if !technology_checkpoint_pending(&app.state.dialogs) {
+                app.state.dialogs.technology_attachment.close();
+            }
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
+
+fn attach_technology_candidate(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    candidate: &TechnologyCandidate,
+) -> Result<String, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = ctx;
+    verify_pinned_model_sources(&candidate.binding, &app.state.model_library_manager)?;
+    let label = candidate.binding.display_label();
+    if app.state.workspace.project.technology_binding() == Some(&candidate.binding)
+        && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
+    {
+        return Ok(format!(
+            "{} already matches project revision {}; no checkpoint or mutation was required.",
+            label,
+            app.state.workspace.project.revision().get()
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let checkpoint = crate::common::project_checkpoint::create(
+            &app.state,
+            crate::common::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
+        )?;
+        commit_technology_after_checkpoint(app, candidate.binding.clone(), &checkpoint)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        start_browser_technology_checkpoint(ctx, app, candidate.binding.clone())?;
+        Ok("Writing and verifying the full-project recovery checkpoint…".to_owned())
+    }
+}
+
+fn commit_technology_after_checkpoint(
+    app: &mut RSpiceApp,
+    binding: ProjectTechnologyBinding,
+    checkpoint: &crate::common::project_checkpoint::ProjectCheckpointSummary,
+) -> Result<String, String> {
+    let previous_revision = app.state.workspace.project.revision();
+    if checkpoint.project_revision() != previous_revision.get()
+        || checkpoint.project_name() != app.state.workspace.project.name()
+        || !crate::common::project_checkpoint::matches_current_state(checkpoint, &app.state)?
+    {
+        return Err(
+            "Project changed after its recovery checkpoint was captured; attachment was not committed"
+                .to_owned(),
+        );
+    }
+    let revision = app
+        .state
+        .workspace
+        .attach_technology(binding.clone())
+        .map_err(|error| format!("Technology attachment was not committed: {error}"))?;
+    if revision == previous_revision {
+        return Err("Technology attachment unexpectedly produced no project revision".to_owned());
+    }
+    app.state.dialogs.project_checkpoint_recovery.invalidate();
+    Ok(format!(
+        "{} committed at project revision {} with {} exact source file{}; recovery checkpoint {} retains revision {}.",
+        binding.display_label(),
+        revision.get(),
+        binding.source_closure().len(),
+        plural(binding.source_closure().len()),
+        checkpoint.checkpoint_id(),
+        checkpoint.project_revision(),
+    ))
+}
+
+fn technology_checkpoint_pending(dialogs: &crate::common::app::DialogState) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        dialogs.technology_attachment.checkpoint_pending
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = dialogs;
+        false
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn start_browser_technology_checkpoint(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    binding: ProjectTechnologyBinding,
+) -> Result<(), String> {
+    if app.state.dialogs.technology_attachment.checkpoint_pending {
+        return Err("A project recovery checkpoint is already being written".to_owned());
+    }
+    let project_id = app.state.workspace.project.id().to_string();
+    let expected_revision = app.state.workspace.project.revision().get();
+    let queued_project_id = project_id.clone();
+    let queued_binding = binding.clone();
+    let repaint = ctx.clone();
+    crate::common::project_checkpoint::start_create(
+        &app.state,
+        crate::common::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
+        move |result| {
+            BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS.with(|queue| {
+                queue
+                    .borrow_mut()
+                    .push_back(BrowserTechnologyCheckpointCompletion {
+                        project_id: queued_project_id,
+                        expected_revision,
+                        binding: queued_binding,
+                        result,
+                    });
+            });
+            repaint.request_repaint();
+        },
+    )?;
+    app.state.dialogs.technology_attachment.checkpoint_pending = true;
+    app.state.dialogs.technology_attachment.validation_error = None;
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpiceApp) {
+    let completions = BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS
+        .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    for completion in completions {
+        if app.state.workspace.project.id().to_string() != completion.project_id
+            || app.state.workspace.project.revision().get() != completion.expected_revision
+        {
+            app.state.dialogs.technology_attachment.checkpoint_pending = false;
+            app.state.dialogs.technology_attachment.validation_error = Some(
+                "Project changed while its recovery checkpoint was being written; attachment was not committed"
+                    .to_owned(),
+            );
+            continue;
+        }
+        let result = completion.result.and_then(|checkpoint| {
+            verify_pinned_model_sources(&completion.binding, &app.state.model_library_manager)?;
+            commit_technology_after_checkpoint(app, completion.binding, &checkpoint)
+        });
+        app.state.dialogs.technology_attachment.checkpoint_pending = false;
+        match result {
+            Ok(receipt) => {
+                app.state.dialogs.technology_attachment.close();
+                app.state
+                    .push_user_message(ConsoleMessage::info(receipt.clone()));
+                app.state
+                    .ui
+                    .toasts
+                    .success(ctx, "Model technology attached", receipt);
+            }
+            Err(error) => {
+                app.state.dialogs.technology_attachment.validation_error = Some(error);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_recovery_completions(ctx: &Context, app: &mut RSpiceApp) {
+    let project_id = app.state.workspace.project.id().to_string();
+    let catalog = BROWSER_RECOVERY_CATALOG_COMPLETIONS
+        .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    for completion in catalog {
+        if completion.project_id != project_id {
+            continue;
+        }
+        let recovery = &mut app.state.dialogs.project_checkpoint_recovery;
+        recovery.loading = false;
+        recovery.initialized = true;
+        match completion.result {
+            Ok(catalog) => {
+                recovery.checkpoints = catalog.checkpoints;
+                recovery.quarantined = catalog.quarantined;
+                recovery.error = None;
+            }
+            Err(error) => recovery.error = Some(error),
+        }
+    }
+
+    let copies = BROWSER_RECOVERY_COPY_COMPLETIONS
+        .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    for completion in copies {
+        if completion.project_id != project_id {
+            continue;
+        }
+        let result = completion.result.and_then(|bytes| {
+            crate::common::browser_download::download_bytes_file(
+                std::path::Path::new(&completion.filename),
+                &bytes,
+                "application/vnd.rspice.project+json",
+            )
+        });
+        match result {
+            Ok(()) => {
+                let receipt = format!(
+                    "Handed independent recovery copy '{}' to the browser download manager",
+                    completion.filename
+                );
+                app.state
+                    .push_user_message(ConsoleMessage::info(receipt.clone()));
+                app.state
+                    .ui
+                    .toasts
+                    .success(ctx, "Recovery copy ready", receipt);
+            }
+            Err(error) => {
+                app.state
+                    .push_user_message(ConsoleMessage::error(error.clone()));
+                app.state
+                    .ui
+                    .toasts
+                    .error_with_title(ctx, "Recovery copy failed", error);
+            }
+        }
+    }
+}
+
+fn verify_pinned_model_sources(
+    binding: &ProjectTechnologyBinding,
+    manager: &ModelLibraryManager,
+) -> Result<(), String> {
+    binding
+        .validate()
+        .map_err(|error| format!("Technology contract is invalid: {error}"))?;
+    manager.validate_attached_technology(Some(binding))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    for source in binding.source_closure() {
+        let observed = ModelLibraryManager::calculate_source_digest(&source.path)?;
+        if observed != source.digest {
+            return Err(format!(
+                "Model source '{}' changed after it was parsed. Refresh the model library before attaching it.",
+                source.path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn technology_warning(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .fill(theme::mix(t.color.bg_panel, t.color.warn, 0.08))
+        .stroke(Stroke::new(
+            1.0,
+            theme::mix(t.color.border, t.color.warn, 0.45),
+        ))
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(egui::Label::new(
+                egui::RichText::new(
+                    "Attachment changes the project's authenticated model-source and process-section execution contract. Before mutation, RSpice durably writes and read-back verifies a whole-project recovery checkpoint; editable design data is never migrated implicitly.",
+                )
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text),
+            ).wrap());
+        });
+    ui.add_space(10.0);
+}
+
+fn technology_dialog_label(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(label)
+            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.accent),
+    );
+    ui.add_space(3.0);
+}
+
+fn technology_unavailable_message(ui: &mut Ui) {
+    property_card(ui, "No attachable model technology", |ui| {
+        muted(
+            ui,
+            "Configure and parse at least one external model library with a canonical source closure and one device model.",
+        );
+    });
+}
+
+fn technology_binding_gates(ui: &mut Ui, has_candidate: bool, checkpoint_pending: bool) {
+    let t = Tokens::get(ui.ctx());
+    status_dot(
+        ui,
+        if has_candidate {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+        if has_candidate {
+            "Source authentication · retained bytes, SHA-256 pins, and dependency edges verified"
+        } else {
+            "Source authentication · attachable parsed models and authenticated bytes required"
+        },
+    );
+    status_dot(
+        ui,
+        if checkpoint_pending {
+            t.color.warn
+        } else {
+            t.color.ok
+        },
+        if checkpoint_pending {
+            "Recovery checkpoint · writing and read-back verification in progress"
+        } else {
+            "Recovery checkpoint · whole-project digest verification required before commit"
+        },
+    );
+    status_dot(
+        ui,
+        if has_candidate {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+        technology_runtime_gate_copy(has_candidate),
+    );
+    status_dot(
+        ui,
+        t.color.text_faint,
+        "Package signature · not represented by this model-library binding",
+    );
+    status_dot(
+        ui,
+        t.color.text_faint,
+        "DRC deck qualification · not supplied; no physical sign-off claim",
+    );
+    status_dot(
+        ui,
+        t.color.text_faint,
+        "License entitlement · not represented; no entitlement claim",
+    );
+}
+
+const fn technology_runtime_gate_copy(has_candidate: bool) -> &'static str {
+    if !has_candidate {
+        return "Model runtime compatibility · authenticated model binding required";
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        "Model runtime compatibility · retained browser bytes verified against accepted SHA-256"
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        "Model runtime compatibility · native source bytes reverified at attach and execution"
+    }
+}
+
+fn technology_error(ui: &mut Ui, error: &str) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .fill(theme::mix(t.color.bg_panel, t.color.err, 0.08))
+        .stroke(Stroke::new(
+            1.0,
+            theme::mix(t.color.border, t.color.err, 0.5),
+        ))
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(error)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.err),
+                )
+                .wrap(),
+            );
+        });
 }
 
 fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1584,6 +2360,7 @@ fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
+    ensure_project_recovery_catalog(ui.ctx(), app);
     header_with_actions(
         ui,
         "PROJECT RECOVERY · NON-DESTRUCTIVE",
@@ -1662,6 +2439,242 @@ fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
     });
+    ui.add_space(PROJECT_GRID_GAP);
+    project_checkpoint_card(ui, app);
+}
+
+fn ensure_project_recovery_catalog(ctx: &Context, app: &mut RSpiceApp) {
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = ctx;
+    let project_id = app.state.workspace.project.id().to_string();
+    if app
+        .state
+        .dialogs
+        .project_checkpoint_recovery
+        .project_id
+        .as_deref()
+        != Some(project_id.as_str())
+    {
+        app.state.dialogs.project_checkpoint_recovery = Default::default();
+        app.state.dialogs.project_checkpoint_recovery.project_id = Some(project_id.clone());
+    }
+    if app.state.dialogs.project_checkpoint_recovery.initialized {
+        return;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let result = crate::common::project_checkpoint::list(&app.state);
+        let recovery = &mut app.state.dialogs.project_checkpoint_recovery;
+        recovery.initialized = true;
+        match result {
+            Ok(catalog) => {
+                recovery.checkpoints = catalog.checkpoints;
+                recovery.quarantined = catalog.quarantined;
+                recovery.error = None;
+            }
+            Err(error) => recovery.error = Some(error),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        if app.state.dialogs.project_checkpoint_recovery.loading {
+            return;
+        }
+        app.state.dialogs.project_checkpoint_recovery.loading = true;
+        let queued_project_id = project_id;
+        let repaint = ctx.clone();
+        crate::common::project_checkpoint::start_list(&app.state, move |result| {
+            BROWSER_RECOVERY_CATALOG_COMPLETIONS.with(|queue| {
+                queue
+                    .borrow_mut()
+                    .push_back(BrowserRecoveryCatalogCompletion {
+                        project_id: queued_project_id,
+                        result,
+                    });
+            });
+            repaint.request_repaint();
+        });
+    }
+}
+
+fn project_checkpoint_card(ui: &mut Ui, app: &mut RSpiceApp) {
+    let loading = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            app.state.dialogs.project_checkpoint_recovery.loading
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            false
+        }
+    };
+    let checkpoints = app
+        .state
+        .dialogs
+        .project_checkpoint_recovery
+        .checkpoints
+        .clone();
+    let error = app.state.dialogs.project_checkpoint_recovery.error.clone();
+    let quarantined = app
+        .state
+        .dialogs
+        .project_checkpoint_recovery
+        .quarantined
+        .clone();
+
+    card(ui, "Full-project recovery checkpoints", |ui| {
+        if loading {
+            muted(ui, "Loading and verifying recovery artifacts…");
+            return;
+        }
+        if let Some(error) = error.as_deref() {
+            status_dot(ui, Tokens::get(ui.ctx()).color.err, error);
+        }
+        if !quarantined.is_empty() {
+            status_dot(
+                ui,
+                Tokens::get(ui.ctx()).color.warn,
+                &format!(
+                    "{} owned recovery artifact{} quarantined",
+                    quarantined.len(),
+                    plural(quarantined.len())
+                ),
+            );
+            for record in &quarantined {
+                property_row(
+                    ui,
+                    record.label(),
+                    &format!(
+                        "{} · {} artifact{} retained",
+                        record.reason(),
+                        record.artifact_count(),
+                        plural(record.artifact_count())
+                    ),
+                );
+            }
+        }
+        if checkpoints.is_empty() {
+            muted(
+                ui,
+                "No integrity-verified full-project checkpoints are available for this project.",
+            );
+            return;
+        }
+
+        for checkpoint in checkpoints {
+            ui.separator();
+            property_row(
+                ui,
+                checkpoint.reason().label(),
+                &format!(
+                    "Revision {} · {} · {}",
+                    checkpoint.project_revision(),
+                    short_identity(&checkpoint.checkpoint_id().to_string()),
+                    format_byte_count(checkpoint.snapshot_byte_len()),
+                ),
+            );
+            ui.horizontal(|ui| {
+                if Button::new("Save recovered copy…").show(ui).clicked() {
+                    export_project_checkpoint_copy(ui.ctx(), app, checkpoint.clone());
+                }
+                muted(
+                    ui,
+                    "Creates an independent project identity; the live project is not overwritten.",
+                );
+            });
+        }
+    });
+}
+
+fn format_byte_count(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn recovery_copy_filename(
+    checkpoint: &crate::common::project_checkpoint::ProjectCheckpointSummary,
+) -> String {
+    let base = checkpoint
+        .project_name()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!(
+        "{}-recovered-r{}.rspiceproj",
+        base.trim_matches('-'),
+        checkpoint.project_revision()
+    )
+}
+
+fn export_project_checkpoint_copy(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    checkpoint: crate::common::project_checkpoint::ProjectCheckpointSummary,
+) {
+    let filename = recovery_copy_filename(&checkpoint);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(destination) = rfd::FileDialog::new()
+            .add_filter("RSpice Project", &["rspiceproj"])
+            .set_file_name(&filename)
+            .save_file()
+        else {
+            return;
+        };
+        match crate::common::project_checkpoint::publish_recovery_copy(&checkpoint, &destination) {
+            Ok(()) => {
+                let receipt = format!("Saved independent recovery copy: {}", destination.display());
+                app.state
+                    .push_user_message(ConsoleMessage::info(receipt.clone()));
+                app.state
+                    .ui
+                    .toasts
+                    .success(ctx, "Recovery copy saved", receipt);
+            }
+            Err(error) => {
+                app.state
+                    .push_user_message(ConsoleMessage::error(error.clone()));
+                app.state
+                    .ui
+                    .toasts
+                    .error_with_title(ctx, "Recovery copy failed", error);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let project_id = app.state.workspace.project.id().to_string();
+        let queued_filename = filename.clone();
+        let repaint = ctx.clone();
+        crate::common::project_checkpoint::start_recovery_copy_bytes(
+            checkpoint,
+            std::path::PathBuf::from(&filename),
+            move |result| {
+                BROWSER_RECOVERY_COPY_COMPLETIONS.with(|queue| {
+                    queue.borrow_mut().push_back(BrowserRecoveryCopyCompletion {
+                        project_id,
+                        filename: queued_filename,
+                        result,
+                    });
+                });
+                repaint.request_repaint();
+            },
+        );
+    }
 }
 
 fn header_with_actions(
@@ -1682,7 +2695,7 @@ fn header_with_actions(
         })
         .show(ui, |ui| {
             ui.set_width((ui.available_width()).max(1.0));
-            if project_header_stacks(ui.ctx().content_rect().width()) {
+            if project_header_stacks(ui.available_width()) {
                 ui.vertical(|ui| {
                     project_heading(ui, eyebrow, title, description);
                     ui.add_space(8.0);
@@ -1908,6 +2921,169 @@ mod tests {
         let advisory = model_dependency_card_copy(7, 1);
         assert_eq!(advisory.detail, "Resolved closure · 1 scan diagnostics");
         assert!(!advisory.ok);
+    }
+
+    #[test]
+    fn technology_attachment_copy_never_claims_pdk_qualification() {
+        assert_eq!(
+            TECHNOLOGY_SURFACE_TITLE,
+            "Model-library technology contract"
+        );
+        assert_eq!(TECHNOLOGY_SURFACE_ACTION, "Attach model technology…");
+        assert_eq!(TECHNOLOGY_DIALOG_TITLE, "Attach model-library technology");
+        assert_eq!(TECHNOLOGY_DIALOG_PRIMARY, "Attach authenticated binding");
+        for copy in [
+            TECHNOLOGY_SURFACE_TITLE,
+            TECHNOLOGY_SURFACE_ACTION,
+            TECHNOLOGY_DIALOG_TITLE,
+            TECHNOLOGY_DIALOG_PRIMARY,
+            TECHNOLOGY_DIALOG_CURRENT,
+            TECHNOLOGY_DIALOG_PENDING,
+        ] {
+            let copy = copy.to_ascii_lowercase();
+            assert!(!copy.contains("pdk"));
+            assert!(!copy.contains("qualified"));
+        }
+    }
+
+    #[test]
+    fn technology_primary_reflects_selection_current_binding_and_checkpoint_state() {
+        assert_eq!(
+            technology_primary_state(false, false, false),
+            TechnologyPrimaryState {
+                label: TECHNOLOGY_DIALOG_PRIMARY,
+                enabled: false,
+            }
+        );
+        assert_eq!(
+            technology_primary_state(true, false, false),
+            TechnologyPrimaryState {
+                label: TECHNOLOGY_DIALOG_PRIMARY,
+                enabled: true,
+            }
+        );
+        assert_eq!(
+            technology_primary_state(true, false, true),
+            TechnologyPrimaryState {
+                label: TECHNOLOGY_DIALOG_CURRENT,
+                enabled: false,
+            }
+        );
+        assert_eq!(
+            technology_primary_state(true, true, false),
+            TechnologyPrimaryState {
+                label: TECHNOLOGY_DIALOG_PENDING,
+                enabled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn every_invalid_configured_model_library_has_an_actionable_diagnostic() {
+        use sha2::{Digest as _, Sha256};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.model_library_manager.clear();
+        app.state.model_library_manager.add_library(
+            crate::state::model_library::ModelLibrary::new("missing-root"),
+        );
+
+        let missing_bytes_path = std::env::temp_dir().join("rspice-missing-retained-bytes.lib");
+        let mut missing_bytes = crate::state::model_library::ModelLibrary::new("missing-bytes");
+        missing_bytes.root_path = Some(missing_bytes_path.clone());
+        missing_bytes.source_closure = vec![crate::state::model_library::ModelSourcePin {
+            path: missing_bytes_path,
+            digest: crate::product::ContentDigest::from_bytes([0x2a; 32]),
+        }];
+        app.state.model_library_manager.add_library(missing_bytes);
+
+        let bytes = b".model nch nmos\n".to_vec();
+        let valid_path = std::env::temp_dir().join("rspice-valid-catalog-model.lib");
+        let digest = crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
+        let mut valid = crate::state::model_library::ModelLibrary::new("valid-models");
+        valid.root_path = Some(valid_path.clone());
+        valid.source_closure = vec![crate::state::model_library::ModelSourcePin {
+            path: valid_path.clone(),
+            digest,
+        }];
+        valid.source_contents = vec![crate::state::model_library::ModelSourceContent {
+            path: valid_path,
+            bytes,
+        }];
+        valid.add_model(crate::state::model_library::DeviceModel::new(
+            "nch",
+            crate::state::model_library::ModelType::Nmos,
+        ));
+        app.state.model_library_manager.add_library(valid);
+
+        let catalog = technology_candidates(&app);
+
+        assert_eq!(catalog.candidates.len(), 1);
+        assert_eq!(
+            catalog.candidates[0].binding.model_library(),
+            "valid-models"
+        );
+        assert_eq!(catalog.diagnostics.len(), 2);
+        assert_eq!(catalog.diagnostics[0].library_name, "missing-bytes");
+        assert!(catalog.diagnostics[0].reason.starts_with(
+            "technology binding does not retain exact bytes for every pinned model source"
+        ));
+        assert_eq!(catalog.diagnostics[1].library_name, "missing-root");
+        assert!(
+            catalog.diagnostics[1]
+                .reason
+                .starts_with("technology binding has no canonical root model source")
+        );
+        assert!(catalog.diagnostics.iter().all(|diagnostic| {
+            diagnostic
+                .reason
+                .contains("Configure, refresh, or re-import")
+        }));
+    }
+
+    #[test]
+    fn technology_commit_rejects_model_bytes_changed_after_parse() {
+        struct TempModelFile(std::path::PathBuf);
+        impl Drop for TempModelFile {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+
+        let path = std::env::temp_dir().join(format!(
+            "rspice-technology-binding-{}.lib",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, ".model nch nmos\n").expect("write model fixture");
+        let path = std::fs::canonicalize(path).expect("canonicalize model fixture");
+        let _cleanup = TempModelFile(path.clone());
+        let digest =
+            ModelLibraryManager::calculate_source_digest(&path).expect("calculate accepted digest");
+        let mut library = crate::state::model_library::ModelLibrary::new("qualified-models")
+            .with_technology("Qualified analog models", "180 nm");
+        library.root_path = Some(path.clone());
+        library.source_closure = vec![crate::state::model_library::ModelSourcePin {
+            path: path.clone(),
+            digest,
+        }];
+        library.source_contents = vec![crate::state::model_library::ModelSourceContent {
+            path: path.clone(),
+            bytes: std::fs::read(&path).expect("read model fixture"),
+        }];
+        library.add_model(crate::state::model_library::DeviceModel::new(
+            "nch",
+            crate::state::model_library::ModelType::Nmos,
+        ));
+        let binding = ProjectTechnologyBinding::from_model_library(&library)
+            .expect("library produces attachable binding");
+
+        let mut manager = ModelLibraryManager::new();
+        manager.add_library(library);
+        verify_pinned_model_sources(&binding, &manager).expect("unchanged source verifies");
+        std::fs::write(&path, ".model nch nmos level=1\n").expect("change model fixture");
+        let error = verify_pinned_model_sources(&binding, &manager)
+            .expect_err("changed source must fail closed");
+        assert!(error.contains("changed after it was parsed"));
     }
 
     #[test]

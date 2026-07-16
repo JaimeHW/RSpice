@@ -28,6 +28,97 @@ pub enum Workspace {
     Netlist,
 }
 
+/// Transactional workflow currently owned by the Simulation Studio surface.
+///
+/// These are editor drafts only. They are deliberately excluded from session
+/// persistence so an interrupted or cancelled workflow can never become
+/// authoritative project configuration after restart.
+#[derive(Debug, Clone)]
+pub enum SimulationWorkflowDialog {
+    ClonePlan(ClonePlanDraft),
+    DesignVariable(DesignVariableDraft),
+    SavedOutput(SavedOutputDraft),
+}
+
+#[derive(Debug, Clone)]
+pub struct ClonePlanDraft {
+    pub name: String,
+    pub copy_analyses_options: bool,
+    pub copy_variables_outputs_specs: bool,
+    pub copy_pvt_model_bindings: bool,
+    pub copy_regression_baseline: bool,
+    pub validation_error: Option<String>,
+}
+
+impl ClonePlanDraft {
+    pub fn for_source(source_name: &str) -> Self {
+        Self {
+            name: format!("{source_name} · variant"),
+            copy_analyses_options: true,
+            copy_variables_outputs_specs: true,
+            copy_pvt_model_bindings: true,
+            copy_regression_baseline: false,
+            validation_error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DesignVariableDraft {
+    pub name: String,
+    pub expression: String,
+    pub quantity: usize,
+    pub scope: usize,
+    pub description: String,
+    pub allowed_range: String,
+    pub sweep_eligibility: usize,
+    pub override_policy: usize,
+    pub validation_error: Option<String>,
+}
+
+impl Default for DesignVariableDraft {
+    fn default() -> Self {
+        Self {
+            name: "RLOAD_TEST".to_owned(),
+            expression: "10 kohm".to_owned(),
+            quantity: 0,
+            scope: 0,
+            description: "Verification load used by characterization plans".to_owned(),
+            allowed_range: "1 kohm … 1 Mohm".to_owned(),
+            sweep_eligibility: 0,
+            override_policy: 0,
+            validation_error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SavedOutputDraft {
+    pub kind: usize,
+    pub name: String,
+    pub expression: String,
+    pub compatible_analyses: usize,
+    pub save_policy: usize,
+    pub precision: usize,
+    pub streaming: usize,
+    pub validation_error: Option<String>,
+}
+
+impl Default for SavedOutputDraft {
+    fn default() -> Self {
+        Self {
+            kind: 0,
+            name: "V(afe_out)".to_owned(),
+            expression: "V(afe_out)".to_owned(),
+            compatible_analyses: 0,
+            save_policy: 0,
+            precision: 0,
+            streaming: 0,
+            validation_error: None,
+        }
+    }
+}
+
 impl Workspace {
     pub const ALL: [Self; 7] = [
         Self::Project,
@@ -611,11 +702,44 @@ impl VerificationPage {
 /// synthetic tuning sandbox migrate without reviving that unavailable flow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegressionComparisonReceipt {
+    pub plan_id: crate::product::SimulationPlanId,
+    pub plan_revision: crate::product::ObjectRevision,
+    pub tolerance_digest: crate::product::ContentDigest,
     pub baseline_run: crate::product::RunId,
     pub candidate_run: crate::product::RunId,
+    pub baseline_dataset: crate::product::DatasetId,
+    pub candidate_dataset: crate::product::DatasetId,
+    pub baseline_content_digest: crate::product::ContentDigest,
+    pub candidate_content_digest: crate::product::ContentDigest,
+    pub baseline_authority_digest: crate::product::ContentDigest,
+    pub candidate_authority_digest: crate::product::ContentDigest,
     pub aligned_checks: usize,
     pub aligned_waveforms: usize,
     pub changed_checks: usize,
+    #[serde(default)]
+    pub passed_checks: usize,
+    #[serde(default)]
+    pub failed_checks: usize,
+    #[serde(default)]
+    pub passed_waveforms: usize,
+    #[serde(default)]
+    pub failed_waveforms: usize,
+    #[serde(default)]
+    pub unconfigured_targets: usize,
+    #[serde(default)]
+    pub unevaluated_targets: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegressionToleranceDraft {
+    pub target: crate::state::RegressionTargetSelector,
+    pub method: crate::state::RegressionComparisonMethod,
+    pub absolute_tolerance: String,
+    pub relative_tolerance_percent: String,
+    pub time_skew_allowance: String,
+    pub comparison_window: String,
+    pub dirty: bool,
+    pub validation_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -628,12 +752,16 @@ pub struct VerificationSessionState {
     /// immutable.
     #[serde(default)]
     pub corner_compare_nominal: bool,
-    #[serde(default)]
+    #[serde(skip)]
     pub regression_comparison: Option<RegressionComparisonReceipt>,
     #[serde(skip)]
     pub regression_baseline_picker_open: bool,
     #[serde(skip)]
     pub regression_baseline_picker_selection: Option<crate::product::RunId>,
+    #[serde(skip)]
+    pub regression_selected_target: Option<crate::state::RegressionTargetSelector>,
+    #[serde(skip)]
+    pub regression_tolerance_drafts: Vec<RegressionToleranceDraft>,
     #[serde(skip, default = "default_verification_action_receipt")]
     pub action_receipt: String,
 }
@@ -650,6 +778,8 @@ impl Default for VerificationSessionState {
             regression_comparison: None,
             regression_baseline_picker_open: false,
             regression_baseline_picker_selection: None,
+            regression_selected_target: None,
+            regression_tolerance_drafts: Vec::new(),
             action_receipt: default_verification_action_receipt(),
         }
     }
@@ -752,6 +882,7 @@ pub struct PreparedPreflightContract {
     pub receipt_label: &'static str,
     pub analysis_ids: Vec<crate::product::ContentDigest>,
     pub task_count: usize,
+    pub saved_output_contract_count: usize,
     pub pvt_point_count: usize,
     pub target: &'static str,
     pub save_policy: &'static str,
@@ -1085,6 +1216,10 @@ pub struct WorkbenchState {
     /// Last analysis lifecycle outcome announced by the transaction owner.
     #[serde(skip)]
     pub analysis_lifecycle_status: String,
+    /// Active Simulation Studio transaction. Drafts are runtime-only and are
+    /// committed atomically by the dialog's primary action.
+    #[serde(skip)]
+    pub simulation_workflow: Option<SimulationWorkflowDialog>,
     /// Selected specification row in the verification matrix.
     #[serde(default)]
     pub selected_spec: Option<usize>,
@@ -1194,6 +1329,7 @@ impl Default for WorkbenchState {
             active_analysis_instance: None,
             analysis_lifecycle_status: "No lifecycle command has been committed this session."
                 .to_owned(),
+            simulation_workflow: None,
             selected_spec: None,
             selected_model: None,
             analysis_query: String::new(),
@@ -1221,6 +1357,7 @@ impl WorkbenchState {
         self.project_launcher_open
             || self.preflight.open
             || self.notification_center_open
+            || self.simulation_workflow.is_some()
             || matches!(
                 self.current_route().surface_id(),
                 SurfaceId::Preferences

@@ -643,18 +643,39 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
 /// Apply the open editor's drafts to the workspace. Returns false (and
 /// leaves the editor open) when a bound fails to parse.
 pub fn apply_drafts(state: &mut AppState) -> bool {
-    let Some(drafts) = state.ui.results.spec_drafts.as_ref() else {
+    let Some(drafts) = state.ui.results.spec_drafts.clone() else {
         return true;
     };
     let mut specs = Vec::with_capacity(drafts.len());
-    for draft in drafts {
+    for draft in &drafts {
         match draft.parse() {
             Ok(Some(entry)) => specs.push(entry),
             Ok(None) => {}
             Err(_) => return false,
         }
     }
-    state.workspace.specs = specs;
+    let Ok(plan_id) = state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(crate::simulation::plan::SimulationPlan::id)
+    else {
+        return false;
+    };
+    let mut workspace = state.workspace.clone();
+    workspace.replace_active_specs(plan_id, specs);
+    if workspace.validate_simulation_configuration().is_err() {
+        return false;
+    }
+    let mut setup = state.sim_setup.clone();
+    if setup
+        .commit_active_plan_configuration_change("Updated output specifications.")
+        .is_err()
+    {
+        return false;
+    }
+    state.workspace = workspace;
+    state.sim_setup = setup;
+    state.workbench.preflight = Default::default();
     state.ui.results.spec_drafts = None;
     true
 }
@@ -730,7 +751,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::spec_table_row_height;
+    use super::{SpecDraft, apply_drafts, spec_table_row_height};
 
     #[test]
     fn matrix_rows_follow_desktop_and_touch_control_contracts() {
@@ -738,5 +759,45 @@ mod tests {
         assert_eq!(spec_table_row_height(32.0), 32.0);
         assert_eq!(spec_table_row_height(44.0), 44.0);
         assert_eq!(spec_table_row_height(48.0), 48.0);
+    }
+
+    #[test]
+    fn applying_drafts_commits_the_active_plan_owned_specification() {
+        let mut state = crate::common::AppState::default();
+        let plan_id = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default plan")
+            .id();
+        let source_revision = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default plan")
+            .revision();
+        state.ui.results.spec_drafts = Some(vec![SpecDraft {
+            measurement: "gain_db".to_owned(),
+            min: "20".to_owned(),
+            max: "40".to_owned(),
+            unit: "dB".to_owned(),
+        }]);
+
+        assert!(apply_drafts(&mut state));
+
+        let owned = state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("active plan payload");
+        assert_eq!(owned.specs.len(), 1);
+        assert_eq!(owned.specs[0].measurement, "gain_db");
+        assert_eq!(state.workspace.specs, owned.specs);
+        assert!(
+            state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("default plan")
+                .revision()
+                > source_revision
+        );
+        assert!(state.ui.results.spec_drafts.is_none());
     }
 }

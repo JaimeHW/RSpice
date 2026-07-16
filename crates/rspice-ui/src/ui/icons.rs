@@ -69,6 +69,8 @@ pub enum Icon {
     Folder,
     /// Add or create.
     Add,
+    /// Duplicate or clone an owned object.
+    Copy,
     /// Stop (square).
     Stop,
     /// Run (play triangle).
@@ -122,6 +124,7 @@ impl Icon {
             Self::File => "Document",
             Self::Folder => "Browse",
             Self::Add => "Add",
+            Self::Copy => "Copy",
             Self::Stop => "Stop",
             Self::Run => "Run",
             Self::Library => "Library workspace",
@@ -248,6 +251,10 @@ impl Icon {
             Icon::Add => &[
                 Line(&[[12.0, 5.0], [12.0, 19.0]]),
                 Line(&[[5.0, 12.0], [19.0, 12.0]]),
+            ],
+            Icon::Copy => &[
+                Poly(&[[8.0, 4.0], [20.0, 4.0], [20.0, 16.0], [8.0, 16.0]]),
+                Poly(&[[4.0, 8.0], [16.0, 8.0], [16.0, 20.0], [4.0, 20.0]]),
             ],
             // Transport glyphs are filled — a stroked square reads as a
             // missing-glyph box, not a stop control.
@@ -390,6 +397,7 @@ mod tests {
             Icon::File,
             Icon::Folder,
             Icon::Add,
+            Icon::Copy,
             Icon::Stop,
             Icon::Run,
             Icon::Library,

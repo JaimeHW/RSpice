@@ -29,6 +29,7 @@ pub(crate) mod file_workflow;
 pub mod logging;
 pub mod menu_bar;
 pub(crate) mod netlist_workflow;
+pub(crate) mod project_checkpoint;
 pub(crate) mod project_lifecycle;
 pub(crate) mod project_workflow;
 #[cfg(not(target_arch = "wasm32"))]

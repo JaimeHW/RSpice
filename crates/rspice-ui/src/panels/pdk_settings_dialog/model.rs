@@ -234,4 +234,6 @@ pub enum PdkSettingsDialogResult {
     Applied(PdkConfig),
     /// User requested to load a specific file
     LoadFile(PathBuf),
+    /// Browser user requested a byte-backed model source import.
+    ImportBrowserFile,
 }

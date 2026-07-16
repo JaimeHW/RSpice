@@ -637,7 +637,7 @@ pub(super) fn persist_model_to_disk(
     {
         let _ = source_path;
         let _ = entry.canonical_ir.as_ref();
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
     with_veriloga_cache_disk_lock("persist Verilog-A cache record", |cache_root| {
@@ -707,7 +707,7 @@ pub(super) fn load_model_from_disk(source_path: &Path) -> Option<CachedVerilogAM
     #[cfg(target_arch = "wasm32")]
     {
         let _ = source_path;
-        return None;
+        None
     }
     #[cfg(not(target_arch = "wasm32"))]
     match with_veriloga_cache_disk_lock("load Verilog-A cache record", |cache_root| {

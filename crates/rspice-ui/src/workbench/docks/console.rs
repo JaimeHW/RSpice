@@ -28,6 +28,7 @@ const EMPTY_HINT_PADDING_X: i8 = 12;
 const EMPTY_HINT_PADDING_Y: i8 = 20;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app, layout);
     if !layout.show_console_body {
         return;

@@ -1270,10 +1270,17 @@ mod tests {
             analysis.waveforms[1].x.as_ref(),
             &[0.0, 0.25, 0.5, 0.75, 1.0]
         );
-        assert_eq!(
-            analysis.waveforms[1].y.as_ref(),
-            &[0.0, 2.5, 5.0, 7.5, 10.0]
-        );
+        for (actual, expected) in analysis.waveforms[1]
+            .y
+            .iter()
+            .zip([0.0_f64, 2.5, 5.0, 7.5, 10.0])
+        {
+            let tolerance = 4.0 * f64::EPSILON * expected.abs().max(1.0);
+            assert!(
+                (actual - expected).abs() <= tolerance,
+                "interpolated {actual:.17e} differs from {expected:.17e} by more than {tolerance:.3e}"
+            );
+        }
     }
 
     #[test]

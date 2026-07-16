@@ -15,6 +15,11 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
 use super::{ConsoleMessage, LicensePhase, RSpiceApp};
 
+#[cfg(any(test, rspice_development_build))]
+const DEVELOPMENT_SAMPLE_ACTION_LABEL: Option<&str> = Some("Paste sample key");
+#[cfg(not(any(test, rspice_development_build)))]
+const DEVELOPMENT_SAMPLE_ACTION_LABEL: Option<&str> = None;
+
 impl RSpiceApp {
     /// Open the dialog: fresh entry, or the stored grant when already
     /// activated (primary becomes Close, secondary removes the license).
@@ -40,21 +45,21 @@ impl RSpiceApp {
             && self.state.dialogs.license_dialog.text.is_empty();
 
         let phase = self.state.dialogs.license_dialog.phase.clone();
-        let (primary, secondary, hint): (&str, &str, String) = match &phase {
+        let (primary, secondary, hint): (&str, Option<&str>, String) = match &phase {
             LicensePhase::Entry | LicensePhase::Error(_) => (
                 "Verify",
-                "Paste sample key",
-                "signature: ed25519 · key id 01".to_owned(),
+                DEVELOPMENT_SAMPLE_ACTION_LABEL,
+                "signature: ed25519 · offline verification".to_owned(),
             ),
             LicensePhase::Verified(_) if already_active => (
                 "Close",
-                "Remove license",
-                "verified · ed25519 key id 01 · denylist clear".to_owned(),
+                Some("Remove license"),
+                "verified · ed25519 · denylist clear".to_owned(),
             ),
             LicensePhase::Verified(_) => (
                 "Activate",
-                "Paste sample key",
-                "verified · ed25519 key id 01 · denylist clear".to_owned(),
+                DEVELOPMENT_SAMPLE_ACTION_LABEL,
+                "verified · ed25519 · denylist clear".to_owned(),
             ),
         };
         let primary_enabled = match &phase {
@@ -67,15 +72,17 @@ impl RSpiceApp {
         let ctrl_enter = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
 
         let state = &mut self.state;
-        let choice = Dialog::new("License", "Enter license key", primary)
+        let mut dialog = Dialog::new("License", "Enter license key", primary)
             .description("Paste, verify, and activate a license key locally on this machine.")
             .size(DialogSize::Transaction)
-            .secondary(secondary)
             .ghost("Cancel")
             .hint(&hint)
             .primary_enabled(primary_enabled)
-            .primary_on_enter(false)
-            .show(ctx, |ui| {
+            .primary_on_enter(false);
+        if let Some(label) = secondary {
+            dialog = dialog.secondary(label);
+        }
+        let choice = dialog.show(ctx, |ui| {
                 let t = Tokens::get(ui.ctx());
                 let c = t.color;
 
@@ -144,11 +151,18 @@ impl RSpiceApp {
             }
             DialogChoice::Secondary => match &self.state.dialogs.license_dialog.phase {
                 LicensePhase::Verified(_) if already_active => self.remove_license(),
+                #[cfg(any(test, rspice_development_build))]
                 _ => {
-                    // Paste sample key — fills the field and verifies, the
-                    // same walkthrough the design specifies.
+                    // Debug/test walkthrough: fill the field and exercise the
+                    // real development-signature verification path.
                     self.state.dialogs.license_dialog.text = license::SAMPLE_KEY.to_owned();
                     self.verify_license_input();
+                }
+                #[cfg(not(any(test, rspice_development_build)))]
+                _ => {
+                    // No release-build dialog state exposes a second action
+                    // here. Remain fail-closed if an unexpected choice is
+                    // ever synthesized by a future dialog implementation.
                 }
             },
             DialogChoice::Primary => match self.state.dialogs.license_dialog.phase.clone() {

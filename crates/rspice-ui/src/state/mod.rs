@@ -43,10 +43,13 @@ pub use workspace::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableRange, DesignVariableScope, DesignVariableScopeKind,
     DesignVariableSweepEligibility, OpenCellView, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
-    ProjectDescriptor, ProjectDescriptorError, ProjectWorkspace, SavedOutput,
-    SavedOutputCompatibility, SavedOutputCompatibilityKind, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, SimulationConfigurationError,
-    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
+    PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION, ProjectDescriptor, ProjectDescriptorError,
+    ProjectTechnologyBinding, ProjectWorkspace, RegressionComparisonMethod,
+    RegressionComparisonWindow, RegressionTargetKind, RegressionTargetSelector,
+    RegressionToleranceRule, SavedOutput, SavedOutputCompatibility, SavedOutputCompatibilityKind,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SimulationConfigurationError, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
+    TechnologyBindingError,
 };
 
 #[cfg(test)]

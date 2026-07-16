@@ -112,7 +112,7 @@ fn issue(args: &[String]) {
     match parse_and_verify(&key) {
         Ok(info) => println!("self-verify against compiled-in keys: OK ({})", info.tier),
         Err(error) => println!(
-            "self-verify against compiled-in keys: {:?} (expected for a fresh key id not yet in VERIFYING_KEYS)",
+            "self-verify against compiled-in keys: {:?} (expected for a fresh key id, or a development key when this tool is built in release mode)",
             error
         ),
     }

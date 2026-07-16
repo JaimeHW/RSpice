@@ -33,11 +33,13 @@ const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
 const BROWSER_UNLOAD_WARNING: &str = "RSpice has unsaved changes.";
 
 #[cfg(target_arch = "wasm32")]
+type BrowserUnloadListener = wasm_bindgen::closure::Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>;
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     static BROWSER_UNLOAD_DIRTY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static BROWSER_UNLOAD_LISTENER: std::cell::RefCell<
-        Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>>
-    > = const { std::cell::RefCell::new(None) };
+    static BROWSER_UNLOAD_LISTENER: std::cell::RefCell<Option<BrowserUnloadListener>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 mod active_viewer;

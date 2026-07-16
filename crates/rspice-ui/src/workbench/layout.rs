@@ -61,6 +61,7 @@ impl LayoutSpec {
         )
     }
 
+    #[cfg(test)]
     pub fn resolve_with_pointer_and_document_strip(
         viewport_width: f32,
         viewport_height: f32,
@@ -68,12 +69,34 @@ impl LayoutSpec {
         document_strip_visible: bool,
         state: &WorkbenchState,
     ) -> Self {
+        Self::resolve_for_shell(
+            viewport_width,
+            viewport_height,
+            coarse_pointer,
+            document_strip_visible,
+            true,
+            true,
+            state,
+        )
+    }
+
+    pub fn resolve_for_shell(
+        viewport_width: f32,
+        viewport_height: f32,
+        coarse_pointer: bool,
+        document_strip_visible: bool,
+        project_open: bool,
+        context_docks_enabled: bool,
+        state: &WorkbenchState,
+    ) -> Self {
         let width_class = WidthClass::for_width(viewport_width);
         let short_landscape = viewport_width <= 900.0 && viewport_height <= 500.0;
         let compact_shell = width_class.uses_bottom_navigation() || short_landscape;
-        let navigator_uses_drawer = compact_shell;
-        let inspector_uses_drawer = compact_shell || width_class.inspector_uses_drawer();
-        let workspaces_uses_drawer = viewport_width <= 560.0 || short_landscape;
+        let navigator_uses_drawer = project_open && context_docks_enabled && compact_shell;
+        let inspector_uses_drawer = project_open
+            && context_docks_enabled
+            && (compact_shell || width_class.inspector_uses_drawer());
+        let workspaces_uses_drawer = project_open && (viewport_width <= 560.0 || short_landscape);
         let show_console_body =
             (state.console_visible || state.console_maximized) && !state.focus_mode;
         // Explicit mobile/coarse-pointer landscape gives the constrained
@@ -121,10 +144,16 @@ impl LayoutSpec {
             )
         };
 
-        let show_navigator_dock =
-            !navigator_uses_drawer && !state.focus_mode && state.navigator_visible;
-        let show_inspector_dock =
-            !inspector_uses_drawer && !state.focus_mode && state.inspector_visible;
+        let show_navigator_dock = project_open
+            && context_docks_enabled
+            && !navigator_uses_drawer
+            && !state.focus_mode
+            && state.navigator_visible;
+        let show_inspector_dock = project_open
+            && context_docks_enabled
+            && !inspector_uses_drawer
+            && !state.focus_mode
+            && state.inspector_visible;
 
         Self {
             width_class,
@@ -214,8 +243,9 @@ impl ChromeMetrics {
         if width <= 820.0 {
             metrics.title = 42.0;
             metrics.toolbar = 47.0;
-            // The late commercial/a11y cascade overrides the earlier compact
-            // 34 px declarations for every interactive toolbar target.
+            // The responsive shell keeps its compact row heights, while the
+            // later mockup accessibility rule gives every toolbar action a
+            // 44 px target at <=820 px even for a fine pointer.
             metrics.toolbar_control = 44.0;
             metrics.run_control = 44.0;
             metrics.document = 36.0;
@@ -236,12 +266,9 @@ impl ChromeMetrics {
             metrics.document = 34.0;
             metrics.status = 0.0;
         }
-        if width <= 820.0 || coarse_pointer {
-            // The compact shell and a raw coarse-pointer capability both use
-            // one coherent touch-density grid.  Mixing 44 px content controls
-            // with 40/42 px title rows, a 36 px document strip, or a 31 px
-            // console strip clips borders and produces the broken vertical
-            // spacing the responsive mockup explicitly avoids.
+        if coarse_pointer {
+            // Coarse pointers additionally inflate shell tracks that are not
+            // covered by the <=820 px responsive target rule.
             metrics.title = 44.0;
             metrics.toolbar = 48.0;
             metrics.toolbar_control = 44.0;
@@ -306,11 +333,54 @@ mod tests {
         assert!(!spec.show_pvt_selector);
         assert_eq!(spec.toolbar_tool_limit, Some(2));
         assert!(!spec.show_status_bar);
-        assert_eq!(spec.title_bar_height, 44.0);
-        assert_eq!(spec.toolbar_height, 48.0);
-        assert_eq!(spec.document_bar_height, 44.0);
-        assert_eq!(spec.console_height, 44.0);
+        assert_eq!(spec.title_bar_height, 40.0);
+        assert_eq!(spec.toolbar_height, 46.0);
+        assert_eq!(spec.toolbar_control_height, 44.0);
+        assert_eq!(spec.run_control_height, 44.0);
+        assert_eq!(spec.document_bar_height, 36.0);
+        assert_eq!(spec.console_height, 31.0);
         assert_eq!(spec.phone_navigation_height, 54.0);
+    }
+
+    #[test]
+    fn no_project_shell_removes_context_docks_and_drawers() {
+        let spec = LayoutSpec::resolve_for_shell(
+            1_440.0,
+            900.0,
+            false,
+            false,
+            false,
+            true,
+            &WorkbenchState::default(),
+        );
+
+        assert!(spec.show_activity_rail);
+        assert!(!spec.show_navigator_dock);
+        assert!(!spec.show_inspector_dock);
+        assert!(!spec.navigator_uses_drawer);
+        assert!(!spec.inspector_uses_drawer);
+        assert!(!spec.has_overlay_drawer);
+    }
+
+    #[test]
+    fn commercial_document_shell_removes_only_context_docks_and_drawers() {
+        let spec = LayoutSpec::resolve_for_shell(
+            1_440.0,
+            900.0,
+            false,
+            true,
+            true,
+            false,
+            &WorkbenchState::default(),
+        );
+
+        assert!(spec.show_activity_rail);
+        assert!(!spec.show_navigator_dock);
+        assert!(!spec.show_inspector_dock);
+        assert!(!spec.navigator_uses_drawer);
+        assert!(!spec.inspector_uses_drawer);
+        assert!(!spec.has_overlay_drawer);
+        assert!(spec.show_console_strip);
     }
 
     #[test]
@@ -321,13 +391,13 @@ mod tests {
         assert!(spec.navigator_uses_drawer);
         assert!(spec.inspector_uses_drawer);
         assert!(!spec.workspaces_uses_drawer);
-        assert_eq!(spec.title_bar_height, 44.0);
-        assert_eq!(spec.toolbar_height, 48.0);
+        assert_eq!(spec.title_bar_height, 42.0);
+        assert_eq!(spec.toolbar_height, 47.0);
         assert_eq!(spec.toolbar_control_height, 44.0);
         assert_eq!(spec.run_control_height, 44.0);
-        assert_eq!(spec.document_bar_height, 44.0);
-        assert_eq!(spec.status_bar_height, 44.0);
-        assert_eq!(spec.console_height, 44.0);
+        assert_eq!(spec.document_bar_height, 36.0);
+        assert_eq!(spec.status_bar_height, 27.0);
+        assert_eq!(spec.console_height, 31.0);
     }
 
     #[test]
@@ -569,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn narrow_fine_pointer_landscape_keeps_the_late_44_px_target_rule() {
+    fn narrow_fine_pointer_landscape_keeps_compact_rows_and_accessible_targets() {
         let spec = LayoutSpec::resolve(800.0, 390.0, &WorkbenchState::default());
 
         assert!(spec.compact_shell);

@@ -44,7 +44,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             };
             ui.painter().hline(
                 rect.x_range(),
-                rect.bottom(),
+                (rect.bottom() - 0.5).max(rect.top()),
                 egui::Stroke::new(1.0, t.color.border),
             );
             ui.horizontal(|ui| {

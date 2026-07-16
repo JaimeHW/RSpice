@@ -16,10 +16,10 @@ mod model;
 mod types;
 
 pub use corner::ProcessCorner;
-pub use library::{ModelLibrary, ModelSourceEdge, ModelSourcePin};
-pub(crate) use library::{
-    first_unreachable_source, is_foreign_platform_absolute_path, is_portable_absolute_path,
-};
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use library::is_foreign_platform_absolute_path;
+pub use library::{ModelLibrary, ModelSourceContent, ModelSourceEdge, ModelSourcePin};
+pub(crate) use library::{first_unreachable_source, is_portable_absolute_path};
 pub use manager::{ModelLibraryManager, SealedModelExecutionSources};
 pub use model::DeviceModel;
 pub use types::{ModelLevel, ModelType};

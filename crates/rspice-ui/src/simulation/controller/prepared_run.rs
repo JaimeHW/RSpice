@@ -174,6 +174,10 @@ impl SimulationController {
                 ),
             )
         })?;
+        state
+            .model_library_manager
+            .validate_attached_technology(state.workspace.project.technology_binding())
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let sealed_models = state
             .model_library_manager
             .seal_execution_sources()

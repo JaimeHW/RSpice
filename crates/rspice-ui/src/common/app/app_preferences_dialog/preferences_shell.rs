@@ -779,6 +779,29 @@ pub(super) fn actionable_scope_strip(
     clicked
 }
 
+/// Scope/capability evidence for pages that intentionally have no executable
+/// policy owner. Unlike `actionable_scope_strip`, this never advertises an
+/// empty resolved-policy workflow.
+pub(super) fn informational_scope_strip(ui: &mut Ui, scope: &str, detail: &str) {
+    let t = Tokens::get(ui.ctx());
+    let narrow = ui.ctx().content_rect().width() <= SCOPE_NARROW_MAX_WIDTH;
+    let horizontal = if narrow { 12 } else { 24 };
+    let response = egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(horizontal, 7))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_min_height(28.0);
+            scope_copy(ui, scope, detail);
+        })
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+}
+
 fn scope_copy(ui: &mut Ui, scope: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.y = 0.0;

@@ -648,13 +648,13 @@ pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let columns_width = (inner_width - gap).max(1.0);
     let label_column = columns_width * 0.4;
     let value_column = (columns_width - label_column).max(1.0);
-    let label = elide_text(ui, label, &label_font, label_column);
-    let value = elide_text(ui, value, &value_font, value_column);
-    let label_galley = ui
-        .painter()
-        .layout_no_wrap(label, label_font, t.color.text_dim);
-    let value_galley = ui.painter().layout_no_wrap(value, value_font, t.color.text);
-    let height = 29.0;
+    let label_galley =
+        ui.painter()
+            .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
+    let value_galley =
+        ui.painter()
+            .layout(value.to_owned(), value_font, t.color.text, value_column);
+    let height = (label_galley.size().y.max(value_galley.size().y) + 12.0).max(29.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + 10.0, rect.top()),
@@ -665,18 +665,12 @@ pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
         Pos2::new(rect.right() - 10.0, rect.bottom()),
     );
     ui.painter().with_clip_rect(label_rect).galley(
-        Pos2::new(
-            label_rect.left(),
-            label_rect.center().y - label_galley.size().y * 0.5,
-        ),
+        Pos2::new(label_rect.left(), label_rect.top() + 6.0),
         label_galley,
         t.color.text_dim,
     );
     ui.painter().with_clip_rect(value_rect).galley(
-        Pos2::new(
-            value_rect.left(),
-            value_rect.center().y - value_galley.size().y * 0.5,
-        ),
+        Pos2::new(value_rect.left(), value_rect.top() + 6.0),
         value_galley,
         t.color.text,
     );

@@ -123,6 +123,52 @@ pub struct CommandPaletteState {
     pub(crate) recent: Vec<crate::workbench::commands::Command>,
 }
 
+/// Retained draft for the mockup-owned project technology transaction.
+/// Selection remains isolated until the primary action verifies every pinned
+/// source and commits one project metadata revision.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TechnologyAttachmentDialogState {
+    pub(crate) open: bool,
+    pub(crate) selected_library: Option<String>,
+    pub(crate) validation_error: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) checkpoint_pending: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProjectCheckpointRecoveryState {
+    pub(crate) project_id: Option<String>,
+    pub(crate) checkpoints: Vec<crate::common::project_checkpoint::ProjectCheckpointSummary>,
+    pub(crate) quarantined: Vec<crate::common::project_checkpoint::ProjectCheckpointQuarantine>,
+    pub(crate) error: Option<String>,
+    pub(crate) initialized: bool,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) loading: bool,
+}
+
+impl ProjectCheckpointRecoveryState {
+    pub(crate) fn invalidate(&mut self) {
+        self.initialized = false;
+        self.error = None;
+    }
+}
+
+impl TechnologyAttachmentDialogState {
+    pub(crate) fn open(&mut self, selected_library: Option<String>) {
+        *self = Self {
+            open: true,
+            selected_library,
+            validation_error: None,
+            #[cfg(target_arch = "wasm32")]
+            checkpoint_pending: false,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 impl CommandPaletteState {
     /// Open fresh (empty query, first row selected, focus requested).
     pub fn open(&mut self) {
@@ -242,6 +288,12 @@ pub struct DialogState {
     /// Command palette state
     pub command_palette: CommandPaletteState,
 
+    /// Project-owned technology attachment transaction.
+    pub(crate) technology_attachment: TechnologyAttachmentDialogState,
+
+    /// Cached, integrity-verified full-project recovery catalog.
+    pub(crate) project_checkpoint_recovery: ProjectCheckpointRecoveryState,
+
     /// Verilog-A model loading dialog state
     pub veriloga_dialog: crate::panels::VerilogALoadDialogState,
 
@@ -284,6 +336,7 @@ impl DialogState {
             || self.shortcut_editor.open
             || self.license_dialog.open
             || self.command_palette.open
+            || self.technology_attachment.open
             || self.veriloga_dialog.open
             || self.interaction.schematic_delete_confirmation_open
             || self.confirmation_dialog.visible
@@ -324,6 +377,7 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.technology_attachment.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.veriloga_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs.interaction.schematic_delete_confirmation_open = true;

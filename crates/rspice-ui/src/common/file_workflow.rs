@@ -226,7 +226,6 @@ pub(crate) fn open_schematic_from_dialog_with_io(
                 state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", error)));
             }
         }
-        return;
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -630,7 +630,14 @@ fn resolved_policy_rows(category: PreferenceCategory, state: &AppState) -> Vec<R
             }
             rows
         }
-        PreferenceCategory::Simulation => Vec::new(),
+        PreferenceCategory::Simulation => vec![choice_policy_row(
+            state,
+            "Default solver preset",
+            ChoicePreference::DefaultSolverPreset,
+            &["Balanced", "Fast", "Accurate", "Robust"],
+            "User default",
+            "new-project simulation plan",
+        )],
         PreferenceCategory::Results => {
             let mut rows = vec![scalar_policy_row(
                 state,
@@ -913,13 +920,18 @@ mod tests {
     fn policy_projection_is_truthful_without_claiming_an_organization_overlay() {
         let state = AppState::default();
         for category in [
-            PreferenceCategory::Simulation,
             PreferenceCategory::Compute,
             PreferenceCategory::Security,
             PreferenceCategory::Integrations,
         ] {
             assert!(resolved_policy_rows(category, &state).is_empty());
         }
+        let simulation = resolved_policy_rows(PreferenceCategory::Simulation, &state);
+        assert_eq!(simulation.len(), 1);
+        assert_eq!(simulation[0].setting, "Default solver preset");
+        assert_eq!(simulation[0].resolved_value, "Balanced");
+        assert_eq!(simulation[0].source, "User default");
+        assert!(!simulation[0].locked);
         let appearance = resolved_policy_rows(PreferenceCategory::Appearance, &state);
         let density = appearance
             .iter()

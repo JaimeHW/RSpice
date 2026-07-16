@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
+use sha2::Digest as _;
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
@@ -17,8 +18,8 @@ use crate::product::{
     SavedOutputId, SimulationPlanId,
 };
 use crate::state::{
-    Cell, ComponentType, Library, LibraryCellInstance, LibraryManager, SchematicState, View,
-    ViewType,
+    AnalysisResultSourceDomain, Cell, ComponentType, Library, LibraryCellInstance, LibraryManager,
+    SchematicState, View, ViewType,
 };
 
 /// Default editable design library created for new projects.
@@ -29,6 +30,8 @@ pub const DEFAULT_TOP_CELL: &str = "top";
 pub const DEFAULT_SCHEMATIC_VIEW: &str = "schematic";
 /// Persisted schema for project identity metadata.
 pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
+/// Persisted schema for an exact project-owned technology binding.
+pub const PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION: u16 = 1;
 
 /// Maximum legal hierarchy depth. This is deliberately generous for real
 /// designs while placing a deterministic bound on corrupt or hostile project
@@ -256,6 +259,313 @@ impl HierarchyResolution {
     }
 }
 
+/// Exact project-owned attachment to a locally parsed and content-pinned model
+/// technology. Physical layer decks, signed organization packages, and remote
+/// entitlement receipts require provider records that are intentionally not
+/// represented by this local binding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectTechnologyBinding {
+    schema_version: u16,
+    package_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    package_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    technology_node: Option<String>,
+    model_library: String,
+    root_source: PathBuf,
+    source_closure: Vec<crate::state::model_library::ModelSourcePin>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    source_edges: Vec<crate::state::model_library::ModelSourceEdge>,
+    model_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    process_sections: Vec<String>,
+}
+
+impl ProjectTechnologyBinding {
+    pub fn from_model_library(
+        library: &crate::state::model_library::ModelLibrary,
+    ) -> Result<Self, TechnologyBindingError> {
+        validate_retained_model_sources(library)?;
+        let root_source = library
+            .root_path
+            .clone()
+            .ok_or(TechnologyBindingError::MissingRootSource)?;
+        let package_name = if library.pdk_name.trim().is_empty() {
+            library.name.clone()
+        } else {
+            library.pdk_name.clone()
+        };
+        let package_version = nonempty_owned(&library.version);
+        let technology_node = nonempty_owned(&library.technology_node);
+        let mut process_sections = library.corners.keys().cloned().collect::<Vec<_>>();
+        process_sections.sort();
+        let binding = Self {
+            schema_version: PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
+            package_name,
+            package_version,
+            technology_node,
+            model_library: library.name.clone(),
+            root_source,
+            source_closure: library.source_closure.clone(),
+            source_edges: library.source_edges.clone(),
+            model_count: library.models.len(),
+            process_sections,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
+    pub fn validate(&self) -> Result<(), TechnologyBindingError> {
+        if self.schema_version != PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION {
+            return Err(TechnologyBindingError::UnsupportedSchema {
+                found: self.schema_version,
+                supported: PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
+            });
+        }
+        validate_technology_text("package_name", &self.package_name)?;
+        validate_technology_text("model_library", &self.model_library)?;
+        if let Some(version) = &self.package_version {
+            validate_technology_text("package_version", version)?;
+        }
+        if let Some(node) = &self.technology_node {
+            validate_technology_text("technology_node", node)?;
+        }
+        if self.root_source.as_os_str().is_empty() {
+            return Err(TechnologyBindingError::MissingRootSource);
+        }
+        if !crate::state::model_library::is_portable_absolute_path(&self.root_source) {
+            return Err(TechnologyBindingError::NonAbsoluteSource(
+                self.root_source.clone(),
+            ));
+        }
+        if self.source_closure.is_empty() {
+            return Err(TechnologyBindingError::EmptySourceClosure);
+        }
+        let mut paths = std::collections::HashSet::with_capacity(self.source_closure.len());
+        for (index, source) in self.source_closure.iter().enumerate() {
+            if !crate::state::model_library::is_portable_absolute_path(&source.path) {
+                return Err(TechnologyBindingError::NonAbsoluteSource(
+                    source.path.clone(),
+                ));
+            }
+            if !paths.insert(source.path.clone()) {
+                return Err(TechnologyBindingError::DuplicateSource(source.path.clone()));
+            }
+            if index > 0 && self.source_closure[index - 1].path >= source.path {
+                return Err(TechnologyBindingError::UnsortedSourceClosure);
+            }
+        }
+        if !paths.contains(&self.root_source) {
+            return Err(TechnologyBindingError::RootAbsentFromClosure(
+                self.root_source.clone(),
+            ));
+        }
+        if self.source_closure.len() > 1 && self.source_edges.is_empty() {
+            return Err(TechnologyBindingError::MissingSourceEdges);
+        }
+        for (index, edge) in self.source_edges.iter().enumerate() {
+            if index > 0 && self.source_edges[index - 1] >= *edge {
+                return Err(TechnologyBindingError::UnsortedSourceEdges);
+            }
+            if !paths.contains(&edge.owner) || !paths.contains(&edge.target) {
+                return Err(TechnologyBindingError::SourceEdgeOutsideClosure);
+            }
+            rspice_core::netlist::normalize_source_path_literal(&edge.requested_path)
+                .map_err(|_| TechnologyBindingError::InvalidSourceEdge)?;
+        }
+        if let Some(unreachable) = crate::state::model_library::first_unreachable_source(
+            &self.root_source,
+            &self.source_closure,
+            &self.source_edges,
+        ) {
+            return Err(TechnologyBindingError::UnreachableSource(
+                unreachable.to_path_buf(),
+            ));
+        }
+        if self.model_count == 0 {
+            return Err(TechnologyBindingError::NoModels);
+        }
+        for (index, section) in self.process_sections.iter().enumerate() {
+            validate_technology_text("process_sections", section)?;
+            if index > 0 && self.process_sections[index - 1] >= *section {
+                return Err(TechnologyBindingError::UnsortedProcessSections);
+            }
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn display_label(&self) -> String {
+        let mut label = self.package_name.clone();
+        if let Some(version) = &self.package_version {
+            label.push_str(" · ");
+            label.push_str(version);
+        }
+        if let Some(node) = &self.technology_node {
+            label.push_str(" · ");
+            label.push_str(node);
+        }
+        label
+    }
+
+    #[must_use]
+    pub fn package_name(&self) -> &str {
+        &self.package_name
+    }
+
+    #[must_use]
+    pub fn package_version(&self) -> Option<&str> {
+        self.package_version.as_deref()
+    }
+
+    #[must_use]
+    pub fn technology_node(&self) -> Option<&str> {
+        self.technology_node.as_deref()
+    }
+
+    #[must_use]
+    pub fn model_library(&self) -> &str {
+        &self.model_library
+    }
+
+    #[must_use]
+    pub fn root_source(&self) -> &Path {
+        &self.root_source
+    }
+
+    #[must_use]
+    pub fn source_closure(&self) -> &[crate::state::model_library::ModelSourcePin] {
+        &self.source_closure
+    }
+
+    #[must_use]
+    pub fn source_edges(&self) -> &[crate::state::model_library::ModelSourceEdge] {
+        &self.source_edges
+    }
+
+    /// Prove that the mutable execution catalog still contains exactly the
+    /// technology contract accepted by the project. Re-parsing, refreshing,
+    /// or replacing a library must therefore invalidate the attachment until
+    /// the user explicitly accepts the new contract.
+    pub(crate) fn validate_model_library(
+        &self,
+        library: &crate::state::model_library::ModelLibrary,
+    ) -> Result<(), TechnologyBindingError> {
+        let observed = Self::from_model_library(library)?;
+        if &observed != self {
+            return Err(TechnologyBindingError::CatalogDrift {
+                library: self.model_library.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn model_count(&self) -> usize {
+        self.model_count
+    }
+
+    #[must_use]
+    pub fn process_sections(&self) -> &[String] {
+        &self.process_sections
+    }
+}
+
+fn validate_retained_model_sources(
+    library: &crate::state::model_library::ModelLibrary,
+) -> Result<(), TechnologyBindingError> {
+    if library.source_contents.len() != library.source_closure.len() {
+        return Err(TechnologyBindingError::MissingRetainedSourceBytes);
+    }
+    for (pin, content) in library.source_closure.iter().zip(&library.source_contents) {
+        if pin.path != content.path {
+            return Err(TechnologyBindingError::RetainedSourceIdentityMismatch);
+        }
+        let digest =
+            crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(&content.bytes).into());
+        if digest != pin.digest {
+            return Err(TechnologyBindingError::RetainedSourceDigestMismatch(
+                pin.path.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn nonempty_owned(value: &str) -> Option<String> {
+    (!value.trim().is_empty()).then(|| value.to_owned())
+}
+
+fn validate_technology_text(
+    field: &'static str,
+    value: &str,
+) -> Result<(), TechnologyBindingError> {
+    if value.is_empty() {
+        return Err(TechnologyBindingError::RequiredField(field));
+    }
+    if value != value.trim() {
+        return Err(TechnologyBindingError::SurroundingWhitespace(field));
+    }
+    if value.chars().count() > 240 {
+        return Err(TechnologyBindingError::FieldTooLong(field));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(TechnologyBindingError::ControlCharacter(field));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TechnologyBindingError {
+    #[error("technology binding schema {found} is unsupported; this build supports {supported}")]
+    UnsupportedSchema { found: u16, supported: u16 },
+    #[error("technology binding field {0} is required")]
+    RequiredField(&'static str),
+    #[error("technology binding field {0} must not begin or end with whitespace")]
+    SurroundingWhitespace(&'static str),
+    #[error("technology binding field {0} exceeds 240 Unicode scalar values")]
+    FieldTooLong(&'static str),
+    #[error("technology binding field {0} contains a control character")]
+    ControlCharacter(&'static str),
+    #[error("technology binding has no canonical root model source")]
+    MissingRootSource,
+    #[error("technology binding has no pinned model-source closure")]
+    EmptySourceClosure,
+    #[error("technology binding repeats pinned source {0}")]
+    DuplicateSource(PathBuf),
+    #[error("technology binding root {0} is absent from its pinned source closure")]
+    RootAbsentFromClosure(PathBuf),
+    #[error("technology binding source {0} is not an absolute portable path identity")]
+    NonAbsoluteSource(PathBuf),
+    #[error("technology binding source closure must be strictly sorted by canonical path")]
+    UnsortedSourceClosure,
+    #[error("multi-file technology binding has no authenticated dependency-resolution edges")]
+    MissingSourceEdges,
+    #[error("technology binding source edges must be strictly sorted and unique")]
+    UnsortedSourceEdges,
+    #[error("technology binding source edge references a source outside its pinned closure")]
+    SourceEdgeOutsideClosure,
+    #[error("technology binding contains an invalid source include path")]
+    InvalidSourceEdge,
+    #[error("technology binding source {0} is unreachable from its root")]
+    UnreachableSource(PathBuf),
+    #[error("technology binding process sections must be strictly sorted and unique")]
+    UnsortedProcessSections,
+    #[error("technology binding contains no parsed device models")]
+    NoModels,
+    #[error("technology binding does not retain exact bytes for every pinned model source")]
+    MissingRetainedSourceBytes,
+    #[error("technology binding retained source identities do not match their pinned closure")]
+    RetainedSourceIdentityMismatch,
+    #[error("technology binding retained bytes for {0} do not match their accepted digest")]
+    RetainedSourceDigestMismatch(PathBuf),
+    #[error(
+        "attached model library '{library}' no longer matches the accepted technology contract"
+    )]
+    CatalogDrift { library: String },
+}
+
 /// Metadata for the active RSpice project.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectDescriptor {
@@ -272,7 +582,12 @@ pub struct ProjectDescriptor {
     pub path: Option<PathBuf>,
     pub root_library: String,
     pub top_cell: String,
+    /// Legacy display-only attachment retained for schema-1 project and
+    /// session compatibility. New commits always pair it with the exact
+    /// structured binding below.
     pub technology: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    technology_binding: Option<ProjectTechnologyBinding>,
     pub description: String,
 }
 
@@ -295,6 +610,8 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             root_library: String,
             top_cell: String,
             technology: Option<String>,
+            #[serde(default)]
+            technology_binding: Option<ProjectTechnologyBinding>,
             description: String,
         }
 
@@ -336,6 +653,7 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
                     &descriptor.root_library,
                     &descriptor.top_cell,
                     &descriptor.technology,
+                    &descriptor.technology_binding,
                     &descriptor.description,
                 ))
                 .map_err(D::Error::custom)?;
@@ -358,6 +676,7 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             root_library: descriptor.root_library,
             top_cell: descriptor.top_cell,
             technology: descriptor.technology,
+            technology_binding: descriptor.technology_binding,
             description: descriptor.description,
         })
     }
@@ -374,6 +693,7 @@ impl Default for ProjectDescriptor {
             root_library: DEFAULT_PROJECT_LIBRARY.to_string(),
             top_cell: DEFAULT_TOP_CELL.to_string(),
             technology: None,
+            technology_binding: None,
             description: String::new(),
         }
     }
@@ -428,7 +748,39 @@ impl ProjectDescriptor {
         if self.top_cell.trim().is_empty() {
             return Err(ProjectDescriptorError::RequiredField("top_cell"));
         }
+        if let Some(binding) = &self.technology_binding {
+            binding.validate()?;
+            let expected_label = binding.display_label();
+            if self.technology.as_deref() != Some(expected_label.as_str()) {
+                return Err(ProjectDescriptorError::TechnologyLabelMismatch);
+            }
+        }
         Ok(())
+    }
+
+    #[must_use]
+    pub fn technology_binding(&self) -> Option<&ProjectTechnologyBinding> {
+        self.technology_binding.as_ref()
+    }
+
+    /// Attach an exact, validated technology contract as one atomic project
+    /// metadata revision. Reattaching the identical binding is a no-op.
+    pub fn attach_technology(
+        &mut self,
+        binding: ProjectTechnologyBinding,
+    ) -> Result<ObjectRevision, ProjectDescriptorError> {
+        binding.validate()?;
+        let label = binding.display_label();
+        if self.technology_binding.as_ref() == Some(&binding)
+            && self.technology.as_deref() == Some(label.as_str())
+        {
+            return Ok(self.revision);
+        }
+        let next_revision = self.revision.next()?;
+        self.technology = Some(label);
+        self.technology_binding = Some(binding);
+        self.revision = next_revision;
+        Ok(next_revision)
     }
 
     /// Validate the local portion of `project.name` from the frozen field
@@ -529,6 +881,10 @@ pub enum ProjectDescriptorError {
     PathSeparator(char),
     #[error("project field {0} is required")]
     RequiredField(&'static str),
+    #[error("legacy technology label does not match the exact project technology binding")]
+    TechnologyLabelMismatch,
+    #[error(transparent)]
+    Technology(#[from] TechnologyBindingError),
     #[error(transparent)]
     Revision(#[from] RevisionError),
 }
@@ -1381,7 +1737,9 @@ fn validate_raw_probe(expression: &str) -> Result<(), String> {
         || function.eq_ignore_ascii_case("I") && arguments.len() == 1
     {
         for argument in arguments {
-            validate_hierarchical_token(argument)?;
+            validate_hierarchical_token(argument).map_err(|error| {
+                format!("raw output must use V(node), V(node+, node-), or I(source): {error}")
+            })?;
         }
         Ok(())
     } else {
@@ -1531,6 +1889,22 @@ pub enum SimulationConfigurationError {
         index: usize,
         first_index: usize,
     },
+    #[error(
+        "simulation_plan_payloads[{plan_id}].regression_tolerances[{index}] is invalid: {message}"
+    )]
+    InvalidRegressionTolerance {
+        plan_id: SimulationPlanId,
+        index: usize,
+        message: String,
+    },
+    #[error(
+        "simulation_plan_payloads[{plan_id}].regression_tolerances[{index}] duplicates target owned by entry {first_index}"
+    )]
+    DuplicateRegressionTolerance {
+        plan_id: SimulationPlanId,
+        index: usize,
+        first_index: usize,
+    },
     #[error("simulation plan {plan_id} already owns a design variable named '{name}'")]
     DesignVariableNameConflict {
         plan_id: SimulationPlanId,
@@ -1549,6 +1923,140 @@ pub enum SimulationConfigurationError {
     MissingClonedAnalysisMapping { analysis_id: AnalysisInstanceId },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegressionComparisonMethod {
+    AbsoluteRelativeEnvelope,
+    PointwiseRelative,
+}
+
+impl RegressionComparisonMethod {
+    pub const ALL: [Self; 2] = [Self::AbsoluteRelativeEnvelope, Self::PointwiseRelative];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AbsoluteRelativeEnvelope => "Absolute + relative envelope",
+            Self::PointwiseRelative => "Pointwise relative",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegressionTargetKind {
+    Measurement,
+    Waveform,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegressionTargetSelector {
+    pub source_domain: AnalysisResultSourceDomain,
+    pub source_instance_id: AnalysisInstanceId,
+    pub kind: RegressionTargetKind,
+    pub name: String,
+    pub occurrence: u32,
+}
+
+impl RegressionTargetSelector {
+    fn validate(&self) -> Result<(), String> {
+        if self.source_domain == AnalysisResultSourceDomain::LegacyUnclassified {
+            return Err(
+                "legacy-unclassified result sources cannot own regression policy".to_owned(),
+            );
+        }
+        if self.name.trim().is_empty() {
+            return Err("target name must not be empty".to_owned());
+        }
+        if self.name != self.name.trim() {
+            return Err("target name must not have surrounding whitespace".to_owned());
+        }
+        if self.name.chars().any(char::is_control) {
+            return Err("target name must not contain control characters".to_owned());
+        }
+        if self.name.graphemes(true).count() > 256 {
+            return Err("target name exceeds 256 grapheme clusters".to_owned());
+        }
+        Ok(())
+    }
+
+    fn cloned_for_new_plan(
+        &self,
+        analysis_identity_map: &HashMap<AnalysisInstanceId, AnalysisInstanceId>,
+    ) -> Result<Self, AnalysisInstanceId> {
+        let mut cloned = self.clone();
+        if self.source_domain == AnalysisResultSourceDomain::SimulationPlan {
+            cloned.source_instance_id = analysis_identity_map
+                .get(&self.source_instance_id)
+                .copied()
+                .ok_or(self.source_instance_id)?;
+        }
+        Ok(cloned)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegressionComparisonWindow {
+    pub start: f64,
+    pub end: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegressionToleranceRule {
+    pub target: RegressionTargetSelector,
+    pub method: RegressionComparisonMethod,
+    /// Absolute value-domain tolerance in the target's retained base unit.
+    pub absolute_tolerance: f64,
+    /// Relative tolerance as a fraction (`0.005` = `0.5%`).
+    pub relative_tolerance: f64,
+    /// Maximum horizontal displacement in the waveform X-axis base unit.
+    pub time_skew_allowance: f64,
+    /// Optional inclusive X-axis comparison window. Measurements use `None`.
+    pub comparison_window: Option<RegressionComparisonWindow>,
+}
+
+impl RegressionToleranceRule {
+    pub fn validate(&self) -> Result<(), String> {
+        self.target.validate()?;
+        for (label, value) in [
+            ("absolute tolerance", self.absolute_tolerance),
+            ("relative tolerance", self.relative_tolerance),
+            ("time-skew allowance", self.time_skew_allowance),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!("{label} must be finite and nonnegative"));
+            }
+        }
+        if self.target.kind == RegressionTargetKind::Measurement
+            && (self.time_skew_allowance != 0.0 || self.comparison_window.is_some())
+        {
+            return Err(
+                "measurement targets cannot define time skew or a comparison window".to_owned(),
+            );
+        }
+        if let Some(window) = self.comparison_window {
+            if !window.start.is_finite() || !window.end.is_finite() {
+                return Err("comparison-window bounds must be finite".to_owned());
+            }
+            if window.start > window.end {
+                return Err("comparison-window start must not exceed its end".to_owned());
+            }
+        }
+        Ok(())
+    }
+
+    fn cloned_for_new_plan(
+        &self,
+        analysis_identity_map: &HashMap<AnalysisInstanceId, AnalysisInstanceId>,
+    ) -> Result<Self, AnalysisInstanceId> {
+        let mut cloned = self.clone();
+        cloned.target = self.target.cloned_for_new_plan(analysis_identity_map)?;
+        Ok(cloned)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SimulationPlanPayload {
@@ -1560,6 +2068,8 @@ pub struct SimulationPlanPayload {
     pub specs: Vec<SpecEntry>,
     #[serde(default)]
     pub regression_baseline_run: Option<RunId>,
+    #[serde(default)]
+    pub regression_tolerances: Vec<RegressionToleranceRule>,
 }
 
 /// Vec-backed because product UUID wrappers intentionally do not define an
@@ -1609,6 +2119,11 @@ pub struct ProjectWorkspace {
     /// session-local while the source itself is persisted with the project.
     #[serde(default, skip)]
     pub netlist_source_dirty: bool,
+    /// Runtime dirty state for project-owned metadata such as an exact
+    /// technology attachment. The binding itself persists in `project`.
+    #[serde(default, skip)]
+    #[doc(hidden)]
+    pub project_metadata_dirty: bool,
 }
 
 impl Default for ProjectWorkspace {
@@ -1629,6 +2144,7 @@ impl Default for ProjectWorkspace {
             netlist_source: None,
             netlist_source_path: None,
             netlist_source_dirty: false,
+            project_metadata_dirty: false,
         }
     }
 }
@@ -1718,6 +2234,28 @@ impl ProjectWorkspace {
                         first_index,
                     });
                 }
+            }
+
+            let mut regression_targets = Vec::<&RegressionTargetSelector>::new();
+            for (index, tolerance) in record.payload.regression_tolerances.iter().enumerate() {
+                tolerance.validate().map_err(|message| {
+                    SimulationConfigurationError::InvalidRegressionTolerance {
+                        plan_id,
+                        index,
+                        message,
+                    }
+                })?;
+                if let Some(first_index) = regression_targets
+                    .iter()
+                    .position(|target| **target == tolerance.target)
+                {
+                    return Err(SimulationConfigurationError::DuplicateRegressionTolerance {
+                        plan_id,
+                        index,
+                        first_index,
+                    });
+                }
+                regression_targets.push(&tolerance.target);
             }
         }
         Ok(())
@@ -1905,18 +2443,26 @@ impl ProjectWorkspace {
         } else {
             (Vec::new(), Vec::new(), Vec::new())
         };
-        let regression_baseline_run = if copy_regression_baseline {
-            source
-                .as_ref()
-                .and_then(|payload| payload.regression_baseline_run)
+        let (regression_baseline_run, regression_tolerances) = if copy_regression_baseline {
+            let source = source.as_ref().expect("copy request resolves source above");
+            let tolerances = source
+                .regression_tolerances
+                .iter()
+                .map(|rule| rule.cloned_for_new_plan(&remap))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|analysis_id| {
+                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                })?;
+            (source.regression_baseline_run, tolerances)
         } else {
-            None
+            (None, Vec::new())
         };
         let payload = SimulationPlanPayload {
             design_variables,
             saved_outputs,
             specs,
             regression_baseline_run,
+            regression_tolerances,
         };
         self.simulation_plan_payloads
             .push(SimulationPlanPayloadRecord {
@@ -2681,6 +3227,7 @@ impl ProjectWorkspace {
             schematic.is_dirty = false;
         }
         self.netlist_source_dirty = false;
+        self.project_metadata_dirty = false;
     }
 
     pub fn any_dirty(&self) -> bool {
@@ -2690,6 +3237,19 @@ impl ProjectWorkspace {
                 .values()
                 .any(|schematic| schematic.is_dirty)
             || self.netlist_source_dirty
+            || self.project_metadata_dirty
+    }
+
+    pub fn attach_technology(
+        &mut self,
+        binding: ProjectTechnologyBinding,
+    ) -> Result<ObjectRevision, ProjectDescriptorError> {
+        let before = self.project.revision();
+        let revision = self.project.attach_technology(binding)?;
+        if revision != before {
+            self.project_metadata_dirty = true;
+        }
+        Ok(revision)
     }
 
     pub fn set_netlist_source_dirty(&mut self, dirty: bool) {
@@ -3063,6 +3623,23 @@ mod tests {
         );
         let variable_id = variable.id;
         let output_id = output.id;
+        let regression_rule = RegressionToleranceRule {
+            target: RegressionTargetSelector {
+                source_domain: AnalysisResultSourceDomain::SimulationPlan,
+                source_instance_id: source_analysis,
+                kind: RegressionTargetKind::Waveform,
+                name: "v(out)".to_owned(),
+                occurrence: 0,
+            },
+            method: RegressionComparisonMethod::AbsoluteRelativeEnvelope,
+            absolute_tolerance: 0.01,
+            relative_tolerance: 0.005,
+            time_skew_allowance: 20e-6,
+            comparison_window: Some(RegressionComparisonWindow {
+                start: 0.0,
+                end: 20e-3,
+            }),
+        };
         workspace
             .simulation_plan_payloads
             .push(SimulationPlanPayloadRecord {
@@ -3070,6 +3647,8 @@ mod tests {
                 payload: SimulationPlanPayload {
                     design_variables: vec![variable],
                     saved_outputs: vec![output],
+                    regression_baseline_run: Some(RunId::new()),
+                    regression_tolerances: vec![regression_rule],
                     ..SimulationPlanPayload::default()
                 },
             });
@@ -3079,7 +3658,7 @@ mod tests {
                 source_plan_id,
                 cloned_plan_id,
                 true,
-                false,
+                true,
                 &[(source_analysis, cloned_analysis)],
             )
             .unwrap();
@@ -3091,6 +3670,18 @@ mod tests {
             DesignVariableScope::SelectedAnalysis { analysis_id }
                 if analysis_id == cloned_analysis
         ));
+        assert_eq!(cloned.regression_tolerances.len(), 1);
+        assert_eq!(
+            cloned.regression_tolerances[0].target.source_instance_id,
+            cloned_analysis
+        );
+        assert_eq!(
+            cloned.regression_tolerances[0].comparison_window,
+            Some(RegressionComparisonWindow {
+                start: 0.0,
+                end: 20e-3,
+            })
+        );
         assert!(matches!(
             cloned.saved_outputs[0].compatible_analyses,
             SavedOutputCompatibility::SelectedAnalysis { analysis_id }
@@ -3111,6 +3702,69 @@ mod tests {
             "10 kohm"
         );
         workspace.validate_simulation_configuration().unwrap();
+    }
+
+    #[test]
+    fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
+        let plan_id = SimulationPlanId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let rule = RegressionToleranceRule {
+            target: RegressionTargetSelector {
+                source_domain: AnalysisResultSourceDomain::ManualDeck,
+                source_instance_id: AnalysisInstanceId::new(),
+                kind: RegressionTargetKind::Waveform,
+                name: "v(out)".to_owned(),
+                occurrence: 0,
+            },
+            method: RegressionComparisonMethod::PointwiseRelative,
+            absolute_tolerance: 1e-3,
+            relative_tolerance: 0.02,
+            time_skew_allowance: 1e-6,
+            comparison_window: Some(RegressionComparisonWindow {
+                start: 0.0,
+                end: 1e-3,
+            }),
+        };
+        workspace
+            .ensure_active_plan_data(plan_id)
+            .regression_tolerances = vec![rule.clone()];
+        workspace.validate_simulation_configuration().unwrap();
+
+        let json = serde_json::to_string(&workspace).unwrap();
+        let restored: ProjectWorkspace = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            restored
+                .active_plan_data(plan_id)
+                .unwrap()
+                .regression_tolerances,
+            vec![rule]
+        );
+
+        let mut invalid = restored;
+        invalid
+            .active_plan_data_mut(plan_id)
+            .unwrap()
+            .regression_tolerances[0]
+            .comparison_window = Some(RegressionComparisonWindow {
+            start: 2.0,
+            end: 1.0,
+        });
+        assert!(matches!(
+            invalid.validate_simulation_configuration(),
+            Err(SimulationConfigurationError::InvalidRegressionTolerance { .. })
+        ));
+
+        let mut invalid_name = workspace;
+        invalid_name
+            .active_plan_data_mut(plan_id)
+            .unwrap()
+            .regression_tolerances[0]
+            .target
+            .name = "v(out)\u{1}".to_owned();
+        assert!(matches!(
+            invalid_name.validate_simulation_configuration(),
+            Err(SimulationConfigurationError::InvalidRegressionTolerance { .. })
+        ));
     }
 
     fn add_schematic_master(
@@ -3723,5 +4377,133 @@ mod tests {
         assert!(workspace.netlist_source_dirty);
         assert!(workspace.any_dirty());
         assert!(!workspace.return_to_generated_netlist());
+    }
+
+    fn technology_binding_fixture() -> ProjectTechnologyBinding {
+        let root = PathBuf::from(r"C:\qualified-pdk\models.lib");
+        ProjectTechnologyBinding {
+            schema_version: PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
+            package_name: "Qualified analog models".to_owned(),
+            package_version: Some("2026.07".to_owned()),
+            technology_node: Some("180 nm".to_owned()),
+            model_library: "qualified_analog".to_owned(),
+            root_source: root.clone(),
+            source_closure: vec![crate::state::model_library::ModelSourcePin {
+                path: root,
+                digest: crate::product::ContentDigest::from_bytes([0x4a; 32]),
+            }],
+            source_edges: Vec::new(),
+            model_count: 14,
+            process_sections: vec!["ff".to_owned(), "ss".to_owned(), "tt".to_owned()],
+        }
+    }
+
+    #[test]
+    fn technology_attachment_is_atomic_revisioned_and_idempotent() {
+        let mut project = ProjectDescriptor::default();
+        let initial_revision = project.revision();
+        let binding = technology_binding_fixture();
+
+        let committed = project
+            .attach_technology(binding.clone())
+            .expect("valid binding commits");
+        assert_eq!(committed.get(), initial_revision.get() + 1);
+        assert_eq!(project.technology_binding(), Some(&binding));
+        assert_eq!(
+            project.technology.as_deref(),
+            Some(binding.display_label().as_str())
+        );
+        assert_eq!(
+            project
+                .attach_technology(binding)
+                .expect("identical binding is a no-op"),
+            committed
+        );
+
+        let mut rejected = technology_binding_fixture();
+        rejected.model_count = 0;
+        let before = project.clone();
+        assert!(matches!(
+            project.attach_technology(rejected),
+            Err(ProjectDescriptorError::Technology(
+                TechnologyBindingError::NoModels
+            ))
+        ));
+        assert_eq!(project.revision(), before.revision());
+        assert_eq!(project.technology, before.technology);
+        assert_eq!(project.technology_binding(), before.technology_binding());
+    }
+
+    #[test]
+    fn attached_technology_detects_exact_catalog_drift() {
+        let root = PathBuf::from(r"C:\qualified-pdk\models.lib");
+        let bytes = b".model nch nmos level=1\n".to_vec();
+        let digest = crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(&bytes).into());
+        let mut library = crate::state::model_library::ModelLibrary::new("qualified_analog")
+            .with_technology("Qualified analog models", "180 nm");
+        library.version = "2026.07".to_owned();
+        library.root_path = Some(root.clone());
+        library.source_closure = vec![crate::state::model_library::ModelSourcePin {
+            path: root.clone(),
+            digest,
+        }];
+        library.source_contents =
+            vec![crate::state::model_library::ModelSourceContent { path: root, bytes }];
+        library.add_model(crate::state::model_library::DeviceModel::new(
+            "nch",
+            crate::state::model_library::ModelType::Nmos,
+        ));
+        let binding = ProjectTechnologyBinding::from_model_library(&library)
+            .expect("exact retained source is attachable");
+        binding
+            .validate_model_library(&library)
+            .expect("unchanged catalog matches");
+
+        library.version = "2026.08".to_owned();
+        assert!(matches!(
+            binding.validate_model_library(&library),
+            Err(TechnologyBindingError::CatalogDrift { .. })
+        ));
+    }
+
+    #[test]
+    fn technology_binding_persists_while_runtime_dirty_state_resets() {
+        let mut workspace = ProjectWorkspace::default();
+        let binding = technology_binding_fixture();
+        workspace
+            .attach_technology(binding.clone())
+            .expect("valid binding commits");
+        assert!(workspace.any_dirty());
+
+        let bytes = serde_json::to_vec(&workspace).expect("workspace serializes");
+        let restored: ProjectWorkspace =
+            serde_json::from_slice(&bytes).expect("workspace restores");
+
+        assert_eq!(restored.project.technology_binding(), Some(&binding));
+        restored
+            .project
+            .validate()
+            .expect("restored binding validates");
+        assert!(!restored.any_dirty());
+    }
+
+    #[test]
+    fn corrupted_persisted_technology_contract_fails_project_validation() {
+        let mut project = ProjectDescriptor::default();
+        project
+            .attach_technology(technology_binding_fixture())
+            .expect("fixture binding commits");
+        let mut encoded = serde_json::to_value(&project).expect("descriptor serializes");
+        encoded["technology_binding"]["root_source"] =
+            serde_json::Value::String("relative/models.lib".to_owned());
+        let restored: ProjectDescriptor =
+            serde_json::from_value(encoded).expect("descriptor shape restores");
+
+        assert!(matches!(
+            restored.validate(),
+            Err(ProjectDescriptorError::Technology(
+                TechnologyBindingError::NonAbsoluteSource(_)
+            ))
+        ));
     }
 }

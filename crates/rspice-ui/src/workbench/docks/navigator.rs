@@ -46,6 +46,7 @@ fn responsive_result_control_height(desktop_height: f32, control_height: f32) ->
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app);
     match app.state.workbench.workspace {
         Workspace::Design => design::show(ui, app),

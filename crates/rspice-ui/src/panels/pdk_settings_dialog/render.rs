@@ -89,12 +89,16 @@ pub fn render_pdk_settings_dialog(
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut load: Option<PathBuf> = None;
+            let mut import_browser_file = false;
             two_pane(ui, PANE_RAIL_W, PANE_HEIGHT, |ui, side| match side {
-                PaneSide::Rail => sources_rail(ui, state),
+                PaneSide::Rail => import_browser_file = sources_rail(ui, state),
                 PaneSide::Detail => load = detail_pane(ui, state),
             });
             if let Some(path) = load {
                 result = PdkSettingsDialogResult::LoadFile(path);
+            }
+            if import_browser_file {
+                result = PdkSettingsDialogResult::ImportBrowserFile;
             }
         });
 
@@ -131,9 +135,13 @@ pub fn render_pdk_settings_dialog(
 // left rail — sources + environment
 // ---------------------------------------------------------------------------
 
-fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
+fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    #[cfg(target_arch = "wasm32")]
+    let mut import_browser_file = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    let import_browser_file = false;
 
     pane_header(ui, |ui| {
         header_caption(ui, "Sources");
@@ -146,6 +154,10 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
                 && let Some(path) = rfd::FileDialog::new().pick_folder()
             {
                 state.add_library_path(path.to_string_lossy().to_string());
+            }
+            #[cfg(target_arch = "wasm32")]
+            if chip(ui, "Import file…", false).clicked() {
+                import_browser_file = true;
             }
             if chip(ui, "+ Add", false).clicked() {
                 state.adding_path = true;
@@ -291,6 +303,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
             }
         }
     }
+    import_browser_file
 }
 
 /// One source row: enable checkbox, elided mono path (click to edit),

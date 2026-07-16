@@ -1,8 +1,8 @@
 //! Application title bar and complete implemented menu taxonomy.
 
 use egui::{
-    Align, Context, Frame, Id, Key, Layout, Modifiers, PointerButton, Popup, Response, Sense,
-    TopBottomPanel, Ui, Vec2,
+    Align, Align2, Context, Frame, Id, Key, Layout, Modifiers, PointerButton, Popup, Rect,
+    Response, Sense, TopBottomPanel, Ui, Vec2,
 };
 
 use crate::common::RSpiceApp;
@@ -43,14 +43,19 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         .show_separator_line(false)
         .show(ctx, |ui| {
             let rect = ui.max_rect();
+            let account_initials = account_initials(app);
+            // Keep both one-pixel rules fully inside the panel clip. A stroke
+            // centered exactly on `rect.top()` loses half its coverage in the
+            // browser renderer and can disappear at common display scales.
+            let (separator_top, separator_bottom) = title_bar_separator_positions(rect);
             ui.painter().hline(
                 rect.x_range(),
-                rect.top(),
+                separator_top,
                 egui::Stroke::new(1.0, t.color.border_strong),
             );
             ui.painter().hline(
                 rect.x_range(),
-                rect.bottom(),
+                separator_bottom,
                 egui::Stroke::new(1.0, t.color.border),
             );
             ui.ctx().accesskit_node_builder(ui.id(), |node| {
@@ -84,12 +89,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     ui.add_space(if viewport_width <= 820.0 { 5.0 } else { 7.0 });
                     if viewport_width > 560.0 {
-                        if icon_action(
-                            ui,
-                            WorkbenchIcon::User,
-                            "Open account, organization, and licensing",
-                            large_targets,
-                        ) {
+                        if account_action(ui, &account_initials, large_targets) {
                             Command::AccountOrganization.execute(app);
                         }
                         if notification_action(
@@ -129,6 +129,13 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                 );
             });
         });
+}
+
+fn title_bar_separator_positions(rect: egui::Rect) -> (f32, f32) {
+    (
+        (rect.top() + 0.5).min(rect.bottom()),
+        (rect.bottom() - 0.5).max(rect.top()),
+    )
 }
 
 fn title_context_is_left_aligned(
@@ -1803,6 +1810,72 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str, large_target: bool
     response.on_hover_text(label).clicked()
 }
 
+fn account_initials(app: &RSpiceApp) -> String {
+    let Some(name) = app
+        .state
+        .license
+        .as_ref()
+        .map(|license| license.licensed_to.trim())
+        .filter(|name| !name.is_empty())
+    else {
+        return "RS".to_owned();
+    };
+    let words = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .collect::<Vec<_>>();
+    match words.as_slice() {
+        [] => "RS".to_owned(),
+        [first] => first.to_uppercase().collect(),
+        [first, .., last] => format!("{}{}", first.to_uppercase(), last.to_uppercase()),
+    }
+}
+
+fn account_action(ui: &mut Ui, initials: &str, large_target: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let target_size = if large_target {
+        Vec2::splat(44.0)
+    } else {
+        Vec2::new(28.0, 27.0)
+    };
+    let (target_rect, response) = ui.allocate_exact_size(target_size, Sense::click());
+    let label = "Open account, organization, and licensing";
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(target_rect, t.radius, t.color.bg_hover);
+    }
+    let avatar_rect = Rect::from_center_size(
+        target_rect.center(),
+        Vec2::splat(if large_target { 28.0 } else { 24.0 }),
+    );
+    ui.painter().circle_filled(
+        avatar_rect.center(),
+        avatar_rect.width() * 0.5,
+        t.color.bg_panel_2,
+    );
+    ui.painter().circle_stroke(
+        avatar_rect.center(),
+        avatar_rect.width() * 0.5,
+        egui::Stroke::new(1.0, t.color.border_strong),
+    );
+    ui.painter().text(
+        avatar_rect.center(),
+        Align2::CENTER_CENTER,
+        initials,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        if response.hovered() || response.has_focus() {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    theme::paint_focus_ring_outset(ui, &response, target_rect);
+    response.on_hover_text(label).clicked()
+}
+
 fn notification_action(ui: &mut Ui, unread_count: usize, large_target: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let size = if large_target {
@@ -1950,6 +2023,16 @@ mod tests {
             820.0,
             true
         ));
+    }
+
+    #[test]
+    fn title_bar_rules_remain_inside_the_browser_clip() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 7.0), egui::vec2(1_440.0, 35.0));
+        let (top, bottom) = title_bar_separator_positions(rect);
+        assert_eq!(top, 7.5);
+        assert_eq!(bottom, 41.5);
+        assert!(top > rect.top());
+        assert!(bottom < rect.bottom());
     }
 
     #[test]

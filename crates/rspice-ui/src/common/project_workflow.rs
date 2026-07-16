@@ -68,7 +68,8 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.workspace = workspace;
     state.schematic = schematic;
     state.clear_design_execution_context();
-    state.sim_setup = crate::common::app::SimSetupState::new();
+    state.sim_setup =
+        crate::common::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
     state.model_library_manager = crate::common::app::default_model_library_manager();
     state.browser_project_save_name = None;
     crate::common::project_lifecycle::reset_for_new_project(state);
@@ -350,27 +351,27 @@ struct BrowserProjectSaveCompletion {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SaveContinuationEvent {
-    CanonicalSaved(crate::common::project_lifecycle::TransactionId),
-    CanonicalSavedWithNewerChanges(crate::common::project_lifecycle::TransactionId),
-    CanonicalNotSaved(crate::common::project_lifecycle::TransactionId),
+    Saved(crate::common::project_lifecycle::TransactionId),
+    SavedWithNewerChanges(crate::common::project_lifecycle::TransactionId),
+    NotSaved(crate::common::project_lifecycle::TransactionId),
 }
 
 #[cfg(target_arch = "wasm32")]
 impl SaveContinuationEvent {
     pub(crate) fn transaction(self) -> crate::common::project_lifecycle::TransactionId {
         match self {
-            Self::CanonicalSaved(transaction)
-            | Self::CanonicalSavedWithNewerChanges(transaction)
-            | Self::CanonicalNotSaved(transaction) => transaction,
+            Self::Saved(transaction)
+            | Self::SavedWithNewerChanges(transaction)
+            | Self::NotSaved(transaction) => transaction,
         }
     }
 
     pub(crate) fn authorizes_destructive_action(self) -> bool {
-        matches!(self, Self::CanonicalSaved(_))
+        matches!(self, Self::Saved(_))
     }
 
     pub(crate) fn needs_another_save(self) -> bool {
-        matches!(self, Self::CanonicalSavedWithNewerChanges(_))
+        matches!(self, Self::SavedWithNewerChanges(_))
     }
 }
 
@@ -382,11 +383,7 @@ thread_local! {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveContinuationEvent> {
-    let Some(completion) =
-        BROWSER_PROJECT_SAVE_RESULTS.with(|queue| queue.borrow_mut().pop_front())
-    else {
-        return None;
-    };
+    let completion = BROWSER_PROJECT_SAVE_RESULTS.with(|queue| queue.borrow_mut().pop_front())?;
     let project_copy = completion.prepared.project_copy;
     let transaction = completion.prepared.transaction;
     let saved_scope = completion.prepared.scope;
@@ -408,7 +405,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             | crate::common::project_lifecycle::BrowserWriteResult::Failed(_) => {}
         }
         crate::common::project_lifecycle::cancel_transaction_if(state, transaction);
-        return (!project_copy).then_some(SaveContinuationEvent::CanonicalNotSaved(transaction));
+        return (!project_copy).then_some(SaveContinuationEvent::NotSaved(transaction));
     }
     let mut continuation = None;
     match completion.result {
@@ -423,14 +420,16 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         } => match crate::common::project_lifecycle::complete_browser_save(
             state,
             completion.prepared,
-            handle_id,
-            binding_id,
-            backend,
-            project_id,
-            generation,
-            display_name.clone(),
-            digest,
-            true,
+            crate::common::project_lifecycle::BrowserSavePublication {
+                handle_id,
+                binding_id,
+                backend,
+                project_id,
+                generation,
+                display_name: display_name.clone(),
+                digest,
+                durable: true,
+            },
         ) {
             Ok(()) => {
                 accept_browser_canonical_display_name(
@@ -457,7 +456,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             Err(error) => {
                 lifecycle_error(state, error, "Browser save completion failed");
                 if !project_copy {
-                    continuation = Some(SaveContinuationEvent::CanonicalNotSaved(transaction));
+                    continuation = Some(SaveContinuationEvent::NotSaved(transaction));
                 }
             }
         },
@@ -473,14 +472,16 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         } => match crate::common::project_lifecycle::complete_browser_save(
             state,
             completion.prepared,
-            handle_id,
-            binding_id,
-            backend,
-            project_id,
-            generation,
-            display_name.clone(),
-            digest,
-            false,
+            crate::common::project_lifecycle::BrowserSavePublication {
+                handle_id,
+                binding_id,
+                backend,
+                project_id,
+                generation,
+                display_name: display_name.clone(),
+                digest,
+                durable: false,
+            },
         ) {
             Ok(()) => {
                 accept_browser_canonical_display_name(
@@ -509,14 +510,14 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             Err(error) => {
                 lifecycle_error(state, error, "Browser save completion failed");
                 if !project_copy {
-                    continuation = Some(SaveContinuationEvent::CanonicalNotSaved(transaction));
+                    continuation = Some(SaveContinuationEvent::NotSaved(transaction));
                 }
             }
         },
         crate::common::project_lifecycle::BrowserWriteResult::Cancelled => {
             crate::common::project_lifecycle::cancel_transaction_if(state, transaction);
             if !project_copy {
-                continuation = Some(SaveContinuationEvent::CanonicalNotSaved(transaction));
+                continuation = Some(SaveContinuationEvent::NotSaved(transaction));
             }
         }
         crate::common::project_lifecycle::BrowserWriteResult::ExternalChange {
@@ -532,7 +533,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 "Browser project changed outside RSpice; reopen it or save an independent project copy",
             ));
             if !project_copy {
-                continuation = Some(SaveContinuationEvent::CanonicalNotSaved(transaction));
+                continuation = Some(SaveContinuationEvent::NotSaved(transaction));
             }
         }
         crate::common::project_lifecycle::BrowserWriteResult::Failed(error) => {
@@ -541,7 +542,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 "Browser project save failed: {error}"
             )));
             if !project_copy {
-                continuation = Some(SaveContinuationEvent::CanonicalNotSaved(transaction));
+                continuation = Some(SaveContinuationEvent::NotSaved(transaction));
             }
         }
     }
@@ -560,9 +561,9 @@ fn canonical_save_continuation_event(
         scope,
         saved_document,
     ) {
-        SaveContinuationEvent::CanonicalSaved(transaction)
+        SaveContinuationEvent::Saved(transaction)
     } else {
-        SaveContinuationEvent::CanonicalSavedWithNewerChanges(transaction)
+        SaveContinuationEvent::SavedWithNewerChanges(transaction)
     }
 }
 
@@ -723,7 +724,8 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.library_manager = libraries;
     state.workspace = workspace;
     state.schematic = schematic;
-    state.sim_setup = crate::common::app::SimSetupState::new();
+    state.sim_setup =
+        crate::common::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
     state.model_library_manager = crate::common::app::default_model_library_manager();
     state.browser_project_save_name = None;
     crate::common::project_lifecycle::mark_project_closed(state);
@@ -824,7 +826,9 @@ fn apply_loaded_project_authorized(
                 }
             },
             None => (
-                crate::common::app::SimSetupState::new(),
+                crate::common::app::SimSetupState::new_with_user_preferences(
+                    &state.ui.preferences,
+                ),
                 crate::common::app::default_model_library_manager(),
                 vec![
                     "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
@@ -1563,6 +1567,27 @@ mod tests {
                 .is_none()
         );
         assert!(state.model_library_manager.library_count() > 0);
+    }
+
+    #[test]
+    fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
+        use crate::simulation::dialog::IntegrationMethod;
+        use crate::workbench::ChoicePreference;
+
+        let mut state = AppState::default();
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::DefaultSolverPreset, 3)
+            .expect("Robust is a valid solver preset");
+
+        create_new_project(&mut state);
+
+        assert_eq!(state.sim_setup.options.itl1, 200);
+        assert_eq!(state.sim_setup.options.itl4, 20);
+        assert!(state.sim_setup.options.arc_length);
+        assert_eq!(state.sim_setup.options.method, IntegrationMethod::Gear2Only);
+        assert_eq!(state.sim_setup.options.temp, 27.0);
     }
 
     #[test]

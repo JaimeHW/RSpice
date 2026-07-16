@@ -271,7 +271,7 @@ pub(crate) enum BrowserOpenResult {
 pub(crate) enum BrowserRestoreResult {
     Missing,
     Restored {
-        baseline: ProjectFile,
+        baseline: Box<ProjectFile>,
         binding: PersistenceBinding,
     },
     ReconnectRequired {
@@ -467,13 +467,19 @@ fn browser_timeout_message(operation: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 struct RetainedBrowserEventHandlers {
     done: std::rc::Rc<std::cell::Cell<bool>>,
-    _callbacks: Vec<wasm_bindgen::closure::Closure<dyn FnMut()>>,
+    _callbacks: Vec<BrowserEventHandler>,
 }
+
+#[cfg(target_arch = "wasm32")]
+type BrowserEventHandler = wasm_bindgen::closure::Closure<dyn FnMut()>;
+
+#[cfg(target_arch = "wasm32")]
+type BrowserEventHandlerBinding = (&'static str, BrowserEventHandler);
 
 #[cfg(target_arch = "wasm32")]
 fn retain_browser_event_handlers(
     done: std::rc::Rc<std::cell::Cell<bool>>,
-    callbacks: Vec<wasm_bindgen::closure::Closure<dyn FnMut()>>,
+    callbacks: Vec<BrowserEventHandler>,
 ) -> Result<(), String> {
     RETAINED_BROWSER_EVENT_HANDLERS.with(|retained| {
         let mut retained = retained.borrow_mut();
@@ -793,16 +799,16 @@ pub(crate) fn start_browser_binding_persist(
                 return;
             }
         };
-        let result = persist_browser_binding(
+        let result = persist_browser_binding(BrowserBindingPersistRequest {
             binding_id,
             backend,
-            &project_id,
+            project_id: &project_id,
             accepted_generation,
-            persisted_generation,
-            &handle,
-            accepted_digest,
-            &display_name,
-        )
+            expected_generation: persisted_generation,
+            handle: &handle,
+            digest: accepted_digest,
+            display_name: &display_name,
+        })
         .await;
         let release = release_browser_web_lock(lock).await;
         if let Err(error) = &release {
@@ -929,25 +935,25 @@ async fn run_browser_write_locked(
             return BrowserWriteResult::Failed(error);
         }
     }
-    if persist_binding && browser_binding_store_supported() {
-        if let Err(error) = indexed_db_validate_generation(
+    if persist_binding
+        && browser_binding_store_supported()
+        && let Err(error) = indexed_db_validate_generation(
             target.binding_id,
             &target.project_id,
             target.backend,
             target.persisted_generation,
         )
         .await
-        {
-            let observed_digest = match read_browser_handle_bytes(handle).await {
-                Ok(current) => digest_bytes(&current),
-                Err(read_error) => {
-                    return BrowserWriteResult::Failed(format!(
-                        "{error}; current canonical bytes could not be inspected: {read_error}"
-                    ));
-                }
-            };
-            return BrowserWriteResult::ExternalChange { observed_digest };
-        }
+    {
+        let observed_digest = match read_browser_handle_bytes(handle).await {
+            Ok(current) => digest_bytes(&current),
+            Err(read_error) => {
+                return BrowserWriteResult::Failed(format!(
+                    "{error}; current canonical bytes could not be inspected: {read_error}"
+                ));
+            }
+        };
+        return BrowserWriteResult::ExternalChange { observed_digest };
     }
     let expected_before_commit = match read_browser_handle_bytes(handle).await {
         Ok(current) => {
@@ -1001,16 +1007,16 @@ async fn run_browser_write_locked(
     let handle_id = target.handle_id.expect("prepared browser handle");
     if persist_binding {
         let commit = classify_browser_binding_commit(
-            persist_browser_binding(
-                target.binding_id,
-                target.backend,
-                &target.project_id,
-                target.accepted_generation,
-                target.persisted_generation,
+            persist_browser_binding(BrowserBindingPersistRequest {
+                binding_id: target.binding_id,
+                backend: target.backend,
+                project_id: &target.project_id,
+                accepted_generation: target.accepted_generation,
+                expected_generation: target.persisted_generation,
                 handle,
-                staged_digest,
-                &display_name,
-            )
+                digest: staged_digest,
+                display_name: &display_name,
+            })
             .await,
         );
         if let BrowserBindingCommitOutcome::SessionOnly(error) = commit {
@@ -1384,7 +1390,7 @@ async fn restore_browser_binding(receipt: &BrowserBindingReceipt) -> BrowserRest
     baseline.workspace.project.path = None;
     let handle_id = register_browser_handle(handle);
     BrowserRestoreResult::Restored {
-        baseline,
+        baseline: Box::new(baseline),
         binding: PersistenceBinding::Browser {
             handle_id,
             binding_id: receipt.binding_id,
@@ -1399,16 +1405,29 @@ async fn restore_browser_binding(receipt: &BrowserBindingReceipt) -> BrowserRest
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn persist_browser_binding(
+struct BrowserBindingPersistRequest<'a> {
     binding_id: uuid::Uuid,
     backend: BrowserBindingBackend,
-    project_id: &str,
+    project_id: &'a str,
     accepted_generation: u64,
     expected_generation: Option<u64>,
-    handle: &wasm_bindgen::JsValue,
+    handle: &'a wasm_bindgen::JsValue,
     digest: ContentDigest,
-    display_name: &str,
-) -> Result<(), String> {
+    display_name: &'a str,
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn persist_browser_binding(request: BrowserBindingPersistRequest<'_>) -> Result<(), String> {
+    let BrowserBindingPersistRequest {
+        binding_id,
+        backend,
+        project_id,
+        accepted_generation,
+        expected_generation,
+        handle,
+        digest,
+        display_name,
+    } = request;
     if !browser_binding_store_supported() {
         return Err("IndexedDB handle persistence is unavailable".to_owned());
     }
@@ -1621,7 +1640,7 @@ async fn open_binding_database() -> Result<BrowserDatabase, String> {
 #[cfg(target_arch = "wasm32")]
 async fn indexed_db_get(key: &str) -> Result<Option<wasm_bindgen::JsValue>, String> {
     let database = open_binding_database().await?;
-    let result = async {
+    async {
         let transaction = call_value_method(
             &database.value,
             "transaction",
@@ -1639,8 +1658,7 @@ async fn indexed_db_get(key: &str) -> Result<Option<wasm_bindgen::JsValue>, Stri
         let value = await_idb_request(&request).await?;
         Ok((!value.is_undefined()).then_some(value))
     }
-    .await;
-    result
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1674,7 +1692,7 @@ async fn indexed_db_compare_exchange_put(
     next_generation: u64,
 ) -> Result<(), String> {
     let database = open_binding_database().await?;
-    let result = async {
+    async {
         let transaction = strict_readwrite_transaction(&database.value)?;
         let completion = await_idb_transaction(&transaction);
         let store = call_value_method(
@@ -1706,14 +1724,13 @@ async fn indexed_db_compare_exchange_put(
         let _ = await_idb_request(&put).await?;
         completion.await
     }
-    .await;
-    result
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]
 async fn indexed_db_delete(key: &str) -> Result<(), String> {
     let database = open_binding_database().await?;
-    let result = async {
+    async {
         let transaction = strict_readwrite_transaction(&database.value)?;
         let completion = await_idb_transaction(&transaction);
         let store = call_value_method(
@@ -1725,8 +1742,205 @@ async fn indexed_db_delete(key: &str) -> Result<(), String> {
         let _ = await_idb_request(&request).await?;
         completion.await
     }
-    .await;
-    result
+    .await
+}
+
+/// Publish one browser recovery checkpoint without putting project-sized
+/// bytes on the synchronous Web Storage path. Snapshot and manifest use
+/// separate strict IndexedDB transactions: exact snapshot readback succeeds
+/// before the small manifest becomes visible.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_checkpoint_publish(
+    project_prefix: String,
+    manifest_key: String,
+    snapshot_key: String,
+    snapshot: Vec<u8>,
+    manifest: String,
+    max_retained: usize,
+    complete: impl FnOnce(Result<(), String>) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = async {
+            indexed_db_add_unique(
+                &snapshot_key,
+                &js_sys::Uint8Array::from(snapshot.as_slice()).into(),
+            )
+            .await?;
+            let observed = indexed_db_get(&snapshot_key)
+                .await?
+                .ok_or_else(|| "IndexedDB did not retain project checkpoint bytes".to_owned())?;
+            let observed = js_sys::Uint8Array::new(&observed).to_vec();
+            if observed != snapshot {
+                let _ = indexed_db_delete(&snapshot_key).await;
+                return Err("IndexedDB checkpoint readback did not match staged bytes".to_owned());
+            }
+            if let Err(error) =
+                indexed_db_add_unique(&manifest_key, &wasm_bindgen::JsValue::from_str(&manifest))
+                    .await
+            {
+                let _ = indexed_db_delete(&snapshot_key).await;
+                return Err(error);
+            }
+            let committed = indexed_db_get(&manifest_key)
+                .await?
+                .and_then(|value| value.as_string())
+                .ok_or_else(|| "IndexedDB did not retain the checkpoint manifest".to_owned())?;
+            if committed != manifest {
+                let _ = indexed_db_delete(&manifest_key).await;
+                let _ = indexed_db_delete(&snapshot_key).await;
+                return Err(
+                    "IndexedDB checkpoint manifest readback did not match staged text".to_owned(),
+                );
+            }
+
+            let retention = async {
+                let mut manifests =
+                    indexed_db_matching_keys(&project_prefix, ".manifest").await?;
+                manifests.sort_by(|left, right| right.cmp(left));
+                for key in manifests.into_iter().skip(max_retained) {
+                    let snapshot = key
+                        .strip_suffix(".manifest")
+                        .map(|stem| format!("{stem}.snapshot"));
+                    indexed_db_delete(&key).await?;
+                    if let Some(snapshot) = snapshot {
+                        indexed_db_delete(&snapshot).await?;
+                    }
+                }
+                let manifest_keys = indexed_db_matching_keys(&project_prefix, ".manifest").await?;
+                let manifest_stems = manifest_keys
+                    .iter()
+                    .filter_map(|key| key.strip_suffix(".manifest"))
+                    .collect::<std::collections::HashSet<_>>();
+                let mut orphan_snapshots = indexed_db_matching_keys(&project_prefix, ".snapshot")
+                    .await?
+                    .into_iter()
+                    .filter(|key| {
+                        key.strip_suffix(".snapshot")
+                            .is_some_and(|stem| !manifest_stems.contains(stem))
+                    })
+                    .collect::<Vec<_>>();
+                orphan_snapshots.sort_by(|left, right| right.cmp(left));
+                for key in orphan_snapshots.into_iter().skip(max_retained) {
+                    indexed_db_delete(&key).await?;
+                }
+                Ok::<(), String>(())
+            }
+            .await;
+            if let Err(error) = retention {
+                log::warn!(
+                    "Browser project checkpoint committed, but retention cleanup was incomplete: {error}"
+                );
+            }
+            Ok(())
+        }
+        .await;
+        complete(result);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_checkpoint_list(
+    project_prefix: String,
+    complete: impl FnOnce(
+        Result<
+            (
+                Vec<(String, Option<String>, String, Option<Vec<u8>>)>,
+                Vec<String>,
+            ),
+            String,
+        >,
+    ) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = async {
+            let manifest_keys = indexed_db_matching_keys(&project_prefix, ".manifest").await?;
+            let mut records = Vec::with_capacity(manifest_keys.len());
+            let mut paired_snapshot_keys = std::collections::HashSet::new();
+            for manifest_key in manifest_keys {
+                let Some(stem) = manifest_key.strip_suffix(".manifest") else {
+                    continue;
+                };
+                let snapshot_key = format!("{stem}.snapshot");
+                paired_snapshot_keys.insert(snapshot_key.clone());
+                let manifest = indexed_db_get(&manifest_key)
+                    .await?
+                    .and_then(|value| value.as_string());
+                let snapshot = indexed_db_get(&snapshot_key)
+                    .await?
+                    .map(|value| js_sys::Uint8Array::new(&value).to_vec());
+                records.push((manifest_key, manifest, snapshot_key, snapshot));
+            }
+            let orphan_snapshots = indexed_db_matching_keys(&project_prefix, ".snapshot")
+                .await?
+                .into_iter()
+                .filter(|key| !paired_snapshot_keys.contains(key))
+                .collect();
+            Ok((records, orphan_snapshots))
+        }
+        .await;
+        complete(result);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_checkpoint_read(
+    snapshot_key: String,
+    complete: impl FnOnce(Result<Vec<u8>, String>) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = indexed_db_get(&snapshot_key).await.and_then(|value| {
+            value
+                .map(|value| js_sys::Uint8Array::new(&value).to_vec())
+                .ok_or_else(|| "browser project checkpoint snapshot is missing".to_owned())
+        });
+        complete(result);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn indexed_db_add_unique(key: &str, value: &wasm_bindgen::JsValue) -> Result<(), String> {
+    let database = open_binding_database().await?;
+    let transaction = strict_readwrite_transaction(&database.value)?;
+    let completion = await_idb_transaction(&transaction);
+    let store = call_value_method(
+        &transaction,
+        "objectStore",
+        &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
+    )?;
+    let request = call_value_method(
+        &store,
+        "add",
+        &[value.clone(), wasm_bindgen::JsValue::from_str(key)],
+    )?;
+    let _ = await_idb_request(&request).await.map_err(|error| {
+        format!("project checkpoint identity already exists or could not be reserved: {error}")
+    })?;
+    completion.await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn indexed_db_matching_keys(prefix: &str, suffix: &str) -> Result<Vec<String>, String> {
+    let database = open_binding_database().await?;
+    let transaction = call_value_method(
+        &database.value,
+        "transaction",
+        &[
+            wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE),
+            wasm_bindgen::JsValue::from_str("readonly"),
+        ],
+    )?;
+    let store = call_value_method(
+        &transaction,
+        "objectStore",
+        &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
+    )?;
+    let keys_request = call_value_method(&store, "getAllKeys", &[])?;
+    let keys = js_sys::Array::from(&await_idb_request(&keys_request).await?);
+    Ok(keys
+        .iter()
+        .filter_map(|key| key.as_string())
+        .filter(|key| key.starts_with(prefix) && key.ends_with(suffix))
+        .collect())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1863,7 +2077,7 @@ async fn await_idb_request(
 #[cfg(target_arch = "wasm32")]
 async fn await_idb_request_with_handlers(
     request: &wasm_bindgen::JsValue,
-    extra_handlers: Vec<(&'static str, wasm_bindgen::closure::Closure<dyn FnMut()>)>,
+    extra_handlers: Vec<BrowserEventHandlerBinding>,
 ) -> Result<wasm_bindgen::JsValue, String> {
     let success_request = request.clone();
     let error_request = request.clone();
@@ -2153,7 +2367,7 @@ fn validate_browser_read_handle(
     let name = js_sys::Reflect::get(handle, &wasm_bindgen::JsValue::from_str("name"))
         .map_err(js_error)?
         .as_string();
-    if !name.is_some_and(|name| !name.trim().is_empty()) {
+    if name.is_none_or(|name| name.trim().is_empty()) {
         return Err("browser project handle has no valid file name".to_owned());
     }
     let methods: &[&str] = if external {

@@ -46,6 +46,7 @@ fn finish_inspector_sections(ui: &mut Ui) {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app);
     ScrollArea::vertical()
         .id_salt("workbench.inspector.scroll")

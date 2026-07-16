@@ -27,13 +27,17 @@ pub(super) fn default_app_state() -> AppState {
         .cloned()
         .unwrap_or_else(crate::state::SchematicState::default);
     workspace.save_active_schematic(&schematic);
+    let sim_setup = super::SimSetupState::new();
+    if let Ok(plan) = sim_setup.stable_analysis_plan() {
+        workspace.migrate_active_plan_data(plan.id());
+    }
 
     AppState {
         schematic,
         simulation: crate::state::SimulationState::default(),
         design_execution_epoch: 0,
         dialogs: DialogState::default(),
-        sim_setup: super::SimSetupState::new(),
+        sim_setup,
         log_buffer: crate::panels::LogBuffer::default(),
         script_console: crate::panels::ScriptConsoleState::default(),
         library_manager,

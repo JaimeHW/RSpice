@@ -233,6 +233,20 @@ impl ProjectFile {
                 ProjectIoError::InvalidData(format!("execution context is invalid: {error}"))
             })?;
         }
+        if let Some(binding) = self.workspace.project.technology_binding() {
+            let context = self.execution_context.as_ref().ok_or_else(|| {
+                ProjectIoError::InvalidData(
+                    "attached technology requires an authoritative execution context".to_owned(),
+                )
+            })?;
+            context
+                .validate_technology_binding(binding)
+                .map_err(|error| {
+                    ProjectIoError::InvalidData(format!(
+                        "attached technology does not match the execution catalog: {error}"
+                    ))
+                })?;
+        }
         self.validate_simulation_configuration_references()?;
         Ok(())
     }
@@ -297,16 +311,16 @@ impl ProjectFile {
                     )));
                 }
             }
-            if let Some(run_id) = record.payload.regression_baseline_run
-                && !self
-                    .simulation_results
-                    .runs
-                    .iter()
-                    .any(|run| run.run_id == Some(run_id))
-            {
-                return Err(ProjectIoError::InvalidData(format!(
-                    "workspace.simulation_plan_payloads[{plan_id}].regression_baseline_run references retained run {run_id}, which is absent from result history"
-                )));
+            for (index, tolerance) in record.payload.regression_tolerances.iter().enumerate() {
+                if tolerance.target.source_domain
+                    == crate::state::AnalysisResultSourceDomain::SimulationPlan
+                    && plan.instance(tolerance.target.source_instance_id).is_none()
+                {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "workspace.simulation_plan_payloads[{plan_id}].regression_tolerances[{index}].target.source_instance_id references analysis {}, which is absent from its owning plan",
+                        tolerance.target.source_instance_id
+                    )));
+                }
             }
         }
 
@@ -329,6 +343,53 @@ impl ProjectFile {
             ));
         }
         Ok(())
+    }
+
+    fn validate_regression_baseline_eligibility(&self) -> Result<(), String> {
+        for record in &self.workspace.simulation_plan_payloads {
+            let Some(run_id) = record.payload.regression_baseline_run else {
+                continue;
+            };
+            let run = self
+                .simulation_results
+                .runs
+                .iter()
+                .find(|run| run.run_id == Some(run_id))
+                .ok_or_else(|| {
+                    format!(
+                        "simulation plan {} references regression baseline {run_id}, which is absent from retained result history",
+                        record.plan_id
+                    )
+                })?;
+            let receipt = run.prepared_receipt.as_ref().ok_or_else(|| {
+                format!("regression baseline {run_id} has no current prepared-run authority")
+            })?;
+            if run.provenance_mode.as_ref() != Some(&ProjectRunProvenanceMode::PreparedTaskBound)
+                || receipt.source_domain == AnalysisResultSourceDomain::LegacyUnclassified
+            {
+                return Err(format!(
+                    "regression baseline {run_id} is legacy or unclassified"
+                ));
+            }
+            if run.analyses.len() != receipt.tasks.len()
+                || run.analyses.iter().any(|analysis| !analysis.success)
+            {
+                return Err(format!(
+                    "regression baseline {run_id} is incomplete or unsuccessful"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn clear_regression_baseline_references(&mut self) -> usize {
+        let mut cleared = 0;
+        for record in &mut self.workspace.simulation_plan_payloads {
+            if record.payload.regression_baseline_run.take().is_some() {
+                cleared += 1;
+            }
+        }
+        cleared
     }
 
     /// Validate the cross-document edge from retained results to the exact
@@ -2816,7 +2877,7 @@ pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), Proje
     {
         crate::common::browser_download::download_text_file(path, &contents)
             .map_err(ProjectIoError::Io)?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2854,6 +2915,9 @@ pub(crate) fn serialize_project_file(project: &ProjectFile) -> Result<String, Pr
         .map_err(ProjectIoError::InvalidData)?;
     project
         .validate_result_plan_references()
+        .map_err(ProjectIoError::InvalidData)?;
+    project
+        .validate_regression_baseline_eligibility()
         .map_err(ProjectIoError::InvalidData)?;
     let mut contents = serde_json::to_string_pretty(project)
         .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
@@ -2911,8 +2975,14 @@ pub(crate) fn load_project_text(
     }
     if let Some(error) = simulation_results_error {
         project.simulation_results = ProjectSimulationResults::default();
+        let cleared = project.clear_regression_baseline_references();
         project.simulation_results_warning = Some(format!(
-            "Simulation results were not restored because their persisted data is invalid: {error}"
+            "Simulation results were not restored because their persisted data is invalid: {error}. Cleared {cleared} regression baseline reference(s) that could no longer be authenticated."
+        ));
+    } else if let Err(error) = project.validate_regression_baseline_eligibility() {
+        let cleared = project.clear_regression_baseline_references();
+        project.simulation_results_warning = Some(format!(
+            "Retained simulation results were restored, but {cleared} regression baseline reference(s) were cleared because the persisted selection is not eligible: {error}"
         ));
     }
     match source_path {
@@ -4438,6 +4508,92 @@ mod tests {
     }
 
     #[test]
+    fn project_load_clears_legacy_regression_baseline_after_result_migration() {
+        let mut project = project_with_execution_context();
+        let plan_id = project
+            .execution_context
+            .as_ref()
+            .expect("execution context")
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .id();
+        let mut run = SimulationRun::new(71);
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "legacy AC"));
+        seal_legacy_unattributed(&mut run);
+        let baseline_id = run.run_id;
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 71;
+        project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+        project
+            .workspace
+            .active_plan_data_mut(plan_id)
+            .expect("active plan payload")
+            .regression_baseline_run = Some(baseline_id);
+
+        let json = serde_json::to_string_pretty(&project).expect("legacy baseline fixture");
+        let loaded = load_project_text(&json, None).expect("project remains loadable");
+
+        assert_eq!(loaded.simulation_results.runs.len(), 1);
+        assert!(
+            loaded
+                .workspace
+                .active_plan_data(plan_id)
+                .expect("active plan payload")
+                .regression_baseline_run
+                .is_none()
+        );
+        assert!(
+            loaded
+                .simulation_results_warning
+                .as_deref()
+                .unwrap_or_default()
+                .contains("not eligible")
+        );
+        serialize_project_file(&loaded).expect("cleaned project reserializes");
+    }
+
+    #[test]
+    fn project_load_clears_dangling_regression_baseline_without_rejecting_project() {
+        let mut project = project_with_execution_context();
+        let plan_id = project
+            .execution_context
+            .as_ref()
+            .expect("execution context")
+            .simulation_plan
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .id();
+        project
+            .workspace
+            .active_plan_data_mut(plan_id)
+            .expect("active plan payload")
+            .regression_baseline_run = Some(crate::product::RunId::new());
+
+        let json = serde_json::to_string_pretty(&project).expect("dangling baseline fixture");
+        let loaded = load_project_text(&json, None).expect("project remains loadable");
+
+        assert!(loaded.simulation_results.is_empty());
+        assert!(
+            loaded
+                .workspace
+                .active_plan_data(plan_id)
+                .expect("active plan payload")
+                .regression_baseline_run
+                .is_none()
+        );
+        assert!(
+            loaded
+                .simulation_results_warning
+                .as_deref()
+                .unwrap_or_default()
+                .contains("absent from retained result history")
+        );
+        serialize_project_file(&loaded).expect("cleaned project reserializes");
+    }
+
+    #[test]
     fn project_text_load_drops_unknown_analysis_type_results_without_parse_failure() {
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
@@ -4995,6 +5151,10 @@ mod tests {
         descriptor.remove("id");
         descriptor.remove("schema_version");
         descriptor.remove("revision");
+        value["workspace"]
+            .as_object_mut()
+            .expect("workspace is an object")
+            .remove("simulation_plan_payloads");
         value["execution_context"]["schema_version"] = serde_json::Value::from(3_u32);
         let legacy_plan = value["execution_context"]["simulation_plan"]
             .as_object_mut()

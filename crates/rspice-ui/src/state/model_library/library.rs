@@ -14,6 +14,17 @@ pub struct ModelSourcePin {
     pub digest: crate::product::ContentDigest,
 }
 
+/// Authenticated bytes retained for one pinned source. Desktop execution
+/// still revalidates the live file, while browser execution uses these bytes
+/// because host filesystem paths are not available in WASM. Keeping the bytes
+/// in the project also makes recovery checkpoints self-contained.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSourceContent {
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
 /// One authenticated dependency-resolution edge captured at explicit import
 /// or refresh. Retaining the owning source and written path literal preserves
 /// symlink, filesystem case, and search-precedence behavior without consulting
@@ -65,6 +76,7 @@ pub(crate) fn is_portable_absolute_path(path: &Path) -> bool {
 
 /// Whether an otherwise-valid absolute identity belongs to another host path
 /// syntax and therefore must never be probed by this process.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn is_foreign_platform_absolute_path(path: &Path) -> bool {
     is_portable_absolute_path(path) && !path.is_absolute()
 }
@@ -114,6 +126,9 @@ pub struct ModelLibrary {
     /// been explicitly refreshed; unpinned external bindings are never runnable.
     #[serde(default)]
     pub source_closure: Vec<ModelSourcePin>,
+    /// Exact bytes corresponding one-for-one with `source_closure`.
+    #[serde(default)]
+    pub source_contents: Vec<ModelSourceContent>,
     /// Authenticated resolution graph for the accepted source closure.
     #[serde(default)]
     pub source_edges: Vec<ModelSourceEdge>,

@@ -6,6 +6,10 @@
 //! one tab from accidentally committing unrelated drafts.
 
 mod persistence;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use persistence::{
+    start_browser_checkpoint_list, start_browser_checkpoint_publish, start_browser_checkpoint_read,
+};
 mod registry;
 mod transaction;
 
@@ -465,7 +469,7 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
                 return;
             }
             state.project_lifecycle.accepted = Some(AcceptedProject {
-                baseline,
+                baseline: *baseline,
                 binding: Some(binding),
             });
             state.native_project_binding_receipt = None;
@@ -859,6 +863,18 @@ pub(crate) struct BrowserPreparedSave {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) struct BrowserSavePublication {
+    pub(crate) handle_id: u64,
+    pub(crate) binding_id: uuid::Uuid,
+    pub(crate) backend: BrowserBindingBackend,
+    pub(crate) project_id: String,
+    pub(crate) generation: u64,
+    pub(crate) display_name: String,
+    pub(crate) digest: ContentDigest,
+    pub(crate) durable: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn prepare_browser_save(
     state: &mut AppState,
     requested_scope: SaveScope,
@@ -944,8 +960,8 @@ pub(crate) fn prepare_browser_save(
                 .browser_conflict
                 .as_ref()
                 .map(|conflict| &conflict.binding))
-            .and_then(|binding| match binding {
-                PersistenceBinding::Browser { handle_id, .. } => Some(*handle_id),
+            .map(|binding| match binding {
+                PersistenceBinding::Browser { handle_id, .. } => *handle_id,
             });
         let project_id = candidate.workspace.project.id().to_string();
         let target = if let Some(PersistenceBinding::Browser {
@@ -1100,15 +1116,18 @@ fn clear_browser_handles() {
 pub(crate) fn complete_browser_save(
     state: &mut AppState,
     prepared: BrowserPreparedSave,
-    handle_id: u64,
-    binding_id: uuid::Uuid,
-    backend: BrowserBindingBackend,
-    project_id: String,
-    generation: u64,
-    display_name: String,
-    digest: ContentDigest,
-    durable: bool,
+    publication: BrowserSavePublication,
 ) -> Result<(), ProjectLifecycleError> {
+    let BrowserSavePublication {
+        handle_id,
+        binding_id,
+        backend,
+        project_id,
+        generation,
+        display_name,
+        digest,
+        durable,
+    } = publication;
     let current = state
         .project_lifecycle
         .transaction
@@ -1207,7 +1226,7 @@ fn finish_successful_save(
         // newly accepted bytes preserves any edits made while it was pending,
         // including project-descriptor edits, instead of overwriting them or
         // marking them clean.
-        return refresh_registry(state);
+        refresh_registry(state)
     }
     #[cfg(not(target_arch = "wasm32"))]
     match scope {

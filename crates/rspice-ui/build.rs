@@ -3,6 +3,16 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
+    // Development license material is an explicit build-profile capability,
+    // not a side effect of `debug_assertions` (which can be enabled for a
+    // release profile). Standard debug builds retain the signed sample-key
+    // workflow; every release and custom profile fails closed unless backed by
+    // a production ceremony key compiled into the application.
+    println!("cargo:rustc-check-cfg=cfg(rspice_development_build)");
+    if env::var("PROFILE").as_deref() == Ok("debug") {
+        println!("cargo:rustc-cfg=rspice_development_build");
+    }
+
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
 

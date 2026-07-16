@@ -316,6 +316,26 @@ impl SimSetupState {
         setup
     }
 
+    /// Create a fresh project-owned plan using the user's retained numerical
+    /// default. The resulting options are copied into the plan: later changes
+    /// to Preferences never mutate an existing plan or its reproducibility.
+    pub fn new_with_user_preferences(preferences: &crate::workbench::UserPreferences) -> Self {
+        use crate::workbench::ChoicePreference;
+
+        let mut setup = Self::new();
+        let mut options = match preferences.choice(ChoicePreference::DefaultSolverPreset) {
+            1 => crate::simulation::dialog::SimulationOptions::fast(),
+            2 => crate::simulation::dialog::SimulationOptions::accurate(),
+            3 => crate::simulation::dialog::SimulationOptions::robust(),
+            _ => crate::simulation::dialog::SimulationOptions::default(),
+        };
+        options.temp = setup.reference_pvt.temperature_celsius;
+        setup.options = options;
+        setup.options_draft =
+            crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
+        setup
+    }
+
     /// Return the exact deterministic execution order for the current run
     /// set. Persisted order wins; newly enabled analyses are appended in
     /// numeric order so legacy and direct-toggle callers remain deterministic.

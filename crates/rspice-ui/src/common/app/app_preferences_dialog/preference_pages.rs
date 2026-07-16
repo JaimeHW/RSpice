@@ -12,8 +12,8 @@ use crate::workbench::{
 };
 
 use super::preferences_shell::{
-    PreferenceCategory, actionable_scope_strip, page_heading, preference_switch, right_aligned,
-    section_label, segmented, setting_row,
+    PreferenceCategory, actionable_scope_strip, informational_scope_strip, page_heading,
+    preference_switch, right_aligned, section_label, segmented, setting_row,
 };
 use super::{AppState, PreferencePageActions};
 
@@ -697,17 +697,25 @@ fn schematic(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     );
 }
 
-fn simulation(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
+fn simulation(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
     resolved_scope_strip(
         ui,
         actions,
-        "Per plan",
-        "only explicit plan-owned simulation settings are currently enforced",
+        "User default + plan",
+        "the retained preset initializes new projects; each plan then owns its exact numerical options",
     );
     page_heading(
         ui,
-        "Simulation configuration",
-        "Numerical, failure-handling and execution settings are configured and retained by each simulation plan.",
+        "Simulation defaults",
+        "Execution targets, numerical policy and failure handling.",
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::DefaultSolverPreset,
+        "Default solver preset",
+        "Individual plans may override this value.",
+        &["Balanced", "Fast", "Accurate", "Robust"],
     );
 }
 
@@ -847,12 +855,11 @@ fn compute(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActio
     );
 }
 
-fn security(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
+fn security(ui: &mut Ui, _state: &mut AppState, _actions: &mut PreferencePageActions) {
+    informational_scope_strip(
         ui,
-        actions,
         "Runtime capability",
-        "no credential, trust, diagnostic, or organization-policy service is attached",
+        "no credential vault, certificate store, proxy provider, or crash-report transport is registered",
     );
     page_heading(
         ui,
@@ -861,12 +868,11 @@ fn security(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActi
     );
 }
 
-fn integrations(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
+fn integrations(ui: &mut Ui, _state: &mut AppState, _actions: &mut PreferencePageActions) {
+    informational_scope_strip(
         ui,
-        actions,
         "Runtime capability",
-        "no integration or extension provider is registered",
+        "no integration registry, signed-extension loader, Python IPC host, or webhook delivery service is registered",
     );
     page_heading(
         ui,
@@ -940,7 +946,6 @@ mod tests {
             .next()
             .expect("production source precedes tests");
         for unsupported in [
-            "ChoicePreference::DefaultSolverPreset",
             "ScalarPreference::LocalParallelSlots",
             "ChoicePreference::DefaultComputeTarget",
             "ScalarPreference::ParallelTaskCeiling",
@@ -967,6 +972,59 @@ mod tests {
                 "fabricated runtime fixture leaked into Preferences: {fabricated}"
             );
         }
+    }
+
+    #[test]
+    fn simulation_page_exposes_only_the_runtime_consumed_mockup_default() {
+        let source = include_str!("preference_pages.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source precedes tests");
+        let simulation = production
+            .split("fn simulation(")
+            .nth(1)
+            .and_then(|source| source.split("fn results(").next())
+            .expect("Simulation page source");
+
+        assert!(simulation.contains("Default solver preset"));
+        assert!(simulation.contains("ChoicePreference::DefaultSolverPreset"));
+        for missing_backend in [
+            "Local parallel slots",
+            "Convergence failure",
+            "Checkpoint policy",
+        ] {
+            assert!(
+                !simulation.contains(missing_backend),
+                "unsupported Simulation row was exposed: {missing_backend}"
+            );
+        }
+    }
+
+    #[test]
+    fn unavailable_provider_pages_do_not_offer_empty_policy_actions() {
+        let source = include_str!("preference_pages.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source precedes tests");
+        let security = production
+            .split("fn security(")
+            .nth(1)
+            .and_then(|source| source.split("fn integrations(").next())
+            .expect("Security page source");
+        let integrations = production
+            .split("fn integrations(")
+            .nth(1)
+            .and_then(|source| source.split("fn accessibility(").next())
+            .expect("Integrations page source");
+
+        assert!(security.contains("informational_scope_strip"));
+        assert!(security.contains("credential vault"));
+        assert!(!security.contains("resolved_scope_strip"));
+        assert!(integrations.contains("informational_scope_strip"));
+        assert!(integrations.contains("integration registry"));
+        assert!(!integrations.contains("resolved_scope_strip"));
     }
 
     #[test]

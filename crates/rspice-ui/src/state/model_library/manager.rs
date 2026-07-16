@@ -3,9 +3,11 @@ use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::is_foreign_platform_absolute_path;
 use super::{
-    DeviceModel, ModelLevel, ModelLibrary, ModelSourceEdge, ModelSourcePin, ModelType,
-    ProcessCorner, first_unreachable_source, is_foreign_platform_absolute_path,
+    DeviceModel, ModelLevel, ModelLibrary, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
+    ModelType, ProcessCorner, first_unreachable_source,
 };
 use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
 
@@ -283,6 +285,15 @@ impl ModelLibraryManager {
             })
             .collect::<Vec<_>>();
         source_closure.sort_by(|left, right| left.path.cmp(&right.path));
+        let mut source_contents = result
+            .resolved_sources
+            .iter()
+            .map(|source| ModelSourceContent {
+                path: source.path.clone(),
+                bytes: source.bytes.as_ref().to_vec(),
+            })
+            .collect::<Vec<_>>();
+        source_contents.sort_by(|left, right| left.path.cmp(&right.path));
         if source_closure.is_empty() {
             return Err(format!(
                 "Model library '{}' produced an empty source dependency closure",
@@ -328,6 +339,7 @@ impl ModelLibraryManager {
             .unwrap_or_else(|| ModelLibrary::new(&lib_name));
         library.root_path = Some(path.clone());
         library.source_closure = source_closure;
+        library.source_contents = source_contents;
         library.source_edges = source_edges;
         library.models.clear();
         library.corners.clear();
@@ -387,6 +399,116 @@ impl ModelLibraryManager {
         Ok(lib_name)
     }
 
+    /// Import one self-contained model source from authenticated bytes.
+    ///
+    /// This is the browser/mobile counterpart to `load_library_file`. Includes
+    /// fail closed because a single-file picker cannot prove dependency bytes;
+    /// multi-file libraries must arrive in a project whose complete retained
+    /// source closure was captured by the desktop importer.
+    pub fn load_library_bytes(
+        &mut self,
+        file_name: &str,
+        bytes: Vec<u8>,
+        section: Option<&str>,
+    ) -> Result<String, String> {
+        use rspice_core::library::LibParser;
+
+        let safe_name = std::path::Path::new(file_name)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| "Model library upload has no valid file name".to_owned())?;
+        let lib_name = std::path::Path::new(safe_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("uploaded-models")
+            .to_owned();
+        let digest = crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
+        let root = PathBuf::from(format!(
+            "/rspice-browser/model-sources/{digest}/{safe_name}"
+        ));
+        let content = rspice_core::netlist::decode_source_bytes(&bytes)
+            .map_err(|error| format!("Uploaded model source cannot be decoded: {error}"))?;
+        let mut parser = LibParser::new(root.parent().unwrap_or(std::path::Path::new("/")));
+        let result = parser.parse_string(&content);
+        if !result.is_ok() {
+            return Err(format!(
+                "Uploaded model library contains parse or unresolved dependency errors: {}",
+                result
+                    .errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
+
+        let mut library = ModelLibrary::new(&lib_name);
+        library.root_path = Some(root.clone());
+        library.source_closure = vec![ModelSourcePin {
+            path: root.clone(),
+            digest,
+        }];
+        library.source_contents = vec![ModelSourceContent {
+            path: root.clone(),
+            bytes,
+        }];
+        library.corners.clear();
+        for section_name in result.section_names() {
+            let corner = ProcessCorner {
+                name: section_name.to_owned(),
+                description: format!("Process corner from {lib_name}"),
+                file_path: Some(root.clone()),
+                is_default: false,
+                ..ProcessCorner::default()
+            };
+            library.corners.insert(corner.name.clone(), corner);
+        }
+        let section_names = result.section_names();
+        let selected_section = section.map(str::to_owned).or_else(|| {
+            section_names
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case("tt"))
+                .or_else(|| section_names.first())
+                .map(|name| (*name).to_owned())
+        });
+        for model in &result.top_level_models {
+            let device_model = Self::convert_parsed_model(model, &root);
+            library
+                .models
+                .insert(device_model.name.clone(), device_model);
+        }
+        if let Some(section_name) = selected_section.as_deref() {
+            let lib_section = result.get_section(section_name).ok_or_else(|| {
+                format!(
+                    "Section '{section_name}' not found. Available: {:?}",
+                    result.section_names()
+                )
+            })?;
+            for model in &lib_section.models {
+                let device_model = Self::convert_parsed_model(model, &root);
+                library
+                    .models
+                    .insert(device_model.name.clone(), device_model);
+            }
+            library.selected_corner = Some(lib_section.name.clone());
+            if let Some(corner) = library.corners.get_mut(&lib_section.name) {
+                corner.is_default = true;
+            }
+        }
+        if library.models.is_empty() {
+            return Err("Uploaded model library contains no supported device models".to_owned());
+        }
+        if self.libraries.contains_key(&lib_name) {
+            return Err(format!(
+                "Model library '{lib_name}' already exists; remove it before importing replacement bytes"
+            ));
+        }
+        self.libraries.insert(lib_name.clone(), library);
+        Ok(lib_name)
+    }
+
     /// Compute the canonical SHA-256 identity used to pin an external model
     /// source. Callers compare this value with the digest stored by the last
     /// explicit load/refresh; computing it never accepts new content.
@@ -399,6 +521,28 @@ impl ModelLibraryManager {
         Ok(crate::product::ContentDigest::from_bytes(
             Sha256::digest(&bytes).into(),
         ))
+    }
+
+    /// Prove that the project-owned technology attachment still names the
+    /// exact live execution catalog entry accepted at attachment time.
+    pub fn validate_attached_technology(
+        &self,
+        binding: Option<&crate::state::ProjectTechnologyBinding>,
+    ) -> Result<(), String> {
+        let Some(binding) = binding else {
+            return Ok(());
+        };
+        let library = self.get_library(binding.model_library()).ok_or_else(|| {
+            format!(
+                "Attached technology library '{}' was removed; reattach an authenticated model library before simulation",
+                binding.model_library()
+            )
+        })?;
+        binding.validate_model_library(library).map_err(|error| {
+            format!(
+                "Attached technology contract is stale: {error}. Reattach the current model library before simulation"
+            )
+        })
     }
 
     /// Build one all-or-nothing source snapshot for a simulation run.
@@ -416,6 +560,7 @@ impl ModelLibraryManager {
 
         let mut expected_sources =
             BTreeMap::<PathBuf, (crate::product::ContentDigest, Vec<String>)>::new();
+        let mut retained_sources = BTreeMap::<PathBuf, Vec<u8>>::new();
         let mut expected_edges = BTreeMap::<(PathBuf, String), PathBuf>::new();
         let mut sealed_libraries = Vec::with_capacity(libraries.len());
         for library in libraries {
@@ -449,6 +594,7 @@ impl ModelLibraryManager {
                 .collect::<HashSet<_>>();
 
             for source in &library.source_closure {
+                #[cfg(not(target_arch = "wasm32"))]
                 if is_foreign_platform_absolute_path(&source.path) {
                     return Err(format!(
                         "Model library '{}' retains foreign-platform dependency '{}', which is unavailable on this host; re-import or repair the binding before simulation",
@@ -456,7 +602,7 @@ impl ModelLibraryManager {
                         source.path.display()
                     ));
                 }
-                if !source.path.is_absolute() {
+                if !super::is_portable_absolute_path(&source.path) {
                     return Err(format!(
                         "Model library '{}' has a non-canonical dependency path '{}'; refresh or re-import it before simulation",
                         library.name,
@@ -534,6 +680,47 @@ impl ModelLibraryManager {
                     expected_edges.insert(key, edge.target.clone());
                 }
             }
+            if !library.source_contents.is_empty() {
+                if library.source_contents.len() != library.source_closure.len() {
+                    return Err(format!(
+                        "Model library '{}' does not retain exact bytes for every pinned source; refresh or re-import it",
+                        library.name
+                    ));
+                }
+                for (pin, content) in library.source_closure.iter().zip(&library.source_contents) {
+                    if pin.path != content.path {
+                        return Err(format!(
+                            "Model library '{}' retained source-byte identity does not match '{}'",
+                            library.name,
+                            pin.path.display()
+                        ));
+                    }
+                    let actual = crate::product::ContentDigest::from_bytes(
+                        Sha256::digest(&content.bytes).into(),
+                    );
+                    if actual != pin.digest {
+                        return Err(format!(
+                            "Model library '{}' retained bytes for '{}' do not match the accepted digest",
+                            library.name,
+                            pin.path.display()
+                        ));
+                    }
+                    match retained_sources.entry(content.path.clone()) {
+                        std::collections::btree_map::Entry::Vacant(entry) => {
+                            entry.insert(content.bytes.clone());
+                        }
+                        std::collections::btree_map::Entry::Occupied(entry)
+                            if entry.get() != &content.bytes =>
+                        {
+                            return Err(format!(
+                                "Model libraries retain different bytes for shared dependency '{}'",
+                                content.path.display()
+                            ));
+                        }
+                        std::collections::btree_map::Entry::Occupied(_) => {}
+                    }
+                }
+            }
 
             let mut sections = library
                 .corners
@@ -559,15 +746,6 @@ impl ModelLibraryManager {
                     requested_path
                 ));
             }
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        if let Some(library) = sealed_libraries.first() {
-            return Err(format!(
-                "Model library '{}' retains its pinned desktop source closure rooted at '{}', but browser builds cannot access desktop file paths; re-import the model source through an available browser workflow before simulation",
-                library.name,
-                library.root_path.display()
-            ));
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -601,7 +779,35 @@ impl ModelLibraryManager {
         };
 
         #[cfg(target_arch = "wasm32")]
-        let authenticated_sources = Vec::<(PathBuf, String)>::new();
+        let authenticated_sources = {
+            let mut authenticated_sources = Vec::with_capacity(expected_sources.len());
+            for (path, (expected_digest, owners)) in expected_sources {
+                let bytes = retained_sources.remove(&path).ok_or_else(|| {
+                    format!(
+                        "Model library dependency '{}' (used by {}) has no retained browser source bytes; re-import the library",
+                        path.display(),
+                        owners.join(", ")
+                    )
+                })?;
+                let actual_digest =
+                    crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
+                if actual_digest != expected_digest {
+                    return Err(format!(
+                        "Retained browser model dependency '{}' no longer matches its accepted digest",
+                        path.display()
+                    ));
+                }
+                let content =
+                    rspice_core::netlist::decode_source_bytes(&bytes).map_err(|error| {
+                        format!(
+                            "Pinned browser model dependency '{}' cannot be decoded: {error}",
+                            path.display()
+                        )
+                    })?;
+                authenticated_sources.push((path, content));
+            }
+            authenticated_sources
+        };
 
         let edges = expected_edges
             .into_iter()
@@ -778,6 +984,24 @@ mod tests {
         )
         .expect("write model fixture");
         (directory, path)
+    }
+
+    #[test]
+    fn byte_backed_import_retains_exact_execution_authority() {
+        let bytes = b".model nch NMOS (LEVEL=1 KP=1e-3)\n".to_vec();
+        let mut manager = ModelLibraryManager::new();
+        let name = manager
+            .load_library_bytes("browser-models.lib", bytes.clone(), None)
+            .expect("self-contained byte source imports");
+        let library = manager.get_library(&name).expect("library retained");
+        assert_eq!(library.source_closure.len(), 1);
+        assert_eq!(library.source_contents.len(), 1);
+        assert_eq!(library.source_contents[0].bytes, bytes);
+        let binding = crate::state::ProjectTechnologyBinding::from_model_library(library)
+            .expect("byte-backed library is attachable");
+        manager
+            .validate_attached_technology(Some(&binding))
+            .expect("unchanged byte-backed catalog matches attachment");
     }
 
     #[test]

@@ -10,32 +10,33 @@ use crate::simulation::plan::{
     AnalysisDependency, AnalysisDraft, AnalysisKind, AnalysisLifecycleCommand,
     AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
 };
+use crate::simulation::{SavedOutputSemanticStatus, SavedOutputStorageEstimate};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, IconButton, mono_input, select,
+};
+use crate::workbench::state::{
+    ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationWorkflowDialog,
+};
 
 use super::super::commands::Command;
 use super::super::design_system::{
     WorkbenchIcon, heading, property_row, status_dot, workspace_title_row,
 };
 
-const PLAN_NAME: &str = "Lab characterization";
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
 const SIMULATION_SPLIT_MIN_WIDTH: f32 = 506.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
 const PREFLIGHT_CELL_HEIGHT: f32 = 42.0;
 const STACKED_WORKSPACE_GAP: f32 = 9.0;
-const ANALYSIS_CATALOG_MAX_WIDTH: f32 = 1_180.0;
-const ANALYSIS_CATALOG_MAX_HEIGHT: f32 = 780.0;
+const SETUP_CARD_HEADER_HEIGHT: f32 = 37.0;
+const SETUP_TABLE_HEADER_HEIGHT: f32 = 27.0;
 const ANALYSIS_CATALOG_GROUP_HEIGHT: f32 = 29.0;
 const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
-const ANALYSIS_CATALOG_PHONE_ROW_HEIGHT: f32 = 72.0;
 const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 142.0;
-const ANALYSIS_CATALOG_WINDOW_CHROME_X: f32 = 26.0;
-const ANALYSIS_CATALOG_WINDOW_CHROME_Y: f32 = 51.0;
-const ANALYSIS_CATALOG_COMPACT_WINDOW_CHROME_Y: f32 = 66.0;
 const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
     "Core analyses",
     "Transfer & linearization",
@@ -71,6 +72,13 @@ struct AnalysisStackRow {
     issue_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AnalysisCatalogRowLayout {
+    height: f32,
+    draw_bottom_border: bool,
+    draw_right_border: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum AnalysisAction {
     Clone,
@@ -89,6 +97,13 @@ enum StackAction {
     Insert(AnalysisKind),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupCardBorder {
+    All,
+    SplitLeft,
+    SplitRight,
+}
+
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Err(error) = resolve_active_analysis_instance(app) {
         record_failure(app, "Analysis selection", &error);
@@ -96,25 +111,30 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
-        let surface_width = ui.available_width();
         ScrollArea::vertical()
             .id_salt("workbench.simulate.surface")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                // Resolve the content width after the scroll area has reserved
+                // its solid scrollbar track. Reusing the outer width clips the
+                // right edge beneath that track.
+                let surface_width = ui.available_width();
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
                 workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
                 analysis_workspace(ui, app, surface_width);
             });
     });
+    simulation_workflow_dialog(ui.ctx(), app);
 }
 
 fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let viewport_width = ui.ctx().content_rect().width();
-    if analysis_workspace_is_split(viewport_width, surface_width) {
+    let responsive_width = viewport_width.min(surface_width);
+    if analysis_workspace_is_split(responsive_width, surface_width) {
         let divider = 1.0;
         let available = ui.available_width();
-        let (left_width, right_width) = analysis_split_widths(available, viewport_width);
+        let (left_width, right_width) = analysis_split_widths(available, responsive_width);
         let column_min_height =
             analysis_column_min_height(ui.clip_rect().bottom(), ui.cursor().top());
         let stack_background = ui.painter().add(egui::Shape::Noop);
@@ -127,7 +147,7 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             ui.allocate_ui_with_layout(
                 vec2(right_width, column_min_height),
                 Layout::top_down(Align::Min),
-                |ui| analysis_editor(ui, app, viewport_width),
+                |ui| analysis_editor(ui, app, responsive_width),
             );
         });
         ui.painter().set(
@@ -141,7 +161,7 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     } else {
         ordered_instance_stack(ui, app);
         ui.add_space(STACKED_WORKSPACE_GAP);
-        analysis_editor(ui, app, viewport_width);
+        analysis_editor(ui, app, responsive_width);
     }
 }
 
@@ -515,48 +535,98 @@ fn analysis_catalog_window(
         return;
     }
 
-    let mut open = true;
     let mut query = app.state.sim_setup.palette_query.clone();
     let mut active = app.state.sim_setup.palette_active;
     let mut chosen = None;
     let mut request_close = false;
     let scroll_to_active = app.state.sim_setup.palette_scroll_to_active;
-    let dialog_size = analysis_catalog_content_size(ctx.content_rect().size());
-    let dialog_width = dialog_size.x;
-    let dialog_height = dialog_size.y;
     let catalog_columns = analysis_catalog_column_count(ctx.content_rect().width());
-    egui::Window::new("Add analysis")
-        .id(egui::Id::new("workbench.simulate.analysis_catalog"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .default_size(vec2(dialog_width, dialog_height))
-        .min_width(dialog_width)
-        .max_width(dialog_width)
-        .min_height(dialog_height)
-        .max_height(dialog_height)
-        .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new("ANALYSIS CATALOG")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(Tokens::get(ui.ctx()).color.accent),
+    let choice = Dialog::new("Simulation Studio", "Add analysis or workflow", "Close")
+        .description(
+            "Search and add an explicitly classified solver, run-set controller, measurement, check, or optimization workflow.",
+        )
+        .size(DialogSize::AnalysisCatalog)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .primary_on_enter(false)
+        .flush_body()
+        .manual_body_scroll()
+        .hint(
+            "Solvers, run-set controllers, measurements, checks, and optimization workflows are classified explicitly.",
+        )
+        .note_only_footer()
+        .show_with_initial_body_focus(ctx, |ui| {
+            let t = Tokens::get(ui.ctx());
+            let mut search_id = None;
+            egui::Frame::NONE
+                .fill(t.color.bg_inset)
+                .show(ui, |ui| {
+                    let width = ui.available_width();
+                    ui.allocate_ui_with_layout(
+                        vec2(width, 48.0),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 9.0;
+                            ui.add_space(12.0);
+                            let (icon_rect, _) =
+                                ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                            WorkbenchIcon::Search.paint(
+                                ui.painter(),
+                                icon_rect,
+                                t.color.text_dim,
+                            );
+                            let keycap_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                            let keycap_width = (ui
+                                .painter()
+                                .layout_no_wrap(
+                                    "Esc".to_owned(),
+                                    keycap_font.clone(),
+                                    t.color.text_dim,
+                                )
+                                .size()
+                                .x
+                                + 10.0)
+                                .max(19.0);
+                            let input_width =
+                                (ui.available_width() - keycap_width - 21.0).max(1.0);
+                            let search = ui.add_sized(
+                                vec2(input_width, 48.0),
+                                analysis_catalog_search_field(&mut query),
+                            );
+                            search_id = Some(search.id);
+                            if search.changed() {
+                                active = 0;
+                            }
+                            let (keycap_rect, _) = ui.allocate_exact_size(
+                                vec2(keycap_width, 18.0),
+                                Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                keycap_rect,
+                                3.0,
+                                t.color.bg_panel_2,
+                            );
+                            ui.painter().rect_stroke(
+                                keycap_rect,
+                                3.0,
+                                Stroke::new(1.0, t.color.border_strong),
+                                egui::StrokeKind::Inside,
+                            );
+                            ui.painter().text(
+                                keycap_rect.center(),
+                                Align2::CENTER_CENTER,
+                                "Esc",
+                                keycap_font,
+                                t.color.text_dim,
+                            );
+                            ui.add_space(12.0);
+                        },
+                    );
+                });
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                ui.cursor().top(),
+                Stroke::new(1.0, t.color.border),
             );
-            ui.label(
-                egui::RichText::new("Create an independent stable analysis instance.")
-                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                    .color(Tokens::get(ui.ctx()).color.text_dim),
-            );
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut query)
-                    .hint_text("Search analyses")
-                    .desired_width(f32::INFINITY),
-            );
-            if search.changed() {
-                active = 0;
-            }
-            if app.state.sim_setup.palette_query.is_empty() {
-                search.request_focus();
-            }
 
             let filtered = filtered_catalog_kinds(&query);
             if filtered.is_empty() {
@@ -570,89 +640,88 @@ fn analysis_catalog_window(
                     active = active.saturating_sub(1);
                 }
                 if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                    chosen = filtered.get(active).copied();
+                    chosen = filtered
+                        .get(active)
+                        .copied()
+                        .filter(|kind| kind.execution_blocker().is_none());
                 }
             }
-            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                request_close = true;
-            }
 
-            ui.add_space(3.0);
-            ScrollArea::vertical()
-                .id_salt("workbench.simulate.analysis_catalog.rows")
-                .auto_shrink([false, false])
-                .max_height((dialog_height - 94.0).max(160.0))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    if filtered.is_empty() {
-                        ui.label(
-                            egui::RichText::new("No analysis matches this search.")
-                                .color(Tokens::get(ui.ctx()).color.text_dim),
-                        );
-                        return;
-                    }
-                    for group in ANALYSIS_CATEGORY_ORDER {
-                        let members = filtered
-                            .iter()
-                            .copied()
-                            .enumerate()
-                            .filter(|(_, kind)| analysis_catalog_group(*kind) == group)
-                            .collect::<Vec<_>>();
-                        if members.is_empty() {
-                            continue;
+            let results_height = ui.available_height().max(1.0);
+            egui::Frame::NONE.fill(t.color.bg_app).show(ui, |ui| {
+                ui.set_min_height(results_height);
+                ScrollArea::vertical()
+                    .id_salt("workbench.simulate.analysis_catalog.rows")
+                    .auto_shrink([false, false])
+                    .max_height(results_height)
+                    .min_scrolled_height(results_height)
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        if filtered.is_empty() {
+                            ui.add_space(12.0);
+                            ui.label(
+                                egui::RichText::new("No analysis matches this search.")
+                                    .color(Tokens::get(ui.ctx()).color.text_dim),
+                            );
+                            return;
                         }
-                        analysis_catalog_group_header(ui, group, members.len());
-                        if let Some(kind) = analysis_catalog_group_rows(
-                            ui,
-                            &members,
-                            rows,
-                            active,
-                            scroll_to_active,
-                            catalog_columns,
-                        ) {
-                            chosen = Some(kind);
+                        let mut rendered_groups = 0;
+                        for group in ANALYSIS_CATEGORY_ORDER {
+                            let members = filtered
+                                .iter()
+                                .copied()
+                                .enumerate()
+                                .filter(|(_, kind)| analysis_catalog_group(*kind) == group)
+                                .collect::<Vec<_>>();
+                            if members.is_empty() {
+                                continue;
+                            }
+                            analysis_catalog_group_header(
+                                ui,
+                                group,
+                                members.len(),
+                                rendered_groups > 0,
+                            );
+                            rendered_groups += 1;
+                            if let Some(kind) = analysis_catalog_group_rows(
+                                ui,
+                                &members,
+                                rows,
+                                active,
+                                scroll_to_active,
+                                catalog_columns,
+                            ) {
+                                chosen = Some(kind);
+                            }
                         }
-                    }
-                    ui.add_space(8.0);
-                });
+                    });
+            });
+            search_id
         });
+
+    if choice == DialogChoice::Cancelled {
+        request_close = true;
+    }
 
     if let Some(kind) = chosen {
         *action = Some(StackAction::Insert(kind));
         request_close = true;
     }
     if request_close {
-        open = false;
+        app.state.sim_setup.palette_open = false;
     }
-    app.state.sim_setup.palette_open = open;
     app.state.sim_setup.palette_query = query;
     app.state.sim_setup.palette_active = active;
     app.state.sim_setup.palette_scroll_to_active = false;
 }
 
-fn analysis_catalog_outer_size(viewport: Vec2) -> Vec2 {
-    let inset = if viewport.x <= TITLE_ACTION_STACK_BREAKPOINT {
-        8.0
-    } else {
-        24.0
-    };
-    vec2(
-        (viewport.x - inset).clamp(1.0, ANALYSIS_CATALOG_MAX_WIDTH),
-        (viewport.y - inset).clamp(1.0, ANALYSIS_CATALOG_MAX_HEIGHT),
-    )
-}
-
-fn analysis_catalog_content_size(viewport: Vec2) -> Vec2 {
-    let outer = analysis_catalog_outer_size(viewport);
-    let chrome_y = if viewport.x <= SIMULATION_STACK_BREAKPOINT {
-        ANALYSIS_CATALOG_COMPACT_WINDOW_CHROME_Y
-    } else {
-        ANALYSIS_CATALOG_WINDOW_CHROME_Y
-    };
-    vec2(
-        (outer.x - ANALYSIS_CATALOG_WINDOW_CHROME_X).max(1.0),
-        (outer.y - chrome_y).max(1.0),
-    )
+fn analysis_catalog_search_field(query: &mut String) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(query)
+        .id_source("workbench.simulate.analysis_catalog.search")
+        .font(theme::sans(tokens::FS_2, FontWeight::Regular))
+        .hint_text("Search solvers, sweeps, measurements, checks…")
+        .vertical_align(Align::Center)
+        .frame(egui::Frame::NONE)
 }
 
 const fn analysis_catalog_column_count(viewport_width: f32) -> usize {
@@ -668,21 +737,43 @@ fn analysis_catalog_group_rows(
     columns: usize,
 ) -> Option<AnalysisKind> {
     let mut chosen = None;
-    for chunk in members.chunks(columns) {
+    let chunk_count = members.len().div_ceil(columns);
+    for (chunk_index, chunk) in members.chunks(columns).enumerate() {
+        let draw_bottom_border = chunk_index + 1 < chunk_count;
         if columns == 1 {
             let (index, kind) = chunk[0];
             let disposition = analysis_catalog_disposition(rows, kind);
-            if analysis_catalog_row(ui, kind, &disposition, index == active, scroll_to_active) {
+            let row_height =
+                analysis_catalog_row_height(ui, kind, &disposition, ui.available_width());
+            if analysis_catalog_row(
+                ui,
+                kind,
+                &disposition,
+                index == active,
+                scroll_to_active,
+                AnalysisCatalogRowLayout {
+                    height: row_height,
+                    draw_bottom_border,
+                    draw_right_border: false,
+                },
+            ) {
                 chosen = Some(kind);
             }
             continue;
         }
 
-        let gap = 1.0;
+        let gap = 0.0;
         let column_width = ((ui.available_width() - gap) / 2.0).max(1.0);
+        let row_height = chunk
+            .iter()
+            .map(|&(_, kind)| {
+                let disposition = analysis_catalog_disposition(rows, kind);
+                analysis_catalog_row_height(ui, kind, &disposition, column_width)
+            })
+            .fold(ANALYSIS_CATALOG_ROW_HEIGHT, f32::max);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            for &(index, kind) in chunk {
+            for (column, &(index, kind)) in chunk.iter().enumerate() {
                 let disposition = analysis_catalog_disposition(rows, kind);
                 ui.allocate_ui_with_layout(
                     vec2(column_width, 0.0),
@@ -695,6 +786,11 @@ fn analysis_catalog_group_rows(
                             &disposition,
                             index == active,
                             scroll_to_active,
+                            AnalysisCatalogRowLayout {
+                                height: row_height,
+                                draw_bottom_border,
+                                draw_right_border: column == 0,
+                            },
                         ) {
                             chosen = Some(kind);
                         }
@@ -702,10 +798,7 @@ fn analysis_catalog_group_rows(
                 );
             }
             if chunk.len() == 1 {
-                ui.allocate_exact_size(
-                    vec2(column_width, ANALYSIS_CATALOG_ROW_HEIGHT),
-                    Sense::hover(),
-                );
+                ui.allocate_exact_size(vec2(column_width, row_height), Sense::hover());
             }
         });
     }
@@ -713,6 +806,9 @@ fn analysis_catalog_group_rows(
 }
 
 fn analysis_catalog_disposition(rows: &[AnalysisStackRow], kind: AnalysisKind) -> String {
+    if kind.execution_blocker().is_some() {
+        return "Unavailable".to_owned();
+    }
     let configured = rows.iter().filter(|row| row.kind == kind).count();
     if configured == 0 {
         "Add instance".to_owned()
@@ -721,7 +817,7 @@ fn analysis_catalog_disposition(rows: &[AnalysisStackRow], kind: AnalysisKind) -
     }
 }
 
-fn analysis_catalog_group_header(ui: &mut Ui, group: &str, count: usize) {
+fn analysis_catalog_group_header(ui: &mut Ui, group: &str, count: usize, has_predecessor: bool) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
         vec2(ui.available_width(), ANALYSIS_CATALOG_GROUP_HEIGHT),
@@ -729,6 +825,13 @@ fn analysis_catalog_group_header(ui: &mut Ui, group: &str, count: usize) {
     );
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     painter.rect_filled(rect, 0.0, t.color.bg_panel_2);
+    if has_predecessor {
+        painter.hline(
+            rect.x_range(),
+            rect.top(),
+            Stroke::new(1.0, t.color.border_strong),
+        );
+    }
     painter.hline(
         rect.x_range(),
         rect.bottom(),
@@ -750,22 +853,137 @@ fn analysis_catalog_group_header(ui: &mut Ui, group: &str, count: usize) {
     );
 }
 
+const fn analysis_catalog_kind_label(kind: AnalysisKind) -> &'static str {
+    match kind {
+        AnalysisKind::MonteCarlo
+        | AnalysisKind::Temperature
+        | AnalysisKind::Corner
+        | AnalysisKind::DcMismatch => "Run-set controller",
+        AnalysisKind::Fourier | AnalysisKind::Disto => "Derived measurement",
+        AnalysisKind::Reliability | AnalysisKind::Soa => "Verification workspace",
+        AnalysisKind::Optimization => "Optimization workspace",
+        _ => "Numerical solver",
+    }
+}
+
+fn analysis_catalog_detail_galley(
+    ui: &Ui,
+    kind: AnalysisKind,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let t = Tokens::get(ui.ctx());
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = width.max(1.0);
+    job.wrap.max_rows = 2;
+    job.append(
+        &analysis_catalog_kind_label(kind).to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
+            color: t.color.text_faint,
+            extra_letter_spacing: 0.04 * tokens::FS_0,
+            ..Default::default()
+        },
+    );
+    job.append(
+        "  ·  ",
+        0.0,
+        egui::TextFormat {
+            font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
+            color: t.color.text_faint,
+            ..Default::default()
+        },
+    );
+    job.append(
+        kind.detail(),
+        0.0,
+        egui::TextFormat {
+            font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
+            color: t.color.text_dim,
+            ..Default::default()
+        },
+    );
+    ui.painter().layout_job(job)
+}
+
+fn analysis_catalog_row_height(
+    ui: &Ui,
+    kind: AnalysisKind,
+    disposition: &str,
+    row_width: f32,
+) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let compact = row_width <= TITLE_ACTION_STACK_BREAKPOINT;
+    let code_right = if compact { 54.0 } else { 70.0 };
+    let copy_left = code_right + if compact { 9.0 } else { 12.0 };
+    let (copy_width, readiness_width) = if compact {
+        (
+            (row_width - 10.0 - copy_left).max(1.0),
+            (row_width - 10.0 - copy_left).max(1.0),
+        )
+    } else {
+        let readiness_left =
+            (row_width - 12.0 - ANALYSIS_CATALOG_READINESS_WIDTH).max(copy_left + 96.0);
+        (
+            (readiness_left - 12.0 - copy_left).max(1.0),
+            (row_width - 12.0 - readiness_left - 24.0).max(1.0),
+        )
+    };
+    let title = ui.painter().layout(
+        kind.label().to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+        copy_width,
+    );
+    let detail = analysis_catalog_detail_galley(ui, kind, copy_width);
+    let copy_height = title.size().y + 3.0 + detail.size().y;
+    let action = ui.painter().layout(
+        disposition.to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+        readiness_width,
+    );
+    let readiness_detail = analysis_catalog_readiness(kind).map(|detail| {
+        ui.painter().layout(
+            detail.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+            readiness_width,
+        )
+    });
+    let readiness_height = action.size().y
+        + readiness_detail
+            .as_ref()
+            .map_or(0.0, |detail| 2.0 + detail.size().y);
+    if compact {
+        (16.0 + copy_height + 5.0 + readiness_height)
+            .max(ANALYSIS_CATALOG_ROW_HEIGHT)
+            .ceil()
+    } else {
+        (14.0 + copy_height.max(readiness_height))
+            .max(ANALYSIS_CATALOG_ROW_HEIGHT)
+            .ceil()
+    }
+}
+
 fn analysis_catalog_row(
     ui: &mut Ui,
     kind: AnalysisKind,
     disposition: &str,
     selected: bool,
     scroll_to_active: bool,
+    layout: AnalysisCatalogRowLayout,
 ) -> bool {
     let t = Tokens::get(ui.ctx());
-    let compact = ui.ctx().content_rect().width() <= TITLE_ACTION_STACK_BREAKPOINT;
-    let height = if compact {
-        ANALYSIS_CATALOG_PHONE_ROW_HEIGHT
+    let compact = ui.available_width() <= TITLE_ACTION_STACK_BREAKPOINT;
+    let blocker = kind.execution_blocker();
+    let enabled = ui.is_enabled() && blocker.is_none();
+    let sense = if enabled {
+        Sense::click()
     } else {
-        ANALYSIS_CATALOG_ROW_HEIGHT
+        Sense::hover()
     };
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), layout.height), sense);
     if selected && scroll_to_active {
         let reveal = Rect::from_min_max(
             egui::pos2(rect.left(), rect.top() - ANALYSIS_CATALOG_GROUP_HEIGHT),
@@ -776,9 +994,13 @@ fn analysis_catalog_row(
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
+            enabled,
             selected,
-            format!("Add {} analysis instance", kind.label()),
+            if let Some(reason) = blocker {
+                format!("{} unavailable: {reason}", kind.label())
+            } else {
+                format!("Add {} analysis instance", kind.label())
+            },
         )
     });
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -793,11 +1015,20 @@ fn analysis_catalog_row(
             t.color.bg_app
         },
     );
-    painter.hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
+    if layout.draw_bottom_border {
+        painter.hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            Stroke::new(1.0, t.color.border),
+        );
+    }
+    if layout.draw_right_border {
+        painter.vline(
+            rect.right() - 0.5,
+            rect.y_range(),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
     if selected {
         painter.vline(
             rect.left() + 1.0,
@@ -825,34 +1056,31 @@ fn analysis_catalog_row(
         (rect.right() - 10.0, copy_left)
     } else {
         let readiness_left =
-            (rect.right() - ANALYSIS_CATALOG_READINESS_WIDTH).max(copy_left + 96.0);
+            (rect.right() - 12.0 - ANALYSIS_CATALOG_READINESS_WIDTH).max(copy_left + 96.0);
         (readiness_left - 12.0, readiness_left)
     };
-    paint_clipped_text(
-        ui,
-        Rect::from_min_max(
-            egui::pos2(copy_left, rect.top() + 7.0),
-            egui::pos2(copy_right, rect.top() + 27.0),
-        ),
-        kind.label(),
+    let copy_width = (copy_right - copy_left).max(1.0);
+    let title_galley = ui.painter().layout(
+        kind.label().to_owned(),
         theme::sans(tokens::FS_0, FontWeight::Medium),
         t.color.text,
+        copy_width,
     );
-    paint_clipped_text(
-        ui,
-        Rect::from_min_max(
-            egui::pos2(copy_left, rect.top() + 28.0),
-            egui::pos2(
-                copy_right,
-                if compact {
-                    rect.top() + 46.0
-                } else {
-                    rect.bottom() - 6.0
-                },
-            ),
-        ),
-        kind.detail(),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+    let detail_galley = analysis_catalog_detail_galley(ui, kind, copy_width);
+    let copy_top = rect.top() + if compact { 8.0 } else { 7.0 };
+    let copy_clip = Rect::from_min_max(
+        egui::pos2(copy_left, copy_top),
+        egui::pos2(copy_right, rect.bottom() - if compact { 8.0 } else { 7.0 }),
+    );
+    let copy_painter = painter.with_clip_rect(copy_clip);
+    copy_painter.galley(
+        egui::pos2(copy_left, copy_top),
+        title_galley.clone(),
+        t.color.text,
+    );
+    copy_painter.galley(
+        egui::pos2(copy_left, copy_top + title_galley.size().y + 3.0),
+        detail_galley.clone(),
         t.color.text_dim,
     );
 
@@ -863,83 +1091,86 @@ fn analysis_catalog_row(
             Stroke::new(1.0, t.color.border),
         );
     }
-    let preview = kind.availability() != crate::simulation::plan::AnalysisAvailability::Production;
+    let readiness = analysis_catalog_readiness(kind);
+    let copy_height = title_galley.size().y + 3.0 + detail_galley.size().y;
     let readiness_top = if compact {
-        rect.top() + 45.0
+        copy_top + copy_height + 5.0
     } else {
         rect.top() + 8.0
     };
+    let readiness_content_left = if compact {
+        readiness_left
+    } else {
+        readiness_left + 12.0
+    };
     painter.circle_filled(
-        egui::pos2(readiness_left + 12.0, readiness_top + 5.0),
+        egui::pos2(readiness_content_left + 2.5, readiness_top + 5.0),
         2.5,
-        if availability_label(kind) == "Production" {
+        if blocker.is_some() {
+            t.color.err
+        } else if availability_label(kind) == "Production" {
             t.color.ok
         } else {
             t.color.warn
         },
     );
-    let readiness_text_width = (rect.right() - 10.0 - readiness_left - 21.0).max(1.0);
-    if compact {
-        paint_clipped_text(
-            ui,
-            Rect::from_min_max(
-                egui::pos2(readiness_left + 21.0, readiness_top),
-                egui::pos2(rect.right() - 10.0, readiness_top + 14.0),
-            ),
-            disposition,
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.text_dim,
-        );
-        if preview {
-            paint_clipped_text(
-                ui,
-                Rect::from_min_max(
-                    egui::pos2(readiness_left + 21.0, readiness_top + 13.0),
-                    egui::pos2(rect.right() - 10.0, readiness_top + 26.0),
-                ),
-                analysis_catalog_readiness(kind).unwrap_or_default(),
-                theme::sans(tokens::FS_0, FontWeight::Regular),
-                t.color.text_faint,
-            );
-        }
-    } else {
-        let action_galley = ui.painter().layout(
-            disposition.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.text_dim,
+    let readiness_text_left = readiness_content_left + 12.0;
+    let readiness_text_width = (rect.right() - 12.0 - readiness_text_left).max(1.0);
+    let action_galley = ui.painter().layout(
+        disposition.to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        if enabled {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+        readiness_text_width,
+    );
+    let action_height = action_galley.size().y;
+    painter.galley(
+        egui::pos2(readiness_text_left, readiness_top),
+        action_galley,
+        if enabled {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    if let Some(readiness) = readiness {
+        let detail_galley = ui.painter().layout(
+            readiness.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            if blocker.is_some() {
+                t.color.err
+            } else {
+                t.color.text_faint
+            },
             readiness_text_width,
         );
-        let action_height = action_galley.size().y;
         painter.galley(
-            egui::pos2(readiness_left + 21.0, readiness_top),
-            action_galley,
-            t.color.text_dim,
+            egui::pos2(readiness_text_left, readiness_top + action_height + 2.0),
+            detail_galley,
+            if blocker.is_some() {
+                t.color.err
+            } else {
+                t.color.text_faint
+            },
         );
-        if preview {
-            let detail_galley = ui.painter().layout(
-                analysis_catalog_readiness(kind)
-                    .unwrap_or_default()
-                    .to_owned(),
-                theme::sans(tokens::FS_0, FontWeight::Regular),
-                t.color.text_faint,
-                readiness_text_width,
-            );
-            painter.galley(
-                egui::pos2(readiness_left + 21.0, readiness_top + action_height),
-                detail_galley,
-                t.color.text_faint,
-            );
-        }
     }
     theme::paint_focus_ring_outset(ui, &response, rect);
-    response
-        .on_hover_text(format!("Add {} analysis instance", kind.label()))
-        .clicked()
+    if let Some(reason) = blocker {
+        response.on_hover_text(reason).clicked() && enabled
+    } else {
+        response
+            .on_hover_text(format!("Add {} analysis instance", kind.label()))
+            .clicked()
+            && enabled
+    }
 }
 
 const fn analysis_catalog_readiness(kind: AnalysisKind) -> Option<&'static str> {
-    if kind.execution_blocker().is_some() {
-        Some("Engine unavailable · blocked")
+    if let Some(reason) = kind.execution_blocker() {
+        Some(reason)
     } else {
         match kind.availability() {
             crate::simulation::plan::AnalysisAvailability::Production => None,
@@ -957,14 +1188,10 @@ fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
     let query = query.trim().to_ascii_lowercase();
     AnalysisKind::MANIFEST_ORDER
         .into_iter()
-        // Configuration identities remain durable for forward compatibility,
-        // but a catalog row is an action promise. Do not offer insertion until
-        // the corresponding execution engine exists.
-        .filter(|kind| kind.execution_blocker().is_none())
         .filter(|kind| {
             query.is_empty()
                 || format!(
-                    "{} {} {} {} {} {} {} {}",
+                    "{} {} {} {} {} {} {} {} {}",
                     kind.stable_id(),
                     kind.code(),
                     kind.glyph(),
@@ -973,6 +1200,7 @@ fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
                     analysis_catalog_group(*kind),
                     kind.category().detail,
                     availability_label(*kind),
+                    kind.execution_blocker().unwrap_or_default(),
                 )
                 .to_ascii_lowercase()
                 .contains(&query)
@@ -981,6 +1209,7 @@ fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
 }
 
 fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
+    let plan_name = app.state.sim_setup.active_plan_name().as_str().to_owned();
     let (eyebrow, description, plan_available) = match app.state.sim_setup.stable_analysis_plan() {
         Ok(plan) => {
             let enabled = plan
@@ -995,8 +1224,9 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             (
                 format!("Simulation plan · revision {}", plan.revision().get()),
                 format!(
-                    "{enabled} enabled instances · {} active · {} executable types in catalog · {} PVT points · {prior}",
+                    "{enabled} enabled instances · {} active · {} catalog types · {} executable · {} PVT points · {prior}",
                     plan.instances().len(),
+                    AnalysisKind::MANIFEST_ORDER.len(),
                     AnalysisKind::MANIFEST_ORDER
                         .into_iter()
                         .filter(|kind| kind.execution_blocker().is_none())
@@ -1013,16 +1243,22 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         ),
     };
 
+    let mut clone_plan = false;
     let mut validate = false;
     if surface_width > TITLE_ACTION_STACK_BREAKPOINT {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let heading_width = (ui.available_width() - 108.0).max(220.0);
+            let heading_width = (ui.available_width() - 222.0).max(220.0);
             ui.allocate_ui_with_layout(
                 vec2(heading_width, 0.0),
                 Layout::top_down(Align::Min),
-                |ui| heading(ui, &eyebrow, PLAN_NAME, &description),
+                |ui| heading(ui, &eyebrow, &plan_name, &description),
             );
+            clone_plan = Button::new("Clone plan")
+                .icon(Icon::Copy)
+                .enabled(plan_available)
+                .show(ui)
+                .clicked();
             validate = Button::new("Validate plan")
                 .icon(Icon::Check)
                 .accent()
@@ -1031,17 +1267,996 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 .clicked();
         });
     } else {
-        heading(ui, &eyebrow, PLAN_NAME, &description);
+        heading(ui, &eyebrow, &plan_name, &description);
         ui.add_space(6.0);
-        validate = Button::new("Validate plan")
-            .icon(Icon::Check)
-            .accent()
-            .enabled(plan_available)
-            .show(ui)
-            .clicked();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let action_width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
+            clone_plan = Button::new("Clone plan")
+                .icon(Icon::Copy)
+                .min_width(action_width)
+                .max_width(action_width)
+                .enabled(plan_available)
+                .show(ui)
+                .clicked();
+            validate = Button::new("Validate plan")
+                .icon(Icon::Check)
+                .accent()
+                .min_width(action_width)
+                .max_width(action_width)
+                .enabled(plan_available)
+                .show(ui)
+                .clicked();
+        });
+    }
+    if clone_plan {
+        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
+            ClonePlanDraft::for_source(&plan_name),
+        ));
     }
     if validate {
         Command::PreflightChecks.execute(app);
+    }
+}
+
+fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
+    let Some(workflow) = app.state.workbench.simulation_workflow.clone() else {
+        return;
+    };
+    match workflow {
+        SimulationWorkflowDialog::ClonePlan(draft) => clone_plan_dialog(ctx, app, draft),
+        SimulationWorkflowDialog::DesignVariable(draft) => design_variable_dialog(ctx, app, draft),
+        SimulationWorkflowDialog::SavedOutput(draft) => saved_output_dialog(ctx, app, draft),
+    }
+}
+
+fn clone_plan_dialog(ctx: &egui::Context, app: &mut RSpiceApp, mut draft: ClonePlanDraft) {
+    draft.validation_error = validate_clone_plan_draft(app, &draft).err();
+    let enabled = draft.validation_error.is_none();
+    let source = format!(
+        "{} · revision {}",
+        app.state.sim_setup.active_plan_name(),
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .map_or(0, |plan| plan.revision().get())
+    );
+    let choice = Dialog::new(
+        "SIMULATION · EXPLICIT PLAN LINEAGE",
+        "Clone simulation plan",
+        "Create cloned plan",
+    )
+    .description(
+        "Create a separately owned simulation plan while preserving source lineage and immutable result manifests.",
+    )
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    .ghost("Cancel")
+    .primary_enabled(enabled)
+    .show(ctx, |ui| {
+        workflow_setting_row(ui, "New plan name", "Unique within this project.", |ui| {
+            mono_input(ui, &mut draft.name, ui.available_width().min(330.0));
+        });
+        workflow_setting_row(
+            ui,
+            "Source",
+            "Frozen source plan and working revision.",
+            |ui| {
+                ui.label(
+                    egui::RichText::new(&source)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                );
+            },
+        );
+        workflow_setting_row(
+            ui,
+            "Copy contents",
+            "Dependencies remain linked by stable identifiers.",
+            |ui| {
+                ui.vertical(|ui| {
+                    workflow_checkbox(
+                        ui,
+                        "Analyses and advanced options",
+                        &mut draft.copy_analyses_options,
+                    );
+                    workflow_checkbox(
+                        ui,
+                        "Variables, outputs and specifications",
+                        &mut draft.copy_variables_outputs_specs,
+                    );
+                    workflow_checkbox(
+                        ui,
+                        "PVT and model bindings",
+                        &mut draft.copy_pvt_model_bindings,
+                    );
+                    workflow_checkbox(
+                        ui,
+                        "Regression baseline ownership",
+                        &mut draft.copy_regression_baseline,
+                    );
+                });
+            },
+        );
+        workflow_setting_row(
+            ui,
+            "Results",
+            "Result datasets are never duplicated with a plan.",
+            |ui| {
+                ui.label("none · manifests remain linked");
+            },
+        );
+        workflow_validation_message(ui, draft.validation_error.as_deref());
+    });
+    finish_workflow_choice(ctx, app, choice, draft, commit_clone_plan);
+}
+
+fn design_variable_dialog(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    mut draft: DesignVariableDraft,
+) {
+    draft.validation_error = validate_design_variable_draft(app, &draft).err();
+    let enabled = draft.validation_error.is_none();
+    let consumer_summary = design_variable_consumers(app, &draft);
+    let resolved_value = design_variable_from_draft(app, &draft)
+        .and_then(|variable| variable.resolved_value_si())
+        .map_or_else(
+            |_| "unresolved".to_owned(),
+            |value| format!("{value:.8e} SI"),
+        );
+    let name_conflicts = if draft
+        .validation_error
+        .as_deref()
+        .is_some_and(|error| error.to_ascii_lowercase().contains("name"))
+    {
+        "resolve validation error"
+    } else {
+        "none"
+    };
+    let choice = Dialog::new(
+        "SIMULATION PLAN · TYPED PARAMETER · DEPENDENCY PREVIEW",
+        "Create design variable",
+        "Create variable",
+    )
+    .description(
+        "Create a typed, scoped simulation parameter with explicit constraints and deterministic netlist ownership.",
+    )
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    .ghost("Cancel")
+    .primary_enabled(enabled)
+    .show(ctx, |ui| {
+        workflow_split(ui, |ui| {
+            workflow_text_field(ui, "Name", &mut draft.name, true);
+            workflow_text_field(ui, "Expression", &mut draft.expression, true);
+            workflow_select_field(
+                ui,
+                "design-variable-quantity",
+                "Quantity",
+                &mut draft.quantity,
+                &[
+                    "Resistance",
+                    "Capacitance",
+                    "Voltage",
+                    "Current",
+                    "Temperature",
+                    "Dimensionless",
+                ],
+            );
+            workflow_select_field(
+                ui,
+                "design-variable-scope",
+                "Ownership scope",
+                &mut draft.scope,
+                &[
+                    "Lab characterization · testbench",
+                    "Project",
+                    "Selected cell",
+                    "Selected analysis only",
+                ],
+            );
+            workflow_text_field(ui, "Description", &mut draft.description, false);
+        }, |ui| {
+            workflow_section_heading(ui, "Constraints and consumers");
+            workflow_text_field(ui, "Allowed range", &mut draft.allowed_range, true);
+            workflow_select_field(
+                ui,
+                "design-variable-sweep",
+                "Sweep eligibility",
+                &mut draft.sweep_eligibility,
+                &["Nested sweep + optimization", "Optimization only", "Fixed parameter"],
+            );
+            workflow_select_field(
+                ui,
+                "design-variable-override",
+                "Override policy",
+                &mut draft.override_policy,
+                &["Explicit test-local override", "Inherit owner only"],
+            );
+            ui.add_space(8.0);
+            property_row(ui, "Resolved value", &resolved_value);
+            property_row(ui, "Name conflicts", name_conflicts);
+            property_row(ui, "Prospective consumers", &consumer_summary);
+            property_row(ui, "Result effect", "dependent future runs only");
+        });
+        workflow_validation_message(ui, draft.validation_error.as_deref());
+    });
+    finish_workflow_choice(ctx, app, choice, draft, commit_design_variable);
+}
+
+fn saved_output_dialog(ctx: &egui::Context, app: &mut RSpiceApp, mut draft: SavedOutputDraft) {
+    draft.validation_error = validate_saved_output_draft(app, &draft).err();
+    let enabled = draft.validation_error.is_none();
+    let candidate = saved_output_from_draft(app, &draft).ok();
+    let preflight = candidate.as_ref().map(|output| {
+        app.simulation_controller
+            .saved_output_preflight(&app.state, output)
+    });
+    let inferred_unit = candidate.as_ref().map_or_else(
+        || inferred_output_unit(&draft.expression),
+        |output| output.inferred_unit(),
+    );
+    let consumers = saved_output_consumers(app, &draft);
+    let expression_validity = preflight.as_ref().map_or_else(
+        || {
+            draft
+                .validation_error
+                .clone()
+                .unwrap_or_else(|| "candidate output is incomplete".to_owned())
+        },
+        |report| saved_output_semantic_summary(report.semantic_status()),
+    );
+    let storage_increment = preflight.as_ref().map_or_else(
+        || "indeterminate until the output contract is valid".to_owned(),
+        |report| {
+            saved_output_storage_summary(
+                report.storage_estimate(),
+                report.compatible_analysis_count(),
+            )
+        },
+    );
+    let choice = Dialog::new(
+        "SIMULATION PLAN · DATA CONTRACT · STORAGE IMPACT",
+        "Add saved output or derived expression",
+        "Add output",
+    )
+    .description(
+        "Add a validated output contract with explicit analysis compatibility, retention, precision, and streaming behavior.",
+    )
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    .ghost("Cancel")
+    .primary_enabled(enabled)
+    .primary_on_enter(false)
+    .show(ctx, |ui| {
+        workflow_split(ui, |ui| {
+            workflow_select_field(
+                ui,
+                "saved-output-kind",
+                "Output kind",
+                &mut draft.kind,
+                &[
+                    "Raw voltage / current",
+                    "Derived expression",
+                    "Device operating-point quantity",
+                    "Noise contributor",
+                    "RF port quantity",
+                ],
+            );
+            workflow_text_field(ui, "Name", &mut draft.name, true);
+            workflow_multiline_field(ui, "Source or expression", &mut draft.expression);
+            workflow_select_field(
+                ui,
+                "saved-output-analyses",
+                "Compatible analyses",
+                &mut draft.compatible_analyses,
+                &["OP + TRAN + AC", "All compatible analyses", "Selected analysis only"],
+            );
+        }, |ui| {
+            workflow_section_heading(ui, "Save, precision, and provenance");
+            workflow_select_field(
+                ui,
+                "saved-output-save-policy",
+                "Save policy",
+                &mut draft.save_policy,
+                &[
+                    "Every accepted point",
+                    "Selected + final points",
+                    "On demand from retained state",
+                    "Failure diagnostics only",
+                ],
+            );
+            workflow_select_field(
+                ui,
+                "saved-output-precision",
+                "Stored precision",
+                &mut draft.precision,
+                &[
+                    "f64 / complex128",
+                    "f32 display cache + full source precision",
+                ],
+            );
+            workflow_select_field(
+                ui,
+                "saved-output-streaming",
+                "Streaming",
+                &mut draft.streaming,
+                &["Live plot · adaptive display decimation", "Store only"],
+            );
+            ui.add_space(8.0);
+            property_row(ui, "Inferred unit", inferred_unit);
+            property_row(ui, "Estimated increment", &storage_increment);
+            property_row(ui, "Expression validity", &expression_validity);
+            property_row(ui, "Consumers", &consumers);
+        });
+        workflow_validation_message(ui, draft.validation_error.as_deref());
+    });
+    finish_workflow_choice(ctx, app, choice, draft, commit_saved_output);
+}
+
+fn validate_clone_plan_draft(app: &RSpiceApp, draft: &ClonePlanDraft) -> Result<(), String> {
+    let name = crate::common::app::SimulationPlanName::new(draft.name.clone())
+        .map_err(|error| error.to_string())?;
+    let key = name.as_str().to_lowercase();
+    if app
+        .state
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_lowercase()
+        == key
+        || app
+            .state
+            .sim_setup
+            .inactive_plans()
+            .iter()
+            .any(|plan| plan.name().as_str().to_lowercase() == key)
+    {
+        return Err(format!(
+            "A simulation plan named '{}' already exists.",
+            name.as_str()
+        ));
+    }
+    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    if plan.has_executing_instances() {
+        return Err(
+            "The active plan owns queued or executing work and cannot be cloned.".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn commit_clone_plan(app: &mut RSpiceApp, draft: &ClonePlanDraft) -> Result<String, String> {
+    validate_clone_plan_draft(app, draft)?;
+    let mut setup = app.state.sim_setup.clone();
+    let mut workspace = app.state.workspace.clone();
+    let source_plan_id = setup.stable_analysis_plan()?.id();
+    workspace.migrate_active_plan_data(source_plan_id);
+    let options = crate::common::app::SimulationPlanCloneOptions {
+        copy_analyses: draft.copy_analyses_options,
+        copy_advanced_options: draft.copy_analyses_options,
+        copy_variables_outputs_and_specifications: draft.copy_variables_outputs_specs,
+        copy_pvt_and_model_bindings: draft.copy_pvt_model_bindings,
+        copy_regression_baseline_ownership: draft.copy_regression_baseline,
+    };
+    let outcome = setup
+        .clone_active_plan(draft.name.clone(), options)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .clone_plan_data(
+            outcome.source_plan_id,
+            outcome.cloned_plan_id,
+            outcome.contents.copy_variables_outputs_and_specifications,
+            outcome.contents.copy_regression_baseline_ownership,
+            &outcome.analysis_identity_map,
+        )
+        .map_err(|error| error.to_string())?;
+    workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+
+    let first_instance = setup
+        .stable_analysis_plan()?
+        .instances()
+        .first()
+        .map(|instance| instance.id());
+    app.state.sim_setup = setup;
+    app.state.workspace = workspace;
+    app.state.workbench.active_analysis_instance = first_instance;
+    app.state.workbench.preflight = Default::default();
+    app.state.workbench.analysis_lifecycle_status = format!(
+        "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
+        outcome.cloned_plan_id,
+        outcome.source_plan_id,
+        outcome.source_revision.get()
+    );
+    Ok(format!(
+        "Created and activated '{}' with independent plan identity {}.",
+        app.state.sim_setup.active_plan_name(),
+        outcome.cloned_plan_id
+    ))
+}
+
+fn design_variable_from_draft(
+    app: &RSpiceApp,
+    draft: &DesignVariableDraft,
+) -> Result<crate::state::DesignVariable, String> {
+    use crate::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariableSweepEligibility,
+    };
+
+    let quantity = DesignVariableQuantity::ALL
+        .get(draft.quantity)
+        .copied()
+        .ok_or_else(|| "Quantity selection is invalid.".to_owned())?;
+    let scope = match draft.scope {
+        0 => DesignVariableScope::Testbench,
+        1 => DesignVariableScope::Project,
+        2 => DesignVariableScope::SelectedCell {
+            cell: app.state.workspace.active_view.clone(),
+        },
+        3 => DesignVariableScope::SelectedAnalysis {
+            analysis_id: app
+                .state
+                .workbench
+                .active_analysis_instance
+                .ok_or_else(|| "Select an analysis before using analysis-only scope.".to_owned())?,
+        },
+        _ => return Err("Ownership scope selection is invalid.".to_owned()),
+    };
+    let allowed_range = parse_design_variable_range(&draft.allowed_range)?;
+    let sweep_eligibility = DesignVariableSweepEligibility::ALL
+        .get(draft.sweep_eligibility)
+        .copied()
+        .ok_or_else(|| "Sweep eligibility selection is invalid.".to_owned())?;
+    let override_policy = DesignVariableOverridePolicy::ALL
+        .get(draft.override_policy)
+        .copied()
+        .ok_or_else(|| "Override policy selection is invalid.".to_owned())?;
+    DesignVariable::new(
+        draft.name.clone(),
+        draft.expression.clone(),
+        quantity,
+        scope,
+        draft.description.clone(),
+        allowed_range,
+        sweep_eligibility,
+        override_policy,
+    )
+}
+
+fn parse_design_variable_range(
+    value: &str,
+) -> Result<Option<crate::state::DesignVariableRange>, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let split = value
+        .split_once('…')
+        .or_else(|| value.split_once("..="))
+        .or_else(|| value.split_once(".."));
+    let Some((minimum, maximum)) = split else {
+        return Err("Allowed range must be written as minimum … maximum.".to_owned());
+    };
+    let minimum = minimum.trim();
+    let maximum = maximum.trim();
+    if minimum.is_empty() || maximum.is_empty() {
+        return Err("Allowed range requires both a minimum and maximum.".to_owned());
+    }
+    Ok(Some(crate::state::DesignVariableRange {
+        minimum: minimum.to_owned(),
+        maximum: maximum.to_owned(),
+    }))
+}
+
+fn validate_design_variable_draft(
+    app: &RSpiceApp,
+    draft: &DesignVariableDraft,
+) -> Result<(), String> {
+    let variable = design_variable_from_draft(app, draft)?;
+    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    let mut workspace = app.state.workspace.clone();
+    workspace
+        .add_design_variable(plan_id, variable)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())
+}
+
+fn commit_design_variable(
+    app: &mut RSpiceApp,
+    draft: &DesignVariableDraft,
+) -> Result<String, String> {
+    let variable = design_variable_from_draft(app, draft)?;
+    let variable_name = variable.name.clone();
+    let mut setup = app.state.sim_setup.clone();
+    let mut workspace = app.state.workspace.clone();
+    let plan_id = setup.stable_analysis_plan()?.id();
+    workspace
+        .add_design_variable(plan_id, variable)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+    let receipt = setup
+        .commit_active_plan_configuration_change(format!(
+            "Created design variable {variable_name}."
+        ))
+        .map_err(|error| error.to_string())?;
+    app.state.sim_setup = setup;
+    app.state.workspace = workspace;
+    app.state.workbench.preflight = Default::default();
+    app.state.workbench.analysis_lifecycle_status = format!(
+        "Configuration receipt #{} · revision {} to {} · {}",
+        receipt.sequence(),
+        receipt.source_revision().get(),
+        receipt.committed_revision().get(),
+        receipt.detail()
+    );
+    Ok(format!(
+        "Created design variable {variable_name} in plan {}.",
+        app.state.sim_setup.active_plan_name()
+    ))
+}
+
+fn saved_output_from_draft(
+    app: &RSpiceApp,
+    draft: &SavedOutputDraft,
+) -> Result<crate::state::SavedOutput, String> {
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+    let kind = SavedOutputKind::ALL
+        .get(draft.kind)
+        .copied()
+        .ok_or_else(|| "Output kind selection is invalid.".to_owned())?;
+    let compatible_analyses = match draft.compatible_analyses {
+        0 => SavedOutputCompatibility::OpTranAc,
+        1 => SavedOutputCompatibility::AllCompatibleAnalyses,
+        2 => SavedOutputCompatibility::SelectedAnalysis {
+            analysis_id: app
+                .state
+                .workbench
+                .active_analysis_instance
+                .ok_or_else(|| "Select an analysis before using analysis-only scope.".to_owned())?,
+        },
+        _ => return Err("Compatible analyses selection is invalid.".to_owned()),
+    };
+    let save_policy = SavedOutputPolicy::ALL
+        .get(draft.save_policy)
+        .copied()
+        .ok_or_else(|| "Save policy selection is invalid.".to_owned())?;
+    let stored_precision = SavedOutputPrecision::ALL
+        .get(draft.precision)
+        .copied()
+        .ok_or_else(|| "Stored precision selection is invalid.".to_owned())?;
+    let streaming = SavedOutputStreaming::ALL
+        .get(draft.streaming)
+        .copied()
+        .ok_or_else(|| "Streaming selection is invalid.".to_owned())?;
+    SavedOutput::new(
+        kind,
+        draft.name.clone(),
+        draft.expression.clone(),
+        compatible_analyses,
+        save_policy,
+        stored_precision,
+        streaming,
+    )
+}
+
+fn validate_saved_output_draft(app: &RSpiceApp, draft: &SavedOutputDraft) -> Result<(), String> {
+    let output = saved_output_from_draft(app, draft)?;
+    let report = app
+        .simulation_controller
+        .saved_output_preflight(&app.state, &output);
+    if let SavedOutputSemanticStatus::Invalid { reason } = report.semantic_status() {
+        return Err(reason.clone());
+    }
+    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    let mut workspace = app.state.workspace.clone();
+    workspace
+        .add_saved_output(plan_id, output)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn commit_saved_output(app: &mut RSpiceApp, draft: &SavedOutputDraft) -> Result<String, String> {
+    validate_saved_output_draft(app, draft)?;
+    let output = saved_output_from_draft(app, draft)?;
+    let output_name = output.name.clone();
+    let mut setup = app.state.sim_setup.clone();
+    let mut workspace = app.state.workspace.clone();
+    let plan_id = setup.stable_analysis_plan()?.id();
+    workspace
+        .add_saved_output(plan_id, output)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+    let receipt = setup
+        .commit_active_plan_configuration_change(format!("Added saved output {output_name}."))
+        .map_err(|error| error.to_string())?;
+    app.state.sim_setup = setup;
+    app.state.workspace = workspace;
+    app.state.workbench.preflight = Default::default();
+    app.state.workbench.analysis_lifecycle_status = format!(
+        "Configuration receipt #{} · revision {} to {} · {}",
+        receipt.sequence(),
+        receipt.source_revision().get(),
+        receipt.committed_revision().get(),
+        receipt.detail()
+    );
+    Ok(format!(
+        "Added saved output {output_name} to plan {}.",
+        app.state.sim_setup.active_plan_name()
+    ))
+}
+
+fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableDraft) -> String {
+    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+        return "plan unavailable".to_owned();
+    };
+    let selected_only = (draft.scope == 3).then_some(app.state.workbench.active_analysis_instance);
+    let labels = plan
+        .instances()
+        .iter()
+        .filter(|instance| instance.enabled())
+        .filter(|instance| selected_only.is_none_or(|selected| selected == Some(instance.id())))
+        .map(|instance| instance.kind().code())
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        "no enabled analysis consumers".to_owned()
+    } else {
+        labels.join(" · ")
+    }
+}
+
+fn saved_output_consumers(app: &RSpiceApp, draft: &SavedOutputDraft) -> String {
+    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+        return "plan unavailable".to_owned();
+    };
+    let selected = app.state.workbench.active_analysis_instance;
+    let labels = plan
+        .instances()
+        .iter()
+        .filter(|instance| instance.enabled())
+        .filter(|instance| match draft.compatible_analyses {
+            0 => matches!(
+                instance.kind(),
+                AnalysisKind::OperatingPoint | AnalysisKind::Transient | AnalysisKind::Ac
+            ),
+            1 => true,
+            2 => selected == Some(instance.id()),
+            _ => false,
+        })
+        .map(|instance| instance.kind().code())
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        "no compatible enabled analyses".to_owned()
+    } else {
+        labels.join(" · ")
+    }
+}
+
+fn inferred_output_unit(expression: &str) -> &'static str {
+    let expression = expression.trim();
+    if expression
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
+    {
+        "volts"
+    } else if expression
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("I("))
+    {
+        "amperes"
+    } else if expression
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("S("))
+    {
+        "dimensionless"
+    } else {
+        "resolved from output schema"
+    }
+}
+
+fn saved_output_semantic_summary(status: &SavedOutputSemanticStatus) -> String {
+    match status {
+        SavedOutputSemanticStatus::Valid { detail } => detail.clone(),
+        SavedOutputSemanticStatus::RuntimeBound { reason } => reason.clone(),
+        SavedOutputSemanticStatus::Invalid { reason } => reason.clone(),
+    }
+}
+
+fn saved_output_storage_summary(
+    estimate: &SavedOutputStorageEstimate,
+    compatible_analyses: usize,
+) -> String {
+    match estimate {
+        SavedOutputStorageEstimate::ExactBytes(bytes) => format!(
+            "{} · {compatible_analyses} compatible {}",
+            format_storage_bytes(*bytes),
+            if compatible_analyses == 1 {
+                "analysis"
+            } else {
+                "analyses"
+            }
+        ),
+        SavedOutputStorageEstimate::Indeterminate { reason } => {
+            format!("indeterminate · {reason}")
+        }
+    }
+}
+
+fn format_storage_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes_f64 = bytes as f64;
+    if bytes_f64 >= GIB {
+        format!("{:.2} GiB", bytes_f64 / GIB)
+    } else if bytes_f64 >= MIB {
+        format!("{:.2} MiB", bytes_f64 / MIB)
+    } else if bytes_f64 >= KIB {
+        format!("{:.2} KiB", bytes_f64 / KIB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn finish_workflow_choice<D>(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    choice: DialogChoice,
+    mut draft: D,
+    commit: fn(&mut RSpiceApp, &D) -> Result<String, String>,
+) where
+    D: Clone + Into<SimulationWorkflowDialog> + WorkflowDraft,
+{
+    match choice {
+        DialogChoice::Primary => match commit(app, &draft) {
+            Ok(message) => {
+                app.state.workbench.simulation_workflow = None;
+                app.state
+                    .ui
+                    .toasts
+                    .success(ctx, "Simulation plan updated", message);
+            }
+            Err(error) => {
+                set_workflow_error(&mut draft, error);
+                app.state.workbench.simulation_workflow = Some(draft.into());
+            }
+        },
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            app.state.workbench.simulation_workflow = None;
+        }
+        DialogChoice::None | DialogChoice::Secondary => {
+            app.state.workbench.simulation_workflow = Some(draft.into());
+        }
+    }
+}
+
+trait WorkflowDraft {
+    fn set_error(&mut self, error: String);
+}
+
+impl WorkflowDraft for ClonePlanDraft {
+    fn set_error(&mut self, error: String) {
+        self.validation_error = Some(error);
+    }
+}
+
+impl WorkflowDraft for DesignVariableDraft {
+    fn set_error(&mut self, error: String) {
+        self.validation_error = Some(error);
+    }
+}
+
+impl WorkflowDraft for SavedOutputDraft {
+    fn set_error(&mut self, error: String) {
+        self.validation_error = Some(error);
+    }
+}
+
+fn set_workflow_error(draft: &mut impl WorkflowDraft, error: String) {
+    draft.set_error(error);
+}
+
+impl From<ClonePlanDraft> for SimulationWorkflowDialog {
+    fn from(draft: ClonePlanDraft) -> Self {
+        Self::ClonePlan(draft)
+    }
+}
+
+impl From<DesignVariableDraft> for SimulationWorkflowDialog {
+    fn from(draft: DesignVariableDraft) -> Self {
+        Self::DesignVariable(draft)
+    }
+}
+
+impl From<SavedOutputDraft> for SimulationWorkflowDialog {
+    fn from(draft: SavedOutputDraft) -> Self {
+        Self::SavedOutput(draft)
+    }
+}
+
+fn workflow_split(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    if ui.available_width() >= 620.0 {
+        let width = ui.available_width();
+        let divider = 1.0;
+        let pane_width = ((width - divider) * 0.5).max(1.0);
+        let response = ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = divider;
+            ui.allocate_ui_with_layout(vec2(pane_width, 0.0), Layout::top_down(Align::Min), |ui| {
+                workflow_split_pane(ui, left)
+            });
+            ui.allocate_ui_with_layout(vec2(pane_width, 0.0), Layout::top_down(Align::Min), |ui| {
+                workflow_split_pane(ui, right)
+            });
+        });
+        let divider_x = response.response.rect.left() + pane_width;
+        ui.painter().vline(
+            divider_x,
+            response.response.rect.y_range(),
+            Stroke::new(1.0, t.color.border_strong),
+        );
+    } else {
+        let left_response = workflow_split_pane(ui, left);
+        ui.painter().hline(
+            left_response.rect.x_range(),
+            left_response.rect.bottom(),
+            Stroke::new(1.0, t.color.border_strong),
+        );
+        workflow_split_pane(ui, right);
+    }
+}
+
+fn workflow_split_pane(ui: &mut Ui, body: impl FnOnce(&mut Ui)) -> egui::Response {
+    let outer_width = ui.available_width();
+    egui::Frame::new()
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_width((outer_width - 20.0).max(1.0));
+            ui.spacing_mut().item_spacing.y = 6.0;
+            body(ui);
+        })
+        .response
+}
+
+fn workflow_setting_row(ui: &mut Ui, title: &str, detail: &str, value: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let response = egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width((width - 24.0).max(1.0));
+            if width >= 560.0 {
+                ui.columns(2, |columns| {
+                    columns[0].label(
+                        egui::RichText::new(title)
+                            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold)),
+                    );
+                    columns[0].label(
+                        egui::RichText::new(detail)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                    value(&mut columns[1]);
+                });
+            } else {
+                ui.label(
+                    egui::RichText::new(title)
+                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold)),
+                );
+                ui.label(
+                    egui::RichText::new(detail)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+                ui.add_space(5.0);
+                value(ui);
+            }
+        })
+        .response;
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn workflow_text_field(ui: &mut Ui, label: &str, value: &mut String, monospace: bool) {
+    workflow_field_label(ui, label);
+    if monospace {
+        mono_input(ui, value, ui.available_width());
+    } else {
+        let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+        ui.add_sized(
+            vec2(ui.available_width(), height),
+            egui::TextEdit::singleline(value).margin(egui::Margin::symmetric(8, 4)),
+        );
+    }
+}
+
+fn workflow_multiline_field(ui: &mut Ui, label: &str, value: &mut String) {
+    workflow_field_label(ui, label);
+    ui.add_sized(
+        vec2(ui.available_width(), 74.0),
+        egui::TextEdit::multiline(value)
+            .font(egui::TextStyle::Monospace)
+            .margin(egui::Margin::symmetric(8, 6)),
+    );
+}
+
+fn workflow_select_field(
+    ui: &mut Ui,
+    salt: &str,
+    label: &str,
+    value: &mut usize,
+    options: &[&str],
+) {
+    workflow_field_label(ui, label);
+    let choices = options
+        .iter()
+        .map(|option| (*option).to_owned())
+        .collect::<Vec<_>>();
+    *value = (*value).min(choices.len().saturating_sub(1));
+    let current = choices.get(*value).map_or("", String::as_str);
+    if let Some(selected) = select(ui, salt, label, current, &choices, ui.available_width()) {
+        *value = selected;
+    }
+}
+
+fn workflow_field_label(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(label)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+}
+
+fn workflow_section_heading(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        rect.left_center(),
+        Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+}
+
+fn workflow_checkbox(ui: &mut Ui, label: &str, value: &mut bool) {
+    ui.add_sized(
+        vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.row_h),
+        egui::Checkbox::new(value, label),
+    );
+}
+
+fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
+    if let Some(error) = error {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(error)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(Tokens::get(ui.ctx()).color.err),
+        );
     }
 }
 
@@ -1059,7 +2274,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
             });
             lifecycle_receipt_strip(ui, app);
             preflight_strip(ui, app);
-            specification_table(ui, app);
+            setup_tables(ui, app);
             return;
         }
         Err(error) => {
@@ -1070,7 +2285,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
             });
             lifecycle_receipt_strip(ui, app);
             preflight_strip(ui, app);
-            specification_table(ui, app);
+            setup_tables(ui, app);
             return;
         }
     };
@@ -1125,7 +2340,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
     }
     lifecycle_receipt_strip(ui, app);
     preflight_strip(ui, app);
-    specification_table(ui, app);
+    setup_tables(ui, app);
 }
 
 fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis) {
@@ -1273,7 +2488,7 @@ fn lifecycle_toolbar(
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.spacing_mut().item_spacing.y = 6.0;
             ui.horizontal_wrapped(|ui| {
-                if Button::new("Clone").show(ui).clicked() {
+                if Button::new("Clone").icon(Icon::Copy).show(ui).clicked() {
                     *action = Some(AnalysisAction::Clone);
                 }
                 if Button::new("Earlier")
@@ -1756,119 +2971,356 @@ fn preflight_cell(
     );
 }
 
-fn specification_table(ui: &mut Ui, app: &RSpiceApp) {
+fn setup_tables(ui: &mut Ui, app: &mut RSpiceApp) {
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.id())
+        .ok();
+    let payload = plan_id
+        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id).cloned())
+        .unwrap_or_default();
+    let design_variables = payload.design_variables;
+    let saved_outputs = payload.saved_outputs;
+    let saved_output_reports = app
+        .simulation_controller
+        .saved_outputs_preflight(&app.state, &saved_outputs);
+    let specifications = if plan_id.is_some() {
+        payload.specs
+    } else {
+        app.state.workspace.specs.clone()
+    };
+    let dataset = selected_output_dataset(&app.state.simulation).cloned();
+    let row_height = Tokens::get(ui.ctx()).metrics.row_h;
+    let variable_rows = design_variables.len().max(1);
+    let output_rows = (saved_outputs.len() + specifications.len()).max(1);
+    let variable_card_height = setup_card_height(row_height, variable_rows);
+    let output_card_height = setup_card_height(row_height, output_rows);
+    let split = ui.available_width() > SIMULATION_STACK_BREAKPOINT;
+    let mut add_variable = false;
+    let mut add_output = false;
+
+    if split {
+        let card_height = variable_card_height.max(output_card_height);
+        let divider = 1.0;
+        let usable = (ui.available_width() - divider).max(1.0);
+        let left_width = usable * 0.46;
+        let right_width = usable - left_width;
+        let row = ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = divider;
+            ui.allocate_ui_with_layout(
+                vec2(left_width, card_height),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    add_variable = design_variables_card(
+                        ui,
+                        &design_variables,
+                        card_height,
+                        SetupCardBorder::SplitLeft,
+                    );
+                },
+            );
+            ui.allocate_ui_with_layout(
+                vec2(right_width, card_height),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    add_output = outputs_specifications_card(
+                        ui,
+                        &saved_outputs,
+                        &saved_output_reports,
+                        &specifications,
+                        dataset.as_ref(),
+                        card_height,
+                        SetupCardBorder::SplitRight,
+                    );
+                },
+            );
+        });
+        ui.painter().vline(
+            row.response.rect.left() + left_width + divider * 0.5,
+            row.response.rect.y_range(),
+            Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+        );
+    } else {
+        add_variable = design_variables_card(
+            ui,
+            &design_variables,
+            variable_card_height,
+            SetupCardBorder::All,
+        );
+        add_output = outputs_specifications_card(
+            ui,
+            &saved_outputs,
+            &saved_output_reports,
+            &specifications,
+            dataset.as_ref(),
+            output_card_height,
+            SetupCardBorder::All,
+        );
+    }
+
+    if add_variable {
+        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::DesignVariable(
+            DesignVariableDraft::default(),
+        ));
+    } else if add_output {
+        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::SavedOutput(
+            SavedOutputDraft::default(),
+        ));
+    }
+}
+
+fn setup_card_height(row_height: f32, rows: usize) -> f32 {
+    SETUP_CARD_HEADER_HEIGHT + SETUP_TABLE_HEADER_HEIGHT + row_height * rows.max(1) as f32
+}
+
+fn design_variables_card(
+    ui: &mut Ui,
+    variables: &[crate::state::DesignVariable],
+    height: f32,
+    border: SetupCardBorder,
+) -> bool {
+    setup_table_card(ui, height, border, |ui| {
+        let add = setup_card_header(ui, "Design variables", "Add design variable");
+        setup_table_row(
+            ui,
+            [0.36, 0.32, 0.32],
+            ["NAME", "VALUE", "SCOPE"],
+            true,
+            [None, None, None],
+        );
+        if variables.is_empty() {
+            setup_table_row(
+                ui,
+                [0.36, 0.32, 0.32],
+                ["No design variables configured", "—", "optional"],
+                false,
+                [None, None, None],
+            );
+        } else {
+            for variable in variables {
+                setup_table_row(
+                    ui,
+                    [0.36, 0.32, 0.32],
+                    [
+                        variable.name.as_str(),
+                        variable.expression.as_str(),
+                        variable.scope.label(),
+                    ],
+                    false,
+                    [None, None, None],
+                );
+            }
+        }
+        add
+    })
+}
+
+fn outputs_specifications_card(
+    ui: &mut Ui,
+    outputs: &[crate::state::SavedOutput],
+    output_reports: &[crate::simulation::SavedOutputPreflightReport],
+    specifications: &[crate::state::SpecEntry],
+    dataset: Option<&crate::state::SimulationRun>,
+    height: f32,
+    border: SetupCardBorder,
+) -> bool {
+    setup_table_card(ui, height, border, |ui| {
+        let add = setup_card_header(ui, "Outputs & specifications", "Add saved output");
+        setup_table_row(
+            ui,
+            [0.42, 0.29, 0.29],
+            ["EXPRESSION", "SPEC", "STATUS"],
+            true,
+            [None, None, None],
+        );
+        if outputs.is_empty() && specifications.is_empty() {
+            setup_table_row(
+                ui,
+                [0.42, 0.29, 0.29],
+                [
+                    "No saved outputs or specifications configured",
+                    "—",
+                    "optional",
+                ],
+                false,
+                [None, None, None],
+            );
+        } else {
+            let t = Tokens::get(ui.ctx());
+            for (index, output) in outputs.iter().enumerate() {
+                let report = output_reports.get(index);
+                let (status, color) = match report.map(|report| report.semantic_status()) {
+                    Some(SavedOutputSemanticStatus::Valid { .. }) => ("valid", t.color.ok),
+                    Some(SavedOutputSemanticStatus::RuntimeBound { .. }) => {
+                        ("runtime-bound", t.color.warn)
+                    }
+                    Some(SavedOutputSemanticStatus::Invalid { reason }) => {
+                        (reason.as_str(), t.color.err)
+                    }
+                    None => ("preflight report unavailable", t.color.err),
+                };
+                setup_table_row(
+                    ui,
+                    [0.42, 0.29, 0.29],
+                    [
+                        output.source_expression.as_str(),
+                        output.status_label(),
+                        status,
+                    ],
+                    false,
+                    [None, None, Some(color)],
+                );
+            }
+            for spec in specifications {
+                let limit = specification_limit(spec);
+                let evidence =
+                    dataset.and_then(|run| measurement_in_output_dataset(run, &spec.measurement));
+                let (status, color) = match evidence {
+                    Some(evidence) if !evidence.measurement_passed => {
+                        ("measurement failed", t.color.err)
+                    }
+                    Some(evidence) if spec.passes(evidence.value) => ("pass", t.color.ok),
+                    Some(_) => ("fail", t.color.err),
+                    None => ("no evidence", t.color.warn),
+                };
+                setup_table_row(
+                    ui,
+                    [0.42, 0.29, 0.29],
+                    [spec.measurement.as_str(), limit.as_str(), status],
+                    false,
+                    [None, None, Some(color)],
+                );
+            }
+        }
+        add
+    })
+}
+
+fn setup_table_card(
+    ui: &mut Ui,
+    height: f32,
+    border: SetupCardBorder,
+    body: impl FnOnce(&mut Ui) -> bool,
+) -> bool {
     let t = Tokens::get(ui.ctx());
-    let row_height = output_table_row_height(ui.ctx().content_rect().width());
-    let dataset = selected_output_dataset(&app.state.simulation);
-    let dataset_context = dataset.map_or_else(
-        || "NO ACTIVE DATASET".to_owned(),
-        |run| format!("RUN {} · DATASET {}", run.id, run.dataset_id),
-    );
-    let header = ui
-        .allocate_exact_size(vec2(ui.available_width(), 37.0), Sense::hover())
-        .0;
-    ui.painter().hline(
-        header.x_range(),
-        header.top(),
-        Stroke::new(1.0, t.color.border_strong),
+    let width = ui.available_width();
+    let response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
+        ui.set_width(width);
+        ui.set_min_height(height);
+        ui.spacing_mut().item_spacing.y = 0.0;
+        if width <= SIMULATION_STACK_BREAKPOINT {
+            ScrollArea::horizontal()
+                .id_salt(("simulation-setup-card", ui.id()))
+                .auto_shrink([false, true])
+                .min_scrolled_width(540.0)
+                .show(ui, |ui| {
+                    ui.set_width(540.0);
+                    body(ui)
+                })
+                .inner
+        } else {
+            body(ui)
+        }
+    });
+    let rect = response.response.rect;
+    match border {
+        SetupCardBorder::All => {
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(1.0, t.color.border),
+                egui::StrokeKind::Inside,
+            );
+        }
+        SetupCardBorder::SplitLeft | SetupCardBorder::SplitRight => {
+            ui.painter().hline(
+                rect.x_range(),
+                rect.top() + 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom() - 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
+            let x = if border == SetupCardBorder::SplitLeft {
+                rect.left() + 0.5
+            } else {
+                rect.right() - 0.5
+            };
+            ui.painter()
+                .vline(x, rect.y_range(), Stroke::new(1.0, t.color.border));
+        }
+    };
+    response.inner
+}
+
+fn setup_card_header(ui: &mut Ui, title: &str, add_tooltip: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (header, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), SETUP_CARD_HEADER_HEIGHT),
+        Sense::hover(),
     );
     ui.painter().hline(
         header.x_range(),
         header.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    let title_rect = Rect::from_min_max(
-        header.left_top() + vec2(11.0, 0.0),
-        egui::pos2(header.left() + header.width() * 0.48, header.bottom()),
-    );
     paint_clipped_text(
         ui,
-        title_rect,
-        "Outputs & specifications",
+        Rect::from_min_max(
+            header.left_top() + vec2(11.0, 0.0),
+            egui::pos2(header.right() - 39.0, header.bottom()),
+        ),
+        title,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
-    let context_rect = Rect::from_min_max(
-        egui::pos2(header.left() + header.width() * 0.50, header.top()),
-        header.right_bottom() - vec2(11.0, 0.0),
+    let add_rect = Rect::from_center_size(
+        egui::pos2(header.right() - 17.5, header.center().y),
+        vec2(28.0, 27.0),
     );
-    ui.painter().with_clip_rect(context_rect).text(
-        context_rect.right_center(),
-        Align2::RIGHT_CENTER,
-        &dataset_context,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(add_rect)
+            .layout(Layout::top_down(Align::Min)),
     );
-
-    specification_table_row(ui, "EXPRESSION", "SPEC", "STATUS", true, None, row_height);
-    if app.state.workspace.specs.is_empty() {
-        specification_table_row(
-            ui,
-            "No project specifications configured",
-            "—",
-            "optional",
-            false,
-            Some(t.color.text_faint),
-            row_height,
-        );
-    } else {
-        for spec in &app.state.workspace.specs {
-            let limit = specification_limit(spec);
-            let evidence =
-                dataset.and_then(|run| measurement_in_output_dataset(run, &spec.measurement));
-            let (status, color) = match evidence {
-                Some(evidence) if !evidence.measurement_passed => {
-                    ("measurement failed".to_owned(), t.color.err)
-                }
-                Some(evidence) if spec.passes(evidence.value) => ("pass".to_owned(), t.color.ok),
-                Some(_) => ("fail".to_owned(), t.color.err),
-                None => ("no evidence".to_owned(), t.color.warn),
-            };
-            specification_table_row(
-                ui,
-                &spec.measurement,
-                &limit,
-                &status,
-                false,
-                Some(color),
-                row_height,
-            );
-        }
-    }
+    IconButton::new(Icon::Add)
+        .size(28.0, 27.0)
+        .tooltip(add_tooltip)
+        .show(&mut child)
+        .clicked()
 }
 
-fn output_table_row_height(viewport_width: f32) -> f32 {
-    if viewport_width <= TITLE_ACTION_STACK_BREAKPOINT {
-        36.0
-    } else if viewport_width <= SIMULATION_STACK_BREAKPOINT {
-        31.0
-    } else {
-        28.0
-    }
-}
-
-fn specification_table_row(
+fn setup_table_row(
     ui: &mut Ui,
-    expression: &str,
-    limit: &str,
-    status: &str,
+    fractions: [f32; 3],
+    cells: [&str; 3],
     header: bool,
-    status_color: Option<Color32>,
-    row_height: f32,
+    cell_colors: [Option<Color32>; 3],
 ) {
     let t = Tokens::get(ui.ctx());
-    let height = if header { 27.0 } else { row_height };
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    let height = if header {
+        SETUP_TABLE_HEADER_HEIGHT
+    } else {
+        t.metrics.row_h
+    };
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     if header {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    let first = rect.left() + rect.width() * 0.56;
-    let second = rect.left() + rect.width() * 0.80;
+    let first = rect.left() + rect.width() * fractions[0];
+    let second = first + rect.width() * fractions[1];
     for x in [first, second] {
         ui.painter()
             .vline(x, rect.y_range(), Stroke::new(1.0, t.color.border));
@@ -1878,37 +3330,26 @@ fn specification_table_row(
     } else {
         theme::mono(tokens::FS_0, FontWeight::Regular)
     };
-    let color = if header {
+    let default_color = if header {
         t.color.text_faint
     } else {
         t.color.text_dim
     };
-    for (cell, text, cell_color) in [
-        (
-            Rect::from_min_max(rect.min, egui::pos2(first, rect.bottom())),
-            expression,
-            color,
+    let rects = [
+        Rect::from_min_max(rect.min, egui::pos2(first, rect.bottom())),
+        Rect::from_min_max(
+            egui::pos2(first, rect.top()),
+            egui::pos2(second, rect.bottom()),
         ),
-        (
-            Rect::from_min_max(
-                egui::pos2(first, rect.top()),
-                egui::pos2(second, rect.bottom()),
-            ),
-            limit,
-            color,
-        ),
-        (
-            Rect::from_min_max(egui::pos2(second, rect.top()), rect.max),
-            status,
-            status_color.unwrap_or(color),
-        ),
-    ] {
+        Rect::from_min_max(egui::pos2(second, rect.top()), rect.max),
+    ];
+    for index in 0..3 {
         paint_clipped_text(
             ui,
-            cell.shrink2(vec2(8.0, 0.0)),
-            text,
+            rects[index].shrink2(vec2(8.0, 0.0)),
+            cells[index],
             font.clone(),
-            cell_color,
+            cell_colors[index].unwrap_or(default_color),
         );
     }
 }
@@ -2519,9 +3960,10 @@ mod tests {
         assert_eq!(ANALYSIS_ROW_HEIGHT, 53.0);
         assert_eq!(PREFLIGHT_CELL_HEIGHT, 42.0);
         assert_eq!(STACKED_WORKSPACE_GAP, 9.0);
-        assert_eq!(output_table_row_height(1_440.0), 28.0);
-        assert_eq!(output_table_row_height(820.0), 31.0);
-        assert_eq!(output_table_row_height(560.0), 36.0);
+        assert_eq!(SETUP_CARD_HEADER_HEIGHT, 37.0);
+        assert_eq!(SETUP_TABLE_HEADER_HEIGHT, 27.0);
+        assert_eq!(setup_card_height(28.0, 0), 92.0);
+        assert_eq!(setup_card_height(31.0, 3), 157.0);
         assert_eq!(analysis_column_min_height(720.0, 148.0), 572.0);
         assert_eq!(analysis_column_min_height(100.0, 120.0), 1.0);
         let row_rect = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_000.0, 572.0));
@@ -2532,26 +3974,67 @@ mod tests {
     }
 
     #[test]
+    fn analysis_catalog_search_text_is_centered_in_its_48_point_row() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut query = "noise".to_owned();
+        let mut geometry = None;
+        let _output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 720.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let output = ui
+                        .allocate_ui_with_layout(
+                            vec2(480.0, 48.0),
+                            Layout::centered_and_justified(egui::Direction::LeftToRight),
+                            |ui| analysis_catalog_search_field(&mut query).show(ui),
+                        )
+                        .inner;
+                    geometry = Some((
+                        output.response.rect,
+                        output.galley_pos,
+                        output.galley.size(),
+                    ));
+                });
+            },
+        );
+        let (response, galley_pos, galley_size) = geometry.expect("search field rendered");
+
+        assert!((response.height() - 48.0).abs() <= 0.5);
+        assert!((galley_pos.y + galley_size.y * 0.5 - response.center().y).abs() <= 0.5);
+    }
+
+    #[test]
+    fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
+        assert_eq!(format_storage_bytes(960), "960 B");
+        assert_eq!(format_storage_bytes(1_536), "1.50 KiB");
+        assert_eq!(format_storage_bytes(2 * 1024 * 1024), "2.00 MiB");
+        assert_eq!(
+            saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(960), 1),
+            "960 B · 1 compatible analysis"
+        );
+        assert_eq!(
+            saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(1_536), 2),
+            "1.50 KiB · 2 compatible analyses"
+        );
+        assert_eq!(
+            saved_output_storage_summary(
+                &SavedOutputStorageEstimate::Indeterminate {
+                    reason: "adaptive transient grid".to_owned(),
+                },
+                1,
+            ),
+            "indeterminate · adaptive transient grid"
+        );
+    }
+
+    #[test]
     fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
-        assert_eq!(
-            analysis_catalog_outer_size(vec2(1_440.0, 900.0)),
-            vec2(1_180.0, 780.0)
-        );
-        assert_eq!(
-            analysis_catalog_outer_size(vec2(390.0, 844.0)),
-            vec2(382.0, 780.0)
-        );
-        assert_eq!(
-            analysis_catalog_content_size(vec2(1_440.0, 900.0)),
-            vec2(1_154.0, 729.0)
-        );
-        assert_eq!(
-            analysis_catalog_content_size(vec2(390.0, 844.0)),
-            vec2(356.0, 714.0)
-        );
         assert_eq!(ANALYSIS_CATALOG_GROUP_HEIGHT, 29.0);
         assert_eq!(ANALYSIS_CATALOG_ROW_HEIGHT, 57.0);
-        assert_eq!(ANALYSIS_CATALOG_PHONE_ROW_HEIGHT, 72.0);
         assert_eq!(ANALYSIS_CATALOG_READINESS_WIDTH, 142.0);
         assert_eq!(analysis_catalog_column_count(1_199.99), 1);
         assert_eq!(analysis_catalog_column_count(1_200.0), 2);
@@ -2562,7 +4045,11 @@ mod tests {
         assert_eq!(analysis_catalog_readiness(AnalysisKind::Transient), None);
         assert_eq!(
             analysis_catalog_readiness(AnalysisKind::Qpss),
-            Some("Engine unavailable · blocked")
+            Some("the QPSS spectral-lattice solver is not available in this engine build")
+        );
+        assert_eq!(
+            analysis_catalog_disposition(&[], AnalysisKind::Qpss),
+            "Unavailable"
         );
     }
 
@@ -2580,16 +4067,10 @@ mod tests {
             AnalysisKind::TransientNoise,
             AnalysisKind::DcMismatch,
         ];
-        assert_eq!(all.len(), AnalysisKind::ALL.len() - unavailable.len());
-        assert!(unavailable.iter().all(|kind| !all.contains(kind)));
+        assert_eq!(all.len(), AnalysisKind::ALL.len());
+        assert!(unavailable.iter().all(|kind| all.contains(kind)));
         assert_eq!(all.first(), Some(&AnalysisKind::OperatingPoint));
-        assert_eq!(
-            all,
-            AnalysisKind::MANIFEST_ORDER
-                .into_iter()
-                .filter(|kind| !unavailable.contains(kind))
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(all, AnalysisKind::MANIFEST_ORDER.to_vec());
         assert!(
             all.iter()
                 .position(|kind| *kind == AnalysisKind::MonteCarlo)
@@ -2599,9 +4080,12 @@ mod tests {
         );
         assert_eq!(
             filtered_catalog_kinds("periodic noise"),
-            vec![AnalysisKind::Pnoise]
+            vec![AnalysisKind::Pnoise, AnalysisKind::Qpnoise]
         );
-        assert!(filtered_catalog_kinds("spectral lattice").is_empty());
+        assert_eq!(
+            filtered_catalog_kinds("spectral lattice"),
+            vec![AnalysisKind::Qpss, AnalysisKind::Qpnoise]
+        );
     }
 
     #[test]
@@ -2631,6 +4115,231 @@ mod tests {
                 .analysis_lifecycle_status
                 .contains("not available")
         );
+    }
+
+    #[test]
+    fn design_variable_workflow_commits_to_the_active_plan_atomically() {
+        let mut app = RSpiceApp::test_instance();
+        let plan_id = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .id();
+        let revision_before = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .revision();
+        let count_before = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .map_or(0, |payload| payload.design_variables.len());
+
+        commit_design_variable(&mut app, &DesignVariableDraft::default())
+            .expect("valid variable commits");
+
+        let payload = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("plan payload");
+        assert_eq!(payload.design_variables.len(), count_before + 1);
+        assert_eq!(
+            payload
+                .design_variables
+                .last()
+                .map(|variable| variable.name.as_str()),
+            Some("RLOAD_TEST")
+        );
+        assert!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("stable plan")
+                .revision()
+                .get()
+                > revision_before.get()
+        );
+    }
+
+    #[test]
+    fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
+        let mut app = RSpiceApp::test_instance();
+        let plan_id = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .id();
+        let revision_before = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .revision();
+        let count_before = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .map_or(0, |payload| payload.design_variables.len());
+        let mut draft = DesignVariableDraft::default();
+        draft.allowed_range = "20 kohm … 30 kohm".to_owned();
+
+        assert!(commit_design_variable(&mut app, &draft).is_err());
+        assert_eq!(
+            app.state
+                .workspace
+                .active_plan_data(plan_id)
+                .map_or(0, |payload| payload.design_variables.len()),
+            count_before
+        );
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("stable plan")
+                .revision(),
+            revision_before
+        );
+    }
+
+    #[test]
+    fn saved_output_workflow_commits_a_typed_plan_contract() {
+        let mut app = RSpiceApp::test_instance();
+        let plan_id = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .id();
+        let count_before = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .map_or(0, |payload| payload.saved_outputs.len());
+
+        commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("valid output commits");
+
+        let output = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .expect("plan payload")
+            .saved_outputs
+            .last()
+            .expect("saved output");
+        assert_eq!(
+            count_before + 1,
+            app.state
+                .workspace
+                .active_plan_data(plan_id)
+                .unwrap()
+                .saved_outputs
+                .len()
+        );
+        assert_eq!(output.name, "V(afe_out)");
+        assert_eq!(output.source_expression, "V(afe_out)");
+    }
+
+    #[test]
+    fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
+        let mut app = RSpiceApp::test_instance();
+        commit_design_variable(&mut app, &DesignVariableDraft::default()).expect("source variable");
+        commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("source output");
+        let source_id = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable source plan")
+            .id();
+        let source_payload = app
+            .state
+            .workspace
+            .active_plan_data(source_id)
+            .expect("source payload")
+            .clone();
+        let retained_runs_before = app
+            .state
+            .simulation
+            .runs
+            .iter()
+            .map(|run| (run.run_id, run.dataset_id, run.id))
+            .collect::<Vec<_>>();
+        let mut draft = ClonePlanDraft::for_source(app.state.sim_setup.active_plan_name().as_str());
+        draft.name = "Independent characterization".to_owned();
+
+        commit_clone_plan(&mut app, &draft).expect("valid clone");
+
+        let clone_id = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("active clone")
+            .id();
+        assert_ne!(clone_id, source_id);
+        assert_eq!(app.state.sim_setup.active_plan_name().as_str(), draft.name);
+        let clone_payload = app
+            .state
+            .workspace
+            .active_plan_data(clone_id)
+            .expect("cloned payload");
+        assert_eq!(clone_payload.design_variables.len(), 1);
+        assert_eq!(clone_payload.saved_outputs.len(), 1);
+        assert_ne!(
+            clone_payload.design_variables[0].id,
+            source_payload.design_variables[0].id
+        );
+        assert_ne!(
+            clone_payload.saved_outputs[0].id,
+            source_payload.saved_outputs[0].id
+        );
+        assert_eq!(
+            app.state
+                .simulation
+                .runs
+                .iter()
+                .map(|run| (run.run_id, run.dataset_id, run.id))
+                .collect::<Vec<_>>(),
+            retained_runs_before
+        );
+    }
+
+    #[test]
+    fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
+        let mut app = RSpiceApp::test_instance();
+        let source_id = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable source plan")
+            .id();
+        let inactive_before = app.state.sim_setup.inactive_plans().len();
+        let mut draft = ClonePlanDraft::for_source(app.state.sim_setup.active_plan_name().as_str());
+        draft.name = "Cancelled clone".to_owned();
+        app.state.workbench.simulation_workflow =
+            Some(SimulationWorkflowDialog::ClonePlan(draft.clone()));
+
+        finish_workflow_choice(
+            &egui::Context::default(),
+            &mut app,
+            DialogChoice::Cancelled,
+            draft,
+            commit_clone_plan,
+        );
+
+        assert!(app.state.workbench.simulation_workflow.is_none());
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("stable source plan")
+                .id(),
+            source_id
+        );
+        assert_eq!(app.state.sim_setup.inactive_plans().len(), inactive_before);
     }
 
     #[test]

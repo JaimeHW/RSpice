@@ -111,10 +111,10 @@ impl PsfWriter {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = path;
-            return Err(Error::new(
+            Err(Error::new(
                 ErrorKind::Unsupported,
                 "PSF path publication is unavailable in the browser; serialize waveform data for a browser download instead",
-            ));
+            ))
         }
         #[cfg(not(target_arch = "wasm32"))]
         let path = path.as_ref().to_path_buf();

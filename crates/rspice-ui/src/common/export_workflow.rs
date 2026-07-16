@@ -79,6 +79,17 @@ pub(crate) trait ExportWorkflowIo {
         self.write_text_file(path, contents)
     }
 
+    /// Publish already-complete binary bytes against the accepted destination.
+    fn write_bytes_file_observed(
+        &self,
+        destination: &ObservedExportDestination,
+        contents: &[u8],
+        mime_type: &str,
+    ) -> Result<(), String> {
+        let _ = (destination, contents, mime_type);
+        Err("this export backend does not support binary publication".to_owned())
+    }
+
     fn write_waveform_csv(
         &self,
         dataset: &crate::io::WaveformDataset,
@@ -175,9 +186,33 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
         .map_err(|error| error.to_string())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_bytes_file_observed(
+        &self,
+        destination: &ObservedExportDestination,
+        contents: &[u8],
+        _mime_type: &str,
+    ) -> Result<(), String> {
+        publish_observed_bytes(destination, contents)
+    }
+
     #[cfg(target_arch = "wasm32")]
     fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
         crate::common::browser_download::download_text_file(path, contents)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn write_bytes_file_observed(
+        &self,
+        destination: &ObservedExportDestination,
+        contents: &[u8],
+        mime_type: &str,
+    ) -> Result<(), String> {
+        crate::common::browser_download::download_bytes_file(
+            destination.path(),
+            contents,
+            mime_type,
+        )
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -215,6 +250,90 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
     fn saved_paths_are_reopenable(&self) -> bool {
         !cfg!(target_arch = "wasm32")
     }
+}
+
+pub(crate) fn deterministic_stored_zip(entries: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
+    if entries.is_empty() || entries.len() > u16::MAX as usize {
+        return Err("CI evidence package has an invalid entry count".to_owned());
+    }
+    let mut archive = Vec::new();
+    let mut directory = Vec::new();
+    for (name, contents) in entries {
+        let name = name.as_bytes();
+        let name_len = u16::try_from(name.len())
+            .map_err(|_| "CI evidence package entry name is too long".to_owned())?;
+        let content_len = u32::try_from(contents.len())
+            .map_err(|_| "CI evidence package entry is too large".to_owned())?;
+        let offset = u32::try_from(archive.len())
+            .map_err(|_| "CI evidence package exceeds ZIP32 limits".to_owned())?;
+        let crc = crc32(contents);
+
+        push_u32(&mut archive, 0x0403_4b50);
+        push_u16(&mut archive, 20);
+        push_u16(&mut archive, 0x0800);
+        push_u16(&mut archive, 0);
+        push_u16(&mut archive, 0);
+        push_u16(&mut archive, 0x0021);
+        push_u32(&mut archive, crc);
+        push_u32(&mut archive, content_len);
+        push_u32(&mut archive, content_len);
+        push_u16(&mut archive, name_len);
+        push_u16(&mut archive, 0);
+        archive.extend_from_slice(name);
+        archive.extend_from_slice(contents);
+
+        push_u32(&mut directory, 0x0201_4b50);
+        push_u16(&mut directory, 20);
+        push_u16(&mut directory, 20);
+        push_u16(&mut directory, 0x0800);
+        push_u16(&mut directory, 0);
+        push_u16(&mut directory, 0);
+        push_u16(&mut directory, 0x0021);
+        push_u32(&mut directory, crc);
+        push_u32(&mut directory, content_len);
+        push_u32(&mut directory, content_len);
+        push_u16(&mut directory, name_len);
+        push_u16(&mut directory, 0);
+        push_u16(&mut directory, 0);
+        push_u16(&mut directory, 0);
+        push_u16(&mut directory, 0);
+        push_u32(&mut directory, 0);
+        push_u32(&mut directory, offset);
+        directory.extend_from_slice(name);
+    }
+    let directory_offset = u32::try_from(archive.len())
+        .map_err(|_| "CI evidence package exceeds ZIP32 limits".to_owned())?;
+    let directory_len = u32::try_from(directory.len())
+        .map_err(|_| "CI evidence package exceeds ZIP32 limits".to_owned())?;
+    archive.extend_from_slice(&directory);
+    push_u32(&mut archive, 0x0605_4b50);
+    push_u16(&mut archive, 0);
+    push_u16(&mut archive, 0);
+    push_u16(&mut archive, entries.len() as u16);
+    push_u16(&mut archive, entries.len() as u16);
+    push_u32(&mut archive, directory_len);
+    push_u32(&mut archive, directory_offset);
+    push_u16(&mut archive, 0);
+    Ok(archive)
+}
+
+fn push_u16(bytes: &mut Vec<u8>, value: u16) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & (0_u32.wrapping_sub(crc & 1)));
+        }
+    }
+    !crc
 }
 
 pub(crate) fn export_completion_message(
@@ -261,7 +380,64 @@ fn publish_observed_bytes(
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::{ExportWorkflowIo, NativeExportWorkflowIo};
+    use super::{ExportWorkflowIo, NativeExportWorkflowIo, deterministic_stored_zip};
+    use sha2::{Digest as _, Sha256};
+
+    fn stored_entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let read_u16 = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]) as usize;
+        let read_u32 = |at: usize| {
+            u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize
+        };
+        let mut offset = 0;
+        let mut entries = Vec::new();
+        while bytes.get(offset..offset + 4) == Some(&0x0403_4b50_u32.to_le_bytes()) {
+            let size = read_u32(offset + 18);
+            let name_len = read_u16(offset + 26);
+            let extra_len = read_u16(offset + 28);
+            let name_start = offset + 30;
+            let content_start = name_start + name_len + extra_len;
+            entries.push((
+                std::str::from_utf8(&bytes[name_start..name_start + name_len])
+                    .expect("UTF-8 ZIP entry")
+                    .to_owned(),
+                bytes[content_start..content_start + size].to_vec(),
+            ));
+            offset = content_start + size;
+        }
+        entries
+    }
+
+    #[test]
+    fn deterministic_ci_zip_retains_exact_entries_contents_and_digest() {
+        let entries = [
+            ("rspice-golden-regression.xml", b"<testsuite/>".as_slice()),
+            (
+                "rspice-golden-regression.tap",
+                b"TAP version 13\n1..0\n".as_slice(),
+            ),
+        ];
+        let first = deterministic_stored_zip(&entries).expect("build ZIP evidence");
+        let second = deterministic_stored_zip(&entries).expect("repeat ZIP evidence");
+        assert_eq!(first, second);
+        assert_eq!(Sha256::digest(&first), Sha256::digest(&second));
+        assert_eq!(
+            stored_entries(&first),
+            vec![
+                (
+                    "rspice-golden-regression.xml".to_owned(),
+                    b"<testsuite/>".to_vec(),
+                ),
+                (
+                    "rspice-golden-regression.tap".to_owned(),
+                    b"TAP version 13\n1..0\n".to_vec(),
+                ),
+            ]
+        );
+        let changed =
+            deterministic_stored_zip(&[entries[0], (entries[1].0, b"TAP version 13\n1..1\n")])
+                .expect("build changed ZIP evidence");
+        assert_ne!(Sha256::digest(first), Sha256::digest(changed));
+    }
 
     #[test]
     fn automatic_text_export_never_overwrites_an_existing_artifact() {
