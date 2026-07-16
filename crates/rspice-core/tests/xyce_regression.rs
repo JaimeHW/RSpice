@@ -315,6 +315,34 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "expected_failure_dc_excess_arguments_parse",
         ),
         (
+            "Netlists/Message/Input/AC_setupSweepParam.cir",
+            "expected_failure_ac_unsupported_sweep_type_parse",
+        ),
+        (
+            "Netlists/Message/Input/NOISE_setupSweepParam.cir",
+            "expected_failure_noise_unsupported_sweep_type_parse",
+        ),
+        (
+            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2a.cir",
+            "expected_failure_message_missing_library_endl_parse",
+        ),
+        (
+            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2b.cir",
+            "expected_failure_message_missing_library_file_unquoted_parse",
+        ),
+        (
+            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2c.cir",
+            "expected_failure_message_missing_library_file_quoted_parse",
+        ),
+        (
+            "Netlists/Message/Device/CircuitBlock_addTableData_1.cir",
+            "expected_failure_message_duplicate_device_parse",
+        ),
+        (
+            "Netlists/Message/Device/DeviceBlock_extractNodes_1.cir",
+            "expected_failure_message_missing_device_nodes_parse",
+        ),
+        (
             "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
             "expected_failure_duplicate_dc_source_function_parse",
         ),
@@ -395,8 +423,8 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        26,
-        "the expected-failure oracle census is exactly twenty-six distinct physical records"
+        33,
+        "the expected-failure oracle census is exactly thirty-three distinct physical records"
     );
 }
 
