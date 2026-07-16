@@ -26,6 +26,7 @@ use super::{
     DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
     InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
     ParametricValue, ParseError, RandomState, SourceSpec, SubcircuitDef,
+    validate_mutual_inductor_references,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -245,6 +246,7 @@ impl<'a> Flattener<'a> {
 
     /// Flatten a netlist, expanding all subcircuit instances
     pub fn flatten(&mut self, netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
+        validate_mutual_inductor_references(netlist)?;
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.global_nodes = netlist.global_nodes.clone();

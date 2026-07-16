@@ -9,6 +9,9 @@
 use super::expr::{eval_expression, eval_expression_complex, prepare_behavioral_expression};
 use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
+use super::mutual_inductor::{
+    MutualInductorSemanticRecord, validate_mutual_inductor_semantic_records,
+};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, DataTable, DeviceInitialConditionDirective,

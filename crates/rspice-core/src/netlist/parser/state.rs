@@ -87,6 +87,7 @@ pub(super) struct ParseState {
     pub(super) subckt_stack: Vec<SubcktFrame>,
     /// Open `.if`/`.elseif`/`.else` blocks, innermost last.
     pub(super) conditional_stack: Vec<ConditionalFrame>,
+    pub(super) mutual_inductor_records: Vec<MutualInductorSemanticRecord>,
     /// Unknown dot-commands and `.options` keys already warned about, so a
     /// deck repeating one card does not flood the log.
     pub(super) unknown_warned: HashSet<String>,
@@ -115,6 +116,7 @@ impl ParseState {
             diagnostics: Vec::new(),
             subckt_stack: Vec::new(),
             conditional_stack: Vec::new(),
+            mutual_inductor_records: Vec::new(),
             unknown_warned: HashSet::new(),
         }
     }
@@ -138,6 +140,8 @@ impl ParseState {
         }
         super::super::expr::validate_global_parameter_expressions(&self.params)
             .map_err(ParseError::InvalidValue)?;
+
+        validate_mutual_inductor_semantic_records(&self.mutual_inductor_records)?;
 
         Ok(Netlist {
             title,

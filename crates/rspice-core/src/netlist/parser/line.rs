@@ -362,6 +362,13 @@ pub(super) fn process_line(
                 &scope,
                 line_num,
             )?;
+            MutualInductorSemanticRecord::append_parsed_elements(
+                &mut state.mutual_inductor_records,
+                &subckt_elements,
+                Some(&frame.qualified_name),
+                origin,
+                line,
+            );
             capture_subckt_body_scope(line, &mut frame.def, &frame.local_params);
             frame.def.elements.extend(subckt_elements);
             frame
@@ -404,7 +411,15 @@ pub(super) fn process_line(
         authored_element_name,
         "TOP_LEVEL",
         line_num,
-    )
+    )?;
+    MutualInductorSemanticRecord::append_parsed_elements(
+        &mut state.mutual_inductor_records,
+        &state.elements[first_new_element..],
+        None,
+        origin,
+        line,
+    );
+    Ok(())
 }
 
 pub(super) fn parse_line(

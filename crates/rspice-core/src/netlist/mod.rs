@@ -20,6 +20,7 @@ pub mod include;
 mod initcond;
 pub mod lexer;
 pub mod multi_run;
+mod mutual_inductor;
 pub mod param_scope;
 mod parser;
 pub mod source_map;
@@ -45,6 +46,7 @@ pub use initcond::{
     DeviceInitialConditionSourceProvider, DeviceInitialConditionSourceText,
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
 };
+pub use mutual_inductor::validate_mutual_inductor_references;
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
@@ -171,6 +173,29 @@ pub struct GlobalSubcircuitPortBindingError {
     pub actual_node: String,
 }
 
+/// A mutual-inductor card references an inductor that is not defined in the
+/// same netlist scope.
+///
+/// SPICE inductor names are scope-local and case-insensitive. The authored,
+/// canonical, and qualified spellings are retained independently so public
+/// adapters can render concise compatibility messages without discarding the
+/// identity needed by IDEs and automation.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Undefined inductor {canonical_inductor_name} in mutual inductor {canonical_coupling_name} definition."
+)]
+pub struct UndefinedMutualInductorReferenceError {
+    pub origin: NetlistSourceLocation,
+    pub authored_coupling_name: String,
+    pub canonical_coupling_name: String,
+    pub qualified_coupling_name: String,
+    pub authored_inductor_name: String,
+    pub canonical_inductor_name: String,
+    pub qualified_inductor_name: String,
+    pub scope_name: Option<String>,
+    pub reference_position: usize,
+}
+
 /// Structured `.INITCOND` failures retained across parser, source-provider,
 /// hierarchy, and public adapter boundaries.
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -276,6 +301,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     GlobalSubcircuitPortBinding(Box<GlobalSubcircuitPortBindingError>),
+
+    #[error(transparent)]
+    UndefinedMutualInductorReference(Box<UndefinedMutualInductorReferenceError>),
 
     #[error(transparent)]
     DeviceInitialCondition(Box<DeviceInitialConditionError>),
