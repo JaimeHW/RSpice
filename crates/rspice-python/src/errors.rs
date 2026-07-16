@@ -31,6 +31,7 @@ struct ParseErrorAttributes {
     canonical_name: Option<String>,
     qualified_name: Option<String>,
     subcircuit_name: Option<String>,
+    canonical_subcircuit_name: Option<String>,
     instance_name: Option<String>,
     canonical_instance_name: Option<String>,
     qualified_instance_name: Option<String>,
@@ -75,6 +76,48 @@ impl ParseErrorAttributes {
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned());
     }
+}
+
+fn duplicate_subcircuit_binding_attributes(
+    error: &rspice_core::netlist::DuplicateSubcircuitPortBindingError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("duplicate_subcircuit_port_binding");
+    attributes.category = Some("subcircuit_binding");
+    attributes.detail = Some(error.formal_port.clone());
+    attributes.authored_name = Some(error.instance_name.clone());
+    attributes.canonical_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_name = Some(error.qualified_instance_name.clone());
+    attributes.subcircuit_name = Some(error.subcircuit_name.clone());
+    attributes.canonical_subcircuit_name = Some(error.canonical_subcircuit_name.clone());
+    attributes.instance_name = Some(error.instance_name.clone());
+    attributes.canonical_instance_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_instance_name = Some(error.qualified_instance_name.clone());
+    attributes.formal_port = Some(error.formal_port.clone());
+    attributes.first_position = Some(error.first_position);
+    attributes.conflicting_position = Some(error.conflicting_position);
+    attributes.first_actual_node = Some(error.first_actual_node.clone());
+    attributes.conflicting_actual_node = Some(error.conflicting_actual_node.clone());
+    attributes
+}
+
+fn global_subcircuit_binding_attributes(
+    error: &rspice_core::netlist::GlobalSubcircuitPortBindingError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("global_subcircuit_port_binding");
+    attributes.category = Some("subcircuit_binding");
+    attributes.detail = Some(error.formal_port.clone());
+    attributes.authored_name = Some(error.instance_name.clone());
+    attributes.canonical_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_name = Some(error.qualified_instance_name.clone());
+    attributes.subcircuit_name = Some(error.subcircuit_name.clone());
+    attributes.canonical_subcircuit_name = Some(error.canonical_subcircuit_name.clone());
+    attributes.instance_name = Some(error.instance_name.clone());
+    attributes.canonical_instance_name = Some(error.canonical_instance_name.clone());
+    attributes.qualified_instance_name = Some(error.qualified_instance_name.clone());
+    attributes.formal_port = Some(error.formal_port.clone());
+    attributes.position = Some(error.position);
+    attributes.actual_node = Some(error.actual_node.clone());
+    attributes
 }
 
 // Base exception for all RSpice errors
@@ -186,38 +229,10 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             attributes
         }
         CoreParseError::DuplicateSubcircuitPortBinding(error) => {
-            let mut attributes = ParseErrorAttributes::new("duplicate_subcircuit_port_binding");
-            attributes.category = Some("subcircuit_binding");
-            attributes.detail = Some(error.formal_port.clone());
-            attributes.authored_name = Some(error.instance_name.clone());
-            attributes.canonical_name = Some(error.canonical_instance_name.clone());
-            attributes.qualified_name = Some(error.qualified_instance_name.clone());
-            attributes.subcircuit_name = Some(error.subcircuit_name.clone());
-            attributes.instance_name = Some(error.instance_name.clone());
-            attributes.canonical_instance_name = Some(error.canonical_instance_name.clone());
-            attributes.qualified_instance_name = Some(error.qualified_instance_name.clone());
-            attributes.formal_port = Some(error.formal_port.clone());
-            attributes.first_position = Some(error.first_position);
-            attributes.conflicting_position = Some(error.conflicting_position);
-            attributes.first_actual_node = Some(error.first_actual_node.clone());
-            attributes.conflicting_actual_node = Some(error.conflicting_actual_node.clone());
-            attributes
+            duplicate_subcircuit_binding_attributes(error)
         }
         CoreParseError::GlobalSubcircuitPortBinding(error) => {
-            let mut attributes = ParseErrorAttributes::new("global_subcircuit_port_binding");
-            attributes.category = Some("subcircuit_binding");
-            attributes.detail = Some(error.formal_port.clone());
-            attributes.authored_name = Some(error.instance_name.clone());
-            attributes.canonical_name = Some(error.canonical_instance_name.clone());
-            attributes.qualified_name = Some(error.qualified_instance_name.clone());
-            attributes.subcircuit_name = Some(error.subcircuit_name.clone());
-            attributes.instance_name = Some(error.instance_name.clone());
-            attributes.canonical_instance_name = Some(error.canonical_instance_name.clone());
-            attributes.qualified_instance_name = Some(error.qualified_instance_name.clone());
-            attributes.formal_port = Some(error.formal_port.clone());
-            attributes.position = Some(error.position);
-            attributes.actual_node = Some(error.actual_node.clone());
-            attributes
+            global_subcircuit_binding_attributes(error)
         }
         CoreParseError::DeviceInitialCondition(error) => {
             let mut attributes = ParseErrorAttributes::new("device_initial_condition");
@@ -342,6 +357,10 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         value.setattr("canonical_name", attributes.canonical_name)?;
         value.setattr("qualified_name", attributes.qualified_name)?;
         value.setattr("subcircuit_name", attributes.subcircuit_name)?;
+        value.setattr(
+            "canonical_subcircuit_name",
+            attributes.canonical_subcircuit_name,
+        )?;
         value.setattr("instance_name", attributes.instance_name)?;
         value.setattr(
             "canonical_instance_name",
@@ -378,105 +397,58 @@ mod tests {
     use super::*;
     use rspice_core::netlist::{
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
-        ParseError as CoreParseError,
     };
 
     #[test]
     fn duplicate_subcircuit_binding_exposes_structured_python_attributes() {
-        Python::initialize();
-        let error = parse_error_to_pyerr(CoreParseError::DuplicateSubcircuitPortBinding(Box::new(
-            DuplicateSubcircuitPortBindingError {
-                subcircuit_name: "INV1".into(),
-                instance_name: "Xinv1".into(),
-                canonical_instance_name: "XINV1".into(),
-                qualified_instance_name: "TOP.Xinv1".into(),
-                formal_port: "GND".into(),
-                first_position: 4,
-                conflicting_position: 8,
-                first_actual_node: "0".into(),
-                conflicting_actual_node: "VDD".into(),
-            },
-        )));
+        let error = DuplicateSubcircuitPortBindingError {
+            subcircuit_name: "inv1".into(),
+            canonical_subcircuit_name: "INV1".into(),
+            instance_name: "Xinv1".into(),
+            canonical_instance_name: "XINV1".into(),
+            qualified_instance_name: "TOP.Xinv1".into(),
+            formal_port: "GND".into(),
+            first_position: 4,
+            conflicting_position: 8,
+            first_actual_node: "0".into(),
+            conflicting_actual_node: "VDD".into(),
+        };
+        let attributes = duplicate_subcircuit_binding_attributes(&error);
 
-        Python::attach(|py| {
-            let value = error.value(py);
-            assert_eq!(
-                value.getattr("kind").unwrap().extract::<String>().unwrap(),
-                "duplicate_subcircuit_port_binding"
-            );
-            assert_eq!(
-                value
-                    .getattr("category")
-                    .unwrap()
-                    .extract::<String>()
-                    .unwrap(),
-                "subcircuit_binding"
-            );
-            assert_eq!(
-                value
-                    .getattr("canonical_instance_name")
-                    .unwrap()
-                    .extract::<String>()
-                    .unwrap(),
-                "XINV1"
-            );
-            assert_eq!(
-                value
-                    .getattr("first_position")
-                    .unwrap()
-                    .extract::<usize>()
-                    .unwrap(),
-                4
-            );
-            assert_eq!(
-                value
-                    .getattr("conflicting_actual_node")
-                    .unwrap()
-                    .extract::<String>()
-                    .unwrap(),
-                "VDD"
-            );
-        });
+        assert_eq!(attributes.kind, "duplicate_subcircuit_port_binding");
+        assert_eq!(attributes.category, Some("subcircuit_binding"));
+        assert_eq!(attributes.subcircuit_name.as_deref(), Some("inv1"));
+        assert_eq!(
+            attributes.canonical_subcircuit_name.as_deref(),
+            Some("INV1")
+        );
+        assert_eq!(attributes.canonical_instance_name.as_deref(), Some("XINV1"));
+        assert_eq!(attributes.first_position, Some(4));
+        assert_eq!(attributes.conflicting_actual_node.as_deref(), Some("VDD"));
     }
 
     #[test]
     fn global_subcircuit_binding_exposes_structured_python_attributes() {
-        Python::initialize();
-        let error = parse_error_to_pyerr(CoreParseError::GlobalSubcircuitPortBinding(Box::new(
-            GlobalSubcircuitPortBindingError {
-                subcircuit_name: "CELL".into(),
-                instance_name: "X1".into(),
-                canonical_instance_name: "X1".into(),
-                qualified_instance_name: "TOP.X1".into(),
-                formal_port: "$G_SHARED".into(),
-                position: 1,
-                actual_node: "LOCAL".into(),
-            },
-        )));
+        let error = GlobalSubcircuitPortBindingError {
+            subcircuit_name: "cell".into(),
+            canonical_subcircuit_name: "CELL".into(),
+            instance_name: "X1".into(),
+            canonical_instance_name: "X1".into(),
+            qualified_instance_name: "TOP.X1".into(),
+            formal_port: "$G_SHARED".into(),
+            position: 1,
+            actual_node: "LOCAL".into(),
+        };
+        let attributes = global_subcircuit_binding_attributes(&error);
 
-        Python::attach(|py| {
-            let value = error.value(py);
-            assert_eq!(
-                value.getattr("kind").unwrap().extract::<String>().unwrap(),
-                "global_subcircuit_port_binding"
-            );
-            assert_eq!(
-                value
-                    .getattr("formal_port")
-                    .unwrap()
-                    .extract::<String>()
-                    .unwrap(),
-                "$G_SHARED"
-            );
-            assert_eq!(
-                value
-                    .getattr("actual_node")
-                    .unwrap()
-                    .extract::<String>()
-                    .unwrap(),
-                "LOCAL"
-            );
-        });
+        assert_eq!(attributes.kind, "global_subcircuit_port_binding");
+        assert_eq!(attributes.subcircuit_name.as_deref(), Some("cell"));
+        assert_eq!(
+            attributes.canonical_subcircuit_name.as_deref(),
+            Some("CELL")
+        );
+        assert_eq!(attributes.formal_port.as_deref(), Some("$G_SHARED"));
+        assert_eq!(attributes.actual_node.as_deref(), Some("LOCAL"));
     }
 }
 

@@ -1030,6 +1030,7 @@ impl XyceExpectedFailureKind {
                 category: XyceExpectedFailureCategory::DuplicateSubcircuitPortBinding,
                 identifiers: vec![
                     "INV1".to_string(),
+                    "INV1".to_string(),
                     "Xinv1".to_string(),
                     "XINV1".to_string(),
                     "Xinv1".to_string(),
@@ -1044,6 +1045,7 @@ impl XyceExpectedFailureKind {
                 stage: XyceExpectedFailureStage::CircuitBuild,
                 category: XyceExpectedFailureCategory::DuplicateSubcircuitPortBinding,
                 identifiers: vec![
+                    "ONEBIT".to_string(),
                     "ONEBIT".to_string(),
                     "X1".to_string(),
                     "X1".to_string(),
@@ -6472,6 +6474,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     "subckt_a2_dup_error.cir",
                     DuplicateSubcircuitPortBindingError {
                         subcircuit_name: "INV1".to_string(),
+                        canonical_subcircuit_name: "INV1".to_string(),
                         instance_name: "Xinv1".to_string(),
                         canonical_instance_name: "XINV1".to_string(),
                         qualified_instance_name: "Xinv1".to_string(),
@@ -6512,6 +6515,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     "subckt_j1_dup_error.cir",
                     DuplicateSubcircuitPortBindingError {
                         subcircuit_name: "ONEBIT".to_string(),
+                        canonical_subcircuit_name: "ONEBIT".to_string(),
                         instance_name: "X1".to_string(),
                         canonical_instance_name: "X1".to_string(),
                         qualified_instance_name: "X1".to_string(),
@@ -6579,6 +6583,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             category: XyceExpectedFailureCategory::DuplicateSubcircuitPortBinding,
             identifiers: vec![
                 actual_error.subcircuit_name,
+                actual_error.canonical_subcircuit_name,
                 actual_error.instance_name,
                 actual_error.canonical_instance_name,
                 actual_error.qualified_instance_name,

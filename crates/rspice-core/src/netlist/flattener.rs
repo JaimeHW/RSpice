@@ -478,6 +478,7 @@ impl<'a> Flattener<'a> {
                     return Err(ParseError::DuplicateSubcircuitPortBinding(Box::new(
                         DuplicateSubcircuitPortBindingError {
                             subcircuit_name: subckt.name.clone(),
+                            canonical_subcircuit_name: subckt.name.to_ascii_uppercase(),
                             instance_name: instance.name.clone(),
                             canonical_instance_name: instance.name.to_ascii_uppercase(),
                             qualified_instance_name: new_prefix.clone(),
@@ -498,6 +499,7 @@ impl<'a> Flattener<'a> {
                     return Err(ParseError::GlobalSubcircuitPortBinding(Box::new(
                         GlobalSubcircuitPortBindingError {
                             subcircuit_name: subckt.name.clone(),
+                            canonical_subcircuit_name: subckt.name.to_ascii_uppercase(),
                             instance_name: instance.name.clone(),
                             canonical_instance_name: instance.name.to_ascii_uppercase(),
                             qualified_instance_name: new_prefix.clone(),
@@ -3093,6 +3095,7 @@ mod tests {
         );
 
         assert_eq!(error.subcircuit_name, "DUP");
+        assert_eq!(error.canonical_subcircuit_name, "DUP");
         assert_eq!(error.instance_name, "X1");
         assert_eq!(error.canonical_instance_name, "X1");
         assert_eq!(error.qualified_instance_name, "X1");
@@ -3140,10 +3143,10 @@ mod tests {
         let explicit = Netlist::parse(
             "explicit global binding\n\
              .GLOBAL VDD\n\
-             .SUBCKT CELL VDD p\n\
+             .SUBCKT cell VDD p\n\
              R1 VDD p 1\n\
              .ENDS\n\
-             X1 OTHER out CELL\n\
+             X1 OTHER out cell\n\
              .END\n",
         )
         .expect("explicit-global fixture parses");
@@ -3151,7 +3154,8 @@ mod tests {
         let ParseError::GlobalSubcircuitPortBinding(error) = error else {
             panic!("expected typed global subcircuit-port binding error");
         };
-        assert_eq!(error.subcircuit_name, "CELL");
+        assert_eq!(error.subcircuit_name, "cell");
+        assert_eq!(error.canonical_subcircuit_name, "CELL");
         assert_eq!(error.instance_name, "X1");
         assert_eq!(error.canonical_instance_name, "X1");
         assert_eq!(error.formal_port, "VDD");
@@ -3257,6 +3261,10 @@ mod tests {
                 panic!("{file_name}: expected typed duplicate binding error");
             };
             assert_eq!(error.subcircuit_name, subcircuit_name, "{file_name}");
+            assert_eq!(
+                error.canonical_subcircuit_name, subcircuit_name,
+                "{file_name}"
+            );
             assert_eq!(error.instance_name, instance_name, "{file_name}");
             assert_eq!(
                 error.canonical_instance_name,
@@ -3305,6 +3313,7 @@ mod tests {
             panic!("BUG784 must expose the typed duplicate binding error");
         };
         assert_eq!(error.subcircuit_name, "suba");
+        assert_eq!(error.canonical_subcircuit_name, "SUBA");
         assert_eq!(error.instance_name, "X1");
         assert_eq!(error.canonical_instance_name, "X1");
         assert_eq!(error.formal_port, "B");
@@ -3312,6 +3321,12 @@ mod tests {
         assert_eq!(error.conflicting_position, 2);
         assert_eq!(error.first_actual_node, "1");
         assert_eq!(error.conflicting_actual_node, "2");
+        assert!(error.to_string().contains(".subckt SUBA"));
+        assert!(
+            error
+                .to_string()
+                .contains("Error invoking subcircuit SUBA instance X1")
+        );
     }
 
     #[test]

@@ -420,8 +420,10 @@ fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic
             Diagnostic::error(error.to_string()).with_line(error.opened_at.line.checked_sub(1))
         }
         ParseError::DuplicateSubcircuitPortBinding(error) => Diagnostic::error(format!(
-            "{}\nInstance: {} · formal {} · positions {} and {} · effective nodes {} and {}",
+            "{}\nSubcircuit: {} (canonical {}) · instance: {} · formal {} · positions {} and {} · effective nodes {} and {}",
             error,
+            error.subcircuit_name,
+            error.canonical_subcircuit_name,
             error.qualified_instance_name,
             error.formal_port,
             error.first_position,
@@ -430,8 +432,10 @@ fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic
             error.conflicting_actual_node,
         )),
         ParseError::GlobalSubcircuitPortBinding(error) => Diagnostic::error(format!(
-            "{}\nInstance: {} · formal {} · position {} · effective node {}",
+            "{}\nSubcircuit: {} (canonical {}) · instance: {} · formal {} · position {} · effective node {}",
             error,
+            error.subcircuit_name,
+            error.canonical_subcircuit_name,
             error.qualified_instance_name,
             error.formal_port,
             error.position,
@@ -546,7 +550,8 @@ mod tests {
         let diagnostic = parse_error_diagnostic(
             rspice_core::netlist::ParseError::DuplicateSubcircuitPortBinding(Box::new(
                 rspice_core::netlist::DuplicateSubcircuitPortBindingError {
-                    subcircuit_name: "INV1".into(),
+                    subcircuit_name: "inv1".into(),
+                    canonical_subcircuit_name: "INV1".into(),
                     instance_name: "Xinv1".into(),
                     canonical_instance_name: "XINV1".into(),
                     qualified_instance_name: "TOP.Xinv1".into(),
@@ -561,6 +566,11 @@ mod tests {
 
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
         assert_eq!(diagnostic.line, None);
+        assert!(
+            diagnostic
+                .message
+                .contains("Subcircuit: inv1 (canonical INV1)")
+        );
         assert!(diagnostic.message.contains("TOP.Xinv1"));
         assert!(diagnostic.message.contains("positions 4 and 8"));
         assert!(diagnostic.message.contains("effective nodes 0 and VDD"));
@@ -571,7 +581,8 @@ mod tests {
         let diagnostic = parse_error_diagnostic(
             rspice_core::netlist::ParseError::GlobalSubcircuitPortBinding(Box::new(
                 rspice_core::netlist::GlobalSubcircuitPortBindingError {
-                    subcircuit_name: "CELL".into(),
+                    subcircuit_name: "cell".into(),
+                    canonical_subcircuit_name: "CELL".into(),
                     instance_name: "X1".into(),
                     canonical_instance_name: "X1".into(),
                     qualified_instance_name: "TOP.X1".into(),
@@ -583,6 +594,11 @@ mod tests {
         );
 
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert!(
+            diagnostic
+                .message
+                .contains("Subcircuit: cell (canonical CELL)")
+        );
         assert!(diagnostic.message.contains("TOP.X1"));
         assert!(diagnostic.message.contains("effective node LOCAL"));
     }

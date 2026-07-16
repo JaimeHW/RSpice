@@ -140,10 +140,11 @@ pub struct MissingSubcircuitEndsError {
 /// same effective node at a particular X-line invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error(
-    "Duplicate nodes in .subckt {subcircuit_name} point to different nodes in X line invocation: formal '{formal_port}' at position {first_position} maps to '{first_actual_node}', but position {conflicting_position} maps to '{conflicting_actual_node}'; Error invoking subcircuit {subcircuit_name} instance {canonical_instance_name}"
+    "Duplicate nodes in .subckt {canonical_subcircuit_name} point to different nodes in X line invocation: formal '{formal_port}' at position {first_position} maps to '{first_actual_node}', but position {conflicting_position} maps to '{conflicting_actual_node}'; Error invoking subcircuit {canonical_subcircuit_name} instance {canonical_instance_name}"
 )]
 pub struct DuplicateSubcircuitPortBindingError {
     pub subcircuit_name: String,
+    pub canonical_subcircuit_name: String,
     pub instance_name: String,
     pub canonical_instance_name: String,
     pub qualified_instance_name: String,
@@ -157,10 +158,11 @@ pub struct DuplicateSubcircuitPortBindingError {
 /// A formal global subcircuit port was connected to a differently named node.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error(
-    "Global node in subcircuit invocation must match same name in .subckt: formal '{formal_port}' at position {position} maps to '{actual_node}'; Error invoking subcircuit {subcircuit_name} instance {canonical_instance_name}"
+    "Global node in subcircuit invocation must match same name in .subckt: formal '{formal_port}' at position {position} maps to '{actual_node}'; Error invoking subcircuit {canonical_subcircuit_name} instance {canonical_instance_name}"
 )]
 pub struct GlobalSubcircuitPortBindingError {
     pub subcircuit_name: String,
+    pub canonical_subcircuit_name: String,
     pub instance_name: String,
     pub canonical_instance_name: String,
     pub qualified_instance_name: String,

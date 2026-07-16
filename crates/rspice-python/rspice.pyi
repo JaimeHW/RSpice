@@ -103,6 +103,7 @@ class ParseError(RSpiceError):
     canonical_name: str | None
     qualified_name: str | None
     subcircuit_name: str | None
+    canonical_subcircuit_name: str | None
     instance_name: str | None
     canonical_instance_name: str | None
     qualified_instance_name: str | None
