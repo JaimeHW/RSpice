@@ -152,6 +152,12 @@ const XYCE_BUG769_DEVICE_CURRENT_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_769/bug_769b.cir";
 const XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_769/bug_769c.cir";
+const XYCE_BUG1578_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_1578/bug_1578.cir";
+const XYCE_BUG198_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_198/bug_198.cir";
+const XYCE_BUG258_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_258/bug_198.cir";
 const XYCE_BUG67_SOURCE_BLAKE3: &str =
     "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
 const XYCE_BUG671_SOURCE_BLAKE3: &str =
@@ -188,6 +194,12 @@ const XYCE_BUG769_DEVICE_CURRENT_SOURCE_BLAKE3: &str =
     "769e5db9d7d51f1860c1e308d8c2374fb6dedc22604a47c9eb2eca1c5d5e7f59";
 const XYCE_BUG769_LEAD_CURRENT_SOURCE_BLAKE3: &str =
     "fb46538cf279bddce942af6e7521aa276760c05d0d4211995de332be804bb60d";
+const XYCE_BUG1578_SOURCE_BLAKE3: &str =
+    "b7debe414f4dec2e06c857e139b128db9f7e64024d86d6baeab672250d9bbfc4";
+const XYCE_BUG198_SOURCE_BLAKE3: &str =
+    "985f4d4efa9b59842c268b526496f40e9f04988a9fc425e5a945bc16c6e24da7";
+const XYCE_BUG258_SOURCE_BLAKE3: &str =
+    "985f4d4efa9b59842c268b526496f40e9f04988a9fc425e5a945bc16c6e24da7";
 const XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3: &str =
     "ccdc1cb4b46160d2c993d155a6816c81e5671aecd700bd364ab8b7d512320a13";
 const XYCE_BUG401_MANIFEST_CENSUS_BLAKE3: &str =
@@ -259,6 +271,9 @@ enum XyceExpectedFailureKind {
     Bug769ParameterNodeVoltage,
     Bug769ParameterDeviceCurrent,
     Bug769ParameterLeadCurrent,
+    Bug1578InvalidDeviceType,
+    Bug198UnrecognizedLine,
+    Bug258UnrecognizedLine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,6 +323,9 @@ impl XyceExpectedFailureKind {
             XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD => {
                 Some(Self::Bug769ParameterLeadCurrent)
             }
+            XYCE_BUG1578_EXPECTED_FAILURE_RECORD => Some(Self::Bug1578InvalidDeviceType),
+            XYCE_BUG198_EXPECTED_FAILURE_RECORD => Some(Self::Bug198UnrecognizedLine),
+            XYCE_BUG258_EXPECTED_FAILURE_RECORD => Some(Self::Bug258UnrecognizedLine),
             _ => None,
         }
     }
@@ -334,6 +352,9 @@ impl XyceExpectedFailureKind {
                 XYCE_BUG769_DEVICE_CURRENT_EXPECTED_FAILURE_RECORD
             }
             Self::Bug769ParameterLeadCurrent => XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD,
+            Self::Bug1578InvalidDeviceType => XYCE_BUG1578_EXPECTED_FAILURE_RECORD,
+            Self::Bug198UnrecognizedLine => XYCE_BUG198_EXPECTED_FAILURE_RECORD,
+            Self::Bug258UnrecognizedLine => XYCE_BUG258_EXPECTED_FAILURE_RECORD,
         }
     }
 
@@ -357,6 +378,9 @@ impl XyceExpectedFailureKind {
             Self::Bug769ParameterNodeVoltage => XYCE_BUG769_NODE_VOLTAGE_SOURCE_BLAKE3,
             Self::Bug769ParameterDeviceCurrent => XYCE_BUG769_DEVICE_CURRENT_SOURCE_BLAKE3,
             Self::Bug769ParameterLeadCurrent => XYCE_BUG769_LEAD_CURRENT_SOURCE_BLAKE3,
+            Self::Bug1578InvalidDeviceType => XYCE_BUG1578_SOURCE_BLAKE3,
+            Self::Bug198UnrecognizedLine => XYCE_BUG198_SOURCE_BLAKE3,
+            Self::Bug258UnrecognizedLine => XYCE_BUG258_SOURCE_BLAKE3,
         }
     }
 
@@ -396,6 +420,9 @@ impl XyceExpectedFailureKind {
             Self::Bug769ParameterLeadCurrent => {
                 "expected_failure_bug769_parameter_lead_current_parse"
             }
+            Self::Bug1578InvalidDeviceType => "expected_failure_bug1578_invalid_device_type_parse",
+            Self::Bug198UnrecognizedLine => "expected_failure_bug198_unrecognized_line_parse",
+            Self::Bug258UnrecognizedLine => "expected_failure_bug258_unrecognized_line_parse",
         }
     }
 
@@ -453,6 +480,13 @@ impl XyceExpectedFailureKind {
                 "in file bug_769c.cir at or near line 69",
                 "Lead Current may not be used in parameter expression [(]RVAL[)]",
             ][..],
+            Self::Bug1578InvalidDeviceType => &[
+                "in file bug_1578.cir at or near line 10",
+                "Invalid device type for device NETLIST",
+            ][..],
+            Self::Bug198UnrecognizedLine | Self::Bug258UnrecognizedLine => {
+                &["in file bug_198.cir at or near line 3", "Unrecognized line"][..]
+            }
         };
         XyceUpstreamExpectedErrorPolicy {
             requires_nonzero_exit: true,
@@ -584,6 +618,22 @@ impl XyceExpectedFailureKind {
                     "line 69".to_string(),
                 ],
             },
+            Self::Bug1578InvalidDeviceType => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::UnknownDeviceType,
+                identifiers: vec![
+                    "NETLIST".to_string(),
+                    "N".to_string(),
+                    "line 10".to_string(),
+                ],
+            },
+            Self::Bug198UnrecognizedLine | Self::Bug258UnrecognizedLine => {
+                XyceExpectedFailureObservation {
+                    stage: XyceExpectedFailureStage::NetlistParse,
+                    category: XyceExpectedFailureCategory::InvalidNetlistLinePrefix,
+                    identifiers: vec!["#".to_string(), "line 3".to_string()],
+                }
+            }
         }
     }
 
@@ -671,6 +721,8 @@ enum XyceExpectedFailureCategory {
     ParameterNodeVoltage,
     ParameterDeviceCurrent,
     ParameterLeadCurrent,
+    UnknownDeviceType,
+    InvalidNetlistLinePrefix,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3968,6 +4020,23 @@ impl XyceTestRunner {
                     XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
                 )?
             }
+            XyceExpectedFailureKind::Bug1578InvalidDeviceType => {
+                Self::observe_bug1578_invalid_device_type_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug198UnrecognizedLine => {
+                Self::observe_bug198_or_bug258_unrecognized_line_failure(
+                    source,
+                    &deck.path,
+                    XyceExpectedFailureKind::Bug198UnrecognizedLine,
+                )?
+            }
+            XyceExpectedFailureKind::Bug258UnrecognizedLine => {
+                Self::observe_bug198_or_bug258_unrecognized_line_failure(
+                    source,
+                    &deck.path,
+                    XyceExpectedFailureKind::Bug258UnrecognizedLine,
+                )?
+            }
         };
         let expected = kind.expected_observation();
         if observation != expected {
@@ -4557,6 +4626,108 @@ impl XyceTestRunner {
             stage: XyceExpectedFailureStage::NetlistParse,
             category: XyceExpectedFailureCategory::DuplicateDcSourceFunction,
             identifiers: vec!["V2".to_string(), "DC".to_string(), "line 4".to_string()],
+        })
+    }
+
+    fn observe_bug1578_invalid_device_type_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 1578",
+            source,
+            32,
+            &[
+                (
+                    1,
+                    "*This is a test to make sure Xyce pukes with an APPROPRIATE",
+                ),
+                (
+                    7,
+                    "* out the title line.  The title line begins with an N, so it is",
+                ),
+                (10, "Netlist to Test the Xyce Pulse Voltage Source Model"),
+                (
+                    12,
+                    "* Tier No.:\t1                                           ",
+                ),
+                (28, "VPULSE 1 0 PULSE(0V 1V 0S 10US 10US 0.1US 20.1US)"),
+                (29, "R 1 0 500"),
+                (30, ".TRAN 1US 20.1US"),
+                (31, ".PRINT TRAN V(1)"),
+                (32, ".END"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            "BUG 1578",
+            source,
+            deck_path,
+            10,
+            "Unknown element type: N",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::UnknownDeviceType,
+            identifiers: vec![
+                "NETLIST".to_string(),
+                "N".to_string(),
+                "line 10".to_string(),
+            ],
+        })
+    }
+
+    fn observe_bug198_or_bug258_unrecognized_line_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let label = match kind {
+            XyceExpectedFailureKind::Bug198UnrecognizedLine => "BUG 198",
+            XyceExpectedFailureKind::Bug258UnrecognizedLine => "BUG 258",
+            _ => {
+                return Err(format!(
+                    "non-BUG 198/258 expected-failure kind passed to unrecognized-line observer: {kind:?}"
+                ));
+            }
+        };
+        Self::require_expected_failure_source_lines(
+            label,
+            source,
+            41,
+            &[
+                (1, "N-Channel Mosfet Circuit "),
+                (
+                    2,
+                    "**************************************************************",
+                ),
+                (
+                    3,
+                    "# Tier No.: 1                                               ",
+                ),
+                (
+                    28,
+                    "************************************************************** ",
+                ),
+                (29, "VDD 5 0 DC 18V "),
+                (31, "R1 5 1 47MEGa"),
+                (37, ".MODEL NFET NMOS(LEVEL=1 KP=0.5M VTO=2V)"),
+                (38, ".DC VDD 18 18 1"),
+                (39, ".PRINT DC V(3,2) V(1,2)"),
+                (40, ".OPTIONS NONLIN in_forcing=0"),
+                (41, ".END"),
+            ],
+        )?;
+        Self::require_exact_syntax_failure(
+            label,
+            source,
+            deck_path,
+            3,
+            "Expected identifier at start of line",
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::InvalidNetlistLinePrefix,
+            identifiers: vec!["#".to_string(), "line 3".to_string()],
         })
     }
 
@@ -65929,6 +66100,21 @@ R2 2 0 1
                 ][..],
             ),
             (
+                XyceExpectedFailureKind::Bug1578InvalidDeviceType,
+                &[
+                    "in file bug_1578.cir at or near line 10",
+                    "Invalid device type for device NETLIST",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug198UnrecognizedLine,
+                &["in file bug_198.cir at or near line 3", "Unrecognized line"][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug258UnrecognizedLine,
+                &["in file bug_198.cir at or near line 3", "Unrecognized line"][..],
+            ),
+            (
                 XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
                 &[
                     "in file bug204.cir at or near line 14",
@@ -66018,7 +66204,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_eighteen_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_twenty_one_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -66038,8 +66224,20 @@ R2 2 0 1
             records,
             vec![
                 (
+                    XYCE_BUG1578_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug1578InvalidDeviceType,
+                ),
+                (
+                    XYCE_BUG198_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug198UnrecognizedLine,
+                ),
+                (
                     XYCE_BUG204_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+                ),
+                (
+                    XYCE_BUG258_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug258UnrecognizedLine,
                 ),
                 (
                     XYCE_BUG281_EXPECTED_FAILURE_RECORD.to_string(),
@@ -66117,7 +66315,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            18,
+            21,
             "each record requires a distinct contract"
         );
     }
@@ -66160,8 +66358,20 @@ R2 2 0 1
                 "expected_failure_duplicate_dc_source_function_parse",
             ),
             (
+                "Netlists/Certification_Tests/BUG_1578/bug_1578.cir",
+                "expected_failure_bug1578_invalid_device_type_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_198/bug_198.cir",
+                "expected_failure_bug198_unrecognized_line_parse",
+            ),
+            (
                 "Netlists/Certification_Tests/BUG_204/bug204.cir",
                 "expected_failure_bug204_invalid_dc_sweep_arity_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_258/bug_198.cir",
+                "expected_failure_bug258_unrecognized_line_parse",
             ),
             (
                 "Netlists/Certification_Tests/BUG_281/bug_281.cir",
@@ -66279,7 +66489,10 @@ R2 2 0 1
             XyceExpectedFailureKind::Bug744DcOperatingPoint,
             XyceExpectedFailureKind::Bug387MissingLibraryEndl,
             XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+            XyceExpectedFailureKind::Bug1578InvalidDeviceType,
+            XyceExpectedFailureKind::Bug198UnrecognizedLine,
             XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+            XyceExpectedFailureKind::Bug258UnrecognizedLine,
             XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
         ] {
             assert_eq!(
@@ -66849,6 +67062,118 @@ R2 2 0 1
                 XyceTestRunner::observe_issue455_duplicate_dc_failure(&mutated, &path).is_err(),
                 "{label} must not satisfy ISSUE 455"
             );
+        }
+    }
+
+    #[test]
+    fn bug1578_bug198_and_bug258_observers_reject_corrected_and_shifted_inputs() {
+        let root = expected_failure_test_root();
+
+        let bug1578_path = root.join("Netlists/Certification_Tests/BUG_1578/bug_1578.cir");
+        let bug1578_source = fs::read_to_string(&bug1578_path).expect("read BUG 1578");
+        XyceTestRunner::observe_bug1578_invalid_device_type_failure(&bug1578_source, &bug1578_path)
+            .expect("canonical BUG 1578 failure is observed");
+        let corrected_bug1578 = bug1578_source.replacen(
+            "Netlist to Test the Xyce Pulse Voltage Source Model",
+            "* Netlist to Test the Xyce Pulse Voltage Source Model",
+            1,
+        );
+        assert_ne!(corrected_bug1578, bug1578_source);
+        XyceTestRunner::parse_xyce_netlist(&corrected_bug1578, &bug1578_path)
+            .expect("commented BUG 1578 invalid device line genuinely parses");
+        for (mutated, label) in [
+            (corrected_bug1578, "commented invalid device line"),
+            (
+                bug1578_source.replacen(
+                    "Netlist to Test the Xyce Pulse Voltage Source Model",
+                    "Invalid line to Test the Xyce Pulse Voltage Source Model",
+                    1,
+                ),
+                "different invalid device type",
+            ),
+            (format!("\r\n{bug1578_source}"), "shifted physical line"),
+        ] {
+            assert_ne!(
+                mutated, bug1578_source,
+                "{label} mutation must change BUG 1578"
+            );
+            assert!(
+                XyceTestRunner::observe_bug1578_invalid_device_type_failure(
+                    &mutated,
+                    &bug1578_path
+                )
+                .is_err(),
+                "{label} must not satisfy BUG 1578"
+            );
+        }
+
+        let bug198_path = root.join("Netlists/Certification_Tests/BUG_198/bug_198.cir");
+        let bug258_path = root.join("Netlists/Certification_Tests/BUG_258/bug_198.cir");
+        let bug198_source = fs::read_to_string(&bug198_path).expect("read BUG 198");
+        let bug258_source = fs::read_to_string(&bug258_path).expect("read BUG 258");
+        assert_eq!(
+            bug198_source, bug258_source,
+            "BUG 198 and BUG 258 intentionally retain byte-identical netlists"
+        );
+        assert_eq!(XYCE_BUG198_SOURCE_BLAKE3, XYCE_BUG258_SOURCE_BLAKE3);
+        assert_ne!(
+            XyceExpectedFailureKind::Bug198UnrecognizedLine.record(),
+            XyceExpectedFailureKind::Bug258UnrecognizedLine.record()
+        );
+        assert_ne!(
+            XyceExpectedFailureKind::Bug198UnrecognizedLine.result_contract(),
+            XyceExpectedFailureKind::Bug258UnrecognizedLine.result_contract()
+        );
+
+        for (label, source, path, kind) in [
+            (
+                "BUG 198",
+                &bug198_source,
+                &bug198_path,
+                XyceExpectedFailureKind::Bug198UnrecognizedLine,
+            ),
+            (
+                "BUG 258",
+                &bug258_source,
+                &bug258_path,
+                XyceExpectedFailureKind::Bug258UnrecognizedLine,
+            ),
+        ] {
+            XyceTestRunner::observe_bug198_or_bug258_unrecognized_line_failure(source, path, kind)
+                .unwrap_or_else(|error| panic!("canonical {label} failure is observed: {error}"));
+            let corrected = source.replacen(
+                "# Tier No.: 1                                               ",
+                "* Tier No.: 1                                               ",
+                1,
+            );
+            assert_ne!(corrected, source.as_str());
+            XyceTestRunner::parse_xyce_netlist(&corrected, path)
+                .unwrap_or_else(|error| panic!("corrected {label} genuinely parses: {error}"));
+            for (mutated, mutation_label) in [
+                (corrected, "commented unrecognized line"),
+                (
+                    source.replacen(
+                        "# Tier No.: 1                                               ",
+                        "# Different invalid line                                    ",
+                        1,
+                    ),
+                    "different hash-prefixed line",
+                ),
+                (format!("\r\n{source}"), "shifted physical line"),
+            ] {
+                assert_ne!(
+                    mutated,
+                    source.as_str(),
+                    "{mutation_label} mutation must change {label}"
+                );
+                assert!(
+                    XyceTestRunner::observe_bug198_or_bug258_unrecognized_line_failure(
+                        &mutated, path, kind
+                    )
+                    .is_err(),
+                    "{mutation_label} must not satisfy {label}"
+                );
+            }
         }
     }
 
