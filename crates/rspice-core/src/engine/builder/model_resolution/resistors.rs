@@ -319,34 +319,26 @@ fn apply_resistor_instance_scaling(
     Ok(resistance)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Level1ModelDefaultResistance {
-    resistance: f64,
-    from_synthetic_default: bool,
-}
-
 fn resolve_level1_model_default_resistance(
     element_name: &str,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
     eval_ctx: &crate::netlist::ParamContext,
-) -> Result<Level1ModelDefaultResistance, SimulationError> {
+    dialect: crate::netlist::ExpressionDialect,
+) -> Result<f64, SimulationError> {
     let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?;
     let Some(rsh) = rsh.filter(|value| value.is_finite() && *value != 0.0) else {
-        return Ok(Level1ModelDefaultResistance {
-            resistance: 1000.0,
-            from_synthetic_default: true,
-        });
+        return Ok(1000.0);
     };
 
-    let (squares, from_synthetic_default) = if let Some(nsq) =
+    let squares = if let Some(nsq) =
         instance_param(instance_params, &["NRS", "NRSQ", "NSQ", "SQUARES"])
     {
-        (nsq, false)
+        nsq
     } else if let Some(nsq) =
         resolve_model_param(model_def, &["NRS", "NRSQ", "NSQ", "SQUARES"], eval_ctx)?
     {
-        (nsq, false)
+        nsq
     } else if let Some(l) = instance_param(instance_params, &["L", "LENGTH"])
         .or_else(|| {
             resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
@@ -363,9 +355,19 @@ fn resolve_level1_model_default_resistance(
             })
             .unwrap_or(10.0e-6);
         let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
-        let short = resolve_model_param(model_def, &["SHORT"], eval_ctx)?.unwrap_or(0.0);
-        let l_eff = l - 2.0 * short;
-        let w_eff = w - 2.0 * narrow;
+        let short = if dialect == crate::netlist::ExpressionDialect::Xyce {
+            0.0
+        } else {
+            resolve_model_param(model_def, &["SHORT"], eval_ctx)?.unwrap_or(0.0)
+        };
+        let (l_eff, w_eff) = if dialect == crate::netlist::ExpressionDialect::Xyce {
+            // Xyce 7.10 defines no resistor-model SHORT parameter and uses
+            // the same one-sided NARROW correction for both dimensions.
+            (l - narrow, w - narrow)
+        } else {
+            // ngspice follows the SPICE3 two-sided etch corrections.
+            (l - 2.0 * short, w - 2.0 * narrow)
+        };
         if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff < 0.0 {
             return Err(SimulationError::Circuit(format!(
                 "Resistor '{}' has invalid effective geometry (L={}, W={}, SHORT={}, NARROW={})",
@@ -373,15 +375,12 @@ fn resolve_level1_model_default_resistance(
             )));
         }
         if w_eff == 0.0 {
-            (f64::INFINITY, false)
+            f64::INFINITY
         } else {
-            (l_eff / w_eff, false)
+            l_eff / w_eff
         }
     } else {
-        return Ok(Level1ModelDefaultResistance {
-            resistance: 1000.0,
-            from_synthetic_default: true,
-        });
+        return Ok(1000.0);
     };
 
     if !(squares.is_infinite() && squares.is_sign_positive())
@@ -393,10 +392,7 @@ fn resolve_level1_model_default_resistance(
         )));
     }
 
-    Ok(Level1ModelDefaultResistance {
-        resistance: rsh * squares,
-        from_synthetic_default,
-    })
+    Ok(rsh * squares)
 }
 
 pub(in crate::engine::builder) fn resolve_resistor_instance_value(
@@ -487,27 +483,19 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
             &eval_ctx,
         )?;
 
-        let mut uses_synthetic_model_default = false;
         if resistance.is_none() {
-            let model_default = resolve_level1_model_default_resistance(
+            resistance = Some(resolve_level1_model_default_resistance(
                 element_name,
                 model_def,
                 instance_params,
                 &eval_ctx,
-            )?;
-            uses_synthetic_model_default = model_default.from_synthetic_default;
-            resistance = Some(model_default.resistance);
+                netlist.params.expression_dialect(),
+            )?);
         }
 
         if resistor_level != Some(2) {
-            if uses_synthetic_model_default {
-                if let Some(model_resistance) = resistance_multiplier {
-                    resistance = Some(model_resistance);
-                }
-            } else {
-                let resistance_multiplier = resistance_multiplier.unwrap_or(1.0);
-                resistance = resistance.map(|value| value * resistance_multiplier);
-            }
+            let resistance_multiplier = resistance_multiplier.unwrap_or(1.0);
+            resistance = resistance.map(|value| value * resistance_multiplier);
         }
     } else if resistance.is_none() && uses_xyce_default {
         resistance = Some(1000.0);
@@ -656,6 +644,26 @@ mod tests {
         temperature_kelvin: f64,
     ) -> (f64, Option<f64>) {
         let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
+        resolve_resistor_from_netlist_at(&netlist, name, temperature_kelvin)
+    }
+
+    fn resolve_xyce_resistor_from_source(source: &str, name: &str) -> f64 {
+        let netlist = crate::netlist::Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("Xyce test netlist parses");
+        resolve_resistor_from_netlist_at(&netlist, name, crate::constants::TEMP_REFERENCE).0
+    }
+
+    fn resolve_resistor_from_netlist_at(
+        netlist: &crate::netlist::Netlist,
+        name: &str,
+        temperature_kelvin: f64,
+    ) -> (f64, Option<f64>) {
         let element = netlist
             .elements
             .iter()
@@ -674,7 +682,7 @@ mod tests {
         };
 
         let dc = resolve_resistor_instance_value(
-            &netlist,
+            netlist,
             &element.name,
             *value,
             value_expr.as_deref(),
@@ -872,11 +880,11 @@ R3 a 0 rmod
     }
 
     #[test]
-    fn value_less_level1_modeled_resistor_uses_model_r_as_default() {
+    fn value_less_level1_modeled_resistor_multiplies_the_one_kilohm_default() {
         let (model_r, _) = resolve_resistor_from_source(
             r#"value-less modeled resistor
 R1 a 0 rmod
-.model rmod R R=2k
+.model rmod R R=2
 .end
 "#,
             "R1",
@@ -886,12 +894,12 @@ R1 a 0 rmod
         let (model_res_alias, _) = resolve_resistor_from_source(
             r#"value-less modeled resistor with RES alias
 R2 a 0 rmod
-.model rmod R RES=43
+.model rmod R RES=0.5
 .end
 "#,
             "R2",
         );
-        assert_eq!(model_res_alias, 43.0);
+        assert_eq!(model_res_alias, 500.0);
     }
 
     #[test]
@@ -905,5 +913,25 @@ R1 a 0 rmod L=2 W=1
             "R1",
         );
         assert_eq!(geometry, 400.0);
+    }
+
+    #[test]
+    fn level1_geometry_follows_the_selected_simulator_dialect() {
+        let source = r#"modeled resistor dialect geometry
+R1 a 0 rmod L=12u W=4u
+.model rmod R RSH=100 NARROW=1u SHORT=1u
+.end
+"#;
+
+        let xyce = resolve_xyce_resistor_from_source(source, "R1");
+        let (ngspice, _) = resolve_resistor_from_source(source, "R1");
+
+        let xyce_expected = 100.0 * 11.0 / 3.0;
+        let ngspice_expected = 100.0 * 10.0 / 2.0;
+        assert!((xyce - xyce_expected).abs() < 1.0e-12, "Xyce R={xyce}");
+        assert!(
+            (ngspice - ngspice_expected).abs() < 1.0e-12,
+            "ngspice R={ngspice}"
+        );
     }
 }
