@@ -296,6 +296,7 @@ pub fn parse_netlist_with_options_and_abort(
 
     let mut line_num = 1;
     let mut continuation = String::new();
+    let mut continuation_line = None;
     let mut data_table: Option<DataTableBuilder> = None;
 
     for (line_index, line) in lines.iter().skip(1).enumerate() {
@@ -340,6 +341,7 @@ pub fn parse_netlist_with_options_and_abort(
 
         // Handle line continuation (+ at start of line)
         if let Some(rest) = trimmed.strip_prefix('+') {
+            continuation_line.get_or_insert(line_num);
             continuation.push(' ');
             continuation.push_str(rest);
             continue;
@@ -347,7 +349,10 @@ pub fn parse_netlist_with_options_and_abort(
 
         // Process previous continued line if exists
         if !continuation.is_empty() {
-            process_line_gated(&continuation, line_num - 1, &mut state)
+            let logical_line = continuation_line
+                .take()
+                .expect("non-empty logical statement records its physical origin");
+            process_line_gated(&continuation, logical_line, &mut state)
                 .map_err(ParseWithAbortError::from)?;
             continuation.clear();
         }
@@ -387,6 +392,7 @@ pub fn parse_netlist_with_options_and_abort(
 
         // Start new continuation or process line
         continuation = trimmed.to_string();
+        continuation_line = Some(line_num);
     }
 
     if let Some(table) = data_table {
@@ -399,7 +405,10 @@ pub fn parse_netlist_with_options_and_abort(
 
     // Process final line
     if !continuation.is_empty() {
-        process_line_gated(&continuation, line_num, &mut state)
+        let logical_line = continuation_line
+            .take()
+            .expect("non-empty logical statement records its physical origin");
+        process_line_gated(&continuation, logical_line, &mut state)
             .map_err(ParseWithAbortError::from)?;
     }
 
@@ -1141,6 +1150,7 @@ fn prescan_temperature_options_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     let mut continuation = String::new();
+    let mut continuation_line = None;
     let mut in_options = false;
     let mut line_num = 1usize;
 
@@ -1163,7 +1173,10 @@ fn prescan_temperature_options_with_abort(
         }
 
         if !continuation.is_empty() {
-            scan_temperature_option_line(&continuation, line_num - 1, state)
+            let logical_line = continuation_line
+                .take()
+                .expect("non-empty .OPTIONS statement records its physical origin");
+            scan_temperature_option_line(&continuation, logical_line, state)
                 .map_err(ParseWithAbortError::from)?;
             continuation.clear();
         }
@@ -1175,13 +1188,17 @@ fn prescan_temperature_options_with_abort(
         {
             in_options = true;
             continuation.push_str(trimmed);
+            continuation_line = Some(line_num);
         } else {
             in_options = false;
         }
     }
 
     if !continuation.is_empty() {
-        scan_temperature_option_line(&continuation, line_num, state)
+        let logical_line = continuation_line
+            .take()
+            .expect("non-empty .OPTIONS statement records its physical origin");
+        scan_temperature_option_line(&continuation, logical_line, state)
             .map_err(ParseWithAbortError::from)?;
     }
 
@@ -1409,5 +1426,75 @@ mod cancellation_tests {
             abort.count() > 7,
             "one large .DATA row must poll beyond its outer line boundary"
         );
+    }
+}
+
+#[cfg(test)]
+mod logical_line_origin_tests {
+    use super::*;
+
+    fn assert_dc_trailing_token_line(source: &str, expected_line: usize) {
+        let error = parse_netlist(source).expect_err("excess .DC argument must be rejected");
+        match error {
+            ParseError::Syntax { line, message } => {
+                assert_eq!(line, expected_line);
+                assert_eq!(message, ".DC has unexpected trailing token Number(4.0)");
+            }
+            other => panic!("expected syntax error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn logical_statement_error_keeps_origin_across_blank_lines() {
+        assert_dc_trailing_token_line("blank-line origin\n.DC V1 -8.0 -4.0 0.0 4.0\n\n.end\n", 2);
+    }
+
+    #[test]
+    fn logical_statement_error_keeps_origin_across_comment_lines() {
+        assert_dc_trailing_token_line(
+            "comment-line origin\n.DC V1 -8.0 -4.0 0.0 4.0\n* intervening comment\n.end\n",
+            2,
+        );
+    }
+
+    #[test]
+    fn continued_statement_error_reports_base_statement_line() {
+        assert_dc_trailing_token_line(
+            "continuation origin\n.DC V1 -8.0 -4.0 0.0\n+ 4.0\n\n* comment\n.end\n",
+            2,
+        );
+    }
+
+    #[test]
+    fn eof_flush_keeps_origin_across_blank_and_comment_lines() {
+        assert_dc_trailing_token_line(
+            "EOF origin\n.DC V1 -8.0 -4.0 0.0 4.0\n\n* trailing comment\n",
+            2,
+        );
+    }
+
+    #[test]
+    fn multi_continuation_statement_reports_base_statement_line() {
+        assert_dc_trailing_token_line(
+            "multi-continuation origin\n.DC V1 -8.0\n+ -4.0\n+ 0.0 4.0\n\n.end\n",
+            2,
+        );
+    }
+
+    #[test]
+    fn temperature_prescan_error_reports_options_base_line() {
+        let source =
+            "temperature origin\n.options noop=1\n+ temp=-274\n\n* intervening comment\n.end\n";
+        let error = parse_netlist(source).expect_err("invalid TEMP must be rejected by prescan");
+        match error {
+            ParseError::Syntax { line, message } => {
+                assert_eq!(line, 2);
+                assert_eq!(
+                    message,
+                    "TEMP must be finite and above absolute zero, found -274 C"
+                );
+            }
+            other => panic!("expected syntax error, got {other:?}"),
+        }
     }
 }
