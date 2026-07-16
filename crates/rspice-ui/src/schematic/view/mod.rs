@@ -34,6 +34,7 @@ use self::preview::draw_interaction_previews;
 use self::resolved_symbol_render::resolved_symbol_world_bounds;
 use self::scene::draw_scene;
 
+#[derive(Default)]
 pub(crate) struct SchematicSymbolContext {
     resolved_by_component_id: HashMap<u64, ResolvedCellSymbol>,
     pending_library_symbol: Option<ResolvedCellSymbol>,
@@ -163,12 +164,16 @@ impl SchematicSymbolContext {
     pub(super) fn select_in_rect(
         &self,
         schematic: &mut SchematicState,
-        min_x: i32,
-        min_y: i32,
-        max_x: i32,
-        max_y: i32,
+        window: SelectionWindow,
         add_to_selection: bool,
     ) -> usize {
+        let SelectionWindow {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+            enclosed_only,
+        } = window;
         if !add_to_selection {
             schematic.selection.clear();
         }
@@ -177,19 +182,27 @@ impl SchematicSymbolContext {
 
         for component in &schematic.components {
             let (min, max) = self.component_bounds(component);
-            if rects_intersect(min, max, min_x, min_y, max_x, max_y)
-                && !schematic.selection.has_component(component.id)
-            {
+            let matches = if enclosed_only {
+                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
+            } else {
+                rects_intersect(min, max, min_x, min_y, max_x, max_y)
+            };
+            if matches && !schematic.selection.has_component(component.id) {
                 schematic.selection.select_component(component.id);
                 count += 1;
             }
         }
 
         for wire in &schematic.wires {
-            let wire_in_rect = wire
-                .points
-                .iter()
-                .any(|point| point_in_rect(*point, min_x, min_y, max_x, max_y));
+            let wire_in_rect = if enclosed_only {
+                wire.points
+                    .iter()
+                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
+            } else {
+                wire.points.windows(2).any(|points| {
+                    segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
+                })
+            };
             if wire_in_rect && !schematic.selection.has_wire(wire.id) {
                 schematic.selection.select_wire(wire.id);
                 count += 1;
@@ -209,12 +222,93 @@ impl SchematicSymbolContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SelectionWindow {
+    min_x: i32,
+    min_y: i32,
+    max_x: i32,
+    max_y: i32,
+    enclosed_only: bool,
+}
+
+impl SelectionWindow {
+    pub(super) const fn new(
+        min_x: i32,
+        min_y: i32,
+        max_x: i32,
+        max_y: i32,
+        enclosed_only: bool,
+    ) -> Self {
+        Self {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+            enclosed_only,
+        }
+    }
+}
+
+fn rect_contains_rect(
+    min: Point,
+    max: Point,
+    min_x: i32,
+    min_y: i32,
+    max_x: i32,
+    max_y: i32,
+) -> bool {
+    min.x >= min_x && min.y >= min_y && max.x <= max_x && max.y <= max_y
+}
+
 fn point_in_rect(point: Point, min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> bool {
     point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
 }
 
 fn rects_intersect(min: Point, max: Point, min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> bool {
     max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y
+}
+
+fn segment_intersects_rect(
+    start: Point,
+    end: Point,
+    min_x: i32,
+    min_y: i32,
+    max_x: i32,
+    max_y: i32,
+) -> bool {
+    if point_in_rect(start, min_x, min_y, max_x, max_y)
+        || point_in_rect(end, min_x, min_y, max_x, max_y)
+    {
+        return true;
+    }
+
+    let dx = f64::from(end.x - start.x);
+    let dy = f64::from(end.y - start.y);
+    let mut enter = 0.0_f64;
+    let mut leave = 1.0_f64;
+    for (p, q) in [
+        (-dx, f64::from(start.x - min_x)),
+        (dx, f64::from(max_x - start.x)),
+        (-dy, f64::from(start.y - min_y)),
+        (dy, f64::from(max_y - start.y)),
+    ] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return false;
+            }
+            continue;
+        }
+        let ratio = q / p;
+        if p < 0.0 {
+            enter = enter.max(ratio);
+        } else {
+            leave = leave.min(ratio);
+        }
+        if enter > leave {
+            return false;
+        }
+    }
+    true
 }
 
 fn refresh_symbol_context_after_interactions(
@@ -372,10 +466,53 @@ mod tests {
         let mut schematic = SchematicState::default();
         schematic.components.push(component);
 
-        let selected = context.select_in_rect(&mut schematic, 190, 40, 210, 60, false);
+        let selected = context.select_in_rect(
+            &mut schematic,
+            SelectionWindow::new(190, 40, 210, 60, false),
+            false,
+        );
 
         assert_eq!(selected, 1);
         assert!(schematic.selection.has_component(1));
+    }
+
+    #[test]
+    fn enclosed_selection_rejects_partial_component_intersections() {
+        let mut schematic = SchematicState::default();
+        schematic.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::new(100, 50),
+        ));
+        let context = SchematicSymbolContext::default();
+
+        assert_eq!(
+            context.select_in_rect(
+                &mut schematic,
+                SelectionWindow::new(95, 45, 105, 55, true),
+                false,
+            ),
+            0
+        );
+        assert!(!schematic.selection.has_component(1));
+    }
+
+    #[test]
+    fn intersecting_selection_detects_wire_crossing_without_an_inside_vertex() {
+        let mut schematic = SchematicState::default();
+        schematic.add_wire(vec![Point::new(0, 50), Point::new(100, 50)]);
+        let wire_id = schematic.wires[0].id;
+        let context = SchematicSymbolContext::default();
+
+        assert_eq!(
+            context.select_in_rect(
+                &mut schematic,
+                SelectionWindow::new(40, 40, 60, 60, false),
+                false,
+            ),
+            1
+        );
+        assert!(schematic.selection.has_wire(wire_id));
     }
 
     #[test]

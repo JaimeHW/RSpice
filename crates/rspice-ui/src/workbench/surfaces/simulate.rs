@@ -22,6 +22,7 @@ use super::super::design_system::{
 
 const PLAN_NAME: &str = "Lab characterization";
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
+const SIMULATION_SPLIT_MIN_WIDTH: f32 = 506.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
 const PREFLIGHT_CELL_HEIGHT: f32 = 42.0;
@@ -109,10 +110,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
-    if surface_width > SIMULATION_STACK_BREAKPOINT {
+    let viewport_width = ui.ctx().content_rect().width();
+    if analysis_workspace_is_split(viewport_width, surface_width) {
         let divider = 1.0;
         let available = ui.available_width();
-        let viewport_width = ui.ctx().content_rect().width();
         let (left_width, right_width) = analysis_split_widths(available, viewport_width);
         let column_min_height =
             analysis_column_min_height(ui.clip_rect().bottom(), ui.cursor().top());
@@ -138,11 +139,14 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             ),
         );
     } else {
-        let viewport_width = ui.ctx().content_rect().width();
         ordered_instance_stack(ui, app);
         ui.add_space(STACKED_WORKSPACE_GAP);
         analysis_editor(ui, app, viewport_width);
     }
+}
+
+fn analysis_workspace_is_split(viewport_width: f32, surface_width: f32) -> bool {
+    viewport_width > SIMULATION_STACK_BREAKPOINT && surface_width >= SIMULATION_SPLIT_MIN_WIDTH
 }
 
 fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
@@ -233,10 +237,18 @@ fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn flat_notice(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
     let response = egui::Frame::new()
         .fill(t.color.bg_app)
         .inner_margin(egui::Margin::same(10))
-        .show(ui, add_contents)
+        .show(ui, |ui| {
+            // `Frame` otherwise shrinks to the labels inside it. The mockup's
+            // empty-state rails are full-column surfaces, so preserve the
+            // containing column width before laying out wrapped copy.
+            ui.set_width((width - 20.0).max(1.0));
+            ui.spacing_mut().item_spacing.y = 3.0;
+            add_contents(ui);
+        })
         .response;
     ui.painter().hline(
         response.rect.x_range(),
@@ -1040,13 +1052,14 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
             flat_notice(ui, |ui| {
                 status_dot(
                     ui,
-                    Tokens::get(ui.ctx()).color.err,
+                    Tokens::get(ui.ctx()).color.warn,
                     "No active analysis instance",
                 );
                 ui.label("The stable plan is empty. Add an analysis from Simulation Studio.");
             });
             lifecycle_receipt_strip(ui, app);
-            preflight_strip(ui, app, viewport_width <= 820.0);
+            preflight_strip(ui, app);
+            specification_table(ui, app);
             return;
         }
         Err(error) => {
@@ -1056,7 +1069,8 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
                 ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
             });
             lifecycle_receipt_strip(ui, app);
-            preflight_strip(ui, app, viewport_width <= 820.0);
+            preflight_strip(ui, app);
+            specification_table(ui, app);
             return;
         }
     };
@@ -1110,7 +1124,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
         apply_analysis_action(app, selected.id, action);
     }
     lifecycle_receipt_strip(ui, app);
-    preflight_strip(ui, app, viewport_width <= 820.0);
+    preflight_strip(ui, app);
     specification_table(ui, app);
 }
 
@@ -1211,10 +1225,12 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
 
 fn capability_banner(ui: &mut Ui, kind: AnalysisKind) {
     let t = Tokens::get(ui.ctx());
+    let content_width = (ui.available_width() - 16.0).max(1.0);
     let response = egui::Frame::new()
         .fill(t.color.accent_dim)
         .inner_margin(egui::Margin::symmetric(8, 7))
         .show(ui, |ui| {
+            ui.set_width(content_width);
             let copy = kind.execution_blocker().map_or_else(
                 || {
                     format!(
@@ -1248,10 +1264,12 @@ fn lifecycle_toolbar(
     action: &mut Option<AnalysisAction>,
 ) {
     let t = Tokens::get(ui.ctx());
+    let content_width = (ui.available_width() - 16.0).max(1.0);
     let response = egui::Frame::new()
         .fill(t.color.bg_panel)
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
+            ui.set_width(content_width);
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.spacing_mut().item_spacing.y = 6.0;
             ui.horizontal_wrapped(|ui| {
@@ -1298,10 +1316,12 @@ fn analysis_contract(
     stacked: bool,
 ) {
     let t = Tokens::get(ui.ctx());
+    let content_width = (ui.available_width() - 16.0).max(1.0);
     let response = egui::Frame::new()
         .fill(t.color.bg_inset)
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
+            ui.set_width(content_width);
             ui.spacing_mut().item_spacing.x = 10.0;
             ui.spacing_mut().item_spacing.y = 0.0;
             let properties = |ui: &mut Ui| {
@@ -1358,6 +1378,7 @@ fn analysis_contract(
 
 fn analysis_form_body(ui: &mut Ui, app: &RSpiceApp, draft: &mut AnalysisDraft) -> &'static str {
     let t = Tokens::get(ui.ctx());
+    let content_width = (ui.available_width() - 16.0).max(1.0);
     egui::Frame::new()
         .fill(t.color.bg_app)
         .inner_margin(egui::Margin {
@@ -1367,8 +1388,14 @@ fn analysis_form_body(ui: &mut Ui, app: &RSpiceApp, draft: &mut AnalysisDraft) -
             bottom: 10,
         })
         .show(ui, |ui| {
+            ui.set_width(content_width);
             ui.spacing_mut().item_spacing.y = 0.0;
-            let note = analysis_form::form(ui, draft);
+            let note = analysis_form::form(
+                ui,
+                draft,
+                app.state.ui.preferences.quantity_presentation_policy(),
+                app.state.ui.number_locale,
+            );
             if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(draft) {
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new(error).color(t.color.err));
@@ -1380,6 +1407,7 @@ fn analysis_form_body(ui: &mut Ui, app: &RSpiceApp, draft: &mut AnalysisDraft) -
 
 fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) {
     let t = Tokens::get(ui.ctx());
+    let content_width = (ui.available_width() - 16.0).max(1.0);
     let valid = app
         .state
         .sim_setup
@@ -1389,6 +1417,7 @@ fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) 
         .fill(t.color.bg_app)
         .inner_margin(egui::Margin::symmetric(8, 6))
         .show(ui, |ui| {
+            ui.set_width(content_width);
             ui.horizontal_wrapped(|ui| {
                 status_dot(
                     ui,
@@ -1505,9 +1534,24 @@ fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) {
     response.on_hover_text(detail);
 }
 
-fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
+fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
     let topology_ok = !app.state.schematic.components.is_empty();
-    let checks_ok = app.state.current_blocking_drc_result().is_none();
+    let retained_report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .filter(|report| {
+            report.project_revision == app.state.workspace.project.revision().get()
+                && report.topology_revision == app.state.schematic.topology_version()
+        });
+    let netlist_state = retained_report.map(|report| {
+        topology_ok
+            && !report.blockers.iter().any(|issue| {
+                issue.remediation == super::super::state::PreflightRemediation::DesignChecks
+            })
+    });
     let (enabled_count, configurations_ok, graph_ok) =
         match app.state.sim_setup.stable_analysis_plan() {
             Ok(plan) => {
@@ -1529,21 +1573,29 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
             }
             Err(_) => (0, false, false),
         };
-    let specifications_ok = app.state.workspace.specs.iter().all(|spec| {
-        !spec.measurement.trim().is_empty()
-            && spec
-                .min
-                .zip(spec.max)
-                .is_none_or(|(minimum, maximum)| minimum <= maximum)
-    });
+    let specifications_configured = !app.state.workspace.specs.is_empty();
+    let specifications_ok = specifications_configured
+        && app.state.workspace.specs.iter().all(|spec| {
+            !spec.measurement.trim().is_empty()
+                && spec
+                    .min
+                    .zip(spec.max)
+                    .is_none_or(|(minimum, maximum)| minimum <= maximum)
+        });
     let items = [
         (
-            topology_ok && checks_ok,
+            netlist_state,
             "Netlist",
             if !topology_ok {
                 "design is empty".to_owned()
-            } else if !checks_ok {
-                "blocking checks".to_owned()
+            } else if retained_report.is_none() {
+                if app.state.workbench.preflight.report.is_some() {
+                    "preflight receipt expired".to_owned()
+                } else {
+                    "preflight not run".to_owned()
+                }
+            } else if netlist_state == Some(false) {
+                "preflight has design blockers".to_owned()
             } else {
                 format!(
                     "revision {} current",
@@ -1552,7 +1604,7 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
             },
         ),
         (
-            graph_ok,
+            Some(graph_ok),
             "Instance graph",
             if graph_ok {
                 format!("dependency ordered · {enabled_count} enabled")
@@ -1561,16 +1613,18 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
             },
         ),
         (
-            specifications_ok,
+            specifications_configured.then_some(specifications_ok),
             "Outputs",
-            if specifications_ok {
+            if !specifications_configured {
+                "not configured · optional".to_owned()
+            } else if specifications_ok {
                 format!("{} specifications valid", app.state.workspace.specs.len())
             } else {
                 "invalid specification bounds".to_owned()
             },
         ),
         (
-            enabled_count > 0 && configurations_ok && graph_ok,
+            retained_report.map(super::super::state::PreflightReport::is_runnable),
             "Execution graph",
             if enabled_count == 0 {
                 "enable an analysis instance".to_owned()
@@ -1578,13 +1632,25 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
                 "correct invalid fields".to_owned()
             } else if !graph_ok {
                 "dependency graph blocked".to_owned()
+            } else if retained_report.is_none() {
+                if app.state.workbench.preflight.report.is_some() {
+                    "rerun expired preflight".to_owned()
+                } else {
+                    "run preflight to authorize dispatch".to_owned()
+                }
+            } else if retained_report.is_some_and(|report| !report.is_runnable()) {
+                "resolve retained preflight blockers".to_owned()
             } else {
-                format!("{enabled_count} analysis tasks ready")
+                let task_count = retained_report
+                    .and_then(|report| report.prepared.as_ref())
+                    .map_or(enabled_count, |prepared| prepared.task_count);
+                format!("{task_count} analysis tasks ready")
             },
         ),
     ];
 
     let t = Tokens::get(ui.ctx());
+    let compact = ui.available_width() <= 760.0;
     let columns = if compact { 2 } else { 4 };
     let rows = items.len().div_ceil(columns);
     let cell_width = ui.available_width() / columns as f32;
@@ -1612,7 +1678,15 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
             rect.min + vec2(cell_width * column as f32, row_height * row as f32),
             vec2(cell_width, row_height),
         );
-        preflight_cell(ui, cell, item.0, item.1, &item.2);
+        preflight_cell(
+            ui,
+            cell,
+            item.0,
+            item.1,
+            &item.2,
+            column + 1 < columns,
+            row + 1 < rows,
+        );
     }
     ui.painter().hline(
         rect.x_range(),
@@ -1621,26 +1695,42 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp, compact: bool) {
     );
 }
 
-fn preflight_cell(ui: &mut Ui, rect: Rect, pass: bool, name: &str, detail: &str) {
+fn preflight_cell(
+    ui: &mut Ui,
+    rect: Rect,
+    pass: Option<bool>,
+    name: &str,
+    detail: &str,
+    draw_right_border: bool,
+    draw_bottom_border: bool,
+) {
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    painter.vline(
-        rect.right(),
-        rect.y_range(),
-        Stroke::new(1.0, t.color.border),
-    );
-    painter.hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let mark = if pass { "✓" } else { "△" };
+    if draw_right_border {
+        painter.vline(
+            rect.right(),
+            rect.y_range(),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
+    if draw_bottom_border {
+        painter.hline(
+            rect.x_range(),
+            rect.bottom(),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
+    let (mark, mark_color) = match pass {
+        Some(true) => ("✓", t.color.ok),
+        Some(false) => ("△", t.color.err),
+        None => ("·", t.color.text_faint),
+    };
     painter.text(
         rect.left_center() + vec2(9.0, 0.0),
         Align2::LEFT_CENTER,
         mark,
         theme::sans(tokens::FS_1, FontWeight::Regular),
-        if pass { t.color.ok } else { t.color.err },
+        mark_color,
     );
     let text_left = rect.left() + 28.0;
     paint_clipped_text(
@@ -1724,10 +1814,13 @@ fn specification_table(ui: &mut Ui, app: &RSpiceApp) {
     } else {
         for spec in &app.state.workspace.specs {
             let limit = specification_limit(spec);
-            let value =
+            let evidence =
                 dataset.and_then(|run| measurement_in_output_dataset(run, &spec.measurement));
-            let (status, color) = match value {
-                Some(value) if spec.passes(value) => ("pass".to_owned(), t.color.ok),
+            let (status, color) = match evidence {
+                Some(evidence) if !evidence.measurement_passed => {
+                    ("measurement failed".to_owned(), t.color.err)
+                }
+                Some(evidence) if spec.passes(evidence.value) => ("pass".to_owned(), t.color.ok),
                 Some(_) => ("fail".to_owned(), t.color.err),
                 None => ("no evidence".to_owned(), t.color.warn),
             };
@@ -1837,14 +1930,36 @@ fn selected_output_dataset(
     simulation.active_run()
 }
 
-fn measurement_in_output_dataset(run: &crate::state::SimulationRun, name: &str) -> Option<f64> {
-    run.analyses.iter().find_map(|analysis| {
-        analysis
-            .measurements
-            .iter()
-            .find(|measurement| measurement.name.eq_ignore_ascii_case(name))
-            .and_then(|measurement| measurement.value)
-    })
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct OutputMeasurementEvidence {
+    value: f64,
+    measurement_passed: bool,
+}
+
+fn measurement_in_output_dataset(
+    run: &crate::state::SimulationRun,
+    name: &str,
+) -> Option<OutputMeasurementEvidence> {
+    run.analyses
+        .iter()
+        .rev()
+        .filter(|analysis| analysis.success && analysis.provenance.is_some())
+        .find_map(|analysis| {
+            analysis
+                .measurements
+                .iter()
+                .rev()
+                .find(|measurement| measurement.name.eq_ignore_ascii_case(name))
+                .and_then(|measurement| {
+                    measurement
+                        .value
+                        .filter(|value| value.is_finite())
+                        .map(|value| OutputMeasurementEvidence {
+                            value,
+                            measurement_passed: measurement.passed && measurement.error.is_none(),
+                        })
+                })
+        })
 }
 
 fn resolve_active_analysis_instance(app: &mut RSpiceApp) -> Result<(), String> {
@@ -2360,7 +2475,20 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::product::{ContentDigest, ObjectRevision};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
+
+    fn attributed(analysis: AnalysisResult) -> AnalysisResult {
+        analysis.with_provenance(
+            crate::state::AnalysisResultProvenance::new(
+                AnalysisInstanceId::new(),
+                ObjectRevision::INITIAL,
+                ContentDigest::from_bytes([0x5a; 32]),
+                Vec::new(),
+            )
+            .expect("valid test provenance"),
+        )
+    }
 
     #[test]
     fn desktop_analysis_split_matches_mockup_ratio_and_minimums() {
@@ -2381,6 +2509,9 @@ mod tests {
     fn responsive_breakpoints_match_mockup_contract() {
         assert_eq!(SIMULATION_STACK_BREAKPOINT, 820.0);
         assert_eq!(TITLE_ACTION_STACK_BREAKPOINT, 560.0);
+        assert!(!analysis_workspace_is_split(820.0, 700.0));
+        assert!(analysis_workspace_is_split(821.0, 506.0));
+        assert!(!analysis_workspace_is_split(1_440.0, 505.0));
     }
 
     #[test]
@@ -2505,15 +2636,15 @@ mod tests {
     #[test]
     fn output_specifications_never_mix_measurements_across_retained_datasets() {
         let mut older = SimulationRun::new(1);
-        older.add_analysis(
+        older.add_analysis(attributed(
             AnalysisResult::new(1, AnalysisType::Ac, "older")
                 .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
-        );
+        ));
         let mut selected = SimulationRun::new(2);
-        selected.add_analysis(
+        selected.add_analysis(attributed(
             AnalysisResult::new(1, AnalysisType::Ac, "selected")
                 .with_measurements(vec![rspice_core::MeasureResult::success("bandwidth", 42.0)]),
-        );
+        ));
 
         let selected_dataset = selected.dataset_id;
         let mut simulation = SimulationState::default();
@@ -2522,8 +2653,66 @@ mod tests {
 
         let run = selected_output_dataset(&simulation).expect("selected dataset");
         assert_eq!(run.dataset_id, selected_dataset);
-        assert_eq!(measurement_in_output_dataset(run, "bandwidth"), Some(42.0));
+        assert_eq!(
+            measurement_in_output_dataset(run, "bandwidth"),
+            Some(OutputMeasurementEvidence {
+                value: 42.0,
+                measurement_passed: true,
+            })
+        );
         assert_eq!(measurement_in_output_dataset(run, "gain"), None);
+    }
+
+    #[test]
+    fn output_specifications_reject_unattributed_failed_and_non_finite_measurements() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "legacy")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)]),
+        );
+        run.add_analysis(attributed(
+            AnalysisResult::failed(2, AnalysisType::Ac, "failed", "solver failed")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 2.0)]),
+        ));
+        run.add_analysis(attributed(
+            AnalysisResult::new(3, AnalysisType::Ac, "non-finite").with_measurements(vec![
+                rspice_core::MeasureResult {
+                    name: "gain".to_owned(),
+                    value: Some(f64::NAN),
+                    error: Some("non-finite".to_owned()),
+                    passed: false,
+                    expected: None,
+                    tolerance: None,
+                },
+            ]),
+        ));
+
+        assert_eq!(measurement_in_output_dataset(&run, "gain"), None);
+    }
+
+    #[test]
+    fn output_specifications_retain_finite_measurement_contract_failures() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(attributed(
+            AnalysisResult::new(1, AnalysisType::Ac, "goal miss").with_measurements(vec![
+                rspice_core::MeasureResult {
+                    name: "gain".to_owned(),
+                    value: Some(9.0),
+                    error: Some("goal miss".to_owned()),
+                    passed: false,
+                    expected: Some(10.0),
+                    tolerance: Some(0.1),
+                },
+            ]),
+        ));
+
+        assert_eq!(
+            measurement_in_output_dataset(&run, "gain"),
+            Some(OutputMeasurementEvidence {
+                value: 9.0,
+                measurement_passed: false,
+            })
+        );
     }
 
     #[test]

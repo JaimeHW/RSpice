@@ -33,6 +33,12 @@ mod session;
 pub mod shortcuts;
 mod surfaces;
 
+pub use crate::quantity::{
+    AngleDisplay, CopiedValueFormat, DecimalSeparatorInput, EngineeringSuffixPolicy,
+    FrequencyDisplay, LayoutCoordinateDisplay, QuantityInputError, QuantityInputKind,
+    QuantityPresentationPolicy, TemperatureDisplay, TimeFrequencyInput, UiNumberLocale, UnitSystem,
+    UnitsPreferences, parse_ui_quantity,
+};
 pub use availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
 };
@@ -42,7 +48,12 @@ pub use capability_workflow::{
 pub use navigation::{
     BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
 };
-pub use preferences::{ChoicePreference, TogglePreference, UserPreferences};
+pub use preferences::{
+    BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,
+    CursorInterpolation, DisplayedSignificantDigits, EngineeringExportFormat, LargeDatasetDisplay,
+    ResultPresentationPolicy, ResultsPreferences, ScalarPreference, TogglePreference,
+    UserPreferences, WorkspacePreferences, WorkspacePreset,
+};
 pub use result_document::{ResultViewer, ResultsState};
 pub use session::{
     GridStyle, InspectorEdit, SymbolClipboard, SymbolDocumentSnapshot, SymbolSelection, SymbolTool,
@@ -201,6 +212,13 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     }
     let now = ctx.input(|input| input.time);
     let session_elapsed = app.state.log_buffer.session_elapsed();
+    let attention = app
+        .state
+        .ui
+        .preferences
+        .workspace()
+        .map(WorkspacePreferences::background_task_attention)
+        .unwrap_or_default();
     let entries = app
         .state
         .log_buffer
@@ -219,6 +237,9 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
                 LogSeverity::Info => ToastKind::Info,
                 LogSeverity::Debug | LogSeverity::Trace => return None,
             };
+            if !attention.retains(matches!(kind, ToastKind::Error)) {
+                return None;
+            }
             Some((
                 entry.id,
                 category,
@@ -327,6 +348,7 @@ fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panels::{LogSeverity, LogSource};
     use crate::workbench::state::Drawer;
 
     #[test]
@@ -358,5 +380,43 @@ mod tests {
             project_log_timestamp(120.0, Duration::from_secs(10), Duration::from_secs(15)),
             120.0
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn background_attention_filters_the_live_activity_stream() {
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .ui
+            .preferences
+            .workspace_mut()
+            .unwrap()
+            .set_background_task_attention(BackgroundTaskAttention::NotifyOnFailureOnly);
+        app.state
+            .log_buffer
+            .log(LogSeverity::Info, LogSource::Simulation, "completed", None);
+        app.state
+            .log_buffer
+            .log(LogSeverity::Error, LogSource::Simulation, "failed", None);
+
+        synchronize_activity_stream(&ctx, &mut app);
+        assert_eq!(app.state.ui.toasts.activity().len(), 1);
+        assert_eq!(app.state.ui.toasts.activity()[0].message(), "failed");
+
+        app.state
+            .ui
+            .preferences
+            .workspace_mut()
+            .unwrap()
+            .set_background_task_attention(BackgroundTaskAttention::Silent);
+        app.state.log_buffer.log(
+            LogSeverity::Error,
+            LogSource::Simulation,
+            "second failure",
+            None,
+        );
+        synchronize_activity_stream(&ctx, &mut app);
+        assert_eq!(app.state.ui.toasts.activity().len(), 1);
     }
 }

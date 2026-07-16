@@ -74,6 +74,7 @@ impl PdkConfig {
         self.library_paths.is_empty()
             && self.environment_variables.is_empty()
             && self.recent_files.is_empty()
+            && self.layout_database_unit.is_none()
     }
 
     /// Get total discovered file count

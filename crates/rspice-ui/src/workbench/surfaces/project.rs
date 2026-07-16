@@ -13,7 +13,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 
 use super::super::commands::Command;
-use super::super::design_system::{WorkbenchIcon, card, property_row, status_dot};
+use super::super::design_system::{WorkbenchIcon, card, property_card, property_row, status_dot};
 use super::super::state::{ModelsPage, ProjectPage, Workspace};
 
 const PROJECT_RESPONSIVE_BREAKPOINT: f32 = 820.0;
@@ -1382,7 +1382,7 @@ fn configuration_table_row(
 
 fn configuration_policy_cards(ui: &mut Ui, app: &RSpiceApp) {
     let add_netlisting = |ui: &mut Ui| {
-        card(ui, "Netlisting policy", |ui| {
+        property_card(ui, "Netlisting policy", |ui| {
             property_row(ui, "Hierarchy", "Preserve names");
             property_row(ui, "Parameter evaluation", "Strict units");
             property_row(ui, "Unbound cell", "Block execution");
@@ -1390,7 +1390,7 @@ fn configuration_policy_cards(ui: &mut Ui, app: &RSpiceApp) {
         });
     };
     let add_environment = |ui: &mut Ui| {
-        card(ui, "Environment", |ui| {
+        property_card(ui, "Environment", |ui| {
             property_row(
                 ui,
                 "Technology",
@@ -1571,7 +1571,7 @@ fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     });
     ui.add_space(PROJECT_GRID_GAP);
-    card(ui, "Reproducibility contract", |ui| {
+    property_card(ui, "Reproducibility contract", |ui| {
         property_row(ui, "Project format", "RSpice project schema 1");
         property_row(ui, "Missing dependency", "Fail closed");
         property_row(ui, "Mutable external path", "Explicit project reference");

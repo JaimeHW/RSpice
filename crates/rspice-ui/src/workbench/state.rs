@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceId, SurfaceNavigation,
-    SurfaceRoute,
+    SurfaceRoute, WorkspacePreset,
 };
 
 const NAVIGATION_SCHEMA_VERSION: u8 = 1;
@@ -88,6 +88,55 @@ impl Workspace {
             Self::Models => "Model inspector",
             Self::Netlist => "Source inspector",
         }
+    }
+}
+
+/// Device-local dock composition retained independently for each workspace.
+/// Engineering documents and project state never enter this presentation
+/// snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkspaceLayoutState {
+    pub navigator_visible: bool,
+    pub inspector_visible: bool,
+    pub console_visible: bool,
+    pub focus_mode: bool,
+    pub navigator_width: f32,
+    pub navigator_width_custom: bool,
+    pub inspector_width: f32,
+    pub inspector_width_custom: bool,
+    pub console_height: f32,
+}
+
+impl Default for WorkspaceLayoutState {
+    fn default() -> Self {
+        Self {
+            navigator_visible: true,
+            inspector_visible: true,
+            console_visible: false,
+            focus_mode: false,
+            navigator_width: default_navigator_width(),
+            navigator_width_custom: false,
+            inspector_width: default_inspector_width(),
+            inspector_width_custom: false,
+            console_height: default_console_height(),
+        }
+    }
+}
+
+impl WorkspaceLayoutState {
+    #[must_use]
+    pub fn for_preset(preset: WorkspacePreset) -> Self {
+        let mut layout = Self::default();
+        match preset {
+            WorkspacePreset::Engineering => {}
+            WorkspacePreset::Canvas => layout.focus_mode = true,
+            WorkspacePreset::Diagnostics => {
+                layout.console_visible = true;
+                layout.console_height = 260.0;
+            }
+        }
+        layout
     }
 }
 
@@ -560,10 +609,31 @@ impl VerificationPage {
 /// datasets; this owns only explicit review cursors and ephemeral receipts.
 /// Unknown legacy fields are ignored so sessions written by the removed
 /// synthetic tuning sandbox migrate without reviving that unavailable flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegressionComparisonReceipt {
+    pub baseline_run: crate::product::RunId,
+    pub candidate_run: crate::product::RunId,
+    pub aligned_checks: usize,
+    pub aligned_waveforms: usize,
+    pub changed_checks: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VerificationSessionState {
     #[serde(default)]
     pub regression_baseline_run: Option<crate::product::RunId>,
+    /// When enabled, process-corner cells are expressed as exact deltas from
+    /// the revision-matched TT/nominal/room point retained by the active
+    /// corner plan. The flag is review state only; result datasets remain
+    /// immutable.
+    #[serde(default)]
+    pub corner_compare_nominal: bool,
+    #[serde(default)]
+    pub regression_comparison: Option<RegressionComparisonReceipt>,
+    #[serde(skip)]
+    pub regression_baseline_picker_open: bool,
+    #[serde(skip)]
+    pub regression_baseline_picker_selection: Option<crate::product::RunId>,
     #[serde(skip, default = "default_verification_action_receipt")]
     pub action_receipt: String,
 }
@@ -576,6 +646,10 @@ impl Default for VerificationSessionState {
     fn default() -> Self {
         Self {
             regression_baseline_run: None,
+            corner_compare_nominal: false,
+            regression_comparison: None,
+            regression_baseline_picker_open: false,
+            regression_baseline_picker_selection: None,
             action_receipt: default_verification_action_receipt(),
         }
     }
@@ -981,6 +1055,9 @@ pub struct WorkbenchState {
     pub inspector_width_custom: bool,
     #[serde(default = "default_console_height")]
     pub console_height: f32,
+    /// Independent device-local dock snapshots for every visited workspace.
+    #[serde(default)]
+    workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     #[serde(default)]
     pub console_page: ConsolePage,
     #[serde(default)]
@@ -1105,6 +1182,7 @@ impl Default for WorkbenchState {
             inspector_width: default_inspector_width(),
             inspector_width_custom: false,
             console_height: default_console_height(),
+            workspace_layouts: HashMap::new(),
             console_page: ConsolePage::Console,
             design_panel: DesignPanel::Navigator,
             documents: WorkspaceDocumentRegistry::default(),
@@ -1189,6 +1267,8 @@ impl WorkbenchState {
         source: RouteTransitionSource,
     ) -> Result<RouteTransition, super::SurfaceRouteUnavailable> {
         super::availability::require_available(route)?;
+        let previous = self.navigation.current();
+        self.reconcile_workspace_layout(previous, route);
         let transition = self.navigation.navigate(route, source);
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         if let Some(workspace) = route.surface_id().workspace() {
@@ -1208,6 +1288,7 @@ impl WorkbenchState {
     ) -> Result<(), super::SurfaceRouteUnavailable> {
         super::availability::require_available(route)?;
         let previous = self.navigation.current();
+        self.reconcile_workspace_layout(previous, route);
         self.navigation.replace(route, source);
         self.reconcile_capability_matrix_route(previous, route);
         if let Some(workspace) = route.surface_id().workspace() {
@@ -1294,6 +1375,8 @@ impl WorkbenchState {
     }
 
     pub fn navigate_back(&mut self, source: RouteTransitionSource) -> Option<RouteTransition> {
+        let destination = self.navigation.back_entries().last().copied()?;
+        self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back(source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().workspace() {
@@ -1311,6 +1394,14 @@ impl WorkbenchState {
         count: usize,
         source: RouteTransitionSource,
     ) -> Option<RouteTransition> {
+        let available = count.min(self.navigation.back_entries().len());
+        let destination = *self.navigation.back_entries().get(
+            self.navigation
+                .back_entries()
+                .len()
+                .saturating_sub(available),
+        )?;
+        self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back_steps(count, source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().workspace() {
@@ -1332,6 +1423,14 @@ impl WorkbenchState {
         count: usize,
         source: RouteTransitionSource,
     ) -> Option<RouteTransition> {
+        let available = count.min(self.navigation.forward_entries().len());
+        let destination = *self.navigation.forward_entries().get(
+            self.navigation
+                .forward_entries()
+                .len()
+                .saturating_sub(available),
+        )?;
+        self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_forward_steps(count, source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().workspace() {
@@ -1403,6 +1502,125 @@ impl WorkbenchState {
         self.activate(Workspace::ALL[next]);
     }
 
+    /// Apply a reviewed workspace preset immediately and retain that exact
+    /// composition for the active workspace.
+    pub fn apply_workspace_preset(&mut self, preset: WorkspacePreset) {
+        self.apply_workspace_layout(WorkspaceLayoutState::for_preset(preset));
+        self.capture_workspace_layout(self.workspace);
+    }
+
+    /// Apply the console launch choice immediately. Errors and explicit
+    /// Problems navigation may still open it later through their own owners.
+    pub fn apply_console_launch_behavior(&mut self, open: bool) {
+        self.focus_mode = false;
+        self.console_visible = open;
+        self.console_maximized = false;
+        self.capture_workspace_layout(self.workspace);
+    }
+
+    #[must_use]
+    pub fn workspace_layout(&self, workspace: Workspace) -> WorkspaceLayoutState {
+        if workspace == self.workspace {
+            return self.current_workspace_layout();
+        }
+        self.workspace_layouts
+            .get(&workspace)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn apply_preset_to_all_workspaces(&mut self, preset: WorkspacePreset) {
+        let layout = WorkspaceLayoutState::for_preset(preset);
+        for workspace in Workspace::ALL {
+            self.workspace_layouts.insert(workspace, layout);
+        }
+        self.apply_workspace_layout(layout);
+    }
+
+    /// Apply the mockup's results-review composition: wide plot/inspector,
+    /// hidden navigator, and collapsed console.
+    pub fn apply_results_review_layout(&mut self) {
+        let layout = WorkspaceLayoutState {
+            navigator_visible: false,
+            inspector_visible: true,
+            console_visible: false,
+            focus_mode: false,
+            inspector_width: 332.0,
+            inspector_width_custom: true,
+            ..WorkspaceLayoutState::default()
+        };
+        self.apply_workspace_layout(layout);
+        self.capture_workspace_layout(self.workspace);
+    }
+
+    pub fn apply_results_review_to_all_workspaces(&mut self) {
+        let layout = WorkspaceLayoutState {
+            navigator_visible: false,
+            inspector_visible: true,
+            console_visible: false,
+            focus_mode: false,
+            inspector_width: 332.0,
+            inspector_width_custom: true,
+            ..WorkspaceLayoutState::default()
+        };
+        for workspace in Workspace::ALL {
+            self.workspace_layouts.insert(workspace, layout);
+        }
+        self.apply_workspace_layout(layout);
+    }
+
+    fn current_workspace_layout(&self) -> WorkspaceLayoutState {
+        WorkspaceLayoutState {
+            navigator_visible: self.navigator_visible,
+            inspector_visible: self.inspector_visible,
+            console_visible: self.console_visible,
+            focus_mode: self.focus_mode,
+            navigator_width: self.navigator_width,
+            navigator_width_custom: self.navigator_width_custom,
+            inspector_width: self.inspector_width,
+            inspector_width_custom: self.inspector_width_custom,
+            console_height: self.console_height,
+        }
+    }
+
+    fn capture_workspace_layout(&mut self, workspace: Workspace) {
+        let layout = self.current_workspace_layout();
+        self.workspace_layouts.insert(workspace, layout);
+    }
+
+    fn apply_workspace_layout(&mut self, layout: WorkspaceLayoutState) {
+        self.navigator_visible = layout.navigator_visible;
+        self.inspector_visible = layout.inspector_visible;
+        self.console_visible = layout.console_visible;
+        self.console_maximized = false;
+        self.focus_mode = layout.focus_mode;
+        self.navigator_width = layout.navigator_width;
+        self.navigator_width_custom = layout.navigator_width_custom;
+        self.inspector_width = layout.inspector_width;
+        self.inspector_width_custom = layout.inspector_width_custom;
+        self.console_height = layout.console_height;
+        self.close_drawer();
+    }
+
+    fn reconcile_workspace_layout(&mut self, previous: SurfaceRoute, current: SurfaceRoute) {
+        let previous_workspace = previous.surface_id().workspace();
+        let current_workspace = current.surface_id().workspace();
+        if previous_workspace == current_workspace {
+            return;
+        }
+        if let Some(previous_workspace) = previous_workspace {
+            self.capture_workspace_layout(previous_workspace);
+        }
+        if let Some(current_workspace) = current_workspace {
+            let layout = self
+                .workspace_layouts
+                .get(&current_workspace)
+                .copied()
+                .unwrap_or_default();
+            self.apply_workspace_layout(layout);
+        }
+    }
+
     pub fn toggle_drawer(&mut self, drawer: Drawer) {
         if self.drawer == Some(drawer) {
             self.close_drawer();
@@ -1467,6 +1685,7 @@ impl WorkbenchState {
         self.inspector_width_custom = false;
         self.console_height = default_console_height();
         self.close_drawer();
+        self.capture_workspace_layout(self.workspace);
     }
 }
 
@@ -1936,5 +2155,65 @@ mod tests {
         .expect("legacy tuning fields are ignored during migration");
 
         assert_eq!(restored, VerificationSessionState::default());
+    }
+
+    #[test]
+    fn workspace_presets_apply_to_the_live_layout_owner() {
+        let mut state = WorkbenchState::default();
+
+        state.apply_workspace_preset(WorkspacePreset::Canvas);
+        assert!(state.focus_mode);
+        assert!(!state.console_visible);
+
+        state.apply_workspace_preset(WorkspacePreset::Diagnostics);
+        assert!(!state.focus_mode);
+        assert!(state.console_visible);
+        assert_eq!(state.console_height, 260.0);
+    }
+
+    #[test]
+    fn workspace_switches_restore_independent_dock_compositions() {
+        let mut state = WorkbenchState::default();
+        state.navigator_width = 340.0;
+        state.navigator_width_custom = true;
+        state.console_visible = false;
+
+        state.activate(Workspace::Results);
+        state.navigator_width = 224.0;
+        state.navigator_width_custom = true;
+        state.console_visible = true;
+        state.console_height = 275.0;
+
+        state.activate(Workspace::Design);
+        assert_eq!(state.navigator_width, 340.0);
+        assert!(!state.console_visible);
+
+        state.activate(Workspace::Results);
+        assert_eq!(state.navigator_width, 224.0);
+        assert!(state.console_visible);
+        assert_eq!(state.console_height, 275.0);
+    }
+
+    #[test]
+    fn independent_workspace_layouts_round_trip_with_the_session() {
+        let mut state = WorkbenchState::default();
+        state.apply_workspace_preset(WorkspacePreset::Diagnostics);
+        state.activate(Workspace::Results);
+        state.apply_results_review_layout();
+
+        let encoded = serde_json::to_string(&state).unwrap();
+        let restored: WorkbenchState = serde_json::from_str(&encoded).unwrap();
+        assert!(restored.workspace_layout(Workspace::Design).console_visible);
+        assert!(
+            !restored
+                .workspace_layout(Workspace::Results)
+                .navigator_visible
+        );
+        assert_eq!(
+            restored
+                .workspace_layout(Workspace::Results)
+                .inspector_width,
+            332.0
+        );
     }
 }

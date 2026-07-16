@@ -165,7 +165,7 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
         .schematic_buffers
         .get(&reference.key())
         .cloned()
-        .unwrap_or_default();
+        .unwrap_or_else(|| state.new_schematic_document());
     // Workspace buffers round-trip through serde, which skips the runtime
     // ID counter and name counters: without recalculation a freshly placed
     // component reuses an existing ID and selection matches both.
@@ -178,6 +178,72 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
             .get_library(&reference.library)
             .is_some_and(|library| library.read_only);
     schematic
+}
+
+impl AppState {
+    /// Resolve the user defaults into one explicit, project-portable document
+    /// policy. This is the only constructor production UI paths use for a new
+    /// schematic/testbench document. Existing buffers are never rewritten.
+    pub(crate) fn new_schematic_document(&self) -> SchematicState {
+        use crate::state::{
+            NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy,
+            SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy, WireRoutingMode,
+        };
+        use crate::workbench::ChoicePreference;
+
+        let mut schematic = SchematicState::default();
+        let preferences = &self.ui.preferences;
+        schematic.document_policy.grid_pitch =
+            match preferences.choice(ChoicePreference::SchematicGrid) {
+                0 => SchematicGridPitch::Mil50,
+                1 => SchematicGridPitch::Mil25,
+                2 => SchematicGridPitch::Metric,
+                _ => unreachable!("schematic grid preference is normalized before use"),
+            };
+        schematic.document_policy.wire_junctions =
+            match preferences.choice(ChoicePreference::WireJunctionBehavior) {
+                0 => WireJunctionPolicy::OrthogonalAutomatic,
+                1 => WireJunctionPolicy::OrthogonalManual,
+                2 => WireJunctionPolicy::AnyAngle,
+                _ => unreachable!("wire policy is normalized before use"),
+            };
+        schematic.document_policy.selection_crossing =
+            match preferences.choice(ChoicePreference::SelectionCrossingPolicy) {
+                0 => SelectionCrossingPolicy::Directional,
+                1 => SelectionCrossingPolicy::EnclosedOnly,
+                2 => SelectionCrossingPolicy::Intersecting,
+                _ => unreachable!("selection policy is normalized before use"),
+            };
+        schematic.document_policy.net_naming =
+            match preferences.choice(ChoicePreference::NetNamingPolicy) {
+                0 => NetNamingPolicy::StrictCaseSensitive,
+                1 => NetNamingPolicy::SpiceCompatibleRelaxed,
+                _ => unreachable!("net naming policy is normalized before use"),
+            };
+        schematic.document_policy.property_commit =
+            match preferences.choice(ChoicePreference::PropertyCommitPolicy) {
+                0 => PropertyCommitPolicy::Atomic,
+                1 => PropertyCommitPolicy::ApplyValidFields,
+                _ => unreachable!("property policy is normalized before use"),
+            };
+        schematic.document_policy.operating_point_annotations =
+            match preferences.choice(ChoicePreference::OperatingPointAnnotation) {
+                0 => OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents,
+                1 => OperatingPointAnnotationPolicy::VoltagesOnly,
+                2 => OperatingPointAnnotationPolicy::Hidden,
+                _ => unreachable!("operating-point policy is normalized before use"),
+            };
+
+        schematic.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
+        schematic.wire_drawing.set_routing_mode(
+            if schematic.document_policy.wire_junctions == WireJunctionPolicy::AnyAngle {
+                WireRoutingMode::Diagonal
+            } else {
+                WireRoutingMode::HorizontalFirst
+            },
+        );
+        schematic
+    }
 }
 
 fn log_severity_from_drc(severity: DrcSeverity) -> LogSeverity {
@@ -1232,7 +1298,43 @@ mod tests {
         PortDirection, PortSpec, ResolvedSymbolSource, Rotation, SYMBOL_DOCUMENT_METADATA_KEY,
         SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View, ViewType, Wire,
     };
+    use crate::workbench::ChoicePreference;
     use crate::workbench::state::Workspace;
+
+    #[test]
+    fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() {
+        let mut state = AppState::default();
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::PropertyCommitPolicy, 1)
+            .unwrap();
+        let created = state.new_schematic_document();
+        assert_eq!(
+            created.document_policy.property_commit,
+            crate::state::PropertyCommitPolicy::ApplyValidFields
+        );
+
+        let reference = CellViewRef::new("work", "preserved", "schematic");
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("preserved");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+        let mut existing = SchematicState::default();
+        existing.document_policy.property_commit = crate::state::PropertyCommitPolicy::Atomic;
+        state
+            .workspace
+            .schematic_buffers
+            .insert(reference.key(), existing);
+
+        state.open_workspace_view(reference);
+
+        assert_eq!(
+            state.schematic.document_policy.property_commit,
+            crate::state::PropertyCommitPolicy::Atomic
+        );
+    }
 
     fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
         SymbolDocument {

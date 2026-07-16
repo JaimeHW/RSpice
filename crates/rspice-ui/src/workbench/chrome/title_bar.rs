@@ -45,6 +45,11 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             let rect = ui.max_rect();
             ui.painter().hline(
                 rect.x_range(),
+                rect.top(),
+                egui::Stroke::new(1.0, t.color.border_strong),
+            );
+            ui.painter().hline(
+                rect.x_range(),
                 rect.bottom(),
                 egui::Stroke::new(1.0, t.color.border),
             );

@@ -1,7 +1,7 @@
 use egui::{Painter, Rect, Stroke};
 
 use crate::common::app::AppState;
-use crate::state::{Component, Point};
+use crate::state::{Component, OperatingPointAnnotationPolicy, Point};
 
 use super::super::symbols::SymbolLibrary;
 use super::SchematicSymbolContext;
@@ -121,6 +121,8 @@ pub(super) fn draw_scene(
         draw_junction(painter, viewport, junction.pos, state);
     }
 
+    draw_operating_point_annotations(painter, available, viewport, state);
+
     if let Some((hx, hy)) = state.dialogs.interaction.hover_wire_vertex {
         let hover_pos = Point::new(hx, hy);
         let is_junction = match cache {
@@ -143,6 +145,156 @@ pub(super) fn draw_scene(
 
     // Check results last — violation badges annotate everything below.
     super::violations::draw_violation_markers(painter, viewport, state);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OperatingPointCanvasAnnotation {
+    position: Point,
+    label: String,
+    selected_current: bool,
+}
+
+fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
+    let name = name.trim();
+    let (head, tail) = name.split_once('(')?;
+    if !head.eq_ignore_ascii_case(&prefix.to_string()) || !tail.ends_with(')') {
+        return None;
+    }
+    let inner = tail[..tail.len() - 1].trim();
+    (!inner.is_empty()).then_some(inner)
+}
+
+/// Produce annotations only from the newest completed run. The retained
+/// cross-probe point map is replaced for each dispatch, so pairing it with an
+/// older selected dataset would falsely attach values to a different design.
+fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
+    let policy = state.schematic.document_policy.operating_point_annotations;
+    if policy == OperatingPointAnnotationPolicy::Hidden
+        || !state.simulation.cross_probe.is_populated()
+        || state.simulation.cross_probe.source_topology_version
+            != Some(state.schematic.topology_version())
+    {
+        return Vec::new();
+    }
+    let Some(dc_op) = state.simulation.runs.first().and_then(|run| {
+        run.analyses
+            .iter()
+            .find_map(|analysis| analysis.dc_op.as_ref())
+    }) else {
+        return Vec::new();
+    };
+
+    let mut annotations = Vec::new();
+    for voltage in &dc_op.node_voltages {
+        if !voltage.value.is_finite() {
+            continue;
+        }
+        let Some(net_name) = wrapped_signal_name(&voltage.name, 'V') else {
+            continue;
+        };
+        let points = state
+            .simulation
+            .cross_probe
+            .net_to_points
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(net_name))
+            .map(|(_, points)| points);
+        let Some(position) = points.and_then(|points| {
+            points
+                .iter()
+                .copied()
+                .min_by_key(|point| (point.y, point.x))
+        }) else {
+            continue;
+        };
+        annotations.push(OperatingPointCanvasAnnotation {
+            position,
+            label: format!(
+                "{} = {} {}",
+                voltage.name,
+                crate::state::format_engineering(voltage.value),
+                voltage.unit
+            ),
+            selected_current: false,
+        });
+    }
+
+    if policy == OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents {
+        for component in state
+            .schematic
+            .components
+            .iter()
+            .filter(|component| state.schematic.selection.has_component(component.id))
+        {
+            let Some(current) = dc_op.branch_currents.iter().find(|current| {
+                current.value.is_finite()
+                    && wrapped_signal_name(&current.name, 'I')
+                        .is_some_and(|name| name.eq_ignore_ascii_case(&component.name))
+            }) else {
+                continue;
+            };
+            annotations.push(OperatingPointCanvasAnnotation {
+                position: component.pos,
+                label: format!(
+                    "{} = {} {}",
+                    current.name,
+                    crate::state::format_engineering(current.value),
+                    current.unit
+                ),
+                selected_current: true,
+            });
+        }
+    }
+    annotations
+}
+
+fn draw_operating_point_annotations(
+    painter: &Painter,
+    available: Rect,
+    viewport: &Viewport,
+    state: &AppState,
+) {
+    use crate::ui::theme::{self, FontWeight};
+
+    let palette = crate::ui::tokens::active_palette();
+    for annotation in operating_point_annotations(state) {
+        let anchor = viewport.schematic_to_screen(annotation.position);
+        if !available.expand(12.0).contains(anchor) {
+            continue;
+        }
+        let galley = painter.layout_no_wrap(
+            annotation.label,
+            theme::mono(crate::ui::tokens::FS_0, FontWeight::Medium),
+            if annotation.selected_current {
+                palette.info
+            } else {
+                palette.net_label
+            },
+        );
+        let offset = if annotation.selected_current {
+            egui::vec2(8.0, 12.0)
+        } else {
+            egui::vec2(7.0, -galley.size().y - 7.0)
+        };
+        let mut text_pos = anchor + offset;
+        text_pos.x = text_pos.x.clamp(
+            available.left() + 3.0,
+            available.right() - galley.size().x - 3.0,
+        );
+        text_pos.y = text_pos.y.clamp(
+            available.top() + 3.0,
+            available.bottom() - galley.size().y - 3.0,
+        );
+        let background = Rect::from_min_size(text_pos, galley.size()).expand2(egui::vec2(4.0, 2.0));
+        painter.rect_filled(background, 2.0, palette.bg_elevated);
+        painter.rect_stroke(
+            background,
+            2.0,
+            Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(text_pos, galley, palette.text);
+    }
 }
 
 /// Centered get-started hint for an empty sheet.
@@ -224,8 +376,10 @@ fn empty_hint_estimated_width(line: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::app::AppState;
     use crate::state::{
-        ComponentType, PortDirection, PortSpec, ResolvedCellSymbol, SymbolDocument, SymbolPin,
+        AnalysisResult, AnalysisType, ComponentType, DcOpResult, OperatingPointValue,
+        PortDirection, PortSpec, ResolvedCellSymbol, SimulationRun, SymbolDocument, SymbolPin,
         SymbolShape,
     };
     use std::collections::HashMap;
@@ -279,5 +433,73 @@ mod tests {
                 "{line:?} should fit within {safe_width}px"
             );
         }
+    }
+
+    fn state_with_operating_point() -> AppState {
+        let mut state = AppState::default();
+        let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(40, 30));
+        component.name = "VBIAS".to_owned();
+        state.schematic.components.push(component);
+        state.schematic.selection.select_component(1);
+
+        let point = Point::new(20, 10);
+        state.simulation.cross_probe.update(
+            HashMap::from([(point, "OUT".to_owned())]),
+            HashMap::from([("OUT".to_owned(), vec![Point::new(30, 10), point])]),
+            HashMap::new(),
+            state.schematic.topology_version(),
+        );
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(DcOpResult {
+                node_voltages: vec![OperatingPointValue {
+                    name: "V(out)".to_owned(),
+                    value: 1.25,
+                    unit: "V".to_owned(),
+                }],
+                branch_currents: vec![OperatingPointValue {
+                    name: "I(vbias)".to_owned(),
+                    value: 2.0e-3,
+                    unit: "A".to_owned(),
+                }],
+                power_dissipation: Vec::new(),
+            }),
+        );
+        state.simulation.runs.insert(0, run);
+        state
+    }
+
+    #[test]
+    fn operating_point_policy_maps_latest_values_to_exact_schematic_points() {
+        let state = state_with_operating_point();
+        let annotations = operating_point_annotations(&state);
+
+        assert_eq!(annotations.len(), 2);
+        assert_eq!(annotations[0].position, Point::new(20, 10));
+        assert!(annotations[0].label.starts_with("V(out) = 1.25"));
+        assert_eq!(annotations[1].position, Point::new(40, 30));
+        assert!(annotations[1].selected_current);
+    }
+
+    #[test]
+    fn hidden_or_voltage_only_policy_enforces_annotation_detail() {
+        let mut state = state_with_operating_point();
+        state.schematic.document_policy.operating_point_annotations =
+            OperatingPointAnnotationPolicy::VoltagesOnly;
+        assert_eq!(operating_point_annotations(&state).len(), 1);
+
+        state.schematic.document_policy.operating_point_annotations =
+            OperatingPointAnnotationPolicy::Hidden;
+        assert!(operating_point_annotations(&state).is_empty());
+    }
+
+    #[test]
+    fn topology_edit_invalidates_retained_operating_point_positions() {
+        let mut state = state_with_operating_point();
+        assert!(!operating_point_annotations(&state).is_empty());
+
+        state.schematic.bump_topology_version();
+
+        assert!(operating_point_annotations(&state).is_empty());
     }
 }

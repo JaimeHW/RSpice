@@ -82,7 +82,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
     if let Some(summary) = super::summary::active_run_summary(state) {
         render_mini_bode(ui, state, &summary);
-        render_as_tuned(ui, &summary);
+        render_as_tuned(
+            ui,
+            &summary,
+            state.ui.preferences.quantity_presentation_policy(),
+        );
         ui.add_space(8.0);
     }
 
@@ -175,7 +179,8 @@ fn render_mini_bode(
 ) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let Some(spec) = mini_bode_spec(summary, c.traces[0], c.traces[2]) else {
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let Some(spec) = mini_bode_spec(summary, c.traces[0], c.traces[2], quantity_policy) else {
         return;
     };
 
@@ -191,10 +196,14 @@ fn render_mini_bode(
     ui.add_space(4.0);
 }
 
-fn render_as_tuned(ui: &mut Ui, summary: &super::summary::NetlistRunSummary) {
+fn render_as_tuned(
+    ui: &mut Ui,
+    summary: &super::summary::NetlistRunSummary,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) {
     section_header(ui, "As tuned", None);
     let t = Tokens::get(ui.ctx());
-    for row in as_tuned_rows(summary) {
+    for row in as_tuned_rows(summary, quantity_policy) {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             ui.label(
@@ -218,16 +227,23 @@ fn render_as_tuned(ui: &mut Ui, summary: &super::summary::NetlistRunSummary) {
     }
 }
 
-fn as_tuned_rows(summary: &super::summary::NetlistRunSummary) -> [TunedMetricRow; 3] {
+fn as_tuned_rows(
+    summary: &super::summary::NetlistRunSummary,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> [TunedMetricRow; 3] {
     [
         TunedMetricRow {
             name: "UGF",
-            value: fmt_opt(summary.stability.ugf, |value| plot::fmt_si(value, "Hz", 2)),
+            value: fmt_opt(summary.stability.ugf, |value| {
+                quantity_policy.format_frequency(value, 2)
+            }),
             highlight: true,
         },
         TunedMetricRow {
             name: "PM",
-            value: fmt_opt(summary.stability.pm_deg, |value| format!("{value:.1} deg")),
+            value: fmt_opt(summary.stability.pm_deg, |value| {
+                quantity_policy.format_angle(value.to_radians(), 1)
+            }),
             highlight: true,
         },
         TunedMetricRow {
@@ -246,6 +262,7 @@ fn mini_bode_spec<'a>(
     summary: &'a super::summary::NetlistRunSummary,
     gain_color: Color32,
     phase_color: Color32,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
 ) -> Option<PlotSpec<'a>> {
     let bode = summary.bode.as_ref()?;
     let x0 = bode
@@ -272,8 +289,15 @@ fn mini_bode_spec<'a>(
         return None;
     }
 
+    let (frequency_scale, frequency_offset, frequency_unit) =
+        quantity_policy.frequency_axis_transform();
+    let frequency_axis = Axis::log_decades(x0, x1, "Hz").with_display_transform(
+        frequency_scale,
+        frequency_offset,
+        frequency_unit,
+    );
     let mut spec = PlotSpec::new(
-        Axis::log_decades(x0, x1, "Hz"),
+        frequency_axis,
         XScale::Log10,
         Axis::linear_with(y0, y1, "dB", 4),
     )
@@ -291,7 +315,13 @@ fn mini_bode_spec<'a>(
         let p0 = p_min.min(-180.0);
         let p1 = p_max.max(0.0);
         if matches!(p1.partial_cmp(&p0), Some(std::cmp::Ordering::Greater)) {
-            spec.y_right = Some((Axis::linear_with(p0, p1, "deg", 3), phase_color));
+            let (angle_scale, angle_offset, angle_unit) = quantity_policy.degree_axis_transform();
+            let phase_axis = Axis::linear_with(p0, p1, "deg", 3).with_display_transform(
+                angle_scale,
+                angle_offset,
+                angle_unit,
+            );
+            spec.y_right = Some((phase_axis, phase_color));
             spec.traces.push(
                 Trace::new(&bode.frequency, phase, phase_color)
                     .right()
@@ -709,7 +739,10 @@ mod tests {
             measurements: HashMap::new(),
         };
 
-        let rows = as_tuned_rows(&summary);
+        let rows = as_tuned_rows(
+            &summary,
+            crate::quantity::QuantityPresentationPolicy::default(),
+        );
 
         assert_eq!(
             rows,
@@ -721,7 +754,7 @@ mod tests {
                 },
                 TunedMetricRow {
                     name: "PM",
-                    value: "45.2 deg".to_string(),
+                    value: "45.2 °".to_string(),
                     highlight: true,
                 },
                 TunedMetricRow {
@@ -754,7 +787,13 @@ mod tests {
             measurements: HashMap::new(),
         };
 
-        let spec = mini_bode_spec(&summary, Color32::RED, Color32::BLUE).expect("mini bode spec");
+        let spec = mini_bode_spec(
+            &summary,
+            Color32::RED,
+            Color32::BLUE,
+            crate::quantity::QuantityPresentationPolicy::default(),
+        )
+        .expect("mini bode spec");
 
         assert_eq!(spec.x.unit, "Hz");
         assert_eq!(spec.x.min, 1.0);

@@ -469,7 +469,9 @@ impl Command {
                 }
             }
             Self::Copy => {
-                if active_symbol_editor(app) {
+                if state.workbench.workspace == Workspace::Results {
+                    state.ui.results.cursors.a.is_some()
+                } else if active_symbol_editor(app) {
                     !state.ui.symbol.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app) && !state.schematic.selection.is_empty()
@@ -625,7 +627,11 @@ impl Command {
                 }
             }
             Self::Copy => {
-                if active_symbol_editor(app) {
+                if app.state.workbench.workspace == Workspace::Results {
+                    if let Some(text) = super::result_document::copy_cursor_text(&mut app.state) {
+                        app.state.ui.clipboard_text_request = Some(text);
+                    }
+                } else if active_symbol_editor(app) {
                     app.copy_selected_symbol_shape();
                 } else {
                     app.state.schematic.copy_selection();

@@ -142,10 +142,21 @@ impl RSpiceApp {
 
         use crate::state::View;
 
+        let seeded_schematic = self.state.new_schematic_document();
         if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
             if let Some(cell_ref) = lib.get_cell_mut(&cell) {
                 let view_type = self.state.dialogs.new_view_type;
                 cell_ref.add_view(View::new(&view_name, view_type));
+                if matches!(
+                    view_type,
+                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                ) {
+                    let reference = crate::state::CellViewRef::new(&library, &cell, &view_name);
+                    self.state
+                        .workspace
+                        .schematic_buffers
+                        .insert(reference.key(), seeded_schematic);
+                }
                 self.state.push_user_message(ConsoleMessage::info(format!(
                     "Created view '{}' in cell '{}'",
                     view_name, cell
@@ -177,5 +188,44 @@ impl RSpiceApp {
         }
 
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{Cell, Library, PropertyCommitPolicy};
+    use crate::workbench::ChoicePreference;
+
+    #[test]
+    fn creating_schematic_view_freezes_current_defaults_into_its_buffer() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("view_policy_test");
+        library.add_cell(Cell::new("filter"));
+        app.state.library_manager.add_library(library);
+        app.state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::PropertyCommitPolicy, 1)
+            .unwrap();
+        app.state.dialogs.new_view_library = "view_policy_test".to_owned();
+        app.state.dialogs.new_view_cell = "filter".to_owned();
+        app.state.dialogs.new_view_name = "schematic".to_owned();
+        app.state.dialogs.new_view_type = crate::state::ViewType::Schematic;
+
+        let outcome = app.handle_new_view_create_action();
+
+        assert!(outcome.close);
+        let key = crate::state::CellViewRef::new("view_policy_test", "filter", "schematic").key();
+        let document = app
+            .state
+            .workspace
+            .schematic_buffers
+            .get(&key)
+            .expect("new schematic view owns an explicit document buffer");
+        assert_eq!(
+            document.document_policy.property_commit,
+            PropertyCommitPolicy::ApplyValidFields
+        );
     }
 }

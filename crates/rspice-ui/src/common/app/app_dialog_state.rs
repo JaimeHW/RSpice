@@ -222,6 +222,10 @@ pub struct DialogState {
     /// Read-only resolved policy review owned by Preferences.
     pub(crate) managed_preference_policy_open: bool,
 
+    /// Device-local workspace layout manager owned by Preferences.
+    pub(crate) workspace_layout_manager:
+        super::app_preferences_dialog::workspace_layout_manager::WorkspaceLayoutManagerState,
+
     /// Transactional shortcut import/export workflows.
     pub(crate) shortcut_portability: super::app_preferences_dialog::shortcut_portability_dialogs::ShortcutPortabilityDialogsState,
 
@@ -275,6 +279,7 @@ impl DialogState {
             || self.waveform_calculator_dialog
             || self.preferences_open
             || self.managed_preference_policy_open
+            || self.workspace_layout_manager.open
             || self.shortcut_portability.application_modal_open()
             || self.shortcut_editor.open
             || self.license_dialog.open
@@ -309,6 +314,11 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs
+                .workspace_layout_manager
+                .open(crate::workbench::WorkspacePreset::Engineering);
+        });
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_portability.open_import());
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_portability.open_export());
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);

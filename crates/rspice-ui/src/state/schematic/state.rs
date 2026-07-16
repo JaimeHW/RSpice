@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::clipboard::ClipboardData;
 use super::component::{Component, LibraryCellInstance};
 use super::component_type::ComponentType;
+use super::document_policy::SchematicDocumentPolicy;
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
 use super::rotation::Rotation;
@@ -66,6 +67,11 @@ pub struct SchematicState {
 
     /// Grid size in pixels
     pub grid_size: i32,
+
+    /// Project-portable editor semantics resolved when this document was
+    /// created. Legacy schematics receive the reviewed default policy.
+    #[serde(default)]
+    pub document_policy: SchematicDocumentPolicy,
 
     /// Zoom level (1.0 = 100%) - not part of undo history or saved files
     /// Uses default of 1.0 when deserializing to prevent black screen
@@ -181,6 +187,7 @@ impl Default for SchematicState {
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
             grid_size: 10,
+            document_policy: SchematicDocumentPolicy::default(),
             zoom: 1.0,
             pan: (0.0, 0.0),
             current_file: None,

@@ -262,6 +262,7 @@ impl SimulationController {
                 generated.point_to_net,
                 generated.nets,
                 generated.net_segments,
+                state.schematic.topology_version(),
             )),
             touchstone_export,
         })

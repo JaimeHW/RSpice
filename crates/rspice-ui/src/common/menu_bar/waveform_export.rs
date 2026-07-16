@@ -1,5 +1,6 @@
 use crate::common::app::AppState;
 use crate::common::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::EngineeringExportFormat;
 
 const NO_RESULTS_MESSAGE: &str = "No simulation results to export. Run a simulation first.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
@@ -20,6 +21,27 @@ pub(crate) fn action_export_csv_with_io(
         state.push_user_message(crate::common::app::ConsoleMessage::warning(warning.clone()));
     }
 
+    match state
+        .ui
+        .preferences
+        .result_presentation_policy()
+        .engineering_export()
+    {
+        EngineeringExportFormat::Csv => export_csv(state, io, &prepared.dataset),
+        EngineeringExportFormat::TouchstoneWhereCompatible => {
+            export_touchstone(state, io, &prepared.dataset)
+        }
+        EngineeringExportFormat::Hdf5EngineeringDataset => {
+            unreachable!("unsupported export preferences resolve to CSV")
+        }
+    }
+}
+
+fn export_csv(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    dataset: &crate::io::WaveformDataset,
+) {
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export Waveform CSV",
         default_name: "waveforms.csv",
@@ -29,15 +51,15 @@ pub(crate) fn action_export_csv_with_io(
         Ok(Some(mut path)) => {
             crate::common::file_actions::ensure_file_extension(&mut path, "csv");
 
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_waveform_csv_observed(&prepared.dataset, &destination)
-            });
+            let export = io
+                .observe_destination(&path)
+                .and_then(|destination| io.write_waveform_csv_observed(dataset, &destination));
             match export {
                 Ok(()) => {
                     let detail = format!(
                         "{} signals, {} points",
-                        prepared.dataset.signal_count(),
-                        prepared.dataset.point_count()
+                        dataset.signal_count(),
+                        dataset.point_count()
                     );
                     state.push_user_message(crate::common::app::ConsoleMessage::info(
                         crate::common::export_workflow::export_completion_message(
@@ -65,6 +87,69 @@ pub(crate) fn action_export_csv_with_io(
                 e
             )));
         }
+    }
+}
+
+fn export_touchstone(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    dataset: &crate::io::WaveformDataset,
+) {
+    // Validate and serialize before opening a save picker. An incompatible
+    // result never asks the user for a destination it cannot publish.
+    let contents = match crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
+        .write_text(dataset)
+    {
+        Ok(contents) => contents,
+        Err(error) => {
+            state.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                "Touchstone export is not compatible with the active result: {error}"
+            )));
+            return;
+        }
+    };
+    let port_count = crate::io::WaveformWriter::touchstone_port_count(dataset)
+        .expect("successful Touchstone validation always identifies a port matrix");
+    let extension = format!("s{port_count}p");
+    let default_name = format!("waveforms.{extension}");
+    let filter_extensions = [extension.as_str()];
+
+    match io.show_save_dialog(SaveDialogConfig {
+        title: "Export Touchstone",
+        default_name: &default_name,
+        filter_name: "Touchstone Files",
+        filter_extensions: &filter_extensions,
+    }) {
+        Ok(Some(mut path)) => {
+            crate::common::file_actions::ensure_file_extension(&mut path, &extension);
+            let export = io
+                .observe_destination(&path)
+                .and_then(|destination| io.write_text_file_observed(&destination, &contents));
+            match export {
+                Ok(()) => {
+                    let detail = format!(
+                        "{} signals, {} points",
+                        dataset.signal_count(),
+                        dataset.point_count()
+                    );
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
+                        crate::common::export_workflow::export_completion_message(
+                            "Touchstone",
+                            &path,
+                            Some(detail),
+                            io,
+                        ),
+                    ));
+                }
+                Err(error) => state.push_user_message(crate::common::app::ConsoleMessage::error(
+                    format!("Touchstone export failed: {error}"),
+                )),
+            }
+        }
+        Ok(None) => {}
+        Err(error) => state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
+            "Touchstone export failed: {error}"
+        ))),
     }
 }
 
@@ -457,6 +542,8 @@ mod tests {
     struct MockExportWorkflowIo {
         datasets: RefCell<Vec<crate::io::WaveformDataset>>,
         paths: RefCell<Vec<PathBuf>>,
+        text_files: RefCell<Vec<(PathBuf, String)>>,
+        dialog_titles: RefCell<Vec<String>>,
         saved_paths_are_reopenable: bool,
     }
 
@@ -465,6 +552,8 @@ mod tests {
             Self {
                 datasets: RefCell::default(),
                 paths: RefCell::default(),
+                text_files: RefCell::default(),
+                dialog_titles: RefCell::default(),
                 saved_paths_are_reopenable: true,
             }
         }
@@ -473,12 +562,18 @@ mod tests {
     impl ExportWorkflowIo for MockExportWorkflowIo {
         fn show_save_dialog(
             &self,
-            _config: SaveDialogConfig<'_>,
+            config: SaveDialogConfig<'_>,
         ) -> Result<Option<PathBuf>, String> {
-            Ok(Some(PathBuf::from("waveforms.csv")))
+            self.dialog_titles
+                .borrow_mut()
+                .push(config.title.to_owned());
+            Ok(Some(PathBuf::from(config.default_name)))
         }
 
-        fn write_text_file(&self, _path: &Path, _contents: &str) -> Result<(), String> {
+        fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
+            self.text_files
+                .borrow_mut()
+                .push((path.to_path_buf(), contents.to_owned()));
             Ok(())
         }
 
@@ -723,6 +818,99 @@ mod tests {
                 .map(|signal| signal.data.as_slice()),
             Some(&[0.6, 1.2][..])
         );
+    }
+
+    #[test]
+    fn engineering_export_preference_dispatches_compatible_touchstone() {
+        let frequency = vec![1.0e6, 2.0e6];
+        let waveforms = ["S11", "S12", "S21", "S22"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                complex_waveform(
+                    &format!("|{name}|"),
+                    name,
+                    frequency.clone(),
+                    vec![0.1 + index as f64 * 0.1, 0.2 + index as f64 * 0.1],
+                    vec![0.01 + index as f64 * 0.1, 0.02 + index as f64 * 0.1],
+                    vec![0.001 + index as f64 * 0.01, 0.002 + index as f64 * 0.01],
+                )
+            })
+            .collect::<Vec<_>>();
+        let ac = AnalysisResult::new(1, AnalysisType::Ac, "S-parameters").with_waveforms(waveforms);
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(ac);
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state
+            .ui
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 1)
+            .unwrap();
+
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+
+        assert!(io.datasets.borrow().is_empty());
+        assert_eq!(io.dialog_titles.borrow().as_slice(), &["Export Touchstone"]);
+        let text_files = io.text_files.borrow();
+        assert_eq!(text_files.len(), 1);
+        assert_eq!(text_files[0].0, PathBuf::from("waveforms.s2p"));
+        assert!(text_files[0].1.contains("# Hz S RI R 50"));
+        assert!(text_files[0].1.contains("1.000000000000e6"));
+    }
+
+    #[test]
+    fn incompatible_touchstone_result_is_rejected_before_save_picker() {
+        let transient = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+            .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.2])]);
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(transient);
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state
+            .ui
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 1)
+            .unwrap();
+
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+
+        assert!(io.dialog_titles.borrow().is_empty());
+        assert!(io.text_files.borrow().is_empty());
+        assert!(last_log_message(&state).contains("not compatible"));
+    }
+
+    #[test]
+    fn displayed_digits_never_reduce_csv_source_precision() {
+        let exact = 1.234_567_890_123_456_f64;
+        let transient = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+            .with_waveforms(vec![waveform("V(out)", vec![0.0], vec![exact])]);
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(transient);
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state
+            .ui
+            .preferences
+            .set_scalar(
+                crate::workbench::ScalarPreference::DisplayedSignificantDigits,
+                3,
+            )
+            .unwrap();
+
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+
+        let datasets = io.datasets.borrow();
+        assert_eq!(datasets[0].get_signal("V(out)").unwrap().data, vec![exact]);
     }
 
     #[test]

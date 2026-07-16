@@ -28,6 +28,7 @@ fn active_data(state: &AppState) -> Option<&PoleZeroData> {
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
 
     let Some(data) = active_data(state) else {
         well_hint(ui, "No root data — run a pole-zero analysis");
@@ -194,7 +195,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ("jω".to_owned(), fmt_si(root.imag, "", 3)),
             (
                 "fₙ".to_owned(),
-                fmt_si(magnitude / std::f64::consts::TAU, "Hz", 2),
+                quantity_policy.format_frequency(magnitude / std::f64::consts::TAU, 2),
             ),
         ];
         if root.imag.abs() > 1e-12 && root.real.abs() > 1e-12 {
@@ -219,6 +220,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         super::panel_note(ui, "Roots appear once a pole-zero analysis runs.");
         return;
     };
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
 
     let unstable = data
         .roots
@@ -250,9 +252,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             fmt_si(root.real, "", 3)
         } else {
             format!(
-                "ζ {:.2} · ωₙ {}",
+                "ζ {:.2} · fₙ {}",
                 root.damping_ratio(),
-                fmt_si(root.natural_frequency(), "", 2)
+                quantity_policy
+                    .format_frequency(root.natural_frequency() / std::f64::consts::TAU, 2)
             )
         };
         rows.push((name, value, false));

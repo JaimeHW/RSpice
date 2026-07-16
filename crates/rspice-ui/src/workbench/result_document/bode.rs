@@ -11,7 +11,7 @@ use egui::Ui;
 
 use crate::common::AppState;
 use crate::state::{SharedWaveformValues, ac_bode_summary_for_selection};
-use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
+use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
@@ -115,6 +115,7 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
         well_hint(
             ui,
@@ -130,7 +131,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             on: true,
         },
         LegendChip {
-            name: "phase°",
+            name: match quantity_policy.angle_display {
+                crate::quantity::AngleDisplay::Degrees => "phase°",
+                crate::quantity::AngleDisplay::Radians => "phase rad",
+            },
             color: c.traces[2],
             on: model.phase_deg.is_some(),
         },
@@ -164,8 +168,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                     .color(c.text_dim),
             );
-            if chip(ui, "wrapped ±180°", !continuous)
-                .on_hover_text("Phase as simulated, wrapped to ±180°")
+            let wrapped_label = match quantity_policy.angle_display {
+                crate::quantity::AngleDisplay::Degrees => "wrapped ±180°",
+                crate::quantity::AngleDisplay::Radians => "wrapped ±π rad",
+            };
+            if chip(ui, wrapped_label, !continuous)
+                .on_hover_text("Phase as simulated, wrapped to one full-turn interval")
                 .clicked()
             {
                 state.ui.results.phase_continuous = false;
@@ -200,8 +208,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .unwrap_or(((g_min - pad).min(-10.0), (g_max + pad).max(10.0)));
     let y = Axis::linear(y0, y1, "dB");
 
-    let mut spec = PlotSpec::new(Axis::log_decades(x0, x1, "Hz"), XScale::Log10, y)
-        .accessible_name("Bode plot");
+    let (frequency_scale, frequency_offset, frequency_unit) =
+        quantity_policy.frequency_axis_transform();
+    let x_axis = Axis::log_decades(x0, x1, "Hz").with_display_transform(
+        frequency_scale,
+        frequency_offset,
+        frequency_unit,
+    );
+    let mut spec = PlotSpec::new(x_axis, XScale::Log10, y).accessible_name("Bode plot");
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
 
     if let Some(phase) = &model.phase_deg {
@@ -220,6 +234,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 Axis::with_ticks(p0, p1, "°", &ticks)
             }
         };
+        let (angle_scale, angle_offset, angle_unit) = quantity_policy.degree_axis_transform();
+        let axis = axis.with_display_transform(angle_scale, angle_offset, angle_unit);
         spec.y_right = Some((axis, c.traces[2]));
         spec.traces.push(
             Trace::new(&model.frequency, phase, c.traces[2])
@@ -240,7 +256,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             y: 0.0,
             side: plot::YSide::Left,
             color: c.accent,
-            label: format!("UGF {}", fmt_si(ugf, "Hz", 1)),
+            label: format!("UGF {}", quantity_policy.format_frequency(ugf, 1)),
             drop_line: true,
             label_dy: 0.0,
         });
@@ -250,7 +266,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 y: sample_at(&model.frequency, phase, ugf),
                 side: plot::YSide::Right,
                 color: c.traces[2],
-                label: format!("PM {pm:.1}°"),
+                label: format!("PM {}", quantity_policy.format_angle(pm.to_radians(), 1)),
                 drop_line: false,
                 label_dy: 30.0,
             });
@@ -270,7 +286,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let readout = |x: f64| -> Vec<(String, String)> {
         let mut rows = vec![
-            ("f".to_owned(), fmt_si(x, "Hz", 2)),
+            ("f".to_owned(), quantity_policy.format_frequency(x, 2)),
             (
                 "gain".to_owned(),
                 format!("{:.1} dB", sample_at(&model.frequency, &model.gain_db, x)),
@@ -279,7 +295,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         if let Some(phase) = &model.phase_deg {
             rows.push((
                 "phase".to_owned(),
-                format!("{:.1} °", sample_at(&model.frequency, phase, x)),
+                quantity_policy.format_angle(sample_at(&model.frequency, phase, x).to_radians(), 1),
             ));
         }
         rows
@@ -302,6 +318,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// The stability readout.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Stability", None);
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
         super::panel_note(ui, "No AC analysis in the active run.");
         return;
@@ -313,7 +330,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let rows = [
         (
             "Phase margin",
-            fmt_opt(m.pm_deg, &|v| format!("{v:.1}°")),
+            fmt_opt(m.pm_deg, &|v| {
+                quantity_policy.format_angle(v.to_radians(), 1)
+            }),
             true,
         ),
         (
@@ -323,12 +342,20 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ),
         (
             "Unity-gain freq",
-            fmt_opt(m.ugf, &|v| fmt_si(v, "Hz", 1)),
+            fmt_opt(m.ugf, &|v| quantity_policy.format_frequency(v, 1)),
             false,
         ),
-        ("f₁₈₀", fmt_opt(m.f180, &|v| fmt_si(v, "Hz", 0)), false),
+        (
+            "f₁₈₀",
+            fmt_opt(m.f180, &|v| quantity_policy.format_frequency(v, 0)),
+            false,
+        ),
         ("A_dc", fmt_opt(m.adc_db, &|v| format!("{v:.1} dB")), false),
-        ("f₋₃dB", fmt_opt(m.f3db, &|v| fmt_si(v, "Hz", 0)), false),
+        (
+            "f₋₃dB",
+            fmt_opt(m.f3db, &|v| quantity_policy.format_frequency(v, 0)),
+            false,
+        ),
     ];
     super::stat_table(ui, &rows);
 

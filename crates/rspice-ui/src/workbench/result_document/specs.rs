@@ -108,6 +108,31 @@ fn untracked_measurements(state: &AppState) -> Vec<String> {
         .collect()
 }
 
+fn spec_table_row_height(control_height: f32) -> f32 {
+    control_height.max(28.0)
+}
+
+fn paint_clipped_table_text(
+    ui: &Ui,
+    clip_rect: egui::Rect,
+    align: egui::Align2,
+    text: impl ToString,
+    font: egui::FontId,
+    color: egui::Color32,
+) {
+    if clip_rect.width() <= 0.0 || clip_rect.height() <= 0.0 {
+        return;
+    }
+    let position = if align == egui::Align2::RIGHT_CENTER {
+        clip_rect.right_center()
+    } else {
+        clip_rect.left_center()
+    };
+    ui.painter()
+        .with_clip_rect(clip_rect)
+        .text(position, align, text, font, color);
+}
+
 /// Render the specs-matrix center view (or the inline editor).
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     if state.ui.results.spec_drafts.is_some() {
@@ -137,44 +162,53 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     const NAME_W: f32 = 170.0;
     const RAIL_W: f32 = 130.0;
     const RUN_W: f32 = 92.0;
-    const ROW_H: f32 = 25.0;
-
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let row_height = spec_table_row_height(t.metrics.ctl_h);
     let table_w = NAME_W + RAIL_W + runs.len() as f32 * RUN_W + 16.0;
+    let viewport_width = ui.available_width().max(1.0);
 
     egui::ScrollArea::both()
         .id_salt("rspice.results.specs")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(4.0);
-            let width = ui.available_width().max(table_w);
+            let width = viewport_width.max(table_w);
             let run_x = |idx: usize| NAME_W + RAIL_W + (idx as f32 + 1.0) * RUN_W;
 
             // Header row.
-            let (header, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::hover());
+            let (header, _) =
+                ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
             ui.painter().hline(
                 header.x_range(),
                 header.bottom() - 0.5,
                 egui::Stroke::new(1.0, c.border),
             );
-            let head = |x: f32, label: &str, color: egui::Color32, align: egui::Align2| {
-                ui.painter().text(
-                    egui::pos2(x, header.center().y),
-                    align,
-                    label,
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    color,
-                );
-            };
+            let head =
+                |cell: egui::Rect, label: &str, color: egui::Color32, align: egui::Align2| {
+                    paint_clipped_table_text(
+                        ui,
+                        cell,
+                        align,
+                        label,
+                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        color,
+                    );
+                };
             head(
-                header.left() + 10.0,
+                egui::Rect::from_min_max(
+                    egui::pos2(header.left() + 10.0, header.top()),
+                    egui::pos2(header.left() + NAME_W - 8.0, header.bottom()),
+                ),
                 "MEASUREMENT",
                 c.text_faint,
                 egui::Align2::LEFT_CENTER,
             );
             head(
-                header.left() + NAME_W,
+                egui::Rect::from_min_max(
+                    egui::pos2(header.left() + NAME_W, header.top()),
+                    egui::pos2(header.left() + NAME_W + RAIL_W - 8.0, header.bottom()),
+                ),
                 "SPEC",
                 c.text_faint,
                 egui::Align2::LEFT_CENTER,
@@ -185,8 +219,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 } else {
                     c.text_faint
                 };
+                let right = header.left() + run_x(idx);
                 head(
-                    header.left() + run_x(idx),
+                    egui::Rect::from_min_max(
+                        egui::pos2(right - RUN_W + 6.0, header.top()),
+                        egui::pos2(right + 6.0, header.bottom()),
+                    ),
                     label,
                     color,
                     egui::Align2::RIGHT_CENTER,
@@ -214,7 +252,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .map(|(idx, _)| idx);
 
                 let (rect, row_response) =
-                    ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
+                    ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
                 row_response.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Label,
@@ -237,15 +275,23 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     rect.bottom() - 0.5,
                     egui::Stroke::new(1.0, c.border.gamma_multiply(0.6)),
                 );
-                ui.painter().text(
-                    egui::pos2(rect.left() + 10.0, rect.center().y),
+                paint_clipped_table_text(
+                    ui,
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left() + 10.0, rect.top()),
+                        egui::pos2(rect.left() + NAME_W - 8.0, rect.bottom()),
+                    ),
                     egui::Align2::LEFT_CENTER,
                     &spec.measurement,
                     theme::mono(tokens::FS_1, FontWeight::Regular),
                     c.text,
                 );
-                ui.painter().text(
-                    egui::pos2(rect.left() + NAME_W, rect.center().y),
+                paint_clipped_table_text(
+                    ui,
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left() + NAME_W, rect.top()),
+                        egui::pos2(rect.left() + NAME_W + RAIL_W - 8.0, rect.bottom()),
+                    ),
                     egui::Align2::LEFT_CENTER,
                     rail_text(spec),
                     theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -310,8 +356,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     if response.hovered() {
                         ui.painter().rect_filled(cell_rect, 2.0, c.bg_hover);
                     }
-                    ui.painter().text(
-                        egui::pos2(right, rect.center().y),
+                    paint_clipped_table_text(
+                        ui,
+                        cell_rect,
                         egui::Align2::RIGHT_CENTER,
                         &text,
                         theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -327,9 +374,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             // Footer verdict per run — only meaningful with bounded rows.
             if !specs.is_empty() {
                 let (foot, _) =
-                    ui.allocate_exact_size(egui::vec2(width, 26.0), egui::Sense::hover());
-                ui.painter().text(
-                    egui::pos2(foot.left() + 10.0, foot.center().y),
+                    ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
+                paint_clipped_table_text(
+                    ui,
+                    egui::Rect::from_min_max(
+                        egui::pos2(foot.left() + 10.0, foot.top()),
+                        egui::pos2(foot.left() + NAME_W - 8.0, foot.bottom()),
+                    ),
                     egui::Align2::LEFT_CENTER,
                     "run verdict",
                     theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -341,8 +392,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     } else {
                         ("✓ pass", c.ok)
                     };
-                    ui.painter().text(
-                        egui::pos2(foot.left() + run_x(idx), foot.center().y),
+                    let right = foot.left() + run_x(idx);
+                    paint_clipped_table_text(
+                        ui,
+                        egui::Rect::from_min_max(
+                            egui::pos2(right - RUN_W + 6.0, foot.top()),
+                            egui::pos2(right + 6.0, foot.bottom()),
+                        ),
                         egui::Align2::RIGHT_CENTER,
                         label,
                         theme::mono(tokens::FS_0, FontWeight::Medium),
@@ -354,9 +410,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             // Unbounded measurements: value-only rows inviting a bound.
             if !untracked.is_empty() {
                 let (head, _) =
-                    ui.allocate_exact_size(egui::vec2(width, 26.0), egui::Sense::hover());
-                ui.painter().text(
-                    egui::pos2(head.left() + 10.0, head.center().y),
+                    ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
+                paint_clipped_table_text(
+                    ui,
+                    egui::Rect::from_min_max(
+                        egui::pos2(head.left() + 10.0, head.top()),
+                        egui::pos2(head.left() + NAME_W + RAIL_W - 8.0, head.bottom()),
+                    ),
                     egui::Align2::LEFT_CENTER,
                     format!("UNBOUNDED — {}", untracked.len()),
                     theme::mono(tokens::FS_0, FontWeight::Medium),
@@ -364,7 +424,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 );
                 for name in &untracked {
                     let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
+                        ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
                     if !ui.is_rect_visible(rect) {
                         continue;
                     }
@@ -373,15 +433,23 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         rect.bottom() - 0.5,
                         egui::Stroke::new(1.0, c.border.gamma_multiply(0.6)),
                     );
-                    ui.painter().text(
-                        egui::pos2(rect.left() + 10.0, rect.center().y),
+                    paint_clipped_table_text(
+                        ui,
+                        egui::Rect::from_min_max(
+                            egui::pos2(rect.left() + 10.0, rect.top()),
+                            egui::pos2(rect.left() + NAME_W - 8.0, rect.bottom()),
+                        ),
                         egui::Align2::LEFT_CENTER,
                         name,
                         theme::mono(tokens::FS_1, FontWeight::Regular),
                         c.text_dim,
                     );
-                    ui.painter().text(
-                        egui::pos2(rect.left() + NAME_W, rect.center().y),
+                    paint_clipped_table_text(
+                        ui,
+                        egui::Rect::from_min_max(
+                            egui::pos2(rect.left() + NAME_W, rect.top()),
+                            egui::pos2(rect.left() + NAME_W + RAIL_W - 8.0, rect.bottom()),
+                        ),
                         egui::Align2::LEFT_CENTER,
                         "—",
                         theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -393,8 +461,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             Some(None) => "fail".to_owned(),
                             None => "—".to_owned(),
                         };
-                        ui.painter().text(
-                            egui::pos2(rect.left() + run_x(idx), rect.center().y),
+                        let right = rect.left() + run_x(idx);
+                        paint_clipped_table_text(
+                            ui,
+                            egui::Rect::from_min_max(
+                                egui::pos2(right - RUN_W + 6.0, rect.top()),
+                                egui::pos2(right + 6.0, rect.bottom()),
+                            ),
                             egui::Align2::RIGHT_CENTER,
                             text,
                             theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -652,5 +725,18 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 ("Where", where_s.as_str()),
             ],
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spec_table_row_height;
+
+    #[test]
+    fn matrix_rows_follow_desktop_and_touch_control_contracts() {
+        assert_eq!(spec_table_row_height(25.0), 28.0);
+        assert_eq!(spec_table_row_height(32.0), 32.0);
+        assert_eq!(spec_table_row_height(44.0), 44.0);
+        assert_eq!(spec_table_row_height(48.0), 48.0);
     }
 }

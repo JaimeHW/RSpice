@@ -13,7 +13,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 
-use super::super::design_system::{card, heading, property_row, workspace_title_row};
+use super::super::design_system::{heading, property_card, property_row, workspace_title_row};
 use super::super::state::{ModelsPage, Workspace};
 
 const TABLE_HEAD_H: f32 = 27.0;
@@ -402,6 +402,7 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
+    let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
     let corner_count = app
         .state
         .model_library_manager
@@ -460,7 +461,9 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                             .and_then(|name| name.to_str())
                             .unwrap_or("not bound"),
                     ),
-                    DataCell::mono(format!("{:.3} °C", corner.temperature)),
+                    DataCell::mono(
+                        quantity_policy.format_temperature(corner.temperature + 273.15, 3),
+                    ),
                     DataCell::mono(format!("{:.6}", corner.vdd_factor)),
                     DataCell::mono_colored(
                         if resolved_source {
@@ -508,7 +511,16 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     }
 
-    let temperature_axis = format_numeric_axis(&temperatures, "°C");
+    let temperature_axis = if temperatures.is_empty() {
+        "not declared".to_owned()
+    } else {
+        temperatures
+            .iter()
+            .filter_map(|value| value.parse::<f64>().ok())
+            .map(|celsius| quantity_policy.format_temperature(celsius + 273.15, 3))
+            .collect::<Vec<_>>()
+            .join(" / ")
+    };
     let supply_axis = format_numeric_axis(&supplies, "× nominal");
     summary_cards(
         ui,
@@ -1166,12 +1178,12 @@ fn summary_cards(
 ) {
     let width = ui.available_width().max(1.0);
     if narrow {
-        card(ui, left_title, |ui| {
+        property_card(ui, left_title, |ui| {
             for (label, value) in left {
                 property_row(ui, label, value);
             }
         });
-        card(ui, right_title, |ui| {
+        property_card(ui, right_title, |ui| {
             for (label, value) in right {
                 property_row(ui, label, value);
             }
@@ -1184,7 +1196,7 @@ fn summary_cards(
                 egui::vec2(column_w, 0.0),
                 Layout::top_down(Align::Min),
                 |ui| {
-                    card(ui, left_title, |ui| {
+                    property_card(ui, left_title, |ui| {
                         for (label, value) in left {
                             property_row(ui, label, value);
                         }
@@ -1195,7 +1207,7 @@ fn summary_cards(
                 egui::vec2(column_w, 0.0),
                 Layout::top_down(Align::Min),
                 |ui| {
-                    card(ui, right_title, |ui| {
+                    property_card(ui, right_title, |ui| {
                         for (label, value) in right {
                             property_row(ui, label, value);
                         }
@@ -1474,7 +1486,7 @@ fn include_node(ui: &mut Ui, title: &str, detail: &str, root: bool) {
 }
 
 fn draw_include_diagnostics(ui: &mut Ui, diagnostics: &IncludeDiagnostics) {
-    card(ui, "Resolution diagnostics", |ui| {
+    property_card(ui, "Resolution diagnostics", |ui| {
         property_row(ui, "Pinned files", &diagnostics.files.to_string());
         property_row(ui, "Definitions", &diagnostics.definitions.to_string());
         property_row(ui, "Captured edges", &diagnostics.edges.to_string());

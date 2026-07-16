@@ -8,6 +8,7 @@
 
 use egui::Ui;
 
+use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use crate::state::property_types::{
     DisplayMode, PropertyDefinition, PropertyRegistry, PropertyValue,
 };
@@ -29,6 +30,9 @@ pub fn render_tabbed_property_dialog(
     state: &mut TabbedPropertyDialogState,
     registry: &PropertyRegistry,
     model_library_manager: &crate::state::ModelLibraryManager,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
+    commit_policy: crate::state::PropertyCommitPolicy,
 ) -> TabbedDialogResult {
     let mut result = TabbedDialogResult::None;
 
@@ -107,7 +111,20 @@ pub fn render_tabbed_property_dialog(
             }
 
             if state.active_tab == "PWL Data" && component_type.is_pwl_source() {
-                crate::properties::pwl_editor::render_pwl_editor(ui, &mut state.pwl_editor);
+                if crate::properties::pwl_editor::render_pwl_editor(
+                    ui,
+                    &mut state.pwl_editor,
+                    quantity_policy,
+                    number_locale,
+                )
+                    == crate::properties::pwl_editor::PwlEditorResult::Modified
+                {
+                    state.pwl_editor.is_modified = true;
+                    state.set_value(
+                        "pwl_data",
+                        PropertyValue::String(state.pwl_editor.to_string()),
+                    );
+                }
             } else {
                 let props: Vec<PropertyDefinition> = sheet
                     .iter()
@@ -120,7 +137,7 @@ pub fn render_tabbed_property_dialog(
                     .cloned()
                     .collect();
                 for def in &props {
-                    render_property_row(ui, def, state);
+                    render_property_row(ui, def, state, quantity_policy, number_locale);
                 }
 
                 let has_advanced = sheet
@@ -149,13 +166,18 @@ pub fn render_tabbed_property_dialog(
 
     match choice {
         DialogChoice::Primary => {
-            if state.validate_all(sheet) {
+            if state.prepare_commit(sheet, commit_policy) {
                 result = TabbedDialogResult::Applied;
-                state.close_visual();
+                // Partial application with failures remains open so the
+                // rejected draft fields can be repaired or explicitly
+                // cancelled. No invalid value crosses the dialog boundary.
+                if state.validation_errors.is_empty() {
+                    state.close_visual();
+                }
             }
         }
         DialogChoice::Secondary => {
-            if state.validate_all(sheet) {
+            if state.prepare_commit(sheet, commit_policy) {
                 result = TabbedDialogResult::Applied;
             }
         }
@@ -201,6 +223,8 @@ fn render_property_row(
     ui: &mut Ui,
     def: &PropertyDefinition,
     state: &mut TabbedPropertyDialogState,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
 ) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -271,7 +295,14 @@ fn render_property_row(
             }
 
             let editor_width = (ui.available_width() - reserve).max(60.0);
-            new_value = render_value_editor(ui, def, &current_value, editor_width);
+            new_value = render_value_editor(
+                ui,
+                def,
+                &current_value,
+                editor_width,
+                quantity_policy,
+                number_locale,
+            );
 
             if let Some(unit) = &def.unit {
                 ui.label(

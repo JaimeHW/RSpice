@@ -199,10 +199,11 @@ fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec
 
 fn reserved_pvt_selector_width(ui: &egui::Ui, app: &RSpiceApp) -> f32 {
     let reference = app.state.sim_setup.reference_pvt;
+    let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
     let label = format!(
-        "{} · {} °C",
+        "{} · {}",
         reference.process.short_name(),
-        pvt_temperature_label(reference.temperature_celsius),
+        pvt_temperature_label(reference.temperature_celsius, quantity_policy),
     );
     let t = Tokens::get(ui.ctx());
     ui.painter()
@@ -649,10 +650,11 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 "Stop active simulation".to_owned()
             } else {
                 let reference = app.state.sim_setup.reference_pvt;
+                let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
                 format!(
-                    "Run active simulation plan at {} · {} °C",
+                    "Run active simulation plan at {} · {}",
                     reference.process.short_name(),
-                    pvt_temperature_label(reference.temperature_celsius)
+                    pvt_temperature_label(reference.temperature_celsius, quantity_policy)
                 )
             };
             let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
@@ -832,10 +834,11 @@ fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
 fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
     let t = Tokens::get(ui.ctx());
     let reference = app.state.sim_setup.reference_pvt;
+    let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
     let label = format!(
-        "{} · {} °C",
+        "{} · {}",
         reference.process.short_name(),
-        pvt_temperature_label(reference.temperature_celsius),
+        pvt_temperature_label(reference.temperature_celsius, quantity_policy),
     );
     let width = ui
         .painter()
@@ -870,9 +873,9 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
                         let selected = reference.process == process
                             && (reference.temperature_celsius - temperature).abs() < f64::EPSILON;
                         let label = format!(
-                            "{} · {} °C",
+                            "{} · {}",
                             process.short_name(),
-                            pvt_temperature_label(temperature)
+                            pvt_temperature_label(temperature, quantity_policy)
                         );
                         let option_height = if height >= 44.0 { 44.0 } else { 29.0 };
                         if ui
@@ -1074,13 +1077,14 @@ fn configured_pvt_count(app: &RSpiceApp) -> usize {
     count.max(1)
 }
 
-fn pvt_temperature_label(value: f64) -> String {
-    let text = if value.fract().abs() < f64::EPSILON {
-        format!("{value:.0}")
-    } else {
-        value.to_string()
-    };
-    text.replace('-', "−")
+fn pvt_temperature_label(
+    celsius: f64,
+    policy: crate::quantity::QuantityPresentationPolicy,
+) -> String {
+    policy
+        .format_temperature(celsius + 273.15, 1)
+        .replace(".0 ", " ")
+        .replace('-', "−")
 }
 
 fn separator(ui: &mut egui::Ui) {

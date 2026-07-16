@@ -420,6 +420,7 @@ pub(in crate::simulation) struct CrossProbeSnapshot {
     point_to_net: HashMap<Point, String>,
     nets: HashMap<String, Vec<Point>>,
     net_segments: HashMap<String, Vec<(Point, Point)>>,
+    topology_version: u64,
 }
 
 impl CrossProbeSnapshot {
@@ -427,20 +428,24 @@ impl CrossProbeSnapshot {
         point_to_net: HashMap<Point, String>,
         nets: HashMap<String, Vec<Point>>,
         net_segments: HashMap<String, Vec<(Point, Point)>>,
+        topology_version: u64,
     ) -> Self {
         Self {
             point_to_net,
             nets,
             net_segments,
+            topology_version,
         }
     }
 
     pub(in crate::simulation) fn apply(self, state: &mut crate::common::app::AppState) {
         state.schematic.net_mapping = self.point_to_net.clone();
-        state
-            .simulation
-            .cross_probe
-            .update(self.point_to_net, self.nets, self.net_segments);
+        state.simulation.cross_probe.update(
+            self.point_to_net,
+            self.nets,
+            self.net_segments,
+            self.topology_version,
+        );
     }
 }
 

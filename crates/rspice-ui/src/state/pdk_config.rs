@@ -79,6 +79,12 @@ pub struct PdkConfig {
     #[serde(default = "default_max_recent")]
     pub max_recent_files: usize,
 
+    /// Physical length of one layout database unit, supplied by the active
+    /// PDK technology configuration. Absence is preserved rather than
+    /// substituting a guessed manufacturing grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_database_unit: Option<crate::quantity::LayoutDatabaseUnit>,
+
     /// Discovered files from last scan (not persisted by default)
     #[serde(skip)]
     pub discovered_files: Vec<DiscoveredFile>,
@@ -99,6 +105,7 @@ impl Default for PdkConfig {
             environment_variables: HashMap::new(),
             recent_files: Vec::new(),
             max_recent_files: default_max_recent(),
+            layout_database_unit: None,
             discovered_files: Vec::new(),
             scan_errors: Vec::new(),
         }

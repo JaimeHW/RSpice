@@ -25,6 +25,10 @@ pub struct CrossProbeMapping {
     /// Version counter - incremented when mapping is updated
     /// Used to detect when probe cache needs refresh
     pub version: u64,
+
+    /// Exact schematic topology revision from which this map was generated.
+    /// Consumers must reject the map after any structural edit.
+    pub source_topology_version: Option<u64>,
 }
 
 /// Does `p` lie on the orthogonal segment `(a, b)` (inclusive)?
@@ -52,10 +56,12 @@ impl CrossProbeMapping {
         point_to_net: HashMap<Point, String>,
         net_to_points: HashMap<String, Vec<Point>>,
         net_segments: HashMap<String, Vec<(Point, Point)>>,
+        source_topology_version: u64,
     ) {
         self.point_to_net = point_to_net;
         self.net_to_points = net_to_points;
         self.net_segments = net_segments;
+        self.source_topology_version = Some(source_topology_version);
         self.version += 1;
     }
 
@@ -64,6 +70,7 @@ impl CrossProbeMapping {
         self.point_to_net.clear();
         self.net_to_points.clear();
         self.net_segments.clear();
+        self.source_topology_version = None;
         self.version += 1;
     }
 

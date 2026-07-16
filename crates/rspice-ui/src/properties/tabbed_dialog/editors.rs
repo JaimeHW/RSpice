@@ -3,6 +3,9 @@
 
 use egui::Ui;
 
+use crate::quantity::{
+    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
+};
 use crate::state::property_types::{
     DisplayMode, PropertyDefinition, PropertyType, PropertyValue, format_engineering,
 };
@@ -18,6 +21,8 @@ pub(super) fn render_value_editor(
     def: &PropertyDefinition,
     current: &PropertyValue,
     width: f32,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
 ) -> Option<PropertyValue> {
     if def.read_only || def.display_mode == DisplayMode::Readonly {
         let t = Tokens::get(ui.ctx());
@@ -30,16 +35,27 @@ pub(super) fn render_value_editor(
     }
 
     match def.prop_type {
-        PropertyType::Number => render_number_editor(ui, current, width),
+        PropertyType::Number => {
+            render_number_editor(ui, def, current, width, quantity_policy, number_locale)
+        }
         PropertyType::String => render_string_editor(ui, current, width),
-        PropertyType::Expression => render_expression_editor(ui, current, width),
+        PropertyType::Expression => {
+            render_expression_editor(ui, def, current, width, quantity_policy, number_locale)
+        }
         PropertyType::Enum => render_enum_editor(ui, current),
         PropertyType::Boolean => render_boolean_editor(ui, current),
     }
 }
 
 /// Number editor with engineering notation and expression escape.
-fn render_number_editor(ui: &mut Ui, current: &PropertyValue, width: f32) -> Option<PropertyValue> {
+fn render_number_editor(
+    ui: &mut Ui,
+    def: &PropertyDefinition,
+    current: &PropertyValue,
+    width: f32,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
+) -> Option<PropertyValue> {
     let text = match current {
         PropertyValue::Number { value, .. } => format_engineering(*value),
         PropertyValue::Expression(e) => e.clone(),
@@ -55,8 +71,13 @@ fn render_number_editor(ui: &mut Ui, current: &PropertyValue, width: f32) -> Opt
             return Some(PropertyValue::Expression(expr));
         }
 
-        if let Ok(value) = crate::properties::parse_engineering_value(&new_text) {
-            return Some(PropertyValue::number(value));
+        if let Ok(value) = parse_ui_quantity(
+            &new_text,
+            property_quantity_kind(def),
+            quantity_policy,
+            number_locale,
+        ) {
+            return Some(PropertyValue::number(value_for_property_schema(def, value)));
         }
     }
 
@@ -81,8 +102,11 @@ fn render_string_editor(ui: &mut Ui, current: &PropertyValue, width: f32) -> Opt
 /// Expression editor.
 fn render_expression_editor(
     ui: &mut Ui,
+    def: &PropertyDefinition,
     current: &PropertyValue,
     width: f32,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
 ) -> Option<PropertyValue> {
     let text = match current {
         PropertyValue::Expression(e) => e.clone(),
@@ -98,13 +122,69 @@ fn render_expression_editor(
     if response.changed() && new_text != text {
         // Engineering notation ("100k", "10n") resolves to a number; only
         // genuinely symbolic input stays an expression.
-        if let Ok(value) = crate::properties::parse_engineering_value(&new_text) {
-            return Some(PropertyValue::number(value));
+        if let Ok(value) = parse_ui_quantity(
+            &new_text,
+            property_quantity_kind(def),
+            quantity_policy,
+            number_locale,
+        ) {
+            return Some(PropertyValue::number(value_for_property_schema(def, value)));
         }
         return Some(PropertyValue::Expression(new_text));
     }
 
     None
+}
+
+fn property_quantity_kind(def: &PropertyDefinition) -> QuantityInputKind {
+    match def.unit.as_deref() {
+        Some("s") => QuantityInputKind::Time,
+        Some("Hz") => QuantityInputKind::Frequency,
+        Some("°" | "deg" | "rad") => QuantityInputKind::Angle,
+        Some("K" | "°F") => QuantityInputKind::Temperature,
+        Some("°C") if def.name.eq_ignore_ascii_case("temp") => QuantityInputKind::Temperature,
+        Some("°C") => QuantityInputKind::TemperatureDelta,
+        _ => QuantityInputKind::EngineeringScalar,
+    }
+}
+
+/// Registry numeric values retain the unit declared by their schema. The
+/// unit-safe parser returns SI, so only legacy degree/Celsius schemas need a
+/// boundary conversion before the property bridge writes them.
+fn value_for_property_schema(def: &PropertyDefinition, value_si: f64) -> f64 {
+    match def.unit.as_deref() {
+        Some("°" | "deg") => value_si.to_degrees(),
+        Some("°C") if def.name.eq_ignore_ascii_case("temp") => value_si - 273.15,
+        Some("°F") => (value_si - 273.15) * 1.8 + 32.0,
+        _ => value_si,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_units_select_safe_interactive_quantity_kinds() {
+        let time = PropertyDefinition::new("td").with_unit("s");
+        let frequency = PropertyDefinition::new("freq").with_unit("Hz");
+        let phase = PropertyDefinition::new("phase").with_unit("°");
+        let delta_temperature = PropertyDefinition::new("dtemp").with_unit("°C");
+        assert_eq!(property_quantity_kind(&time), QuantityInputKind::Time);
+        assert_eq!(
+            property_quantity_kind(&frequency),
+            QuantityInputKind::Frequency
+        );
+        assert_eq!(property_quantity_kind(&phase), QuantityInputKind::Angle);
+        assert_eq!(
+            property_quantity_kind(&delta_temperature),
+            QuantityInputKind::TemperatureDelta
+        );
+        assert_eq!(
+            value_for_property_schema(&phase, std::f64::consts::FRAC_PI_2),
+            90.0
+        );
+    }
 }
 
 /// Enum editor — chips for small sets, dropdown beyond that.

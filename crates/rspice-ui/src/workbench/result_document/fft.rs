@@ -7,7 +7,7 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::common::AppState;
-use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
+use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 
@@ -83,6 +83,7 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
         well_hint(ui, "No spectrum yet — the FFT runs on the active transient");
         return;
@@ -168,8 +169,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let y = Axis::linear_with(y_lo, y_hi, "dBV", 7);
 
     let (x_lo, x_hi) = view.x.unwrap_or((0.0, x1));
-    let mut spec = PlotSpec::new(Axis::linear(x_lo, x_hi, "Hz"), XScale::Linear, y)
-        .accessible_name("FFT magnitude plot");
+    let (frequency_scale, frequency_offset, frequency_unit) =
+        quantity_policy.frequency_axis_transform();
+    let x_axis = Axis::linear(x_lo, x_hi, "Hz").with_display_transform(
+        frequency_scale,
+        frequency_offset,
+        frequency_unit,
+    );
+    let mut spec = PlotSpec::new(x_axis, XScale::Linear, y).accessible_name("FFT magnitude plot");
     spec.left_margin = 60.0;
     spec.traces.push(
         Trace::new(&model.frequency, &model.magnitude_db, c.traces[0])
@@ -204,7 +211,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let readout = |x: f64| -> Vec<(String, String)> {
         vec![
-            ("f".to_owned(), fmt_si(x, "Hz", 1)),
+            ("f".to_owned(), quantity_policy.format_frequency(x, 1)),
             (
                 "level".to_owned(),
                 format!(
@@ -232,13 +239,16 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// THD/SNR summary + harmonics table.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Spectrum", None);
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(analysis) = state.analysis.fft_state.analysis.clone() else {
         super::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
         return;
     };
 
-    let f = |v: Option<f64>, unit: &str, digits: usize| {
-        v.map_or("—".to_owned(), |v| fmt_si(v, unit, digits))
+    let f = |v: Option<f64>, digits: usize| {
+        v.map_or("—".to_owned(), |v| {
+            quantity_policy.format_frequency(v, digits)
+        })
     };
     let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| format!("{v:.1} dB"));
 
@@ -250,11 +260,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .map_or("—".to_owned(), |v| format!("{v:.3} %"));
 
     let rows = [
-        (
-            "Fundamental",
-            f(analysis.fundamental_frequency, "Hz", 1),
-            false,
-        ),
+        ("Fundamental", f(analysis.fundamental_frequency, 1), false),
         (
             "Amplitude",
             db(analysis.fundamental_db).replace(" dB", " dBV"),
@@ -283,7 +289,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             .map(|&(f, level)| {
                 let order = ((f / f0).round() as usize).max(2);
                 (
-                    format!("HD{order} · {}", fmt_si(f, "Hz", 0)),
+                    format!("HD{order} · {}", quantity_policy.format_frequency(f, 0)),
                     format!("{:.1} dBc", level - db0),
                 )
             })

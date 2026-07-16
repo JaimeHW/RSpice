@@ -3,6 +3,9 @@
 
 use egui::Ui;
 
+use crate::quantity::{
+    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input};
@@ -25,7 +28,12 @@ const INDEX_COL: f32 = 30.0;
 /// Render the PWL editor widget.
 ///
 /// Returns `PwlEditorResult::Modified` if the data changed.
-pub fn render_pwl_editor(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditorResult {
+pub fn render_pwl_editor(
+    ui: &mut Ui,
+    state: &mut PwlEditorState,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
+) -> PwlEditorResult {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let mut result = PwlEditorResult::None;
@@ -57,12 +65,12 @@ pub fn render_pwl_editor(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditorRe
     });
 
     if state.adding_point {
-        render_new_point_row(ui, state, &mut result);
+        render_new_point_row(ui, state, &mut result, quantity_policy, number_locale);
     }
 
     ui.add_space(4.0);
     render_table_header(ui, state);
-    render_points_table(ui, state, &mut result);
+    render_points_table(ui, state, &mut result, quantity_policy, number_locale);
 
     if let Some(error) = &state.validation_error {
         ui.add_space(4.0);
@@ -78,7 +86,13 @@ pub fn render_pwl_editor(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditorRe
     result
 }
 
-fn render_new_point_row(ui: &mut Ui, state: &mut PwlEditorState, result: &mut PwlEditorResult) {
+fn render_new_point_row(
+    ui: &mut Ui,
+    state: &mut PwlEditorState,
+    result: &mut PwlEditorResult,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
+) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -87,8 +101,21 @@ fn render_new_point_row(ui: &mut Ui, state: &mut PwlEditorState, result: &mut Pw
         mono_input(ui, &mut state.new_time, cell);
         mono_input(ui, &mut state.new_value, cell);
         if Button::new("Add").accent().show(ui).clicked() {
-            state.add_point();
-            *result = PwlEditorResult::Modified;
+            match normalize_pwl_pair(
+                &state.new_time,
+                &state.new_value,
+                quantity_policy,
+                number_locale,
+            ) {
+                Ok((time, value)) => {
+                    state.new_time = time;
+                    state.new_value = value;
+                    state.add_point();
+                    state.validation_error = None;
+                    *result = PwlEditorResult::Modified;
+                }
+                Err(error) => state.validation_error = Some(error),
+            }
         }
         if Button::new("Cancel").ghost().show(ui).clicked() {
             state.adding_point = false;
@@ -134,7 +161,13 @@ fn render_table_header(ui: &mut Ui, state: &PwlEditorState) {
     );
 }
 
-fn render_points_table(ui: &mut Ui, state: &mut PwlEditorState, result: &mut PwlEditorResult) {
+fn render_points_table(
+    ui: &mut Ui,
+    state: &mut PwlEditorState,
+    result: &mut PwlEditorResult,
+    quantity_policy: QuantityPresentationPolicy,
+    number_locale: UiNumberLocale,
+) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -186,7 +219,18 @@ fn render_points_table(ui: &mut Ui, state: &mut PwlEditorState, result: &mut Pwl
                     let value_response =
                         mono_input(ui, &mut state.edit_buffers[i].1, ui.available_width());
                     if time_response.changed() || value_response.changed() {
-                        data_changed = true;
+                        match normalize_pwl_pair(
+                            &state.edit_buffers[i].0,
+                            &state.edit_buffers[i].1,
+                            quantity_policy,
+                            number_locale,
+                        ) {
+                            Ok((time, value)) => {
+                                state.edit_buffers[i] = (time, value);
+                                data_changed = true;
+                            }
+                            Err(error) => state.validation_error = Some(error),
+                        }
                     }
                     if time_response.gained_focus() || value_response.gained_focus() {
                         state.selected_row = Some(i);
@@ -206,6 +250,25 @@ fn render_points_table(ui: &mut Ui, state: &mut PwlEditorState, result: &mut Pwl
                 }
             }
         });
+}
+
+fn normalize_pwl_pair(
+    time: &str,
+    value: &str,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) -> Result<(String, String), String> {
+    let time_si = parse_ui_quantity(time, QuantityInputKind::Time, policy, locale)
+        .map_err(|error| format!("Time: {error}"))?;
+    if time_si < 0.0 {
+        return Err("Time cannot be negative".to_owned());
+    }
+    let value_si = parse_ui_quantity(value, QuantityInputKind::EngineeringScalar, policy, locale)
+        .map_err(|error| format!("Value: {error}"))?;
+    Ok((
+        format_engineering_for_spice(time_si),
+        format_engineering_for_spice(value_si),
+    ))
 }
 
 fn render_summary(ui: &mut Ui, state: &PwlEditorState) {

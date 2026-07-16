@@ -335,9 +335,20 @@ impl SchematicState {
     ///
     /// This matches commercial EDA tool behavior for maintaining clean topology.
     pub fn cleanup_wire_topology(&mut self) {
+        self.cleanup_wire_topology_with_junction_policy(true);
+    }
+
+    /// Clean topology while respecting the resolved document/user junction
+    /// policy. Manual-junction projects still receive safe geometric cleanup,
+    /// but existing explicit junction ownership is never synthesized away.
+    pub fn cleanup_wire_topology_with_junction_policy(&mut self, automatic_junctions: bool) {
         self.remove_degenerate_segments();
         self.optimize_all_wires();
-        self.update_wire_junctions();
+        if automatic_junctions {
+            self.update_wire_junctions();
+        } else {
+            self.remove_orphan_junctions();
+        }
     }
 
     /// Delete a wire by ID

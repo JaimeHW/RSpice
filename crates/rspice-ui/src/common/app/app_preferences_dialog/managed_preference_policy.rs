@@ -11,17 +11,32 @@ use egui::{Align, Context, Galley, Layout, Rect, Response, Sense, Stroke, Ui, ve
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::workbench::{ChoicePreference, ScalarPreference, TogglePreference};
 
 use super::AppState;
+use super::preferences_shell::PreferenceCategory;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedPolicyRow {
-    setting: &'static str,
-    resolved_value: &'static str,
-    source: &'static str,
-    override_state: &'static str,
-    reason: &'static str,
+    setting: String,
+    resolved_value: String,
+    source: String,
+    override_state: String,
+    reason: String,
     locked: bool,
+}
+
+impl ResolvedPolicyRow {
+    fn user(setting: &str, resolved_value: impl Into<String>, source: &str, reason: &str) -> Self {
+        Self {
+            setting: setting.to_owned(),
+            resolved_value: resolved_value.into(),
+            source: source.to_owned(),
+            override_state: "allowed".to_owned(),
+            reason: reason.to_owned(),
+            locked: false,
+        }
+    }
 }
 
 const POLICY_TABLE_NARROW_BREAKPOINT: f32 = 820.0;
@@ -38,49 +53,14 @@ const POLICY_HEADERS: [&str; POLICY_COLUMN_COUNT] = [
     "Reason",
 ];
 
-const ENFORCED_POLICY_ROWS: [ResolvedPolicyRow; 4] = [
-    ResolvedPolicyRow {
-        setting: "Extension policy",
-        resolved_value: "Built-in modules only",
-        source: "RSpice safety floor",
-        override_state: "locked",
-        reason: "native-code control",
-        locked: true,
-    },
-    ResolvedPolicyRow {
-        setting: "Audit retention",
-        resolved_value: "Project and operation receipts",
-        source: "RSpice integrity policy",
-        override_state: "locked",
-        reason: "reproducible evidence",
-        locked: true,
-    },
-    ResolvedPolicyRow {
-        setting: "Certificate trust",
-        resolved_value: "System trust roots",
-        source: "Host security policy",
-        override_state: "locked",
-        reason: "remote execution",
-        locked: true,
-    },
-    ResolvedPolicyRow {
-        setting: "Diagnostics sharing",
-        resolved_value: "disabled",
-        source: "RSpice privacy floor",
-        override_state: "locked",
-        reason: "privacy protection",
-        locked: true,
-    },
-];
-
-pub(super) fn render(ctx: &Context, state: &mut AppState) {
+pub(super) fn render(ctx: &Context, state: &mut AppState, category: PreferenceCategory) {
     if !state.dialogs.managed_preference_policy_open {
         return;
     }
-    let density = state.ui.theme.density.label();
+    let rows = resolved_policy_rows(category, state);
     let choice = Dialog::new(
-        "PREFERENCES \u{00b7} ORGANIZATION OVERLAY \u{00b7} AUDITABLE",
-        "Managed preference policy",
+        "PREFERENCES \u{00b7} RESOLVED POLICY \u{00b7} AUDITABLE",
+        "Resolved preference policy",
         "Close",
     )
     .description(
@@ -89,7 +69,11 @@ pub(super) fn render(ctx: &Context, state: &mut AppState) {
     .size(DialogSize::Transaction)
     .flush_body()
     .show(ctx, |ui| {
-        render_policy_table(ui, density);
+        if rows.is_empty() {
+            render_empty_policy(ui);
+        } else {
+            render_policy_table(ui, &rows);
+        }
         render_notes(ui);
     });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
@@ -97,11 +81,31 @@ pub(super) fn render(ctx: &Context, state: &mut AppState) {
     }
 }
 
-fn render_policy_table(ui: &mut Ui, density: &'static str) {
+fn render_empty_policy(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let response = ui.add_sized(
+        [ui.available_width(), 48.0],
+        egui::Label::new(
+            egui::RichText::new("No runtime-backed preferences are exposed for this category.")
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .color(t.color.text_dim),
+        )
+        .wrap(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            true,
+            "No runtime-backed preferences are exposed for this category",
+        )
+    });
+}
+
+fn render_policy_table(ui: &mut Ui, rows: &[ResolvedPolicyRow]) {
     let narrow = ui.ctx().content_rect().width() <= POLICY_TABLE_NARROW_BREAKPOINT;
-    let mut table_width = ui.available_width();
-    let table_height =
-        POLICY_HEADER_HEIGHT + POLICY_ROW_HEIGHT * (ENFORCED_POLICY_ROWS.len() as f32 + 1.0);
+    let viewport_width = ui.available_width().max(1.0);
+    let mut table_width = viewport_width;
+    let table_height = POLICY_HEADER_HEIGHT + POLICY_ROW_HEIGHT * rows.len() as f32;
     let response = ui
         .allocate_ui_with_layout(
             vec2(ui.available_width(), table_height),
@@ -114,17 +118,14 @@ fn render_policy_table(ui: &mut Ui, density: &'static str) {
                     .min_scrolled_height(table_height)
                     .show(ui, |ui| {
                         table_width = if narrow {
-                            ui.available_width().max(POLICY_TABLE_NARROW_MIN_WIDTH)
+                            viewport_width.max(POLICY_TABLE_NARROW_MIN_WIDTH)
                         } else {
-                            ui.available_width()
+                            viewport_width
                         };
                         ui.set_min_width(table_width);
                         ui.spacing_mut().item_spacing.y = 0.0;
                         policy_header_row(ui, table_width);
-                        for row in ENFORCED_POLICY_ROWS
-                            .into_iter()
-                            .chain([density_row(density)])
-                        {
+                        for row in rows {
                             policy_data_row(ui, table_width, row);
                         }
                     });
@@ -170,21 +171,21 @@ fn policy_header_row(ui: &mut Ui, table_width: f32) {
     });
 }
 
-fn policy_data_row(ui: &mut Ui, table_width: f32, row: ResolvedPolicyRow) {
+fn policy_data_row(ui: &mut Ui, table_width: f32, row: &ResolvedPolicyRow) {
     let column_width = table_width / POLICY_COLUMN_COUNT as f32;
     let cells = [
-        (row.setting, PolicyCellTone::Normal),
-        (row.resolved_value, PolicyCellTone::Normal),
-        (row.source, PolicyCellTone::Normal),
+        (row.setting.as_str(), PolicyCellTone::Normal),
+        (row.resolved_value.as_str(), PolicyCellTone::Normal),
+        (row.source.as_str(), PolicyCellTone::Normal),
         (
-            row.override_state,
+            row.override_state.as_str(),
             if row.locked {
                 PolicyCellTone::Locked
             } else {
                 PolicyCellTone::Allowed
             },
         ),
-        (row.reason, PolicyCellTone::Normal),
+        (row.reason.as_str(), PolicyCellTone::Normal),
     ];
     let response = ui
         .allocate_ui_with_layout(
@@ -200,7 +201,7 @@ fn policy_data_row(ui: &mut Ui, table_width: f32, row: ResolvedPolicyRow) {
         .response;
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Row);
-        node.set_label(row.setting);
+        node.set_label(row.setting.as_str());
     });
 }
 
@@ -342,26 +343,415 @@ fn access_bounds(rect: Rect) -> egui::accesskit::Rect {
     }
 }
 
-const fn density_row(density: &'static str) -> ResolvedPolicyRow {
-    ResolvedPolicyRow {
-        setting: "Interface density",
-        resolved_value: density,
-        source: "User preference",
-        override_state: "allowed",
-        reason: "device local",
-        locked: false,
+fn option_label(index: usize, options: &[&str]) -> String {
+    options
+        .get(index)
+        .copied()
+        .unwrap_or("Unknown value (blocked)")
+        .to_owned()
+}
+
+fn choice_policy_row(
+    state: &AppState,
+    setting: &str,
+    key: ChoicePreference,
+    options: &[&str],
+    source: &str,
+    reason: &str,
+) -> ResolvedPolicyRow {
+    ResolvedPolicyRow::user(
+        setting,
+        option_label(state.ui.preferences.choice(key), options),
+        source,
+        reason,
+    )
+}
+
+fn toggle_policy_row(
+    state: &AppState,
+    setting: &str,
+    key: TogglePreference,
+    source: &str,
+    reason: &str,
+) -> ResolvedPolicyRow {
+    ResolvedPolicyRow::user(
+        setting,
+        if state.ui.preferences.toggle(key) {
+            "Enabled"
+        } else {
+            "Disabled"
+        },
+        source,
+        reason,
+    )
+}
+
+fn scalar_policy_row(
+    state: &AppState,
+    setting: &str,
+    key: ScalarPreference,
+    suffix: &str,
+    source: &str,
+    reason: &str,
+) -> ResolvedPolicyRow {
+    ResolvedPolicyRow::user(
+        setting,
+        format!("{}{}", state.ui.preferences.scalar(key), suffix),
+        source,
+        reason,
+    )
+}
+
+fn resolved_policy_rows(category: PreferenceCategory, state: &AppState) -> Vec<ResolvedPolicyRow> {
+    match category {
+        PreferenceCategory::Appearance => vec![
+            ResolvedPolicyRow::user(
+                "Color mode",
+                state.ui.theme.mode.label(),
+                "User profile",
+                "interface presentation",
+            ),
+            ResolvedPolicyRow::user(
+                "Interface density",
+                state.ui.theme.density.label(),
+                "User profile",
+                "device presentation",
+            ),
+            ResolvedPolicyRow::user(
+                "Color-safe traces",
+                if state.ui.theme.colorblind_traces {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                },
+                "User profile",
+                "trace accessibility",
+            ),
+            ResolvedPolicyRow::user(
+                "Canvas contrast",
+                format!("{}%", state.ui.theme.canvas_contrast),
+                "User profile",
+                "engineering canvas",
+            ),
+            ResolvedPolicyRow::user(
+                "Engineering canvas theme",
+                state.ui.theme.canvas_theme.label(),
+                "User profile",
+                "engineering canvas",
+            ),
+        ],
+        PreferenceCategory::Workspace => {
+            let mut rows = vec![ResolvedPolicyRow::user(
+                "Engineering profile",
+                state.workbench.engineering_profile.label(),
+                "Device local",
+                "workspace capability scope",
+            )];
+            if let Some(workspace) = state.ui.preferences.workspace() {
+                let preset = ["Engineering", "Canvas", "Diagnostics"][workspace.preset().index()];
+                let console = ["Collapsed", "Open"][workspace.console_on_launch().index()];
+                let attention = [
+                    "Badge and notify; never steal focus",
+                    "Notify on failure only",
+                    "Silent",
+                ][workspace.background_task_attention().index()];
+                let layout = state.workbench.workspace_layout(state.workbench.workspace);
+                rows.extend([
+                    ResolvedPolicyRow::user(
+                        "Workspace preset",
+                        preset,
+                        "Device local",
+                        "dock composition",
+                    ),
+                    ResolvedPolicyRow::user(
+                        "Console on launch",
+                        console,
+                        "Device local",
+                        "launch presentation",
+                    ),
+                    ResolvedPolicyRow::user(
+                        "Dock sizes",
+                        format!(
+                            "navigator {:.0} px · inspector {:.0} px · console {:.0} px",
+                            layout.navigator_width, layout.inspector_width, layout.console_height
+                        ),
+                        "Device local",
+                        "workspace layout",
+                    ),
+                    ResolvedPolicyRow::user(
+                        "Background task attention",
+                        attention,
+                        "Device local",
+                        "activity stream",
+                    ),
+                ]);
+            }
+            rows
+        }
+        PreferenceCategory::Units => [
+            (
+                "Unit system",
+                ChoicePreference::UnitSystem,
+                &["Mixed", "SI", "Imperial layout"][..],
+            ),
+            (
+                "Engineering suffixes",
+                ChoicePreference::EngineeringSuffixes,
+                &["Strict RSpice · 10Meg, 10m", "Classic SPICE compatibility"][..],
+            ),
+            (
+                "Frequency display",
+                ChoicePreference::FrequencyDisplay,
+                &["Hz · engineering prefixes", "rad/s"][..],
+            ),
+            (
+                "Temperature display",
+                ChoicePreference::TemperatureDisplay,
+                &["°C", "K", "°F"][..],
+            ),
+            (
+                "Copied values",
+                ChoicePreference::CopiedValueFormat,
+                &[
+                    "Engineering notation + unit",
+                    "Scientific notation + SI unit",
+                ][..],
+            ),
+            (
+                "Angle display",
+                ChoicePreference::AngleDisplay,
+                &["Degrees", "Radians"][..],
+            ),
+            (
+                "Layout coordinate display",
+                ChoicePreference::LayoutCoordinateDisplay,
+                &["µm with database-unit remainder", "nm", "Database units"][..],
+            ),
+            (
+                "Time and frequency input",
+                ChoicePreference::TimeFrequencyInput,
+                &["Strict units required", "Infer from field quantity"][..],
+            ),
+            (
+                "Decimal separator on input",
+                ChoicePreference::DecimalSeparatorInput,
+                &["Locale-aware UI · portable files", "Period everywhere"][..],
+            ),
+        ]
+        .into_iter()
+        .map(|(setting, key, options)| {
+            choice_policy_row(
+                state,
+                setting,
+                key,
+                options,
+                "User profile",
+                "display/input",
+            )
+        })
+        .collect(),
+        PreferenceCategory::Schematic => {
+            let mut rows = vec![
+                choice_policy_row(
+                    state,
+                    "Grid and snap",
+                    ChoicePreference::SchematicGrid,
+                    &["50 mil", "25 mil", "Metric"],
+                    "User default",
+                    "new schematic document",
+                ),
+                choice_policy_row(
+                    state,
+                    "Operating-point annotation",
+                    ChoicePreference::OperatingPointAnnotation,
+                    &["Voltages + selected currents", "Voltages only", "Hidden"],
+                    "User default",
+                    "new schematic document",
+                ),
+                toggle_policy_row(
+                    state,
+                    "Cross-probe behavior",
+                    TogglePreference::CrossProbeBehavior,
+                    "User default",
+                    "schematic interaction",
+                ),
+                toggle_policy_row(
+                    state,
+                    "Connectivity checks",
+                    TogglePreference::IncrementalConnectivityChecks,
+                    "User default",
+                    "schematic evidence",
+                ),
+            ];
+            for (setting, key, options) in [
+                (
+                    "Wire and junction behavior",
+                    ChoicePreference::WireJunctionBehavior,
+                    &[
+                        "Orthogonal · automatic explicit junctions",
+                        "Orthogonal · manual junctions",
+                        "Any-angle routing",
+                    ][..],
+                ),
+                (
+                    "Selection crossing policy",
+                    ChoicePreference::SelectionCrossingPolicy,
+                    &[
+                        "Directional window selection",
+                        "Enclosed objects only",
+                        "Intersecting objects",
+                    ][..],
+                ),
+                (
+                    "Net naming policy",
+                    ChoicePreference::NetNamingPolicy,
+                    &[
+                        "Strict project policy · case sensitive",
+                        "SPICE-compatible relaxed",
+                    ][..],
+                ),
+                (
+                    "Property commit",
+                    ChoicePreference::PropertyCommitPolicy,
+                    &[
+                        "Atomic · reject the complete invalid edit",
+                        "Apply valid fields and report failures",
+                    ][..],
+                ),
+            ] {
+                rows.push(choice_policy_row(
+                    state,
+                    setting,
+                    key,
+                    options,
+                    "User default",
+                    "new schematic document",
+                ));
+            }
+            rows
+        }
+        PreferenceCategory::Simulation => Vec::new(),
+        PreferenceCategory::Results => {
+            let mut rows = vec![scalar_policy_row(
+                state,
+                "Displayed significant digits",
+                ScalarPreference::DisplayedSignificantDigits,
+                "",
+                "User default",
+                "result presentation",
+            )];
+            for (setting, key, options) in [
+                (
+                    "Cursor interpolation",
+                    ChoicePreference::CursorInterpolation,
+                    &[
+                        "Monotone cubic where valid",
+                        "Linear",
+                        "Nearest accepted point",
+                    ][..],
+                ),
+                (
+                    "Complex-number display",
+                    ChoicePreference::ComplexNumberDisplay,
+                    &[
+                        "Magnitude / phase · degrees",
+                        "Real / imaginary",
+                        "Magnitude / phase · radians",
+                    ][..],
+                ),
+                (
+                    "Large-dataset display",
+                    ChoicePreference::LargeDatasetDisplay,
+                    &[
+                        "Envelope + extrema-preserving decimation",
+                        "Uniform display sampling",
+                        "No display decimation",
+                    ][..],
+                ),
+                (
+                    "Default engineering export",
+                    ChoicePreference::EngineeringExport,
+                    &["CSV", "Touchstone where compatible"][..],
+                ),
+            ] {
+                rows.push(choice_policy_row(
+                    state,
+                    setting,
+                    key,
+                    options,
+                    "User default",
+                    "result presentation",
+                ));
+            }
+            rows
+        }
+        PreferenceCategory::Files => vec![ResolvedPolicyRow::user(
+            "Autosave interval",
+            format!("{} minutes", state.ui.autosave_minutes),
+            "User + project",
+            "recovery checkpoint cadence",
+        )],
+        PreferenceCategory::Compute => Vec::new(),
+        PreferenceCategory::Security => Vec::new(),
+        PreferenceCategory::Accessibility => vec![
+            toggle_policy_row(
+                state,
+                "Reduced motion",
+                TogglePreference::ReducedMotion,
+                "User profile",
+                "interface accessibility",
+            ),
+            choice_policy_row(
+                state,
+                "Minimum touch target",
+                ChoicePreference::MinimumTouchTarget,
+                &["44 px · WCAG recommended", "48 px"],
+                "User profile",
+                "pointer accessibility",
+            ),
+        ],
+        PreferenceCategory::Shortcuts => {
+            let policies = state.ui.preferences.shortcuts().policies();
+            vec![
+                ResolvedPolicyRow::user(
+                    "Single-key canvas commands",
+                    policies.single_key_canvas().label(),
+                    "User profile",
+                    "shortcut dispatch",
+                ),
+                ResolvedPolicyRow::user(
+                    "Chord timeout",
+                    policies.chord_timeout().label(),
+                    "User profile",
+                    "shortcut dispatch",
+                ),
+                ResolvedPolicyRow::user(
+                    "Protected platform shortcuts",
+                    policies.protected_shortcuts().label(),
+                    "User profile + platform safety",
+                    "shortcut conflict policy",
+                ),
+                ResolvedPolicyRow::user(
+                    "Context precedence",
+                    policies.context_precedence().label(),
+                    "User profile",
+                    "shortcut dispatch",
+                ),
+            ]
+        }
+        PreferenceCategory::Integrations => Vec::new(),
     }
 }
 
 fn render_notes(ui: &mut Ui) {
     let notes = [
         (
-            "Resolution order",
-            "Safety floor \u{2192} organization policy \u{2192} project policy \u{2192} user preference \u{2192} device-local state. Lower layers cannot weaken a protected value.",
+            "Inclusion rule",
+            "Only preferences with an active runtime owner appear here. Persisted values without an enforcing consumer are omitted.",
         ),
         (
             "Audit",
-            "Policy revision, signer, application time, and affected settings are retained when a managed overlay is present. Project data and result manifests are not modified by preference overlays.",
+            "Resolved values are projected from current retained state. This view does not infer an organization, quota, credential store, remote target, or integration provider.",
         ),
     ];
     let narrow = ui.ctx().content_rect().width() <= POLICY_NOTE_NARROW_BREAKPOINT;
@@ -466,6 +856,8 @@ mod tests {
         viewport_width: f32,
         surface_width: f32,
     ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        let state = AppState::default();
+        let rows = resolved_policy_rows(PreferenceCategory::Appearance, &state);
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -484,7 +876,7 @@ mod tests {
                         ui.scope(|ui| {
                             ui.set_width(surface_width);
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            render_policy_table(ui, "Compact");
+                            render_policy_table(ui, &rows);
                             render_notes(ui);
                         });
                     });
@@ -519,15 +911,39 @@ mod tests {
 
     #[test]
     fn policy_projection_is_truthful_without_claiming_an_organization_overlay() {
-        assert!(ENFORCED_POLICY_ROWS.iter().all(|row| row.locked));
-        assert!(
-            ENFORCED_POLICY_ROWS
-                .iter()
-                .all(|row| !row.source.contains("Acme"))
-        );
-        let density = density_row("Compact");
-        assert_eq!(density.source, "User preference");
+        let state = AppState::default();
+        for category in [
+            PreferenceCategory::Simulation,
+            PreferenceCategory::Compute,
+            PreferenceCategory::Security,
+            PreferenceCategory::Integrations,
+        ] {
+            assert!(resolved_policy_rows(category, &state).is_empty());
+        }
+        let appearance = resolved_policy_rows(PreferenceCategory::Appearance, &state);
+        let density = appearance
+            .iter()
+            .find(|row| row.setting == "Interface density")
+            .expect("density projection");
+        assert_eq!(density.source, "User profile");
         assert!(!density.locked);
+
+        let schematic = resolved_policy_rows(PreferenceCategory::Schematic, &state);
+        assert!(
+            schematic
+                .iter()
+                .all(|row| row.setting != "Edit-in-place hierarchy")
+        );
+        let results = resolved_policy_rows(PreferenceCategory::Results, &state);
+        for unsupported in [
+            "Family trace labeling",
+            "Default axis policy",
+            "Measurement evaluation",
+            "Plot documents",
+            "Cross-probe result families",
+        ] {
+            assert!(results.iter().all(|row| row.setting != unsupported));
+        }
     }
 
     #[test]
@@ -562,7 +978,7 @@ mod tests {
             assert_eq!(pair[0].x1, pair[1].x0);
         }
 
-        let resolution = node_bounds(&nodes, egui::accesskit::Role::Label, "Resolution order");
+        let resolution = node_bounds(&nodes, egui::accesskit::Role::Label, "Inclusion rule");
         let audit = node_bounds(&nodes, egui::accesskit::Role::Label, "Audit");
         assert_eq!(resolution.y0, audit.y0);
         assert_eq!(resolution.x1, audit.x0);
@@ -580,7 +996,7 @@ mod tests {
         );
         assert_eq!(table.x1 - table.x0, POLICY_TABLE_NARROW_MIN_WIDTH as f64);
 
-        let resolution = node_bounds(&nodes, egui::accesskit::Role::Label, "Resolution order");
+        let resolution = node_bounds(&nodes, egui::accesskit::Role::Label, "Inclusion rule");
         let audit = node_bounds(&nodes, egui::accesskit::Role::Label, "Audit");
         assert_eq!(resolution.x0, audit.x0);
         assert_eq!(resolution.x1, audit.x1);
@@ -590,6 +1006,8 @@ mod tests {
 
     #[test]
     fn policy_table_exposes_complete_table_semantics() {
+        let state = AppState::default();
+        let rows = resolved_policy_rows(PreferenceCategory::Appearance, &state);
         let nodes = render_policy_nodes(1_440.0, 760.0);
         assert_eq!(
             nodes
@@ -603,7 +1021,7 @@ mod tests {
                 .iter()
                 .filter(|(_, node)| node.role() == egui::accesskit::Role::Row)
                 .count(),
-            ENFORCED_POLICY_ROWS.len() + 2
+            rows.len() + 1
         );
         assert_eq!(
             nodes
@@ -617,13 +1035,9 @@ mod tests {
                 .iter()
                 .filter(|(_, node)| node.role() == egui::accesskit::Role::Cell)
                 .count(),
-            POLICY_COLUMN_COUNT * (ENFORCED_POLICY_ROWS.len() + 1)
+            POLICY_COLUMN_COUNT * rows.len()
         );
-        for setting in ENFORCED_POLICY_ROWS
-            .into_iter()
-            .chain([density_row("Compact")])
-            .map(|row| row.setting)
-        {
+        for setting in rows.iter().map(|row| row.setting.as_str()) {
             assert!(nodes.iter().any(|(_, node)| {
                 node.role() == egui::accesskit::Role::Row && node.label() == Some(setting)
             }));

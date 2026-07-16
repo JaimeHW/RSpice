@@ -1,8 +1,4 @@
-//! Runtime-backed Preferences page content.
-//!
-//! The mockup contains additional settings and categories. A control is
-//! exposed here only when an existing RSpice subsystem consumes it; storage
-//! by itself is not treated as implementation.
+//! Runtime-backed Preferences page content from the approved workbench mockup.
 
 use egui::Ui;
 
@@ -10,11 +6,14 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, select};
 use crate::ui::{Density, EngineeringCanvasTheme, Mode};
-use crate::workbench::{ChoicePreference, TogglePreference};
+use crate::workbench::{
+    BackgroundTaskAttention, ChoicePreference, ConsoleLaunchBehavior, ScalarPreference,
+    TogglePreference, WorkspacePreferences, WorkspacePreset,
+};
 
 use super::preferences_shell::{
-    PreferenceCategory, page_heading, preference_switch, right_aligned, scope_strip, section_label,
-    segmented, setting_row,
+    PreferenceCategory, actionable_scope_strip, page_heading, preference_switch, right_aligned,
+    section_label, segmented, setting_row,
 };
 use super::{AppState, PreferencePageActions};
 
@@ -25,14 +24,82 @@ pub(super) fn render(
     actions: &mut PreferencePageActions,
 ) {
     match category {
-        PreferenceCategory::Appearance => appearance(ui, state),
+        PreferenceCategory::Appearance => appearance(ui, state, actions),
         PreferenceCategory::Workspace => workspace(ui, state, actions),
-        PreferenceCategory::Files => files(ui, state),
-        PreferenceCategory::Accessibility => accessibility(ui, state),
+        PreferenceCategory::Units => units(ui, state, actions),
+        PreferenceCategory::Schematic => schematic(ui, state, actions),
+        PreferenceCategory::Simulation => simulation(ui, state, actions),
+        PreferenceCategory::Results => results(ui, state, actions),
+        PreferenceCategory::Files => files(ui, state, actions),
+        PreferenceCategory::Compute => compute(ui, state, actions),
+        PreferenceCategory::Security => security(ui, state, actions),
+        PreferenceCategory::Accessibility => accessibility(ui, state, actions),
         PreferenceCategory::Shortcuts => {
             super::shortcut_preferences::render_page(ui, state, actions);
         }
+        PreferenceCategory::Integrations => integrations(ui, state, actions),
     }
+}
+
+fn resolved_scope_strip(
+    ui: &mut Ui,
+    actions: &mut PreferencePageActions,
+    scope: &str,
+    detail: &str,
+) {
+    if actionable_scope_strip(ui, scope, detail, "View resolved policy\u{2026}") {
+        actions.open_resolved_preference_policy = true;
+    }
+}
+
+fn toggle_row(
+    ui: &mut Ui,
+    state: &mut AppState,
+    key: TogglePreference,
+    title: &'static str,
+    detail: &'static str,
+    accessible_label: &'static str,
+) {
+    setting_row(ui, title, detail, |ui| {
+        right_aligned(ui, |ui| {
+            let mut value = state.ui.preferences.toggle(key);
+            if preference_switch(ui, key.stable_id(), accessible_label, &mut value) {
+                state.ui.preferences.set_toggle(key, value);
+            }
+        });
+    });
+}
+
+fn scalar_row(
+    ui: &mut Ui,
+    state: &mut AppState,
+    key: ScalarPreference,
+    title: &'static str,
+    detail: &'static str,
+    range: std::ops::RangeInclusive<u32>,
+) {
+    setting_row(ui, title, detail, |ui| {
+        right_aligned(ui, |ui| {
+            let mut value = state.ui.preferences.scalar(key);
+            let response = ui.add_sized(
+                [
+                    ui.available_width().min(360.0),
+                    Tokens::get(ui.ctx()).metrics.ctl_h,
+                ],
+                egui::DragValue::new(&mut value).range(range).speed(1.0),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, title)
+            });
+            if response.changed() {
+                state
+                    .ui
+                    .preferences
+                    .set_scalar(key, value)
+                    .expect("numeric control constrains the complete preference domain");
+            }
+        });
+    });
 }
 
 fn action_row(
@@ -75,7 +142,7 @@ fn choice_row(
                 title,
                 options[active],
                 &labels,
-                ui.available_width().min(390.0),
+                ui.available_width().min(360.0),
             ) {
                 state
                     .ui
@@ -87,16 +154,17 @@ fn choice_row(
     });
 }
 
-fn appearance(ui: &mut Ui, state: &mut AppState) {
-    scope_strip(
+fn appearance(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
         ui,
+        actions,
         "User profile",
-        "saved in this application profile on the current device",
+        "portable across desktop and web",
     );
     page_heading(
         ui,
         "Appearance",
-        "Applied to this application profile. Touch target sizing follows the active platform.",
+        "Shared across desktop and web. Touch target sizing follows the active platform.",
     );
     setting_row(
         ui,
@@ -208,8 +276,9 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    scope_strip(
+    resolved_scope_strip(
         ui,
+        actions,
         "Device local",
         "dock geometry and restored documents stay on this device",
     );
@@ -263,11 +332,456 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
         "Workspace layout",
         "Saved per device while project documents remain portable.",
     );
+    if state.ui.preferences.workspace().is_none() {
+        return;
+    }
+
+    section_label(ui, "Dock composition");
+    setting_row(
+        ui,
+        "Workspace preset",
+        "Engineering keeps contextual panes; Canvas focuses the active editor; Diagnostics opens the console.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let mut selected = state
+                    .ui
+                    .preferences
+                    .workspace()
+                    .map(WorkspacePreferences::preset)
+                    .unwrap_or_default()
+                    .index();
+                if segmented(
+                    ui,
+                    "preferences.workspace.preset",
+                    &["Engineering", "Canvas", "Diagnostics"],
+                    &mut selected,
+                ) {
+                    let preset = WorkspacePreset::from_index(selected)
+                        .expect("workspace preset segments define the complete domain");
+                    state
+                        .ui
+                        .preferences
+                        .workspace_mut()
+                        .expect("the compatible Workspace domain was checked above")
+                        .set_preset(preset);
+                    state.workbench.apply_workspace_preset(preset);
+                }
+            });
+        },
+    );
+    setting_row(
+        ui,
+        "Console on launch",
+        "Errors and explicit Problem navigation always open it.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let mut selected = state
+                    .ui
+                    .preferences
+                    .workspace()
+                    .map(WorkspacePreferences::console_on_launch)
+                    .unwrap_or_default()
+                    .index();
+                if segmented(
+                    ui,
+                    "preferences.workspace.console-on-launch",
+                    &["Collapsed", "Open"],
+                    &mut selected,
+                ) {
+                    let behavior = ConsoleLaunchBehavior::from_index(selected)
+                        .expect("console launch segments define the complete domain");
+                    state
+                        .ui
+                        .preferences
+                        .workspace_mut()
+                        .expect("the compatible Workspace domain was checked above")
+                        .set_console_on_launch(behavior);
+                    state
+                        .workbench
+                        .apply_console_launch_behavior(behavior.is_open());
+                }
+            });
+        },
+    );
+    setting_row(
+        ui,
+        "Dock sizes",
+        "Independent navigator, inspector and console sizes per workspace.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let layout = state.workbench.workspace_layout(state.workbench.workspace);
+                ui.vertical(|ui| {
+                    ui.label(format!(
+                        "navigator {:.0} px · inspector {:.0} px",
+                        layout.navigator_width, layout.inspector_width
+                    ));
+                    ui.label(format!("console {:.0} px · saved", layout.console_height));
+                });
+            });
+        },
+    );
+
+    section_label(ui, "Attention and navigation");
+    if action_row(
+        ui,
+        "Remember per-workspace layouts",
+        "Design, Simulation, Results and DRC retain independent docks and console state.",
+        "workspace-layouts",
+        "Manage layouts…",
+    ) {
+        actions.open_workspace_layout_manager = true;
+    }
+
+    section_label(ui, "Startup and windows");
+    setting_row(
+        ui,
+        "Background task attention",
+        "Bring the application forward only for explicit user-blocking decisions.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let options = [
+                    "Badge and notify; never steal focus",
+                    "Notify on failure only",
+                    "Silent",
+                ];
+                let option_labels = options.map(str::to_owned);
+                let active = state
+                    .ui
+                    .preferences
+                    .workspace()
+                    .map(WorkspacePreferences::background_task_attention)
+                    .unwrap_or_default()
+                    .index();
+                if let Some(selected) = select(
+                    ui,
+                    "preferences.workspace.background-task-attention",
+                    "Background task attention",
+                    options[active],
+                    &option_labels,
+                    ui.available_width().min(360.0),
+                ) {
+                    state
+                        .ui
+                        .preferences
+                        .workspace_mut()
+                        .expect("the compatible Workspace domain was checked above")
+                        .set_background_task_attention(
+                            BackgroundTaskAttention::from_index(selected)
+                                .expect("background-attention options define the complete domain"),
+                        );
+                }
+            });
+        },
+    );
 }
 
-fn files(ui: &mut Ui, state: &mut AppState) {
-    scope_strip(
+fn units(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
         ui,
+        actions,
+        "User profile",
+        "display-only; projects retain explicit stored units",
+    );
+    page_heading(
+        ui,
+        "Units and engineering notation",
+        "Parsing is strict and unit-safe; display choices never change stored values.",
+    );
+    setting_row(
+        ui,
+        "Unit system",
+        "Mixed engineering is recommended for circuit design.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let mut selected = state.ui.preferences.choice(ChoicePreference::UnitSystem);
+                if segmented(
+                    ui,
+                    "preferences.units.system",
+                    &["Mixed", "SI", "Imperial layout"],
+                    &mut selected,
+                ) {
+                    state
+                        .ui
+                        .preferences
+                        .set_choice(ChoicePreference::UnitSystem, selected)
+                        .expect("unit-system segments define the complete domain");
+                }
+            });
+        },
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::EngineeringSuffixes,
+        "Engineering suffixes",
+        "Case-sensitive SPICE parsing with unambiguous meg and mil handling.",
+        &["Strict RSpice · 10Meg, 10m", "Classic SPICE compatibility"],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::FrequencyDisplay,
+        "Frequency display",
+        "Stored internally as hertz.",
+        &["Hz · engineering prefixes", "rad/s"],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::TemperatureDisplay,
+        "Temperature display",
+        "Display conversion is applied only after the stored kelvin value is resolved.",
+        &["°C", "K", "°F"],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::CopiedValueFormat,
+        "Copied values",
+        "Copy retains full precision plus an explicit unit.",
+        &[
+            "Engineering notation + unit",
+            "Scientific notation + SI unit",
+        ],
+    );
+    section_label(ui, "Locale and reporting");
+    setting_row(
+        ui,
+        "Locale, date, time and numeric format",
+        "Display and reporting preferences never change parsed or stored values.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                ui.label("System locale · portable engineering files");
+            });
+        },
+    );
+    section_label(ui, "Angles, coordinates and input");
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::AngleDisplay,
+        "Angle display",
+        "Expression functions continue to require an explicit unit where ambiguous.",
+        &["Degrees", "Radians"],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::LayoutCoordinateDisplay,
+        "Layout coordinate display",
+        "The PDK database unit remains authoritative and unchanged.",
+        &["µm with database-unit remainder", "nm", "Database units"],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::TimeFrequencyInput,
+        "Time and frequency input",
+        "Reject ambiguous suffixes and show the normalized value before commit.",
+        &["Strict units required", "Infer from field quantity"],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::DecimalSeparatorInput,
+        "Decimal separator on input",
+        "Netlists and automation files always use the portable period separator.",
+        &["Locale-aware UI · portable files", "Period everywhere"],
+    );
+}
+
+fn schematic(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
+        ui,
+        actions,
+        "User default",
+        "each project may declare stricter design rules",
+    );
+    page_heading(
+        ui,
+        "Schematic editor",
+        "Interaction, units, hierarchy and connectivity behavior.",
+    );
+    setting_row(
+        ui,
+        "Grid and snap",
+        "Visible grid and placement increments.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let mut selected = state.ui.preferences.choice(ChoicePreference::SchematicGrid);
+                if segmented(
+                    ui,
+                    "preferences.schematic.grid",
+                    &["50 mil", "25 mil", "Metric"],
+                    &mut selected,
+                ) {
+                    state
+                        .ui
+                        .preferences
+                        .set_choice(ChoicePreference::SchematicGrid, selected)
+                        .expect("schematic-grid segments define the complete domain");
+                }
+            });
+        },
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::OperatingPointAnnotation,
+        "Operating-point annotation",
+        "Default detail after a completed compatible run.",
+        &["Voltages + selected currents", "Voltages only", "Hidden"],
+    );
+    toggle_row(
+        ui,
+        state,
+        TogglePreference::CrossProbeBehavior,
+        "Cross-probe behavior",
+        "Highlight the matching net, device, netlist line and trace.",
+        "Enable cross-probe behavior",
+    );
+    toggle_row(
+        ui,
+        state,
+        TogglePreference::IncrementalConnectivityChecks,
+        "Connectivity checks",
+        "Refresh incrementally while editing.",
+        "Enable incremental connectivity checks",
+    );
+    section_label(ui, "Editing and hierarchy");
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::WireJunctionBehavior,
+        "Wire and junction behavior",
+        "Orthogonal routing previews connectivity before a wire is committed.",
+        &[
+            "Orthogonal · automatic explicit junctions",
+            "Orthogonal · manual junctions",
+            "Any-angle routing",
+        ],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::SelectionCrossingPolicy,
+        "Selection crossing policy",
+        "Left-to-right encloses; right-to-left intersects, matching physical editors.",
+        &[
+            "Directional window selection",
+            "Enclosed objects only",
+            "Intersecting objects",
+        ],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::NetNamingPolicy,
+        "Net naming policy",
+        "Case, global-net syntax, generated names and bus expansion are checked before netlisting.",
+        &[
+            "Strict project policy · case sensitive",
+            "SPICE-compatible relaxed",
+        ],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::PropertyCommitPolicy,
+        "Property commit",
+        "Validate typed values and dependencies before a multi-object edit is applied.",
+        &[
+            "Atomic · reject the complete invalid edit",
+            "Apply valid fields and report failures",
+        ],
+    );
+}
+
+fn simulation(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
+        ui,
+        actions,
+        "Per plan",
+        "only explicit plan-owned simulation settings are currently enforced",
+    );
+    page_heading(
+        ui,
+        "Simulation configuration",
+        "Numerical, failure-handling and execution settings are configured and retained by each simulation plan.",
+    );
+}
+
+fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
+        ui,
+        actions,
+        "User default",
+        "plot documents may override display behavior",
+    );
+    page_heading(
+        ui,
+        "Results and precision",
+        "Plot behavior never changes stored engineering precision. Trace accessibility is owned by Appearance.",
+    );
+    scalar_row(
+        ui,
+        state,
+        ScalarPreference::DisplayedSignificantDigits,
+        "Displayed significant digits",
+        "Copy retains full stored precision.",
+        3..=17,
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::CursorInterpolation,
+        "Cursor interpolation",
+        "Method used between accepted solver points.",
+        &[
+            "Monotone cubic where valid",
+            "Linear",
+            "Nearest accepted point",
+        ],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::ComplexNumberDisplay,
+        "Complex-number display",
+        "Viewer-specific axes may override this without changing the dataset.",
+        &[
+            "Magnitude / phase · degrees",
+            "Real / imaginary",
+            "Magnitude / phase · radians",
+        ],
+    );
+    section_label(ui, "Axes, data and evaluation");
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::LargeDatasetDisplay,
+        "Large-dataset display",
+        "Visual decimation preserves extrema, crossings and cursor source samples.",
+        &[
+            "Envelope + extrema-preserving decimation",
+            "Uniform display sampling",
+            "No display decimation",
+        ],
+    );
+    choice_row(
+        ui,
+        state,
+        ChoicePreference::EngineeringExport,
+        "Default engineering export",
+        "Exports retain full stored precision; Touchstone is offered only for compatible S-parameter datasets.",
+        &["CSV", "Touchstone where compatible"],
+    );
+}
+
+fn files(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
+        ui,
+        actions,
         "User + project",
         "locations are device local; retention policy is project portable",
     );
@@ -307,9 +821,64 @@ fn files(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-fn accessibility(ui: &mut Ui, state: &mut AppState) {
-    scope_strip(
+fn compute(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
         ui,
+        actions,
+        "Runtime capability",
+        "this build has no registered remote execution targets",
+    );
+    page_heading(
+        ui,
+        "Remote compute",
+        "Remote target and scheduling controls are shown only when backed by a configured execution service.",
+    );
+    setting_row(
+        ui,
+        "Local processor availability",
+        "Host-reported hardware concurrency; this is capability information, not a remote scheduling policy.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let threads =
+                    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+                ui.label(format!("{threads} logical threads detected"));
+            });
+        },
+    );
+}
+
+fn security(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
+        ui,
+        actions,
+        "Runtime capability",
+        "no credential, trust, diagnostic, or organization-policy service is attached",
+    );
+    page_heading(
+        ui,
+        "Security and privacy",
+        "Configurable security controls are shown only when an enforcing runtime service owns them.",
+    );
+}
+
+fn integrations(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
+        ui,
+        actions,
+        "Runtime capability",
+        "no integration or extension provider is registered",
+    );
+    page_heading(
+        ui,
+        "Plug-ins and integrations",
+        "Configurable integration controls are shown only when a provider supplies executable actions and retained state.",
+    );
+}
+
+fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+    resolved_scope_strip(
+        ui,
+        actions,
         "User profile",
         "saved on this device; capability may increase minimum touch targets",
     );
@@ -317,14 +886,6 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         ui,
         "Accessibility",
         "Keyboard, screen-reader, vision and motor-access settings apply across every workspace.",
-    );
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::InterfaceScale,
-        "Interface scale",
-        "Independent of plot and schematic zoom.",
-        &["100% · system default", "110%", "125%", "150%"],
     );
     setting_row(
         ui,
@@ -367,4 +928,95 @@ fn setting_detail(ui: &mut Ui, text: &str) {
         )
         .wrap(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pages_do_not_expose_persistence_only_or_fabricated_controls() {
+        let source = include_str!("preference_pages.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source precedes tests");
+        for unsupported in [
+            "ChoicePreference::DefaultSolverPreset",
+            "ScalarPreference::LocalParallelSlots",
+            "ChoicePreference::DefaultComputeTarget",
+            "ScalarPreference::ParallelTaskCeiling",
+            "ChoicePreference::CertificateTrust",
+            "TogglePreference::AutomaticDiagnostics",
+            "ChoicePreference::ExtensionPolicy",
+            "TogglePreference::PythonAutomationApi",
+            "ChoicePreference::InterfaceScale",
+        ] {
+            assert!(
+                !production.contains(unsupported),
+                "persistence-only control leaked into Preferences: {unsupported}"
+            );
+        }
+        for fabricated in [
+            "lab-hpc-west",
+            "Operating-system protected vault",
+            "United States · organization managed",
+            "0 installed extensions",
+            "Built-in sandbox only",
+        ] {
+            assert!(
+                !production.contains(fabricated),
+                "fabricated runtime fixture leaked into Preferences: {fabricated}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_rows_follow_the_mockup_order_and_hide_missing_backends() {
+        let source = include_str!("preference_pages.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source precedes tests");
+        let workspace = production
+            .split("fn workspace(")
+            .nth(1)
+            .and_then(|source| source.split("fn units(").next())
+            .expect("Workspace page source");
+
+        let mut cursor = 0;
+        for row in [
+            "Product scope",
+            "Engineering profile",
+            "Feature ownership and availability",
+            "Workspace layout",
+            "Dock composition",
+            "Workspace preset",
+            "Console on launch",
+            "Dock sizes",
+            "Attention and navigation",
+            "Remember per-workspace layouts",
+            "Startup and windows",
+            "Background task attention",
+        ] {
+            let offset = workspace[cursor..]
+                .find(row)
+                .unwrap_or_else(|| panic!("missing Workspace mockup row: {row}"));
+            cursor += offset + row.len();
+        }
+
+        for missing_backend in [
+            "Restore workspace documents",
+            "Portable preferences",
+            "Notifications and job alerts",
+            "Startup destination",
+            "Multi-window documents",
+            "Per-monitor placement",
+            "Phone window model",
+            "Document tabs and session",
+        ] {
+            assert!(
+                !workspace.contains(missing_backend),
+                "unsupported Workspace row was exposed: {missing_backend}"
+            );
+        }
+    }
 }

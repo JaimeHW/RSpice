@@ -23,6 +23,7 @@ pub(crate) fn open_specification_editor(state: &mut AppState) {
 }
 mod strip;
 mod waves;
+pub(crate) use waves::copy_cursor_text;
 
 pub(crate) use waves::toggle_visibility;
 

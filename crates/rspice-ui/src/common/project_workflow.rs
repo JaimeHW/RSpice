@@ -61,10 +61,7 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     }
     let mut library_manager = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut library_manager);
-    let schematic = workspace
-        .active_schematic()
-        .cloned()
-        .unwrap_or_else(crate::state::SchematicState::default);
+    let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
 
     state.library_manager = library_manager;
@@ -720,7 +717,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     }
     let mut libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let schematic = workspace.active_schematic().cloned().unwrap_or_default();
+    let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
     state.clear_design_execution_context();
     state.library_manager = libraries;

@@ -537,7 +537,10 @@ pub fn format_engineering(value: f64) -> String {
     } else if abs_value >= 1e9 {
         (value / 1e9, "G")
     } else if abs_value >= 1e6 {
-        (value / 1e6, "M")
+        // `M` is milli in SPICE-compatible engineering input. Emit the
+        // unambiguous spelling so a displayed property round-trips through
+        // the editor parser without a nine-order-of-magnitude change.
+        (value / 1e6, "Meg")
     } else if abs_value >= 1e3 {
         (value / 1e3, "k")
     } else if abs_value >= 1.0 || abs_value == 0.0 {
@@ -570,3 +573,22 @@ pub fn format_engineering(value: f64) -> String {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::format_engineering;
+
+    #[test]
+    fn engineering_display_uses_unambiguous_mega_for_editor_round_trip() {
+        let displayed = format_engineering(3.3e6);
+        assert_eq!(displayed, "3.300Meg");
+        assert_eq!(
+            crate::properties::parse_engineering_value(&displayed).unwrap(),
+            3.3e6
+        );
+        assert_eq!(
+            crate::properties::parse_engineering_value("3.3M").unwrap(),
+            3.3e-3
+        );
+    }
+}

@@ -22,6 +22,7 @@ use super::well_hint;
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
 
     let smith = &state.analysis.smith_chart_state;
     let visible: Vec<usize> = smith
@@ -204,7 +205,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let trace = &smith.traces[*trace_index];
         let frequency = trace.points.get(i).map(|p| p.frequency).unwrap_or(0.0);
         let mag = (gamma_re * gamma_re + gamma_im * gamma_im).sqrt();
-        let phase_deg = gamma_im.atan2(gamma_re).to_degrees();
+        let phase = gamma_im.atan2(gamma_re);
         // z = z0 (1+Γ)/(1−Γ)
         let denom = (1.0 - gamma_re) * (1.0 - gamma_re) + gamma_im * gamma_im;
         let (r, x) = if denom > 1e-12 {
@@ -221,8 +222,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             "∞".to_owned()
         };
         let rows = [
-            ("f".to_owned(), fmt_si(frequency, "Hz", 2)),
-            ("Γ".to_owned(), format!("{mag:.3} ∠ {phase_deg:.1}°")),
+            (
+                "f".to_owned(),
+                quantity_policy.format_frequency(frequency, 2),
+            ),
+            (
+                "Γ".to_owned(),
+                format!("{mag:.3} ∠ {}", quantity_policy.format_angle(phase, 1)),
+            ),
             (
                 "Z".to_owned(),
                 if r.is_finite() {
@@ -250,6 +257,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "S-parameters", None);
     let smith = &state.analysis.smith_chart_state;
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(trace) = smith
         .traces
         .iter()
@@ -269,8 +277,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             match (first, last) {
                 (Some(a), Some(b)) => format!(
                     "{} – {}",
-                    fmt_si(a.frequency, "Hz", 1),
-                    fmt_si(b.frequency, "Hz", 1)
+                    quantity_policy.format_frequency(a.frequency, 1),
+                    quantity_policy.format_frequency(b.frequency, 1)
                 ),
                 _ => "—".to_owned(),
             },

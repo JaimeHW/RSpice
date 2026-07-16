@@ -13,11 +13,13 @@ use super::super::design_system::{card, heading, property_row, status_dot, works
 use super::super::state::VerificationPage;
 
 const VERIFY_RESPONSIVE_BREAKPOINT: f32 = 820.0;
+const VERIFY_KPI_BREAKPOINT: f32 = 1_260.0;
 const VERIFY_PHONE_BREAKPOINT: f32 = 560.0;
 const VERIFY_STACKED_CHART_HEIGHT: f32 = 250.0;
 const VERIFY_PHONE_CHART_HEIGHT: f32 = 230.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    let ctx = ui.ctx().clone();
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         let surface_width = ui.available_width();
@@ -40,9 +42,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             });
     });
+    regression_baseline_picker(&ctx, app);
 }
 
-fn verification_heading(ui: &mut Ui, app: &RSpiceApp) {
+fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
     let run = verification_run(app);
     let (eyebrow, title, description) = match app.state.workbench.verification_page {
         VerificationPage::Yield => (
@@ -103,7 +106,271 @@ fn verification_heading(ui: &mut Ui, app: &RSpiceApp) {
             "Physical sign-off remains fail-closed until a layout source, rule deck, and immutable marker database are retained.",
         ),
     };
-    heading(ui, &eyebrow, title, description);
+    let page = app.state.workbench.verification_page;
+    let available = ui.available_width().max(1.0);
+    let action_width = match page {
+        VerificationPage::Corners | VerificationPage::Regression => 238.0,
+        _ => 0.0,
+    };
+    let viewport_width = ui.ctx().content_rect().width();
+    if action_width > 0.0 && viewport_width > VERIFY_PHONE_BREAKPOINT && available > 560.0 {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2((available - action_width - 8.0).max(1.0), 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| heading(ui, &eyebrow, title, description),
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(action_width, 0.0),
+                egui::Layout::right_to_left(egui::Align::Min),
+                |ui| verification_header_actions(ui, app, page),
+            );
+        });
+    } else {
+        heading(ui, &eyebrow, title, description);
+        if action_width > 0.0 {
+            ui.add_space(7.0);
+            ui.horizontal_wrapped(|ui| verification_header_actions(ui, app, page));
+        }
+    }
+}
+
+fn verification_header_actions(ui: &mut Ui, app: &mut RSpiceApp, page: VerificationPage) {
+    ui.spacing_mut().item_spacing.x = 6.0;
+    match page {
+        VerificationPage::Corners => {
+            let has_corner_result = latest_analysis(app, crate::state::AnalysisType::Corner)
+                .is_some_and(|result| !result.waveforms.is_empty());
+            let export = Button::new("Export matrix").enabled(has_corner_result);
+            let export = if has_corner_result {
+                export.accent()
+            } else {
+                export
+            };
+            if export
+                .show(ui)
+                .on_disabled_hover_text(
+                    "Run and retain a process-corner analysis before exporting.",
+                )
+                .clicked()
+            {
+                export_active_corner_matrix(app);
+            }
+            let nominal_available = corner_nominal_index(app).is_some();
+            if Button::new("Compare nominal")
+                .enabled(nominal_available)
+                .show(ui)
+                .on_disabled_hover_text(
+                    "A revision-matched TT, nominal-voltage, room-temperature point is required.",
+                )
+                .clicked()
+            {
+                app.state.workbench.verification.corner_compare_nominal =
+                    !app.state.workbench.verification.corner_compare_nominal;
+                app.state.workbench.verification.action_receipt =
+                    if app.state.workbench.verification.corner_compare_nominal {
+                        "Corner matrix now reports exact deltas from the retained nominal point."
+                            .to_owned()
+                    } else {
+                        "Corner matrix restored to absolute retained values.".to_owned()
+                    };
+            }
+        }
+        VerificationPage::Regression => {
+            let can_run = regression_run_pair(app).is_some();
+            let run = Button::new("Run regression").enabled(can_run);
+            let run = if can_run { run.accent() } else { run };
+            if run
+                .show(ui)
+                .on_disabled_hover_text(
+                    "Retain two distinct immutable result datasets before comparing them.",
+                )
+                .clicked()
+            {
+                run_regression_comparison(app);
+            }
+            if Button::new("Select baseline").show(ui).clicked() {
+                app.state
+                    .workbench
+                    .verification
+                    .regression_baseline_picker_selection =
+                    app.state.workbench.verification.regression_baseline_run;
+                app.state
+                    .workbench
+                    .verification
+                    .regression_baseline_picker_open = true;
+            }
+        }
+        VerificationPage::Yield
+        | VerificationPage::Tuning
+        | VerificationPage::Optimization
+        | VerificationPage::Reliability
+        | VerificationPage::Drc => {}
+    }
+}
+
+fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if !app
+        .state
+        .workbench
+        .verification
+        .regression_baseline_picker_open
+    {
+        return;
+    }
+
+    let active_run = app.state.simulation.active_run().map(|run| run.run_id);
+    let mut candidates = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .filter(|run| Some(run.run_id) != active_run && run.analyses.iter().any(verified_analysis))
+        .map(|run| {
+            (
+                run.run_id,
+                run.id,
+                run.label.clone(),
+                run.dataset_id.to_string(),
+                run.prepared_receipt().is_some(),
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| right.1.cmp(&left.1));
+
+    let mut selected = app
+        .state
+        .workbench
+        .verification
+        .regression_baseline_picker_selection;
+    if selected.is_none_or(|selected| !candidates.iter().any(|row| row.0 == selected)) {
+        selected = candidates.first().map(|row| row.0);
+    }
+
+    let mut open = true;
+    let mut cancel = false;
+    let mut commit = false;
+    let viewport = ctx.content_rect().size();
+    let width = (viewport.x - 16.0).clamp(1.0, 620.0);
+    let candidate_height = (viewport.y - 210.0).clamp(90.0, 420.0);
+    egui::Window::new("Select regression baseline")
+        .id(egui::Id::new("workbench.verify.regression_baseline_picker"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .default_width(width)
+        .min_width(width)
+        .max_width(width)
+        .show(ctx, |ui| {
+            let t = Tokens::get(ui.ctx());
+            ui.label(
+                egui::RichText::new("GOVERNED RETAINED BASELINE")
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(t.color.accent),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "Choose the immutable dataset used for the next exact comparison.",
+                )
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .color(t.color.text_dim),
+            );
+            ui.add_space(6.0);
+
+            if candidates.is_empty() {
+                status_dot(
+                    ui,
+                    t.color.warn,
+                    "No distinct source-attributed retained run is available",
+                );
+                ui.label("Retain another completed run before selecting a regression baseline.");
+            } else {
+                let list_width = ui.available_width();
+                ScrollArea::vertical()
+                    .id_salt("workbench.verify.regression_baseline_candidates")
+                    .max_height(candidate_height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        egui::Frame::new()
+                            .fill(t.color.bg_panel)
+                            .stroke(egui::Stroke::new(1.0, t.color.border))
+                            .show(ui, |ui| {
+                                ui.set_width((list_width - 2.0).max(1.0));
+                                for (run_id, _, label, dataset, prepared) in &candidates {
+                                    let is_selected = selected == Some(*run_id);
+                                    let response = ui.selectable_label(
+                                        is_selected,
+                                        egui::RichText::new(label)
+                                            .font(theme::sans(tokens::FS_1, FontWeight::Medium)),
+                                    );
+                                    if response.clicked() {
+                                        selected = Some(*run_id);
+                                    }
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.add_space(10.0);
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Dataset {dataset} · {}",
+                                                if *prepared {
+                                                    "prepared snapshot retained"
+                                                } else {
+                                                    "legacy retained provenance"
+                                                }
+                                            ))
+                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                            .color(t.color.text_dim),
+                                        );
+                                    });
+                                }
+                            });
+                    });
+            }
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let can_commit = selected.is_some();
+                let use_baseline = Button::new("Use baseline").enabled(can_commit);
+                let use_baseline = if can_commit {
+                    use_baseline.accent()
+                } else {
+                    use_baseline
+                };
+                if use_baseline.show(ui).clicked() {
+                    commit = true;
+                }
+                if Button::new("Cancel").show(ui).clicked() {
+                    cancel = true;
+                }
+            });
+        });
+
+    if commit {
+        if let Some(run_id) = selected {
+            app.state.workbench.verification.regression_baseline_run = Some(run_id);
+            app.state.workbench.verification.regression_comparison = None;
+            let run_number = candidates
+                .iter()
+                .find(|row| row.0 == run_id)
+                .map(|row| row.1)
+                .unwrap_or_default();
+            app.state.workbench.verification.action_receipt = format!(
+                "Run {run_number} is the selected immutable regression baseline. Run regression to create a comparison receipt."
+            );
+        }
+        open = false;
+    }
+    if cancel {
+        open = false;
+    }
+    app.state
+        .workbench
+        .verification
+        .regression_baseline_picker_selection = selected;
+    app.state
+        .workbench
+        .verification
+        .regression_baseline_picker_open = open;
 }
 
 fn cockpit(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -388,15 +655,38 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
             },
         ),
     ];
+    verification_kpi_strip(ui, &items);
+}
+
+fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::Color32)]) {
+    let t = Tokens::get(ui.ctx());
     let columns = verification_status_columns(ui.ctx().content_rect().width());
-    let width = ui.available_width();
+    let width = ui.available_width().max(1.0);
     let cell_width = width / columns as f32;
+    let top = ui.cursor().top();
+    ui.painter().hline(
+        egui::Rangef::new(ui.min_rect().left(), ui.min_rect().left() + width),
+        top,
+        egui::Stroke::new(1.0, t.color.border),
+    );
     for row in items.chunks(columns) {
+        let row_height = row
+            .iter()
+            .map(|(_, _, detail, _)| {
+                let galley = ui.painter().layout(
+                    detail.clone(),
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.text_faint,
+                    (cell_width - 20.0).max(1.0),
+                );
+                (56.0 + galley.size().y).max(73.0)
+            })
+            .fold(73.0_f32, f32::max);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
             for (index, (label, value, detail, tone)) in row.iter().enumerate() {
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(cell_width, 68.0), egui::Sense::hover());
+                let (rect, response) = ui
+                    .allocate_exact_size(egui::vec2(cell_width, row_height), egui::Sense::hover());
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Label,
@@ -405,27 +695,32 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
                     )
                 });
                 if ui.is_rect_visible(rect) {
-                    let content_rect = rect.shrink2(egui::vec2(12.0, 0.0));
+                    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+                    let content_rect = rect.shrink2(egui::vec2(10.0, 0.0));
                     let painter = ui.painter().with_clip_rect(content_rect);
                     painter.text(
-                        rect.left_top() + egui::vec2(12.0, 9.0),
+                        rect.left_top() + egui::vec2(10.0, 10.0),
                         egui::Align2::LEFT_TOP,
                         label,
                         theme::sans(tokens::FS_0, FontWeight::Regular),
                         t.color.text_dim,
                     );
                     painter.text(
-                        rect.left_top() + egui::vec2(12.0, 28.0),
+                        rect.left_top() + egui::vec2(10.0, 29.0),
                         egui::Align2::LEFT_TOP,
                         value,
                         theme::mono(17.0, FontWeight::Medium),
                         *tone,
                     );
-                    painter.text(
-                        rect.left_top() + egui::vec2(12.0, 49.0),
-                        egui::Align2::LEFT_TOP,
-                        detail,
+                    let detail_galley = painter.layout(
+                        detail.clone(),
                         theme::sans(tokens::FS_0, FontWeight::Regular),
+                        t.color.text_faint,
+                        (cell_width - 20.0).max(1.0),
+                    );
+                    painter.galley(
+                        rect.left_top() + egui::vec2(10.0, 52.0),
+                        detail_galley,
                         t.color.text_faint,
                     );
                     if index + 1 < row.len() {
@@ -435,23 +730,15 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
                             egui::Stroke::new(1.0, t.color.border),
                         );
                     }
-                    if columns == 2 && row.as_ptr() == items.as_ptr() {
-                        ui.painter().hline(
-                            rect.x_range(),
-                            rect.bottom(),
-                            egui::Stroke::new(1.0, t.color.border),
-                        );
-                    }
                 }
             }
         });
+        ui.painter().hline(
+            egui::Rangef::new(ui.min_rect().left(), ui.min_rect().left() + width),
+            ui.cursor().top(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
     }
-    let bottom = ui.cursor().top();
-    ui.painter().hline(
-        egui::Rangef::new(ui.min_rect().left(), ui.max_rect().right()),
-        bottom,
-        egui::Stroke::new(1.0, t.color.border_strong),
-    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -744,7 +1031,7 @@ fn run_margin_matrix(
             ]
         })
         .collect::<Vec<_>>();
-    render_data_table(ui, "verification-run-margin", &headers, &rows, 360.0);
+    render_data_table(ui, "verification-run-margin", &headers, &rows, None);
 }
 
 fn specification_matrix(ui: &mut Ui, app: &mut RSpiceApp, evidence: &[SpecificationEvidence]) {
@@ -811,7 +1098,7 @@ fn specification_matrix(ui: &mut Ui, app: &mut RSpiceApp, evidence: &[Specificat
         "verification-specification-matrix",
         &headers,
         &rows,
-        if t.metrics.ctl_h >= 44.0 { 540.0 } else { 0.0 },
+        None,
     );
 }
 
@@ -931,15 +1218,23 @@ fn render_data_table(
     id: &str,
     headers: &[(String, f32)],
     rows: &[Vec<TableCell>],
-    min_width: f32,
+    desktop_min_width: Option<f32>,
 ) {
     let t = Tokens::get(ui.ctx());
     let row_height = verification_table_row_height(ui.ctx().content_rect().width());
+    // Capture the viewport before entering the horizontal scroll area. Inside
+    // it, `available_width()` is the unconstrained scroll content width and
+    // previously stretched ordinary tables far past the visible surface.
+    let viewport_width = ui.available_width().max(1.0);
     egui::ScrollArea::horizontal()
         .id_salt(id)
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
         .show(ui, |ui| {
-            let width = ui.available_width().max(min_width);
+            let width = verification_table_width(
+                ui.ctx().content_rect().width(),
+                viewport_width,
+                desktop_min_width,
+            );
             ui.set_min_width(width);
             let (head, head_response) =
                 ui.allocate_exact_size(egui::vec2(width, 27.0), egui::Sense::hover());
@@ -967,19 +1262,20 @@ fn render_data_table(
                 egui::Stroke::new(1.0, t.color.border),
             );
             if rows.is_empty() {
+                let empty_message = verification_table_empty_message(id);
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Label,
                         ui.is_enabled(),
-                        "No specification evidence",
+                        empty_message,
                     )
                 });
                 ui.painter().text(
                     rect.left_center() + egui::vec2(8.0, 0.0),
                     egui::Align2::LEFT_CENTER,
-                    "No specification evidence",
+                    empty_message,
                     theme::sans(tokens::FS_0, FontWeight::Regular),
                     t.color.text_dim,
                 );
@@ -1022,11 +1318,38 @@ fn render_data_table(
         });
 }
 
+fn verification_table_width(
+    viewport_width: f32,
+    surface_width: f32,
+    desktop_min_width: Option<f32>,
+) -> f32 {
+    let responsive_minimum = desktop_min_width.unwrap_or({
+        if viewport_width <= VERIFY_RESPONSIVE_BREAKPOINT {
+            540.0
+        } else {
+            0.0
+        }
+    });
+    surface_width.max(responsive_minimum)
+}
+
 fn verification_status_columns(viewport_width: f32) -> usize {
-    if viewport_width <= VERIFY_RESPONSIVE_BREAKPOINT {
+    if viewport_width <= VERIFY_KPI_BREAKPOINT {
         2
     } else {
         4
+    }
+}
+
+fn verification_table_empty_message(id: &str) -> &'static str {
+    match id {
+        "verification-run-margin" => "No retained run-margin evidence",
+        "verification-specification-matrix" => "No specification evidence",
+        "verify-corner-matrix" => "No retained corner-signal evidence",
+        "verify-corner-worst-points" => "No point-attributed corner verdicts",
+        "verify-optimization-results" => "No retained optimization traces",
+        "verify-regression-checks" => "No aligned regression checks",
+        _ => "No retained evidence",
     }
 }
 
@@ -1226,6 +1549,7 @@ fn latest_analysis(
     app.state.simulation.active_run().and_then(|run| {
         run.analyses
             .iter()
+            .rev()
             .find(|analysis| analysis.analysis_type == analysis_type && verified_analysis(analysis))
     })
 }
@@ -1318,48 +1642,71 @@ fn action_receipt(ui: &mut Ui, app: &RSpiceApp) {
 }
 
 fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Process-corner execution", |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if Button::new("Run corner plan").accent().show(ui).clicked() {
-                let result =
-                    request_analysis_run(app, &[crate::simulation::plan::AnalysisKind::Corner]);
-                record_verification_action(
-                    app,
-                    result,
-                    "Process-corner execution was dispatched through the active simulation plan.",
-                );
-            }
-            if Button::new("Configure corner plan").show(ui).clicked() {
-                let result =
-                    open_analysis_configuration(app, crate::simulation::plan::AnalysisKind::Corner);
-                record_verification_action(
-                    app,
-                    result,
-                    "The production corner-analysis configuration was opened.",
-                );
-            }
-            if Button::new("Export matrix")
-                .enabled(Command::ExportWaveformsCsv.is_enabled(app))
-                .show(ui)
-                .clicked()
-            {
-                Command::ExportWaveformsCsv.execute(app);
-            }
-        });
-        let actual_points = latest_analysis(app, crate::state::AnalysisType::Corner)
-            .and_then(|analysis| analysis.waveforms.first())
-            .map_or(0, |waveform| waveform.x.len());
-        property_row(
-            ui,
-            "Active dataset",
-            &if actual_points == 0 {
-                "No retained corner result".to_owned()
+    let result = latest_analysis(app, crate::state::AnalysisType::Corner);
+    let point_count = result
+        .and_then(|analysis| analysis.waveforms.first())
+        .map_or(0, |waveform| waveform.x.len());
+    let signal_count = result.map_or(0, |analysis| analysis.waveforms.len());
+    // `AnalysisResult::measurements` has no corner-point identity. It must not
+    // be presented as a pointwise specification matrix until that provenance
+    // is retained by the result schema.
+    let configured_specifications = app.state.workspace.specs.len();
+    let (elapsed, run_detail) = verification_run(app).map_or_else(
+        || {
+            (
+                "No dataset".to_owned(),
+                "No active immutable run".to_owned(),
+            )
+        },
+        |run| {
+            (
+                format!("{:.3} s", run.elapsed_time),
+                format!("Run {} · dataset {}", run.id, run.dataset_id),
+            )
+        },
+    );
+    let t = Tokens::get(ui.ctx());
+    let items = [
+        (
+            "PVT points retained".to_owned(),
+            point_count.to_string(),
+            if point_count == 0 {
+                "No process-corner evidence".to_owned()
             } else {
-                format!("{actual_points} retained points")
+                run_detail
             },
-        );
-    });
-    if let Some(result) = latest_analysis(app, crate::state::AnalysisType::Corner) {
+            if point_count == 0 {
+                t.color.warn
+            } else {
+                t.color.ok
+            },
+        ),
+        (
+            "Signals retained".to_owned(),
+            signal_count.to_string(),
+            "source-attributed corner traces".to_owned(),
+            if signal_count == 0 {
+                t.color.warn
+            } else {
+                t.color.ok
+            },
+        ),
+        (
+            "Specifications configured".to_owned(),
+            configured_specifications.to_string(),
+            "No pointwise verdict payload retained".to_owned(),
+            t.color.warn,
+        ),
+        (
+            "Runtime".to_owned(),
+            elapsed,
+            "active immutable run".to_owned(),
+            t.color.text,
+        ),
+    ];
+    verification_kpi_strip(ui, &items);
+
+    if let Some(result) = result {
         let axis = result
             .waveforms
             .first()
@@ -1372,14 +1719,24 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
         } else {
             let mut headers = vec![("Signal".to_owned(), 0.24)];
             let point_fraction = 0.64 / axis.len() as f32;
+            let point_labels = corner_point_labels(app, result);
             headers.extend(axis.iter().enumerate().map(|(index, value)| {
-                (
-                    format!("P{:02} · {}", index + 1, format_scalar(*value)),
-                    point_fraction,
-                )
+                let label = point_labels
+                    .as_ref()
+                    .and_then(|labels| labels.get(index))
+                    .cloned()
+                    .unwrap_or_else(|| format!("P{:02} · {}", index + 1, format_scalar(*value)));
+                (label, point_fraction)
             }));
             headers.push(("State".to_owned(), 0.12));
             let t = Tokens::get(ui.ctx());
+            let nominal_index = app
+                .state
+                .workbench
+                .verification
+                .corner_compare_nominal
+                .then(|| corner_nominal_index(app))
+                .flatten();
             let rows = result
                 .waveforms
                 .iter()
@@ -1387,12 +1744,15 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                     let aligned = waveform.x.as_slice() == axis && waveform.y.len() == axis.len();
                     let mut row = vec![TableCell::text(&waveform.name)];
                     if aligned {
-                        row.extend(
-                            waveform
-                                .y
-                                .iter()
-                                .map(|value| TableCell::mono(format_scalar(*value))),
-                        );
+                        let nominal = nominal_index
+                            .and_then(|index| waveform.y.get(index))
+                            .copied();
+                        row.extend(waveform.y.iter().map(|value| {
+                            TableCell::mono(nominal.map_or_else(
+                                || format_scalar(*value),
+                                |nominal| format!("{:+.6e}", *value - nominal),
+                            ))
+                        }));
                     } else {
                         row.extend((0..axis.len()).map(|_| TableCell::mono("—")));
                     }
@@ -1405,8 +1765,12 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                 .collect::<Vec<_>>();
             table_section_header(
                 ui,
-                "Retained process-corner values",
-                Some("source-attributed active dataset"),
+                "Full PVT retained-value matrix",
+                Some(if nominal_index.is_some() {
+                    "exact delta from retained nominal point"
+                } else {
+                    "absolute source-attributed values"
+                }),
                 None,
             );
             render_data_table(
@@ -1414,15 +1778,151 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                 "verify-corner-matrix",
                 &headers,
                 &rows,
-                (220.0 + axis.len() as f32 * 88.0).max(560.0),
+                Some((220.0 + axis.len() as f32 * 88.0).max(1_450.0)),
             );
+            corner_evidence_details(ui, app, result, point_count);
         }
     } else {
         card(ui, "Corner evidence", |ui| {
             ui.label("No retained process-corner analysis is available for the active dataset. Run the configured corner plan to create evidence.");
         });
     }
-    action_receipt(ui, app);
+}
+
+fn export_active_corner_matrix(app: &mut RSpiceApp) {
+    let result_id =
+        latest_analysis(app, crate::state::AnalysisType::Corner).map(|result| result.id);
+    let analysis_index = result_id.and_then(|result_id| {
+        app.state.simulation.active_run().and_then(|run| {
+            run.analyses.iter().position(|analysis| {
+                analysis.id == result_id
+                    && analysis.analysis_type == crate::state::AnalysisType::Corner
+                    && verified_analysis(analysis)
+            })
+        })
+    });
+    if let Some(index) = analysis_index {
+        app.state.simulation.select_analysis(index);
+        Command::ExportWaveformsCsv.execute(app);
+        app.state.workbench.verification.action_receipt =
+            "The retained process-corner matrix was selected for CSV export.".to_owned();
+    } else {
+        app.state.workbench.verification.action_receipt =
+            "Corner export blocked: no source-attributed successful corner result is active."
+                .to_owned();
+    }
+}
+
+fn corner_point_labels(
+    app: &RSpiceApp,
+    result: &crate::state::AnalysisResult,
+) -> Option<Vec<String>> {
+    use crate::simulation::plan::AnalysisDraft;
+
+    let provenance = result.provenance.as_ref()?;
+    let plan = app.state.sim_setup.stable_analysis_plan().ok()?;
+    let instance = plan
+        .instances()
+        .iter()
+        .find(|instance| instance.id() == provenance.source_instance_id())?;
+    if instance.modified_revision() != provenance.source_revision() {
+        return None;
+    }
+    let AnalysisDraft::Corner(state) = instance.draft() else {
+        return None;
+    };
+    let labels = state.to_config().ok()?.corner_names();
+    let points = result.waveforms.first()?.x.len();
+    (labels.len() == points).then_some(labels)
+}
+
+fn corner_nominal_index(app: &RSpiceApp) -> Option<usize> {
+    let result = latest_analysis(app, crate::state::AnalysisType::Corner)?;
+    let labels = corner_point_labels(app, result)?;
+    let exact_nominal = format!(
+        "TT_1.00V_{:.0}C",
+        app.state.sim_setup.reference_pvt.temperature_celsius
+    );
+    labels.iter().position(|label| label == &exact_nominal)
+}
+
+fn corner_evidence_details(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    result: &crate::state::AnalysisResult,
+    point_count: usize,
+) {
+    let t = Tokens::get(ui.ctx());
+    let available = ui.available_width();
+    let split = ui.ctx().content_rect().width() > 1_020.0 && available >= 641.0;
+    let render_worst = |ui: &mut Ui| {
+        table_section_header(ui, "Worst PVT points", None, None);
+        let headers = vec![
+            ("Rank".to_owned(), 0.16),
+            ("Point".to_owned(), 0.28),
+            ("Limiting spec".to_owned(), 0.36),
+            ("Margin".to_owned(), 0.20),
+        ];
+        let rows = vec![vec![
+            TableCell::mono("—"),
+            TableCell::text("No pointwise evidence"),
+            TableCell::text("Point-attributed measurements not retained"),
+            TableCell::tone("NO VERDICT", t.color.warn),
+        ]];
+        render_data_table(ui, "verify-corner-worst-points", &headers, &rows, None);
+    };
+    let render_reproducibility = |ui: &mut Ui| {
+        table_section_header(ui, "Run reproducibility", None, None);
+        let run = verification_run(app);
+        property_row(
+            ui,
+            "Dataset",
+            &run.map_or_else(
+                || "unavailable".to_owned(),
+                |run| run.dataset_id.to_string(),
+            ),
+        );
+        property_row(
+            ui,
+            "Run provenance",
+            if run.and_then(|run| run.prepared_receipt()).is_some() {
+                "prepared snapshot retained"
+            } else {
+                "prepared snapshot unavailable"
+            },
+        );
+        property_row(
+            ui,
+            "Analysis provenance",
+            if result.provenance.is_some() {
+                "source identity retained"
+            } else {
+                "legacy / unattributed"
+            },
+        );
+        property_row(ui, "PVT points", &point_count.to_string());
+    };
+    ui.add_space(1.0);
+    if split {
+        let left = (available - 1.0) * 0.45;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 1.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(left, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                render_worst,
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(available - left - 1.0, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                render_reproducibility,
+            );
+        });
+    } else {
+        render_worst(ui);
+        ui.add_space(1.0);
+        render_reproducibility(ui);
+    }
 }
 
 fn tuning_unavailable(ui: &mut Ui) {
@@ -1511,7 +2011,7 @@ fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
             Some("source-owned result evidence"),
             None,
         );
-        render_data_table(ui, "verify-optimization-results", &headers, &rows, 520.0);
+        render_data_table(ui, "verify-optimization-results", &headers, &rows, None);
     }
     action_receipt(ui, app);
 }
@@ -1623,6 +2123,7 @@ fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
 #[derive(Debug, Clone, PartialEq)]
 struct RegressionCheck {
     name: String,
+    source_identity: String,
     baseline: f64,
     current: f64,
 }
@@ -1641,43 +2142,71 @@ fn derive_regression_checks(
     baseline: &crate::state::SimulationRun,
     current: &crate::state::SimulationRun,
 ) -> Vec<RegressionCheck> {
-    let baseline_measurements = baseline
+    let mut checks = Vec::new();
+    for baseline_analysis in baseline
         .analyses
         .iter()
         .filter(|analysis| verified_analysis(analysis))
-        .flat_map(|analysis| &analysis.measurements)
-        .filter_map(|measurement| {
-            (measurement.passed && measurement.error.is_none())
-                .then_some(measurement.value)
-                .flatten()
-                .filter(|value| value.is_finite())
-                .map(|value| (measurement.name.to_ascii_lowercase(), value))
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let current_measurements = current
-        .analyses
-        .iter()
-        .filter(|analysis| verified_analysis(analysis))
-        .flat_map(|analysis| &analysis.measurements)
-        .filter_map(|measurement| {
-            (measurement.passed && measurement.error.is_none())
-                .then_some(measurement.value)
-                .flatten()
-                .filter(|value| value.is_finite())
-                .map(|value| (measurement.name.to_ascii_lowercase(), value))
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
-    baseline_measurements
-        .into_iter()
-        .filter_map(|(name, baseline)| {
-            let current = *current_measurements.get(&name)?;
-            Some(RegressionCheck {
+    {
+        let baseline_provenance = baseline_analysis
+            .provenance
+            .as_ref()
+            .expect("verified analyses retain provenance");
+        let Some(current_analysis) = current.analyses.iter().find(|analysis| {
+            verified_analysis(analysis)
+                && analysis.provenance.as_ref().is_some_and(|provenance| {
+                    provenance.source_domain() == baseline_provenance.source_domain()
+                        && provenance.source_instance_id()
+                            == baseline_provenance.source_instance_id()
+                })
+        }) else {
+            continue;
+        };
+        let current_provenance = current_analysis
+            .provenance
+            .as_ref()
+            .expect("verified analyses retain provenance");
+        for (index, baseline_measurement) in baseline_analysis.measurements.iter().enumerate() {
+            let name = baseline_measurement.name.to_ascii_lowercase();
+            let occurrence = baseline_analysis.measurements[..index]
+                .iter()
+                .filter(|measurement| measurement.name.eq_ignore_ascii_case(&name))
+                .count();
+            let Some(current_measurement) = current_analysis
+                .measurements
+                .iter()
+                .filter(|measurement| measurement.name.eq_ignore_ascii_case(&name))
+                .nth(occurrence)
+            else {
+                continue;
+            };
+            let Some(baseline_value) = baseline_measurement.value.filter(|value| value.is_finite())
+            else {
+                continue;
+            };
+            let Some(current_value) = current_measurement.value.filter(|value| value.is_finite())
+            else {
+                continue;
+            };
+            checks.push(RegressionCheck {
                 name,
-                baseline,
-                current,
-            })
-        })
-        .collect()
+                source_identity: format!(
+                    "{} · {:?} → {:?}",
+                    baseline_provenance.source_instance_id(),
+                    baseline_provenance.source_revision(),
+                    current_provenance.source_revision()
+                ),
+                baseline: baseline_value,
+                current: current_value,
+            });
+        }
+    }
+    checks.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.source_identity.cmp(&right.source_identity))
+    });
+    checks
 }
 
 fn regression_run_pair(
@@ -1700,113 +2229,182 @@ fn regression_run_pair(
     (baseline.run_id != current.run_id).then_some((baseline, current))
 }
 
-fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
-    let pair_ids = regression_run_pair(app).map(|(baseline, current)| {
-        (
-            baseline.run_id,
-            baseline.id,
-            current.id,
-            baseline.label.clone(),
-        )
-    });
-    card(ui, "Governed baseline", |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if Button::new("Select next baseline").show(ui).clicked() {
-                let current = app
-                    .state
-                    .simulation
-                    .active_run()
-                    .map(|run| run.run_id);
-                let candidates = app
-                    .state
-                    .simulation
-                    .runs
-                    .iter()
-                    .filter(|run| Some(run.run_id) != current)
-                    .map(|run| run.run_id)
-                    .collect::<Vec<_>>();
-                if candidates.is_empty() {
-                    app.state.workbench.verification.action_receipt =
-                        "Baseline selection blocked: regression requires two retained immutable runs."
-                            .to_owned();
-                } else {
-                    let next = app
-                        .state
-                        .workbench
-                        .verification
-                        .regression_baseline_run
-                        .and_then(|selected| candidates.iter().position(|id| *id == selected))
-                        .map_or(0, |index| (index + 1) % candidates.len());
-                    app.state.workbench.verification.regression_baseline_run =
-                        Some(candidates[next]);
-                    app.state.workbench.verification.action_receipt =
-                        "Regression baseline selection updated without rewriting prior evidence."
-                            .to_owned();
-                }
-            }
-            let can_compare = pair_ids.is_some();
-            if Button::new("Run regression")
-                .accent()
-                .enabled(can_compare)
-                .show(ui)
-                .clicked()
-            {
-                let checks = regression_run_pair(app)
-                    .map(|(baseline, current)| derive_regression_checks(baseline, current))
-                    .unwrap_or_default();
-                app.state.workbench.verification.action_receipt = if checks.is_empty() {
-                    "Regression blocked: the selected runs have no aligned finite measurement evidence."
-                        .to_owned()
-                } else {
-                    format!(
-                        "Regression computed exact deltas for {} aligned measurements. No pass/fail verdict was issued because this project has no regression-tolerance contract.",
-                        checks.len()
-                    )
-                };
-            }
+fn run_regression_comparison(app: &mut RSpiceApp) {
+    let Some((baseline, current)) = regression_run_pair(app) else {
+        app.state.workbench.verification.regression_comparison = None;
+        app.state.workbench.verification.action_receipt =
+            "Regression blocked: select a distinct retained baseline first.".to_owned();
+        return;
+    };
+    let baseline_run = baseline.run_id;
+    let candidate_run = current.run_id;
+    let checks = derive_regression_checks(baseline, current);
+    let aligned_waveforms = aligned_regression_waveforms(baseline, current).len();
+    let changed_checks = checks.iter().filter(|check| check.changed()).count();
+    app.state.workbench.verification.regression_comparison =
+        Some(super::super::state::RegressionComparisonReceipt {
+            baseline_run,
+            candidate_run,
+            aligned_checks: checks.len(),
+            aligned_waveforms,
+            changed_checks,
         });
-        if let Some((_, baseline_id, current_id, baseline_label)) = &pair_ids {
-            property_row(
-                ui,
-                "Baseline",
-                &format!("Run {baseline_id} · {baseline_label}"),
-            );
-            property_row(ui, "Candidate", &format!("Run {current_id}"));
-            property_row(
-                ui,
-                "Comparison",
-                "aligned finite .MEAS values · exact delta",
-            );
-            property_row(
-                ui,
-                "Verdict policy",
-                "no tolerance contract · no pass/fail verdict",
-            );
-        } else {
-            ui.label(
-                "Regression is fail-closed until two distinct immutable datasets are retained.",
-            );
+    app.state.workbench.verification.action_receipt = format!(
+        "Regression retained a comparison receipt for {} aligned measurements and {} aligned waveforms. No pass/fail verdict was issued because this project has no regression-tolerance contract.",
+        checks.len(),
+        aligned_waveforms
+    );
+}
+
+fn aligned_regression_waveforms<'a>(
+    baseline: &'a crate::state::SimulationRun,
+    current: &'a crate::state::SimulationRun,
+) -> Vec<(
+    &'a crate::state::WaveformData,
+    &'a crate::state::WaveformData,
+)> {
+    let mut aligned = Vec::new();
+    for baseline_analysis in baseline
+        .analyses
+        .iter()
+        .filter(|analysis| verified_analysis(analysis))
+    {
+        let baseline_provenance = baseline_analysis
+            .provenance
+            .as_ref()
+            .expect("verified analyses retain provenance");
+        let Some(current_analysis) = current.analyses.iter().find(|analysis| {
+            verified_analysis(analysis)
+                && analysis.provenance.as_ref().is_some_and(|provenance| {
+                    provenance.source_domain() == baseline_provenance.source_domain()
+                        && provenance.source_instance_id()
+                            == baseline_provenance.source_instance_id()
+                })
+        }) else {
+            continue;
+        };
+        for (index, baseline_waveform) in baseline_analysis.waveforms.iter().enumerate() {
+            let occurrence = baseline_analysis.waveforms[..index]
+                .iter()
+                .filter(|waveform| waveform.name == baseline_waveform.name)
+                .count();
+            if let Some(current_waveform) = current_analysis
+                .waveforms
+                .iter()
+                .filter(|waveform| waveform.name == baseline_waveform.name)
+                .nth(occurrence)
+                .filter(|waveform| {
+                    baseline_waveform.x.as_slice() == waveform.x.as_slice()
+                        && baseline_waveform.y.len() == waveform.y.len()
+                        && !baseline_waveform.y.is_empty()
+                })
+            {
+                aligned.push((baseline_waveform, current_waveform));
+            }
         }
-    });
-    let checks = regression_run_pair(app)
+    }
+    aligned
+}
+
+fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
+    let pair = regression_run_pair(app);
+    let checks = pair
         .map(|(baseline, current)| derive_regression_checks(baseline, current))
         .unwrap_or_default();
     let t = Tokens::get(ui.ctx());
+    let aligned_waveforms = pair.map_or(0, |(baseline, current)| {
+        aligned_regression_waveforms(baseline, current).len()
+    });
+    let changed = checks.iter().filter(|check| check.changed()).count();
+    let worst_delta = checks
+        .iter()
+        .map(|check| check.delta().abs())
+        .filter(|delta| delta.is_finite())
+        .max_by(|left, right| left.total_cmp(right));
+    let items = [
+        (
+            "Aligned checks".to_owned(),
+            checks.len().to_string(),
+            "finite measurements in both datasets".to_owned(),
+            if checks.is_empty() {
+                t.color.warn
+            } else {
+                t.color.ok
+            },
+        ),
+        (
+            "Waveforms aligned".to_owned(),
+            aligned_waveforms.to_string(),
+            "exact axis and sample-count match".to_owned(),
+            if aligned_waveforms == 0 {
+                t.color.warn
+            } else {
+                t.color.ok
+            },
+        ),
+        (
+            "Largest exact delta".to_owned(),
+            worst_delta.map_or_else(|| "No evidence".to_owned(), format_scalar),
+            format!("{changed} changed values require review"),
+            if changed == 0 && !checks.is_empty() {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        ),
+        (
+            "Tolerance contract".to_owned(),
+            "Not configured".to_owned(),
+            "no pass/fail verdict issued".to_owned(),
+            t.color.warn,
+        ),
+    ];
+    verification_kpi_strip(ui, &items);
+
+    let width = ui.available_width();
+    let split = ui.ctx().content_rect().width() > 1_020.0 && width >= 641.0;
+    if split {
+        let left = ((width - 1.0) * 0.45).clamp(280.0, width - 361.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 1.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(left, 250.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| regression_waveform_chart(ui, pair),
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(width - left - 1.0, 250.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| regression_baseline_contract(ui, app, pair),
+            );
+        });
+    } else {
+        ui.allocate_ui(egui::vec2(width, 230.0), |ui| {
+            regression_waveform_chart(ui, pair)
+        });
+        ui.add_space(1.0);
+        regression_baseline_contract(ui, app, pair);
+    }
+    ui.add_space(1.0);
     let headers = vec![
-        ("Check".to_owned(), 0.22),
-        ("Baseline".to_owned(), 0.17),
-        ("Current".to_owned(), 0.17),
-        ("Delta".to_owned(), 0.17),
-        ("Evidence state".to_owned(), 0.27),
+        ("Check".to_owned(), 0.17),
+        ("Comparison".to_owned(), 0.14),
+        ("Baseline".to_owned(), 0.14),
+        ("Current".to_owned(), 0.14),
+        ("Delta".to_owned(), 0.14),
+        ("Tolerance".to_owned(), 0.13),
+        ("Status".to_owned(), 0.14),
     ];
     let rows = checks
         .iter()
         .map(|check| {
             vec![
                 TableCell::text(&check.name),
+                TableCell::text(format!("exact · {}", check.source_identity)),
                 TableCell::mono(format_scalar(check.baseline)),
                 TableCell::mono(format_scalar(check.current)),
                 TableCell::mono(format!("{:+.6e}", check.delta())),
+                TableCell::mono("not configured"),
                 TableCell::tone(
                     if check.changed() {
                         "CHANGED · REVIEW"
@@ -1825,11 +2423,219 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     table_section_header(
         ui,
         "Regression checks",
-        Some("exact comparison · verdict requires configured tolerance"),
+        Some("exact values · verdict requires configured tolerance"),
         None,
     );
-    render_data_table(ui, "verify-regression-checks", &headers, &rows, 650.0);
-    action_receipt(ui, app);
+    render_data_table(ui, "verify-regression-checks", &headers, &rows, None);
+}
+
+fn regression_baseline_contract(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    pair: Option<(&crate::state::SimulationRun, &crate::state::SimulationRun)>,
+) {
+    table_section_header(ui, "Baseline contract", Some("immutable reference"), None);
+    if let Some((baseline, current)) = pair {
+        property_row(ui, "Baseline run", &format!("Run {}", baseline.id));
+        property_row(ui, "Candidate run", &format!("Run {}", current.id));
+        property_row(ui, "Baseline dataset", &baseline.dataset_id.to_string());
+        property_row(
+            ui,
+            "Baseline provenance",
+            if baseline.prepared_receipt().is_some() {
+                "prepared snapshot retained"
+            } else {
+                "legacy / unclassified"
+            },
+        );
+        let receipt = app
+            .state
+            .workbench
+            .verification
+            .regression_comparison
+            .as_ref()
+            .filter(|receipt| {
+                receipt.baseline_run == baseline.run_id && receipt.candidate_run == current.run_id
+            });
+        property_row(
+            ui,
+            "Comparison receipt",
+            &receipt.map_or_else(
+                || "not run / stale".to_owned(),
+                |receipt| {
+                    format!(
+                        "{} checks · {} waveforms · {} changed",
+                        receipt.aligned_checks, receipt.aligned_waveforms, receipt.changed_checks
+                    )
+                },
+            ),
+        );
+        property_row(ui, "Replacement policy", "explicit selection required");
+    } else {
+        let t = Tokens::get(ui.ctx());
+        egui::Frame::new()
+            .fill(t.color.bg_panel)
+            .inner_margin(egui::Margin::same(10))
+            .show(ui, |ui| {
+                status_dot(ui, t.color.warn, "No governed baseline selected");
+                ui.label(
+                    "Retain two immutable runs, then select the baseline used for exact comparison.",
+                );
+            });
+    }
+}
+
+fn regression_waveform_chart(
+    ui: &mut Ui,
+    pair: Option<(&crate::state::SimulationRun, &crate::state::SimulationRun)>,
+) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let height = ui.available_height().max(210.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
+    let header = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + 36.0));
+    ui.painter().rect_filled(header, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        header.x_range(),
+        header.bottom(),
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    let header_left = egui::Rect::from_min_max(
+        header.min,
+        egui::pos2(header.left() + header.width() * 0.45, header.bottom()),
+    );
+    let header_right =
+        egui::Rect::from_min_max(egui::pos2(header_left.right(), header.top()), header.max);
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let title = elide_table_text(
+        ui,
+        "Waveform comparison",
+        &title_font,
+        (header_left.width() - 20.0).max(0.0),
+    );
+    ui.painter().with_clip_rect(header_left).text(
+        header_left.left_center() + egui::vec2(10.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        title,
+        title_font,
+        t.color.text,
+    );
+    let aligned = pair
+        .map(|(baseline, current)| aligned_regression_waveforms(baseline, current))
+        .unwrap_or_default();
+    let Some((baseline, current)) = aligned.first().copied() else {
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Other,
+                ui.is_enabled(),
+                "Waveform comparison: no exactly aligned retained waveform pair",
+            )
+        });
+        ui.painter().text(
+            rect.center() + egui::vec2(0.0, 12.0),
+            egui::Align2::CENTER_CENTER,
+            "No exactly aligned waveform pair",
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+        return;
+    };
+    let detail_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let detail = elide_table_text(
+        ui,
+        &format!("{} · tolerance not configured", current.name),
+        &detail_font,
+        (header_right.width() - 20.0).max(0.0),
+    );
+    ui.painter().with_clip_rect(header_right).text(
+        header_right.right_center() - egui::vec2(10.0, 0.0),
+        egui::Align2::RIGHT_CENTER,
+        detail,
+        detail_font,
+        t.color.text_faint,
+    );
+    let finite_values = baseline
+        .y
+        .iter()
+        .chain(current.y.iter())
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    let Some(y_min) = finite_values.iter().copied().min_by(f64::total_cmp) else {
+        return;
+    };
+    let Some(y_max) = finite_values.iter().copied().max_by(f64::total_cmp) else {
+        return;
+    };
+    let finite_x = current
+        .x
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    let Some(x_min) = finite_x.iter().copied().min_by(f64::total_cmp) else {
+        return;
+    };
+    let Some(x_max) = finite_x.iter().copied().max_by(f64::total_cmp) else {
+        return;
+    };
+    let plot = egui::Rect::from_min_max(
+        header.left_bottom() + egui::vec2(10.0, 10.0),
+        rect.right_bottom() - egui::vec2(10.0, 18.0),
+    );
+    for step in 0..=4 {
+        let y = egui::lerp(plot.bottom()..=plot.top(), step as f32 / 4.0);
+        ui.painter().hline(
+            plot.x_range(),
+            y,
+            egui::Stroke::new(1.0, t.color.canvas_grid.gamma_multiply(0.55)),
+        );
+    }
+    let points = |x_values: &[f64], y_values: &[f64]| {
+        x_values
+            .iter()
+            .zip(y_values)
+            .filter_map(|(x_value, y_value)| {
+                if !x_value.is_finite() || !y_value.is_finite() {
+                    return None;
+                }
+                let x_fraction = if (x_max - x_min).abs() <= f64::EPSILON {
+                    0.5
+                } else {
+                    ((*x_value - x_min) / (x_max - x_min)) as f32
+                };
+                let y_fraction = if (y_max - y_min).abs() <= f64::EPSILON {
+                    0.5
+                } else {
+                    ((*y_value - y_min) / (y_max - y_min)) as f32
+                };
+                Some(egui::pos2(
+                    egui::lerp(plot.left()..=plot.right(), x_fraction),
+                    egui::lerp(plot.bottom()..=plot.top(), y_fraction),
+                ))
+            })
+            .collect::<Vec<_>>()
+    };
+    ui.painter().add(egui::Shape::line(
+        points(baseline.x.as_slice(), baseline.y.as_slice()),
+        egui::Stroke::new(1.5, t.color.text_faint),
+    ));
+    ui.painter().add(egui::Shape::line(
+        points(current.x.as_slice(), current.y.as_slice()),
+        egui::Stroke::new(1.8, t.color.accent),
+    ));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Other,
+            ui.is_enabled(),
+            format!(
+                "Aligned regression waveform {} with {} exact samples; baseline and current traces shown without a tolerance verdict",
+                current.name,
+                current.y.len()
+            ),
+        )
+    });
 }
 
 fn physical_drc(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1897,9 +2703,16 @@ mod tests {
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
 
     fn attributed(analysis: AnalysisResult) -> AnalysisResult {
+        attributed_with_id(analysis, AnalysisInstanceId::new())
+    }
+
+    fn attributed_with_id(
+        analysis: AnalysisResult,
+        source_instance_id: AnalysisInstanceId,
+    ) -> AnalysisResult {
         analysis.with_provenance(
             crate::state::AnalysisResultProvenance::new(
-                AnalysisInstanceId::new(),
+                source_instance_id,
                 ObjectRevision::INITIAL,
                 ContentDigest::from_bytes([0x5a; 32]),
                 Vec::new(),
@@ -1929,7 +2742,9 @@ mod tests {
 
     #[test]
     fn responsive_verify_geometry_matches_mockup_breakpoints() {
-        assert_eq!(verification_status_columns(821.0), 4);
+        assert_eq!(verification_status_columns(1_261.0), 4);
+        assert_eq!(verification_status_columns(1_260.0), 2);
+        assert_eq!(verification_status_columns(821.0), 2);
         assert_eq!(verification_status_columns(820.0), 2);
         assert_eq!(verification_status_columns(390.0), 2);
 
@@ -1939,6 +2754,13 @@ mod tests {
         assert_eq!(verification_table_row_height(1_440.0), 28.0);
         assert_eq!(verification_table_row_height(820.0), 31.0);
         assert_eq!(verification_table_row_height(560.0), 36.0);
+
+        assert_eq!(verification_table_width(1_280.0, 718.0, None), 718.0);
+        assert_eq!(verification_table_width(560.0, 390.0, None), 540.0);
+        assert_eq!(
+            verification_table_width(1_280.0, 718.0, Some(1_450.0)),
+            1_450.0
+        );
     }
 
     #[test]
@@ -2108,21 +2930,24 @@ mod tests {
 
     #[test]
     fn regression_evidence_uses_only_aligned_finite_measurements() {
+        let source_instance_id = AnalysisInstanceId::new();
         let mut baseline = SimulationRun::new(38);
-        baseline.add_analysis(attributed(
+        baseline.add_analysis(attributed_with_id(
             AnalysisResult::new(1, AnalysisType::Ac, "baseline").with_measurements(vec![
                 rspice_core::MeasureResult::success("gain", 40.0),
                 rspice_core::MeasureResult::success("bandwidth", 100.0),
                 rspice_core::MeasureResult::success("baseline_only", 1.0),
             ]),
+            source_instance_id,
         ));
         let mut current = SimulationRun::new(41);
-        current.add_analysis(attributed(
+        current.add_analysis(attributed_with_id(
             AnalysisResult::new(1, AnalysisType::Ac, "candidate").with_measurements(vec![
                 rspice_core::MeasureResult::success("GAIN", 40.4),
                 rspice_core::MeasureResult::success("bandwidth", 103.0),
                 rspice_core::MeasureResult::success("candidate_only", 2.0),
             ]),
+            source_instance_id,
         ));
 
         let checks = derive_regression_checks(&baseline, &current);
@@ -2131,5 +2956,91 @@ mod tests {
         assert!(checks[0].changed());
         assert_eq!(checks[1].name, "gain");
         assert!(checks[1].changed());
+    }
+
+    #[test]
+    fn regression_evidence_retains_finite_goal_misses() {
+        let source_instance_id = AnalysisInstanceId::new();
+        let mut baseline_measurement = rspice_core::MeasureResult::success("gain", 40.0);
+        baseline_measurement.expected = Some(41.0);
+        baseline_measurement.tolerance = Some(0.1);
+        baseline_measurement.passed = false;
+        baseline_measurement.error = Some("value misses GOAL".to_owned());
+        let mut current_measurement = rspice_core::MeasureResult::success("gain", 40.2);
+        current_measurement.expected = Some(41.0);
+        current_measurement.tolerance = Some(0.1);
+        current_measurement.passed = false;
+        current_measurement.error = Some("value misses GOAL".to_owned());
+
+        let mut baseline = SimulationRun::new(38);
+        baseline.add_analysis(attributed_with_id(
+            AnalysisResult::new(1, AnalysisType::Ac, "baseline")
+                .with_measurements(vec![baseline_measurement]),
+            source_instance_id,
+        ));
+        let mut current = SimulationRun::new(41);
+        current.add_analysis(attributed_with_id(
+            AnalysisResult::new(1, AnalysisType::Ac, "candidate")
+                .with_measurements(vec![current_measurement]),
+            source_instance_id,
+        ));
+
+        let checks = derive_regression_checks(&baseline, &current);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].baseline, 40.0);
+        assert_eq!(checks[0].current, 40.2);
+    }
+
+    #[test]
+    fn regression_waveforms_require_exact_analysis_name_axis_and_length_alignment() {
+        let source_instance_id = AnalysisInstanceId::new();
+        let mut baseline = SimulationRun::new(38);
+        baseline.add_analysis(attributed_with_id(
+            AnalysisResult::new(9, AnalysisType::Transient, "unrelated transient").with_waveforms(
+                vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 2.0, 4.0],
+                    vec![0.0, 2.0, 4.0],
+                    "#808080",
+                )],
+            ),
+            AnalysisInstanceId::new(),
+        ));
+        baseline.add_analysis(attributed_with_id(
+            AnalysisResult::new(1, AnalysisType::Transient, "baseline").with_waveforms(vec![
+                crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 1.0, 2.0],
+                    "#ffffff",
+                ),
+            ]),
+            source_instance_id,
+        ));
+        let mut current = SimulationRun::new(41);
+        current.add_analysis(attributed_with_id(
+            AnalysisResult::new(1, AnalysisType::Transient, "candidate").with_waveforms(vec![
+                crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 1.1, 2.1],
+                    "#ffbf00",
+                ),
+                crate::state::WaveformData::new(
+                    "V(other)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 0.5, 1.0],
+                    "#00ff00",
+                ),
+            ]),
+            source_instance_id,
+        ));
+
+        let aligned = aligned_regression_waveforms(&baseline, &current);
+        assert_eq!(aligned.len(), 1);
+        assert_eq!(aligned[0].0.name, "V(out)");
+
+        current.analyses[0].waveforms[0].x = std::sync::Arc::new(vec![0.0, 1.0, 2.5]);
+        assert!(aligned_regression_waveforms(&baseline, &current).is_empty());
     }
 }

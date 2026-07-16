@@ -199,24 +199,45 @@ fn handle_select_dragging(
 
     if response.drag_stopped_by(egui::PointerButton::Primary) {
         if state.dialogs.interaction.vertex_drag_pos.is_some() {
-            state.schematic.cleanup_wire_topology();
+            let automatic_junctions = state
+                .schematic
+                .document_policy
+                .wire_junctions
+                .automatic_junctions();
+            state
+                .schematic
+                .cleanup_wire_topology_with_junction_policy(automatic_junctions);
             // One undo entry for the whole gesture (no-ops deduplicate).
             state.schematic.end_operation();
             state.dialogs.interaction.vertex_drag_pos = None;
             state.dialogs.interaction.drag.cancel();
         } else if state.dialogs.last_drag_pos.is_some() {
-            state.schematic.cleanup_wire_topology();
+            let automatic_junctions = state
+                .schematic
+                .document_policy
+                .wire_junctions
+                .automatic_junctions();
+            state
+                .schematic
+                .cleanup_wire_topology_with_junction_policy(automatic_junctions);
             state.schematic.end_operation();
             state.dialogs.drag_start = None;
             state.dialogs.last_drag_pos = None;
-        } else if let Some((min_x, min_y, max_x, max_y)) = state.schematic.selection_rect.finish() {
+        } else {
+            let left_to_right =
+                state.schematic.selection_rect.current.x >= state.schematic.selection_rect.start.x;
+            let Some((min_x, min_y, max_x, max_y)) = state.schematic.selection_rect.finish() else {
+                return;
+            };
             let add_mode = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
+            let enclosed_only = state
+                .schematic
+                .document_policy
+                .selection_crossing
+                .enclosed_only(left_to_right);
             symbol_context.select_in_rect(
                 &mut state.schematic,
-                min_x,
-                min_y,
-                max_x,
-                max_y,
+                super::SelectionWindow::new(min_x, min_y, max_x, max_y, enclosed_only),
                 add_mode,
             );
         }
@@ -364,11 +385,17 @@ fn handle_probe_click(
                 let display = format!("V({net_name})");
                 toggle_probe_with_feedback(ui, state, &net_name, &display);
 
-                let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
-                state
-                    .schematic
-                    .net_highlight
-                    .highlight_net(&net_graph, grid_pos);
+                if state
+                    .ui
+                    .preferences
+                    .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
+                {
+                    let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
+                    state
+                        .schematic
+                        .net_highlight
+                        .highlight_net(&net_graph, grid_pos);
+                }
             }
         } else {
             log::info!(

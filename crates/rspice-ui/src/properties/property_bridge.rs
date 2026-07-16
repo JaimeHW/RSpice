@@ -59,6 +59,7 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::CurrentSourceAc => "ac_mag",
         ComponentType::CurrentSourcePulse => "i1",
         ComponentType::CurrentSourceSin => "io",
+        ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => "pwl_data",
         ComponentType::Diode => "is",
         ComponentType::Nmos | ComponentType::Pmos => "w",
         ComponentType::NpnBjt | ComponentType::PnpBjt => "is",

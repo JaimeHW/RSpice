@@ -52,6 +52,7 @@ pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewR
 mod app_dialog_state;
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
+mod app_preference_runtime;
 mod app_serialization;
 
 mod app_console;
@@ -558,7 +559,19 @@ impl RSpiceApp {
             AppState::default()
         };
 
+        let console_open = state
+            .ui
+            .preferences
+            .workspace()
+            .map(crate::workbench::WorkspacePreferences::console_on_launch)
+            .unwrap_or_default()
+            .is_open();
+        state.workbench.apply_console_launch_behavior(console_open);
+
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
+        state
+            .ui
+            .set_number_locale(crate::quantity::platform_number_locale());
 
         // Apply the design-system theme (canvas painters read the active
         // palette directly).
@@ -1035,9 +1048,13 @@ impl eframe::App for RSpiceApp {
             });
         }
         self.prepare_frame(&ctx);
+        if let Some(text) = self.state.ui.clipboard_text_request.take() {
+            ctx.copy_text(text);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         self.autosave_tick(&ctx);
         self.render_frame_chrome(&ctx);
+        self.refresh_incremental_connectivity_checks();
         self.render_frame_dialogs(&ctx);
     }
 

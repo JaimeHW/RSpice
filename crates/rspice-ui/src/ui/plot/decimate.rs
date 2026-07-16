@@ -12,6 +12,25 @@ use std::sync::Arc;
 
 use super::scale::XScale;
 
+/// Viewer-only sampling policy. None of these modes mutate or replace the
+/// source waveform arrays.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DisplayDecimation {
+    #[default]
+    EnvelopeExtrema,
+    Uniform,
+    FullResolution,
+}
+
+/// Evaluation method used for cursor readouts between accepted source points.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SampleInterpolation {
+    #[default]
+    MonotoneCubic,
+    Linear,
+    Nearest,
+}
+
 /// Cache of decimated envelopes. Owned by the results workspace state;
 /// cleared wholesale when the data version changes.
 #[derive(Debug, Default, Clone)]
@@ -34,6 +53,7 @@ struct Entry {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 struct CacheKey {
     trace: u64,
+    mode: DisplayDecimation,
     columns: u32,
     x0_bits: u64,
     x1_bits: u64,
@@ -53,10 +73,12 @@ impl DecimationCache {
         self.tick = self.tick.wrapping_add(1);
     }
 
-    /// Fetch or compute the envelope for one trace at the given view.
+    /// Fetch or compute a bounded display series for one trace at the given
+    /// view. Full-resolution rendering deliberately bypasses this cache.
     #[allow(clippy::too_many_arguments)]
-    pub fn envelope(
+    pub fn series(
         &mut self,
+        mode: DisplayDecimation,
         trace_key: u64,
         x: &[f64],
         y: &[f64],
@@ -65,8 +87,10 @@ impl DecimationCache {
         x_scale: XScale,
         columns: usize,
     ) -> Arc<[[f64; 2]]> {
+        debug_assert!(!matches!(mode, DisplayDecimation::FullResolution));
         let key = CacheKey {
             trace: trace_key,
+            mode,
             columns: columns as u32,
             x0_bits: x0.to_bits(),
             x1_bits: x1.to_bits(),
@@ -83,7 +107,12 @@ impl DecimationCache {
                 self.map.clear();
             }
         }
-        let envelope: Arc<[[f64; 2]]> = decimate_minmax(x, y, x0, x1, x_scale, columns).into();
+        let envelope: Arc<[[f64; 2]]> = match mode {
+            DisplayDecimation::EnvelopeExtrema => decimate_minmax(x, y, x0, x1, x_scale, columns),
+            DisplayDecimation::Uniform => decimate_uniform(x, y, x0, x1, columns),
+            DisplayDecimation::FullResolution => unreachable!("full resolution bypasses cache"),
+        }
+        .into();
         self.map.insert(
             key,
             Entry {
@@ -93,6 +122,35 @@ impl DecimationCache {
         );
         envelope
     }
+}
+
+/// Uniformly sample the visible source range to at most `columns` points,
+/// retaining both visible endpoints. This is intentionally a presentation
+/// alternative to the extrema-preserving envelope.
+pub fn decimate_uniform(x: &[f64], y: &[f64], x0: f64, x1: f64, columns: usize) -> Vec<[f64; 2]> {
+    let n = x.len().min(y.len());
+    if n == 0 || columns == 0 || !matches!(x1.partial_cmp(&x0), Some(std::cmp::Ordering::Greater)) {
+        return Vec::new();
+    }
+    let start = x[..n]
+        .partition_point(|&value| value < x0)
+        .saturating_sub(1);
+    let end = (x[..n].partition_point(|&value| value <= x1) + 1).min(n);
+    let visible = end.saturating_sub(start);
+    if columns == 1 {
+        return vec![[x[start], y[start]]];
+    }
+    if visible <= columns {
+        return (start..end).map(|index| [x[index], y[index]]).collect();
+    }
+    let last = visible - 1;
+    (0..columns)
+        .map(|slot| {
+            let offset = slot * last / (columns - 1);
+            let index = start + offset;
+            [x[index], y[index]]
+        })
+        .collect()
 }
 
 /// Reduce `(x, y)` to a per-column min/max envelope over `[x0, x1]` split
@@ -179,6 +237,12 @@ pub fn decimate_minmax(
 /// Linearly interpolated sample of `(x, y)` at `xq` (x sorted ascending).
 /// Clamps outside the data range.
 pub fn sample_at(x: &[f64], y: &[f64], xq: f64) -> f64 {
+    sample_at_with(x, y, xq, SampleInterpolation::Linear)
+}
+
+/// Evaluate a source series at `xq` using the selected cursor policy. Values
+/// outside the accepted range clamp to the first/last accepted sample.
+pub fn sample_at_with(x: &[f64], y: &[f64], xq: f64, interpolation: SampleInterpolation) -> f64 {
     let n = x.len().min(y.len());
     if n == 0 {
         return 0.0;
@@ -195,8 +259,67 @@ pub fn sample_at(x: &[f64], y: &[f64], xq: f64) -> f64 {
     if span <= 0.0 {
         return y[lo];
     }
+    if matches!(interpolation, SampleInterpolation::Nearest) {
+        return if xq - x[lo] <= x[hi] - xq {
+            y[lo]
+        } else {
+            y[hi]
+        };
+    }
     let t = (xq - x[lo]) / span;
-    y[lo] + t * (y[hi] - y[lo])
+    let linear = y[lo] + t * (y[hi] - y[lo]);
+    if !matches!(interpolation, SampleInterpolation::MonotoneCubic) || n < 3 {
+        return linear;
+    }
+    let Some(m0) = monotone_slope(x, y, n, lo) else {
+        return linear;
+    };
+    let Some(m1) = monotone_slope(x, y, n, hi) else {
+        return linear;
+    };
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let value = (2.0 * t3 - 3.0 * t2 + 1.0) * y[lo]
+        + (t3 - 2.0 * t2 + t) * span * m0
+        + (-2.0 * t3 + 3.0 * t2) * y[hi]
+        + (t3 - t2) * span * m1;
+    if value.is_finite() { value } else { linear }
+}
+
+fn monotone_slope(x: &[f64], y: &[f64], n: usize, index: usize) -> Option<f64> {
+    let secant = |left: usize, right: usize| {
+        let h = x[right] - x[left];
+        (h.is_finite() && h > 0.0 && y[left].is_finite() && y[right].is_finite())
+            .then(|| (h, (y[right] - y[left]) / h))
+    };
+    if index == 0 {
+        let (h0, d0) = secant(0, 1)?;
+        let (h1, d1) = secant(1, 2)?;
+        return Some(endpoint_slope(h0, h1, d0, d1));
+    }
+    if index + 1 == n {
+        let (h0, d0) = secant(n - 2, n - 1)?;
+        let (h1, d1) = secant(n - 3, n - 2)?;
+        return Some(endpoint_slope(h0, h1, d0, d1));
+    }
+    let (h_previous, d_previous) = secant(index - 1, index)?;
+    let (h_next, d_next) = secant(index, index + 1)?;
+    if d_previous == 0.0 || d_next == 0.0 || d_previous.signum() != d_next.signum() {
+        return Some(0.0);
+    }
+    let w1 = 2.0 * h_next + h_previous;
+    let w2 = h_next + 2.0 * h_previous;
+    Some((w1 + w2) / (w1 / d_previous + w2 / d_next))
+}
+
+fn endpoint_slope(h0: f64, h1: f64, d0: f64, d1: f64) -> f64 {
+    let mut slope = ((2.0 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
+    if slope.signum() != d0.signum() {
+        slope = 0.0;
+    } else if d0.signum() != d1.signum() && slope.abs() > 3.0 * d0.abs() {
+        slope = 3.0 * d0;
+    }
+    slope
 }
 
 #[cfg(test)]
@@ -229,5 +352,29 @@ mod tests {
         let y = [0.0, 10.0, 20.0];
         assert!((sample_at(&x, &y, 0.5) - 5.0).abs() < 1e-12);
         assert!((sample_at(&x, &y, 5.0) - 20.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn cursor_interpolation_modes_are_distinct_and_monotone_is_shape_preserving() {
+        let x = [0.0, 1.0, 2.0, 3.0];
+        let y = [0.0, 1.0, 1.5, 1.75];
+        let nearest = sample_at_with(&x, &y, 1.25, SampleInterpolation::Nearest);
+        let linear = sample_at_with(&x, &y, 1.25, SampleInterpolation::Linear);
+        let cubic = sample_at_with(&x, &y, 1.25, SampleInterpolation::MonotoneCubic);
+        assert_eq!(nearest, 1.0);
+        assert_eq!(linear, 1.125);
+        assert!((1.0..=1.5).contains(&cubic));
+        assert_ne!(cubic, linear);
+    }
+
+    #[test]
+    fn uniform_decimation_retains_visible_endpoints() {
+        let x = (0..100).map(f64::from).collect::<Vec<_>>();
+        let y = x.iter().map(|value| value * value).collect::<Vec<_>>();
+        let points = decimate_uniform(&x, &y, 10.0, 89.0, 8);
+        assert_eq!(points.len(), 8);
+        assert_eq!(points.first().copied(), Some([9.0, 81.0]));
+        assert_eq!(points.last().copied(), Some([90.0, 8100.0]));
+        assert_eq!(decimate_uniform(&x, &y, 10.0, 89.0, 1).len(), 1);
     }
 }

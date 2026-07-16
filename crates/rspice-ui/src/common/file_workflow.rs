@@ -89,7 +89,8 @@ impl FileWorkflowIo for NativeFileWorkflowIo {
 
 /// Reset the current schematic to a new empty document.
 pub(crate) fn create_new_schematic(state: &mut AppState) {
-    replace_active_schematic_document(state, crate::state::SchematicState::default());
+    let schematic = state.new_schematic_document();
+    replace_active_schematic_document(state, schematic);
     state.clear_design_execution_context();
     state.push_user_message(ConsoleMessage::info("Created new schematic"));
 }

@@ -51,6 +51,11 @@ pub struct TabbedPropertyDialogState {
     /// Global error message (e.g., "Cannot apply changes")
     pub global_error: Option<String>,
 
+    /// Validated field delta prepared for the host's next atomic component
+    /// mutation. Kept private so unvalidated draft values can never be
+    /// mistaken for an authorized commit.
+    prepared_commit: HashMap<String, PropertyValue>,
+
     /// PWL editor state (for PWL sources)
     pub pwl_editor: PwlEditorState,
 
@@ -131,7 +136,26 @@ impl TabbedPropertyDialogState {
         self.modified.clear();
         self.validation_errors.clear();
         self.global_error = None;
+        self.prepared_commit.clear();
         self.show_advanced = false;
+
+        self.pwl_editor = if component_type.is_pwl_source() {
+            let source = self
+                .values
+                .get("pwl_data")
+                .map(PropertyValue::display_string)
+                .unwrap_or_default();
+            PwlEditorState::from_string(
+                &source,
+                if component_type == ComponentType::CurrentSourcePwl {
+                    "A"
+                } else {
+                    "V"
+                },
+            )
+        } else {
+            PwlEditorState::default()
+        };
 
         self.tabs = self.build_tabs_from_sheet(sheet);
 
@@ -152,6 +176,7 @@ impl TabbedPropertyDialogState {
         self.validation_errors.clear();
         self.tabs.clear();
         self.global_error = None;
+        self.prepared_commit.clear();
     }
 
     /// Close the dialog visually but KEEP values for caller to apply.
@@ -170,6 +195,7 @@ impl TabbedPropertyDialogState {
         self.validation_errors.clear();
         self.tabs.clear();
         self.global_error = None;
+        self.prepared_commit.clear();
     }
 
     /// Cancel editing and close the dialog
@@ -184,6 +210,26 @@ impl TabbedPropertyDialogState {
         self.modified.clear();
         self.validation_errors.clear();
         self.global_error = None;
+        self.prepared_commit.clear();
+    }
+
+    /// Mark only the fields from a partial commit as the new baseline. Draft
+    /// fields that failed validation remain modified and visible for repair.
+    pub fn mark_fields_applied(&mut self, names: impl IntoIterator<Item = String>) {
+        for name in names {
+            if let Some(value) = self.values.get(&name).cloned() {
+                self.original_values.insert(name.clone(), value);
+            }
+            self.modified.remove(&name);
+            self.validation_errors.remove(&name);
+            if name == "pwl_data" {
+                self.pwl_editor.is_modified = false;
+            }
+        }
+        self.prepared_commit.clear();
+        if self.validation_errors.is_empty() {
+            self.global_error = None;
+        }
     }
 
     /// Revert all changes to original values
@@ -192,6 +238,22 @@ impl TabbedPropertyDialogState {
         self.modified.clear();
         self.validation_errors.clear();
         self.global_error = None;
+        self.prepared_commit.clear();
+        if self.component_type.is_some_and(|kind| kind.is_pwl_source()) {
+            let source = self
+                .values
+                .get("pwl_data")
+                .map(PropertyValue::display_string)
+                .unwrap_or_default();
+            self.pwl_editor = PwlEditorState::from_string(
+                &source,
+                if self.component_type == Some(ComponentType::CurrentSourcePwl) {
+                    "A"
+                } else {
+                    "V"
+                },
+            );
+        }
     }
 
     /// Set a property value.
@@ -236,12 +298,22 @@ impl TabbedPropertyDialogState {
         self.validation_errors.clear();
         self.global_error = None;
 
-        for (name, value) in &self.values {
-            if let Some(def) = sheet.get(name)
-                && let Err(error) = def.validate(value)
-            {
-                self.validation_errors.insert(name.clone(), error);
+        for def in sheet.iter() {
+            let value = self.values.get(&def.name).unwrap_or(&def.default_value);
+            if let Err(error) = def.validate(value) {
+                self.validation_errors.insert(def.name.clone(), error);
             }
+        }
+        if self.component_type.is_some_and(|kind| kind.is_pwl_source())
+            && !self.pwl_editor.is_valid()
+        {
+            self.validation_errors.insert(
+                "pwl_data".to_owned(),
+                self.pwl_editor
+                    .validation_error
+                    .clone()
+                    .unwrap_or_else(|| "PWL waveform data is invalid".to_owned()),
+            );
         }
 
         if !self.validation_errors.is_empty() {
@@ -253,6 +325,54 @@ impl TabbedPropertyDialogState {
         }
 
         true
+    }
+
+    /// Validate the draft and prepare exactly the delta authorized by the
+    /// document's commit policy.
+    ///
+    /// Atomic mode prepares nothing unless every field is valid. Partial mode
+    /// prepares only valid modified fields; invalid draft values remain
+    /// isolated in this dialog and are never passed to the component bridge.
+    pub fn prepare_commit(
+        &mut self,
+        sheet: &PropertySheet,
+        policy: crate::state::PropertyCommitPolicy,
+    ) -> bool {
+        self.prepared_commit.clear();
+        let all_valid = self.validate_all(sheet);
+        if !all_valid && policy == crate::state::PropertyCommitPolicy::Atomic {
+            return false;
+        }
+
+        for name in &self.modified {
+            if self.validation_errors.contains_key(name) {
+                continue;
+            }
+            if let Some(value) = self.values.get(name) {
+                self.prepared_commit.insert(name.clone(), value.clone());
+            }
+        }
+
+        if self.prepared_commit.is_empty() {
+            if all_valid {
+                self.global_error = Some("No modified properties to apply".to_owned());
+            }
+            return false;
+        }
+
+        if !all_valid {
+            self.global_error = Some(format!(
+                "{} invalid field(s) retained; {} valid field(s) will be applied",
+                self.validation_errors.len(),
+                self.prepared_commit.len()
+            ));
+        }
+        true
+    }
+
+    /// Transfer the already validated field delta to the component host.
+    pub fn take_prepared_commit(&mut self) -> HashMap<String, PropertyValue> {
+        std::mem::take(&mut self.prepared_commit)
     }
 
     /// Get the list of tabs
@@ -356,5 +476,71 @@ impl TabbedPropertyDialogState {
 
         tabs.sort_by_key(|t| t.order);
         tabs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::PropertyCommitPolicy;
+    use crate::state::property_types::{PropertyDefinition, PropertyType};
+
+    fn numeric(value: f64) -> PropertyValue {
+        PropertyValue::Number { value, unit: None }
+    }
+
+    fn constrained_sheet() -> PropertySheet {
+        let mut sheet = PropertySheet::new();
+        sheet.add(
+            PropertyDefinition::new("gain")
+                .with_type(PropertyType::Number)
+                .with_default(numeric(1.0))
+                .with_range(0.0, 10.0),
+        );
+        sheet.add(
+            PropertyDefinition::new("offset")
+                .with_type(PropertyType::Number)
+                .with_default(numeric(0.0))
+                .with_range(-1.0, 1.0),
+        );
+        sheet
+    }
+
+    fn edited_dialog(sheet: &PropertySheet) -> TabbedPropertyDialogState {
+        let mut values = HashMap::new();
+        values.insert("gain".to_owned(), numeric(1.0));
+        values.insert("offset".to_owned(), numeric(0.0));
+        let mut state = TabbedPropertyDialogState::default();
+        state.open_for_component(7, "X7", ComponentType::Resistor, sheet, values);
+        state.set_value("gain", numeric(2.0));
+        state.set_value("offset", numeric(3.0));
+        state
+    }
+
+    #[test]
+    fn atomic_policy_never_prepares_a_partial_invalid_draft() {
+        let sheet = constrained_sheet();
+        let mut state = edited_dialog(&sheet);
+
+        assert!(!state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
+        assert!(state.take_prepared_commit().is_empty());
+        assert!(state.validation_errors.contains_key("offset"));
+        assert!(state.is_modified("gain"));
+    }
+
+    #[test]
+    fn partial_policy_prepares_only_valid_modified_fields() {
+        let sheet = constrained_sheet();
+        let mut state = edited_dialog(&sheet);
+
+        assert!(state.prepare_commit(&sheet, PropertyCommitPolicy::ApplyValidFields));
+        let prepared = state.take_prepared_commit();
+        assert_eq!(prepared.get("gain"), Some(&numeric(2.0)));
+        assert!(!prepared.contains_key("offset"));
+
+        state.mark_fields_applied(prepared.into_keys());
+        assert!(!state.is_modified("gain"));
+        assert!(state.is_modified("offset"));
+        assert!(state.validation_errors.contains_key("offset"));
     }
 }

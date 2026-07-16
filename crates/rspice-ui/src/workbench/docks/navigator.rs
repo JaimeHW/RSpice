@@ -782,15 +782,31 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     section_header(ui, "Active evidence coverage", None);
     let coverage = verification_coverage(app);
-    ui.label(
-        egui::RichText::new(&coverage.status)
-            .color(if coverage.gaps == 0 {
+    let status_width = ui.available_width().max(1.0);
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width((status_width - 20.0).max(1.0));
+            let healthy = coverage.total > 0 && coverage.gaps == 0;
+            let tone = if healthy {
                 Tokens::get(ui.ctx()).color.ok
             } else {
                 Tokens::get(ui.ctx()).color.warn
-            })
-            .strong(),
-    );
+            };
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(5.0, 13.0), egui::Sense::hover());
+                ui.painter().circle_filled(dot.center(), 2.5, tone);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&coverage.status)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(tone),
+                    )
+                    .wrap(),
+                );
+            });
+        });
     property_row(
         ui,
         "Mapped specifications",
@@ -1010,30 +1026,40 @@ fn verification_flow_presentation(
                 },
             }
         }
-        VerificationPage::Regression => VerificationFlowPresentation {
-            label: verification_flow_label(page).to_owned(),
-            detail: "Measurements and waveforms vs governed baseline".to_owned(),
-            status: if app.state.simulation.runs.len() >= 2 {
-                format!("{} retained runs", app.state.simulation.runs.len())
-            } else {
-                "baseline unavailable".to_owned()
-            },
-            glyph: if app.state.simulation.runs.len() >= 2 {
-                "✓"
-            } else {
-                "·"
-            },
-            icon_tone: if app.state.simulation.runs.len() >= 2 {
-                FlowTone::Accent
-            } else {
-                FlowTone::Neutral
-            },
-            status_tone: if app.state.simulation.runs.len() >= 2 {
-                FlowTone::Accent
-            } else {
-                FlowTone::Neutral
-            },
-        },
+        VerificationPage::Regression => {
+            let retained_runs = app
+                .state
+                .simulation
+                .runs
+                .iter()
+                .filter(|run| {
+                    run.analyses
+                        .iter()
+                        .any(|analysis| analysis.success && analysis.provenance.is_some())
+                })
+                .count();
+            let ready = retained_runs >= 2;
+            VerificationFlowPresentation {
+                label: verification_flow_label(page).to_owned(),
+                detail: "Measurements and waveforms vs governed baseline".to_owned(),
+                status: if ready {
+                    format!("{retained_runs} source-attributed runs")
+                } else {
+                    "baseline unavailable".to_owned()
+                },
+                glyph: if ready { "✓" } else { "·" },
+                icon_tone: if ready {
+                    FlowTone::Accent
+                } else {
+                    FlowTone::Neutral
+                },
+                status_tone: if ready {
+                    FlowTone::Accent
+                } else {
+                    FlowTone::Neutral
+                },
+            }
+        }
         VerificationPage::Drc => VerificationFlowPresentation {
             label: verification_flow_label(page).to_owned(),
             detail: "Geometry rules · markers · waivers · sign-off".to_owned(),
@@ -1049,7 +1075,7 @@ fn verified_analysis(
     run: &crate::state::SimulationRun,
     analysis_type: crate::state::AnalysisType,
 ) -> Option<&crate::state::AnalysisResult> {
-    run.analyses.iter().find(|analysis| {
+    run.analyses.iter().rev().find(|analysis| {
         analysis.analysis_type == analysis_type && analysis.success && analysis.provenance.is_some()
     })
 }
@@ -1079,12 +1105,11 @@ fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
                         return None;
                     }
                     analysis.measurements.iter().find_map(|measurement| {
-                        (measurement.name.eq_ignore_ascii_case(&spec.measurement)
-                            && measurement.passed
-                            && measurement.error.is_none())
-                        .then_some(measurement.value)
-                        .flatten()
-                        .filter(|value| value.is_finite())
+                        if measurement.name.eq_ignore_ascii_case(&spec.measurement) {
+                            measurement.value.filter(|value| value.is_finite())
+                        } else {
+                            None
+                        }
                     })
                 })
             })
@@ -1553,10 +1578,11 @@ mod tests {
         verification_flow_label, verification_navigator_requires_scroll,
     };
     use crate::common::RSpiceApp;
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::services::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
     };
-    use crate::state::{SimulationRun, SimulationState};
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
     use crate::workbench::state::VerificationPage;
 
     fn result(trail: Vec<bool>) -> YieldResult {
@@ -1631,6 +1657,51 @@ mod tests {
         assert_eq!(coverage.passed, 0);
         assert_eq!(coverage.gaps, 1);
         assert_ne!(coverage.status, "Coverage current for active dataset");
+    }
+
+    #[test]
+    fn empty_specification_set_is_neutral_not_healthy() {
+        let app = RSpiceApp::test_instance();
+        let coverage = verification_coverage(&app);
+
+        assert_eq!(coverage.total, 0);
+        assert_eq!(coverage.gaps, 0);
+        assert_eq!(coverage.status, "No project specifications configured");
+        assert_ne!(coverage.status, "Coverage current for active dataset");
+    }
+
+    #[test]
+    fn finite_goal_miss_counts_as_executed_but_not_passed() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workspace.specs.push(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            min: Some(41.0),
+            max: None,
+            unit: "V/V".to_owned(),
+        });
+        let mut measurement = rspice_core::MeasureResult::success("gain", 40.0);
+        measurement.passed = false;
+        measurement.error = Some("value misses GOAL".to_owned());
+        let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![measurement])
+            .with_provenance(
+                crate::state::AnalysisResultProvenance::new(
+                    AnalysisInstanceId::new(),
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0x7b; 32]),
+                    Vec::new(),
+                )
+                .expect("test provenance is valid"),
+            );
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        app.state.simulation.runs = vec![run];
+        app.state.simulation.active_run_idx = Some(0);
+
+        let coverage = verification_coverage(&app);
+        assert_eq!(coverage.executed, 1);
+        assert_eq!(coverage.passed, 0);
+        assert_eq!(coverage.gaps, 0);
     }
 
     #[test]

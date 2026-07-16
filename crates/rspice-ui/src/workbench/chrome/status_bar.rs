@@ -282,9 +282,9 @@ fn engineering_context_summary(app: &RSpiceApp) -> String {
             || {
                 if matches!(
                     app.state.workspace.active_view_type(),
-                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                    crate::state::ViewType::Layout
                 ) {
-                    "x — · y — mm".to_owned()
+                    "x — · y — layout".to_owned()
                 } else {
                     "x — · y — grid".to_owned()
                 }
@@ -292,9 +292,19 @@ fn engineering_context_summary(app: &RSpiceApp) -> String {
             |(x, y)| {
                 if matches!(
                     app.state.workspace.active_view_type(),
-                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                    crate::state::ViewType::Layout
                 ) {
-                    format!("x {x:.2} · y {y:.2} mm")
+                    app.state.pdk_config.layout_database_unit.map_or_else(
+                        || format!("x {x:.0} · y {y:.0} DBU unavailable"),
+                        |dbu| {
+                            let policy = app.state.ui.preferences.quantity_presentation_policy();
+                            format!(
+                                "x {} · y {}",
+                                policy.format_layout_coordinate(x, dbu),
+                                policy.format_layout_coordinate(y, dbu)
+                            )
+                        },
+                    )
                 } else {
                     format!("x {x:.2} · y {y:.2} grid")
                 }

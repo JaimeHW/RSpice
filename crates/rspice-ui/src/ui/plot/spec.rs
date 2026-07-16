@@ -3,6 +3,7 @@
 
 use egui::Color32;
 
+use super::decimate::DisplayDecimation;
 use super::format::tick_label;
 use super::scale::{XScale, decade_ticks, linear_ticks};
 
@@ -17,6 +18,10 @@ pub struct Axis {
     pub ticks: Vec<(f64, String)>,
     /// Unit label drawn once at the axis end ("V", "dB", "Hz", "UI").
     pub unit: &'static str,
+    /// Affine presentation transform applied only to labels/accessibility.
+    /// Geometry and stored samples remain in the axis' canonical data space.
+    pub display_scale: f64,
+    pub display_offset: f64,
 }
 
 impl Axis {
@@ -27,6 +32,8 @@ impl Axis {
             max,
             ticks: linear_ticks(min, max, 6),
             unit,
+            display_scale: 1.0,
+            display_offset: 0.0,
         }
     }
 
@@ -37,6 +44,8 @@ impl Axis {
             max,
             ticks: linear_ticks(min, max, target),
             unit,
+            display_scale: 1.0,
+            display_offset: 0.0,
         }
     }
 
@@ -47,6 +56,8 @@ impl Axis {
             max,
             ticks: decade_ticks(min, max),
             unit,
+            display_scale: 1.0,
+            display_offset: 0.0,
         }
     }
 
@@ -57,7 +68,41 @@ impl Axis {
             max,
             ticks: ticks.iter().map(|&v| (v, tick_label(v))).collect(),
             unit,
+            display_scale: 1.0,
+            display_offset: 0.0,
         }
+    }
+
+    /// Present canonical data through an affine conversion without changing
+    /// the plot geometry. This keeps zoom/cursor coordinates and stored data
+    /// exact while allowing Hz→rad/s, °C→K/°F, and degree→radian labels.
+    #[must_use]
+    pub fn with_display_transform(mut self, scale: f64, offset: f64, unit: &'static str) -> Self {
+        debug_assert!(scale.is_finite() && scale != 0.0);
+        debug_assert!(offset.is_finite());
+        self.display_scale = scale;
+        self.display_offset = offset;
+        self.unit = unit;
+        let display = |value: f64| value.mul_add(scale, offset);
+        for (value, label) in &mut self.ticks {
+            *label = tick_label(display(*value));
+        }
+        self
+    }
+
+    #[must_use]
+    pub fn display_value(&self, canonical: f64) -> f64 {
+        canonical.mul_add(self.display_scale, self.display_offset)
+    }
+
+    #[must_use]
+    pub fn format_display_value(&self, canonical: f64) -> String {
+        tick_label(self.display_value(canonical))
+    }
+
+    #[must_use]
+    pub fn format_display_delta(&self, canonical_delta: f64) -> String {
+        tick_label(canonical_delta * self.display_scale)
     }
 }
 
@@ -208,6 +253,8 @@ pub struct PlotSpec<'a> {
     pub y_right: Option<(Axis, Color32)>,
     /// Traces, drawn in order (first = bottom).
     pub traces: Vec<Trace<'a>>,
+    /// Viewer-only trace sampling policy.
+    pub display_decimation: DisplayDecimation,
     /// Analysis markers, drawn above traces.
     pub markers: Vec<Marker>,
     /// Horizontal reference lines.
@@ -230,6 +277,7 @@ impl<'a> PlotSpec<'a> {
             y,
             y_right: None,
             traces: Vec::new(),
+            display_decimation: DisplayDecimation::default(),
             markers: Vec::new(),
             ref_lines: Vec::new(),
             bands: Vec::new(),

@@ -5,6 +5,7 @@ mod preference_pages;
 mod preferences_shell;
 pub(crate) mod shortcut_portability_dialogs;
 mod shortcut_preferences;
+pub(crate) mod workspace_layout_manager;
 
 use egui::{Context, Id};
 
@@ -29,6 +30,8 @@ pub(super) const CAPABILITY_MATRIX_HELP: &str = "See installed, licensed, previe
 #[derive(Debug, Default)]
 pub(super) struct PreferencePageActions {
     pub(super) open_capability_matrix: bool,
+    pub(super) open_resolved_preference_policy: bool,
+    pub(super) open_workspace_layout_manager: bool,
     pub(super) open_shortcut_editor: bool,
     pub(super) open_shortcut_import: bool,
     pub(super) open_shortcut_export: bool,
@@ -80,6 +83,7 @@ impl RSpiceApp {
                 self.state.dialogs.shortcut_editor.close_and_discard();
             }
             self.state.dialogs.managed_preference_policy_open = false;
+            self.state.dialogs.workspace_layout_manager.close();
             ctx.data_mut(|data| data.remove_temp::<PreferenceCategory>(category_id));
             preferences_shell::unmount(ctx);
             return;
@@ -99,6 +103,7 @@ impl RSpiceApp {
                 .shortcut_portability
                 .application_modal_open()
             || self.state.dialogs.managed_preference_policy_open
+            || self.state.dialogs.workspace_layout_manager.open
             || retained_under_child_manager;
         let shell_response = {
             let state = &mut self.state;
@@ -130,7 +135,8 @@ impl RSpiceApp {
         }
         self.execute_preference_page_actions(ctx, actions);
         shortcut_preferences::render_editor(ctx, &mut self.state);
-        managed_preference_policy::render(ctx, &mut self.state);
+        managed_preference_policy::render(ctx, &mut self.state, category);
+        workspace_layout_manager::render(ctx, &mut self.state);
         self.render_shortcut_portability_dialogs(ctx);
     }
 
@@ -150,8 +156,18 @@ impl RSpiceApp {
         if actions.open_shortcut_export {
             self.state.dialogs.shortcut_portability.open_export();
         }
-        if actions.open_resolved_shortcut_policy {
+        if actions.open_resolved_preference_policy || actions.open_resolved_shortcut_policy {
             self.state.dialogs.managed_preference_policy_open = true;
+        }
+        if actions.open_workspace_layout_manager {
+            let preset = self
+                .state
+                .ui
+                .preferences
+                .workspace()
+                .map(crate::workbench::WorkspacePreferences::preset)
+                .unwrap_or_default();
+            self.state.dialogs.workspace_layout_manager.open(preset);
         }
         if let Some(profile) = actions.shortcut_policy_candidate {
             self.begin_shortcut_policy_publication(ctx, profile);
@@ -677,6 +693,10 @@ mod tests {
         app.state.dialogs.preferences_open = true;
         app.state.dialogs.shortcut_portability.open_import();
         app.state.dialogs.managed_preference_policy_open = true;
+        app.state
+            .dialogs
+            .workspace_layout_manager
+            .open(crate::workbench::WorkspacePreset::Engineering);
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             app.render_preferences_dialog(ctx)
@@ -690,6 +710,7 @@ mod tests {
                 .application_modal_open()
         );
         assert!(!app.state.dialogs.managed_preference_policy_open);
+        assert!(!app.state.dialogs.workspace_layout_manager.open);
         assert!(!app.state.dialogs.application_modal_open());
     }
 
@@ -781,6 +802,17 @@ mod tests {
             SurfaceId::FeatureAvailability
         );
         assert!(app.state.dialogs.preferences_open);
+
+        let mut layout_app = test_app();
+        layout_app.execute_preference_page_actions(
+            &Context::default(),
+            PreferencePageActions {
+                open_workspace_layout_manager: true,
+                ..PreferencePageActions::default()
+            },
+        );
+        assert!(layout_app.state.dialogs.workspace_layout_manager.open);
+        assert!(layout_app.state.dialogs.application_modal_open());
     }
 
     #[cfg(not(target_arch = "wasm32"))]

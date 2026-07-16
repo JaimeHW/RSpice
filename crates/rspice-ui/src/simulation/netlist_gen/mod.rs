@@ -667,6 +667,57 @@ mod tests {
         );
     }
 
+    #[test]
+    fn strict_net_policy_preserves_case_distinct_connectivity() {
+        let mut state = SchematicState::default();
+        state
+            .wires
+            .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
+        state
+            .wires
+            .push(Wire::new(2, vec![Point::new(0, 100), Point::new(40, 100)]));
+        state
+            .net_labels
+            .push(NetLabel::new(1, Point::new(20, 0), "DATA"));
+        state
+            .net_labels
+            .push(NetLabel::new(2, Point::new(20, 100), "data"));
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+
+        assert_ne!(
+            generator.net_at(Point::new(0, 0)).map(|net| net.id),
+            generator.net_at(Point::new(0, 100)).map(|net| net.id)
+        );
+    }
+
+    #[test]
+    fn relaxed_net_policy_merges_case_insensitively() {
+        let mut state = SchematicState::default();
+        state.document_policy.net_naming = crate::state::NetNamingPolicy::SpiceCompatibleRelaxed;
+        state
+            .wires
+            .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
+        state
+            .wires
+            .push(Wire::new(2, vec![Point::new(0, 100), Point::new(40, 100)]));
+        state
+            .net_labels
+            .push(NetLabel::new(1, Point::new(20, 0), "DATA"));
+        state
+            .net_labels
+            .push(NetLabel::new(2, Point::new(20, 100), "data"));
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+
+        assert_eq!(
+            generator.net_at(Point::new(0, 0)).map(|net| net.id),
+            generator.net_at(Point::new(0, 100)).map(|net| net.id)
+        );
+    }
+
     /// A label naming a net "gnd" maps to SPICE node 0.
     #[test]
     fn gnd_label_maps_to_node_zero() {

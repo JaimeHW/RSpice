@@ -396,6 +396,9 @@ pub struct UiSessionState {
     /// Canonical user/device preference overrides not already owned by the
     /// theme or autosave runtime.
     pub preferences: super::preferences::UserPreferences,
+    /// Decimal-mark information supplied by the native/web platform edge.
+    /// `None` is deliberate: engineering code must not guess the host locale.
+    pub number_locale: crate::quantity::UiNumberLocale,
     /// Browser-only opt-in for egui's Web Speech interaction feedback.
     /// Native assistive technology is negotiated automatically by AccessKit.
     pub browser_spoken_feedback: bool,
@@ -420,6 +423,10 @@ pub struct UiSessionState {
     /// screenshot + save dialog; the web build offers the browser's own
     /// capture instead).
     pub export_png_requested: bool,
+    /// One-shot platform clipboard payload emitted by commands that copy
+    /// engineering readouts. Kept transient so clipboard intent is never
+    /// serialized into a project/session.
+    pub clipboard_text_request: Option<String>,
     /// One-shot request to change platform fullscreen state. Keeping this
     /// transient prevents the web backend from receiving the same viewport
     /// command every frame and preserves the user's persisted preference in
@@ -443,6 +450,12 @@ impl UiSessionState {
             autosave_minutes: 5,
             ..Self::default()
         }
+    }
+
+    /// Replace the platform-provided locale used by interactive UI quantity
+    /// fields. Portable project and SPICE parsers never read this value.
+    pub fn set_number_locale(&mut self, locale: crate::quantity::UiNumberLocale) {
+        self.number_locale = locale;
     }
 
     pub(crate) fn request_full_screen(&mut self, enabled: bool) {

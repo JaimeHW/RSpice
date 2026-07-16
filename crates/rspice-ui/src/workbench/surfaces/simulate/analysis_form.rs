@@ -6,6 +6,9 @@
 
 use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 
+use crate::quantity::{
+    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
+};
 use crate::simulation::plan::{
     AnalysisDraft, FrequencySweepDraft, NetworkPortDraft, PeriodicNetworkDraft,
 };
@@ -94,6 +97,28 @@ fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
         return inspector_input_row(ui, label, value);
     }
     field_cell(ui, label, |ui| mono_input(ui, value, ui.available_width()))
+}
+
+fn quantity_input_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) -> Response {
+    let response = input_row(ui, label, value);
+    if response.lost_focus()
+        && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
+    {
+        let schema_value = if kind == QuantityInputKind::Temperature {
+            parsed - 273.15
+        } else {
+            parsed
+        };
+        *value = format!("{schema_value:.17e}");
+    }
+    response
 }
 
 fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> bool {
@@ -188,15 +213,39 @@ fn action_line(ui: &mut Ui, label: &str) -> bool {
         .clicked()
 }
 
-fn frequency_sweep_fields(ui: &mut Ui, sweep: &mut FrequencySweepDraft) {
-    input_row(ui, "Start", &mut sweep.start);
-    input_row(ui, "Stop", &mut sweep.stop);
+fn frequency_sweep_fields(
+    ui: &mut Ui,
+    sweep: &mut FrequencySweepDraft,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
+    quantity_input_row(
+        ui,
+        "Start",
+        &mut sweep.start,
+        QuantityInputKind::Frequency,
+        policy,
+        locale,
+    );
+    quantity_input_row(
+        ui,
+        "Stop",
+        &mut sweep.stop,
+        QuantityInputKind::Frequency,
+        policy,
+        locale,
+    );
     input_row(ui, "Points", &mut sweep.points);
     choice_row(ui, "Sweep", SWEEP_KINDS, &mut sweep.sweep);
 }
 
-fn periodic_network_fields(ui: &mut Ui, setup: &mut PeriodicNetworkDraft) {
-    frequency_sweep_fields(ui, &mut setup.sweep);
+fn periodic_network_fields(
+    ui: &mut Ui,
+    setup: &mut PeriodicNetworkDraft,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
+    frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
     input_row(ui, "Max sideband", &mut setup.max_sideband);
     check_row(ui, "Mixed-mode matrix", &mut setup.mixed_mode);
     check_row(ui, "Noise parameters", &mut setup.noise_parameters);
@@ -224,7 +273,12 @@ fn network_port_fields(ui: &mut Ui, index: usize, port: &mut NetworkPortDraft) {
 }
 
 /// Render the form for `draft`; returns the explanatory note.
-pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
+pub(super) fn form(
+    ui: &mut Ui,
+    draft: &mut AnalysisDraft,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) -> &'static str {
     clear_pending_cell(ui);
     ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;
     let note = match draft {
@@ -238,16 +292,62 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Solves the DC operating point; device bias lands in the OP inspector."
         }
         AnalysisDraft::Transient(setup) => {
-            input_row(ui, "Stop time", &mut setup.stop);
-            input_row(ui, "Step time", &mut setup.step);
-            input_row(ui, "Start time", &mut setup.start);
-            input_row(ui, "Max step", &mut setup.max_step);
+            quantity_input_row(
+                ui,
+                "Stop time",
+                &mut setup.stop,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Step time",
+                &mut setup.step,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Start time",
+                &mut setup.start,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            if !setup.max_step.eq_ignore_ascii_case("auto") {
+                quantity_input_row(
+                    ui,
+                    "Max step",
+                    &mut setup.max_step,
+                    QuantityInputKind::Time,
+                    policy,
+                    locale,
+                );
+            } else {
+                input_row(ui, "Max step", &mut setup.max_step);
+            }
             check_row(ui, "Use initial conditions", &mut setup.uic);
             "Local truncation error controls step size between limits."
         }
         AnalysisDraft::Ac(setup) => {
-            input_row(ui, "Start", &mut setup.fstart);
-            input_row(ui, "Stop", &mut setup.fstop);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.fstart,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.fstop,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
             "Small-signal sweep around the operating point."
@@ -270,8 +370,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             input_row(ui, "Output", &mut setup.output);
             input_row(ui, "Reference", &mut setup.reference);
             input_row(ui, "Input src", &mut setup.input);
-            input_row(ui, "Start", &mut setup.fstart);
-            input_row(ui, "Stop", &mut setup.fstop);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.fstart,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.fstop,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
             "Integrated and spot noise over its independent small-signal sweep."
@@ -294,7 +408,14 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             input_row(ui, "Output", &mut setup.output_expr);
             choice_row(ui, "Mode", &["DC", "AC"], &mut setup.sens_type_idx);
             if setup.sens_type_idx == 1 {
-                input_row(ui, "Frequency", &mut setup.ac_freq);
+                quantity_input_row(
+                    ui,
+                    "Frequency",
+                    &mut setup.ac_freq,
+                    QuantityInputKind::Frequency,
+                    policy,
+                    locale,
+                );
             }
             check_row(ui, "Include parameters", &mut setup.include_params);
             check_row(ui, "Include devices", &mut setup.include_devices);
@@ -317,7 +438,14 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Statistical sampling around the nominal design."
         }
         AnalysisDraft::Pss(setup) => {
-            input_row(ui, "Fundamental", &mut setup.fund_freq);
+            quantity_input_row(
+                ui,
+                "Fundamental",
+                &mut setup.fund_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Harmonics", &mut setup.num_harmonics);
             input_row(ui, "Max iters", &mut setup.max_iter);
             choice_row(ui, "Method", &["shooting", "HB"], &mut setup.method_idx);
@@ -330,8 +458,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
         }
         AnalysisDraft::Stb(setup) => {
             input_row(ui, "Probe", &mut setup.probe_source);
-            input_row(ui, "Start", &mut setup.start_freq);
-            input_row(ui, "Stop", &mut setup.stop_freq);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.start_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.stop_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points/dec", &mut setup.points_per_decade);
             check_row(ui, "Gain margin", &mut setup.gain_margin);
             check_row(ui, "Phase margin", &mut setup.phase_margin);
@@ -339,15 +481,43 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Loop gain and margins via the probe source."
         }
         AnalysisDraft::Temperature(setup) => {
-            input_row(ui, "Start", &mut setup.temp_start);
-            input_row(ui, "Stop", &mut setup.temp_stop);
-            input_row(ui, "Step", &mut setup.temp_step);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.temp_start,
+                QuantityInputKind::Temperature,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.temp_stop,
+                QuantityInputKind::Temperature,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Step",
+                &mut setup.temp_step,
+                QuantityInputKind::TemperatureDelta,
+                policy,
+                locale,
+            );
             choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
             check_row(ui, "Corner temps only", &mut setup.corner_temps);
             "Repeats the base analysis across temperature."
         }
         AnalysisDraft::HarmonicBalance(setup) => {
-            input_row(ui, "Fundamental", &mut setup.fundamental);
+            quantity_input_row(
+                ui,
+                "Fundamental",
+                &mut setup.fundamental,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Harmonics", &mut setup.harmonics);
             input_row(ui, "Source", &mut setup.fundamental_source);
             input_row(ui, "Oversample", &mut setup.oversample);
@@ -357,7 +527,14 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             let mut remove: Option<usize> = None;
             for (idx, tone) in setup.additional_tones.iter_mut().enumerate() {
                 sub_header(ui, &format!("Tone {}", idx + 2));
-                input_row(ui, "Frequency", &mut tone.frequency);
+                quantity_input_row(
+                    ui,
+                    "Frequency",
+                    &mut tone.frequency,
+                    QuantityInputKind::Frequency,
+                    policy,
+                    locale,
+                );
                 input_row(ui, "Harmonics", &mut tone.harmonics);
                 input_row(ui, "Source", &mut tone.source);
                 if action_line(ui, "Remove tone") {
@@ -374,8 +551,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Multi-tone steady state in the frequency domain."
         }
         AnalysisDraft::SParameter(setup) => {
-            input_row(ui, "Start", &mut setup.start_freq);
-            input_row(ui, "Stop", &mut setup.stop_freq);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.start_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.stop_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.num_points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Z0", &mut setup.z0);
@@ -408,8 +599,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Scattering parameters between the defined ports."
         }
         AnalysisDraft::Pac(setup) => {
-            input_row(ui, "Start", &mut setup.start_freq);
-            input_row(ui, "Stop", &mut setup.stop_freq);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.start_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.stop_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.num_points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Input src", &mut setup.input_source);
@@ -421,8 +626,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Small-signal AC around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pnoise(setup) => {
-            input_row(ui, "Start", &mut setup.start_freq);
-            input_row(ui, "Stop", &mut setup.stop_freq);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.start_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.stop_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.num_points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Output", &mut setup.output_node);
@@ -440,8 +659,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Cyclostationary noise around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pxf(setup) => {
-            input_row(ui, "Start", &mut setup.start_freq);
-            input_row(ui, "Stop", &mut setup.stop_freq);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.start_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.stop_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.num_points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Output", &mut setup.output_node);
@@ -461,8 +694,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Loop stability around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::TransferFunction(setup) => {
-            input_row(ui, "Start", &mut setup.start_freq);
-            input_row(ui, "Stop", &mut setup.stop_freq);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.start_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.stop_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.num_points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Input src", &mut setup.input_source);
@@ -490,9 +737,30 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             sub_header(ui, "Temperature");
             check_row(ui, "Sweep temperature", &mut setup.enable_temp_sweep);
             if setup.enable_temp_sweep {
-                input_row(ui, "Cold", &mut setup.temp_cold);
-                input_row(ui, "Room", &mut setup.temp_room);
-                input_row(ui, "Hot", &mut setup.temp_hot);
+                quantity_input_row(
+                    ui,
+                    "Cold",
+                    &mut setup.temp_cold,
+                    QuantityInputKind::Temperature,
+                    policy,
+                    locale,
+                );
+                quantity_input_row(
+                    ui,
+                    "Room",
+                    &mut setup.temp_room,
+                    QuantityInputKind::Temperature,
+                    policy,
+                    locale,
+                );
+                quantity_input_row(
+                    ui,
+                    "Hot",
+                    &mut setup.temp_hot,
+                    QuantityInputKind::Temperature,
+                    policy,
+                    locale,
+                );
             }
             ui.add_space(4.0);
             check_row(ui, "Full matrix", &mut setup.full_matrix);
@@ -505,8 +773,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Repeats the base analysis across the selected corners."
         }
         AnalysisDraft::Envelope(setup) => {
-            input_row(ui, "Fundamental", &mut setup.fundamental);
-            input_row(ui, "Stop time", &mut setup.stop_time);
+            quantity_input_row(
+                ui,
+                "Fundamental",
+                &mut setup.fundamental,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop time",
+                &mut setup.stop_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
             input_row(ui, "Harmonics", &mut setup.harmonics);
             choice_row(
                 ui,
@@ -517,11 +799,32 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Envelope-following transient for modulated carriers."
         }
         AnalysisDraft::Fourier(setup) => {
-            input_row(ui, "Fundamental", &mut setup.fundamental);
+            quantity_input_row(
+                ui,
+                "Fundamental",
+                &mut setup.fundamental,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Harmonics", &mut setup.harmonics);
             input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "From", &mut setup.start_time);
-            input_row(ui, "To", &mut setup.stop_time);
+            quantity_input_row(
+                ui,
+                "From",
+                &mut setup.start_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "To",
+                &mut setup.stop_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
             check_row(ui, "Compute THD", &mut setup.compute_thd);
             check_row(ui, "Normalize", &mut setup.normalize);
             "Fourier components of a transient waveform window."
@@ -553,8 +856,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Tunes the variables (name:min:max[:initial]) toward the goal."
         }
         AnalysisDraft::Soa(setup) => {
-            input_row(ui, "Stop time", &mut setup.stop_time);
-            input_row(ui, "Step time", &mut setup.step_time);
+            quantity_input_row(
+                ui,
+                "Stop time",
+                &mut setup.stop_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Step time",
+                &mut setup.step_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
             check_row(ui, "Check Vgs", &mut setup.check_vgs_max);
             if setup.check_vgs_max {
                 input_row(ui, "Max Vgs", &mut setup.max_vgs);
@@ -574,8 +891,22 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Flags excursions outside the safe operating area during transient."
         }
         AnalysisDraft::Disto(setup) => {
-            input_row(ui, "Start", &mut setup.sweep.fstart);
-            input_row(ui, "Stop", &mut setup.sweep.fstop);
+            quantity_input_row(
+                ui,
+                "Start",
+                &mut setup.sweep.fstart,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Stop",
+                &mut setup.sweep.fstop,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Points", &mut setup.sweep.points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep.sweep);
             input_row(ui, "f2/f1", &mut setup.f2_over_f1);
@@ -593,11 +924,11 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Multi-tone spectral-lattice operating state (needs OP)."
         }
         AnalysisDraft::Hbsp(setup) => {
-            periodic_network_fields(ui, setup);
+            periodic_network_fields(ui, setup, policy, locale);
             "Large-signal network response linearized around harmonic balance (needs HB)."
         }
         AnalysisDraft::Hbnoise(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep);
+            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
             input_row(ui, "Output", &mut setup.output_node);
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Input source", &mut setup.input_source);
@@ -608,11 +939,11 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Noise folding and correlation around harmonic balance (needs HB)."
         }
         AnalysisDraft::Psp(setup) => {
-            periodic_network_fields(ui, setup);
+            periodic_network_fields(ui, setup, policy, locale);
             "Frequency-translated network response around PSS (needs PSS)."
         }
         AnalysisDraft::Qpac(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep);
+            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
             input_row(ui, "Input source", &mut setup.input_source);
             input_row(ui, "Output", &mut setup.output_node);
             input_row(ui, "Output ref", &mut setup.output_ref);
@@ -621,7 +952,7 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Small-signal conversion matrix around QPSS (needs QPSS)."
         }
         AnalysisDraft::Qpnoise(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep);
+            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
             input_row(ui, "Output", &mut setup.output_node);
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Input source", &mut setup.input_source);
@@ -631,7 +962,7 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Noise folding across a multi-tone spectral lattice (needs QPSS)."
         }
         AnalysisDraft::Qpxf(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep);
+            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
             input_row(ui, "Input source", &mut setup.input_source);
             input_row(ui, "Output", &mut setup.output_node);
             input_row(ui, "Output ref", &mut setup.output_ref);
@@ -641,12 +972,47 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             "Translated transfer paths indexed by lattice products (needs QPSS)."
         }
         AnalysisDraft::TransientNoise(setup) => {
-            input_row(ui, "Stop time", &mut setup.stop_time);
-            input_row(ui, "Step time", &mut setup.step_time);
-            input_row(ui, "Start time", &mut setup.start_time);
-            input_row(ui, "Max step", &mut setup.max_step);
+            quantity_input_row(
+                ui,
+                "Stop time",
+                &mut setup.stop_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Step time",
+                &mut setup.step_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Start time",
+                &mut setup.start_time,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
+            quantity_input_row(
+                ui,
+                "Max step",
+                &mut setup.max_step,
+                QuantityInputKind::Time,
+                policy,
+                locale,
+            );
             input_row(ui, "Seed", &mut setup.seed);
-            input_row(ui, "Noise fmax", &mut setup.noise_fmax);
+            quantity_input_row(
+                ui,
+                "Noise fmax",
+                &mut setup.noise_fmax,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+            );
             input_row(ui, "Noise scale", &mut setup.scale);
             check_row(
                 ui,

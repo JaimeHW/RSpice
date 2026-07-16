@@ -62,6 +62,7 @@ fn derived(state: &mut AppState) -> Option<NyquistDerived> {
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
 
     let Some(curve) = active_curve(state) else {
         well_hint(ui, "No loop-gain data — run an AC analysis");
@@ -219,14 +220,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .and_then(|curve| curve.points.get(i).map(|p| p.frequency))
             .unwrap_or(0.0);
         let magnitude = (re[i] * re[i] + im[i] * im[i]).sqrt();
-        let phase_deg = im[i].atan2(re[i]).to_degrees();
+        let phase_radians = im[i].atan2(re[i]);
         let rows = [
-            ("f".to_owned(), fmt_si(frequency, "Hz", 2)),
+            (
+                "f".to_owned(),
+                quantity_policy.format_frequency(frequency, 2),
+            ),
             ("Re".to_owned(), fmt_si(re[i], "", 3)),
             ("Im".to_owned(), fmt_si(im[i], "", 3)),
             (
                 "|L| ∠".to_owned(),
-                format!("{magnitude:.3} ∠ {phase_deg:.1}°"),
+                format!(
+                    "{magnitude:.3} ∠ {}",
+                    quantity_policy.format_angle(phase_radians, 1)
+                ),
             ),
         ];
         super::point_card(&plot_ui, response.plot_rect, pos, &name, c.traces[0], &rows);
@@ -240,6 +247,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// Stability readout.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Stability", None);
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(s) = derived(state) else {
         super::panel_note(
             ui,
@@ -270,7 +278,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ),
         (
             "Phase margin",
-            fmt_opt(s.phase_margin, &|v| format!("{v:.1}°")),
+            fmt_opt(s.phase_margin, &|degrees| {
+                quantity_policy.format_angle(degrees.to_radians(), 1)
+            }),
             false,
         ),
     ];

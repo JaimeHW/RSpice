@@ -50,6 +50,19 @@ impl WaveformWriter {
         }
     }
 
+    /// Port count encoded by a Touchstone-compatible result dataset.
+    /// Callers should use this only after `write_text` has validated the full
+    /// matrix; it is provided so save workflows can choose the required
+    /// `.sNp` extension without re-materializing the matrix.
+    pub(crate) fn touchstone_port_count(dataset: &WaveformDataset) -> Option<usize> {
+        dataset
+            .signals
+            .iter()
+            .filter_map(|signal| Self::parse_touchstone_signal_name(&signal.name))
+            .map(|(row, column, _)| row.max(column))
+            .max()
+    }
+
     fn touchstone_text(dataset: &WaveformDataset) -> Result<String, String> {
         let (frequencies, matrix) = Self::extract_touchstone_matrix(dataset)?;
         let num_ports = matrix.len();
@@ -251,6 +264,20 @@ impl WaveformWriter {
 
     fn parse_touchstone_signal_name(name: &str) -> Option<(usize, usize, bool)> {
         let normalized = name.trim().to_ascii_uppercase().replace(' ', "");
+        if let Some(base) = normalized
+            .strip_prefix("RE(")
+            .and_then(|value| value.strip_suffix(')'))
+            && let Some((row, col)) = Self::parse_touchstone_base_name(base)
+        {
+            return Some((row, col, false));
+        }
+        if let Some(base) = normalized
+            .strip_prefix("IM(")
+            .and_then(|value| value.strip_suffix(')'))
+            && let Some((row, col)) = Self::parse_touchstone_base_name(base)
+        {
+            return Some((row, col, true));
+        }
         // Prefer longest suffix matches first.
         let suffixes = [
             ("_IMAG", true),

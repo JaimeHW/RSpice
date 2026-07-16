@@ -9,8 +9,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 
 use super::cursor::CursorPair;
-use super::decimate::DecimationCache;
-use super::format::tick_label;
+use super::decimate::{DecimationCache, DisplayDecimation};
 use super::spec::{PlotSpec, YSide};
 
 /// A view-range change requested by a navigation gesture this frame.
@@ -246,8 +245,8 @@ fn axis_accessibility_range(axis: &super::spec::Axis) -> String {
     };
     format!(
         "{} to {}{}",
-        tick_label(axis.min),
-        tick_label(axis.max),
+        axis.format_display_value(axis.min),
+        axis.format_display_value(axis.max),
         unit
     )
 }
@@ -265,11 +264,11 @@ fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -
     let cursor_summary = cursors.map_or_else(String::new, |pair| match (pair.a, pair.b) {
         (Some(a), Some(b)) => format!(
             " Cursor A {}, cursor B {}, delta {}.",
-            tick_label(a),
-            tick_label(b),
-            tick_label(b - a)
+            spec.x.format_display_value(a),
+            spec.x.format_display_value(b),
+            spec.x.format_display_delta(b - a)
         ),
-        (Some(a), None) => format!(" Cursor A {}.", tick_label(a)),
+        (Some(a), None) => format!(" Cursor A {}.", spec.x.format_display_value(a)),
         _ => String::new(),
     });
     format!(
@@ -476,9 +475,13 @@ pub fn show(
                 continue;
             }
             let stroke = Stroke::new(trace.width, trace.color);
-            let points: Vec<Pos2> = match trace.cache_key {
-                Some(key) => cache
-                    .envelope(
+            let points: Vec<Pos2> = match (trace.cache_key, spec.display_decimation) {
+                (
+                    Some(key),
+                    mode @ (DisplayDecimation::EnvelopeExtrema | DisplayDecimation::Uniform),
+                ) => cache
+                    .series(
+                        mode,
                         key,
                         trace.x,
                         trace.y,
@@ -490,7 +493,7 @@ pub fn show(
                     .iter()
                     .map(|p| pos2(mx(p[0]), map_y(p[1], trace.side)))
                     .collect(),
-                None => trace
+                _ => trace
                     .x
                     .iter()
                     .zip(trace.y.iter())
@@ -868,6 +871,7 @@ fn draw_readout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::plot::format::tick_label;
     use crate::ui::plot::{Axis, Marker, Trace, XScale};
 
     #[test]

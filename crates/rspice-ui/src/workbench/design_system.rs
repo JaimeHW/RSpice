@@ -5,6 +5,7 @@
 //! layout or widget implementations are reused.
 
 use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -549,20 +550,26 @@ pub fn labeled_icon_button_sized(
                 t.color.text_dim
             },
         );
-        ui.painter().text(
+        let label_font = theme::sans(
+            // `.tool-text-button` inherits the mockup's 13 px body type;
+            // compactness comes from its 29 px box, not smaller copy.
+            tokens::FS_2,
+            if selected {
+                FontWeight::SemiBold
+            } else {
+                FontWeight::Regular
+            },
+        );
+        let text_rect = Rect::from_min_max(
+            Pos2::new(rect.left() + 29.0, rect.top()),
+            Pos2::new(rect.right() - 8.0, rect.bottom()),
+        );
+        let visible_label = elide_text(ui, label, &label_font, text_rect.width().max(0.0));
+        ui.painter().with_clip_rect(text_rect).text(
             Pos2::new(rect.left() + 29.0, rect.center().y),
             Align2::LEFT_CENTER,
-            label,
-            theme::sans(
-                // `.tool-text-button` inherits the mockup's 13 px body type;
-                // compactness comes from its 29 px box, not smaller copy.
-                tokens::FS_2,
-                if selected {
-                    FontWeight::SemiBold
-                } else {
-                    FontWeight::Regular
-                },
-            ),
+            visible_label,
+            label_font,
             if !enabled {
                 t.color.text_faint
             } else if selected {
@@ -573,7 +580,7 @@ pub fn labeled_icon_button_sized(
         );
         theme::paint_focus_ring_outset(ui, &response, rect);
     }
-    response
+    response.on_hover_text(label)
 }
 
 pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
@@ -594,19 +601,36 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     );
     ui.painter()
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
-    ui.painter().text(
-        Pos2::new(rect.left() + 10.0, rect.center().y),
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let title_right = if meta.is_some() {
+        rect.left() + rect.width() * 0.58
+    } else {
+        rect.right()
+    };
+    let title_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + 10.0, rect.top()),
+        Pos2::new((title_right - 6.0).max(rect.left() + 10.0), rect.bottom()),
+    );
+    let title = elide_text(ui, &title.to_uppercase(), &title_font, title_rect.width());
+    ui.painter().with_clip_rect(title_rect).text(
+        title_rect.left_center(),
         Align2::LEFT_CENTER,
-        title.to_uppercase(),
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        title,
+        title_font,
         t.color.text_dim,
     );
     if let Some(meta) = meta {
-        ui.painter().text(
-            Pos2::new(rect.right() - 10.0, rect.center().y),
+        let meta_rect = Rect::from_min_max(
+            Pos2::new(title_right, rect.top()),
+            Pos2::new(rect.right() - 10.0, rect.bottom()),
+        );
+        let meta = elide_text(ui, meta, &meta_font, meta_rect.width());
+        ui.painter().with_clip_rect(meta_rect).text(
+            meta_rect.right_center(),
             Align2::RIGHT_CENTER,
             meta,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
+            meta_font,
             t.color.text_faint,
         );
     }
@@ -614,6 +638,8 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
+    let full_label = label;
+    let full_value = value;
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let width = ui.available_width().max(1.0);
@@ -622,30 +648,86 @@ pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let columns_width = (inner_width - gap).max(1.0);
     let label_column = columns_width * 0.4;
     let value_column = (columns_width - label_column).max(1.0);
-    let label_galley =
-        ui.painter()
-            .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
-    let value_galley =
-        ui.painter()
-            .layout(value.to_owned(), value_font, t.color.text, value_column);
-    let content_height = label_galley.size().y.max(value_galley.size().y);
-    let height = (content_height + 12.0).max(29.0);
+    let label = elide_text(ui, label, &label_font, label_column);
+    let value = elide_text(ui, value, &value_font, value_column);
+    let label_galley = ui
+        .painter()
+        .layout_no_wrap(label, label_font, t.color.text_dim);
+    let value_galley = ui.painter().layout_no_wrap(value, value_font, t.color.text);
+    let height = 29.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let text_top = rect.top() + 6.0;
-    ui.painter().galley(
-        Pos2::new(rect.left() + 10.0, text_top),
+    let label_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + 10.0, rect.top()),
+        Pos2::new(rect.left() + 10.0 + label_column, rect.bottom()),
+    );
+    let value_rect = Rect::from_min_max(
+        Pos2::new(label_rect.right() + gap, rect.top()),
+        Pos2::new(rect.right() - 10.0, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(label_rect).galley(
+        Pos2::new(
+            label_rect.left(),
+            label_rect.center().y - label_galley.size().y * 0.5,
+        ),
         label_galley,
         t.color.text_dim,
     );
-    ui.painter().galley(
-        Pos2::new(rect.left() + 10.0 + label_column + gap, text_top),
+    ui.painter().with_clip_rect(value_rect).galley(
+        Pos2::new(
+            value_rect.left(),
+            value_rect.center().y - value_galley.size().y * 0.5,
+        ),
         value_galley,
         t.color.text,
     );
-    response
+    response.on_hover_text(format!("{full_label}: {full_value}"))
+}
+
+fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+    if max_width <= 0.0 {
+        return String::new();
+    }
+    let fits = |candidate: &str| {
+        ui.painter()
+            .layout_no_wrap(candidate.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+            <= max_width
+    };
+    if fits(text) {
+        return text.to_owned();
+    }
+    let ellipsis = "…";
+    if !fits(ellipsis) {
+        return String::new();
+    }
+    let graphemes = UnicodeSegmentation::graphemes(text, true).collect::<Vec<_>>();
+    let mut low = 0;
+    let mut high = graphemes.len();
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        let candidate = format!("{}{}", graphemes[..middle].concat(), ellipsis);
+        if fits(&candidate) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    format!("{}{}", graphemes[..low].concat(), ellipsis)
 }
 
 pub fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
+    card_with_body_margin(ui, title, 11, body);
+}
+
+/// Card whose body is already a property list. [`property_row`] owns the
+/// mockup's ten-pixel cell inset, so this variant deliberately adds no second
+/// card-body inset.
+pub fn property_card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
+    card_with_body_margin(ui, title, 0, body);
+}
+
+fn card_with_body_margin(ui: &mut Ui, title: &str, body_margin: i8, body: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (head_rect, _) = ui.allocate_exact_size(Vec2::new(width, 37.0), Sense::hover());
@@ -659,17 +741,23 @@ pub fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
         head_rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    ui.painter().text(
-        Pos2::new(head_rect.left() + 11.0, head_rect.center().y),
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let title_rect = Rect::from_min_max(
+        Pos2::new(head_rect.left() + 11.0, head_rect.top()),
+        Pos2::new(head_rect.right() - 11.0, head_rect.bottom()),
+    );
+    let title = elide_text(ui, title, &title_font, title_rect.width());
+    ui.painter().with_clip_rect(title_rect).text(
+        title_rect.left_center(),
         Align2::LEFT_CENTER,
         title,
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        title_font,
         t.color.text,
     );
     egui::Frame::new()
-        .inner_margin(egui::Margin::same(11))
+        .inner_margin(egui::Margin::same(body_margin))
         .show(ui, |ui| {
-            ui.set_width((width - 22.0).max(1.0));
+            ui.set_width((width - f32::from(body_margin) * 2.0).max(1.0));
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), body);
         });
 }

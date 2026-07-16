@@ -25,7 +25,6 @@ const SCOPE_NARROW_MAX_WIDTH: f32 = 760.0;
 const SECTION_LABEL_NARROW_MAX_WIDTH: f32 = 620.0;
 const HEADER_HEIGHT: f32 = 57.0;
 const FOOTER_HEIGHT: f32 = 48.0;
-const PHONE_FOOTER_HEIGHT: f32 = 96.0;
 const CATEGORY_RAIL_WIDTH: f32 = 208.0;
 const CATEGORY_ROW_HEIGHT: f32 = 36.0;
 const TOUCH_TARGET: f32 = 44.0;
@@ -42,35 +41,54 @@ const SETTING_ROW_COLUMN_GAP: f32 = 24.0;
 const SETTING_ROW_PHONE_VALUE_GAP: f32 = 10.0;
 const SHELL_ID: &str = "rspice.preferences.shell";
 
-/// Canonical categories whose current controls have runtime consumers.
-/// Remaining mockup categories stay capability-gated rather than exposing
-/// form values that no engineering subsystem observes.
+/// Canonical category order from the approved Preferences mockup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum PreferenceCategory {
     #[default]
     Appearance,
     Workspace,
+    Units,
+    Schematic,
+    Simulation,
+    Results,
     Files,
+    Compute,
+    Security,
     Accessibility,
     Shortcuts,
+    Integrations,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 12] = [
         Self::Appearance,
         Self::Workspace,
+        Self::Units,
+        Self::Schematic,
+        Self::Simulation,
+        Self::Results,
         Self::Files,
+        Self::Compute,
+        Self::Security,
         Self::Accessibility,
         Self::Shortcuts,
+        Self::Integrations,
     ];
 
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
             Self::Workspace => "Workspace",
+            Self::Units => "Units & notation",
+            Self::Schematic => "Schematic",
+            Self::Simulation => "Simulation",
+            Self::Results => "Results",
             Self::Files => "Files & storage",
+            Self::Compute => "Remote compute",
+            Self::Security => "Security & privacy",
             Self::Accessibility => "Accessibility",
             Self::Shortcuts => "Shortcuts",
+            Self::Integrations => "Integrations",
         }
     }
 
@@ -78,9 +96,16 @@ impl PreferenceCategory {
         match self {
             Self::Appearance => "appearance",
             Self::Workspace => "workspace",
+            Self::Units => "units",
+            Self::Schematic => "schematic",
+            Self::Simulation => "simulation",
+            Self::Results => "results",
             Self::Files => "files",
+            Self::Compute => "compute",
+            Self::Security => "security",
             Self::Accessibility => "accessibility",
             Self::Shortcuts => "shortcuts",
+            Self::Integrations => "integrations",
         }
     }
 }
@@ -233,7 +258,7 @@ pub(super) fn show(
             egui::pos2(inner.right(), inner.top() + HEADER_HEIGHT),
         );
         let footer = Rect::from_min_max(
-            egui::pos2(inner.left(), inner.bottom() - footer_height(layout)),
+            egui::pos2(inner.left(), inner.bottom() - FOOTER_HEIGHT),
             inner.max,
         );
         let body = Rect::from_min_max(
@@ -247,7 +272,7 @@ pub(super) fn show(
             response.close_requested = true;
         }
         initial_focus_control_id = render_body(&mut surface, body, layout, category, render_page);
-        if render_footer(&mut surface, footer, layout.phone) {
+        if render_footer(&mut surface, footer) {
             response.account_organization_requested = true;
         }
         let dialog_response = dialog_ui.response();
@@ -618,48 +643,12 @@ fn render_scrolling_page(
         });
 }
 
-fn footer_height(layout: PreferencesLayout) -> f32 {
-    if layout.phone {
-        PHONE_FOOTER_HEIGHT
-    } else {
-        FOOTER_HEIGHT
-    }
-}
-
-fn render_footer(surface: &mut Ui, rect: Rect, phone: bool) -> bool {
+fn render_footer(surface: &mut Ui, rect: Rect) -> bool {
     let t = Tokens::get(surface.ctx());
     surface.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     surface
         .painter()
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
-    if phone {
-        let mut ui = surface.new_child(
-            egui::UiBuilder::new()
-                .max_rect(rect.shrink2(vec2(12.0, 6.0)))
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
-        ui.spacing_mut().item_spacing.y = FOOTER_ITEM_GAP;
-        ui.set_width(ui.available_width());
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(
-                    "Personal and device preferences apply immediately. Project settings remain versioned.",
-                )
-                .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                .color(t.color.text_dim),
-            )
-            .wrap(),
-        );
-        return ui
-            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.push_id("account-organization", |ui| {
-                    Button::new("Organization & licensing…").show(ui).clicked()
-                })
-                .inner
-            })
-            .inner;
-    }
-
     let mut ui = surface.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(vec2(12.0, 0.0)))
@@ -716,48 +705,6 @@ pub(super) fn page_heading(ui: &mut Ui, title: &str, description: &str) {
             );
         });
     ui.add_space(if phone { 8.0 } else { 12.0 });
-}
-
-/// Read-only ownership strip shown above settings pages without a trailing
-/// resolved-policy action.
-pub(super) fn scope_strip(ui: &mut Ui, scope: &str, detail: &str) {
-    let t = Tokens::get(ui.ctx());
-    let narrow = ui.ctx().content_rect().width() <= SCOPE_NARROW_MAX_WIDTH;
-    let horizontal = if narrow { 12 } else { 24 };
-    let response = egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(horizontal, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_min_height(28.0);
-            ui.vertical(|ui| {
-                ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.label(
-                    egui::RichText::new(scope)
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text),
-                );
-                ui.add_space(2.0);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(detail)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_faint),
-                    )
-                    .wrap(),
-                );
-            });
-        })
-        .response;
-    ui.painter().hline(
-        response.rect.x_range(),
-        response.rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    // CSS collapses the strip's 14 px bottom margin with the 14–18 px top
-    // margin of the next heading/section. Every runtime-backed page has that
-    // next block, so it owns the single resolved gap here.
 }
 
 /// Mockup scope strip variant with the trailing resolved-policy executor.
@@ -1317,7 +1264,6 @@ mod tests {
     fn shell_structure_matches_preferences_mockup_tokens() {
         assert_eq!(HEADER_HEIGHT, 57.0);
         assert_eq!(FOOTER_HEIGHT, 48.0);
-        assert_eq!(PHONE_FOOTER_HEIGHT, 96.0);
         assert_eq!(CATEGORY_RAIL_WIDTH, 208.0);
         assert_eq!(CATEGORY_ROW_HEIGHT, 36.0);
         assert_eq!(NARROW_MAX_WIDTH, 820.0);
@@ -1346,7 +1292,7 @@ mod tests {
         assert_eq!(layout.surface.size(), vec2(382.0, 836.0));
         assert!(layout.narrow);
         assert!(layout.phone);
-        assert_eq!(footer_height(layout), PHONE_FOOTER_HEIGHT);
+        assert_eq!(FOOTER_HEIGHT, 48.0);
     }
 
     #[test]
@@ -1403,7 +1349,7 @@ mod tests {
         assert_eq!(layout.surface.size(), vec2(740.0, 680.0));
         assert!(layout.narrow);
         assert!(!layout.phone);
-        assert_eq!(footer_height(layout), FOOTER_HEIGHT);
+        assert_eq!(FOOTER_HEIGHT, 48.0);
     }
 
     #[test]
@@ -1429,15 +1375,22 @@ mod tests {
     }
 
     #[test]
-    fn category_navigation_exposes_only_runtime_backed_mockup_pages() {
+    fn category_navigation_matches_the_complete_mockup_order() {
         assert_eq!(
             PreferenceCategory::ALL.map(PreferenceCategory::label),
             [
                 "Appearance",
                 "Workspace",
+                "Units & notation",
+                "Schematic",
+                "Simulation",
+                "Results",
                 "Files & storage",
+                "Remote compute",
+                "Security & privacy",
                 "Accessibility",
                 "Shortcuts",
+                "Integrations",
             ]
         );
     }

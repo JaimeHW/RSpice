@@ -177,7 +177,16 @@ impl<'a> NetlistGenerator<'a> {
                 continue;
             };
 
-            let key = spec.name.to_ascii_lowercase();
+            if let Err(error) =
+                validate_net_name(&spec.name, self.schematic.document_policy.net_naming)
+            {
+                self.errors.push(format!(
+                    "Invalid interface port name '{}': {error}",
+                    spec.name
+                ));
+                continue;
+            }
+            let key = net_name_key(&spec.name, self.schematic.document_policy.net_naming);
             match name_to_net.get(&key) {
                 // Same port name elsewhere: one interface pin, one net.
                 Some(&primary) if primary != net_id => self.merge_nets(primary, net_id),
@@ -212,14 +221,22 @@ impl<'a> NetlistGenerator<'a> {
             .nets
             .iter()
             .filter_map(|net| {
-                net.label
-                    .as_ref()
-                    .map(|label| (label.to_ascii_lowercase(), net.id))
+                net.label.as_ref().map(|label| {
+                    (
+                        net_name_key(label, self.schematic.document_policy.net_naming),
+                        net.id,
+                    )
+                })
             })
             .collect();
         for label in labels {
             let name = label.name.trim();
             if name.is_empty() {
+                continue;
+            }
+            if let Err(error) = validate_net_name(name, self.schematic.document_policy.net_naming) {
+                self.errors
+                    .push(format!("Invalid net label \"{name}\": {error}"));
                 continue;
             }
             let Some(&net_id) = self.point_to_net.get(&label.pos) else {
@@ -230,14 +247,21 @@ impl<'a> NetlistGenerator<'a> {
                 continue;
             };
 
-            match name_to_net.get(&name.to_ascii_lowercase()) {
+            let key = net_name_key(name, self.schematic.document_policy.net_naming);
+            match name_to_net.get(&key) {
                 // Same name on another net: connect them.
                 Some(&primary) if primary != net_id => self.merge_nets(primary, net_id),
                 _ => {
-                    name_to_net.insert(name.to_ascii_lowercase(), net_id);
+                    name_to_net.insert(key, net_id);
                     let existing = self.net(net_id).and_then(|net| net.label.clone());
                     match existing {
-                        Some(existing) if !existing.eq_ignore_ascii_case(name) => {
+                        Some(existing)
+                            if !net_names_equal(
+                                &existing,
+                                name,
+                                self.schematic.document_policy.net_naming,
+                            ) =>
+                        {
                             self.warnings.push(format!(
                                 "Net carries conflicting labels \"{existing}\" and \
                                  \"{name}\"; keeping \"{existing}\""
@@ -305,4 +329,52 @@ impl<'a> NetlistGenerator<'a> {
 
     //-------------------------------------------------------------------------
     // Phase 3: Header Generation
+}
+
+fn net_name_key(name: &str, policy: crate::state::NetNamingPolicy) -> String {
+    match policy {
+        crate::state::NetNamingPolicy::StrictCaseSensitive => name.to_owned(),
+        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => name.to_ascii_lowercase(),
+    }
+}
+
+fn net_names_equal(left: &str, right: &str, policy: crate::state::NetNamingPolicy) -> bool {
+    match policy {
+        crate::state::NetNamingPolicy::StrictCaseSensitive => left == right,
+        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => left.eq_ignore_ascii_case(right),
+    }
+}
+
+fn validate_net_name(
+    name: &str,
+    policy: crate::state::NetNamingPolicy,
+) -> Result<(), &'static str> {
+    if name.is_empty() {
+        return Err("name is empty");
+    }
+    if name.chars().any(char::is_whitespace) {
+        return Err("whitespace is not permitted");
+    }
+    if name.chars().any(char::is_control) {
+        return Err("control characters are not permitted");
+    }
+    if policy == crate::state::NetNamingPolicy::StrictCaseSensitive
+        && name.chars().any(|character| {
+            !character.is_ascii_alphanumeric() && "_.$:/![]<>-".find(character).is_none()
+        })
+    {
+        return Err("name contains a character outside the strict project syntax");
+    }
+    let opens = name
+        .chars()
+        .filter(|character| matches!(character, '[' | '<'))
+        .count();
+    let closes = name
+        .chars()
+        .filter(|character| matches!(character, ']' | '>'))
+        .count();
+    if opens != closes {
+        return Err("bus delimiters are unbalanced");
+    }
+    Ok(())
 }

@@ -15,10 +15,16 @@ use crate::common::AppState;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
 };
-use crate::ui::plot::{self, Axis, CursorPair, PlotSpec, Trace, XScale, fmt_si, sample_at};
+use crate::ui::plot::{
+    self, Axis, CursorPair, DisplayDecimation, PlotSpec, SampleInterpolation, Trace, XScale,
+    fmt_si_significant, fmt_significant, sample_at_with,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
+use crate::workbench::{
+    ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
+};
 
 use super::strip::{LegendChip, StripHeader};
 use super::{
@@ -35,11 +41,26 @@ enum TraceKind {
     MagnitudeDb,
     /// Phase in degrees (right axis, dashed).
     PhaseDeg,
+    /// Phase in radians (right axis, dashed).
+    PhaseRad,
+    /// Original real component of a complex source quantity.
+    Real,
+    /// Original imaginary component of a complex source quantity.
+    Imaginary,
+}
+
+impl TraceKind {
+    const fn is_phase(self) -> bool {
+        matches!(self, Self::PhaseDeg | Self::PhaseRad)
+    }
 }
 
 /// One trace of a strip, with owned `Arc` handles into the run data.
 struct StripTrace {
     waveform_index: usize,
+    /// Name of the source waveform in the immutable dataset. Display names
+    /// may be derived representations such as `re(V(out))`.
+    source_waveform_name: String,
     name: String,
     color: egui::Color32,
     x: SharedWaveformValues,
@@ -94,11 +115,17 @@ impl std::fmt::Debug for ModelsCache {
 
 /// Everything `build_models` reads: run data version, the display-run set,
 /// per-trace visibility and stored color, phase mode, and the theme palette.
-fn models_fingerprint(simulation: &SimulationState, phase_continuous: bool, t: &Tokens) -> u64 {
+fn models_fingerprint(
+    simulation: &SimulationState,
+    phase_continuous: bool,
+    complex_display: ComplexNumberDisplay,
+    t: &Tokens,
+) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     simulation.data_version.hash(&mut h);
     phase_continuous.hash(&mut h);
+    complex_display.hash(&mut h);
     for color in &t.color.traces {
         color.to_array().hash(&mut h);
     }
@@ -127,9 +154,10 @@ fn models_fingerprint(simulation: &SimulationState, phase_continuous: bool, t: &
 pub(super) fn cached_models(
     simulation: &SimulationState,
     results: &mut ResultsState,
+    complex_display: ComplexNumberDisplay,
     t: &Tokens,
 ) -> Arc<Vec<StripModel>> {
-    let fp = models_fingerprint(simulation, results.phase_continuous, t);
+    let fp = models_fingerprint(simulation, results.phase_continuous, complex_display, t);
     if let Some((cached_fp, models)) = &results.models.0
         && *cached_fp == fp
     {
@@ -140,6 +168,7 @@ pub(super) fn cached_models(
         &mut results.derived,
         t,
         results.phase_continuous,
+        complex_display,
     ));
     results.models.0 = Some((fp, Arc::clone(&models)));
     models
@@ -210,23 +239,43 @@ impl StripModel {
         }
     }
 
-    fn format_x(&self, x: f64) -> String {
-        fmt_si(
+    fn format_x(
+        &self,
+        x: f64,
+        significant_digits: usize,
+        quantity_policy: crate::quantity::QuantityPresentationPolicy,
+    ) -> String {
+        if self.x_unit == "Hz" {
+            return quantity_policy.format_frequency(x, significant_digits);
+        }
+        fmt_si_significant(
             x,
             if self.x_unit.is_empty() {
                 ""
             } else {
                 self.x_unit
             },
-            3,
+            significant_digits,
         )
     }
 
-    fn format_trace_value(&self, trace: &StripTrace, value: f64) -> String {
+    fn format_trace_value(
+        &self,
+        trace: &StripTrace,
+        value: f64,
+        significant_digits: usize,
+        quantity_policy: crate::quantity::QuantityPresentationPolicy,
+    ) -> String {
         match trace.kind {
-            TraceKind::Value => fmt_si(value, self.y_unit, 3),
-            TraceKind::MagnitudeDb => format!("{value:.1} dB"),
-            TraceKind::PhaseDeg => format!("{value:.1} °"),
+            TraceKind::Value => fmt_si_significant(value, self.y_unit, significant_digits),
+            TraceKind::MagnitudeDb => fmt_significant(value, significant_digits, " dB"),
+            TraceKind::PhaseDeg => {
+                quantity_policy.format_angle(value.to_radians(), significant_digits)
+            }
+            TraceKind::PhaseRad => quantity_policy.format_angle(value, significant_digits),
+            TraceKind::Real | TraceKind::Imaginary => {
+                fmt_si_significant(value, self.y_unit, significant_digits)
+            }
         }
     }
 }
@@ -238,6 +287,7 @@ pub(super) fn build_models(
     derived: &mut DerivedSeries,
     tokens: &Tokens,
     phase_continuous: bool,
+    complex_display: ComplexNumberDisplay,
 ) -> Vec<StripModel> {
     let display_runs = simulation.display_runs();
     let Some((&run, overlay_runs)) = display_runs.split_first() else {
@@ -249,7 +299,14 @@ pub(super) fn build_models(
         if analysis.waveforms.is_empty() {
             continue;
         }
+        let displays_cartesian_complex = analysis.analysis_type == AnalysisType::Ac
+            && complex_display == ComplexNumberDisplay::RealImaginary
+            && analysis
+                .waveforms
+                .iter()
+                .any(|waveform| waveform.complex.is_some());
         let (x_scale, x_unit, y_unit) = match analysis.analysis_type {
+            AnalysisType::Ac if displays_cartesian_complex => (XScale::Log10, "Hz", ""),
             AnalysisType::Ac => (XScale::Log10, "Hz", "dB"),
             AnalysisType::Noise | AnalysisType::Pnoise => (XScale::Log10, "Hz", "V^2/Hz"),
             AnalysisType::Transient => (XScale::Linear, "s", "V"),
@@ -262,8 +319,52 @@ pub(super) fn build_models(
             let color = waveform_color(waveform, waveform_index, tokens);
             let is_phase = waveform.name.starts_with("phase(");
             let is_mag = waveform.name.starts_with('|');
+            if displays_cartesian_complex {
+                if let Some(complex) = &waveform.complex {
+                    for (kind, name, color, y) in [
+                        (
+                            TraceKind::Real,
+                            format!("re({})", complex.source_name),
+                            color,
+                            Arc::clone(&complex.real),
+                        ),
+                        (
+                            TraceKind::Imaginary,
+                            format!("im({})", complex.source_name),
+                            tokens.color.traces[(waveform_index + 1) % tokens.color.traces.len()],
+                            Arc::clone(&complex.imag),
+                        ),
+                    ] {
+                        traces.push(StripTrace {
+                            waveform_index,
+                            source_waveform_name: waveform.name.clone(),
+                            name,
+                            color,
+                            x: Arc::clone(&waveform.x),
+                            y,
+                            kind,
+                            visible: waveform.visible,
+                            run_id: run.id,
+                            overlay: false,
+                        });
+                    }
+                    continue;
+                }
+                if is_phase
+                    && analysis.waveforms.iter().any(|candidate| {
+                        candidate.complex.as_ref().is_some_and(|complex| {
+                            waveform.name == format!("phase({})", complex.source_name)
+                        })
+                    })
+                {
+                    continue;
+                }
+            }
             let kind = if analysis.analysis_type == AnalysisType::Ac && is_phase {
-                TraceKind::PhaseDeg
+                match complex_display {
+                    ComplexNumberDisplay::MagnitudePhaseRadians => TraceKind::PhaseRad,
+                    _ => TraceKind::PhaseDeg,
+                }
             } else if analysis.analysis_type == AnalysisType::Ac && is_mag {
                 TraceKind::MagnitudeDb
             } else {
@@ -276,14 +377,18 @@ pub(super) fn build_models(
                 ),
                 // Continuous phase display: cached unwrapped copy of the
                 // wrapped samples, same key convention as `db`.
-                TraceKind::PhaseDeg if phase_continuous => derived.unwrapped(
+                TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
+                    derived,
                     (analysis_index as u64) << 32 | waveform_index as u64,
                     &waveform.y,
+                    phase_continuous,
+                    kind == TraceKind::PhaseRad,
                 ),
                 _ => Arc::clone(&waveform.y),
             };
             traces.push(StripTrace {
                 waveform_index,
+                source_waveform_name: waveform.name.clone(),
                 name: waveform.name.clone(),
                 color,
                 x: Arc::clone(&waveform.x),
@@ -309,9 +414,10 @@ pub(super) fn build_models(
 
             let mut contributed = false;
             for signal_index in 0..signal_trace_count {
-                let (signal_name, signal_color, signal_kind, signal_visible) = {
+                let (source_name, signal_name, signal_color, signal_kind, signal_visible) = {
                     let signal = &traces[signal_index];
                     (
+                        signal.source_waveform_name.clone(),
                         signal.name.clone(),
                         signal.color,
                         signal.kind,
@@ -322,7 +428,7 @@ pub(super) fn build_models(
                     .waveforms
                     .iter()
                     .enumerate()
-                    .find(|(_, waveform)| waveform.name == signal_name)
+                    .find(|(_, waveform)| waveform.name == source_name)
                 else {
                     continue;
                 };
@@ -331,13 +437,30 @@ pub(super) fn build_models(
                 let derived_key = run_mixed_key(base_key, overlay_run.id, true);
                 let y = match signal_kind {
                     TraceKind::MagnitudeDb => derived.db(derived_key, &overlay_waveform.y),
-                    TraceKind::PhaseDeg if phase_continuous => {
-                        derived.unwrapped(derived_key, &overlay_waveform.y)
+                    TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
+                        derived,
+                        derived_key,
+                        &overlay_waveform.y,
+                        phase_continuous,
+                        signal_kind == TraceKind::PhaseRad,
+                    ),
+                    TraceKind::Real => {
+                        let Some(complex) = &overlay_waveform.complex else {
+                            continue;
+                        };
+                        Arc::clone(&complex.real)
+                    }
+                    TraceKind::Imaginary => {
+                        let Some(complex) = &overlay_waveform.complex else {
+                            continue;
+                        };
+                        Arc::clone(&complex.imag)
                     }
                     _ => Arc::clone(&overlay_waveform.y),
                 };
                 traces.push(StripTrace {
                     waveform_index: overlay_index,
+                    source_waveform_name: source_name,
                     name: signal_name,
                     color: signal_color,
                     x: Arc::clone(&overlay_waveform.x),
@@ -378,14 +501,39 @@ pub(super) fn build_models(
     models
 }
 
+fn displayed_phase_series(
+    derived: &mut DerivedSeries,
+    key: u64,
+    phase_degrees: &SharedWaveformValues,
+    continuous: bool,
+    radians: bool,
+) -> SharedWaveformValues {
+    let degrees = if continuous {
+        derived.unwrapped(key, phase_degrees)
+    } else {
+        Arc::clone(phase_degrees)
+    };
+    if !radians {
+        return degrees;
+    }
+    // Radian conversion is a cached presentation series. Stored samples stay
+    // in their original degree representation for reproducibility/export.
+    const RADIANS_KEY_BIT: u64 = 1 << 61;
+    const CONTINUOUS_KEY_BIT: u64 = 1 << 60;
+    derived.get_or(
+        key ^ RADIANS_KEY_BIT ^ if continuous { CONTINUOUS_KEY_BIT } else { 0 },
+        || Arc::new(degrees.iter().map(|value| value.to_radians()).collect()),
+    )
+}
+
 /// Stable per-trace identity shared by the decimation, range, and
 /// measurement caches. Phase traces fold in the wrapped/continuous choice
 /// so a toggle never serves stale envelopes, ranges, or stats.
 fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
-    let continuous = (trace.kind == TraceKind::PhaseDeg && model.phase_continuous) as u64;
-    let base = (model.analysis_index as u64) << 40
-        | continuous << 39
-        | (trace.waveform_index as u64) << 2
+    let continuous = (trace.kind.is_phase() && model.phase_continuous) as u64;
+    let base = (model.analysis_index as u64) << 44
+        | continuous << 43
+        | (trace.waveform_index as u64) << 3
         | trace.kind as u64;
     run_mixed_key(base, trace.run_id, trace.overlay)
 }
@@ -396,7 +544,7 @@ fn y_range(derived: &mut DerivedSeries, model: &StripModel, phase: bool) -> Opti
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
     for trace in &model.traces {
-        let is_phase = trace.kind == TraceKind::PhaseDeg;
+        let is_phase = trace.kind.is_phase();
         if is_phase != phase || !trace.visible {
             continue;
         }
@@ -435,6 +583,22 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     (x1 > x0).then_some((x0, x1))
 }
 
+const fn cursor_interpolation(policy: CursorInterpolation) -> SampleInterpolation {
+    match policy {
+        CursorInterpolation::MonotoneCubicWhereValid => SampleInterpolation::MonotoneCubic,
+        CursorInterpolation::Linear => SampleInterpolation::Linear,
+        CursorInterpolation::NearestAcceptedPoint => SampleInterpolation::Nearest,
+    }
+}
+
+const fn display_decimation(policy: LargeDatasetDisplay) -> DisplayDecimation {
+    match policy {
+        LargeDatasetDisplay::EnvelopeExtrema => DisplayDecimation::EnvelopeExtrema,
+        LargeDatasetDisplay::UniformDisplaySampling => DisplayDecimation::Uniform,
+        LargeDatasetDisplay::NoDisplayDecimation => DisplayDecimation::FullResolution,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // center view
 // ---------------------------------------------------------------------------
@@ -442,7 +606,13 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
 /// Render the strip stack.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    let models = cached_models(&state.simulation, &mut state.ui.results, &t);
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &t,
+    );
     if models.is_empty() {
         let hint = if state.simulation.active_run().is_none() {
             let shortcut = state.ui.preferences.shortcuts().resolved_label(
@@ -962,6 +1132,73 @@ pub(crate) fn toggle_visibility(
     }
 }
 
+/// Serialize the active Waves cursor readout for the platform clipboard.
+/// This is the Edit → Copy consumer for the Units copied-value policy.
+pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
+    let x = state.ui.results.cursors.a?;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
+    let models = build_models(
+        &state.simulation,
+        &mut state.ui.results.derived,
+        &Tokens::default(),
+        state.ui.results.phase_continuous,
+        presentation.complex_number_display(),
+    );
+    let model = state
+        .ui
+        .results
+        .cursor_strip
+        .and_then(|index| models.iter().find(|model| model.analysis_index == index))?;
+
+    let mut text = String::new();
+    append_copied_cursor(&mut text, "A", x, model, interpolation, quantity_policy);
+    if let Some(b) = state.ui.results.cursors.b {
+        text.push('\n');
+        append_copied_cursor(&mut text, "B", b, model, interpolation, quantity_policy);
+    }
+    Some(text)
+}
+
+fn append_copied_cursor(
+    target: &mut String,
+    cursor: &str,
+    x: f64,
+    model: &StripModel,
+    interpolation: SampleInterpolation,
+    policy: crate::quantity::QuantityPresentationPolicy,
+) {
+    use std::fmt::Write as _;
+
+    let copied_x = if model.x_unit == "Hz" {
+        policy.copy_frequency(x)
+    } else {
+        policy.copy_si_value(x, model.x_unit)
+    };
+    let _ = writeln!(
+        target,
+        "{cursor} {} = {}",
+        model.x_label(),
+        copied_x.trim_end()
+    );
+    for trace in model.traces.iter().filter(|trace| trace.visible).take(6) {
+        let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
+        let copied = match trace.kind {
+            TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
+            TraceKind::PhaseRad => policy.copy_angle(value),
+            TraceKind::MagnitudeDb => policy.copy_si_value(value, "dB"),
+            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+                policy.copy_si_value(value, model.y_unit)
+            }
+        };
+        let _ = writeln!(target, "{} = {}", trace.name, copied.trim_end());
+    }
+    while target.ends_with('\n') {
+        target.pop();
+    }
+}
+
 fn show_strip_plot(
     ui: &mut Ui,
     state: &mut AppState,
@@ -969,6 +1206,10 @@ fn show_strip_plot(
     linked_cursor_domain: Option<CursorDomain>,
 ) {
     let t = Tokens::get(ui.ctx());
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let Some((x0, x1)) = x_range(model) else {
         well_hint(ui, "No data");
         return;
@@ -1012,25 +1253,35 @@ fn show_strip_plot(
     let (x0, x1) = view.x.unwrap_or((x0, x1));
     let (y0, y1) = view.y.unwrap_or((y0, y1));
 
-    let x_axis = match model.x_scale {
+    let mut x_axis = match model.x_scale {
         XScale::Log10 => Axis::log_decades(x0, x1, model.x_unit),
         XScale::Linear => Axis::linear(x0, x1, model.x_unit),
     };
+    if model.x_unit == "Hz" {
+        let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
+        x_axis = x_axis.with_display_transform(scale, offset, unit);
+    }
     let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, model.y_unit))
         .accessible_name("Waveform plot");
+    spec.display_decimation = display_decimation(presentation.large_dataset_display());
 
     // Right (phase) axis when phase traces are visible.
     let has_phase = model
         .traces
         .iter()
-        .any(|trace| trace.kind == TraceKind::PhaseDeg && trace.visible);
+        .any(|trace| trace.kind.is_phase() && trace.visible);
     if has_phase && let Some((p0, p1)) = y_range(&mut state.ui.results.derived, model, true) {
-        let axis = match view.y_right {
-            // Zoomed: plain linear ticks — the 45° lattice would emit
-            // hundreds of gridlines (or none) at arbitrary zoom depths.
-            Some((z0, z1)) => Axis::linear_with(z0, z1, "°", 5),
-            None => {
-                // Round phase bounds to 45° so ticks land on familiar angles.
+        let displays_radians = model
+            .traces
+            .iter()
+            .any(|trace| trace.kind == TraceKind::PhaseRad && trace.visible);
+        let axis = match (view.y_right, displays_radians) {
+            (Some((z0, z1)), true) => Axis::linear_with(z0, z1, "rad", 5),
+            (None, true) => Axis::linear_with(p0, p1, "rad", 5),
+            // Zoomed degree axes use plain linear ticks; the 45° lattice
+            // would be too dense at arbitrary zoom depths.
+            (Some((z0, z1)), false) => Axis::linear_with(z0, z1, "°", 5),
+            (None, false) => {
                 let p0 = (p0 / 45.0).floor() * 45.0;
                 let p1 = (p1 / 45.0).ceil() * 45.0;
                 let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
@@ -1038,6 +1289,17 @@ fn show_strip_plot(
                     .collect();
                 Axis::with_ticks(p0, p1, "°", &ticks)
             }
+        };
+        let axis = if displays_radians {
+            match quantity_policy.angle_display {
+                crate::quantity::AngleDisplay::Degrees => {
+                    axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
+                }
+                crate::quantity::AngleDisplay::Radians => axis,
+            }
+        } else {
+            let (scale, offset, unit) = quantity_policy.degree_axis_transform();
+            axis.with_display_transform(scale, offset, unit)
         };
         spec.y_right = Some((axis, t.color.traces[2]));
     }
@@ -1068,7 +1330,7 @@ fn show_strip_plot(
         if trace.overlay {
             plot_trace = plot_trace.thin();
         }
-        if trace.kind == TraceKind::PhaseDeg {
+        if trace.kind.is_phase() {
             plot_trace = plot_trace.right().dashed();
         }
         spec.traces.push(plot_trace);
@@ -1087,14 +1349,23 @@ fn show_strip_plot(
         .then_some(state.ui.results.cursors);
 
     let readout = |x: f64| -> Vec<(String, String)> {
-        let mut rows = vec![(model.x_label().to_owned(), model.format_x(x))];
+        let mut rows = vec![(
+            model.x_label().to_owned(),
+            model.format_x(x, significant_digits, quantity_policy),
+        )];
         for trace in model.traces.iter().filter(|t| t.visible).take(6) {
-            let value = sample_at(&trace.x, &trace.y, x);
-            rows.push((trace.name.clone(), model.format_trace_value(trace, value)));
+            let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
+            rows.push((
+                trace.name.clone(),
+                model.format_trace_value(trace, value, significant_digits, quantity_policy),
+            ));
         }
         for expr in exprs.iter().take(3) {
-            let value = sample_at(&expr.x, &expr.y, x);
-            rows.push((expr.label.clone(), fmt_si(value, "", 3)));
+            let value = sample_at_with(&expr.x, &expr.y, x, interpolation);
+            rows.push((
+                expr.label.clone(),
+                fmt_si_significant(value, "", significant_digits),
+            ));
         }
         rows
     };
@@ -1142,7 +1413,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         state.ui.results.clear_cursors();
     }
 
-    let models = cached_models(&state.simulation, &mut state.ui.results, &t);
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &t,
+    );
     let cursor_model = state
         .ui
         .results
@@ -1152,21 +1431,27 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let cursors = state.ui.results.cursors;
     match (cursor_model, cursors.a) {
         (Some(model), Some(a)) => {
-            cursor_block(ui, "A", c.accent, &model.format_x(a), &value_rows(model, a));
+            cursor_block(
+                ui,
+                "A",
+                c.accent,
+                &model.format_x(a, significant_digits, quantity_policy),
+                &value_rows(model, a, presentation, quantity_policy),
+            );
             if let Some(b) = cursors.b {
                 cursor_block(
                     ui,
                     "B",
                     c.traces[4],
-                    &model.format_x(b),
-                    &value_rows(model, b),
+                    &model.format_x(b, significant_digits, quantity_policy),
+                    &value_rows(model, b, presentation, quantity_policy),
                 );
                 cursor_block(
                     ui,
                     "B − A",
                     c.text_faint,
-                    &model.format_x(b - a),
-                    &delta_rows(model, a, b),
+                    &model.format_x(b - a, significant_digits, quantity_policy),
+                    &delta_rows(model, a, b, presentation, quantity_policy),
                 );
             }
         }
@@ -1196,43 +1481,81 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             "Measurements"
         };
         section_header(ui, title, None);
-        measurement_rows(ui, &mut state.ui.results.derived, model, window);
+        measurement_rows(
+            ui,
+            &mut state.ui.results.derived,
+            model,
+            window,
+            significant_digits,
+            quantity_policy,
+        );
     }
 }
 
-fn value_rows(model: &StripModel, x: f64) -> Vec<(String, String)> {
+fn value_rows(
+    model: &StripModel,
+    x: f64,
+    presentation: ResultPresentationPolicy,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> Vec<(String, String)> {
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     model
         .traces
         .iter()
         .filter(|trace| trace.visible)
         .take(6)
         .map(|trace| {
-            let value = sample_at(&trace.x, &trace.y, x);
-            (trace.name.clone(), model.format_trace_value(trace, value))
+            let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
+            (
+                trace.name.clone(),
+                model.format_trace_value(trace, value, significant_digits, quantity_policy),
+            )
         })
         .collect()
 }
 
-fn delta_rows(model: &StripModel, a: f64, b: f64) -> Vec<(String, String)> {
+fn delta_rows(
+    model: &StripModel,
+    a: f64,
+    b: f64,
+    presentation: ResultPresentationPolicy,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> Vec<(String, String)> {
     let mut rows = Vec::new();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let dx = b - a;
     match model.x_scale {
         XScale::Linear if model.x_unit == "s" => {
-            rows.push(("Δt".to_owned(), fmt_si(dx, "s", 3)));
+            rows.push((
+                "Δt".to_owned(),
+                fmt_si_significant(dx, "s", significant_digits),
+            ));
             if dx != 0.0 {
-                rows.push(("1/Δt".to_owned(), fmt_si(1.0 / dx.abs(), "Hz", 2)));
+                rows.push((
+                    "1/Δt".to_owned(),
+                    quantity_policy.format_frequency(1.0 / dx.abs(), significant_digits),
+                ));
             }
         }
         XScale::Log10 => {
-            rows.push(("Δf".to_owned(), fmt_si(dx, "Hz", 2)));
+            rows.push((
+                "Δf".to_owned(),
+                quantity_policy.format_frequency(dx, significant_digits),
+            ));
         }
-        _ => rows.push(("Δx".to_owned(), fmt_si(dx, model.x_unit, 3))),
+        _ => rows.push((
+            "Δx".to_owned(),
+            fmt_si_significant(dx, model.x_unit, significant_digits),
+        )),
     }
     for trace in model.traces.iter().filter(|t| t.visible).take(4) {
-        let dv = sample_at(&trace.x, &trace.y, b) - sample_at(&trace.x, &trace.y, a);
+        let dv = sample_at_with(&trace.x, &trace.y, b, interpolation)
+            - sample_at_with(&trace.x, &trace.y, a, interpolation);
         rows.push((
             format!("Δ{}", trace.name),
-            model.format_trace_value(trace, dv),
+            model.format_trace_value(trace, dv, significant_digits, quantity_policy),
         ));
     }
     // dB/decade slope between cursors on log strips.
@@ -1244,8 +1567,12 @@ fn delta_rows(model: &StripModel, a: f64, b: f64) -> Vec<(String, String)> {
                 .iter()
                 .find(|t| t.kind == TraceKind::MagnitudeDb && t.visible)
         {
-            let ddb = sample_at(&mag.x, &mag.y, b) - sample_at(&mag.x, &mag.y, a);
-            rows.push(("slope".to_owned(), format!("{:.1} dB/dec", ddb / dlog)));
+            let ddb = sample_at_with(&mag.x, &mag.y, b, interpolation)
+                - sample_at_with(&mag.x, &mag.y, a, interpolation);
+            rows.push((
+                "slope".to_owned(),
+                fmt_significant(ddb / dlog, significant_digits, " dB/dec"),
+            ));
         }
     }
     rows
@@ -1337,6 +1664,8 @@ fn measurement_rows(
     derived: &mut DerivedSeries,
     model: &StripModel,
     window: Option<(f64, f64)>,
+    significant_digits: usize,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
 ) {
     use crate::waveform::measurements as basic;
 
@@ -1366,14 +1695,22 @@ fn measurement_rows(
         };
         let fmt = |v: f64| -> String {
             match trace.kind {
-                TraceKind::Value => fmt_si(v, model.y_unit, 3),
-                TraceKind::MagnitudeDb => format!("{v:.1} dB"),
-                TraceKind::PhaseDeg => format!("{v:.1} °"),
+                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+                    fmt_si_significant(v, model.y_unit, significant_digits)
+                }
+                TraceKind::MagnitudeDb => fmt_significant(v, significant_digits, " dB"),
+                TraceKind::PhaseDeg => {
+                    quantity_policy.format_angle(v.to_radians(), significant_digits)
+                }
+                TraceKind::PhaseRad => quantity_policy.format_angle(v, significant_digits),
             }
         };
         rows.push((format!("{} min", trace.name), fmt(min)));
         rows.push((format!("{} max", trace.name), fmt(max)));
-        if trace.kind == TraceKind::Value {
+        if matches!(
+            trace.kind,
+            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary
+        ) {
             rows.push((format!("{} rms", trace.name), fmt(rms)));
         }
     }
@@ -1386,6 +1723,7 @@ mod tests {
     use super::*;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::state::{AnalysisResult, AnalysisResultProvenance, SimulationRun, WaveformData};
+    use crate::workbench::ChoicePreference;
 
     #[test]
     fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
@@ -1397,7 +1735,13 @@ mod tests {
         );
         let mut derived = DerivedSeries::default();
 
-        let models = build_models(&simulation, &mut derived, &Tokens::default(), false);
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+        );
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].y_unit, "V^2/Hz");
@@ -1453,7 +1797,13 @@ mod tests {
         assert!(simulation.select_analysis(0));
         let mut derived = DerivedSeries::default();
 
-        let models = build_models(&simulation, &mut derived, &Tokens::default(), false);
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+        );
 
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].signal_trace_count, 1);
@@ -1464,5 +1814,67 @@ mod tests {
         assert_eq!(models[1].traces.len(), 2);
         assert!(models[1].traces[1].overlay);
         assert_eq!(models[1].traces[1].y.as_slice(), &[201.0, 202.0]);
+    }
+
+    #[test]
+    fn complex_display_policy_uses_original_components_or_radian_phase() {
+        let magnitude = WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 10.0], "#fff")
+            .with_complex_components("V(out)", vec![0.8, 6.0], vec![0.6, 8.0]);
+        let phase = WaveformData::new("phase(V(out))", vec![1.0, 10.0], vec![180.0, 90.0], "#aaa");
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![magnitude, phase]),
+        );
+
+        let mut derived = DerivedSeries::default();
+        let cartesian = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::RealImaginary,
+        );
+        assert_eq!(cartesian[0].signal_trace_count, 2);
+        assert_eq!(cartesian[0].y_unit, "");
+        assert_eq!(cartesian[0].traces[0].name, "re(V(out))");
+        assert_eq!(cartesian[0].traces[0].y.as_slice(), &[0.8, 6.0]);
+        assert_eq!(cartesian[0].traces[1].name, "im(V(out))");
+        assert_eq!(cartesian[0].traces[1].y.as_slice(), &[0.6, 8.0]);
+
+        let radians = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseRadians,
+        );
+        assert!(matches!(radians[0].traces[0].kind, TraceKind::MagnitudeDb));
+        assert_eq!(radians[0].traces[0].y.as_slice(), &[0.0, 20.0]);
+        assert!(matches!(radians[0].traces[1].kind, TraceKind::PhaseRad));
+        assert!((radians[0].traces[1].y[0] - std::f64::consts::PI).abs() < 1e-12);
+        assert!((radians[0].traces[1].y[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn cursor_copy_uses_explicit_scientific_si_policy() {
+        let mut state = AppState::default();
+        state.simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
+                WaveformData::new("onoise", vec![1.0, 10.0], vec![2.0e-18, 4.0e-18], "#fff"),
+            ]),
+        );
+        state.ui.results.cursor_strip = Some(0);
+        state.ui.results.cursors.a = Some(10.0);
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::CopiedValueFormat, 1)
+            .unwrap();
+
+        let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
+
+        assert!(copied.contains("A f = 1.00000000000000000e1 Hz"));
+        assert!(copied.contains("onoise = 4."));
+        assert!(copied.contains("e-18 V^2/Hz"));
     }
 }

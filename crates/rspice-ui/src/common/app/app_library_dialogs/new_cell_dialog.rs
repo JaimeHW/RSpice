@@ -172,8 +172,28 @@ impl RSpiceApp {
             cell.add_view(View::new("testbench", ViewType::Testbench));
         }
 
+        let seeded_schematic = self.state.new_schematic_document();
         if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
             lib.add_cell(cell);
+            for view_name in [
+                self.state
+                    .dialogs
+                    .new_cell_create_schematic
+                    .then_some("schematic"),
+                self.state
+                    .dialogs
+                    .new_cell_create_testbench
+                    .then_some("testbench"),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let reference = crate::state::CellViewRef::new(&library, &name, view_name);
+                self.state
+                    .workspace
+                    .schematic_buffers
+                    .insert(reference.key(), seeded_schematic.clone());
+            }
             self.state.push_user_message(ConsoleMessage::info(format!(
                 "Created cell '{}' in library '{}'",
                 name, library
@@ -203,5 +223,59 @@ impl RSpiceApp {
         }
 
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{Library, OperatingPointAnnotationPolicy, SchematicGridPitch};
+    use crate::workbench::ChoicePreference;
+
+    #[test]
+    fn creating_cell_seeds_every_schematic_like_view_at_creation_time() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .library_manager
+            .add_library(Library::new("policy_test"));
+        app.state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::SchematicGrid, 2)
+            .unwrap();
+        app.state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::OperatingPointAnnotation, 2)
+            .unwrap();
+        app.state.dialogs.new_cell_library = "policy_test".to_owned();
+        app.state.dialogs.new_cell_name = "amp".to_owned();
+        app.state.dialogs.new_cell_create_schematic = true;
+        app.state.dialogs.new_cell_create_testbench = true;
+
+        let outcome = app.handle_new_cell_create_action();
+
+        assert!(outcome.close);
+        for view in ["schematic", "testbench"] {
+            let key = crate::state::CellViewRef::new("policy_test", "amp", view).key();
+            let document = app
+                .state
+                .workspace
+                .schematic_buffers
+                .get(&key)
+                .expect("document seeded when view is created");
+            assert_eq!(
+                document.document_policy.grid_pitch,
+                SchematicGridPitch::Metric
+            );
+            assert_eq!(
+                document.grid_size,
+                SchematicGridPitch::Metric.canvas_grid_size()
+            );
+            assert_eq!(
+                document.document_policy.operating_point_annotations,
+                OperatingPointAnnotationPolicy::Hidden
+            );
+        }
     }
 }

@@ -10,6 +10,9 @@ use egui::{Context, Ui};
 
 use super::{ConsoleMessage, RSpiceApp};
 use crate::common::app::SimSetupState;
+use crate::quantity::{
+    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
+};
 use crate::simulation::dialog::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
 };
@@ -122,15 +125,74 @@ fn algorithm_tab(ui: &mut Ui, opts: &mut OptionsDialogState) {
     }
 }
 
-fn limits_tab(ui: &mut Ui, opts: &mut OptionsDialogState) {
-    input_row(ui, "Min step", &mut opts.min_timestep);
-    input_row(ui, "Max step", &mut opts.max_timestep);
+fn typed_input_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
+    let response = input_row(ui, label, value);
+    if response.lost_focus()
+        && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
+    {
+        let schema_value = if kind == QuantityInputKind::Temperature {
+            parsed - 273.15
+        } else {
+            parsed
+        };
+        *value = format!("{schema_value:.17e}");
+    }
+}
+
+fn limits_tab(
+    ui: &mut Ui,
+    opts: &mut OptionsDialogState,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
+    typed_input_row(
+        ui,
+        "Min step",
+        &mut opts.min_timestep,
+        QuantityInputKind::Time,
+        policy,
+        locale,
+    );
+    typed_input_row(
+        ui,
+        "Max step",
+        &mut opts.max_timestep,
+        QuantityInputKind::Time,
+        policy,
+        locale,
+    );
     input_row(ui, "Cut factor", &mut opts.timestep_factor);
 }
 
-fn temperature_tab(ui: &mut Ui, opts: &mut OptionsDialogState) {
-    input_row(ui, "TEMP (C)", &mut opts.temp);
-    input_row(ui, "TNOM (C)", &mut opts.tnom);
+fn temperature_tab(
+    ui: &mut Ui,
+    opts: &mut OptionsDialogState,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
+    typed_input_row(
+        ui,
+        "TEMP",
+        &mut opts.temp,
+        QuantityInputKind::Temperature,
+        policy,
+        locale,
+    );
+    typed_input_row(
+        ui,
+        "TNOM",
+        &mut opts.tnom,
+        QuantityInputKind::Temperature,
+        policy,
+        locale,
+    );
     check_row(ui, "Verbose diagnostics", &mut opts.verbose);
     check_row(ui, "Save internal nodes", &mut opts.save_internals);
 }
@@ -190,6 +252,8 @@ impl RSpiceApp {
         };
 
         let choice = {
+            let quantity_policy = self.state.ui.preferences.quantity_presentation_policy();
+            let number_locale = self.state.ui.number_locale;
             let setup = &mut self.state.sim_setup;
             Dialog::new("Simulate", "Simulation options", "OK")
                 .description(
@@ -214,8 +278,18 @@ impl RSpiceApp {
                         0 => accuracy_tab(ui, &mut setup.options_draft),
                         1 => convergence_tab(ui, &mut setup.options_draft),
                         2 => algorithm_tab(ui, &mut setup.options_draft),
-                        3 => limits_tab(ui, &mut setup.options_draft),
-                        _ => temperature_tab(ui, &mut setup.options_draft),
+                        3 => limits_tab(
+                            ui,
+                            &mut setup.options_draft,
+                            quantity_policy,
+                            number_locale,
+                        ),
+                        _ => temperature_tab(
+                            ui,
+                            &mut setup.options_draft,
+                            quantity_policy,
+                            number_locale,
+                        ),
                     }
 
                     if !setup.options_errors.is_empty() {

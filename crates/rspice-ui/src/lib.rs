@@ -94,6 +94,11 @@ pub mod state;
 /// Utility functions and helpers
 pub mod utils;
 
+/// Unit-safe user presentation and UI quantity-input policy. Values entering
+/// or leaving this module are always expressed in their documented SI base
+/// units; deck dialect and PDK database-unit semantics live elsewhere.
+pub mod quantity;
+
 /// Shared output specification helpers for analysis/sensitivity paths
 pub(crate) mod output_spec;
 

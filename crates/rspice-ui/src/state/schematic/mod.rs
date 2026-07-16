@@ -19,6 +19,7 @@ mod canvas_cache;
 mod clipboard;
 mod component;
 mod component_type;
+mod document_policy;
 mod net_highlight;
 mod net_label;
 mod point;
@@ -37,6 +38,10 @@ pub use canvas_cache::CanvasCache;
 pub use clipboard::ClipboardData;
 pub use component::{Component, LibraryCellInstance};
 pub use component_type::ComponentType;
+pub use document_policy::{
+    NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
+    SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,
+};
 pub use net_highlight::{NetGraph, NetHighlightState};
 pub use net_label::{Junction, NetLabel};
 pub use point::{LabelPosition, Point};
