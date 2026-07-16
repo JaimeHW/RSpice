@@ -181,6 +181,7 @@ impl Netlist {
             .into());
         }
 
+        ensure_parse_not_aborted(abort)?;
         let directive = self
             .device_initial_conditions
             .as_mut()
@@ -191,7 +192,6 @@ impl Netlist {
             resolved_path: Some(loaded.resolved_path),
             content_identity: Some(blake3::hash(loaded.content.as_bytes()).to_hex().to_string()),
         };
-        ensure_parse_not_aborted(abort)?;
         Ok(())
     }
 }
@@ -607,6 +607,50 @@ mod tests {
             directive.entries.is_empty(),
             "valid prefix must not leak into the AST after a later failure"
         );
+    }
+
+    #[test]
+    fn cancellation_at_commit_boundary_leaves_external_directive_unresolved() {
+        #[derive(Debug)]
+        struct OneRecordProvider;
+        impl DeviceInitialConditionSourceProvider for OneRecordProvider {
+            fn load_device_initial_condition_source_with_abort(
+                &self,
+                _execution_context: &Path,
+                _requested_path: &str,
+                _abort: &dyn AbortSignal,
+            ) -> Result<DeviceInitialConditionSourceText, ParseWithAbortError> {
+                Ok(DeviceInitialConditionSourceText {
+                    resolved_path: PathBuf::from("commit-boundary.dat"),
+                    content: Arc::from("C1 IC=5\n"),
+                })
+            }
+        }
+
+        let mut netlist =
+            Netlist::parse("cancel file\n.INITCOND FILE cancel.dat\nC1 1 0 1u\n.END\n")
+                .expect("unresolved file directive parses");
+        let abort = crate::abort_signal::CountingAbort::new(4);
+        let result =
+            netlist.resolve_device_initial_condition_source_with_abort(&OneRecordProvider, &abort);
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert_eq!(
+            abort.count(),
+            5,
+            "edge-triggered abort must fire at the final pre-commit poll"
+        );
+        let directive = netlist
+            .device_initial_conditions
+            .expect("cancelled resolution retains directive");
+        assert!(directive.entries.is_empty());
+        assert!(matches!(
+            directive.source,
+            DeviceInitialConditionSource::File {
+                resolved_path: None,
+                content_identity: None,
+                ..
+            }
+        ));
     }
 
     #[test]
