@@ -28,9 +28,13 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::product::AnalysisInstanceId;
 #[cfg(test)]
 use crate::state::Wire;
-use crate::state::{Component, ComponentType, Point, SchematicState};
+use crate::state::{
+    CellViewRef, Component, ComponentType, DesignVariable, DesignVariableScope, Point,
+    SchematicState,
+};
 
 mod connectivity;
 mod formatting;
@@ -87,7 +91,12 @@ pub fn generate_netlist_with_analysis(
     schematic: &SchematicState,
     analysis_lines: &[String],
 ) -> NetlistResult {
-    finish_generation(NetlistGenerator::new(schematic), schematic, analysis_lines)
+    finish_generation(
+        NetlistGenerator::new(schematic),
+        schematic,
+        analysis_lines,
+        &[],
+    )
 }
 
 /// Generate a netlist with project-cell hierarchy: placed cells whose
@@ -102,15 +111,104 @@ pub fn generate_netlist_hierarchical(
         NetlistGenerator::with_hierarchy(schematic, hierarchy),
         schematic,
         analysis_lines,
+        &[],
     )
+}
+
+/// Resolution context for project design variables. Scope matching uses exact
+/// persisted identities; display labels never participate in execution.
+#[derive(Debug, Clone, Copy)]
+pub struct DesignVariableNetlistContext<'a> {
+    pub active_cell: &'a CellViewRef,
+    pub analysis_instances: &'a [AnalysisInstanceId],
+}
+
+/// Generate a self-contained hierarchical deck with the exact design
+/// variables applicable to this cell/view and run set.
+pub fn generate_netlist_hierarchical_with_variables(
+    schematic: &SchematicState,
+    analysis_lines: &[String],
+    hierarchy: &HierarchySource<'_>,
+    variables: &[DesignVariable],
+    context: DesignVariableNetlistContext<'_>,
+) -> NetlistResult {
+    let parameter_lines = match design_variable_parameter_lines(variables, context) {
+        Ok(lines) => lines,
+        Err(errors) => {
+            let mut result = finish_generation(
+                NetlistGenerator::with_hierarchy(schematic, hierarchy),
+                schematic,
+                analysis_lines,
+                &[],
+            );
+            result.errors.extend(errors);
+            return result;
+        }
+    };
+    finish_generation(
+        NetlistGenerator::with_hierarchy(schematic, hierarchy),
+        schematic,
+        analysis_lines,
+        &parameter_lines,
+    )
+}
+
+/// Canonical parameter lines sorted by case-insensitive SPICE identifier.
+/// Reordering equivalent project rows therefore cannot perturb executable
+/// source or its content digest.
+pub fn design_variable_parameter_lines(
+    variables: &[DesignVariable],
+    context: DesignVariableNetlistContext<'_>,
+) -> Result<Vec<String>, Vec<String>> {
+    let mut errors = Vec::new();
+    let mut ordered = BTreeMap::<String, &DesignVariable>::new();
+    for (index, variable) in variables.iter().enumerate() {
+        if let Err(error) = variable.validate() {
+            errors.push(format!("design variable {} is invalid: {error}", index + 1));
+            continue;
+        }
+        let canonical = variable.name.to_ascii_lowercase();
+        if ordered.insert(canonical, variable).is_some() {
+            errors.push(format!(
+                "design variable '{}' duplicates another case-insensitive parameter name",
+                variable.name
+            ));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    Ok(ordered
+        .into_values()
+        .filter(|variable| design_variable_applies(variable, context))
+        .map(DesignVariable::netlist_statement)
+        .collect())
+}
+
+fn design_variable_applies(
+    variable: &DesignVariable,
+    context: DesignVariableNetlistContext<'_>,
+) -> bool {
+    match &variable.scope {
+        DesignVariableScope::Project => true,
+        // The payload owner is the active named simulation plan/testbench.
+        // Presentation view type is not execution authority.
+        DesignVariableScope::Testbench => true,
+        DesignVariableScope::SelectedCell { cell } => cell == context.active_cell,
+        DesignVariableScope::SelectedAnalysis { analysis_id } => {
+            context.analysis_instances.contains(analysis_id)
+        }
+    }
 }
 
 fn finish_generation(
     mut generator: NetlistGenerator<'_>,
     schematic: &SchematicState,
     analysis_lines: &[String],
+    parameter_lines: &[String],
 ) -> NetlistResult {
-    let netlist = generator.generate_with_analysis(analysis_lines);
+    let netlist = generator.generate_with_analysis_and_parameters(analysis_lines, parameter_lines);
 
     // Build the nets map from the generator's data
     let mut nets: HashMap<String, Vec<Point>> = HashMap::new();
@@ -415,6 +513,14 @@ impl<'a> NetlistGenerator<'a> {
 
     /// Generate netlist with custom analysis commands
     pub fn generate_with_analysis(&mut self, analysis_lines: &[String]) -> String {
+        self.generate_with_analysis_and_parameters(analysis_lines, &[])
+    }
+
+    fn generate_with_analysis_and_parameters(
+        &mut self,
+        analysis_lines: &[String],
+        parameter_lines: &[String],
+    ) -> String {
         self.reset_generation_state();
 
         // Phase 1: Extract node connectivity
@@ -434,6 +540,14 @@ impl<'a> NetlistGenerator<'a> {
 
         // Phase 3: Generate header
         self.generate_header();
+
+        // Phase 3b: Emit typed project parameters before any instance or
+        // subcircuit can reference them.
+        if !parameter_lines.is_empty() {
+            self.lines.push("* Design variables".to_owned());
+            self.lines.extend(parameter_lines.iter().cloned());
+            self.lines.push(String::new());
+        }
 
         // Phase 4: Generate include directives for library-bound instances
         self.generate_library_view_includes();
@@ -581,6 +695,59 @@ mod tests {
         ]);
         Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
             .with_library_cell(binding)
+    }
+
+    fn variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {
+        DesignVariable::new(
+            name,
+            expression,
+            crate::state::DesignVariableQuantity::Resistance,
+            scope,
+            "netlist fixture",
+            None,
+            crate::state::DesignVariableSweepEligibility::FixedParameter,
+            crate::state::DesignVariableOverridePolicy::InheritOwnerOnly,
+        )
+        .expect("fixture variable is valid")
+    }
+
+    #[test]
+    fn design_variable_parameter_lines_are_canonical_and_plan_scoped() {
+        let active_cell = CellViewRef::default_top();
+        let other_cell = CellViewRef::new("user", "other", "schematic");
+        let selected_analysis = AnalysisInstanceId::new();
+        let variables = vec![
+            variable("ZLOAD", "20 kohm", DesignVariableScope::Project),
+            variable("ALOAD", "10 kohm", DesignVariableScope::Testbench),
+            variable(
+                "CELL_ONLY",
+                "30 kohm",
+                DesignVariableScope::SelectedCell { cell: other_cell },
+            ),
+            variable(
+                "ANALYSIS_ONLY",
+                "40 kohm",
+                DesignVariableScope::SelectedAnalysis {
+                    analysis_id: selected_analysis,
+                },
+            ),
+        ];
+        let lines = design_variable_parameter_lines(
+            &variables,
+            DesignVariableNetlistContext {
+                active_cell: &active_cell,
+                analysis_instances: &[selected_analysis],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            lines,
+            [
+                ".param ALOAD=1.00000000000000000e4",
+                ".param ANALYSIS_ONLY=4.00000000000000000e4",
+                ".param ZLOAD=2.00000000000000000e4",
+            ]
+        );
     }
 
     #[test]

@@ -1431,6 +1431,15 @@ fn revert_document(
             })?;
             state.sim_setup = context.simulation_plan;
             state.sim_setup.prepare_after_restore();
+            state.workspace.simulation_plan_payloads = baseline.workspace.simulation_plan_payloads;
+            if let Some(plan_id) = state
+                .sim_setup
+                .analysis_plan
+                .as_ref()
+                .map(crate::simulation::plan::SimulationPlan::id)
+            {
+                state.workspace.sync_legacy_specs_projection(plan_id);
+            }
         }
         ProjectDocumentId::ModelCatalog => {
             let context = baseline.execution_context.ok_or_else(|| {
@@ -1636,6 +1645,16 @@ fn overlay_document(
                 })?
                 .simulation_plan
                 .clone();
+            target.workspace.simulation_plan_payloads =
+                working.workspace.simulation_plan_payloads.clone();
+            if let Some(plan_id) = target
+                .execution_context
+                .as_ref()
+                .and_then(|context| context.simulation_plan.analysis_plan.as_ref())
+                .map(crate::simulation::plan::SimulationPlan::id)
+            {
+                target.workspace.sync_legacy_specs_projection(plan_id);
+            }
         }
         ProjectDocumentId::ModelCatalog => {
             ensure_execution_context(target, working)?.model_libraries = working

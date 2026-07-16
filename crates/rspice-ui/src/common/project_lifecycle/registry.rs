@@ -98,7 +98,9 @@ pub(crate) fn active_document(
         Workspace::Design => ProjectDocumentId::CellView(active_view.clone()),
         Workspace::Simulate => ProjectDocumentId::SimulationPlan,
         Workspace::Results => ProjectDocumentId::ResultHistory,
-        Workspace::Verify => ProjectDocumentId::VerificationSpecifications,
+        // Specifications are owned by the active named simulation plan so a
+        // clone can copy or omit them truthfully as one atomic payload.
+        Workspace::Verify => ProjectDocumentId::SimulationPlan,
         Workspace::Models => ProjectDocumentId::ModelCatalog,
         Workspace::Netlist => ProjectDocumentId::NetlistSource,
     }
@@ -124,6 +126,14 @@ fn document_digests(
     project: &ProjectFile,
 ) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
     let mut documents = HashMap::new();
+    let mut plan_payloads = project
+        .workspace
+        .simulation_plan_payloads
+        .iter()
+        .map(|record| (record.plan_id, &record.payload))
+        .collect::<Vec<_>>();
+    plan_payloads
+        .sort_by(|(left, _), (right, _)| left.as_uuid().as_bytes().cmp(right.as_uuid().as_bytes()));
 
     documents.insert(
         ProjectDocumentId::ProjectConfiguration,
@@ -131,12 +141,13 @@ fn document_digests(
     );
     documents.insert(
         ProjectDocumentId::SimulationPlan,
-        digest(
-            &project
+        digest(&(
+            project
                 .execution_context
                 .as_ref()
                 .map(|context| &context.simulation_plan),
-        )?,
+            plan_payloads,
+        ))?,
     );
     documents.insert(
         ProjectDocumentId::ModelCatalog,
@@ -153,7 +164,9 @@ fn document_digests(
     );
     documents.insert(
         ProjectDocumentId::VerificationSpecifications,
-        digest(&project.workspace.specs)?,
+        // Retained as a stable registry identity for older callers. Current
+        // specifications participate in the simulation-plan payload digest.
+        digest(&())?,
     );
     documents.insert(
         ProjectDocumentId::NetlistSource,
@@ -374,7 +387,10 @@ fn write_canonical_json(value: &serde_json::Value, out: &mut Vec<u8>) -> Result<
 mod tests {
     use super::*;
     use crate::common::app::AppState;
-    use crate::state::{ComponentType, Point};
+    use crate::state::{
+        ComponentType, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
+        DesignVariableScope, DesignVariableSweepEligibility, Point, SimulationPlanPayloadRecord,
+    };
 
     #[test]
     fn canonical_digest_is_independent_of_map_insertion_order() {
@@ -439,5 +455,68 @@ mod tests {
             .expect("rebuild edited registry");
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
+    }
+
+    #[test]
+    fn simulation_plan_payload_digest_is_owner_order_independent() {
+        let state = AppState::default();
+        let mut first = super::super::snapshot(&state).expect("first snapshot");
+        let mut second = first.clone();
+        first
+            .workspace
+            .simulation_plan_payloads
+            .push(SimulationPlanPayloadRecord {
+                plan_id: crate::product::SimulationPlanId::new(),
+                payload: Default::default(),
+            });
+        second.workspace.simulation_plan_payloads = first
+            .workspace
+            .simulation_plan_payloads
+            .iter()
+            .cloned()
+            .rev()
+            .collect();
+
+        let first_digest = document_digests(&first)
+            .unwrap()
+            .remove(&ProjectDocumentId::SimulationPlan)
+            .unwrap();
+        let second_digest = document_digests(&second)
+            .unwrap()
+            .remove(&ProjectDocumentId::SimulationPlan)
+            .unwrap();
+        assert_eq!(first_digest, second_digest);
+    }
+
+    #[test]
+    fn design_variable_edit_marks_the_simulation_plan_document_dirty() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(4, 6));
+        let baseline = super::super::snapshot(&state).expect("baseline snapshot");
+        let plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
+        let variable = DesignVariable::new(
+            "RLOAD",
+            "10 kohm",
+            DesignVariableQuantity::Resistance,
+            DesignVariableScope::Testbench,
+            "Load resistance",
+            None,
+            DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+        )
+        .unwrap();
+        state
+            .workspace
+            .ensure_active_plan_data(plan_id)
+            .design_variables
+            .push(variable);
+
+        let current = super::super::snapshot(&state).expect("current snapshot");
+        let mut registry = DocumentRegistry::default();
+        registry.rebuild(&current, Some(&baseline)).unwrap();
+        assert!(registry.is_dirty(&ProjectDocumentId::SimulationPlan));
+        assert!(!registry.is_dirty(&ProjectDocumentId::VerificationSpecifications));
     }
 }

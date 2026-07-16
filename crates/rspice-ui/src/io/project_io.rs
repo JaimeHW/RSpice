@@ -191,11 +191,17 @@ impl ProjectFile {
     }
 
     pub fn new_with_execution_context(
-        workspace: ProjectWorkspace,
+        mut workspace: ProjectWorkspace,
         libraries: LibraryManager,
         simulation_results: ProjectSimulationResults,
         execution_context: ProjectExecutionContext,
     ) -> Self {
+        if let Some(plan) = &execution_context.simulation_plan.analysis_plan {
+            workspace.migrate_active_plan_data(plan.id());
+        }
+        for plan in execution_context.simulation_plan.inactive_plans() {
+            workspace.migrate_inactive_plan_data(plan.id());
+        }
         Self {
             version: ProjectVersion::current(),
             workspace,
@@ -217,12 +223,110 @@ impl ProjectFile {
             .project
             .validate()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
+        self.workspace
+            .validate_simulation_configuration()
+            .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
         let view_index = self.validate_library_tree()?;
         self.validate_workspace_references(&view_index)?;
         if let Some(context) = &self.execution_context {
             context.validate().map_err(|error| {
                 ProjectIoError::InvalidData(format!("execution context is invalid: {error}"))
             })?;
+        }
+        self.validate_simulation_configuration_references()?;
+        Ok(())
+    }
+
+    fn validate_simulation_configuration_references(&self) -> Result<(), ProjectIoError> {
+        let setup = self
+            .execution_context
+            .as_ref()
+            .map(|context| &context.simulation_plan);
+        let find_plan = |plan_id: SimulationPlanId| {
+            setup.and_then(|setup| {
+                setup
+                    .analysis_plan
+                    .as_ref()
+                    .filter(|plan| plan.id() == plan_id)
+                    .or_else(|| {
+                        setup
+                            .inactive_plans()
+                            .iter()
+                            .find(|plan| plan.id() == plan_id)
+                            .map(crate::common::app::StoredSimulationPlan::analysis_plan)
+                    })
+            })
+        };
+
+        for record in &self.workspace.simulation_plan_payloads {
+            let plan_id = record.plan_id;
+            let plan = find_plan(plan_id).ok_or_else(|| {
+                ProjectIoError::InvalidData(format!(
+                    "workspace.simulation_plan_payloads[{plan_id}] has no owning simulation plan"
+                ))
+            })?;
+            for (index, variable) in record.payload.design_variables.iter().enumerate() {
+                match &variable.scope {
+                    crate::state::DesignVariableScope::SelectedCell { cell } => {
+                        self.validate_library_reference(
+                            &format!(
+                                "workspace.simulation_plan_payloads[{plan_id}].design_variables[{index}].scope.cell"
+                            ),
+                            cell,
+                        )?;
+                    }
+                    crate::state::DesignVariableScope::SelectedAnalysis { analysis_id } => {
+                        if plan.instance(*analysis_id).is_none() {
+                            return Err(ProjectIoError::InvalidData(format!(
+                                "workspace.simulation_plan_payloads[{plan_id}].design_variables[{index}].scope.analysis_id references analysis {analysis_id}, which is absent from its owning plan"
+                            )));
+                        }
+                    }
+                    crate::state::DesignVariableScope::Testbench
+                    | crate::state::DesignVariableScope::Project => {}
+                }
+            }
+
+            for (index, output) in record.payload.saved_outputs.iter().enumerate() {
+                if let crate::state::SavedOutputCompatibility::SelectedAnalysis { analysis_id } =
+                    &output.compatible_analyses
+                    && plan.instance(*analysis_id).is_none()
+                {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "workspace.simulation_plan_payloads[{plan_id}].saved_outputs[{index}].compatible_analyses.analysis_id references analysis {analysis_id}, which is absent from its owning plan"
+                    )));
+                }
+            }
+            if let Some(run_id) = record.payload.regression_baseline_run
+                && !self
+                    .simulation_results
+                    .runs
+                    .iter()
+                    .any(|run| run.run_id == Some(run_id))
+            {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace.simulation_plan_payloads[{plan_id}].regression_baseline_run references retained run {run_id}, which is absent from result history"
+                )));
+            }
+        }
+
+        if let Some(setup) = setup {
+            let plan_ids = setup
+                .analysis_plan
+                .iter()
+                .map(crate::simulation::plan::SimulationPlan::id)
+                .chain(setup.inactive_plans().iter().map(|plan| plan.id()));
+            for plan_id in plan_ids {
+                if self.workspace.active_plan_data(plan_id).is_none() {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "simulation plan {plan_id} has no plan-owned configuration payload"
+                    )));
+                }
+            }
+        } else if !self.workspace.simulation_plan_payloads.is_empty() {
+            return Err(ProjectIoError::InvalidData(
+                "simulation plan payloads are present without an execution context".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -2674,6 +2778,12 @@ pub(crate) fn load_project_text(
         context.migrate_to_current(project_id).map_err(|error| {
             ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))
         })?;
+        if let Some(plan) = &context.simulation_plan.analysis_plan {
+            project.workspace.migrate_active_plan_data(plan.id());
+        }
+        for plan in context.simulation_plan.inactive_plans() {
+            project.workspace.migrate_inactive_plan_data(plan.id());
+        }
     }
     project.validate()?;
     let mut simulation_results_error = project

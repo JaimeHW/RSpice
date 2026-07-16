@@ -169,10 +169,41 @@ fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) ->
         &state.library_manager,
         &state.workspace.schematic_buffers,
     );
-    let generation = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+    let analysis_instances = state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .into_iter()
+        .flat_map(|plan| plan.instances())
+        .filter(|instance| instance.enabled())
+        .map(crate::simulation::plan::AnalysisInstance::id)
+        .collect::<Vec<_>>();
+    let Some(plan_id) = state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(crate::simulation::plan::SimulationPlan::id)
+    else {
+        state.push_user_message(crate::common::app::ConsoleMessage::error(
+            "Netlist export requires a stable active simulation plan.",
+        ));
+        return None;
+    };
+    let Some(plan_payload) = state.workspace.active_plan_data(plan_id) else {
+        state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
+            "Simulation plan {plan_id} has no plan-owned configuration payload."
+        )));
+        return None;
+    };
+    let generation = crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
         &state.schematic,
         &[],
         &hierarchy,
+        &plan_payload.design_variables,
+        crate::simulation::netlist_gen::DesignVariableNetlistContext {
+            active_cell: &state.workspace.active_view,
+            analysis_instances: &analysis_instances,
+        },
     );
 
     if !generation.errors.is_empty() {

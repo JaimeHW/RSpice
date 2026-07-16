@@ -21,10 +21,10 @@ pub use command::{
     TransactionReceipt, ValidationCode, ValidationIssue, ValidationSeverity,
 };
 pub use identity::{
-    AnalysisInstanceId, AutomationPipelineId, ContentDigest, DatasetId, DesignId, DigestError,
-    JobId, ModelBindingId, ObjectRef, ObjectRevision, ProjectId, ReleaseCandidateId,
-    ResultDocumentId, RevisionError, RunId, RunSetId, SimulationPlanId, TestbenchId, UuidIdError,
-    UuidIdParseError, VerificationEvidenceId, VerificationPlanId,
+    AnalysisInstanceId, AutomationPipelineId, ContentDigest, DatasetId, DesignId, DesignVariableId,
+    DigestError, JobId, ModelBindingId, ObjectRef, ObjectRevision, ProjectId, ReleaseCandidateId,
+    ResultDocumentId, RevisionError, RunId, RunSetId, SavedOutputId, SimulationPlanId, TestbenchId,
+    UuidIdError, UuidIdParseError, VerificationEvidenceId, VerificationPlanId,
 };
 pub use lifecycle::{
     DatasetBinding, DatasetManifest, DatasetProvenance, JobEvent, JobState, LifecycleError,

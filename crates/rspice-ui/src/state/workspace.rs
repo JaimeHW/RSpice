@@ -12,7 +12,10 @@ use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
-use crate::product::{ObjectRevision, ProjectId, RevisionError};
+use crate::product::{
+    AnalysisInstanceId, DesignVariableId, ObjectRevision, ProjectId, RevisionError, RunId,
+    SavedOutputId, SimulationPlanId,
+};
 use crate::state::{
     Cell, ComponentType, Library, LibraryCellInstance, LibraryManager, SchematicState, View,
     ViewType,
@@ -576,6 +579,24 @@ pub struct SpecEntry {
 }
 
 impl SpecEntry {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_parameter_name(&self.measurement)
+            .map_err(|error| format!("measurement name is invalid: {error}"))?;
+        if self.min.is_some_and(|value| !value.is_finite())
+            || self.max.is_some_and(|value| !value.is_finite())
+        {
+            return Err("specification bounds must be finite".to_owned());
+        }
+        if self
+            .min
+            .zip(self.max)
+            .is_some_and(|(minimum, maximum)| minimum > maximum)
+        {
+            return Err("specification minimum exceeds its maximum".to_owned());
+        }
+        validate_bounded_text("unit", &self.unit, 64, true)
+    }
+
     /// Spec verdict for one measured value.
     pub fn passes(&self, value: f64) -> bool {
         self.min.is_none_or(|min| value >= min) && self.max.is_none_or(|max| value <= max)
@@ -587,6 +608,968 @@ impl SpecEntry {
         let above = self.max.map_or(0.0, |max| (value - max).max(0.0));
         below.max(above)
     }
+}
+
+/// Physical quantity carried by a design variable. The quantity is retained
+/// independently from the expression so editors can validate units without
+/// coercing the user's exact engineering input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignVariableQuantity {
+    Resistance,
+    Capacitance,
+    Voltage,
+    Current,
+    Temperature,
+    Dimensionless,
+}
+
+impl DesignVariableQuantity {
+    pub const ALL: [Self; 6] = [
+        Self::Resistance,
+        Self::Capacitance,
+        Self::Voltage,
+        Self::Current,
+        Self::Temperature,
+        Self::Dimensionless,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Resistance => "Resistance",
+            Self::Capacitance => "Capacitance",
+            Self::Voltage => "Voltage",
+            Self::Current => "Current",
+            Self::Temperature => "Temperature",
+            Self::Dimensionless => "Dimensionless",
+        }
+    }
+}
+
+/// Exact ownership boundary for a design variable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DesignVariableScope {
+    Testbench,
+    Project,
+    SelectedCell { cell: CellViewRef },
+    SelectedAnalysis { analysis_id: AnalysisInstanceId },
+}
+
+impl DesignVariableScope {
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::Testbench => "Lab characterization · testbench",
+            Self::Project => "Project",
+            Self::SelectedCell { .. } => "Selected cell",
+            Self::SelectedAnalysis { .. } => "Selected analysis only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesignVariableScopeKind {
+    Testbench,
+    Project,
+    SelectedCell,
+    SelectedAnalysis,
+}
+
+impl DesignVariableScopeKind {
+    pub const ALL: [Self; 4] = [
+        Self::Testbench,
+        Self::Project,
+        Self::SelectedCell,
+        Self::SelectedAnalysis,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Testbench => "Lab characterization · testbench",
+            Self::Project => "Project",
+            Self::SelectedCell => "Selected cell",
+            Self::SelectedAnalysis => "Selected analysis only",
+        }
+    }
+}
+
+impl From<&DesignVariableScope> for DesignVariableScopeKind {
+    fn from(value: &DesignVariableScope) -> Self {
+        match value {
+            DesignVariableScope::Testbench => Self::Testbench,
+            DesignVariableScope::Project => Self::Project,
+            DesignVariableScope::SelectedCell { .. } => Self::SelectedCell,
+            DesignVariableScope::SelectedAnalysis { .. } => Self::SelectedAnalysis,
+        }
+    }
+}
+
+/// Inclusive engineering bounds for a variable. Bounds remain expressions so
+/// suffixes and owner variables survive a lossless project round trip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesignVariableRange {
+    pub minimum: String,
+    pub maximum: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignVariableSweepEligibility {
+    NestedSweepAndOptimization,
+    OptimizationOnly,
+    FixedParameter,
+}
+
+impl DesignVariableSweepEligibility {
+    pub const ALL: [Self; 3] = [
+        Self::NestedSweepAndOptimization,
+        Self::OptimizationOnly,
+        Self::FixedParameter,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NestedSweepAndOptimization => "Nested sweep + optimization",
+            Self::OptimizationOnly => "Optimization only",
+            Self::FixedParameter => "Fixed parameter",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignVariableOverridePolicy {
+    ExplicitTestLocalOverride,
+    InheritOwnerOnly,
+}
+
+impl DesignVariableOverridePolicy {
+    pub const ALL: [Self; 2] = [Self::ExplicitTestLocalOverride, Self::InheritOwnerOnly];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExplicitTestLocalOverride => "Explicit test-local override",
+            Self::InheritOwnerOnly => "Inherit owner only",
+        }
+    }
+}
+
+/// Persisted, typed simulation-plan parameter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesignVariable {
+    pub id: DesignVariableId,
+    pub revision: ObjectRevision,
+    pub name: String,
+    pub expression: String,
+    pub quantity: DesignVariableQuantity,
+    pub scope: DesignVariableScope,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub allowed_range: Option<DesignVariableRange>,
+    pub sweep_eligibility: DesignVariableSweepEligibility,
+    pub override_policy: DesignVariableOverridePolicy,
+}
+
+impl DesignVariable {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: impl Into<String>,
+        expression: impl Into<String>,
+        quantity: DesignVariableQuantity,
+        scope: DesignVariableScope,
+        description: impl Into<String>,
+        allowed_range: Option<DesignVariableRange>,
+        sweep_eligibility: DesignVariableSweepEligibility,
+        override_policy: DesignVariableOverridePolicy,
+    ) -> Result<Self, String> {
+        let variable = Self {
+            id: DesignVariableId::new(),
+            revision: ObjectRevision::INITIAL,
+            name: name.into(),
+            expression: expression.into(),
+            quantity,
+            scope,
+            description: description.into(),
+            allowed_range,
+            sweep_eligibility,
+            override_policy,
+        };
+        variable.validate()?;
+        Ok(variable)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        validate_parameter_name(&self.name)?;
+        validate_single_line_expression("expression", &self.expression)?;
+        let value = self.resolved_value_si()?;
+        if let Some(range) = &self.allowed_range {
+            validate_single_line_expression("allowed-range minimum", &range.minimum)?;
+            validate_single_line_expression("allowed-range maximum", &range.maximum)?;
+            let minimum =
+                parse_design_quantity(&range.minimum, self.quantity).map_err(|error| {
+                    format!(
+                        "allowed-range minimum is invalid for {}: {error}",
+                        self.quantity.label()
+                    )
+                })?;
+            let maximum =
+                parse_design_quantity(&range.maximum, self.quantity).map_err(|error| {
+                    format!(
+                        "allowed-range maximum is invalid for {}: {error}",
+                        self.quantity.label()
+                    )
+                })?;
+            if minimum > maximum {
+                return Err("allowed-range minimum exceeds its maximum".to_owned());
+            }
+            if value < minimum || value > maximum {
+                return Err(format!(
+                    "resolved value {value} is outside the inclusive allowed range {minimum}..={maximum}"
+                ));
+            }
+        }
+        validate_bounded_text("description", &self.description, 1_024, true)?;
+        if let DesignVariableScope::SelectedCell { cell } = &self.scope {
+            cell.validate_name_segments()
+                .map_err(|error| format!("selected cell is invalid: {error}"))?;
+        }
+        Ok(())
+    }
+
+    pub fn resolved_value_si(&self) -> Result<f64, String> {
+        parse_design_quantity(&self.expression, self.quantity).map_err(|error| {
+            format!(
+                "expression is invalid for {}: {error}",
+                self.quantity.label()
+            )
+        })
+    }
+
+    /// Canonical top-level SPICE statement. Validation is intentionally kept
+    /// separate so callers can aggregate every project diagnostic at once.
+    pub fn netlist_statement(&self) -> String {
+        let value = self
+            .resolved_value_si()
+            .expect("validated design variables always resolve to finite SI values");
+        format!(".param {}={value:.17e}", self.name)
+    }
+
+    fn cloned_for_new_plan(
+        &self,
+        analysis_identity_map: &HashMap<AnalysisInstanceId, AnalysisInstanceId>,
+    ) -> Result<Self, AnalysisInstanceId> {
+        let mut cloned = self.clone();
+        cloned.id = DesignVariableId::new();
+        cloned.revision = ObjectRevision::INITIAL;
+        if let DesignVariableScope::SelectedAnalysis { analysis_id } = &mut cloned.scope {
+            *analysis_id = analysis_identity_map
+                .get(analysis_id)
+                .copied()
+                .ok_or(*analysis_id)?;
+        }
+        Ok(cloned)
+    }
+}
+
+const LEGACY_DESIGN_VARIABLE_ID_NAMESPACE: Uuid =
+    Uuid::from_u128(0x3c56_6c65_03dc_5e65_b66c_a4d4_86dc_8d53);
+
+impl<'de> Deserialize<'de> for DesignVariable {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            #[serde(default = "missing_identity_sentinel")]
+            id: serde_json::Value,
+            #[serde(default)]
+            revision: ObjectRevision,
+            name: String,
+            expression: String,
+            quantity: DesignVariableQuantity,
+            scope: DesignVariableScope,
+            #[serde(default)]
+            description: String,
+            #[serde(default)]
+            allowed_range: Option<DesignVariableRange>,
+            sweep_eligibility: DesignVariableSweepEligibility,
+            override_policy: DesignVariableOverridePolicy,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let identity = serde_json::to_vec(&(
+            &wire.name,
+            &wire.expression,
+            wire.quantity,
+            &wire.scope,
+            &wire.description,
+            &wire.allowed_range,
+            wire.sweep_eligibility,
+            wire.override_policy,
+        ))
+        .map_err(D::Error::custom)?;
+        let id = deserialize_or_migrate_identity::<DesignVariableId, D::Error>(
+            wire.id,
+            LEGACY_DESIGN_VARIABLE_ID_NAMESPACE,
+            &identity,
+            DesignVariableId::from_namespace,
+        )?;
+        Ok(Self {
+            id,
+            revision: wire.revision,
+            name: wire.name,
+            expression: wire.expression,
+            quantity: wire.quantity,
+            scope: wire.scope,
+            description: wire.description,
+            allowed_range: wire.allowed_range,
+            sweep_eligibility: wire.sweep_eligibility,
+            override_policy: wire.override_policy,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedOutputKind {
+    RawVoltageOrCurrent,
+    DerivedExpression,
+    DeviceOperatingPointQuantity,
+    NoiseContributor,
+    RfPortQuantity,
+}
+
+impl SavedOutputKind {
+    pub const ALL: [Self; 5] = [
+        Self::RawVoltageOrCurrent,
+        Self::DerivedExpression,
+        Self::DeviceOperatingPointQuantity,
+        Self::NoiseContributor,
+        Self::RfPortQuantity,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RawVoltageOrCurrent => "Raw voltage / current",
+            Self::DerivedExpression => "Derived expression",
+            Self::DeviceOperatingPointQuantity => "Device operating-point quantity",
+            Self::NoiseContributor => "Noise contributor",
+            Self::RfPortQuantity => "RF port quantity",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SavedOutputCompatibility {
+    OpTranAc,
+    AllCompatibleAnalyses,
+    SelectedAnalysis { analysis_id: AnalysisInstanceId },
+}
+
+impl SavedOutputCompatibility {
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::OpTranAc => "OP + TRAN + AC",
+            Self::AllCompatibleAnalyses => "All compatible analyses",
+            Self::SelectedAnalysis { .. } => "Selected analysis only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavedOutputCompatibilityKind {
+    OpTranAc,
+    AllCompatibleAnalyses,
+    SelectedAnalysis,
+}
+
+impl SavedOutputCompatibilityKind {
+    pub const ALL: [Self; 3] = [
+        Self::OpTranAc,
+        Self::AllCompatibleAnalyses,
+        Self::SelectedAnalysis,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::OpTranAc => "OP + TRAN + AC",
+            Self::AllCompatibleAnalyses => "All compatible analyses",
+            Self::SelectedAnalysis => "Selected analysis only",
+        }
+    }
+}
+
+impl From<&SavedOutputCompatibility> for SavedOutputCompatibilityKind {
+    fn from(value: &SavedOutputCompatibility) -> Self {
+        match value {
+            SavedOutputCompatibility::OpTranAc => Self::OpTranAc,
+            SavedOutputCompatibility::AllCompatibleAnalyses => Self::AllCompatibleAnalyses,
+            SavedOutputCompatibility::SelectedAnalysis { .. } => Self::SelectedAnalysis,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedOutputPolicy {
+    EveryAcceptedPoint,
+    SelectedAndFinalPoints,
+    OnDemandFromRetainedState,
+    FailureDiagnosticsOnly,
+}
+
+impl SavedOutputPolicy {
+    pub const ALL: [Self; 4] = [
+        Self::EveryAcceptedPoint,
+        Self::SelectedAndFinalPoints,
+        Self::OnDemandFromRetainedState,
+        Self::FailureDiagnosticsOnly,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::EveryAcceptedPoint => "Every accepted point",
+            Self::SelectedAndFinalPoints => "Selected + final points",
+            Self::OnDemandFromRetainedState => "On demand from retained state",
+            Self::FailureDiagnosticsOnly => "Failure diagnostics only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedOutputPrecision {
+    FullSourcePrecision,
+    DisplayCacheWithFullSourcePrecision,
+}
+
+impl SavedOutputPrecision {
+    pub const ALL: [Self; 2] = [
+        Self::FullSourcePrecision,
+        Self::DisplayCacheWithFullSourcePrecision,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FullSourcePrecision => "f64 / complex128",
+            Self::DisplayCacheWithFullSourcePrecision => {
+                "f32 display cache + full source precision"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedOutputStreaming {
+    LivePlotAdaptiveDisplayDecimation,
+    StoreOnly,
+}
+
+impl SavedOutputStreaming {
+    pub const ALL: [Self; 2] = [Self::LivePlotAdaptiveDisplayDecimation, Self::StoreOnly];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LivePlotAdaptiveDisplayDecimation => "Live plot · adaptive display decimation",
+            Self::StoreOnly => "Store only",
+        }
+    }
+}
+
+/// Persisted waveform/data contract owned by the simulation plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedOutput {
+    pub id: SavedOutputId,
+    pub revision: ObjectRevision,
+    pub kind: SavedOutputKind,
+    pub name: String,
+    pub source_expression: String,
+    pub compatible_analyses: SavedOutputCompatibility,
+    pub save_policy: SavedOutputPolicy,
+    pub stored_precision: SavedOutputPrecision,
+    pub streaming: SavedOutputStreaming,
+}
+
+impl SavedOutput {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        kind: SavedOutputKind,
+        name: impl Into<String>,
+        source_expression: impl Into<String>,
+        compatible_analyses: SavedOutputCompatibility,
+        save_policy: SavedOutputPolicy,
+        stored_precision: SavedOutputPrecision,
+        streaming: SavedOutputStreaming,
+    ) -> Result<Self, String> {
+        let output = Self {
+            id: SavedOutputId::new(),
+            revision: ObjectRevision::INITIAL,
+            kind,
+            name: name.into(),
+            source_expression: source_expression.into(),
+            compatible_analyses,
+            save_policy,
+            stored_precision,
+            streaming,
+        };
+        output.validate()?;
+        Ok(output)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        validate_bounded_text("name", &self.name, 256, false)?;
+        validate_bounded_text(
+            "source or expression",
+            &self.source_expression,
+            8_192,
+            false,
+        )?;
+        validate_saved_output_expression(self.kind, &self.source_expression)
+    }
+
+    /// Unit preview derived from the output schema without inspecting a
+    /// mutable result dataset. Derived expressions remain explicit until the
+    /// calculator's dimensional resolver evaluates their dependencies.
+    pub fn inferred_unit(&self) -> &'static str {
+        match self.kind {
+            SavedOutputKind::RawVoltageOrCurrent
+                if self
+                    .source_expression
+                    .trim()
+                    .get(..2)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V(")) =>
+            {
+                "volts"
+            }
+            SavedOutputKind::RawVoltageOrCurrent => "amperes",
+            SavedOutputKind::DerivedExpression => "resolved from expression",
+            SavedOutputKind::DeviceOperatingPointQuantity => "from device quantity",
+            SavedOutputKind::NoiseContributor => "V²/Hz or A²/Hz",
+            SavedOutputKind::RfPortQuantity => "dimensionless",
+        }
+    }
+
+    pub const fn status_label(&self) -> &'static str {
+        match self.save_policy {
+            SavedOutputPolicy::EveryAcceptedPoint => "full capture",
+            SavedOutputPolicy::SelectedAndFinalPoints => "selected + final",
+            SavedOutputPolicy::OnDemandFromRetainedState => "retained-state derivation",
+            SavedOutputPolicy::FailureDiagnosticsOnly => "failure diagnostics",
+        }
+    }
+
+    fn cloned_for_new_plan(
+        &self,
+        analysis_identity_map: &HashMap<AnalysisInstanceId, AnalysisInstanceId>,
+    ) -> Result<Self, AnalysisInstanceId> {
+        let mut cloned = self.clone();
+        cloned.id = SavedOutputId::new();
+        cloned.revision = ObjectRevision::INITIAL;
+        if let SavedOutputCompatibility::SelectedAnalysis { analysis_id } =
+            &mut cloned.compatible_analyses
+        {
+            *analysis_id = analysis_identity_map
+                .get(analysis_id)
+                .copied()
+                .ok_or(*analysis_id)?;
+        }
+        Ok(cloned)
+    }
+}
+
+const LEGACY_SAVED_OUTPUT_ID_NAMESPACE: Uuid =
+    Uuid::from_u128(0x75b5_6a7e_614a_5b71_b2dc_32cb_7624_1038);
+
+impl<'de> Deserialize<'de> for SavedOutput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            #[serde(default = "missing_identity_sentinel")]
+            id: serde_json::Value,
+            #[serde(default)]
+            revision: ObjectRevision,
+            kind: SavedOutputKind,
+            name: String,
+            source_expression: String,
+            compatible_analyses: SavedOutputCompatibility,
+            save_policy: SavedOutputPolicy,
+            stored_precision: SavedOutputPrecision,
+            streaming: SavedOutputStreaming,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let identity = serde_json::to_vec(&(
+            wire.kind,
+            &wire.name,
+            &wire.source_expression,
+            &wire.compatible_analyses,
+            wire.save_policy,
+            wire.stored_precision,
+            wire.streaming,
+        ))
+        .map_err(D::Error::custom)?;
+        let id = deserialize_or_migrate_identity::<SavedOutputId, D::Error>(
+            wire.id,
+            LEGACY_SAVED_OUTPUT_ID_NAMESPACE,
+            &identity,
+            SavedOutputId::from_namespace,
+        )?;
+        Ok(Self {
+            id,
+            revision: wire.revision,
+            kind: wire.kind,
+            name: wire.name,
+            source_expression: wire.source_expression,
+            compatible_analyses: wire.compatible_analyses,
+            save_policy: wire.save_policy,
+            stored_precision: wire.stored_precision,
+            streaming: wire.streaming,
+        })
+    }
+}
+
+const MISSING_IDENTITY_SENTINEL: &str = "__rspice_missing_stable_identity__";
+
+fn missing_identity_sentinel() -> serde_json::Value {
+    serde_json::Value::String(MISSING_IDENTITY_SENTINEL.to_owned())
+}
+
+fn deserialize_or_migrate_identity<I, E>(
+    value: serde_json::Value,
+    namespace: Uuid,
+    identity: &[u8],
+    migrate: fn(Uuid, &[u8]) -> I,
+) -> Result<I, E>
+where
+    I: serde::de::DeserializeOwned,
+    E: serde::de::Error,
+{
+    if value == missing_identity_sentinel() {
+        Ok(migrate(namespace, identity))
+    } else if value.is_null() {
+        Err(E::custom("stable identity must not be null"))
+    } else {
+        serde_json::from_value(value).map_err(E::custom)
+    }
+}
+
+fn parse_design_quantity(
+    expression: &str,
+    quantity: DesignVariableQuantity,
+) -> Result<f64, String> {
+    use crate::quantity::{
+        QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
+    };
+
+    let text = expression.trim();
+    let (numeric, kind) = match quantity {
+        DesignVariableQuantity::Resistance => (
+            strip_required_unit(text, &["ohm", "Ω"])
+                .ok_or_else(|| "explicit resistance unit required (ohm or Ω)".to_owned())?,
+            QuantityInputKind::EngineeringScalar,
+        ),
+        DesignVariableQuantity::Capacitance => (
+            text.strip_suffix('F')
+                .ok_or_else(|| "explicit capacitance unit required (F)".to_owned())?,
+            QuantityInputKind::EngineeringScalar,
+        ),
+        DesignVariableQuantity::Voltage => (
+            text.strip_suffix('V')
+                .ok_or_else(|| "explicit voltage unit required (V)".to_owned())?,
+            QuantityInputKind::EngineeringScalar,
+        ),
+        DesignVariableQuantity::Current => (
+            text.strip_suffix('A')
+                .ok_or_else(|| "explicit current unit required (A)".to_owned())?,
+            QuantityInputKind::EngineeringScalar,
+        ),
+        DesignVariableQuantity::Temperature => (text, QuantityInputKind::Temperature),
+        DesignVariableQuantity::Dimensionless => (text, QuantityInputKind::EngineeringScalar),
+    };
+    let numeric = if quantity == DesignVariableQuantity::Dimensionless
+        || quantity == DesignVariableQuantity::Temperature
+    {
+        numeric.trim().to_owned()
+    } else {
+        normalize_explicit_unit_scalar(numeric.trim())
+    };
+    parse_ui_quantity(
+        &numeric,
+        kind,
+        QuantityPresentationPolicy::default(),
+        UiNumberLocale::default(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn normalize_explicit_unit_scalar(value: &str) -> String {
+    if let Some(prefix) = value.strip_suffix('M') {
+        format!("{}Meg", prefix.trim_end())
+    } else {
+        value.to_owned()
+    }
+}
+
+fn strip_required_unit<'a>(value: &'a str, units: &[&str]) -> Option<&'a str> {
+    units.iter().find_map(|unit| {
+        if unit.is_ascii() {
+            value
+                .get(value.len().saturating_sub(unit.len())..)
+                .filter(|suffix| suffix.eq_ignore_ascii_case(unit))
+                .map(|_| &value[..value.len() - unit.len()])
+        } else {
+            value.strip_suffix(unit)
+        }
+    })
+}
+
+fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> Result<(), String> {
+    let expression = expression.trim();
+    match kind {
+        SavedOutputKind::RawVoltageOrCurrent => validate_raw_probe(expression),
+        SavedOutputKind::DerivedExpression => parse_calculator_expression(expression),
+        SavedOutputKind::DeviceOperatingPointQuantity => validate_device_op_probe(expression),
+        SavedOutputKind::NoiseContributor => {
+            if validate_hierarchical_token(expression).is_ok() {
+                Ok(())
+            } else {
+                parse_calculator_expression(expression)
+            }
+        }
+        SavedOutputKind::RfPortQuantity => {
+            if !expression
+                .get(..2)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("S("))
+            {
+                return Err("RF port quantity must use S(port, port) syntax".to_owned());
+            }
+            parse_calculator_expression(expression)
+        }
+    }
+}
+
+fn parse_calculator_expression(expression: &str) -> Result<(), String> {
+    crate::analysis::calculator::parser::Parser::new(expression)
+        .try_parse()
+        .map(|_| ())
+        .map_err(|error| format!("expression is invalid: {error}"))
+}
+
+fn validate_raw_probe(expression: &str) -> Result<(), String> {
+    let open = expression
+        .find('(')
+        .ok_or_else(|| "raw output must use V(node), V(node+, node-), or I(source)".to_owned())?;
+    if !expression.ends_with(')') {
+        return Err("raw output has an unterminated probe".to_owned());
+    }
+    let function = &expression[..open];
+    let arguments = &expression[open + 1..expression.len() - 1];
+    let arguments = arguments.split(',').map(str::trim).collect::<Vec<_>>();
+    if function.eq_ignore_ascii_case("V") && matches!(arguments.len(), 1 | 2)
+        || function.eq_ignore_ascii_case("I") && arguments.len() == 1
+    {
+        for argument in arguments {
+            validate_hierarchical_token(argument)?;
+        }
+        Ok(())
+    } else {
+        Err("raw output must use V(node), V(node+, node-), or I(source)".to_owned())
+    }
+}
+
+fn validate_device_op_probe(expression: &str) -> Result<(), String> {
+    let Some(body) = expression.strip_prefix('@') else {
+        return Err("device operating-point quantity must use @device[quantity] syntax".to_owned());
+    };
+    let Some(open) = body.find('[') else {
+        return Err("device operating-point quantity must use @device[quantity] syntax".to_owned());
+    };
+    if !body.ends_with(']') {
+        return Err("device operating-point quantity has an unterminated quantity".to_owned());
+    }
+    validate_hierarchical_token(&body[..open])?;
+    validate_parameter_name(&body[open + 1..body.len() - 1])
+        .map_err(|error| format!("device quantity is invalid: {error}"))
+}
+
+fn validate_hierarchical_token(value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err("probe target is required".to_owned());
+    }
+    if let Some(character) = value.chars().find(|character| {
+        !character.is_ascii_alphanumeric()
+            && !matches!(character, '_' | '.' | ':' | '/' | '$' | '+' | '-')
+    }) {
+        return Err(format!(
+            "probe target contains unsupported character {character:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_parameter_name(value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err("name is required".to_owned());
+    }
+    if value.len() > 128 {
+        return Err("name exceeds 128 bytes".to_owned());
+    }
+    let mut characters = value.chars();
+    let first = characters.next().expect("empty handled above");
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return Err("name must begin with an ASCII letter or underscore".to_owned());
+    }
+    if let Some(character) =
+        characters.find(|character| !character.is_ascii_alphanumeric() && *character != '_')
+    {
+        return Err(format!(
+            "name contains unsupported character {character:?}; use ASCII letters, digits, and underscores"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_single_line_expression(label: &str, value: &str) -> Result<(), String> {
+    validate_bounded_text(label, value, 8_192, false)?;
+    if value
+        .chars()
+        .any(|character| matches!(character, '\r' | '\n'))
+    {
+        return Err(format!("{label} must be a single line"));
+    }
+    Ok(())
+}
+
+fn validate_bounded_text(
+    label: &str,
+    value: &str,
+    maximum_bytes: usize,
+    allow_empty: bool,
+) -> Result<(), String> {
+    if !allow_empty && value.trim().is_empty() {
+        return Err(format!("{label} is required"));
+    }
+    if value.len() > maximum_bytes {
+        return Err(format!("{label} exceeds {maximum_bytes} bytes"));
+    }
+    if let Some(character) = value
+        .chars()
+        .find(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(format!("{label} contains control character {character:?}"));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SimulationConfigurationError {
+    #[error("simulation_plan_payloads contains duplicate owner {plan_id}")]
+    DuplicatePlanPayload { plan_id: SimulationPlanId },
+    #[error("simulation_plan_payloads[{plan_id}].design_variables[{index}] is invalid: {message}")]
+    InvalidDesignVariable {
+        plan_id: SimulationPlanId,
+        index: usize,
+        message: String,
+    },
+    #[error(
+        "simulation_plan_payloads[{plan_id}].design_variables[{index}] duplicates the case-insensitive name of design_variables[{first_index}]"
+    )]
+    DuplicateDesignVariableName {
+        plan_id: SimulationPlanId,
+        index: usize,
+        first_index: usize,
+    },
+    #[error("design variable identity {id} is reused by plans {first_plan_id} and {plan_id}")]
+    DuplicateDesignVariableIdentity {
+        id: DesignVariableId,
+        first_plan_id: SimulationPlanId,
+        plan_id: SimulationPlanId,
+    },
+    #[error("simulation_plan_payloads[{plan_id}].saved_outputs[{index}] is invalid: {message}")]
+    InvalidSavedOutput {
+        plan_id: SimulationPlanId,
+        index: usize,
+        message: String,
+    },
+    #[error(
+        "simulation_plan_payloads[{plan_id}].saved_outputs[{index}] duplicates the case-insensitive name of saved_outputs[{first_index}]"
+    )]
+    DuplicateSavedOutputName {
+        plan_id: SimulationPlanId,
+        index: usize,
+        first_index: usize,
+    },
+    #[error("saved output identity {id} is reused by plans {first_plan_id} and {plan_id}")]
+    DuplicateSavedOutputIdentity {
+        id: SavedOutputId,
+        first_plan_id: SimulationPlanId,
+        plan_id: SimulationPlanId,
+    },
+    #[error("simulation_plan_payloads[{plan_id}].specs[{index}] is invalid: {message}")]
+    InvalidSpecification {
+        plan_id: SimulationPlanId,
+        index: usize,
+        message: String,
+    },
+    #[error(
+        "simulation_plan_payloads[{plan_id}].specs[{index}] duplicates the case-insensitive measurement of specs[{first_index}]"
+    )]
+    DuplicateSpecification {
+        plan_id: SimulationPlanId,
+        index: usize,
+        first_index: usize,
+    },
+    #[error("simulation plan {plan_id} already owns a design variable named '{name}'")]
+    DesignVariableNameConflict {
+        plan_id: SimulationPlanId,
+        name: String,
+    },
+    #[error("simulation plan {plan_id} already owns a saved output named '{name}'")]
+    SavedOutputNameConflict {
+        plan_id: SimulationPlanId,
+        name: String,
+    },
+    #[error("simulation plan {plan_id} has no configuration payload")]
+    PlanPayloadMissing { plan_id: SimulationPlanId },
+    #[error("simulation plan {plan_id} already has a configuration payload")]
+    PlanPayloadAlreadyExists { plan_id: SimulationPlanId },
+    #[error("cloned plan payload has no destination mapping for source analysis {analysis_id}")]
+    MissingClonedAnalysisMapping { analysis_id: AnalysisInstanceId },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationPlanPayload {
+    #[serde(default)]
+    pub design_variables: Vec<DesignVariable>,
+    #[serde(default)]
+    pub saved_outputs: Vec<SavedOutput>,
+    #[serde(default)]
+    pub specs: Vec<SpecEntry>,
+    #[serde(default)]
+    pub regression_baseline_run: Option<RunId>,
+}
+
+/// Vec-backed because product UUID wrappers intentionally do not define an
+/// ordering. Validation guarantees unique owners; lifecycle hashing sorts a
+/// canonical projection by UUID bytes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationPlanPayloadRecord {
+    pub plan_id: SimulationPlanId,
+    pub payload: SimulationPlanPayload,
 }
 
 /// Project-level workspace state.
@@ -607,6 +1590,11 @@ pub struct ProjectWorkspace {
     /// design intent, so it persists with the workspace.
     #[serde(default)]
     pub specs: Vec<SpecEntry>,
+    /// Plan-owned variables, output contracts, and specifications. Projects
+    /// predating this feature migrate the active legacy `specs` projection
+    /// into one record after execution-context migration.
+    #[serde(default)]
+    pub simulation_plan_payloads: Vec<SimulationPlanPayloadRecord>,
     /// Manually edited netlist source. When set, simulations run this
     /// deck instead of regenerating from the schematic (text-first mode);
     /// `None` means the netlist view shows the generated artifact.
@@ -637,10 +1625,306 @@ impl Default for ProjectWorkspace {
             hierarchy_instances: Vec::new(),
             schematic_buffers,
             specs: Vec::new(),
+            simulation_plan_payloads: Vec::new(),
             netlist_source: None,
             netlist_source_path: None,
             netlist_source_dirty: false,
         }
+    }
+}
+
+impl ProjectWorkspace {
+    /// Validate the persisted simulation configuration without requiring any
+    /// runtime editor state. Cross-document targets are validated by project
+    /// I/O once the library tree and simulation plan are available.
+    pub fn validate_simulation_configuration(&self) -> Result<(), SimulationConfigurationError> {
+        let mut plan_ids = HashMap::<SimulationPlanId, usize>::new();
+        let mut variable_ids = HashMap::<DesignVariableId, SimulationPlanId>::new();
+        let mut output_ids = HashMap::<SavedOutputId, SimulationPlanId>::new();
+        for (record_index, record) in self.simulation_plan_payloads.iter().enumerate() {
+            let plan_id = record.plan_id;
+            if plan_ids.insert(plan_id, record_index).is_some() {
+                return Err(SimulationConfigurationError::DuplicatePlanPayload { plan_id });
+            }
+
+            let mut variable_names = HashMap::<String, usize>::new();
+            for (index, variable) in record.payload.design_variables.iter().enumerate() {
+                variable.validate().map_err(|message| {
+                    SimulationConfigurationError::InvalidDesignVariable {
+                        plan_id,
+                        index,
+                        message,
+                    }
+                })?;
+                if let Some(first_plan_id) = variable_ids.insert(variable.id, plan_id) {
+                    return Err(
+                        SimulationConfigurationError::DuplicateDesignVariableIdentity {
+                            id: variable.id,
+                            first_plan_id,
+                            plan_id,
+                        },
+                    );
+                }
+                let canonical = variable.name.to_ascii_lowercase();
+                if let Some(first_index) = variable_names.insert(canonical, index) {
+                    return Err(SimulationConfigurationError::DuplicateDesignVariableName {
+                        plan_id,
+                        index,
+                        first_index,
+                    });
+                }
+            }
+
+            let mut output_names = HashMap::<String, usize>::new();
+            for (index, output) in record.payload.saved_outputs.iter().enumerate() {
+                output.validate().map_err(|message| {
+                    SimulationConfigurationError::InvalidSavedOutput {
+                        plan_id,
+                        index,
+                        message,
+                    }
+                })?;
+                if let Some(first_plan_id) = output_ids.insert(output.id, plan_id) {
+                    return Err(SimulationConfigurationError::DuplicateSavedOutputIdentity {
+                        id: output.id,
+                        first_plan_id,
+                        plan_id,
+                    });
+                }
+                let canonical = output.name.to_lowercase();
+                if let Some(first_index) = output_names.insert(canonical, index) {
+                    return Err(SimulationConfigurationError::DuplicateSavedOutputName {
+                        plan_id,
+                        index,
+                        first_index,
+                    });
+                }
+            }
+
+            let mut specification_names = HashMap::<String, usize>::new();
+            for (index, specification) in record.payload.specs.iter().enumerate() {
+                specification.validate().map_err(|message| {
+                    SimulationConfigurationError::InvalidSpecification {
+                        plan_id,
+                        index,
+                        message,
+                    }
+                })?;
+                let canonical = specification.measurement.to_ascii_lowercase();
+                if let Some(first_index) = specification_names.insert(canonical, index) {
+                    return Err(SimulationConfigurationError::DuplicateSpecification {
+                        plan_id,
+                        index,
+                        first_index,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn active_plan_data(&self, plan_id: SimulationPlanId) -> Option<&SimulationPlanPayload> {
+        self.simulation_plan_payloads
+            .iter()
+            .find(|record| record.plan_id == plan_id)
+            .map(|record| &record.payload)
+    }
+
+    pub fn active_plan_data_mut(
+        &mut self,
+        plan_id: SimulationPlanId,
+    ) -> Option<&mut SimulationPlanPayload> {
+        self.simulation_plan_payloads
+            .iter_mut()
+            .find(|record| record.plan_id == plan_id)
+            .map(|record| &mut record.payload)
+    }
+
+    /// Deterministically seed a plan payload from the legacy active specs
+    /// projection. Existing plan-owned data always wins.
+    pub fn migrate_active_plan_data(&mut self, plan_id: SimulationPlanId) {
+        if self.active_plan_data(plan_id).is_none() {
+            self.simulation_plan_payloads
+                .push(SimulationPlanPayloadRecord {
+                    plan_id,
+                    payload: SimulationPlanPayload {
+                        specs: self.specs.clone(),
+                        ..SimulationPlanPayload::default()
+                    },
+                });
+        }
+        self.sync_legacy_specs_projection(plan_id);
+    }
+
+    /// Seed a retained inactive plan without copying the active plan's legacy
+    /// specification projection into a different ownership boundary.
+    pub fn migrate_inactive_plan_data(&mut self, plan_id: SimulationPlanId) {
+        if self.active_plan_data(plan_id).is_none() {
+            self.simulation_plan_payloads
+                .push(SimulationPlanPayloadRecord {
+                    plan_id,
+                    payload: SimulationPlanPayload::default(),
+                });
+        }
+    }
+
+    pub fn ensure_active_plan_data(
+        &mut self,
+        plan_id: SimulationPlanId,
+    ) -> &mut SimulationPlanPayload {
+        self.migrate_active_plan_data(plan_id);
+        self.active_plan_data_mut(plan_id)
+            .expect("migration inserts the requested plan payload")
+    }
+
+    pub fn active_specs(&self, plan_id: SimulationPlanId) -> &[SpecEntry] {
+        self.active_plan_data(plan_id)
+            .map_or(self.specs.as_slice(), |payload| payload.specs.as_slice())
+    }
+
+    pub fn replace_active_specs(&mut self, plan_id: SimulationPlanId, specs: Vec<SpecEntry>) {
+        self.ensure_active_plan_data(plan_id).specs = specs.clone();
+        self.specs = specs;
+    }
+
+    pub fn sync_legacy_specs_projection(&mut self, plan_id: SimulationPlanId) {
+        if let Some(specs) = self
+            .active_plan_data(plan_id)
+            .map(|payload| payload.specs.clone())
+        {
+            self.specs = specs;
+        }
+    }
+
+    pub fn add_design_variable(
+        &mut self,
+        plan_id: SimulationPlanId,
+        variable: DesignVariable,
+    ) -> Result<(), SimulationConfigurationError> {
+        variable.validate().map_err(|message| {
+            SimulationConfigurationError::InvalidDesignVariable {
+                plan_id,
+                index: self
+                    .active_plan_data(plan_id)
+                    .map_or(0, |payload| payload.design_variables.len()),
+                message,
+            }
+        })?;
+        let payload = self.ensure_active_plan_data(plan_id);
+        if payload
+            .design_variables
+            .iter()
+            .any(|existing| existing.name.eq_ignore_ascii_case(&variable.name))
+        {
+            return Err(SimulationConfigurationError::DesignVariableNameConflict {
+                plan_id,
+                name: variable.name,
+            });
+        }
+        payload.design_variables.push(variable);
+        Ok(())
+    }
+
+    pub fn add_saved_output(
+        &mut self,
+        plan_id: SimulationPlanId,
+        output: SavedOutput,
+    ) -> Result<(), SimulationConfigurationError> {
+        output
+            .validate()
+            .map_err(|message| SimulationConfigurationError::InvalidSavedOutput {
+                plan_id,
+                index: self
+                    .active_plan_data(plan_id)
+                    .map_or(0, |payload| payload.saved_outputs.len()),
+                message,
+            })?;
+        let payload = self.ensure_active_plan_data(plan_id);
+        if payload
+            .saved_outputs
+            .iter()
+            .any(|existing| existing.name.eq_ignore_ascii_case(&output.name))
+        {
+            return Err(SimulationConfigurationError::SavedOutputNameConflict {
+                plan_id,
+                name: output.name,
+            });
+        }
+        payload.saved_outputs.push(output);
+        Ok(())
+    }
+
+    /// Copy or initialize the payload for a newly cloned plan. The insertion
+    /// is atomic with respect to validation: no target record is created on
+    /// any error.
+    pub fn clone_plan_data(
+        &mut self,
+        source_plan_id: SimulationPlanId,
+        cloned_plan_id: SimulationPlanId,
+        copy_variables_outputs_specs: bool,
+        copy_regression_baseline: bool,
+        analysis_identity_map: &[(AnalysisInstanceId, AnalysisInstanceId)],
+    ) -> Result<(), SimulationConfigurationError> {
+        if self.active_plan_data(cloned_plan_id).is_some() {
+            return Err(SimulationConfigurationError::PlanPayloadAlreadyExists {
+                plan_id: cloned_plan_id,
+            });
+        }
+        let source = (copy_variables_outputs_specs || copy_regression_baseline)
+            .then(|| {
+                self.active_plan_data(source_plan_id).cloned().ok_or(
+                    SimulationConfigurationError::PlanPayloadMissing {
+                        plan_id: source_plan_id,
+                    },
+                )
+            })
+            .transpose()?;
+        let remap = analysis_identity_map
+            .iter()
+            .copied()
+            .collect::<HashMap<_, _>>();
+        let (design_variables, saved_outputs, specs) = if copy_variables_outputs_specs {
+            let source = source.as_ref().expect("copy request resolves source above");
+            let design_variables = source
+                .design_variables
+                .iter()
+                .map(|variable| variable.cloned_for_new_plan(&remap))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|analysis_id| {
+                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                })?;
+            let saved_outputs = source
+                .saved_outputs
+                .iter()
+                .map(|output| output.cloned_for_new_plan(&remap))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|analysis_id| {
+                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                })?;
+            (design_variables, saved_outputs, source.specs.clone())
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
+        let regression_baseline_run = if copy_regression_baseline {
+            source
+                .as_ref()
+                .and_then(|payload| payload.regression_baseline_run)
+        } else {
+            None
+        };
+        let payload = SimulationPlanPayload {
+            design_variables,
+            saved_outputs,
+            specs,
+            regression_baseline_run,
+        };
+        self.simulation_plan_payloads
+            .push(SimulationPlanPayloadRecord {
+                plan_id: cloned_plan_id,
+                payload,
+            });
+        self.sync_legacy_specs_projection(cloned_plan_id);
+        Ok(())
     }
 }
 
@@ -1643,6 +2927,190 @@ mod tests {
 
     fn symbol_reference(cell: &str) -> CellViewRef {
         CellViewRef::new("work", cell, "symbol")
+    }
+
+    fn resistance_variable(
+        name: &str,
+        expression: &str,
+        scope: DesignVariableScope,
+    ) -> DesignVariable {
+        DesignVariable::new(
+            name,
+            expression,
+            DesignVariableQuantity::Resistance,
+            scope,
+            "fixture",
+            Some(DesignVariableRange {
+                minimum: "1 kohm".to_owned(),
+                maximum: "1 Mohm".to_owned(),
+            }),
+            DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+        )
+        .expect("fixture variable is valid")
+    }
+
+    fn raw_output(
+        name: &str,
+        expression: &str,
+        compatibility: SavedOutputCompatibility,
+    ) -> SavedOutput {
+        SavedOutput::new(
+            SavedOutputKind::RawVoltageOrCurrent,
+            name,
+            expression,
+            compatibility,
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::FullSourcePrecision,
+            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+        )
+        .expect("fixture output is valid")
+    }
+
+    #[test]
+    fn typed_design_variable_enforces_units_range_and_canonical_netlist_value() {
+        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        assert_eq!(variable.resolved_value_si().unwrap(), 10_000.0);
+        assert_eq!(
+            variable.netlist_statement(),
+            ".param RLOAD=1.00000000000000000e4"
+        );
+
+        let mut wrong_unit = variable.clone();
+        wrong_unit.expression = "10 V".to_owned();
+        assert!(wrong_unit.validate().unwrap_err().contains("resistance"));
+
+        let mut outside = variable;
+        outside.expression = "2 Mohm".to_owned();
+        assert!(outside.validate().unwrap_err().contains("outside"));
+    }
+
+    #[test]
+    fn saved_output_validation_is_kind_specific() {
+        assert!(
+            raw_output(
+                "VOUT",
+                "V(out)",
+                SavedOutputCompatibility::AllCompatibleAnalyses
+            )
+            .validate()
+            .is_ok()
+        );
+        let invalid = SavedOutput::new(
+            SavedOutputKind::RawVoltageOrCurrent,
+            "gain",
+            "V(out) / V(in)",
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::FullSourcePrecision,
+            SavedOutputStreaming::StoreOnly,
+        );
+        assert!(invalid.unwrap_err().contains("raw output"));
+        let derived = SavedOutput::new(
+            SavedOutputKind::DerivedExpression,
+            "gain",
+            "V(out) / V(in)",
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::OnDemandFromRetainedState,
+            SavedOutputPrecision::FullSourcePrecision,
+            SavedOutputStreaming::StoreOnly,
+        )
+        .expect("calculator expression is valid");
+        assert_eq!(derived.inferred_unit(), "resolved from expression");
+    }
+
+    #[test]
+    fn missing_row_identity_migrates_deterministically_and_null_is_rejected() {
+        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let mut value = serde_json::to_value(variable).unwrap();
+        value.as_object_mut().unwrap().remove("id");
+        let first: DesignVariable = serde_json::from_value(value.clone()).unwrap();
+        let second: DesignVariable = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(first.id, second.id);
+
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("id".to_owned(), serde_json::Value::Null);
+        assert!(
+            serde_json::from_value::<DesignVariable>(value)
+                .unwrap_err()
+                .to_string()
+                .contains("must not be null")
+        );
+    }
+
+    #[test]
+    fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
+        let source_plan_id = SimulationPlanId::new();
+        let cloned_plan_id = SimulationPlanId::new();
+        let source_analysis = AnalysisInstanceId::new();
+        let cloned_analysis = AnalysisInstanceId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let variable = resistance_variable(
+            "RLOAD",
+            "10 kohm",
+            DesignVariableScope::SelectedAnalysis {
+                analysis_id: source_analysis,
+            },
+        );
+        let output = raw_output(
+            "VOUT",
+            "V(out)",
+            SavedOutputCompatibility::SelectedAnalysis {
+                analysis_id: source_analysis,
+            },
+        );
+        let variable_id = variable.id;
+        let output_id = output.id;
+        workspace
+            .simulation_plan_payloads
+            .push(SimulationPlanPayloadRecord {
+                plan_id: source_plan_id,
+                payload: SimulationPlanPayload {
+                    design_variables: vec![variable],
+                    saved_outputs: vec![output],
+                    ..SimulationPlanPayload::default()
+                },
+            });
+
+        workspace
+            .clone_plan_data(
+                source_plan_id,
+                cloned_plan_id,
+                true,
+                false,
+                &[(source_analysis, cloned_analysis)],
+            )
+            .unwrap();
+        let cloned = workspace.active_plan_data(cloned_plan_id).unwrap();
+        assert_ne!(cloned.design_variables[0].id, variable_id);
+        assert_ne!(cloned.saved_outputs[0].id, output_id);
+        assert!(matches!(
+            cloned.design_variables[0].scope,
+            DesignVariableScope::SelectedAnalysis { analysis_id }
+                if analysis_id == cloned_analysis
+        ));
+        assert!(matches!(
+            cloned.saved_outputs[0].compatible_analyses,
+            SavedOutputCompatibility::SelectedAnalysis { analysis_id }
+                if analysis_id == cloned_analysis
+        ));
+
+        workspace
+            .active_plan_data_mut(cloned_plan_id)
+            .unwrap()
+            .design_variables[0]
+            .expression = "20 kohm".to_owned();
+        assert_eq!(
+            workspace
+                .active_plan_data(source_plan_id)
+                .unwrap()
+                .design_variables[0]
+                .expression,
+            "10 kohm"
+        );
+        workspace.validate_simulation_configuration().unwrap();
     }
 
     fn add_schematic_master(

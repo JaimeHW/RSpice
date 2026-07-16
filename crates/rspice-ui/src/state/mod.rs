@@ -38,8 +38,13 @@ pub use symbol_resolver::{
     ResolvedSymbolSource, SymbolResolver,
 };
 pub use workspace::{
-    CellViewRef, OpenCellView, PROJECT_DESCRIPTOR_SCHEMA_VERSION, ProjectDescriptor,
-    ProjectDescriptorError, ProjectWorkspace, SpecEntry,
+    CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
+    DesignVariableRange, DesignVariableScope, DesignVariableScopeKind,
+    DesignVariableSweepEligibility, OpenCellView, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+    ProjectDescriptor, ProjectDescriptorError, ProjectWorkspace, SavedOutput,
+    SavedOutputCompatibility, SavedOutputCompatibilityKind, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming, SimulationConfigurationError,
+    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
 };
 
 #[cfg(test)]

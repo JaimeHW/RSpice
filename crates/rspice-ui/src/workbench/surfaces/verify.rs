@@ -194,8 +194,7 @@ fn verification_header_actions(ui: &mut Ui, app: &mut RSpiceApp, page: Verificat
                 app.state
                     .workbench
                     .verification
-                    .regression_baseline_picker_selection =
-                    app.state.workbench.verification.regression_baseline_run;
+                    .regression_baseline_picker_selection = active_regression_baseline(app);
                 app.state
                     .workbench
                     .verification
@@ -347,8 +346,15 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
 
     if commit {
         if let Some(run_id) = selected {
-            app.state.workbench.verification.regression_baseline_run = Some(run_id);
-            app.state.workbench.verification.regression_comparison = None;
+            if let Err(error) = commit_regression_baseline(app, run_id) {
+                app.state.workbench.verification.action_receipt =
+                    format!("Regression baseline was not changed: {error}");
+                app.state
+                    .workbench
+                    .verification
+                    .regression_baseline_picker_selection = selected;
+                return;
+            }
             let run_number = candidates
                 .iter()
                 .find(|row| row.0 == run_id)
@@ -2213,20 +2219,67 @@ fn regression_run_pair(
     app: &RSpiceApp,
 ) -> Option<(&crate::state::SimulationRun, &crate::state::SimulationRun)> {
     let current = app.state.simulation.active_run()?;
-    let selected = app
-        .state
-        .workbench
-        .verification
-        .regression_baseline_run
-        .and_then(|id| {
-            app.state
-                .simulation
-                .runs
-                .iter()
-                .find(|run| run.run_id == id)
-        });
+    let selected = active_regression_baseline(app).and_then(|id| {
+        app.state
+            .simulation
+            .runs
+            .iter()
+            .find(|run| run.run_id == id)
+    });
     let baseline = selected?;
     (baseline.run_id != current.run_id).then_some((baseline, current))
+}
+
+fn active_regression_baseline(app: &RSpiceApp) -> Option<crate::product::RunId> {
+    let plan_id = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(crate::simulation::plan::SimulationPlan::id)?;
+    app.state
+        .workspace
+        .active_plan_data(plan_id)
+        .and_then(|payload| payload.regression_baseline_run)
+        .or(app.state.workbench.verification.regression_baseline_run)
+}
+
+fn commit_regression_baseline(
+    app: &mut RSpiceApp,
+    run_id: crate::product::RunId,
+) -> Result<(), String> {
+    let plan_id = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(crate::simulation::plan::SimulationPlan::id)
+        .ok_or_else(|| "the active simulation plan is unavailable".to_owned())?;
+    if !app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .any(|run| run.run_id == run_id)
+    {
+        return Err(format!("retained run {run_id} no longer exists"));
+    }
+
+    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.sim_setup.clone();
+    workspace
+        .ensure_active_plan_data(plan_id)
+        .regression_baseline_run = Some(run_id);
+    setup
+        .commit_active_plan_configuration_change(format!(
+            "selected regression baseline run {run_id}"
+        ))
+        .map_err(|error| error.to_string())?;
+    app.state.workspace = workspace;
+    app.state.sim_setup = setup;
+    app.state.workbench.verification.regression_baseline_run = Some(run_id);
+    app.state.workbench.verification.regression_comparison = None;
+    Ok(())
 }
 
 fn run_regression_comparison(app: &mut RSpiceApp) {

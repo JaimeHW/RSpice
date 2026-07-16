@@ -91,6 +91,8 @@ define_uuid_id!(DesignId);
 define_uuid_id!(TestbenchId);
 define_uuid_id!(SimulationPlanId);
 define_uuid_id!(AnalysisInstanceId);
+define_uuid_id!(DesignVariableId);
+define_uuid_id!(SavedOutputId);
 define_uuid_id!(RunSetId);
 define_uuid_id!(JobId);
 define_uuid_id!(RunId);

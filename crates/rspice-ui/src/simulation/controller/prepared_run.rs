@@ -189,11 +189,31 @@ impl SimulationController {
             &state.library_manager,
             &state.workspace.schematic_buffers,
         );
-        let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
-            &state.schematic,
-            &analysis_lines,
-            &hierarchy,
-        );
+        let analysis_instances = plan
+            .instances()
+            .iter()
+            .map(crate::simulation::plan::FrozenAnalysisInstance::id)
+            .collect::<Vec<_>>();
+        let plan_payload = state.workspace.active_plan_data(plan.plan_id()).ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Simulation plan {} has no plan-owned variables, outputs, and specifications payload",
+                    plan.plan_id()
+                ),
+            )
+        })?;
+        let generated =
+            crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
+                &state.schematic,
+                &analysis_lines,
+                &hierarchy,
+                &plan_payload.design_variables,
+                crate::simulation::netlist_gen::DesignVariableNetlistContext {
+                    active_cell: &state.workspace.active_view,
+                    analysis_instances: &analysis_instances,
+                },
+            );
         if !generated.errors.is_empty() {
             return Err(PreparationError::new(
                 PreparationStage::Netlist,
