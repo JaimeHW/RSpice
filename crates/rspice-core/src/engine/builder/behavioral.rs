@@ -4,31 +4,6 @@ pub(in crate::engine::builder) fn expression_references_circuit_state(expression
     crate::netlist::expr::behavioral_expression_references_runtime_quantity(expression)
 }
 
-pub(in crate::engine::builder) fn temperature_param_to_celsius(value: f64) -> f64 {
-    // Netlist TEMP values are Celsius; Kelvin values enter through solver
-    // configuration, not instance parameters.
-    value
-}
-
-pub(in crate::engine::builder) fn effective_instance_temperature_celsius(
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
-) -> f64 {
-    let mut current_temp_c = crate::analysis::temperature::kelvin_to_celsius(temperature_kelvin);
-    if let Some((_, temp)) = instance_params
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("TEMP"))
-    {
-        current_temp_c = temperature_param_to_celsius(*temp);
-    } else if let Some((_, dtemp)) = instance_params
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("DTEMP"))
-    {
-        current_temp_c += *dtemp;
-    }
-    current_temp_c
-}
-
 pub(in crate::engine::builder) fn temperature_scale_factor(
     current_temp_c: f64,
     tnom_c: f64,
@@ -63,40 +38,23 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
     netlist: &Netlist,
     element: &crate::netlist::Element,
     expression: &str,
+    model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
 ) -> Result<(), SimulationError> {
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
-    let current_temp_c =
-        effective_instance_temperature_celsius(instance_params, temperature_kelvin);
-    let tnom_c = netlist.options.tnom.unwrap_or(27.0);
-    let tc1 = instance_params
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("TC1"))
-        .map(|(_, value)| *value)
-        .unwrap_or(0.0);
-    let tc2 = instance_params
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("TC2"))
-        .map(|(_, value)| *value)
-        .unwrap_or(0.0);
-    let temp_scale = temperature_scale_factor(current_temp_c, tnom_c, tc1, tc2);
-    let mult = instance_params
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("M") || name.eq_ignore_ascii_case("MULT"))
-        .map(|(_, value)| *value)
-        .unwrap_or(1.0);
-    if !mult.is_finite() || mult <= 0.0 {
+    let policy = resolve_behavioral_resistor_policy(
+        netlist,
+        &element.name,
+        model_name,
+        instance_params,
+        temperature_kelvin,
+    )?;
+    if !policy.scale.is_finite() || policy.scale == 0.0 {
         return Err(SimulationError::Circuit(format!(
-            "Resistor '{}' has invalid multiplicity M={} (must be finite and > 0)",
-            element.name, mult
-        )));
-    }
-    if !temp_scale.is_finite() || temp_scale <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "Resistor '{}' resolved to invalid temperature scaling factor {}",
-            element.name, temp_scale
+            "Resistor '{}' resolved to unsupported zero or non-finite behavioral resistance scale {}",
+            element.name, policy.scale
         )));
     }
 
@@ -107,17 +65,10 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
             element.name, e
         ))
     })?;
-    let current_expression = if (mult - 1.0).abs() < f64::EPSILON {
-        format!(
-            "(V({},{})/(({})*{}))",
-            element.nodes[0], element.nodes[1], prepared, temp_scale
-        )
-    } else {
-        format!(
-            "(({}*V({},{}))/(({})*{}))",
-            mult, element.nodes[0], element.nodes[1], prepared, temp_scale
-        )
-    };
+    let current_expression = format!(
+        "(V({},{})/(({})*{}))",
+        element.nodes[0], element.nodes[1], prepared, policy.scale
+    );
 
     let mut bcs = crate::device::BehavioralCurrentSource::new_with_source_path(
         element.name.clone(),
@@ -128,6 +79,8 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
     )
     .map_err(SimulationError::Circuit)?;
     bcs.set_expression_dialect(netlist.params.expression_dialect());
+    bcs.set_temperature(policy.temperature_celsius);
+    bcs.enable_two_terminal_observables();
     circuit.behavioral_sources.add_current(bcs);
     Ok(())
 }

@@ -138,6 +138,29 @@ impl Engine {
             result.dc_observables.push((format!("P({name})"), power));
             result.dc_observables.push((format!("W({name})"), power));
         }
+
+        // A solution-dependent resistor is stamped as a behavioral current
+        // expression so its complete Jacobian participates in Newton solves.
+        // Preserve the resistor lead-observable contract at the accepted
+        // solution without mutating the circuit's expression state.
+        for source in &circuit.behavioral_sources.current_sources {
+            if !source.has_two_terminal_observables() {
+                continue;
+            }
+            let voltage = node_voltage(source.node_pos) - node_voltage(source.node_neg);
+            let mut observable_source = source.clone();
+            let current = observable_source.evaluate(solution, 0.0);
+            let power = voltage * current;
+            result
+                .dc_observables
+                .push((format!("I({})", source.name), current));
+            result
+                .dc_observables
+                .push((format!("P({})", source.name), power));
+            result
+                .dc_observables
+                .push((format!("W({})", source.name), power));
+        }
     }
 
     fn build_empty_dc_result() -> SimulationResult {
@@ -981,6 +1004,42 @@ RLOAD1B 1b 0 1
                     < 1e-12
             );
         }
+    }
+
+    #[test]
+    fn modeled_solution_dependent_resistor_uses_model_temperature_law_and_observables() {
+        let deck = r#"modeled solution-dependent resistor
+VCTRL ctrl 0 2
+RCTRL ctrl 0 1
+VIN in 0 1
+RDYN in out {0.5*V(ctrl)} RMOD TC1=0.1 TC2=0.2
+RLOAD out 0 2
+.model RMOD R (TCE=3)
+.op
+.end
+"#;
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.temperature = crate::analysis::temperature::celsius_to_kelvin(37.0);
+        let result = Engine::new(config)
+            .run_dc_op(&netlist)
+            .expect("modeled solution-dependent resistor solves");
+
+        let resistance = 1.01_f64.powf(30.0);
+        let expected_current = 1.0 / (resistance + 2.0);
+        let expected_voltage = 2.0 * expected_current;
+        let expected_power = resistance * expected_current * expected_current;
+
+        assert!((result.try_voltage_named("out").unwrap() - expected_voltage).abs() < 1.0e-9);
+        assert!(
+            (result.try_dc_observable_named("I(RDYN)").unwrap() - expected_current).abs() < 1.0e-9
+        );
+        assert!(
+            (result.try_dc_observable_named("P(rdyn)").unwrap() - expected_power).abs() < 1.0e-9
+        );
+        assert!(
+            (result.try_dc_observable_named("W(RdYn)").unwrap() - expected_power).abs() < 1.0e-9
+        );
     }
 
     #[test]

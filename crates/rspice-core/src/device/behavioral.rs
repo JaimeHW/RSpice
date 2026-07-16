@@ -1360,6 +1360,9 @@ pub struct BehavioralCurrentSource {
     temperature: Value,
     /// Dialect-specific expression-function semantics.
     expression_dialect: ExpressionDialect,
+    /// Whether this expression represents a two-terminal device whose lead
+    /// current and power are part of the public device-observable surface.
+    two_terminal_observables: bool,
 }
 
 impl BehavioralCurrentSource {
@@ -1405,6 +1408,7 @@ impl BehavioralCurrentSource {
                 crate::constants::TEMP_REFERENCE,
             ),
             expression_dialect: ExpressionDialect::Ngspice,
+            two_terminal_observables: false,
         })
     }
 
@@ -1510,6 +1514,17 @@ impl BehavioralCurrentSource {
     /// Set dialect-specific expression-function semantics.
     pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
         self.expression_dialect = dialect;
+    }
+
+    /// Mark this current expression as the constitutive law of a two-terminal
+    /// device (currently a solution-dependent resistor), rather than an
+    /// independent behavioral current source.
+    pub(crate) fn enable_two_terminal_observables(&mut self) {
+        self.two_terminal_observables = true;
+    }
+
+    pub(crate) fn has_two_terminal_observables(&self) -> bool {
+        self.two_terminal_observables
     }
 
     #[inline]

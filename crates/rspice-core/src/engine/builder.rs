@@ -3157,21 +3157,6 @@ impl Engine {
                         .transpose()?;
                     let value_expr = prepared_value_expr.as_deref();
 
-                    if let Some(expression) = value_expr
-                        && model.is_none()
-                        && expression_references_circuit_state(expression)
-                    {
-                        add_behavioral_resistor(
-                            &mut circuit,
-                            netlist,
-                            element,
-                            expression,
-                            instance_params,
-                            self.config.temperature,
-                        )?;
-                        continue;
-                    }
-
                     #[cfg(feature = "veriloga-builtins")]
                     if let Some(model_name) = model.as_deref()
                         && try_route_generated_resistor_model(
@@ -3184,6 +3169,21 @@ impl Engine {
                             self.config.temperature,
                         )?
                     {
+                        continue;
+                    }
+
+                    if let Some(expression) = value_expr
+                        && expression_references_circuit_state(expression)
+                    {
+                        add_behavioral_resistor(
+                            &mut circuit,
+                            netlist,
+                            element,
+                            expression,
+                            model.as_deref(),
+                            instance_params,
+                            self.config.temperature,
+                        )?;
                         continue;
                     }
 

@@ -527,13 +527,13 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         }
     })?;
 
-    let tce = instance_param(instance_params, &["TCE"]).or_else(|| {
-        model_def.and_then(|model_def| {
-            resolve_model_param(model_def, &["TCE"], &eval_ctx)
-                .ok()
-                .flatten()
-        })
-    });
+    let tce = if let Some(tce) = instance_param(instance_params, &["TCE"]) {
+        Some(tce)
+    } else if let Some(model_def) = model_def {
+        resolve_model_param(model_def, &["TCE"], &eval_ctx)?
+    } else {
+        None
+    };
     if let Some(tce) = tce {
         let temp_delta_c = current_temp_c - tnom_c;
         let scale = 1.01_f64.powf(tce * temp_delta_c);
@@ -545,24 +545,20 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         }
         resolved *= scale;
     } else {
-        let tc1 = instance_param(instance_params, &["TC1", "TC"])
-            .or_else(|| {
-                model_def.and_then(|model_def| {
-                    resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)
-                        .ok()
-                        .flatten()
-                })
-            })
-            .unwrap_or(0.0);
-        let tc2 = instance_param(instance_params, &["TC2"])
-            .or_else(|| {
-                model_def.and_then(|model_def| {
-                    resolve_model_param(model_def, &["TC2"], &eval_ctx)
-                        .ok()
-                        .flatten()
-                })
-            })
-            .unwrap_or(0.0);
+        let tc1 = if let Some(tc1) = instance_param(instance_params, &["TC1", "TC"]) {
+            tc1
+        } else if let Some(model_def) = model_def {
+            resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)?.unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let tc2 = if let Some(tc2) = instance_param(instance_params, &["TC2"]) {
+            tc2
+        } else if let Some(model_def) = model_def {
+            resolve_model_param(model_def, &["TC2"], &eval_ctx)?.unwrap_or(0.0)
+        } else {
+            0.0
+        };
         if tc1 != 0.0 || tc2 != 0.0 {
             let temp_ctx =
                 crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
@@ -572,6 +568,51 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
     }
 
     apply_resistor_instance_scaling(element_name, "resistance", resolved, instance_params)
+}
+
+pub(in crate::engine::builder) struct ResolvedBehavioralResistorPolicy {
+    pub scale: f64,
+    pub temperature_celsius: f64,
+}
+
+/// Resolve the state-independent policy which surrounds a
+/// solution-dependent resistor's raw `R` expression. Supplying a unit base
+/// resistance deliberately exercises the same model, temperature, and
+/// multiplicity policy as a scalar instance: an explicit expression owns the
+/// base resistance, while model `R`, the selected temperature law, and `1/M`
+/// remain applicable.
+pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
+    netlist: &Netlist,
+    element_name: &str,
+    model_name: Option<&str>,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<ResolvedBehavioralResistorPolicy, SimulationError> {
+    let model_def = if let Some(model_name) = model_name {
+        Some(find_model_def(netlist, model_name).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "Resistor '{}' references unknown model '{}'",
+                element_name, model_name
+            ))
+        })?)
+    } else {
+        None
+    };
+    let (_, temperature_celsius, _) =
+        resolve_resistor_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
+    let scale = resolve_resistor_instance_value(
+        netlist,
+        element_name,
+        1.0,
+        None,
+        model_name,
+        instance_params,
+        temperature_kelvin,
+    )?;
+    Ok(ResolvedBehavioralResistorPolicy {
+        scale,
+        temperature_celsius,
+    })
 }
 
 pub(in crate::engine::builder) fn resolve_resistor_small_signal_value(
