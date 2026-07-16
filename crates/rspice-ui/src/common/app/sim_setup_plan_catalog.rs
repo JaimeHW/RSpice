@@ -11,7 +11,7 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::product::{ObjectRevision, SimulationPlanId};
+use crate::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::{AnalysisPlanError, SimulationPlan};
 
@@ -226,12 +226,24 @@ impl SimulationPlanCloneOptions {
 
 /// Committed clone transaction used by adjacent project-owned domains to
 /// copy their payloads under the exact same source and destination IDs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationPlanCloneOutcome {
     pub source_plan_id: SimulationPlanId,
     pub source_revision: ObjectRevision,
     pub cloned_plan_id: SimulationPlanId,
     pub contents: SimulationPlanCloneOptions,
+    /// Exact source-to-clone analysis mapping for plan-owned payloads whose
+    /// scope targets a selected analysis instance.
+    pub analysis_identity_map: Vec<(AnalysisInstanceId, AnalysisInstanceId)>,
+}
+
+impl SimulationPlanCloneOutcome {
+    #[must_use]
+    pub fn remap_analysis_id(&self, source: AnalysisInstanceId) -> Option<AnalysisInstanceId> {
+        self.analysis_identity_map
+            .iter()
+            .find_map(|(candidate, cloned)| (*candidate == source).then_some(*cloned))
+    }
 }
 
 /// Atomic named-plan catalog operation failure.
@@ -349,6 +361,12 @@ impl SimSetupState {
         let source_id = source.id();
         let source_revision = source.revision();
         let cloned_id = cloned_plan.id();
+        let analysis_identity_map = source
+            .instances()
+            .iter()
+            .zip(cloned_plan.instances())
+            .map(|(source, cloned)| (source.id(), cloned.id()))
+            .collect();
         let cloned_lineage =
             SimulationPlanLineage::cloned_from_with_contents(source_id, source_revision, contents);
         let cloned_reference_pvt = if contents.copy_pvt_and_model_bindings {
@@ -392,6 +410,7 @@ impl SimSetupState {
             source_revision,
             cloned_plan_id: cloned_id,
             contents,
+            analysis_identity_map,
         })
     }
 
@@ -654,6 +673,10 @@ mod tests {
         assert_eq!(clone.source_plan_id, source_id);
         assert_eq!(clone.contents, SimulationPlanCloneOptions::default());
         assert_eq!(
+            clone.analysis_identity_map,
+            vec![(source_instance_id, clone_instance_id(&setup))]
+        );
+        assert_eq!(
             setup.active_plan_lineage(),
             SimulationPlanLineage::cloned_from(source_id, setup.inactive_plans()[0].revision())
         );
@@ -709,8 +732,13 @@ mod tests {
         );
         assert_eq!(setup.reference_pvt.temperature_celsius, 125.0);
         assert_eq!(outcome.contents, contents);
+        assert!(outcome.analysis_identity_map.is_empty());
         assert_eq!(setup.active_plan_lineage().clone_contents(), Some(contents));
         assert_eq!(setup.enabled_analysis_instance_count(), 0);
+    }
+
+    fn clone_instance_id(setup: &SimSetupState) -> AnalysisInstanceId {
+        setup.analysis_plan.as_ref().unwrap().instances()[0].id()
     }
 
     #[test]
