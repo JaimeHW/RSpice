@@ -744,7 +744,8 @@ impl<'a> Parser<'a> {
                 "ASINH" => Some(Function::Asinh),
                 "ACOSH" => Some(Function::Acosh),
                 "ATANH" => Some(Function::Atanh),
-                "FLOOR" | "INT" => Some(Function::Floor),
+                "INT" | "TRUNC" => Some(Function::Trunc),
+                "FLOOR" => Some(Function::Floor),
                 "CEIL" | "CEILING" => Some(Function::Ceil),
                 "ROUND" | "NINT" => Some(Function::Round),
                 "SQR" => Some(Function::Sqr),
@@ -987,6 +988,21 @@ mod tests {
         assert!((eval_const_xyce("log(100)") - 2.0).abs() < 1.0e-15);
         assert!((eval_const_xyce("ln(100)") - 100.0_f64.ln()).abs() < 1.0e-15);
         assert!((eval_const_xyce("log10(100)") - 2.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn int_truncates_toward_zero_independently_of_floor() {
+        for (input, truncated, floored) in [
+            (-1.9, -1.0, -2.0),
+            (-0.9, 0.0, -1.0),
+            (0.0, 0.0, 0.0),
+            (0.9, 0.0, 0.0),
+            (1.9, 1.0, 1.0),
+        ] {
+            assert_eq!(eval_const(&format!("int({input})")), truncated);
+            assert_eq!(eval_const(&format!("trunc({input})")), truncated);
+            assert_eq!(eval_const(&format!("floor({input})")), floored);
+        }
     }
 
     #[test]

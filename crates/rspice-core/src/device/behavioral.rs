@@ -485,7 +485,8 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
         Expr::Function { func, args } => {
             matches!(
                 func,
-                Function::Floor
+                Function::Trunc
+                    | Function::Floor
                     | Function::Ceil
                     | Function::Round
                     | Function::Sign
@@ -958,6 +959,10 @@ fn eval_function_with_derivative(
             } else {
                 Some((x.atanh(), dx / (1.0 - x * x)))
             }
+        }
+        Function::Trunc => {
+            let (x, _) = eval_arg(0)?;
+            Some((x.trunc(), 0.0))
         }
         Function::Floor => {
             let (x, _) = eval_arg(0)?;
@@ -1879,6 +1884,17 @@ mod tests {
         let (value, derivative) = eval_node_derivative("v(n)%2", 5.25);
         assert_eq!(value, 1.25);
         assert_eq!(derivative, 1.0);
+    }
+
+    #[test]
+    fn analytic_derivative_distinguishes_int_from_floor_for_negative_values() {
+        let (integer, integer_derivative) = eval_node_derivative("int(v(n))", -1.75);
+        let (floor, floor_derivative) = eval_node_derivative("floor(v(n))", -1.75);
+
+        assert_eq!(integer, -1.0);
+        assert_eq!(floor, -2.0);
+        assert_eq!(integer_derivative, 0.0);
+        assert_eq!(floor_derivative, 0.0);
     }
 
     #[test]

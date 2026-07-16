@@ -70,6 +70,7 @@ pub enum Instruction {
     Asinh,
     Acosh,
     Atanh,
+    Trunc,
     Floor,
     Ceil,
     Round,
@@ -369,6 +370,7 @@ impl Vm {
                         }
                     });
                 }
+                Instruction::Trunc => self.unary_op(|a| a.trunc()),
                 Instruction::Floor => self.unary_op(|a| a.floor()),
                 Instruction::Ceil => self.unary_op(|a| a.ceil()),
                 Instruction::Round => self.unary_op(|a| a.round_ties_even()),

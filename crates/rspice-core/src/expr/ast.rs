@@ -90,6 +90,7 @@ pub enum Function {
     Acosh,
     Atanh,
     // Rounding
+    Trunc,
     Floor,
     Ceil,
     Round,

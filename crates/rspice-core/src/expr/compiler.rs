@@ -111,6 +111,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Asinh => Instruction::Asinh,
                 Function::Acosh => Instruction::Acosh,
                 Function::Atanh => Instruction::Atanh,
+                Function::Trunc => Instruction::Trunc,
                 Function::Floor => Instruction::Floor,
                 Function::Ceil => Instruction::Ceil,
                 Function::Round => Instruction::Round,
