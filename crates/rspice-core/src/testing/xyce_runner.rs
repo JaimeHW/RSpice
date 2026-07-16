@@ -112,6 +112,10 @@ const XYCE_BUG667_NODESET_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_667_son/nodeset_in_subckt.cir";
 const XYCE_BUG667_NODESET_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_667_son/nodeset_not_in_subckt.cir";
+const XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_754_son/dcsweep_globalpar.cir";
+const XYCE_BUG754_LITERAL_REFERENCE_RECORD: &str =
+    "netlists/certification_tests/bug_754_son/dcsweep_nopar.cir";
 const XYCE_BUG67_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_67/bug_67.cir";
 const XYCE_BUG671_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_671/vpwl_binaryfile.cir";
@@ -726,6 +730,43 @@ struct XyceBug667NodesetContract {
     owner_plan: XyceStaticTranPlan,
     reference_plan: XyceStaticTranPlan,
     role: XyceBug667NodesetRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug754GlobalParameterRole {
+    GlobalParameterOwner,
+    LiteralReference,
+}
+
+impl XyceBug754GlobalParameterRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::GlobalParameterOwner => "bug754_global_parameter_dc_relational_wrapper_owner",
+            Self::LiteralReference => {
+                "bug754_global_parameter_dc_relational_wrapper_literal_reference"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug754GlobalParameterContract {
+    owner_plan: XyceStaticDcPlan,
+    reference_plan: XyceStaticDcPlan,
+    role: XyceBug754GlobalParameterRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug754GlobalParameterSnapshot {
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    model_name: String,
+    model_type: String,
+    model_params: Vec<(String, u64)>,
+    dc_source: String,
+    dc_start_bits: u64,
+    dc_stop_bits: u64,
+    dc_step_bits: u64,
+    probes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3055,6 +3096,30 @@ impl XyceTestRunner {
                     start,
                     "bug667_nodeset_relational_wrapper",
                     format!("BUG 667 NODESET relational qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.bug754_global_parameter_relational_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_bug754_global_parameter_relational_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "bug754_global_parameter_dc_relational_wrapper",
+                    format!("BUG 754 global-parameter DC qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -13647,6 +13712,153 @@ impl XyceTestRunner {
         // Index sequences, case-sensitive columns, and byte-identical
         // precision-8 scientific tokens for every TIME and probe value.
         self.compare_serialized_default_prn_tables(owner, reference)
+    }
+
+    fn run_bug754_global_parameter_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug754GlobalParameterContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        // Preserve the removed wrapper's execution order: run the
+        // global-parameter owner first, run the literal reference second, then
+        // apply bytewise `diff` with dcsweep_nopar.cir as the good file.
+        let owner = match self.simulate_bug754_global_parameter_member(
+            &contract.owner_plan,
+            start,
+            "global-parameter owner",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 754 global-parameter execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let reference = match self.simulate_bug754_global_parameter_member(
+            &contract.reference_plan,
+            start,
+            "literal reference",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 754 literal-reference execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mismatches = match self.compare_bug754_global_parameter_tables(&reference, &owner) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG 754 bytewise default-PRN adapter failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} BUG 754 exact PRN mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn simulate_bug754_global_parameter_member(
+        &self,
+        plan: &XyceStaticDcPlan,
+        start: Instant,
+        role: &str,
+    ) -> Result<XycePrnTable, String> {
+        let (netlist, results) = self
+            .run_static_dc_results(plan, start)
+            .map_err(|err| format!("{role} simulation failed: {err}"))?;
+        if results.len() != 1_001 {
+            return Err(format!(
+                "{role} produced {} DC points instead of 1001",
+                results.len()
+            ));
+        }
+        self.dc_results_to_prn_table(plan, &netlist, &results)
+            .map_err(|err| format!("{role} default PRN generation failed: {err}"))
+    }
+
+    fn compare_bug754_global_parameter_tables(
+        &self,
+        reference: &XycePrnTable,
+        owner: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let reference_fingerprint = Self::bug754_default_prn_serialization_fingerprint(reference)?;
+        let owner_fingerprint = Self::bug754_default_prn_serialization_fingerprint(owner)?;
+        if reference_fingerprint == owner_fingerprint {
+            return Ok(Vec::new());
+        }
+        let mismatches = self.compare_serialized_default_prn_tables(reference, owner)?;
+        if mismatches.is_empty() {
+            Err(
+                "serialized default PRNs differ outside their numeric data tokens despite equal tables"
+                    .into(),
+            )
+        } else {
+            Ok(mismatches)
+        }
+    }
+
+    fn bug754_default_prn_serialization_fingerprint(
+        table: &XycePrnTable,
+    ) -> Result<Vec<Vec<String>>, String> {
+        const COLUMNS: [&str; 4] = ["Index", "v(drain)", "v(gate)", "I(vdrain)"];
+        if table.columns != COLUMNS || table.rows.len() != 1_001 {
+            return Err(format!(
+                "BUG 754 default PRN requires exact columns {COLUMNS:?} and 1001 rows, got {:?}/{}",
+                table.columns,
+                table.rows.len()
+            ));
+        }
+        // Release 7.10's default writer is deterministic: one fixed header
+        // layout, one fixed whitespace layout per four-field row, precision-8
+        // scientific formatting for every numeric token, and one fixed
+        // simulation footer. Once exact columns, row count, Index sequence,
+        // and every formatted token are equal, bytewise PRN equality follows;
+        // there is no table-dependent separator or metadata left to vary.
+        let mut lines = Vec::with_capacity(1_003);
+        lines.push(table.columns.clone());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != COLUMNS.len() || row[0].to_bits() != (row_index as Value).to_bits() {
+                return Err(format!(
+                    "BUG 754 default PRN row {row_index} has a noncanonical Index or field count"
+                ));
+            }
+            lines.push(
+                row.iter()
+                    .map(|value| Self::xyce_default_prn_text(*value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        lines.push(
+            ["End", "of", "Xyce(TM)", "Simulation"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        Ok(lines)
     }
 
     fn compare_analytic_integer_dc_table(
@@ -45564,6 +45776,422 @@ impl XyceTestRunner {
         })())
     }
 
+    fn bug754_global_parameter_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug754GlobalParameterContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = match relative.as_str() {
+            XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD => {
+                XyceBug754GlobalParameterRole::GlobalParameterOwner
+            }
+            XYCE_BUG754_LITERAL_REFERENCE_RECORD => XyceBug754GlobalParameterRole::LiteralReference,
+            _ => return None,
+        };
+        Some((|| {
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| "BUG 754 record has no sibling directory".to_string())?;
+            let owner_path = parent.join("dcsweep_globalpar.cir");
+            let reference_path = parent.join("dcsweep_nopar.cir");
+            if Self::normalize_manifest_key(&self.relative_key(&owner_path))
+                != XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD
+                || Self::normalize_manifest_key(&self.relative_key(&reference_path))
+                    != XYCE_BUG754_LITERAL_REFERENCE_RECORD
+            {
+                return Err("owner/reference paths are not the exact BUG 754 sibling pair".into());
+            }
+            if !self.requires_upstream_wrapper(XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD)
+                || self.requires_upstream_wrapper(XYCE_BUG754_LITERAL_REFERENCE_RECORD)
+            {
+                return Err(
+                    "exactly dcsweep_globalpar.cir must own the removed upstream wrapper".into(),
+                );
+            }
+
+            let mut family_members = BTreeSet::new();
+            for entry in fs::read_dir(parent)
+                .map_err(|err| format!("could not inspect BUG 754 directory: {err}"))?
+            {
+                let entry =
+                    entry.map_err(|err| format!("could not inspect BUG 754 entry: {err}"))?;
+                let path = entry.path();
+                let file_name = entry.file_name();
+                let name = file_name
+                    .to_str()
+                    .ok_or_else(|| "BUG 754 directory contains a non-Unicode entry".to_string())?;
+                let normalized_name = name.to_ascii_lowercase();
+                if normalized_name.starts_with("dcsweep_")
+                    && path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                {
+                    let metadata = fs::symlink_metadata(&path)
+                        .map_err(|err| format!("could not inspect BUG 754 family member: {err}"))?;
+                    if !metadata.file_type().is_file()
+                        || metadata.file_type().is_symlink()
+                        || metadata.len() == 0
+                    {
+                        return Err(format!(
+                            "BUG 754 family member '{}' must be a nonempty regular non-symlink file",
+                            path.display()
+                        ));
+                    }
+                    Self::insert_bug754_family_member_name(&mut family_members, name)?;
+                }
+            }
+            if family_members
+                != BTreeSet::from([
+                    "dcsweep_globalpar.cir".to_string(),
+                    "dcsweep_nopar.cir".to_string(),
+                ])
+            {
+                return Err(format!(
+                    "BUG 754 dcsweep family must contain exactly its two records, got {family_members:?}"
+                ));
+            }
+            for (member_role, path) in [
+                ("global-parameter owner", &owner_path),
+                ("literal reference", &reference_path),
+            ] {
+                self.reject_wrapper_output_artifacts(path)
+                    .map_err(|err| format!("{member_role} {err}"))?;
+            }
+
+            let owner_source = fs::read_to_string(&owner_path)
+                .map_err(|err| format!("failed to read BUG 754 owner: {err}"))?;
+            let reference_source = fs::read_to_string(&reference_path)
+                .map_err(|err| format!("failed to read BUG 754 reference: {err}"))?;
+            Self::validate_bug754_source_pair(&owner_source, &reference_source)?;
+
+            let owner_plan = self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?;
+            let reference_plan =
+                self.static_dc_plan_for_path(&reference_path, ExpressionDialect::Xyce)?;
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_path)
+                .map_err(|err| format!("BUG 754 owner parse failed: {err}"))?;
+            let reference_netlist =
+                Self::parse_xyce_netlist(&reference_plan.source, &reference_path)
+                    .map_err(|err| format!("BUG 754 reference parse failed: {err}"))?;
+            Self::validate_bug754_member(
+                &owner_plan,
+                &owner_netlist,
+                XyceBug754GlobalParameterRole::GlobalParameterOwner,
+            )?;
+            Self::validate_bug754_member(
+                &reference_plan,
+                &reference_netlist,
+                XyceBug754GlobalParameterRole::LiteralReference,
+            )?;
+            let owner_snapshot =
+                Self::bug754_global_parameter_snapshot(&owner_plan, &owner_netlist)?;
+            let reference_snapshot =
+                Self::bug754_global_parameter_snapshot(&reference_plan, &reference_netlist)?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "BUG 754 effective circuits differ after global-parameter normalization: owner={owner_snapshot:?} reference={reference_snapshot:?}"
+                ));
+            }
+
+            Ok(XyceBug754GlobalParameterContract {
+                owner_plan,
+                reference_plan,
+                role,
+            })
+        })())
+    }
+
+    fn insert_bug754_family_member_name(
+        family_members: &mut BTreeSet<String>,
+        name: &str,
+    ) -> Result<(), String> {
+        let normalized = name.to_ascii_lowercase();
+        if !family_members.insert(normalized.clone()) {
+            return Err(format!(
+                "BUG 754 dcsweep family contains case-colliding physical record '{name}' normalized as '{normalized}'"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_bug754_source_pair(owner: &str, reference: &str) -> Result<(), String> {
+        let statements = |source: &str| {
+            Self::logical_netlist_lines(source)
+                .into_iter()
+                .filter_map(|line| {
+                    let statement = Self::strip_netlist_comment(&line).trim();
+                    (!statement.is_empty()).then(|| Self::normalize_probe(statement))
+                })
+                .collect::<Vec<_>>()
+        };
+        let owner_statements = statements(owner);
+        let reference_statements = statements(reference);
+        let expected_owner = [
+            ".global_paramvgi=0.5",
+            ".global_paramvdi=1.0",
+            "m1draingatesource0mlev1",
+            "vdraindrain0dc{vdi}",
+            "vgategate0dc.5",
+            "vsourcesource0dc{0}",
+            ".dcvdrain010.001",
+            ".printdcv(drain)v(gate)i(vdrain)",
+            ".modelmlev1nmoslevel=1",
+            ".end",
+        ];
+        let expected_reference = [
+            "m1draingatesource0mlev1",
+            "vdraindrain0dc1.0",
+            "vgategate0dc.5",
+            "vsourcesource0dc{0}",
+            ".dcvdrain010.001",
+            ".printdcv(drain)v(gate)i(vdrain)",
+            ".modelmlev1nmoslevel=1",
+            ".end",
+        ];
+        if owner_statements != expected_owner {
+            return Err(format!(
+                "BUG 754 owner executable statements changed: {owner_statements:?}"
+            ));
+        }
+        if reference_statements != expected_reference {
+            return Err(format!(
+                "BUG 754 reference executable statements changed: {reference_statements:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_bug754_member(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        role: XyceBug754GlobalParameterRole,
+    ) -> Result<(), String> {
+        let requires_wrapper = role == XyceBug754GlobalParameterRole::GlobalParameterOwner;
+        let expected_contract = if requires_wrapper {
+            XyceStaticDcContract::WrapperDefault
+        } else {
+            XyceStaticDcContract::PlainStatic
+        };
+        if Self::static_dc_contract_for_print_format(
+            requires_wrapper,
+            plan.print_format.as_deref(),
+        )? != expected_contract
+        {
+            return Err(format!(
+                "BUG 754 {role:?} does not map to the required {expected_contract:?} contract"
+            ));
+        }
+        if plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !plan.steps.is_empty()
+            || !plan.diagnostics.is_empty()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+            || !plan.dc.source.eq_ignore_ascii_case("Vdrain")
+            || plan.dc.start.to_bits() != 0.0f64.to_bits()
+            || plan.dc.stop.to_bits() != 1.0f64.to_bits()
+            || plan.dc.step.to_bits() != 0.001f64.to_bits()
+            || plan
+                .print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .ne(["v(drain)", "v(gate)", "i(vdrain)"])
+        {
+            return Err(format!(
+                "BUG 754 member requires one diagnostic-free Vdrain 0:0.001:1 linear DC sweep and ordered default V(drain), V(gate), I(Vdrain) output; actual plan={plan:?}"
+            ));
+        }
+        if netlist.elements.len() != 4
+            || netlist.models.len() != 1
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Dc { .. }])
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(
+                "BUG 754 member admits exactly one Level-1 NMOS, three DC sources, one DC analysis, and no auxiliary state"
+                    .into(),
+            );
+        }
+        let mut numeric_params = netlist.params.numeric_parameters();
+        numeric_params.sort_by(|left, right| {
+            left.0
+                .to_ascii_lowercase()
+                .cmp(&right.0.to_ascii_lowercase())
+        });
+        match role {
+            XyceBug754GlobalParameterRole::GlobalParameterOwner => {
+                let expected = [("vdi", 1.0f64.to_bits()), ("vgi", 0.5f64.to_bits())];
+                let actual = numeric_params
+                    .iter()
+                    .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+                    .collect::<Vec<_>>();
+                if actual
+                    != expected
+                        .into_iter()
+                        .map(|(name, bits)| (name.to_string(), bits))
+                        .collect::<Vec<_>>()
+                {
+                    return Err(format!(
+                        "BUG 754 owner must retain exactly VDI=1.0 and VGI=0.5 global parameters, got {actual:?}"
+                    ));
+                }
+            }
+            XyceBug754GlobalParameterRole::LiteralReference if numeric_params.is_empty() => {}
+            XyceBug754GlobalParameterRole::LiteralReference => {
+                return Err("BUG 754 literal reference must not declare numeric parameters".into());
+            }
+        }
+        Self::bug754_global_parameter_snapshot(plan, netlist).map(|_| ())
+    }
+
+    fn bug754_global_parameter_snapshot(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+    ) -> Result<XyceBug754GlobalParameterSnapshot, String> {
+        let [model] = netlist.models.as_slice() else {
+            return Err("BUG 754 requires exactly one MOS model".into());
+        };
+        if !model.name.eq_ignore_ascii_case("mlev1")
+            || !model.model_type.eq_ignore_ascii_case("nmos")
+            || model.params.len() != 1
+            || !model.params[0].0.eq_ignore_ascii_case("level")
+            || model.params[0].1.to_bits() != 1.0f64.to_bits()
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!("BUG 754 Level-1 NMOS model changed: {model:?}"));
+        }
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let name = element.name.to_ascii_lowercase();
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| node.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Mosfet {
+                    model,
+                    mos_type: crate::netlist::MosType::Nmos,
+                    compact_syntax: false,
+                    instance_params,
+                    deferred_params,
+                } if model.eq_ignore_ascii_case("mlev1")
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && nodes == ["drain", "gate", "source", "0"] =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "M:NMOS:L1".to_string(),
+                        nodes,
+                        numeric_bits: Vec::new(),
+                        text: vec!["mlev1".to_string()],
+                    }
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if value.is_finite() =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "BUG 754 element '{}' is outside the exact Level-1 NMOS/DC-source envelope",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(name.clone(), fingerprint).is_some() {
+                return Err(format!("BUG 754 contains duplicate element '{name}'"));
+            }
+        }
+        let expected_elements = BTreeMap::from([
+            (
+                "m1".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "M:NMOS:L1".to_string(),
+                    nodes: vec![
+                        "drain".to_string(),
+                        "gate".to_string(),
+                        "source".to_string(),
+                        "0".to_string(),
+                    ],
+                    numeric_bits: Vec::new(),
+                    text: vec!["mlev1".to_string()],
+                },
+            ),
+            (
+                "vdrain".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "V:DC".to_string(),
+                    nodes: vec!["drain".to_string(), "0".to_string()],
+                    numeric_bits: vec![1.0f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+            (
+                "vgate".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "V:DC".to_string(),
+                    nodes: vec!["gate".to_string(), "0".to_string()],
+                    numeric_bits: vec![0.5f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+            (
+                "vsource".to_string(),
+                XyceRelationalElementFingerprint {
+                    kind: "V:DC".to_string(),
+                    nodes: vec!["source".to_string(), "0".to_string()],
+                    numeric_bits: vec![0.0f64.to_bits()],
+                    text: Vec::new(),
+                },
+            ),
+        ]);
+        if elements != expected_elements {
+            return Err(format!(
+                "BUG 754 canonical Level-1 NMOS/source topology changed: {elements:?}"
+            ));
+        }
+        Ok(XyceBug754GlobalParameterSnapshot {
+            elements,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params: vec![("level".to_string(), 1.0f64.to_bits())],
+            dc_source: plan.dc.source.to_ascii_lowercase(),
+            dc_start_bits: plan.dc.start.to_bits(),
+            dc_stop_bits: plan.dc.stop.to_bits(),
+            dc_step_bits: plan.dc.step.to_bits(),
+            probes: plan
+                .print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect(),
+        })
+    }
+
     fn validate_bug667_nodeset_member(
         plan: &XyceStaticTranPlan,
         netlist: &Netlist,
@@ -53021,6 +53649,80 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
         (owner, format!("{}\n", reference_lines.join("\n")))
     }
 
+    const BUG754_GLOBAL_PARAMETER_OWNER_SOURCE: &str = "* Shows bug in .dc sweep over source with global par usage\n\
+\n\
+.global_param vgi = 0.5\n\
+.global_param vdi = 1.0\n\
+M1 drain gate source 0 mlev1\n\
+* This produces INCORRECT DC sweep values if {vdi} used\n\
+*Vdrain drain 0  dc 1.0\n\
+Vdrain drain 0  dc {vdi}\n\
+Vgate gate 0 dc .5\n\
+Vsource source 0 dc {0}\n\
+\n\
+.dc vdrain 0 1 0.001 \n\
+.print dc v(drain) v(gate) I(vdrain)\n\
+\n\
+\n\
+.model mlev1 nmos level=1\n\
+\n\
+.end\n\
+\n";
+
+    const BUG754_LITERAL_REFERENCE_SOURCE: &str = "* Baseline circuit not using global param\n\
+\n\
+M1 drain gate source 0 mlev1\n\
+Vdrain drain 0  dc 1.0\n\
+Vgate gate 0 dc .5\n\
+Vsource source 0 dc {0}\n\
+\n\
+.dc vdrain 0 1 0.001 \n\
+.print dc v(drain) v(gate) I(vdrain)\n\
+\n\
+.model mlev1 nmos level=1\n\
+\n\
+.end\n\
+\n";
+
+    fn bug754_global_parameter_fixture(
+        label: &str,
+        owner_source: &str,
+        reference_source: &str,
+    ) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-bug754-global-parameter-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let family = root.join("Netlists/Certification_Tests/BUG_754_SON");
+        fs::create_dir_all(&family).expect("create BUG 754 fixture directory");
+        let owner_path = family.join("dcsweep_globalpar.cir");
+        let reference_path = family.join("dcsweep_nopar.cir");
+        fs::write(&owner_path, owner_source).expect("write BUG 754 owner");
+        fs::write(&reference_path, reference_source).expect("write BUG 754 reference");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_754_SON/dcsweep_globalpar.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 754 wrapper provenance");
+        let owner = XyceDeck {
+            path: owner_path,
+            relative_path: "Netlists/Certification_Tests/BUG_754_SON/dcsweep_globalpar.cir"
+                .to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let reference = XyceDeck {
+            path: reference_path,
+            relative_path: "Netlists/Certification_Tests/BUG_754_SON/dcsweep_nopar.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        (root, owner, reference, runner)
+    }
+
     fn bug655_continuation_fixture(
         label: &str,
         owner_source: &str,
@@ -54409,6 +55111,377 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             assert_eq!(result.contract, expected_contract);
         }
         fs::remove_dir_all(root).expect("remove BUG 667 execution fixture");
+    }
+
+    #[test]
+    fn bug754_global_parameter_pair_is_manifest_owned_and_semantically_identical() {
+        let (root, owner, reference, runner) = bug754_global_parameter_fixture(
+            "qualification",
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE,
+            BUG754_LITERAL_REFERENCE_SOURCE,
+        );
+        let owner_contract = runner
+            .bug754_global_parameter_relational_contract(&owner)
+            .expect("owner is selected")
+            .expect("owner pair qualifies");
+        let reference_contract = runner
+            .bug754_global_parameter_relational_contract(&reference)
+            .expect("reference is selected")
+            .expect("reference pair qualifies");
+        assert_eq!(
+            owner_contract.role,
+            XyceBug754GlobalParameterRole::GlobalParameterOwner
+        );
+        assert_eq!(
+            reference_contract.role,
+            XyceBug754GlobalParameterRole::LiteralReference
+        );
+        assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+        assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+
+        let owner_netlist =
+            XyceTestRunner::parse_xyce_netlist(&owner_contract.owner_plan.source, &owner.path)
+                .expect("parse owner");
+        let reference_netlist = XyceTestRunner::parse_xyce_netlist(
+            &owner_contract.reference_plan.source,
+            &reference.path,
+        )
+        .expect("parse reference");
+        assert_eq!(
+            XyceTestRunner::bug754_global_parameter_snapshot(
+                &owner_contract.owner_plan,
+                &owner_netlist,
+            )
+            .expect("owner snapshot"),
+            XyceTestRunner::bug754_global_parameter_snapshot(
+                &owner_contract.reference_plan,
+                &reference_netlist,
+            )
+            .expect("reference snapshot")
+        );
+        fs::remove_dir_all(root).expect("remove BUG 754 qualification fixture");
+    }
+
+    #[test]
+    fn bug754_global_parameter_pair_rejects_source_and_semantic_mutations() {
+        let mutations = [
+            (
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen("vdi = 1.0", "vdi = 1.1", 1),
+                BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+                "changed effective global parameter",
+            ),
+            (
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                    "Vdrain drain 0  dc {vdi}",
+                    "Vdrain drain 0  dc 1.0",
+                    1,
+                ),
+                BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+                "owner lost parameterized source representation",
+            ),
+            (
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.to_string(),
+                format!(".global_param vdi=1.0\n{}", BUG754_LITERAL_REFERENCE_SOURCE),
+                "reference gained parameter state",
+            ),
+            (
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                    "M1 drain gate source 0",
+                    "M1 drain gate source source",
+                    1,
+                ),
+                BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+                "changed MOS bulk topology",
+            ),
+            (
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                    ".dc vdrain 0 1 0.001",
+                    ".dc vdrain 0 1 0.002",
+                    1,
+                ),
+                BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+                "changed DC grid",
+            ),
+            (
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                    "v(drain) v(gate) I(vdrain)",
+                    "v(drain) I(vdrain)",
+                    1,
+                ),
+                BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+                "changed ordered probes",
+            ),
+            (
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen("nmos level=1", "nmos level=2", 1),
+                BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+                "changed model level",
+            ),
+        ];
+        for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+            let (root, owner, _, runner) = bug754_global_parameter_fixture(
+                &format!("mutation-{index}"),
+                &owner_source,
+                &reference_source,
+            );
+            assert!(
+                matches!(
+                    runner.bug754_global_parameter_relational_contract(&owner),
+                    Some(Err(_))
+                ),
+                "{reason} must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove BUG 754 mutation fixture");
+        }
+    }
+
+    #[test]
+    fn bug754_global_parameter_pair_rejects_provenance_census_and_artifacts() {
+        let mut normalized_names = BTreeSet::new();
+        XyceTestRunner::insert_bug754_family_member_name(
+            &mut normalized_names,
+            "dcsweep_globalpar.cir",
+        )
+        .expect("first physical spelling is admitted");
+        assert!(
+            XyceTestRunner::insert_bug754_family_member_name(
+                &mut normalized_names,
+                "DCSWEEP_GLOBALPAR.CIR",
+            )
+            .is_err(),
+            "case-colliding physical records must fail before normalized census comparison"
+        );
+
+        let assert_rejected = |label: &str, mutate: &dyn Fn(&Path, &XyceDeck, &XyceDeck)| {
+            let (root, owner, reference, _) = bug754_global_parameter_fixture(
+                label,
+                BUG754_GLOBAL_PARAMETER_OWNER_SOURCE,
+                BUG754_LITERAL_REFERENCE_SOURCE,
+            );
+            mutate(&root, &owner, &reference);
+            let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+            assert!(
+                matches!(
+                    runner.bug754_global_parameter_relational_contract(&owner),
+                    Some(Err(_))
+                ),
+                "{label} must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove BUG 754 provenance fixture");
+        };
+
+        assert_rejected("missing-owner", &|root, _, _| {
+            fs::write(root.join(HARNESS_MANIFEST_FILE), "")
+                .expect("remove BUG 754 owner provenance");
+        });
+        assert_rejected("reference-wrapper", &|root, _, reference| {
+            fs::write(
+                root.join(HARNESS_MANIFEST_FILE),
+                format!(
+                    "Netlists/Certification_Tests/BUG_754_SON/dcsweep_globalpar.cir\trequires_upstream_wrapper\n{}\trequires_upstream_wrapper\n",
+                    reference.relative_path
+                ),
+            )
+            .expect("mark reference as wrapper-owned");
+        });
+        assert_rejected("extra-family-member", &|_, owner, _| {
+            fs::write(
+                owner
+                    .path
+                    .parent()
+                    .expect("owner parent")
+                    .join("dcsweep_extra.cir"),
+                "extra\n.end\n",
+            )
+            .expect("write extra BUG 754 family member");
+        });
+        assert_rejected("owner-artifact", &|root, owner, _| {
+            let output = root.join("OutputData/Certification_Tests/BUG_754_SON");
+            fs::create_dir_all(&output).expect("create BUG 754 OutputData");
+            fs::write(
+                output.join(format!(
+                    "{}.prn",
+                    owner.path.file_name().unwrap().to_string_lossy()
+                )),
+                "forbidden",
+            )
+            .expect("write owner output artifact");
+        });
+        assert_rejected("reference-artifact", &|root, _, reference| {
+            let output = root.join("OutputData/Certification_Tests/BUG_754_SON");
+            fs::create_dir_all(&output).expect("create BUG 754 OutputData");
+            fs::write(
+                output.join(format!(
+                    "{}.PRN",
+                    reference.path.file_name().unwrap().to_string_lossy()
+                )),
+                "forbidden",
+            )
+            .expect("write reference output artifact");
+        });
+    }
+
+    #[test]
+    fn bug754_global_parameter_comparator_reproduces_bytewise_default_prn_diff() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let table = || XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "v(drain)".to_string(),
+                "v(gate)".to_string(),
+                "I(vdrain)".to_string(),
+            ],
+            rows: (0..=1_000)
+                .map(|row| {
+                    let drain = row as Value * 0.001;
+                    vec![row as Value, drain, 0.5, -drain * 1.0e-6]
+                })
+                .collect(),
+        };
+        let reference = table();
+        assert!(
+            runner
+                .compare_bug754_global_parameter_tables(&reference, &reference)
+                .expect("identical BUG 754 PRNs compare")
+                .is_empty()
+        );
+        let tokens = XyceTestRunner::bug754_default_prn_serialization_fingerprint(&reference)
+            .expect("canonical BUG 754 PRN serializes");
+        assert_eq!(tokens.len(), 1_003);
+        assert_eq!(tokens[0], reference.columns);
+        assert_eq!(tokens[1_002], ["End", "of", "Xyce(TM)", "Simulation"]);
+
+        let mut same_serialized_value = reference.clone();
+        same_serialized_value.rows[1_000][1] = 1.000_000_000_1;
+        assert!(
+            runner
+                .compare_bug754_global_parameter_tables(&reference, &same_serialized_value)
+                .expect("precision-8-identical values compare")
+                .is_empty(),
+            "upstream diff observes serialized PRN text rather than raw f64 bits"
+        );
+
+        let mut changed_value = reference.clone();
+        changed_value.rows[1_000][1] = 1.000_001;
+        assert_eq!(
+            runner
+                .compare_bug754_global_parameter_tables(&reference, &changed_value)
+                .expect("changed printed value compares")
+                .len(),
+            1
+        );
+        let mut changed_header = reference.clone();
+        changed_header.columns.swap(1, 2);
+        assert!(
+            runner
+                .compare_bug754_global_parameter_tables(&reference, &changed_header)
+                .is_err()
+        );
+        let mut changed_index = reference.clone();
+        changed_index.rows[10][0] = 11.0;
+        assert!(
+            runner
+                .compare_bug754_global_parameter_tables(&reference, &changed_index)
+                .is_err()
+        );
+        let mut missing_row = reference.clone();
+        missing_row.rows.pop();
+        assert!(
+            runner
+                .compare_bug754_global_parameter_tables(&reference, &missing_row)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn bug754_global_parameter_candidate_census_is_exactly_two_records() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let discovered = runner.discover_tests();
+        let discovered_by_path = discovered
+            .iter()
+            .map(|deck| {
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    deck,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut independent_candidates = BTreeSet::new();
+        for owner in discovered.iter().filter(|deck| {
+            runner.requires_upstream_wrapper(&deck.relative_path)
+                && deck
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("dcsweep_globalpar.cir"))
+        }) {
+            let owner_source = fs::read_to_string(&owner.path).expect("read BUG 754 owner");
+            let reference_key = XyceTestRunner::normalize_manifest_key(
+                &runner.relative_key(&owner.path.with_file_name("dcsweep_nopar.cir")),
+            );
+            let Some(reference) = discovered_by_path.get(&reference_key) else {
+                continue;
+            };
+            let reference_source =
+                fs::read_to_string(&reference.path).expect("read BUG 754 reference");
+            if XyceTestRunner::validate_bug754_source_pair(&owner_source, &reference_source).is_ok()
+            {
+                independent_candidates
+                    .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+                independent_candidates.insert(reference_key);
+            }
+        }
+        let selected = discovered
+            .iter()
+            .filter_map(|deck| {
+                runner
+                    .bug754_global_parameter_relational_contract(deck)
+                    .map(|contract| {
+                        contract.unwrap_or_else(|err| {
+                            panic!("BUG 754 candidate failed qualification: {err}")
+                        });
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(independent_candidates, selected);
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD.to_string(),
+                XYCE_BUG754_LITERAL_REFERENCE_RECORD.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn bug754_global_parameter_relational_pair_executes_both_roles() {
+        let (root, owner, reference, runner) = bug754_global_parameter_fixture(
+            "execution",
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE,
+            BUG754_LITERAL_REFERENCE_SOURCE,
+        );
+        for (deck, expected_contract) in [
+            (owner, "bug754_global_parameter_dc_relational_wrapper_owner"),
+            (
+                reference,
+                "bug754_global_parameter_dc_relational_wrapper_literal_reference",
+            ),
+        ] {
+            let result = runner.run_discovered_test(&deck);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "BUG 754 role must execute exact default-PRN diff: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+            assert!(result.mismatches.is_empty());
+        }
+        fs::remove_dir_all(root).expect("remove BUG 754 execution fixture");
     }
 
     #[test]
