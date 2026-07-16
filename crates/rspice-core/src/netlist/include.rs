@@ -525,14 +525,7 @@ impl IncludeProcessor {
         current_path: &Path,
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
-        self.expand_content_from_mapped_with_abort(
-            content,
-            current_path,
-            None,
-            false,
-            false,
-            abort,
-        )
+        self.expand_content_from_mapped_with_abort(content, current_path, None, false, false, abort)
     }
 
     /// Resolve a filename to an absolute path
@@ -1416,7 +1409,7 @@ mod tests {
             &child_path,
             "Rchild 1 0 1\n.include leaf.inc\n.end\nRignored 9 0 9\n",
         )
-            .expect("write child include");
+        .expect("write child include");
         std::fs::write(&leaf_path, "Rleaf 2 0 2\n").expect("write leaf include");
         let deck = "mapped title\n.include nested/child.inc\nRtop 3 0 3\n.end\n";
 

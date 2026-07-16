@@ -165,9 +165,9 @@ impl ParseState {
         detected_at: NetlistSourceLocation,
         boundary: MissingSubcircuitEndsBoundary,
     ) -> Option<ParseError> {
-        self.subckt_stack.last().map(|frame| {
-            Self::missing_subcircuit_ends_error(frame, detected_at, boundary)
-        })
+        self.subckt_stack
+            .last()
+            .map(|frame| Self::missing_subcircuit_ends_error(frame, detected_at, boundary))
     }
 
     fn missing_subcircuit_ends_error(

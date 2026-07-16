@@ -610,10 +610,7 @@ fn process_source_events_at(
                 let Some(source) = active_sources.last() else {
                     return Err(ParseError::Syntax {
                         line: origin.line,
-                        message: format!(
-                            "{}: included .END has no active source frame",
-                            origin
-                        ),
+                        message: format!("{}: included .END has no active source frame", origin),
                     }
                     .into());
                 };

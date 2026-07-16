@@ -918,15 +918,13 @@ impl Netlist {
             let insertion = output
                 .items
                 .iter()
-                .rposition(|item| {
-                    matches!(item, include::ExpandedSourceItem::ExitSource { .. })
-                })
+                .rposition(|item| matches!(item, include::ExpandedSourceItem::ExitSource { .. }))
                 .unwrap_or(output.items.len());
             output.items.splice(
                 insertion..insertion,
-                promoted.into_iter().map(|(text, origin)| {
-                    include::ExpandedSourceItem::Line { text, origin }
-                }),
+                promoted
+                    .into_iter()
+                    .map(|(text, origin)| include::ExpandedSourceItem::Line { text, origin }),
             );
         }
         ensure_parse_not_aborted(abort)?;
@@ -6611,11 +6609,8 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("create include provenance fixture");
         let deck = dir.join("deck.cir");
         let child = dir.join("missing.ends");
-        std::fs::write(
-            &deck,
-            "include missing ends\n.include missing.ends\n.end\n",
-        )
-        .expect("write include owner");
+        std::fs::write(&deck, "include missing ends\n.include missing.ends\n.end\n")
+            .expect("write include owner");
         std::fs::write(&child, ".subckt testsub a b\nR1 a b 1\nR2 b 0 1\n")
             .expect("write missing child");
 
@@ -6751,8 +6746,7 @@ mod tests {
             "cross-source ends\n.subckt outer a b\n.include child.inc\n.end\n",
         )
         .expect("write cross-source owner");
-        std::fs::write(dir.join("child.inc"), ".ends outer\n")
-            .expect("write cross-source closer");
+        std::fs::write(dir.join("child.inc"), ".ends outer\n").expect("write cross-source closer");
 
         let error = Netlist::parse_file(&deck).expect_err("child cannot close parent .SUBCKT");
         assert!(
@@ -6774,8 +6768,7 @@ mod tests {
             "included END continuation\n.include child.inc\n+ TC=1\n.end\n",
         )
         .expect("write continuation owner");
-        std::fs::write(dir.join("child.inc"), "R1 1 0 1k\n.end\n")
-            .expect("write terminal child");
+        std::fs::write(dir.join("child.inc"), "R1 1 0 1k\n.end\n").expect("write terminal child");
 
         Netlist::parse_file(&deck)
             .expect_err("parent continuation cannot attach across an included .END boundary");
@@ -6805,8 +6798,7 @@ mod tests {
             "child base continuation\n.include child-base.inc\n+ 1k\n.end\n",
         )
         .expect("write child-base owner");
-        std::fs::write(dir.join("child-base.inc"), "R1 1 0\n")
-            .expect("write child base statement");
+        std::fs::write(dir.join("child-base.inc"), "R1 1 0\n").expect("write child base statement");
         let parsed = Netlist::parse_file(&child_base)
             .expect("parent continuation extends the child base line");
         assert_eq!(parsed.elements.len(), 1);
