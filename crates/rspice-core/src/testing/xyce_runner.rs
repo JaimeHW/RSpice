@@ -21,9 +21,10 @@ use crate::netlist::expr::{
     behavioral_expression_references_unbound_frequency, prepare_behavioral_expression,
 };
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
-    ParameterRedefinitionPolicy, ParametricValue, ParseError, StatisticalParamMode, StepCommand,
-    StepSweep, StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, MissingSubcircuitEndsBoundary,
+    Netlist, NetlistParseOptions, ParameterRedefinitionPolicy, ParametricValue, ParseError,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -129,6 +130,14 @@ const XYCE_BUG387_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_387_son/bug_387.cir";
 const XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/subcircuit/subckt_noname.cir";
+const XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/subcircuit/subckt_missing_ends.cir";
+const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/subcircuit/subckt_missing_ends2.cir";
+const XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/subcircuit/subckt_missing_ends3.cir";
+const XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/subcircuit/subckt_missing_ends4.cir";
 const XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/input/dc_excessargs.cir";
 const XYCE_ISSUE455_EXPECTED_FAILURE_RECORD: &str =
@@ -171,6 +180,17 @@ const XYCE_BUG387_SOURCE_BLAKE3: &str =
     "4cf9e5605ea32387fb6e670928e057940236b92fe3c240ee64b8b9bdce60e1b0";
 const XYCE_SUBCKT_NONAME_SOURCE_BLAKE3: &str =
     "0d6a0bd47a0637d0fb92dab3555532594e026b4ed52b1840596db2acd509e79f";
+const XYCE_SUBCKT_MISSING_ENDS_END_CARD_SOURCE_BLAKE3: &str =
+    "1cb69bb569491d5aebdf0bdffae2a06c4d199aa5d46c424aef0326e10f5d149d";
+const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_SOURCE_BLAKE3: &str =
+    "4d9840ab8e11b5f154fe64d2eaa6076d2ab5b595eb16a4248a84ce39a4a50a71";
+const XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_SOURCE_BLAKE3: &str =
+    "0b74635ac9a645a8e9604152ef35223c5e98b351edab65b49baf3c1008ed62c2";
+const XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_SOURCE_BLAKE3: &str =
+    "16e9eb7f9f462997ea78c9ea2e9974c9816f2810c9de647ee430345575273334";
+const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3: &str =
+    "7e198f9c1c164fa0a80560c99a8f5e85777ae6e19a1484b954459692db603661";
+const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES: usize = 43;
 const XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3: &str =
     "472709aa403c4da89e736c47b64eff48fd919f2518d671c79cc728d847812ac1";
 const XYCE_ISSUE455_SOURCE_BLAKE3: &str =
@@ -262,6 +282,10 @@ enum XyceExpectedFailureKind {
     Bug744DcOperatingPoint,
     Bug387MissingLibraryEndl,
     MessageSubcircuitMissingName,
+    MessageSubcircuitMissingEndsEndCard,
+    MessageSubcircuitMissingEndsIncludeEof,
+    MessageSubcircuitMissingEndsTopLevelEof,
+    MessageSubcircuitMissingEndsTsInvEof,
     MessageDcExcessArguments,
     Issue455DuplicateDcSourceFunction,
     Bug204InvalidDcSweepArity,
@@ -305,6 +329,18 @@ impl XyceExpectedFailureKind {
             XYCE_BUG744_EXPECTED_FAILURE_RECORD => Some(Self::Bug744DcOperatingPoint),
             XYCE_BUG387_EXPECTED_FAILURE_RECORD => Some(Self::Bug387MissingLibraryEndl),
             XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD => Some(Self::MessageSubcircuitMissingName),
+            XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageSubcircuitMissingEndsEndCard)
+            }
+            XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageSubcircuitMissingEndsIncludeEof)
+            }
+            XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageSubcircuitMissingEndsTopLevelEof)
+            }
+            XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageSubcircuitMissingEndsTsInvEof)
+            }
             XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD => Some(Self::MessageDcExcessArguments),
             XYCE_ISSUE455_EXPECTED_FAILURE_RECORD => Some(Self::Issue455DuplicateDcSourceFunction),
             XYCE_BUG204_EXPECTED_FAILURE_RECORD => Some(Self::Bug204InvalidDcSweepArity),
@@ -343,6 +379,18 @@ impl XyceExpectedFailureKind {
             Self::Bug744DcOperatingPoint => XYCE_BUG744_EXPECTED_FAILURE_RECORD,
             Self::Bug387MissingLibraryEndl => XYCE_BUG387_EXPECTED_FAILURE_RECORD,
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD,
+            Self::MessageSubcircuitMissingEndsEndCard => {
+                XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageSubcircuitMissingEndsIncludeEof => {
+                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageSubcircuitMissingEndsTopLevelEof => {
+                XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageSubcircuitMissingEndsTsInvEof => {
+                XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD
+            }
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD,
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_EXPECTED_FAILURE_RECORD,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_EXPECTED_FAILURE_RECORD,
@@ -372,6 +420,18 @@ impl XyceExpectedFailureKind {
             Self::Bug744DcOperatingPoint => XYCE_BUG744_SOURCE_BLAKE3,
             Self::Bug387MissingLibraryEndl => XYCE_BUG387_SOURCE_BLAKE3,
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_SOURCE_BLAKE3,
+            Self::MessageSubcircuitMissingEndsEndCard => {
+                XYCE_SUBCKT_MISSING_ENDS_END_CARD_SOURCE_BLAKE3
+            }
+            Self::MessageSubcircuitMissingEndsIncludeEof => {
+                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_SOURCE_BLAKE3
+            }
+            Self::MessageSubcircuitMissingEndsTopLevelEof => {
+                XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_SOURCE_BLAKE3
+            }
+            Self::MessageSubcircuitMissingEndsTsInvEof => {
+                XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_SOURCE_BLAKE3
+            }
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3,
             Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
             Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
@@ -399,6 +459,18 @@ impl XyceExpectedFailureKind {
             Self::Bug744DcOperatingPoint => "expected_failure_dc_operating_point",
             Self::Bug387MissingLibraryEndl => "expected_failure_missing_library_endl_parse",
             Self::MessageSubcircuitMissingName => "expected_failure_missing_subcircuit_name_parse",
+            Self::MessageSubcircuitMissingEndsEndCard => {
+                "expected_failure_subckt_missing_ends_end_card_parse"
+            }
+            Self::MessageSubcircuitMissingEndsIncludeEof => {
+                "expected_failure_subckt_missing_ends_include_eof_parse"
+            }
+            Self::MessageSubcircuitMissingEndsTopLevelEof => {
+                "expected_failure_subckt_missing_ends_toplevel_eof_parse"
+            }
+            Self::MessageSubcircuitMissingEndsTsInvEof => {
+                "expected_failure_subckt_missing_ends_ts_inv_eof_parse"
+            }
             Self::MessageDcExcessArguments => "expected_failure_dc_excess_arguments_parse",
             Self::Issue455DuplicateDcSourceFunction => {
                 "expected_failure_duplicate_dc_source_function_parse"
@@ -451,6 +523,15 @@ impl XyceExpectedFailureKind {
                 &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..]
             }
             Self::MessageSubcircuitMissingName => &["Subcircuit name required"][..],
+            Self::MessageSubcircuitMissingEndsEndCard
+            | Self::MessageSubcircuitMissingEndsTopLevelEof => {
+                &["Subcircuit TESTSUB missing .ENDS"][..]
+            }
+            Self::MessageSubcircuitMissingEndsIncludeEof => &[
+                "Netlist error in file missing.ends",
+                "Subcircuit TESTSUB missing .ENDS",
+            ][..],
+            Self::MessageSubcircuitMissingEndsTsInvEof => &["Subcircuit TS_INV missing .ENDS"][..],
             Self::MessageDcExcessArguments => &["Extraneous values"][..],
             Self::Issue455DuplicateDcSourceFunction => &[
                 "Netlist error in file issue455.cir at or near line 4",
@@ -540,6 +621,54 @@ impl XyceExpectedFailureKind {
                 stage: XyceExpectedFailureStage::NetlistParse,
                 category: XyceExpectedFailureCategory::MissingSubcircuitName,
                 identifiers: vec![".SUBCKT".to_string(), "line 21".to_string()],
+            },
+            Self::MessageSubcircuitMissingEndsEndCard => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingSubcircuitEnds,
+                identifiers: vec![
+                    "testsub".to_string(),
+                    "TESTSUB".to_string(),
+                    "TESTSUB".to_string(),
+                    "subckt_missing_ends.cir:12".to_string(),
+                    "subckt_missing_ends.cir:21".to_string(),
+                    "END_CARD".to_string(),
+                ],
+            },
+            Self::MessageSubcircuitMissingEndsIncludeEof => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingSubcircuitEnds,
+                identifiers: vec![
+                    "testsub".to_string(),
+                    "TESTSUB".to_string(),
+                    "TESTSUB".to_string(),
+                    "missing.ends:1".to_string(),
+                    "missing.ends:4".to_string(),
+                    "END_OF_SOURCE".to_string(),
+                ],
+            },
+            Self::MessageSubcircuitMissingEndsTopLevelEof => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingSubcircuitEnds,
+                identifiers: vec![
+                    "testsub".to_string(),
+                    "TESTSUB".to_string(),
+                    "TESTSUB".to_string(),
+                    "subckt_missing_ends3.cir:17".to_string(),
+                    "subckt_missing_ends3.cir:21".to_string(),
+                    "END_OF_SOURCE".to_string(),
+                ],
+            },
+            Self::MessageSubcircuitMissingEndsTsInvEof => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::MissingSubcircuitEnds,
+                identifiers: vec![
+                    "TS_INV".to_string(),
+                    "TS_INV".to_string(),
+                    "TS_INV".to_string(),
+                    "subckt_missing_ends4.cir:22".to_string(),
+                    "subckt_missing_ends4.cir:32".to_string(),
+                    "END_OF_SOURCE".to_string(),
+                ],
             },
             Self::MessageDcExcessArguments => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::NetlistParse,
@@ -663,7 +792,11 @@ impl XyceExpectedFailureKind {
 
     fn shared_family_census(self) -> Option<XyceExpectedFailureFamilyCensus> {
         match self {
-            Self::MessageSubcircuitMissingName => Some(XyceExpectedFailureFamilyCensus {
+            Self::MessageSubcircuitMissingName
+            | Self::MessageSubcircuitMissingEndsEndCard
+            | Self::MessageSubcircuitMissingEndsIncludeEof
+            | Self::MessageSubcircuitMissingEndsTopLevelEof
+            | Self::MessageSubcircuitMissingEndsTsInvEof => Some(XyceExpectedFailureFamilyCensus {
                 physical_cir_count: 8,
                 physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 8,
@@ -736,6 +869,7 @@ enum XyceExpectedFailureCategory {
     ConflictingIdealVoltageConstraints,
     MissingLibraryEndl,
     MissingSubcircuitName,
+    MissingSubcircuitEnds,
     DcExcessArguments,
     DuplicateDcSourceFunction,
     InvalidDcSweepArity,
@@ -3997,6 +4131,12 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::MessageSubcircuitMissingName => {
                 Self::observe_subckt_noname_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard
+            | XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof
+            | XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof
+            | XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof => {
+                Self::observe_missing_subcircuit_ends_failure(source, &deck.path, kind)?
+            }
             XyceExpectedFailureKind::MessageDcExcessArguments => {
                 Self::observe_dc_excess_args_failure(source, &deck.path)?
             }
@@ -4592,6 +4732,305 @@ impl XyceTestRunner {
             stage: XyceExpectedFailureStage::NetlistParse,
             category: XyceExpectedFailureCategory::MissingSubcircuitName,
             identifiers: vec![".SUBCKT".to_string(), "line 21".to_string()],
+        })
+    }
+
+    fn validate_missing_subcircuit_ends_dependency(deck_path: &Path) -> Result<PathBuf, String> {
+        let dependency = deck_path
+            .parent()
+            .ok_or_else(|| "missing-.ENDS include deck has no parent directory".to_string())?
+            .join("missing.ends");
+        let metadata = fs::symlink_metadata(&dependency).map_err(|error| {
+            format!(
+                "failed to inspect missing-.ENDS include dependency {}: {error}",
+                dependency.display()
+            )
+        })?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "missing-.ENDS include dependency {} must be a regular non-symlink file",
+                dependency.display()
+            ));
+        }
+        let bytes = fs::read(&dependency).map_err(|error| {
+            format!(
+                "failed to read missing-.ENDS include dependency {}: {error}",
+                dependency.display()
+            )
+        })?;
+        let digest = blake3::hash(&bytes).to_hex().to_string();
+        if bytes.len() != XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES
+            || digest != XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3
+        {
+            return Err(format!(
+                "missing-.ENDS include dependency changed: expected {} bytes / {}, got {} bytes / {}",
+                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES,
+                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3,
+                bytes.len(),
+                digest
+            ));
+        }
+        let content = std::str::from_utf8(&bytes).map_err(|error| {
+            format!(
+                "missing-.ENDS include dependency {} is not UTF-8: {error}",
+                dependency.display()
+            )
+        })?;
+        Self::require_expected_failure_source_lines(
+            "Message/Subcircuit missing.ends dependency",
+            content,
+            3,
+            &[
+                (1, ".subckt testsub a b c"),
+                (2, "r1 a b 1"),
+                (3, "r2 b c 1"),
+            ],
+        )?;
+        dependency.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize missing-.ENDS include dependency {}: {error}",
+                dependency.display()
+            )
+        })
+    }
+
+    fn canonical_expected_failure_source_path(path: &Path, label: &str) -> Result<PathBuf, String> {
+        path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize {label} path {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    fn expected_failure_location_identifier(
+        location: &crate::netlist::NetlistSourceLocation,
+    ) -> Result<String, String> {
+        let path = location
+            .path
+            .as_deref()
+            .ok_or_else(|| "expected file-backed source location has no path".to_string())?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "source location path {} has no UTF-8 filename",
+                    path.display()
+                )
+            })?;
+        Ok(format!("{file_name}:{}", location.line))
+    }
+
+    fn observe_missing_subcircuit_ends_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let (
+            label,
+            authored_name,
+            canonical_name,
+            qualified_name,
+            expected_deck_file,
+            opened_line,
+            detected_line,
+            boundary,
+            dependency_origin,
+        ) = match kind {
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard => {
+                Self::require_expected_failure_source_lines(
+                    "Message/Subcircuit subckt_missing_ends",
+                    source,
+                    26,
+                    &[
+                        (10, "xsub1 0 1 2 testsub"),
+                        (12, ".subckt testsub a b c"),
+                        (17, "* it should be \".ends\" but using \".end\" here"),
+                        (21, ".end"),
+                        (23, ".tran 0 1"),
+                        (24, ".print tran v(1)"),
+                        (25, ".end"),
+                    ],
+                )?;
+                (
+                    "Message/Subcircuit subckt_missing_ends",
+                    "testsub",
+                    "TESTSUB",
+                    "TESTSUB",
+                    "subckt_missing_ends.cir",
+                    12,
+                    21,
+                    MissingSubcircuitEndsBoundary::EndCard,
+                    false,
+                )
+            }
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof => {
+                Self::require_expected_failure_source_lines(
+                    "Message/Subcircuit subckt_missing_ends2",
+                    source,
+                    17,
+                    &[
+                        (10, "xsub1 0 1 2 testsub"),
+                        (12, ".include missing.ends"),
+                        (14, ".tran 0 1"),
+                        (15, ".print tran v(1)"),
+                        (16, ".end"),
+                    ],
+                )?;
+                (
+                    "Message/Subcircuit subckt_missing_ends2",
+                    "testsub",
+                    "TESTSUB",
+                    "TESTSUB",
+                    "subckt_missing_ends2.cir",
+                    1,
+                    4,
+                    MissingSubcircuitEndsBoundary::EndOfSource,
+                    true,
+                )
+            }
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof => {
+                Self::require_expected_failure_source_lines(
+                    "Message/Subcircuit subckt_missing_ends3",
+                    source,
+                    20,
+                    &[
+                        (10, "xsub1 0 1 2 testsub"),
+                        (12, ".tran 0 1"),
+                        (13, ".print tran v(1)"),
+                        (17, ".subckt testsub a b c"),
+                        (18, "r1 a b 1"),
+                        (19, "r2 b c 1"),
+                        (20, "*.ends"),
+                    ],
+                )?;
+                (
+                    "Message/Subcircuit subckt_missing_ends3",
+                    "testsub",
+                    "TESTSUB",
+                    "TESTSUB",
+                    "subckt_missing_ends3.cir",
+                    17,
+                    21,
+                    MissingSubcircuitEndsBoundary::EndOfSource,
+                    false,
+                )
+            }
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof => {
+                Self::require_expected_failure_source_lines(
+                    "Message/Subcircuit subckt_missing_ends4",
+                    source,
+                    31,
+                    &[
+                        (17, "XU2 CLK CLKB TS_INV"),
+                        (22, ".SUBCKT TS_INV A  YN"),
+                        (24, "s1 digpower risefall digpower a Lsw_1meg"),
+                        (
+                            28,
+                            "r1  risefall z 0.1 ; this is resistor with incorrectly labeled node \"z\"",
+                        ),
+                        (31, "*.ENDS TS_INV"),
+                    ],
+                )?;
+                (
+                    "Message/Subcircuit subckt_missing_ends4",
+                    "TS_INV",
+                    "TS_INV",
+                    "TS_INV",
+                    "subckt_missing_ends4.cir",
+                    22,
+                    32,
+                    MissingSubcircuitEndsBoundary::EndOfSource,
+                    false,
+                )
+            }
+            _ => {
+                return Err(format!(
+                    "non-missing-.ENDS expected-failure kind passed to missing-.ENDS observer: {kind:?}"
+                ));
+            }
+        };
+
+        let actual_deck_file = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("{label} deck path has no UTF-8 filename"))?;
+        if actual_deck_file != expected_deck_file {
+            return Err(format!(
+                "{label} deck filename changed: expected {expected_deck_file:?}, got {actual_deck_file:?}"
+            ));
+        }
+        let deck_canonical = Self::canonical_expected_failure_source_path(deck_path, label)?;
+        let expected_origin = if dependency_origin {
+            Self::validate_missing_subcircuit_ends_dependency(deck_path)?
+        } else {
+            deck_canonical
+        };
+        let error = match Self::parse_xyce_netlist(source, deck_path) {
+            Err(error) => error,
+            Ok(_) => {
+                return Err(format!(
+                    "{label} unexpectedly parsed; the missing-.ENDS condition is absent"
+                ));
+            }
+        };
+        let ParseError::MissingSubcircuitEnds {
+            authored_name: actual_authored,
+            canonical_name: actual_canonical,
+            qualified_name: actual_qualified,
+            opened_at,
+            detected_at,
+            boundary: actual_boundary,
+        } = error
+        else {
+            return Err(format!(
+                "{label} produced the wrong typed parse failure: {error:?}"
+            ));
+        };
+        let opened_path = opened_at
+            .path
+            .as_deref()
+            .ok_or_else(|| format!("{label} opening location lost its source path"))?;
+        let detected_path = detected_at
+            .path
+            .as_deref()
+            .ok_or_else(|| format!("{label} detection location lost its source path"))?;
+        let opened_canonical =
+            Self::canonical_expected_failure_source_path(opened_path, "observed opening source")?;
+        let detected_canonical = Self::canonical_expected_failure_source_path(
+            detected_path,
+            "observed detection source",
+        )?;
+        if actual_authored != authored_name
+            || actual_canonical != canonical_name
+            || actual_qualified != qualified_name
+            || opened_at.line != opened_line
+            || detected_at.line != detected_line
+            || actual_boundary != boundary
+            || opened_canonical != expected_origin
+            || detected_canonical != expected_origin
+        {
+            return Err(format!(
+                "{label} typed missing-.ENDS observation changed: authored={actual_authored:?}, canonical={actual_canonical:?}, qualified={actual_qualified:?}, opened_at={opened_at:?}, detected_at={detected_at:?}, boundary={actual_boundary:?}"
+            ));
+        }
+        let boundary_identifier = match actual_boundary {
+            MissingSubcircuitEndsBoundary::EndCard => "END_CARD",
+            MissingSubcircuitEndsBoundary::AlterCard => "ALTER_CARD",
+            MissingSubcircuitEndsBoundary::EndOfSource => "END_OF_SOURCE",
+        };
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::MissingSubcircuitEnds,
+            identifiers: vec![
+                actual_authored,
+                actual_canonical,
+                actual_qualified,
+                Self::expected_failure_location_identifier(&opened_at)?,
+                Self::expected_failure_location_identifier(&detected_at)?,
+                boundary_identifier.to_string(),
+            ],
         })
     }
 
@@ -66160,6 +66599,25 @@ R2 2 0 1
                 &["Subcircuit name required"][..],
             ),
             (
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+                &["Subcircuit TESTSUB missing .ENDS"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof,
+                &[
+                    "Netlist error in file missing.ends",
+                    "Subcircuit TESTSUB missing .ENDS",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+                &["Subcircuit TESTSUB missing .ENDS"][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+                &["Subcircuit TS_INV missing .ENDS"][..],
+            ),
+            (
                 XyceExpectedFailureKind::MessageDcExcessArguments,
                 &["Extraneous values"][..],
             ),
@@ -66286,7 +66744,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_twenty_two_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_twenty_six_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -66390,6 +66848,22 @@ R2 2 0 1
                     XyceExpectedFailureKind::MessageDcExcessArguments,
                 ),
                 (
+                    XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+                ),
+                (
+                    XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof,
+                ),
+                (
+                    XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+                ),
+                (
+                    XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+                ),
+                (
                     XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::MessageSubcircuitMissingName,
                 ),
@@ -66401,7 +66875,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            22,
+            26,
             "each record requires a distinct contract"
         );
     }
@@ -66434,6 +66908,22 @@ R2 2 0 1
             (
                 "Netlists/Message/Subcircuit/subckt_noname.cir",
                 "expected_failure_missing_subcircuit_name_parse",
+            ),
+            (
+                "Netlists/Message/Subcircuit/subckt_missing_ends.cir",
+                "expected_failure_subckt_missing_ends_end_card_parse",
+            ),
+            (
+                "Netlists/Message/Subcircuit/subckt_missing_ends2.cir",
+                "expected_failure_subckt_missing_ends_include_eof_parse",
+            ),
+            (
+                "Netlists/Message/Subcircuit/subckt_missing_ends3.cir",
+                "expected_failure_subckt_missing_ends_toplevel_eof_parse",
+            ),
+            (
+                "Netlists/Message/Subcircuit/subckt_missing_ends4.cir",
+                "expected_failure_subckt_missing_ends_ts_inv_eof_parse",
             ),
             (
                 "Netlists/Message/Input/DC_excessArgs.cir",
@@ -66511,16 +67001,22 @@ R2 2 0 1
 
     #[test]
     fn expected_failure_shared_family_censuses_are_exactly_pinned() {
-        assert_eq!(
-            XyceExpectedFailureKind::MessageSubcircuitMissingName.shared_family_census(),
-            Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 8,
-                physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 8,
-                manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: false,
-            })
-        );
+        let message_subcircuit_census = Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 8,
+            physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 8,
+            manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: false,
+        });
+        for member in [
+            XyceExpectedFailureKind::MessageSubcircuitMissingName,
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof,
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+        ] {
+            assert_eq!(member.shared_family_census(), message_subcircuit_census);
+        }
         assert_eq!(
             XyceExpectedFailureKind::MessageDcExcessArguments.shared_family_census(),
             Some(XyceExpectedFailureFamilyCensus {
@@ -67090,6 +67586,136 @@ R2 2 0 1
                 "{label} must not satisfy subckt_noname"
             );
         }
+    }
+
+    #[test]
+    fn missing_subcircuit_ends_observers_reject_corrections_shifts_and_path_mutations() {
+        let root = expected_failure_test_root();
+        let family = root.join("Netlists/Message/Subcircuit");
+        for (file_name, kind, malformed, corrected) in [
+            (
+                "subckt_missing_ends.cir",
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+                "\r\n.end\r\n\r\n.tran",
+                "\r\n.ends\r\n\r\n.tran",
+            ),
+            (
+                "subckt_missing_ends3.cir",
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+                "*.ends",
+                ".ends",
+            ),
+            (
+                "subckt_missing_ends4.cir",
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+                "*.ENDS TS_INV",
+                ".ENDS TS_INV",
+            ),
+        ] {
+            let path = family.join(file_name);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {file_name}: {error}"));
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &path, kind)
+                .unwrap_or_else(|error| {
+                    panic!("canonical {file_name} missing-.ENDS failure is observed: {error}")
+                });
+
+            let corrected_source = source.replacen(malformed, corrected, 1);
+            assert_ne!(corrected_source, source);
+            XyceTestRunner::parse_xyce_netlist(&corrected_source, &path)
+                .unwrap_or_else(|error| panic!("corrected {file_name} genuinely parses: {error}"));
+            assert!(
+                XyceTestRunner::observe_missing_subcircuit_ends_failure(
+                    &corrected_source,
+                    &path,
+                    kind
+                )
+                .is_err(),
+                "corrected {file_name} must not satisfy its missing-.ENDS oracle"
+            );
+
+            let shifted = format!("\r\n{source}");
+            assert!(
+                XyceTestRunner::observe_missing_subcircuit_ends_failure(&shifted, &path, kind)
+                    .is_err(),
+                "shifted {file_name} must not satisfy its missing-.ENDS oracle"
+            );
+
+            let temp_dir = unique_expected_failure_temp_dir("missing-ends-path");
+            fs::create_dir_all(&temp_dir).expect("create missing-.ENDS path fixture");
+            let renamed = temp_dir.join("renamed.cir");
+            fs::write(&renamed, &source).expect("write renamed missing-.ENDS fixture");
+            assert!(
+                XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &renamed, kind)
+                    .is_err(),
+                "renamed {file_name} must fail exact record identity"
+            );
+            fs::remove_dir_all(temp_dir).expect("remove missing-.ENDS path fixture");
+        }
+    }
+
+    #[test]
+    fn missing_subcircuit_ends_include_observer_pins_dependency_and_child_provenance() {
+        let root = expected_failure_test_root();
+        let source_family = root.join("Netlists/Message/Subcircuit");
+        let source = fs::read_to_string(source_family.join("subckt_missing_ends2.cir"))
+            .expect("read subckt_missing_ends2");
+        let dependency = fs::read(source_family.join("missing.ends")).expect("read missing.ends");
+        let temp_dir = unique_expected_failure_temp_dir("missing-ends-include");
+        fs::create_dir_all(&temp_dir).expect("create missing-.ENDS include fixture");
+        let deck_path = temp_dir.join("subckt_missing_ends2.cir");
+        let dependency_path = temp_dir.join("missing.ends");
+        fs::write(&deck_path, &source).expect("write missing-.ENDS include deck");
+        fs::write(&dependency_path, &dependency).expect("write missing-.ENDS include dependency");
+        let kind = XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof;
+
+        XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind)
+            .expect("canonical copied include EOF failure is observed");
+
+        let corrected_dependency =
+            ".subckt testsub a b c\r\nr1 a b 1\r\nr2 b c 1\r\n.ends testsub\r\n";
+        fs::write(&dependency_path, corrected_dependency).expect("close included subcircuit");
+        XyceTestRunner::parse_xyce_netlist(&source, &deck_path)
+            .expect("included source with matching .ENDS genuinely parses");
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind)
+                .is_err(),
+            "corrected dependency must fail exact missing-.ENDS provenance"
+        );
+
+        let mut changed_dependency = dependency.clone();
+        changed_dependency[20] ^= 0x01;
+        fs::write(&dependency_path, changed_dependency).expect("mutate missing.ends bytes");
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind)
+                .is_err(),
+            "byte-mutated dependency must fail exact provenance"
+        );
+
+        fs::remove_file(&dependency_path).expect("remove missing.ends dependency");
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind)
+                .is_err(),
+            "missing dependency must fail closed"
+        );
+
+        fs::write(&dependency_path, &dependency).expect("restore missing.ends dependency");
+        let renamed_deck = temp_dir.join("renamed.cir");
+        fs::write(&renamed_deck, &source).expect("write renamed include deck");
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &renamed_deck, kind)
+                .is_err(),
+            "renamed include owner must fail exact record identity"
+        );
+
+        let shifted = format!("\r\n{source}");
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&shifted, &deck_path, kind)
+                .is_err(),
+            "shifted include owner must fail exact authored-line provenance"
+        );
+
+        fs::remove_dir_all(temp_dir).expect("remove missing-.ENDS include fixture");
     }
 
     #[test]
