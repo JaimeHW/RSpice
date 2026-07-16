@@ -52,6 +52,15 @@ pub enum AnalysisRunType {
     Envelope,
     /// Fourier analysis
     Fourier,
+    Qpss,
+    Hbsp,
+    Hbnoise,
+    Psp,
+    Qpac,
+    Qpnoise,
+    Qpxf,
+    TransientNoise,
+    DcMismatch,
 }
 
 impl AnalysisRunType {
@@ -83,6 +92,15 @@ impl AnalysisRunType {
             AnalysisRunType::SParameter => "S-Parameter",
             AnalysisRunType::Envelope => "Envelope",
             AnalysisRunType::Fourier => "Fourier",
+            AnalysisRunType::Qpss => "QPSS",
+            AnalysisRunType::Hbsp => "HBSP",
+            AnalysisRunType::Hbnoise => "HBNOISE",
+            AnalysisRunType::Psp => "PSP",
+            AnalysisRunType::Qpac => "QPAC",
+            AnalysisRunType::Qpnoise => "QPNOISE",
+            AnalysisRunType::Qpxf => "QPXF",
+            AnalysisRunType::TransientNoise => "Transient Noise",
+            AnalysisRunType::DcMismatch => "DC Mismatch Contribution",
         }
     }
 
@@ -98,6 +116,8 @@ impl AnalysisRunType {
                 | AnalysisRunType::PoleZero
                 | AnalysisRunType::Stb
                 | AnalysisRunType::Reliability
+                | AnalysisRunType::Qpss
+                | AnalysisRunType::DcMismatch
         )
     }
 
@@ -109,7 +129,19 @@ impl AnalysisRunType {
                 | AnalysisRunType::Pnoise
                 | AnalysisRunType::Pxf
                 | AnalysisRunType::Pstb
+                | AnalysisRunType::Psp
         )
+    }
+
+    pub fn requires_qpss(&self) -> bool {
+        matches!(
+            self,
+            AnalysisRunType::Qpac | AnalysisRunType::Qpnoise | AnalysisRunType::Qpxf
+        )
+    }
+
+    pub fn requires_harmonic_balance(&self) -> bool {
+        matches!(self, AnalysisRunType::Hbsp | AnalysisRunType::Hbnoise)
     }
 
     /// Estimated relative complexity (for progress estimation)
@@ -140,6 +172,15 @@ impl AnalysisRunType {
             AnalysisRunType::SParameter => 6,
             AnalysisRunType::Envelope => 12,
             AnalysisRunType::Fourier => 7,
+            AnalysisRunType::Qpss => 30,
+            AnalysisRunType::Hbsp => 12,
+            AnalysisRunType::Hbnoise => 18,
+            AnalysisRunType::Psp => 12,
+            AnalysisRunType::Qpac => 12,
+            AnalysisRunType::Qpnoise => 18,
+            AnalysisRunType::Qpxf => 14,
+            AnalysisRunType::TransientNoise => 20,
+            AnalysisRunType::DcMismatch => 8,
         }
     }
 }

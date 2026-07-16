@@ -607,6 +607,51 @@ fn initial_status_for_spec(
             freq: *fundamental_freq,
             stop_freq: *fundamental_freq * (*num_harmonics).max(1) as f64,
         },
+        AnalysisSpec::Qpss { tones, .. } => SimulationStatus::AcAnalysis {
+            freq: tones.first().map_or(0.0, |tone| tone.frequency),
+            stop_freq: tones.iter().map(|tone| tone.frequency).fold(0.0, f64::max),
+        },
+        AnalysisSpec::Hbsp {
+            start_freq,
+            stop_freq,
+            ..
+        }
+        | AnalysisSpec::Psp {
+            start_freq,
+            stop_freq,
+            ..
+        }
+        | AnalysisSpec::Qpac {
+            start_freq,
+            stop_freq,
+            ..
+        }
+        | AnalysisSpec::Qpxf {
+            start_freq,
+            stop_freq,
+            ..
+        } => SimulationStatus::AcAnalysis {
+            freq: *start_freq,
+            stop_freq: *stop_freq,
+        },
+        AnalysisSpec::Hbnoise {
+            start_freq,
+            stop_freq,
+            ..
+        }
+        | AnalysisSpec::Qpnoise {
+            start_freq,
+            stop_freq,
+            ..
+        } => SimulationStatus::NoiseAnalysis {
+            freq: *start_freq,
+            stop_freq: *stop_freq,
+        },
+        AnalysisSpec::TransientNoise { stop_time, .. } => SimulationStatus::Transient {
+            time: 0.0,
+            stop_time: *stop_time,
+        },
+        AnalysisSpec::DcMismatch { .. } => SimulationStatus::PostProcessing,
     }
 }
 

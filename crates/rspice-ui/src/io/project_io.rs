@@ -736,6 +736,15 @@ fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
         AnalysisType::Fourier => "Fourier",
         AnalysisType::HarmonicBalance => "HarmonicBalance",
         AnalysisType::Pss => "Pss",
+        AnalysisType::Qpss => "Qpss",
+        AnalysisType::Hbsp => "Hbsp",
+        AnalysisType::Hbnoise => "Hbnoise",
+        AnalysisType::Psp => "Psp",
+        AnalysisType::Qpac => "Qpac",
+        AnalysisType::Qpnoise => "Qpnoise",
+        AnalysisType::Qpxf => "Qpxf",
+        AnalysisType::TransientNoise => "TransientNoise",
+        AnalysisType::DcMismatch => "DcMismatch",
     }
 }
 
@@ -766,6 +775,15 @@ fn analysis_type_from_key(key: &str) -> Option<AnalysisType> {
         "Fourier" | ".four" => Some(AnalysisType::Fourier),
         "HarmonicBalance" | ".hb" => Some(AnalysisType::HarmonicBalance),
         "Pss" | ".pss" => Some(AnalysisType::Pss),
+        "Qpss" | ".qpss" => Some(AnalysisType::Qpss),
+        "Hbsp" | ".hbsp" => Some(AnalysisType::Hbsp),
+        "Hbnoise" | ".hbnoise" => Some(AnalysisType::Hbnoise),
+        "Psp" | ".psp" => Some(AnalysisType::Psp),
+        "Qpac" | ".qpac" => Some(AnalysisType::Qpac),
+        "Qpnoise" | ".qpnoise" => Some(AnalysisType::Qpnoise),
+        "Qpxf" | ".qpxf" => Some(AnalysisType::Qpxf),
+        "TransientNoise" | ".tnoise" => Some(AnalysisType::TransientNoise),
+        "DcMismatch" | ".dcmatch" => Some(AnalysisType::DcMismatch),
         _ => None,
     }
 }
@@ -797,6 +815,15 @@ const fn analysis_kind_tag_for_plan_kind(kind: AnalysisKind) -> u8 {
         AnalysisKind::SParameter => 23,
         AnalysisKind::Envelope => 24,
         AnalysisKind::Fourier => 25,
+        AnalysisKind::Qpss => 26,
+        AnalysisKind::Hbsp => 27,
+        AnalysisKind::Hbnoise => 28,
+        AnalysisKind::Psp => 29,
+        AnalysisKind::Qpac => 30,
+        AnalysisKind::Qpnoise => 31,
+        AnalysisKind::Qpxf => 32,
+        AnalysisKind::TransientNoise => 33,
+        AnalysisKind::DcMismatch => 34,
     }
 }
 
@@ -5168,5 +5195,19 @@ mod tests {
             .expect_err("invalid project text fails");
 
         assert!(matches!(err, ProjectIoError::ParseError(_)));
+    }
+
+    #[test]
+    fn canonical_plan_kind_tags_cover_the_complete_manifest_without_collisions() {
+        let tags = AnalysisKind::ALL
+            .into_iter()
+            .map(analysis_kind_tag_for_plan_kind)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(tags.len(), AnalysisKind::ALL.len());
+        assert_eq!(analysis_kind_tag_for_plan_kind(AnalysisKind::Qpss), 26);
+        assert_eq!(
+            analysis_kind_tag_for_plan_kind(AnalysisKind::DcMismatch),
+            34
+        );
     }
 }

@@ -393,6 +393,9 @@ pub struct UiSessionState {
     /// Autosave checkpoint interval in minutes; 0 = off. Checkpoints write
     /// next to the project file and never touch it.
     pub autosave_minutes: u8,
+    /// Canonical user/device preference overrides not already owned by the
+    /// theme or autosave runtime.
+    pub preferences: super::preferences::UserPreferences,
     /// Browser-only opt-in for egui's Web Speech interaction feedback.
     /// Native assistive technology is negotiated automatically by AccessKit.
     pub browser_spoken_feedback: bool,
@@ -466,6 +469,8 @@ pub struct UiSessionStateSer {
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
     #[serde(default)]
+    preferences: super::preferences::UserPreferences,
+    #[serde(default)]
     browser_spoken_feedback: bool,
     #[serde(default)]
     result_viewer: super::result_document::ResultViewer,
@@ -501,6 +506,7 @@ impl From<&UiSessionState> for UiSessionStateSer {
             show_grid: session.grid.visible(),
             grid_style: Some(session.grid),
             autosave_minutes: normalize_autosave_minutes(session.autosave_minutes),
+            preferences: session.preferences.clone(),
             browser_spoken_feedback: session.browser_spoken_feedback,
             result_viewer: session.results.viewer,
         }
@@ -514,10 +520,13 @@ impl From<UiSessionStateSer> for UiSessionState {
         } else {
             GridStyle::Off
         });
+        let mut preferences = ser.preferences;
+        preferences.normalize();
         let mut session = Self {
             theme: ser.theme,
             grid,
             autosave_minutes: normalize_autosave_minutes(ser.autosave_minutes),
+            preferences,
             browser_spoken_feedback: ser.browser_spoken_feedback,
             ..Self::new()
         };

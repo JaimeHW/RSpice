@@ -224,15 +224,22 @@ impl Theme {
     /// viewport. Responsive touch targets are transient layout policy, not a
     /// persisted density preference: leaving a narrow/coarse viewport must
     /// restore the user's Compact or Relaxed metrics immediately.
-    pub(crate) fn apply_responsive_metrics(self, ctx: &Context, touch_targets: bool) {
+    /// Apply responsive metrics with the user's validated minimum target.
+    /// Device capability may increase this value but never reduce it.
+    pub(crate) fn apply_responsive_metrics_with_target(
+        self,
+        ctx: &Context,
+        touch_target: Option<f32>,
+    ) {
         let mut effective = self;
         effective.mode = self.mode.effective(ctx);
         let mut t = effective.tokens();
-        if touch_targets {
+        if let Some(touch_target) = touch_target {
+            let touch_target = touch_target.max(44.0);
             t.metrics = Metrics {
-                ctl_h: 44.0,
-                row_h: 44.0,
-                bar_pad: 9.0,
+                ctl_h: touch_target,
+                row_h: touch_target,
+                bar_pad: 9.0 + (touch_target - 44.0) * 0.5,
             };
         }
         ctx.set_style(build_style(&t));
@@ -494,13 +501,13 @@ mod tests {
             ..Theme::default()
         };
 
-        theme.apply_responsive_metrics(&ctx, true);
+        theme.apply_responsive_metrics_with_target(&ctx, Some(44.0));
         assert_eq!(Tokens::get(&ctx).metrics.ctl_h, 44.0);
         assert_eq!(Tokens::get(&ctx).metrics.row_h, 44.0);
         assert_eq!(ctx.style().spacing.interact_size.y, 44.0);
         assert_eq!(ctx.style().spacing.interact_size.x, 44.0);
 
-        theme.apply_responsive_metrics(&ctx, false);
+        theme.apply_responsive_metrics_with_target(&ctx, None);
         assert_eq!(Tokens::get(&ctx).metrics.ctl_h, 32.0);
         assert_eq!(Tokens::get(&ctx).metrics.row_h, 33.0);
         assert_eq!(ctx.style().spacing.interact_size.y, 32.0);

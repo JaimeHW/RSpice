@@ -31,6 +31,15 @@ impl AnalysisSpec {
             AnalysisSpec::SParameter { .. } => AnalysisRunType::SParameter,
             AnalysisSpec::Envelope { .. } => AnalysisRunType::Envelope,
             AnalysisSpec::Fourier { .. } => AnalysisRunType::Fourier,
+            AnalysisSpec::Qpss { .. } => AnalysisRunType::Qpss,
+            AnalysisSpec::Hbsp { .. } => AnalysisRunType::Hbsp,
+            AnalysisSpec::Hbnoise { .. } => AnalysisRunType::Hbnoise,
+            AnalysisSpec::Psp { .. } => AnalysisRunType::Psp,
+            AnalysisSpec::Qpac { .. } => AnalysisRunType::Qpac,
+            AnalysisSpec::Qpnoise { .. } => AnalysisRunType::Qpnoise,
+            AnalysisSpec::Qpxf { .. } => AnalysisRunType::Qpxf,
+            AnalysisSpec::TransientNoise { .. } => AnalysisRunType::TransientNoise,
+            AnalysisSpec::DcMismatch { .. } => AnalysisRunType::DcMismatch,
         }
     }
 }

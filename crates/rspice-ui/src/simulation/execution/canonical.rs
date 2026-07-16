@@ -655,6 +655,242 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             writer.f64(*start_time);
             writer.f64(*stop_time);
         }
+        AnalysisSpec::Qpss {
+            tones,
+            max_iterations,
+            relative_tolerance,
+            autonomous,
+            oscillator_node,
+        } => {
+            writer.sequence(tones.len());
+            for tone in tones {
+                writer.f64(tone.frequency);
+                writer.usize(tone.harmonics);
+                writer.option(tone.source.as_ref(), |w, value| w.string(value));
+                writer.option(tone.name.as_ref(), |w, value| w.string(value));
+            }
+            writer.usize(*max_iterations);
+            writer.f64(*relative_tolerance);
+            writer.bool(*autonomous);
+            writer.option(oscillator_node.as_ref(), |w, value| w.string(value));
+        }
+        AnalysisSpec::Hbsp { .. } | AnalysisSpec::Psp { .. } => {
+            encode_manifest_network(writer, spec);
+        }
+        AnalysisSpec::Hbnoise {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            integrated_noise,
+            noise_figure,
+            contributor_ranking,
+        } => {
+            writer.f64(*start_freq);
+            writer.f64(*stop_freq);
+            writer.usize(*points_per_unit);
+            encode_frequency_sweep(writer, *sweep);
+            writer.string(output_node);
+            writer.string(output_ref);
+            writer.string(input_source);
+            writer.usize(*max_sideband);
+            writer.bool(*integrated_noise);
+            writer.bool(*noise_figure);
+            writer.bool(*contributor_ranking);
+        }
+        AnalysisSpec::Qpac { .. } => {
+            encode_quasi_periodic_transfer(writer, spec);
+        }
+        AnalysisSpec::Qpnoise {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            output_node,
+            output_ref,
+            input_source,
+            lattice_min,
+            lattice_max,
+            integrated_noise,
+            contributor_ranking,
+        } => {
+            writer.f64(*start_freq);
+            writer.f64(*stop_freq);
+            writer.usize(*points_per_unit);
+            encode_frequency_sweep(writer, *sweep);
+            writer.string(output_node);
+            writer.string(output_ref);
+            writer.string(input_source);
+            for value in lattice_min {
+                writer.i32(*value);
+            }
+            for value in lattice_max {
+                writer.i32(*value);
+            }
+            writer.bool(*integrated_noise);
+            writer.bool(*contributor_ranking);
+        }
+        AnalysisSpec::Qpxf { group_delay, .. } => {
+            encode_quasi_periodic_transfer(writer, spec);
+            writer.bool(*group_delay);
+        }
+        AnalysisSpec::TransientNoise {
+            stop_time,
+            step_time,
+            start_time,
+            max_timestep,
+            seed,
+            noise_fmax,
+            scale,
+            uic,
+        } => {
+            writer.f64(*stop_time);
+            writer.f64(*step_time);
+            writer.f64(*start_time);
+            writer.f64(*max_timestep);
+            writer.u64(*seed);
+            writer.f64(*noise_fmax);
+            writer.f64(*scale);
+            writer.bool(*uic);
+        }
+        AnalysisSpec::DcMismatch {
+            output_expression,
+            sigma_multiplier,
+            contributor_limit,
+            include_process,
+            include_mismatch,
+            normalized_contributions,
+        } => {
+            writer.string(output_expression);
+            writer.f64(*sigma_multiplier);
+            writer.usize(*contributor_limit);
+            writer.bool(*include_process);
+            writer.bool(*include_mismatch);
+            writer.bool(*normalized_contributions);
+        }
+    }
+}
+
+fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
+    let (
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        ports,
+        max_sideband,
+        mixed_mode,
+        noise_parameters,
+    ) = match spec {
+        AnalysisSpec::Hbsp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            mixed_mode,
+            noise_parameters,
+        }
+        | AnalysisSpec::Psp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            mixed_mode,
+            noise_parameters,
+        } => (
+            *start_freq,
+            *stop_freq,
+            *points_per_unit,
+            *sweep,
+            ports,
+            *max_sideband,
+            *mixed_mode,
+            *noise_parameters,
+        ),
+        _ => unreachable!("network encoder accepts only HBSP or PSP"),
+    };
+    writer.f64(start_freq);
+    writer.f64(stop_freq);
+    writer.usize(points_per_unit);
+    encode_frequency_sweep(writer, sweep);
+    writer.sequence(ports.len());
+    for port in ports {
+        writer.string(&port.node_pos);
+        writer.string(&port.node_neg);
+        writer.option(port.z0.as_ref(), |w, value| w.f64(*value));
+    }
+    writer.usize(max_sideband);
+    writer.bool(mixed_mode);
+    writer.bool(noise_parameters);
+}
+
+fn encode_quasi_periodic_transfer(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
+    let (
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        input_source,
+        output_node,
+        output_ref,
+        input_lattice,
+        output_lattice,
+    ) = match spec {
+        AnalysisSpec::Qpac {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            input_source,
+            output_node,
+            output_ref,
+            input_lattice,
+            output_lattice,
+        }
+        | AnalysisSpec::Qpxf {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            input_source,
+            output_node,
+            output_ref,
+            input_lattice,
+            output_lattice,
+            ..
+        } => (
+            *start_freq,
+            *stop_freq,
+            *points_per_unit,
+            *sweep,
+            input_source.as_str(),
+            output_node.as_str(),
+            output_ref.as_str(),
+            *input_lattice,
+            *output_lattice,
+        ),
+        _ => unreachable!("quasi-periodic transfer encoder accepts only QPAC or QPXF"),
+    };
+    writer.f64(start_freq);
+    writer.f64(stop_freq);
+    writer.usize(points_per_unit);
+    encode_frequency_sweep(writer, sweep);
+    writer.string(input_source);
+    writer.string(output_node);
+    writer.string(output_ref);
+    for value in input_lattice {
+        writer.i32(value);
+    }
+    for value in output_lattice {
+        writer.i32(value);
     }
 }
 
@@ -849,6 +1085,15 @@ pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
         AnalysisSpec::SParameter { .. } => 23,
         AnalysisSpec::Envelope { .. } => 24,
         AnalysisSpec::Fourier { .. } => 25,
+        AnalysisSpec::Qpss { .. } => 26,
+        AnalysisSpec::Hbsp { .. } => 27,
+        AnalysisSpec::Hbnoise { .. } => 28,
+        AnalysisSpec::Psp { .. } => 29,
+        AnalysisSpec::Qpac { .. } => 30,
+        AnalysisSpec::Qpnoise { .. } => 31,
+        AnalysisSpec::Qpxf { .. } => 32,
+        AnalysisSpec::TransientNoise { .. } => 33,
+        AnalysisSpec::DcMismatch { .. } => 34,
     }
 }
 

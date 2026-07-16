@@ -17,6 +17,10 @@ mod op_inspector;
 mod pz;
 mod smith;
 mod specs;
+
+pub(crate) fn open_specification_editor(state: &mut AppState) {
+    specs::open_editor(state);
+}
 mod strip;
 mod waves;
 

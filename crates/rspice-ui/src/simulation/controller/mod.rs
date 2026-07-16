@@ -816,6 +816,15 @@ impl SimulationController {
             AnalysisRunType::SParameter => AnalysisType::SParameter,
             AnalysisRunType::Envelope => AnalysisType::Envelope,
             AnalysisRunType::Fourier => AnalysisType::Fourier,
+            AnalysisRunType::Qpss => AnalysisType::Qpss,
+            AnalysisRunType::Hbsp => AnalysisType::Hbsp,
+            AnalysisRunType::Hbnoise => AnalysisType::Hbnoise,
+            AnalysisRunType::Psp => AnalysisType::Psp,
+            AnalysisRunType::Qpac => AnalysisType::Qpac,
+            AnalysisRunType::Qpnoise => AnalysisType::Qpnoise,
+            AnalysisRunType::Qpxf => AnalysisType::Qpxf,
+            AnalysisRunType::TransientNoise => AnalysisType::TransientNoise,
+            AnalysisRunType::DcMismatch => AnalysisType::DcMismatch,
         }
     }
 

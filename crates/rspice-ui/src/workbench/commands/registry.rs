@@ -407,7 +407,7 @@ impl Command {
             Self::OpenWorkspace(Workspace::Models) => MODELS_WORKSPACE,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
             Self::ResultViewer(ResultViewer::Waves) => RESULTS_WORKSPACE,
-            Self::VerificationPage(VerificationPage::Cockpit) => VERIFICATION_WORKSPACE,
+            Self::VerificationPage(VerificationPage::Yield) => VERIFICATION_WORKSPACE,
             Self::ProjectLauncher => PROJECT_LAUNCHER,
             Self::NewProject => NEW_PROJECT,
             Self::OpenProject => OPEN_PROJECT,
@@ -558,10 +558,10 @@ mod tests {
             );
             assert_eq!(
                 binding_owners(VERIFICATION_WORKSPACE[0].chord, platform),
-                vec![Command::VerificationPage(VerificationPage::Cockpit)]
+                vec![Command::VerificationPage(VerificationPage::Yield)]
             );
             assert_eq!(
-                Command::VerificationPage(VerificationPage::Cockpit).shortcut_label(platform),
+                Command::VerificationPage(VerificationPage::Yield).shortcut_label(platform),
                 "Alt+5"
             );
         }

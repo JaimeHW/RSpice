@@ -129,6 +129,7 @@ pub enum Command {
     AutomationConsole,
     CommandPalette,
     KeyboardShortcuts,
+    AccountOrganization,
     License,
     FeatureAvailability,
     InteroperabilityMatrix,
@@ -373,22 +374,28 @@ impl Command {
                 spec("result-pole-zero", "Open pole-zero viewer", "", "Results")
             }
             Self::EditSpecifications => {
-                spec("specifications", "Edit specification matrix", "", "Verify")
+                spec("specifications", "Edit specification matrix", "", "Results")
             }
-            Self::VerificationPage(VerificationPage::Cockpit) => {
+            Self::VerificationPage(VerificationPage::Yield) => {
                 spec("yield", "Verification cockpit", "", "Verify")
             }
-            Self::VerificationPage(VerificationPage::Specifications) => {
-                spec("specification-page", "Specification matrix", "", "Verify")
+            Self::VerificationPage(VerificationPage::Corners) => {
+                spec("corners", "Corner matrix", "", "Verify")
             }
-            Self::VerificationPage(VerificationPage::Checks) => {
-                spec("verification-checks", "Design checks", "", "Verify")
+            Self::VerificationPage(VerificationPage::Tuning) => {
+                spec("tuning", "Parameter tuning unavailable", "", "Verify")
+            }
+            Self::VerificationPage(VerificationPage::Optimization) => {
+                spec("optimization", "Optimization", "", "Verify")
             }
             Self::VerificationPage(VerificationPage::Reliability) => {
-                spec("reliability-workbench", "Reliability and SOA", "", "Verify")
+                spec("reliability", "Reliability and SOA", "", "Verify")
             }
-            Self::VerificationPage(VerificationPage::History) => {
-                spec("verification-history", "Run history", "", "Verify")
+            Self::VerificationPage(VerificationPage::Regression) => {
+                spec("regression", "Regression plan", "", "Verify")
+            }
+            Self::VerificationPage(VerificationPage::Drc) => {
+                spec("open-drc", "Physical DRC", "", "Verify")
             }
             Self::ProjectPage(_) => spec("project-page", "Open project page", "", "Project"),
             Self::ModelsPage(ModelsPage::Models) => {
@@ -416,6 +423,12 @@ impl Command {
                 spec("command-palette", "Command palette", "Ctrl+K", "Navigate")
             }
             Self::KeyboardShortcuts => spec("command-reference", "Command reference", "", "Help"),
+            Self::AccountOrganization => spec(
+                "account-organization",
+                "Account and administration…",
+                "",
+                "Account",
+            ),
             Self::License => spec("license-activation", "License and activation…", "", "Help"),
             Self::FeatureAvailability => spec(
                 "feature-availability",
@@ -551,6 +564,7 @@ impl Command {
             Self::StopSimulation => stop_simulation_enabled(state.simulation.is_running),
             Self::ClearResults => state.simulation.has_results(),
             Self::ExportWaveformsCsv => state.simulation.has_results(),
+            Self::VerificationPage(VerificationPage::Tuning) => false,
             Self::ClearConsole => {
                 !state.log_buffer.is_empty() || !state.script_console.history.is_empty()
             }
@@ -872,7 +886,7 @@ impl Command {
                     file_action(app, FileMenuAction::SaveProject);
                 } else {
                     activate_workspace(app, Workspace::Verify);
-                    app.state.workbench.verification_page = VerificationPage::Checks;
+                    app.state.workbench.verification_page = VerificationPage::Yield;
                     app.state.workbench.console_visible = true;
                     app.state.workbench.console_page = super::state::ConsolePage::Problems;
                 }
@@ -923,8 +937,15 @@ impl Command {
             }
             Self::EditSpecifications => {
                 app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
-                activate_workspace(app, Workspace::Verify);
-                app.state.workbench.verification_page = VerificationPage::Specifications;
+                crate::workbench::result_document::open_specification_editor(&mut app.state);
+                activate_workspace(app, Workspace::Results);
+            }
+            Self::VerificationPage(VerificationPage::Tuning) => {
+                app.state.push_user_message(
+                    crate::common::app::ConsoleMessage::warning(
+                        "Parameter tuning is unavailable until real design-parameter discovery and transactional simulation integration are implemented.",
+                    ),
+                );
             }
             Self::VerificationPage(page) => {
                 activate_workspace(app, Workspace::Verify);
@@ -951,6 +972,7 @@ impl Command {
             }
             Self::CommandPalette => app.state.dialogs.command_palette.open(),
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
+            Self::AccountOrganization => super::account_organization::open(app),
             Self::License => app.open_license_dialog(),
             Self::FeatureAvailability => {
                 let route = super::SurfaceRoute::surface(super::SurfaceId::FeatureAvailability);
@@ -1150,7 +1172,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Models),
     Command::OpenWorkspace(Workspace::Netlist),
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-    Command::VerificationPage(VerificationPage::Cockpit),
+    Command::VerificationPage(VerificationPage::Yield),
     Command::ModelsPage(ModelsPage::Models),
     Command::ZoomIn,
     Command::ZoomOut,
@@ -1189,6 +1211,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AutomationConsole,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
+    Command::AccountOrganization,
     Command::FeatureAvailability,
     Command::InteroperabilityMatrix,
     Command::About,
@@ -1207,6 +1230,37 @@ pub fn command_catalog() -> impl Iterator<Item = Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edit_specifications_opens_the_real_results_editor() {
+        let mut app = RSpiceApp::test_instance();
+
+        Command::EditSpecifications.execute(&mut app);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Results);
+        assert_eq!(
+            app.state.ui.results.viewer,
+            crate::workbench::ResultViewer::Specs
+        );
+        assert!(app.state.ui.results.spec_drafts.is_some());
+    }
+
+    #[test]
+    fn tuning_command_is_inaccessible_until_transactional_execution_exists() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Project;
+        app.state.workbench.verification_page = VerificationPage::Yield;
+        let command = Command::VerificationPage(VerificationPage::Tuning);
+
+        assert!(!command.is_enabled(&app));
+        command.execute(&mut app);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Project);
+        assert_eq!(
+            app.state.workbench.verification_page,
+            VerificationPage::Yield
+        );
+    }
 
     #[test]
     fn command_catalog_has_unique_stable_ids() {

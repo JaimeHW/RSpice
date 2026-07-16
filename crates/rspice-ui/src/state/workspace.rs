@@ -13,7 +13,10 @@ use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
 use crate::product::{ObjectRevision, ProjectId, RevisionError};
-use crate::state::{Cell, Library, LibraryManager, SchematicState, View, ViewType};
+use crate::state::{
+    Cell, ComponentType, Library, LibraryCellInstance, LibraryManager, SchematicState, View,
+    ViewType,
+};
 
 /// Default editable design library created for new projects.
 pub const DEFAULT_PROJECT_LIBRARY: &str = "user";
@@ -23,6 +26,15 @@ pub const DEFAULT_TOP_CELL: &str = "top";
 pub const DEFAULT_SCHEMATIC_VIEW: &str = "schematic";
 /// Persisted schema for project identity metadata.
 pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
+
+/// Maximum legal hierarchy depth. This is deliberately generous for real
+/// designs while placing a deterministic bound on corrupt or hostile project
+/// data before it reaches netlisting.
+const MAX_HIERARCHY_RESOLUTION_DEPTH: usize = 128;
+/// Maximum number of expanded instances accepted by the configuration
+/// resolver. The table remains grouped by master, but the receipt count is an
+/// exact expanded-instance count up to this defensive product limit.
+const MAX_HIERARCHY_RESOLUTION_INSTANCES: usize = 1_000_000;
 
 /// Versioned identity domain for legacy session descriptors that predate a
 /// persisted [`ProjectId`]. Project-file migration derives its ID from the
@@ -161,6 +173,83 @@ impl CellViewRef {
 
     pub fn display_path(&self) -> String {
         self.key()
+    }
+}
+
+/// Resolution state for one grouped library/cell/view binding in the complete
+/// testbench hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HierarchyBindingStatus {
+    Resolved,
+    Modified,
+    Unresolved,
+    Recursive,
+    DepthLimit,
+    InstanceLimit,
+}
+
+impl HierarchyBindingStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::Modified => "modified",
+            Self::Unresolved => "unresolved",
+            Self::Recursive => "recursive",
+            Self::DepthLimit => "depth limit",
+            Self::InstanceLimit => "instance limit",
+        }
+    }
+
+    pub fn is_resolved(self) -> bool {
+        matches!(self, Self::Resolved | Self::Modified)
+    }
+
+    pub fn is_modified(self) -> bool {
+        self == Self::Modified
+    }
+
+    fn severity(self) -> u8 {
+        match self {
+            Self::Resolved => 0,
+            Self::Modified => 1,
+            Self::Unresolved => 2,
+            Self::Recursive => 3,
+            Self::DepthLimit => 4,
+            Self::InstanceLimit => 5,
+        }
+    }
+}
+
+/// One row in the resolved hierarchy-binding manifest. Repeated masters are
+/// grouped while `instance_count` retains their exact expanded multiplicity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedHierarchyBinding {
+    pub reference: CellViewRef,
+    pub purpose: String,
+    pub view_search_order: Vec<String>,
+    pub stop_view: Option<String>,
+    pub model_section: String,
+    pub status: HierarchyBindingStatus,
+    pub instance_count: usize,
+    pub diagnostic: Option<String>,
+}
+
+/// Immutable resolution receipt for the project configuration surface and
+/// preflight diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HierarchyResolution {
+    pub bindings: Vec<ResolvedHierarchyBinding>,
+    pub total_instances: usize,
+    pub resolved_instances: usize,
+}
+
+impl HierarchyResolution {
+    pub fn unresolved_instances(&self) -> usize {
+        self.total_instances.saturating_sub(self.resolved_instances)
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.unresolved_instances() == 0
     }
 }
 
@@ -555,6 +644,620 @@ impl Default for ProjectWorkspace {
     }
 }
 
+struct HierarchyResolver<'a> {
+    workspace: &'a ProjectWorkspace,
+    libraries: &'a LibraryManager,
+    active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+    rows: Vec<ResolvedHierarchyBinding>,
+    row_indices: HashMap<String, usize>,
+    total_instances: usize,
+    resolved_instances: usize,
+}
+
+#[derive(Clone, Copy)]
+struct HierarchyMaster<'a> {
+    schematic: Option<&'a SchematicState>,
+    view_type: Option<ViewType>,
+    view_modified: bool,
+    library_read_only: bool,
+    library_has_technology: bool,
+}
+
+impl<'a> HierarchyResolver<'a> {
+    fn new(
+        workspace: &'a ProjectWorkspace,
+        libraries: &'a LibraryManager,
+        active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+    ) -> Self {
+        Self {
+            workspace,
+            libraries,
+            active_overlay,
+            rows: Vec::new(),
+            row_indices: HashMap::new(),
+            total_instances: 0,
+            resolved_instances: 0,
+        }
+    }
+
+    fn resolve(mut self) -> HierarchyResolution {
+        let root = CellViewRef::new(
+            &self.workspace.project.root_library,
+            &self.workspace.project.top_cell,
+            DEFAULT_SCHEMATIC_VIEW,
+        );
+        let mut ancestors = Vec::new();
+        self.resolve_reference(root, None, 0, true, &mut ancestors);
+        HierarchyResolution {
+            bindings: self.rows,
+            total_instances: self.total_instances,
+            resolved_instances: self.resolved_instances,
+        }
+    }
+
+    fn resolve_reference(
+        &mut self,
+        requested: CellViewRef,
+        binding: Option<&LibraryCellInstance>,
+        depth: usize,
+        is_root: bool,
+        ancestors: &mut Vec<String>,
+    ) {
+        if self.total_instances >= MAX_HIERARCHY_RESOLUTION_INSTANCES {
+            let mut row = self.binding_row(
+                requested,
+                binding,
+                depth,
+                is_root,
+                HierarchyBindingStatus::InstanceLimit,
+                Some(format!(
+                    "hierarchy exceeds the supported limit of {MAX_HIERARCHY_RESOLUTION_INSTANCES} expanded instances"
+                )),
+            );
+            row.instance_count = 1;
+            self.total_instances = self.total_instances.saturating_add(1);
+            self.upsert(row);
+            return;
+        }
+        self.total_instances += 1;
+
+        if depth > MAX_HIERARCHY_RESOLUTION_DEPTH {
+            let row = self.binding_row(
+                requested,
+                binding,
+                depth,
+                is_root,
+                HierarchyBindingStatus::DepthLimit,
+                Some(format!(
+                    "hierarchy exceeds the supported depth of {MAX_HIERARCHY_RESOLUTION_DEPTH}"
+                )),
+            );
+            self.upsert(row);
+            return;
+        }
+
+        let search_order = hierarchy_view_search_order(&requested.view, is_root);
+        let source_binding_error = binding.and_then(|binding| {
+            binding
+                .source_path
+                .as_ref()
+                .and_then(|_| self.validate_source_binding(binding).err())
+        });
+        let master = if source_binding_error.is_none() {
+            self.resolve_master(&requested, binding, &search_order)
+        } else {
+            None
+        };
+        let resolved_reference = master
+            .as_ref()
+            .and_then(|(_, reference)| reference.clone())
+            .unwrap_or_else(|| requested.clone());
+        let identity = hierarchy_identity(&resolved_reference);
+
+        if ancestors.iter().any(|ancestor| ancestor == &identity) {
+            let chain = ancestors
+                .iter()
+                .chain(std::iter::once(&identity))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" → ");
+            let row = self.binding_row_with_master(
+                resolved_reference,
+                binding,
+                depth,
+                is_root,
+                master.map(|(master, _)| master),
+                HierarchyBindingStatus::Recursive,
+                Some(format!("recursive hierarchy: {chain}")),
+            );
+            self.upsert(row);
+            return;
+        }
+
+        let (master, status, diagnostic) = match master {
+            Some((master, _)) => {
+                let modified = master.view_modified
+                    || master.schematic.is_some_and(|schematic| schematic.is_dirty);
+                (
+                    Some(master),
+                    if modified {
+                        HierarchyBindingStatus::Modified
+                    } else {
+                        HierarchyBindingStatus::Resolved
+                    },
+                    None,
+                )
+            }
+            None => (
+                None,
+                HierarchyBindingStatus::Unresolved,
+                source_binding_error.or_else(|| {
+                    Some(format!(
+                        "no executable master resolved for {} using {}",
+                        hierarchy_display_path(&requested),
+                        search_order.join(" → ")
+                    ))
+                }),
+            ),
+        };
+
+        let row = self.binding_row_with_master(
+            resolved_reference,
+            binding,
+            depth,
+            is_root,
+            master,
+            status,
+            diagnostic,
+        );
+        self.upsert(row);
+        if status.is_resolved() {
+            self.resolved_instances += 1;
+        }
+
+        let Some(schematic) = master.and_then(|master| master.schematic) else {
+            return;
+        };
+        let children = schematic
+            .components
+            .iter()
+            .filter(|component| component.kind == ComponentType::CellInstance)
+            .filter_map(|component| component.library_cell.clone())
+            .collect::<Vec<_>>();
+        if children.is_empty() {
+            return;
+        }
+
+        ancestors.push(identity);
+        for child in &children {
+            let requested_view = if child.view.eq_ignore_ascii_case("symbol") {
+                DEFAULT_SCHEMATIC_VIEW
+            } else {
+                child.view.as_str()
+            };
+            self.resolve_reference(
+                CellViewRef::new(&child.library, &child.cell, requested_view),
+                Some(child),
+                depth + 1,
+                false,
+                ancestors,
+            );
+        }
+        ancestors.pop();
+    }
+
+    fn binding_row(
+        &self,
+        reference: CellViewRef,
+        binding: Option<&LibraryCellInstance>,
+        depth: usize,
+        is_root: bool,
+        status: HierarchyBindingStatus,
+        diagnostic: Option<String>,
+    ) -> ResolvedHierarchyBinding {
+        self.binding_row_with_master(reference, binding, depth, is_root, None, status, diagnostic)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn binding_row_with_master(
+        &self,
+        reference: CellViewRef,
+        binding: Option<&LibraryCellInstance>,
+        depth: usize,
+        is_root: bool,
+        master: Option<HierarchyMaster<'_>>,
+        status: HierarchyBindingStatus,
+        diagnostic: Option<String>,
+    ) -> ResolvedHierarchyBinding {
+        let search_order = hierarchy_view_search_order(&reference.view, is_root);
+        let source_bound = binding
+            .and_then(|value| value.source_path.as_ref())
+            .is_some();
+        let terminal_view = master
+            .and_then(|value| value.view_type)
+            .filter(|view_type| hierarchy_stop_view(*view_type));
+        let purpose = if is_root {
+            "testbench root"
+        } else if source_bound || terminal_view.is_some() {
+            "macro-model"
+        } else if master
+            .is_some_and(|value| value.library_read_only && value.library_has_technology)
+        {
+            "foundry devices"
+        } else if depth == 1 {
+            "design under test"
+        } else {
+            "hierarchical cell"
+        };
+        let stop_view = if is_root {
+            None
+        } else {
+            terminal_view
+                .map(|view_type| view_type.display_name().to_owned())
+                .or_else(|| {
+                    search_order
+                        .iter()
+                        .rev()
+                        .find(|view| hierarchy_stop_view(ViewType::from_name(view)))
+                        .cloned()
+                })
+        };
+        ResolvedHierarchyBinding {
+            model_section: hierarchy_model_section(self.libraries, &reference, binding),
+            reference,
+            purpose: purpose.to_owned(),
+            view_search_order: search_order,
+            stop_view,
+            status,
+            instance_count: 1,
+            diagnostic,
+        }
+    }
+
+    fn resolve_master(
+        &self,
+        requested: &CellViewRef,
+        binding: Option<&LibraryCellInstance>,
+        search_order: &[String],
+    ) -> Option<(HierarchyMaster<'a>, Option<CellViewRef>)> {
+        let library = find_library(self.libraries, &requested.library);
+        let cell = library.and_then(|library| find_cell(library, &requested.cell));
+        let source_bound = binding
+            .and_then(|value| value.source_path.as_ref())
+            .is_some();
+
+        if source_bound {
+            let view = cell.and_then(|cell| find_view(cell, &requested.view))?;
+            return Some((
+                HierarchyMaster {
+                    schematic: None,
+                    view_type: Some(view.view_type),
+                    view_modified: view.modified,
+                    library_read_only: library.is_some_and(|library| library.read_only),
+                    library_has_technology: library
+                        .is_some_and(|library| !library.technology.trim().is_empty()),
+                },
+                Some(requested.clone()),
+            ));
+        }
+
+        for candidate in search_order {
+            let reference = CellViewRef::new(&requested.library, &requested.cell, candidate);
+            // A buffer without an authoritative library/cell/view identity is
+            // an orphan, not an executable master. Corrupt or partially
+            // restored workspaces must fail closed.
+            let Some(view) = cell.and_then(|cell| find_view(cell, candidate)) else {
+                continue;
+            };
+            let view_type = view.view_type;
+            if matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
+                if let Some(schematic) = self.find_schematic(&reference) {
+                    return Some((
+                        HierarchyMaster {
+                            schematic: Some(schematic),
+                            view_type: Some(view_type),
+                            view_modified: view.modified,
+                            library_read_only: library.is_some_and(|library| library.read_only),
+                            library_has_technology: library
+                                .is_some_and(|library| !library.technology.trim().is_empty()),
+                        },
+                        Some(reference),
+                    ));
+                }
+                continue;
+            }
+            // External executable views are owned by the placed binding's
+            // source path. A library view alone is not enough: accepting it
+            // here would claim a closure the netlist generator cannot emit.
+        }
+        None
+    }
+
+    fn find_schematic(&self, reference: &CellViewRef) -> Option<&'a SchematicState> {
+        if let Some((overlay_reference, schematic)) = self.active_overlay
+            && overlay_reference
+                .key()
+                .eq_ignore_ascii_case(&reference.key())
+        {
+            return Some(schematic);
+        }
+        find_schematic(self.workspace, reference)
+    }
+
+    fn validate_source_binding(&self, binding: &LibraryCellInstance) -> Result<(), String> {
+        let Some(library) = find_library(self.libraries, &binding.library) else {
+            return Err(format!(
+                "source-backed binding {}/{} has no authoritative library",
+                binding.library, binding.cell
+            ));
+        };
+        let Some(cell) = find_cell(library, &binding.cell) else {
+            return Err(format!(
+                "source-backed binding {}/{} has no authoritative cell",
+                binding.library, binding.cell
+            ));
+        };
+        let Some(view) = find_view(cell, &binding.view) else {
+            return Err(format!(
+                "source-backed binding {}/{}/{} has no authoritative view",
+                binding.library, binding.cell, binding.view
+            ));
+        };
+        if !matches!(
+            view.view_type,
+            ViewType::Spice | ViewType::VerilogA | ViewType::Verilog | ViewType::Extracted
+        ) {
+            return Err(format!(
+                "source-backed binding {}/{}/{} is not an executable source view",
+                binding.library, binding.cell, binding.view
+            ));
+        }
+        if binding.terminal_order.is_empty() {
+            return Err(format!(
+                "source-backed binding {}/{}/{} has no validated terminal contract",
+                binding.library, binding.cell, binding.view
+            ));
+        }
+        let source_path = binding
+            .source_path
+            .as_deref()
+            .expect("validated only for source-backed bindings");
+        if !source_path.is_absolute() {
+            return Err(format!(
+                "source-backed binding {}/{}/{} does not have an absolute source identity",
+                binding.library, binding.cell, binding.view
+            ));
+        }
+        let authoritative_path = view
+            .file_path
+            .as_deref()
+            .or_else(|| metadata_source_path(&view.metadata))
+            .or_else(|| metadata_source_path(&cell.metadata));
+        let Some(authoritative_path) = authoritative_path else {
+            return Err(format!(
+                "source-backed binding {}/{}/{} has no authoritative source identity",
+                binding.library, binding.cell, binding.view
+            ));
+        };
+        if !source_paths_match(source_path, authoritative_path) {
+            return Err(format!(
+                "source-backed binding {}/{}/{} conflicts with the authoritative source path",
+                binding.library, binding.cell, binding.view
+            ));
+        }
+        validate_source_file(source_path, view.view_type, binding)
+    }
+
+    fn upsert(&mut self, row: ResolvedHierarchyBinding) {
+        let key = row.reference.key().to_ascii_lowercase();
+        if let Some(index) = self.row_indices.get(&key).copied() {
+            let existing = &mut self.rows[index];
+            existing.instance_count = existing.instance_count.saturating_add(row.instance_count);
+            if row.status.severity() > existing.status.severity() {
+                existing.status = row.status;
+                existing.diagnostic = row.diagnostic;
+            }
+            return;
+        }
+        self.row_indices.insert(key, self.rows.len());
+        self.rows.push(row);
+    }
+}
+
+fn find_library<'a>(libraries: &'a LibraryManager, name: &str) -> Option<&'a Library> {
+    libraries
+        .libraries_by_key()
+        .find(|(key, library)| {
+            key.eq_ignore_ascii_case(name) || library.name.eq_ignore_ascii_case(name)
+        })
+        .map(|(_, library)| library)
+}
+
+fn find_cell<'a>(library: &'a Library, name: &str) -> Option<&'a Cell> {
+    library
+        .cells
+        .iter()
+        .find(|(key, cell)| key.eq_ignore_ascii_case(name) || cell.name.eq_ignore_ascii_case(name))
+        .map(|(_, cell)| cell)
+}
+
+fn find_view<'a>(cell: &'a Cell, name: &str) -> Option<&'a View> {
+    cell.views
+        .iter()
+        .find(|(key, view)| key.eq_ignore_ascii_case(name) || view.name.eq_ignore_ascii_case(name))
+        .map(|(_, view)| view)
+}
+
+fn find_schematic<'a>(
+    workspace: &'a ProjectWorkspace,
+    reference: &CellViewRef,
+) -> Option<&'a SchematicState> {
+    workspace
+        .schematic_buffers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))
+        .map(|(_, schematic)| schematic)
+}
+
+fn metadata_source_path(metadata: &HashMap<String, String>) -> Option<&Path> {
+    metadata
+        .get("netlist.source_path")
+        .or_else(|| metadata.get("veriloga.source_path"))
+        .filter(|path| !path.trim().is_empty())
+        .map(Path::new)
+}
+
+fn source_paths_match(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_source_file(
+    source_path: &Path,
+    view_type: ViewType,
+    binding: &LibraryCellInstance,
+) -> Result<(), String> {
+    let source = std::fs::read_to_string(source_path).map_err(|error| {
+        format!(
+            "source-backed binding {}/{}/{} cannot read {}: {error}",
+            binding.library,
+            binding.cell,
+            binding.view,
+            source_path.display()
+        )
+    })?;
+    let master = binding
+        .module_name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(&binding.cell);
+    let declaration_found = match view_type {
+        ViewType::Verilog | ViewType::VerilogA => source.lines().any(|line| {
+            let code = line.split("//").next().unwrap_or_default();
+            let mut tokens = code
+                .split(|character: char| !character.is_alphanumeric() && character != '_')
+                .filter(|token| !token.is_empty());
+            tokens.any(|token| token.eq_ignore_ascii_case("module"))
+                && tokens.any(|token| token.eq_ignore_ascii_case(master))
+        }),
+        ViewType::Spice | ViewType::Extracted => source.lines().any(|line| {
+            let mut tokens = line.split_ascii_whitespace();
+            tokens
+                .next()
+                .is_some_and(|token| token.eq_ignore_ascii_case(".subckt"))
+                && tokens
+                    .next()
+                    .is_some_and(|token| token.eq_ignore_ascii_case(master))
+        }),
+        _ => false,
+    };
+    if declaration_found {
+        Ok(())
+    } else {
+        Err(format!(
+            "source-backed binding {}/{}/{} does not declare executable master {master}",
+            binding.library, binding.cell, binding.view
+        ))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn validate_source_file(
+    _source_path: &Path,
+    _view_type: ViewType,
+    binding: &LibraryCellInstance,
+) -> Result<(), String> {
+    Err(format!(
+        "source-backed binding {}/{}/{} references a desktop path unavailable in this browser session",
+        binding.library, binding.cell, binding.view
+    ))
+}
+
+fn hierarchy_identity(reference: &CellViewRef) -> String {
+    format!(
+        "{}/{}",
+        reference.library.to_ascii_lowercase(),
+        reference.cell.to_ascii_lowercase()
+    )
+}
+
+fn hierarchy_display_path(reference: &CellViewRef) -> String {
+    format!("{}/{}", reference.library, reference.cell)
+}
+
+fn hierarchy_view_search_order(requested: &str, is_root: bool) -> Vec<String> {
+    let requested = if requested.eq_ignore_ascii_case("symbol") {
+        DEFAULT_SCHEMATIC_VIEW
+    } else {
+        requested
+    };
+    let mut order = vec![requested.to_owned()];
+    match ViewType::from_name(requested) {
+        ViewType::Schematic | ViewType::Testbench if !is_root => {
+            order.push("extracted".to_owned());
+            order.push("spice".to_owned());
+        }
+        ViewType::Schematic | ViewType::Testbench => order.push("spice".to_owned()),
+        ViewType::Extracted | ViewType::Verilog | ViewType::VerilogA => {
+            order.push("spice".to_owned());
+        }
+        ViewType::Spice => {}
+        _ => order.push("spice".to_owned()),
+    }
+    order.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    order
+}
+
+fn hierarchy_stop_view(view_type: ViewType) -> bool {
+    matches!(
+        view_type,
+        ViewType::Spice | ViewType::Verilog | ViewType::VerilogA | ViewType::Extracted
+    )
+}
+
+fn hierarchy_model_section(
+    libraries: &LibraryManager,
+    reference: &CellViewRef,
+    binding: Option<&LibraryCellInstance>,
+) -> String {
+    let library = find_library(libraries, &reference.library);
+    let cell = library.and_then(|library| find_cell(library, &reference.cell));
+    let view = cell.and_then(|cell| find_view(cell, &reference.view));
+    for metadata in [
+        view.map(|view| &view.metadata),
+        cell.map(|cell| &cell.metadata),
+        library.map(|library| &library.metadata),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        for key in ["model_sections", "model_section", "sections", "section"] {
+            if let Some(value) = metadata.get(key).filter(|value| !value.trim().is_empty()) {
+                return value.clone();
+            }
+        }
+    }
+    if binding
+        .and_then(|value| value.source_path.as_ref())
+        .is_some()
+    {
+        "source-defined".to_owned()
+    } else {
+        "inherit PVT".to_owned()
+    }
+}
+
 impl ProjectWorkspace {
     /// Create a new default project and ensure its editable top cell exists in
     /// the shared library manager.
@@ -562,6 +1265,28 @@ impl ProjectWorkspace {
         let mut workspace = Self::default();
         workspace.ensure_library_model(libraries);
         workspace
+    }
+
+    /// Resolve the complete executable library/cell/view closure rooted at the
+    /// project testbench. Open tabs are intentionally irrelevant: this receipt
+    /// follows placed hierarchical instances and the same schematic/source
+    /// ownership used by netlisting.
+    pub fn resolve_hierarchy(&self, libraries: &LibraryManager) -> HierarchyResolution {
+        HierarchyResolver::new(self, libraries, None).resolve()
+    }
+
+    /// Resolve the hierarchy while projecting the live editor buffer over its
+    /// persisted workspace copy. Rendering and validation use this form so a
+    /// just-placed instance cannot disappear from the receipt until save or a
+    /// view switch.
+    pub fn resolve_hierarchy_with_active<'a>(
+        &'a self,
+        libraries: &'a LibraryManager,
+        active_reference: &'a CellViewRef,
+        active_schematic: &'a SchematicState,
+    ) -> HierarchyResolution {
+        HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
+            .resolve()
     }
 
     /// Ensure the workspace's top library/cell/view exists in the library tree.
@@ -910,6 +1635,7 @@ pub fn ensure_cell_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Point;
 
     fn reference(cell: &str) -> CellViewRef {
         CellViewRef::new("work", cell, "schematic")
@@ -917,6 +1643,275 @@ mod tests {
 
     fn symbol_reference(cell: &str) -> CellViewRef {
         CellViewRef::new("work", cell, "symbol")
+    }
+
+    fn add_schematic_master(
+        libraries: &mut LibraryManager,
+        workspace: &mut ProjectWorkspace,
+        library_name: &str,
+        cell_name: &str,
+        schematic: SchematicState,
+    ) {
+        if libraries.get_library(library_name).is_none() {
+            libraries.add_library(Library::new(library_name));
+        }
+        let library = libraries
+            .get_library_mut(library_name)
+            .expect("library exists");
+        let cell = library.get_or_create_cell(cell_name);
+        if cell.get_view("schematic").is_none() {
+            cell.add_view(View::new("schematic", ViewType::Schematic));
+        }
+        workspace.schematic_buffers.insert(
+            CellViewRef::new(library_name, cell_name, "schematic").key(),
+            schematic,
+        );
+    }
+
+    fn instance(library: &str, cell: &str) -> LibraryCellInstance {
+        LibraryCellInstance::new(library, cell, "schematic")
+    }
+
+    #[test]
+    fn hierarchy_resolution_follows_instances_not_open_tabs() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.open_views.push(OpenCellView::new(
+            CellViewRef::new("unrelated", "open_tab", "schematic"),
+            ViewType::Schematic,
+        ));
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+
+        let resolution = workspace.resolve_hierarchy(&libraries);
+
+        assert_eq!(resolution.total_instances, 1);
+        assert_eq!(resolution.resolved_instances, 1);
+        assert_eq!(resolution.bindings.len(), 1);
+        assert_eq!(resolution.bindings[0].purpose, "testbench root");
+        assert_eq!(resolution.bindings[0].reference.cell, "top");
+    }
+
+    #[test]
+    fn hierarchy_resolution_counts_transitive_repeated_instances() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+
+        let top = workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer");
+        top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
+        top.add_library_cell_component(Point::new(80, 20), instance("work", "amp"));
+
+        let mut amp = SchematicState::default();
+        amp.add_library_cell_component(Point::new(40, 40), instance("work", "bias"));
+        add_schematic_master(&mut libraries, &mut workspace, "work", "amp", amp);
+        add_schematic_master(
+            &mut libraries,
+            &mut workspace,
+            "work",
+            "bias",
+            SchematicState::default(),
+        );
+
+        let resolution = workspace.resolve_hierarchy(&libraries);
+
+        assert!(resolution.is_valid());
+        assert_eq!(resolution.total_instances, 5);
+        assert_eq!(resolution.resolved_instances, 5);
+        assert_eq!(resolution.bindings.len(), 3);
+        let amp = resolution
+            .bindings
+            .iter()
+            .find(|row| row.reference.cell == "amp")
+            .expect("amp row");
+        assert_eq!(amp.instance_count, 2);
+        assert_eq!(amp.purpose, "design under test");
+        assert_eq!(
+            amp.view_search_order
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["schematic", "extracted", "spice"]
+        );
+        assert_eq!(amp.stop_view.as_deref(), Some("spice"));
+        let bias = resolution
+            .bindings
+            .iter()
+            .find(|row| row.reference.cell == "bias")
+            .expect("bias row");
+        assert_eq!(bias.instance_count, 2);
+        assert_eq!(bias.purpose, "hierarchical cell");
+    }
+
+    #[test]
+    fn hierarchy_resolution_reports_unbound_and_recursive_masters() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer")
+            .add_library_cell_component(Point::new(20, 20), instance("missing", "unbound"));
+
+        let unresolved = workspace.resolve_hierarchy(&libraries);
+        assert_eq!(unresolved.total_instances, 2);
+        assert_eq!(unresolved.resolved_instances, 1);
+        assert_eq!(unresolved.unresolved_instances(), 1);
+        assert_eq!(
+            unresolved.bindings[1].status,
+            HierarchyBindingStatus::Unresolved
+        );
+        assert!(unresolved.bindings[1].diagnostic.is_some());
+
+        let top = workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer");
+        top.components.clear();
+        top.add_library_cell_component(Point::new(20, 20), instance("work", "loop"));
+        let mut loop_master = SchematicState::default();
+        loop_master.add_library_cell_component(Point::new(20, 20), instance("work", "loop"));
+        add_schematic_master(&mut libraries, &mut workspace, "work", "loop", loop_master);
+
+        let recursive = workspace.resolve_hierarchy(&libraries);
+        assert_eq!(recursive.total_instances, 3);
+        assert_eq!(recursive.resolved_instances, 2);
+        let loop_row = recursive
+            .bindings
+            .iter()
+            .find(|row| row.reference.cell == "loop")
+            .expect("loop row");
+        assert_eq!(loop_row.instance_count, 2);
+        assert_eq!(loop_row.status, HierarchyBindingStatus::Recursive);
+        assert!(
+            loop_row
+                .diagnostic
+                .as_deref()
+                .is_some_and(|diagnostic| diagnostic.contains("work/loop → work/loop"))
+        );
+    }
+
+    #[test]
+    fn hierarchy_resolution_projects_unsaved_active_topology() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        let mut live = workspace
+            .schematic_buffers
+            .get(&CellViewRef::default_top().key())
+            .expect("top buffer")
+            .clone();
+        live.add_library_cell_component(Point::new(20, 20), instance("missing", "live_child"));
+
+        let persisted = workspace.resolve_hierarchy(&libraries);
+        let projected =
+            workspace.resolve_hierarchy_with_active(&libraries, &workspace.active_view, &live);
+
+        assert_eq!(persisted.total_instances, 1);
+        assert_eq!(projected.total_instances, 2);
+        assert_eq!(projected.unresolved_instances(), 1);
+        assert!(
+            projected
+                .bindings
+                .iter()
+                .any(|binding| binding.reference.cell == "live_child"
+                    && binding.status == HierarchyBindingStatus::Unresolved)
+        );
+    }
+
+    #[test]
+    fn hierarchy_resolution_rejects_orphan_schematic_buffers() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer")
+            .add_library_cell_component(Point::new(20, 20), instance("orphan", "amp"));
+        workspace.schematic_buffers.insert(
+            CellViewRef::new("orphan", "amp", "schematic").key(),
+            SchematicState::default(),
+        );
+
+        let resolution = workspace.resolve_hierarchy(&libraries);
+
+        assert_eq!(resolution.unresolved_instances(), 1);
+        assert!(
+            resolution
+                .bindings
+                .iter()
+                .any(|binding| binding.reference.cell == "amp"
+                    && binding.status == HierarchyBindingStatus::Unresolved)
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn hierarchy_resolution_rejects_missing_and_conflicting_source_bindings() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        let base = std::env::temp_dir().join(format!("rspice-hierarchy-{}", Uuid::new_v4()));
+        let authoritative = base.join("amp.cir");
+        let conflicting = base.join("other.cir");
+        std::fs::create_dir_all(&base).expect("create source fixture directory");
+        std::fs::write(&authoritative, ".subckt amp in out\n.ends amp\n")
+            .expect("write authoritative source");
+        std::fs::write(&conflicting, ".subckt amp in out\n.ends amp\n")
+            .expect("write conflicting source");
+
+        let missing_path = base.join("missing.cir");
+        let mut library = Library::new("models");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("spice", ViewType::Spice).with_path(missing_path.clone()));
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let mut binding = LibraryCellInstance::new("models", "amp", "spice");
+        binding.terminal_order = vec!["in".to_owned(), "out".to_owned()];
+        binding.source_path = Some(missing_path);
+        workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer")
+            .add_library_cell_component(Point::new(20, 20), binding.clone());
+
+        let missing = workspace.resolve_hierarchy(&libraries);
+        assert_eq!(missing.unresolved_instances(), 1);
+        assert!(missing.bindings.iter().any(|row| {
+            row.diagnostic
+                .as_deref()
+                .is_some_and(|diagnostic| diagnostic.contains("cannot read"))
+        }));
+
+        libraries
+            .get_library_mut("models")
+            .and_then(|library| library.get_cell_mut("amp"))
+            .and_then(|cell| cell.get_view_mut("spice"))
+            .expect("authoritative source view")
+            .file_path = Some(authoritative);
+        binding.source_path = Some(conflicting);
+        workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer")
+            .components
+            .last_mut()
+            .expect("source-backed instance")
+            .library_cell = Some(binding);
+        let conflicting = workspace.resolve_hierarchy(&libraries);
+        assert_eq!(conflicting.unresolved_instances(), 1);
+        assert!(conflicting.bindings.iter().any(|row| {
+            row.diagnostic
+                .as_deref()
+                .is_some_and(|diagnostic| diagnostic.contains("conflicts"))
+        }));
+
+        std::fs::remove_dir_all(base).expect("remove source fixture directory");
     }
 
     #[test]

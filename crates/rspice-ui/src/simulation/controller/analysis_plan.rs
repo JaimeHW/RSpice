@@ -44,10 +44,17 @@ impl SimulationController {
                 .map(|dependency| dependency.target())
                 .collect();
 
-            let spec = match self
-                .build_analysis_spec_for_index(&projected_state, instance.kind().legacy_index())
-            {
-                Ok(spec) => spec,
+            let spec = match self.build_manifest_preview_spec(instance.draft()) {
+                Ok(Some(spec)) => spec,
+                Ok(None) => match self
+                    .build_analysis_spec_for_index(&projected_state, instance.kind().legacy_index())
+                {
+                    Ok(spec) => spec,
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", instance.kind().label()));
+                        continue;
+                    }
+                },
                 Err(error) => {
                     errors.push(format!("{}: {error}", instance.kind().label()));
                     continue;
@@ -156,6 +163,15 @@ impl SimulationController {
                 | AnalysisSpec::Reliability { .. }
                 | AnalysisSpec::Optimization { .. }
                 | AnalysisSpec::Soa { .. }
+                | AnalysisSpec::Qpss { .. }
+                | AnalysisSpec::Hbsp { .. }
+                | AnalysisSpec::Hbnoise { .. }
+                | AnalysisSpec::Psp { .. }
+                | AnalysisSpec::Qpac { .. }
+                | AnalysisSpec::Qpnoise { .. }
+                | AnalysisSpec::Qpxf { .. }
+                | AnalysisSpec::TransientNoise { .. }
+                | AnalysisSpec::DcMismatch { .. }
         )
     }
 

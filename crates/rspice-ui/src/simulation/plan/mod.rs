@@ -9,8 +9,12 @@ mod config;
 mod kind;
 mod model;
 
-pub use config::{AcDraft, AnalysisDraft, DistoDraft, NoiseDraft};
-pub use kind::AnalysisKind;
+pub use config::{
+    AcDraft, AnalysisDraft, DcMismatchDraft, DistoDraft, FrequencySweepDraft, HbNoiseDraft,
+    NetworkPortDraft, NoiseDraft, PeriodicNetworkDraft, QpssDraft, QuasiPeriodicAcDraft,
+    QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft, TransientNoiseDraft,
+};
+pub use kind::{AnalysisAvailability, AnalysisCategory, AnalysisKind};
 pub use model::{
     AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
     AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, AnalysisTombstone,

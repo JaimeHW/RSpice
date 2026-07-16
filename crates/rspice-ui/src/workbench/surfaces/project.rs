@@ -1187,6 +1187,11 @@ fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn hierarchy_binding_table(ui: &mut Ui, app: &RSpiceApp) {
     let t = Tokens::get(ui.ctx());
+    let resolution = app.state.workspace.resolve_hierarchy_with_active(
+        &app.state.library_manager,
+        &app.state.workspace.active_view,
+        &app.state.schematic,
+    );
     let width = ui.available_width().max(1.0);
     let (header, _) = ui.allocate_exact_size(vec2(width, 37.0), Sense::hover());
     ui.painter().hline(
@@ -1206,19 +1211,25 @@ fn hierarchy_binding_table(ui: &mut Ui, app: &RSpiceApp) {
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
-    let resolved = app.state.workspace.open_views.len();
+    let resolved = resolution.resolved_instances;
+    let total = resolution.total_instances;
+    let resolution_label = if resolution.is_valid() {
+        format!(
+            "{resolved} instance{} resolved",
+            if resolved == 1 { "" } else { "s" }
+        )
+    } else {
+        format!("{resolved} / {total} instances resolved")
+    };
     ui.painter().text(
         header.right_center() - vec2(11.0, 0.0),
         Align2::RIGHT_CENTER,
-        format!(
-            "{resolved} cellview{} resolved",
-            if resolved == 1 { "" } else { "s" }
-        ),
+        resolution_label,
         theme::mono(tokens::FS_0, FontWeight::Regular),
-        if resolved == 0 {
-            t.color.warn
-        } else {
+        if resolution.is_valid() {
             t.color.ok
+        } else {
+            t.color.warn
         },
     );
 
@@ -1242,44 +1253,53 @@ fn hierarchy_binding_table(ui: &mut Ui, app: &RSpiceApp) {
                 true,
                 None,
             );
-            if app.state.workspace.open_views.is_empty() {
+            if resolution.bindings.is_empty() {
                 configuration_table_row(
                     ui,
                     table_width,
-                    ["No open cellviews", "—", "—", "—", "—", "unresolved"],
+                    [
+                        "No hierarchy root",
+                        "testbench root",
+                        "schematic → spice",
+                        "—",
+                        "inherit PVT",
+                        "unresolved",
+                    ],
                     false,
                     Some(t.color.warn),
                 );
             } else {
-                for view in &app.state.workspace.open_views {
-                    let active = view.reference == app.state.workspace.active_view;
-                    let reference = view.reference.display_path();
-                    let purpose = if active {
-                        "testbench root"
-                    } else {
-                        "open cellview"
-                    };
-                    let search_order = format!("{} → spice", view.reference.view);
-                    let stop_view = if view.reference.view.eq_ignore_ascii_case("spice") {
-                        "spice"
-                    } else {
-                        "—"
-                    };
-                    let status = if view.dirty { "modified" } else { "resolved" };
-                    configuration_table_row(
+                for binding in &resolution.bindings {
+                    let mut reference =
+                        format!("{}/{}", binding.reference.library, binding.reference.cell);
+                    if binding.instance_count > 1 {
+                        reference.push_str(&format!(" ×{}", binding.instance_count));
+                    }
+                    let search_order = binding.view_search_order.join(" → ");
+                    let stop_view = binding.stop_view.as_deref().unwrap_or("—");
+                    let status_color =
+                        if !binding.status.is_resolved() || binding.status.is_modified() {
+                            t.color.warn
+                        } else {
+                            t.color.ok
+                        };
+                    let response = configuration_table_row(
                         ui,
                         table_width,
                         [
                             &reference,
-                            purpose,
+                            &binding.purpose,
                             &search_order,
                             stop_view,
-                            "inherit PVT",
-                            status,
+                            &binding.model_section,
+                            binding.status.label(),
                         ],
                         false,
-                        Some(if view.dirty { t.color.warn } else { t.color.ok }),
+                        Some(status_color),
                     );
+                    if let Some(diagnostic) = binding.diagnostic.as_deref() {
+                        response.on_hover_text(diagnostic);
+                    }
                 }
             }
         });
@@ -1291,14 +1311,29 @@ fn configuration_table_row(
     cells: [&str; 6],
     header: bool,
     status_color: Option<Color32>,
-) {
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let height = if header {
         CONFIGURATION_TABLE_HEADER_HEIGHT
     } else {
         CONFIGURATION_TABLE_ROW_HEIGHT
     };
-    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let accessible_label = if header {
+        format!("Hierarchy table columns: {}", cells.join(", "))
+    } else {
+        format!(
+            "Hierarchy binding: cell {}; purpose {}; view search order {}; stop view {}; model section {}; status {}",
+            cells[0], cells[1], cells[2], cells[3], cells[4], cells[5]
+        )
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            accessible_label.clone(),
+        )
+    });
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     if header {
         painter.rect_filled(rect, 0.0, t.color.bg_panel_2);
@@ -1342,6 +1377,7 @@ fn configuration_table_row(
         );
         left = right;
     }
+    response
 }
 
 fn configuration_policy_cards(ui: &mut Ui, app: &RSpiceApp) {

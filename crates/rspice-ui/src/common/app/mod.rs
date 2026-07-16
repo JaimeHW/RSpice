@@ -606,6 +606,10 @@ impl RSpiceApp {
 
     fn prepare_frame(&mut self, ctx: &Context) {
         let initializing_frame = self.first_frame;
+        let desired_zoom = self.state.ui.preferences.interface_scale();
+        if (ctx.zoom_factor() - desired_zoom).abs() > f32::EPSILON {
+            ctx.set_zoom_factor(desired_zoom);
+        }
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
         let system_mode_changed = self.state.ui.theme.mode == crate::ui::Mode::System

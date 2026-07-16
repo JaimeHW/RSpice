@@ -254,7 +254,7 @@ mod tests {
                 CommandPlatform::Desktop
             ),
             vec![Command::VerificationPage(
-                crate::workbench::state::VerificationPage::Cockpit
+                crate::workbench::state::VerificationPage::Yield
             )]
         );
 

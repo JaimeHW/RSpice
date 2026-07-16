@@ -35,6 +35,18 @@ const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 142.0;
 const ANALYSIS_CATALOG_WINDOW_CHROME_X: f32 = 26.0;
 const ANALYSIS_CATALOG_WINDOW_CHROME_Y: f32 = 51.0;
 const ANALYSIS_CATALOG_COMPACT_WINDOW_CHROME_Y: f32 = 66.0;
+const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
+    "Core analyses",
+    "Transfer & linearization",
+    "RF & periodic solvers",
+    "Periodic small-signal",
+    "Quasi-periodic small-signal",
+    "Time-domain stochastic",
+    "Sweeps & variation",
+    "Measurements",
+    "Verification checks",
+    "Optimization workflow",
+];
 
 #[derive(Clone)]
 struct SelectedAnalysis {
@@ -184,13 +196,7 @@ fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
             });
         } else {
             let mut displayed_position = 0usize;
-            for group in [
-                "Numerical analyses",
-                "Sweeps & variation",
-                "Derived measurements",
-                "Verification analyses",
-                "Optimization analyses",
-            ] {
+            for group in ANALYSIS_CATEGORY_ORDER {
                 let members = rows
                     .iter()
                     .filter(|row| analysis_catalog_group(row.kind) == group)
@@ -573,13 +579,7 @@ fn analysis_catalog_window(
                         );
                         return;
                     }
-                    for group in [
-                        "Numerical analyses",
-                        "Sweeps & variation",
-                        "Derived measurements",
-                        "Verification analyses",
-                        "Optimization analyses",
-                    ] {
+                    for group in ANALYSIS_CATEGORY_ORDER {
                         let members = filtered
                             .iter()
                             .copied()
@@ -803,7 +803,7 @@ fn analysis_catalog_row(
     painter.text(
         rect.left_center() + vec2(12.0, 0.0),
         Align2::LEFT_CENTER,
-        kind.stable_id().to_uppercase(),
+        kind.code(),
         theme::mono(tokens::FS_0, FontWeight::SemiBold),
         t.color.accent,
     );
@@ -839,7 +839,7 @@ fn analysis_catalog_row(
                 },
             ),
         ),
-        analysis_catalog_group(kind),
+        kind.detail(),
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
@@ -851,7 +851,7 @@ fn analysis_catalog_row(
             Stroke::new(1.0, t.color.border),
         );
     }
-    let preview = availability_label(kind) != "Production";
+    let preview = kind.availability() != crate::simulation::plan::AnalysisAvailability::Production;
     let readiness_top = if compact {
         rect.top() + 45.0
     } else {
@@ -926,46 +926,46 @@ fn analysis_catalog_row(
 }
 
 const fn analysis_catalog_readiness(kind: AnalysisKind) -> Option<&'static str> {
-    match kind {
-        AnalysisKind::Pac
-        | AnalysisKind::Pnoise
-        | AnalysisKind::Pxf
-        | AnalysisKind::Pstb
-        | AnalysisKind::Envelope
-        | AnalysisKind::Reliability => Some("Preview engine · non-sign-off"),
-        AnalysisKind::Disto => Some("Compatibility path · non-sign-off"),
-        _ => None,
+    if kind.execution_blocker().is_some() {
+        Some("Engine unavailable · blocked")
+    } else {
+        match kind.availability() {
+            crate::simulation::plan::AnalysisAvailability::Production => None,
+            crate::simulation::plan::AnalysisAvailability::Preview => {
+                Some("Preview engine · non-sign-off")
+            }
+            crate::simulation::plan::AnalysisAvailability::Compatibility => {
+                Some("Compatibility path · non-sign-off")
+            }
+        }
     }
 }
 
 fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
     let query = query.trim().to_ascii_lowercase();
-    [
-        "Numerical analyses",
-        "Sweeps & variation",
-        "Derived measurements",
-        "Verification analyses",
-        "Optimization analyses",
-    ]
-    .into_iter()
-    .flat_map(|group| {
-        AnalysisKind::ALL
-            .into_iter()
-            .filter(move |kind| analysis_catalog_group(*kind) == group)
-    })
-    .filter(|kind| {
-        query.is_empty()
-            || format!(
-                "{} {} {} {}",
-                kind.stable_id(),
-                kind.label(),
-                analysis_catalog_group(*kind),
-                availability_label(*kind)
-            )
-            .to_ascii_lowercase()
-            .contains(&query)
-    })
-    .collect()
+    AnalysisKind::MANIFEST_ORDER
+        .into_iter()
+        // Configuration identities remain durable for forward compatibility,
+        // but a catalog row is an action promise. Do not offer insertion until
+        // the corresponding execution engine exists.
+        .filter(|kind| kind.execution_blocker().is_none())
+        .filter(|kind| {
+            query.is_empty()
+                || format!(
+                    "{} {} {} {} {} {} {} {}",
+                    kind.stable_id(),
+                    kind.code(),
+                    kind.glyph(),
+                    kind.label(),
+                    kind.detail(),
+                    analysis_catalog_group(*kind),
+                    kind.category().detail,
+                    availability_label(*kind),
+                )
+                .to_ascii_lowercase()
+                .contains(&query)
+        })
+        .collect()
 }
 
 fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
@@ -983,9 +983,12 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             (
                 format!("Simulation plan · revision {}", plan.revision().get()),
                 format!(
-                    "{enabled} enabled instances · {} active · {} canonical types discoverable · {} PVT points · {prior}",
+                    "{enabled} enabled instances · {} active · {} executable types in catalog · {} PVT points · {prior}",
                     plan.instances().len(),
-                    AnalysisKind::ALL.len(),
+                    AnalysisKind::MANIFEST_ORDER
+                        .into_iter()
+                        .filter(|kind| kind.execution_blocker().is_none())
+                        .count(),
                     configured_pvt_count(plan.instances()),
                 ),
                 true,
@@ -1173,8 +1176,11 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
         | AnalysisKind::PoleZero
         | AnalysisKind::Stb
         | AnalysisKind::SParameter
+        | AnalysisKind::Hbsp
+        | AnalysisKind::Psp
         | AnalysisKind::Optimization
-        | AnalysisKind::Soa => WorkbenchIcon::Target,
+        | AnalysisKind::Soa
+        | AnalysisKind::DcMismatch => WorkbenchIcon::Target,
         AnalysisKind::MonteCarlo | AnalysisKind::Temperature | AnalysisKind::Corner => {
             WorkbenchIcon::Grid
         }
@@ -1188,11 +1194,17 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
         | AnalysisKind::Noise
         | AnalysisKind::Sensitivity
         | AnalysisKind::Pss
+        | AnalysisKind::Qpss
         | AnalysisKind::HarmonicBalance
+        | AnalysisKind::Hbnoise
         | AnalysisKind::Pac
         | AnalysisKind::Pnoise
         | AnalysisKind::Pxf
         | AnalysisKind::Pstb
+        | AnalysisKind::Qpac
+        | AnalysisKind::Qpnoise
+        | AnalysisKind::Qpxf
+        | AnalysisKind::TransientNoise
         | AnalysisKind::Envelope => WorkbenchIcon::Simulate,
     }
 }
@@ -1203,11 +1215,21 @@ fn capability_banner(ui: &mut Ui, kind: AnalysisKind) {
         .fill(t.color.accent_dim)
         .inner_margin(egui::Margin::symmetric(8, 7))
         .show(ui, |ui| {
+            let copy = kind.execution_blocker().map_or_else(
+                || {
+                    format!(
+                        "{} is retained for design review and produces non-sign-off data.",
+                        availability_label(kind)
+                    )
+                },
+                |blocker| {
+                    format!(
+                        "Execution is blocked: {blocker}. The configuration remains editable and persistent."
+                    )
+                },
+            );
             ui.label(
-                egui::RichText::new(format!(
-                    "{} is retained for design review and produces non-sign-off data.",
-                    availability_label(kind)
-                ))
+                egui::RichText::new(copy)
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(t.color.text_dim),
             );
@@ -1908,6 +1930,10 @@ fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) {
     app.state.sim_setup.palette_query.clear();
     app.state.sim_setup.palette_active = 0;
     app.state.sim_setup.palette_scroll_to_active = false;
+    if let Some(reason) = kind.execution_blocker() {
+        record_failure(app, "Insert", reason);
+        return;
+    }
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
@@ -2137,61 +2163,11 @@ const fn lifecycle_command_label(command: AnalysisLifecycleCommand) -> &'static 
 }
 
 const fn availability_label(kind: AnalysisKind) -> &'static str {
-    match kind {
-        AnalysisKind::Pac
-        | AnalysisKind::Pnoise
-        | AnalysisKind::Pxf
-        | AnalysisKind::Pstb
-        | AnalysisKind::Envelope
-        | AnalysisKind::Reliability => "Preview · non-sign-off",
-        AnalysisKind::Disto => "Compatibility · non-sign-off",
-        AnalysisKind::OperatingPoint
-        | AnalysisKind::Transient
-        | AnalysisKind::Ac
-        | AnalysisKind::DcSweep
-        | AnalysisKind::Noise
-        | AnalysisKind::PoleZero
-        | AnalysisKind::Sensitivity
-        | AnalysisKind::MonteCarlo
-        | AnalysisKind::Pss
-        | AnalysisKind::Stb
-        | AnalysisKind::Temperature
-        | AnalysisKind::HarmonicBalance
-        | AnalysisKind::SParameter
-        | AnalysisKind::TransferFunction
-        | AnalysisKind::Corner
-        | AnalysisKind::Fourier
-        | AnalysisKind::Optimization
-        | AnalysisKind::Soa => "Production",
-    }
+    kind.availability().label()
 }
 
 const fn analysis_catalog_group(kind: AnalysisKind) -> &'static str {
-    match kind {
-        AnalysisKind::MonteCarlo | AnalysisKind::Temperature | AnalysisKind::Corner => {
-            "Sweeps & variation"
-        }
-        AnalysisKind::Fourier | AnalysisKind::Disto => "Derived measurements",
-        AnalysisKind::Reliability | AnalysisKind::Soa => "Verification analyses",
-        AnalysisKind::Optimization => "Optimization analyses",
-        AnalysisKind::OperatingPoint
-        | AnalysisKind::Transient
-        | AnalysisKind::Ac
-        | AnalysisKind::DcSweep
-        | AnalysisKind::Noise
-        | AnalysisKind::PoleZero
-        | AnalysisKind::Sensitivity
-        | AnalysisKind::Pss
-        | AnalysisKind::Stb
-        | AnalysisKind::HarmonicBalance
-        | AnalysisKind::SParameter
-        | AnalysisKind::Pac
-        | AnalysisKind::Pnoise
-        | AnalysisKind::Pxf
-        | AnalysisKind::Pstb
-        | AnalysisKind::TransferFunction
-        | AnalysisKind::Envelope => "Numerical analyses",
-    }
+    kind.category().label
 }
 
 fn configured_pvt_count(instances: &[crate::simulation::plan::AnalysisInstance]) -> usize {
@@ -2229,7 +2205,16 @@ fn configured_pvt_count(instances: &[crate::simulation::plan::AnalysisInstance])
             | AnalysisDraft::Reliability(_)
             | AnalysisDraft::Optimization(_)
             | AnalysisDraft::Soa(_)
-            | AnalysisDraft::Disto(_) => has_nominal_analysis = true,
+            | AnalysisDraft::Disto(_)
+            | AnalysisDraft::Qpss(_)
+            | AnalysisDraft::Hbsp(_)
+            | AnalysisDraft::Hbnoise(_)
+            | AnalysisDraft::Psp(_)
+            | AnalysisDraft::Qpac(_)
+            | AnalysisDraft::Qpnoise(_)
+            | AnalysisDraft::Qpxf(_)
+            | AnalysisDraft::TransientNoise(_)
+            | AnalysisDraft::DcMismatch(_) => has_nominal_analysis = true,
         }
     }
     count
@@ -2444,13 +2429,36 @@ mod tests {
             Some("Preview engine · non-sign-off")
         );
         assert_eq!(analysis_catalog_readiness(AnalysisKind::Transient), None);
+        assert_eq!(
+            analysis_catalog_readiness(AnalysisKind::Qpss),
+            Some("Engine unavailable · blocked")
+        );
     }
 
     #[test]
     fn analysis_catalog_search_preserves_canonical_group_order() {
         let all = filtered_catalog_kinds("");
-        assert_eq!(all.len(), AnalysisKind::ALL.len());
+        let unavailable = [
+            AnalysisKind::Qpss,
+            AnalysisKind::Hbsp,
+            AnalysisKind::Hbnoise,
+            AnalysisKind::Psp,
+            AnalysisKind::Qpac,
+            AnalysisKind::Qpnoise,
+            AnalysisKind::Qpxf,
+            AnalysisKind::TransientNoise,
+            AnalysisKind::DcMismatch,
+        ];
+        assert_eq!(all.len(), AnalysisKind::ALL.len() - unavailable.len());
+        assert!(unavailable.iter().all(|kind| !all.contains(kind)));
         assert_eq!(all.first(), Some(&AnalysisKind::OperatingPoint));
+        assert_eq!(
+            all,
+            AnalysisKind::MANIFEST_ORDER
+                .into_iter()
+                .filter(|kind| !unavailable.contains(kind))
+                .collect::<Vec<_>>()
+        );
         assert!(
             all.iter()
                 .position(|kind| *kind == AnalysisKind::MonteCarlo)
@@ -2461,6 +2469,36 @@ mod tests {
         assert_eq!(
             filtered_catalog_kinds("periodic noise"),
             vec![AnalysisKind::Pnoise]
+        );
+        assert!(filtered_catalog_kinds("spectral lattice").is_empty());
+    }
+
+    #[test]
+    fn unavailable_analysis_cannot_be_inserted_through_the_surface_action() {
+        let mut app = RSpiceApp::test_instance();
+        let before = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .instances()
+            .len();
+
+        insert_analysis_instance(&mut app, AnalysisKind::Qpss);
+
+        let after = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .instances()
+            .len();
+        assert_eq!(after, before);
+        assert!(
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .contains("not available")
         );
     }
 

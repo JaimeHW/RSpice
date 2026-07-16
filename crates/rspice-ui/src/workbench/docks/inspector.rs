@@ -77,7 +77,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         egui::Stroke::new(1.0, t.color.border),
     );
     let title = match app.state.workbench.workspace {
-        Workspace::Verify if app.state.workbench.verification_page == VerificationPage::Cockpit => {
+        Workspace::Verify if app.state.workbench.verification_page == VerificationPage::Yield => {
             "Yield details"
         }
         Workspace::Verify => app.state.workbench.verification_page.label(),
@@ -532,7 +532,7 @@ fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
     }
 }
 
-fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
+fn component_checks(ui: &mut Ui, app: &RSpiceApp, _component: &Component) {
     let topology = app.state.schematic.topology_version();
     let current = app.state.dialogs.drc_checked_version == topology;
     let summary = current
@@ -564,22 +564,7 @@ fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
             "△ pending recheck"
         },
     );
-    let soa_findings = app
-        .state
-        .simulation
-        .soa_violations
-        .iter()
-        .filter(|violation| violation.device_id.eq_ignore_ascii_case(&component.name))
-        .count();
-    property_row(
-        ui,
-        "Safe operating area",
-        &if soa_findings == 0 {
-            "No retained violations".to_owned()
-        } else {
-            format!("{soa_findings} retained violation(s)")
-        },
-    );
+    property_row(ui, "Safe operating area", "Dataset attribution unavailable");
     property_row(
         ui,
         "Last checked",
@@ -858,62 +843,144 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.workbench.verification_page == VerificationPage::Cockpit {
-        yield_details(ui, app);
-        return;
+    match app.state.workbench.verification_page {
+        VerificationPage::Yield => yield_details(ui, app),
+        VerificationPage::Corners => {
+            let result = app
+                .state
+                .simulation
+                .active_run()
+                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Corner));
+            let points = result
+                .and_then(|analysis| analysis.waveforms.first())
+                .map_or(0, |waveform| waveform.x.len());
+            section_header(
+                ui,
+                "Corner details",
+                Some(if result.is_some() {
+                    "retained"
+                } else {
+                    "not run"
+                }),
+            );
+            property_row(ui, "Points", &points.to_string());
+            property_row(
+                ui,
+                "Signals",
+                &result
+                    .map_or(0, |analysis| analysis.waveforms.len())
+                    .to_string(),
+            );
+            property_row(
+                ui,
+                "Execution",
+                if result.is_some_and(|analysis| analysis.success) {
+                    "complete"
+                } else if result.is_some() {
+                    "failed / incomplete"
+                } else {
+                    "no evidence"
+                },
+            );
+        }
+        VerificationPage::Tuning => {
+            section_header(ui, "Parameter tuning", Some("unavailable"));
+            property_row(ui, "Design parameters", "not integrated");
+            property_row(ui, "Transactional execution", "not integrated");
+            property_row(ui, "Evidence", "unavailable");
+        }
+        VerificationPage::Optimization => {
+            section_header(ui, "Optimization details", None);
+            let retained =
+                app.state.simulation.active_run().and_then(|run| {
+                    verified_analysis(run, crate::state::AnalysisType::Optimization)
+                });
+            if retained.is_some() {
+                property_row(ui, "State", "retained optimization result");
+            } else {
+                property_row(ui, "State", "no retained optimization evidence");
+            }
+        }
+        VerificationPage::Reliability => {
+            let active_run = app.state.simulation.active_run();
+            let has_soa = active_run
+                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Soa))
+                .is_some();
+            let has_aging = active_run
+                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Reliability))
+                .is_some();
+            section_header(
+                ui,
+                "Reliability details",
+                Some(if has_soa || has_aging {
+                    "execution receipt only"
+                } else {
+                    "not run"
+                }),
+            );
+            property_row(
+                ui,
+                "SOA evidence",
+                if has_soa {
+                    "payload unavailable"
+                } else {
+                    "unavailable"
+                },
+            );
+            property_row(ui, "SOA verdict", "blocked");
+            property_row(
+                ui,
+                "Aging evidence",
+                if has_aging {
+                    "payload unavailable"
+                } else {
+                    "unavailable"
+                },
+            );
+            property_row(ui, "Reliability verdict", "blocked");
+            property_row(ui, "Geometry", "owned by Physical DRC");
+        }
+        VerificationPage::Regression => {
+            section_header(ui, "Regression details", Some("main"));
+            property_row(
+                ui,
+                "Retained runs",
+                &app.state.simulation.runs.len().to_string(),
+            );
+            property_row(
+                ui,
+                "Baseline",
+                if app.state.simulation.runs.len() >= 2 {
+                    "selectable immutable run"
+                } else {
+                    "unavailable"
+                },
+            );
+            property_row(ui, "Verdict", "requires configured tolerance contract");
+        }
+        VerificationPage::Drc => {
+            section_header(ui, "Physical evidence", Some("unavailable"));
+            property_row(ui, "Layout source", "not attached");
+            property_row(ui, "Rule deck", "not attached");
+            property_row(ui, "Marker database", "unavailable");
+            property_row(ui, "Sign-off", "blocked");
+            section_header(ui, "Release consumption", None);
+            ui.label("Physical verification owns marker disposition. Release closure consumes this exact database and cannot override it.");
+        }
     }
-    section_header(ui, "Currentness", None);
-    let current = app.state.dialogs.drc_checked_version == app.state.schematic.topology_version();
-    property_row(
-        ui,
-        "Schematic revision",
-        &app.state.schematic.topology_version().to_string(),
-    );
-    property_row(
-        ui,
-        "Checks",
-        if current {
-            "Current"
-        } else {
-            "Stale / not run"
-        },
-    );
-    if let Some(result) = &app.state.dialogs.drc_results {
-        let summary = result.summary();
-        property_row(ui, "Critical", &summary.critical.to_string());
-        property_row(ui, "Errors", &summary.errors.to_string());
-        property_row(ui, "Advisories", &summary.warnings.to_string());
-        property_row(ui, "Runtime", &format!("{} ms", result.duration_ms));
-    }
-    section_header(ui, "Specification evidence", None);
-    property_row(
-        ui,
-        "Tracked specifications",
-        &app.state.workspace.specs.len().to_string(),
-    );
-    property_row(
-        ui,
-        "Simulation runs",
-        &app.state.simulation.runs.len().to_string(),
-    );
-    property_row(
-        ui,
-        "SOA violations",
-        &app.state.simulation.soa_violations.len().to_string(),
-    );
-    property_row(
-        ui,
-        "Aging results",
-        &app.state.simulation.reliability_results.len().to_string(),
-    );
+}
+
+fn verified_analysis(
+    run: &crate::state::SimulationRun,
+    analysis_type: crate::state::AnalysisType,
+) -> Option<&crate::state::AnalysisResult> {
+    run.analyses.iter().find(|analysis| {
+        analysis.analysis_type == analysis_type && analysis.success && analysis.provenance.is_some()
+    })
 }
 
 fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
-    let run = app
-        .state
-        .simulation
-        .active_run()
-        .or_else(|| app.state.simulation.runs.first());
+    let run = app.state.simulation.active_run();
     let provenance = run.and_then(|run| {
         app.state.simulation.yield_provenance.filter(|provenance| {
             provenance.source_run_id == run.run_id && provenance.source_dataset_id == run.dataset_id

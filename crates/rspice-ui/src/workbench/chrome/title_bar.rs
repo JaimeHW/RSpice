@@ -79,6 +79,14 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     ui.add_space(if viewport_width <= 820.0 { 5.0 } else { 7.0 });
                     if viewport_width > 560.0 {
+                        if icon_action(
+                            ui,
+                            WorkbenchIcon::User,
+                            "Open account, organization, and licensing",
+                            large_targets,
+                        ) {
+                            Command::AccountOrganization.execute(app);
+                        }
                         if notification_action(
                             ui,
                             app.state.ui.toasts.unread_count(),
@@ -1136,7 +1144,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
             WorkbenchIcon::Check
         }
         Command::CompileVerilogA => WorkbenchIcon::Code,
-        Command::License => WorkbenchIcon::User,
+        Command::AccountOrganization | Command::License => WorkbenchIcon::User,
         Command::KeyboardShortcuts => WorkbenchIcon::Search,
         Command::InteroperabilityMatrix => WorkbenchIcon::Compare,
         Command::FeatureAvailability | Command::About => WorkbenchIcon::Info,
@@ -1338,16 +1346,44 @@ fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::VerificationPage(VerificationPage::Cockpit),
+        Command::VerificationPage(VerificationPage::Yield),
         "Verification cockpit",
+        None,
+    );
+    command_item_as(
+        ui,
+        app,
+        Command::VerificationPage(VerificationPage::Corners),
+        "Corner matrix",
+        None,
+    );
+    command_item_as(
+        ui,
+        app,
+        Command::VerificationPage(VerificationPage::Optimization),
+        "Optimization",
+        None,
+    );
+    command_item_as(
+        ui,
+        app,
+        Command::VerificationPage(VerificationPage::Reliability),
+        "Reliability, fault and SOA",
+        None,
+    );
+    command_item_as(
+        ui,
+        app,
+        Command::VerificationPage(VerificationPage::Regression),
+        "Regression plan",
         None,
     );
     menu_separator(ui);
     command_item_as(
         ui,
         app,
-        Command::EditSpecifications,
-        "Specification matrix",
+        Command::VerificationPage(VerificationPage::Drc),
+        "Physical DRC",
         None,
     );
 }
@@ -1392,7 +1428,7 @@ fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
         command_item_as(
             ui,
             app,
-            Command::VerificationPage(VerificationPage::Cockpit),
+            Command::VerificationPage(VerificationPage::Yield),
             "Verification workspace",
             Some(""),
         );

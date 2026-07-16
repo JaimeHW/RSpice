@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+pub(crate) mod account_organization;
 pub mod availability;
 pub mod browser_navigation;
 pub mod capability_workflow;
@@ -24,6 +25,7 @@ mod chrome;
 mod docks;
 mod layout;
 mod notification_center;
+mod preferences;
 mod preflight;
 mod project_launcher;
 mod recovery;
@@ -39,6 +41,7 @@ pub use capability_workflow::{
 pub use navigation::{
     BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
 };
+pub use preferences::{ChoicePreference, TogglePreference, UserPreferences};
 pub use result_document::{ResultViewer, ResultsState};
 pub use session::{
     GridStyle, InspectorEdit, SymbolClipboard, SymbolDocumentSnapshot, SymbolSelection, SymbolTool,
@@ -82,10 +85,28 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     // persisted Compact/Relaxed preference. Content controls become 44 px at
     // narrow widths or for coarse input; explicit chrome controls continue to
     // use LayoutSpec's more specific row/control dimensions.
-    app.state.ui.theme.apply_responsive_metrics(
-        ctx,
-        viewport.x <= 820.0 || app.state.workbench.coarse_pointer,
-    );
+    let large_targets = viewport.x <= 820.0 || app.state.workbench.coarse_pointer;
+    let requested_target = if app
+        .state
+        .ui
+        .preferences
+        .choice(ChoicePreference::MinimumTouchTarget)
+        == 1
+    {
+        48.0
+    } else {
+        44.0
+    };
+    app.state
+        .ui
+        .theme
+        .apply_responsive_metrics_with_target(ctx, large_targets.then_some(requested_target));
+    let reduced_motion = app
+        .state
+        .ui
+        .preferences
+        .toggle(TogglePreference::ReducedMotion);
+    ctx.style_mut(|style| style.animation_time = if reduced_motion { 0.0 } else { 0.25 });
     app.state.workbench.reconcile_drawer_mode(
         layout.navigator_uses_drawer,
         layout.inspector_uses_drawer,
@@ -154,6 +175,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 /// from Preferences is the top modal while the originating dialog remains
 /// retained underneath and can be restored on Close.
 pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
+    account_organization::show(ctx, app);
     feature_availability::show(ctx, app);
 }
 

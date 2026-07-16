@@ -60,6 +60,15 @@ pub enum AnalysisType {
     HarmonicBalance,
     /// Periodic Steady State analysis
     Pss,
+    Qpss,
+    Hbsp,
+    Hbnoise,
+    Psp,
+    Qpac,
+    Qpnoise,
+    Qpxf,
+    TransientNoise,
+    DcMismatch,
 }
 
 impl AnalysisType {
@@ -91,6 +100,15 @@ impl AnalysisType {
             AnalysisType::Fourier => ".four",
             AnalysisType::HarmonicBalance => ".hb",
             AnalysisType::Pss => ".pss",
+            AnalysisType::Qpss => ".qpss",
+            AnalysisType::Hbsp => ".hbsp",
+            AnalysisType::Hbnoise => ".hbnoise",
+            AnalysisType::Psp => ".psp",
+            AnalysisType::Qpac => ".qpac",
+            AnalysisType::Qpnoise => ".qpnoise",
+            AnalysisType::Qpxf => ".qpxf",
+            AnalysisType::TransientNoise => ".tnoise",
+            AnalysisType::DcMismatch => ".dcmatch",
         }
     }
 
@@ -122,6 +140,15 @@ impl AnalysisType {
             AnalysisType::Fourier => "Fourier",
             AnalysisType::HarmonicBalance => "Harmonic Balance",
             AnalysisType::Pss => "PSS",
+            AnalysisType::Qpss => "QPSS",
+            AnalysisType::Hbsp => "Large-Signal S-Parameters",
+            AnalysisType::Hbnoise => "Harmonic-Balance Noise",
+            AnalysisType::Psp => "Periodic S-Parameters",
+            AnalysisType::Qpac => "QPAC",
+            AnalysisType::Qpnoise => "Quasi-Periodic Noise",
+            AnalysisType::Qpxf => "Quasi-Periodic Transfer",
+            AnalysisType::TransientNoise => "Transient Noise",
+            AnalysisType::DcMismatch => "DC Mismatch Contribution",
         }
     }
 
@@ -153,6 +180,15 @@ impl AnalysisType {
             AnalysisType::Fourier => "FOU",
             AnalysisType::HarmonicBalance => "HB",
             AnalysisType::Pss => "PSS",
+            AnalysisType::Qpss => "QPSS",
+            AnalysisType::Hbsp => "HSP",
+            AnalysisType::Hbnoise => "HN",
+            AnalysisType::Psp => "PSP",
+            AnalysisType::Qpac => "QPAC",
+            AnalysisType::Qpnoise => "QPN",
+            AnalysisType::Qpxf => "QPXF",
+            AnalysisType::TransientNoise => "TN",
+            AnalysisType::DcMismatch => "DM",
         }
     }
 
@@ -165,6 +201,7 @@ impl AnalysisType {
             | AnalysisType::Pss
             | AnalysisType::Envelope
             | AnalysisType::Soa => ("Time", "s", "Voltage", "V"),
+            AnalysisType::TransientNoise => ("Time", "s", "Voltage", "V"),
             AnalysisType::Ac
             | AnalysisType::Disto
             | AnalysisType::Tf
@@ -175,7 +212,15 @@ impl AnalysisType {
             | AnalysisType::SParameter
             | AnalysisType::HarmonicBalance
             | AnalysisType::Fourier => ("Frequency", "Hz", "Magnitude", "V"),
-            AnalysisType::Noise | AnalysisType::Pnoise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
+            AnalysisType::Qpss
+            | AnalysisType::Hbsp
+            | AnalysisType::Psp
+            | AnalysisType::Qpac
+            | AnalysisType::Qpxf => ("Frequency", "Hz", "Magnitude", "V"),
+            AnalysisType::Noise
+            | AnalysisType::Pnoise
+            | AnalysisType::Hbnoise
+            | AnalysisType::Qpnoise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
             AnalysisType::DcSweep => ("Voltage", "V", "Voltage", "V"),
             AnalysisType::DcOp => ("", "", "Voltage", "V"),
             AnalysisType::PoleZero => ("Real", "", "Imaginary", ""),
@@ -185,6 +230,7 @@ impl AnalysisType {
             AnalysisType::Corner => ("Temperature", "C", "Voltage", "V"),
             AnalysisType::Reliability => ("Lifetime", "year", "Shift", ""),
             AnalysisType::Optimization => ("Iteration", "iter", "Cost", "cost"),
+            AnalysisType::DcMismatch => ("Parameter", "", "Contribution", "%"),
         }
     }
 }

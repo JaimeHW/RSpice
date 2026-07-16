@@ -6,7 +6,9 @@
 
 use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 
-use crate::simulation::plan::AnalysisDraft;
+use crate::simulation::plan::{
+    AnalysisDraft, FrequencySweepDraft, NetworkPortDraft, PeriodicNetworkDraft,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -184,6 +186,41 @@ fn action_line(ui: &mut Ui, label: &str) -> bool {
         .min_width(ui.available_width())
         .show(ui)
         .clicked()
+}
+
+fn frequency_sweep_fields(ui: &mut Ui, sweep: &mut FrequencySweepDraft) {
+    input_row(ui, "Start", &mut sweep.start);
+    input_row(ui, "Stop", &mut sweep.stop);
+    input_row(ui, "Points", &mut sweep.points);
+    choice_row(ui, "Sweep", SWEEP_KINDS, &mut sweep.sweep);
+}
+
+fn periodic_network_fields(ui: &mut Ui, setup: &mut PeriodicNetworkDraft) {
+    frequency_sweep_fields(ui, &mut setup.sweep);
+    input_row(ui, "Max sideband", &mut setup.max_sideband);
+    check_row(ui, "Mixed-mode matrix", &mut setup.mixed_mode);
+    check_row(ui, "Noise parameters", &mut setup.noise_parameters);
+    let port_count = setup.ports.len();
+    let mut remove = None;
+    for (index, port) in setup.ports.iter_mut().enumerate() {
+        network_port_fields(ui, index, port);
+        if port_count > 1 && action_line(ui, "Remove port") {
+            remove = Some(index);
+        }
+    }
+    if let Some(index) = remove {
+        setup.ports.remove(index);
+    }
+    if action_line(ui, "+ Add port") {
+        setup.ports.push(NetworkPortDraft::default());
+    }
+}
+
+fn network_port_fields(ui: &mut Ui, index: usize, port: &mut NetworkPortDraft) {
+    sub_header(ui, &format!("Port {}", index + 1));
+    input_row(ui, "Node +", &mut port.node_pos);
+    input_row(ui, "Node −", &mut port.node_neg);
+    input_row(ui, "Reference Z0", &mut port.z0);
 }
 
 /// Render the form for `draft`; returns the explanatory note.
@@ -543,6 +580,93 @@ pub(super) fn form(ui: &mut Ui, draft: &mut AnalysisDraft) -> &'static str {
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep.sweep);
             input_row(ui, "f2/f1", &mut setup.f2_over_f1);
             "Harmonic and intermodulation distortion; empty ratio means single-tone."
+        }
+        AnalysisDraft::Qpss(setup) => {
+            input_row(ui, "Tone frequencies", &mut setup.tones);
+            input_row(ui, "Harmonic orders", &mut setup.harmonics);
+            input_row(ui, "Max iterations", &mut setup.max_iterations);
+            input_row(ui, "Relative tolerance", &mut setup.relative_tolerance);
+            check_row(ui, "Autonomous oscillator", &mut setup.autonomous);
+            if setup.autonomous {
+                input_row(ui, "Oscillator node", &mut setup.oscillator_node);
+            }
+            "Multi-tone spectral-lattice operating state (needs OP)."
+        }
+        AnalysisDraft::Hbsp(setup) => {
+            periodic_network_fields(ui, setup);
+            "Large-signal network response linearized around harmonic balance (needs HB)."
+        }
+        AnalysisDraft::Hbnoise(setup) => {
+            frequency_sweep_fields(ui, &mut setup.sweep);
+            input_row(ui, "Output", &mut setup.output_node);
+            input_row(ui, "Output ref", &mut setup.output_ref);
+            input_row(ui, "Input source", &mut setup.input_source);
+            input_row(ui, "Max sideband", &mut setup.max_sideband);
+            check_row(ui, "Integrated noise", &mut setup.integrated_noise);
+            check_row(ui, "Noise figure", &mut setup.noise_figure);
+            check_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
+            "Noise folding and correlation around harmonic balance (needs HB)."
+        }
+        AnalysisDraft::Psp(setup) => {
+            periodic_network_fields(ui, setup);
+            "Frequency-translated network response around PSS (needs PSS)."
+        }
+        AnalysisDraft::Qpac(setup) => {
+            frequency_sweep_fields(ui, &mut setup.sweep);
+            input_row(ui, "Input source", &mut setup.input_source);
+            input_row(ui, "Output", &mut setup.output_node);
+            input_row(ui, "Output ref", &mut setup.output_ref);
+            input_row(ui, "Input lattice", &mut setup.input_lattice);
+            input_row(ui, "Output lattice", &mut setup.output_lattice);
+            "Small-signal conversion matrix around QPSS (needs QPSS)."
+        }
+        AnalysisDraft::Qpnoise(setup) => {
+            frequency_sweep_fields(ui, &mut setup.sweep);
+            input_row(ui, "Output", &mut setup.output_node);
+            input_row(ui, "Output ref", &mut setup.output_ref);
+            input_row(ui, "Input source", &mut setup.input_source);
+            input_row(ui, "Lattice ranges", &mut setup.lattice_products);
+            check_row(ui, "Integrated noise", &mut setup.integrated_noise);
+            check_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
+            "Noise folding across a multi-tone spectral lattice (needs QPSS)."
+        }
+        AnalysisDraft::Qpxf(setup) => {
+            frequency_sweep_fields(ui, &mut setup.sweep);
+            input_row(ui, "Input source", &mut setup.input_source);
+            input_row(ui, "Output", &mut setup.output_node);
+            input_row(ui, "Output ref", &mut setup.output_ref);
+            input_row(ui, "Input lattice", &mut setup.input_lattice);
+            input_row(ui, "Output lattice", &mut setup.output_lattice);
+            check_row(ui, "Group delay", &mut setup.group_delay);
+            "Translated transfer paths indexed by lattice products (needs QPSS)."
+        }
+        AnalysisDraft::TransientNoise(setup) => {
+            input_row(ui, "Stop time", &mut setup.stop_time);
+            input_row(ui, "Step time", &mut setup.step_time);
+            input_row(ui, "Start time", &mut setup.start_time);
+            input_row(ui, "Max step", &mut setup.max_step);
+            input_row(ui, "Seed", &mut setup.seed);
+            input_row(ui, "Noise fmax", &mut setup.noise_fmax);
+            input_row(ui, "Noise scale", &mut setup.scale);
+            check_row(
+                ui,
+                "Use initial conditions",
+                &mut setup.use_initial_conditions,
+            );
+            "Reproducible stochastic device noise in the time domain (needs TRAN)."
+        }
+        AnalysisDraft::DcMismatch(setup) => {
+            input_row(ui, "Output expression", &mut setup.output_expression);
+            input_row(ui, "Sigma multiplier", &mut setup.sigma_multiplier);
+            input_row(ui, "Contributor limit", &mut setup.contributor_limit);
+            check_row(ui, "Process variation", &mut setup.include_process);
+            check_row(ui, "Local mismatch", &mut setup.include_mismatch);
+            check_row(
+                ui,
+                "Normalize contributions",
+                &mut setup.normalized_contributions,
+            );
+            "Local mismatch variance and ranked contributions around OP (needs OP)."
         }
     };
     clear_pending_cell(ui);

@@ -521,29 +521,74 @@ impl ProjectPage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum VerificationPage {
     #[default]
-    Cockpit,
-    Specifications,
-    Checks,
+    #[serde(alias = "Cockpit", alias = "Specifications", alias = "Checks")]
+    Yield,
+    Corners,
+    Tuning,
+    Optimization,
     Reliability,
-    History,
+    #[serde(alias = "History")]
+    Regression,
+    Drc,
 }
 
 impl VerificationPage {
-    pub const ALL: [Self; 5] = [
-        Self::Cockpit,
-        Self::Specifications,
-        Self::Checks,
+    /// Persisted route catalog. `Tuning` is retained for backward-compatible
+    /// session decoding but is deliberately absent from `NAVIGATION` until a
+    /// real parameter-discovery/edit/netlist/simulate transaction exists.
+    pub const ALL: [Self; 7] = [
+        Self::Yield,
+        Self::Corners,
+        Self::Tuning,
+        Self::Optimization,
         Self::Reliability,
-        Self::History,
+        Self::Regression,
+        Self::Drc,
+    ];
+
+    pub const NAVIGATION: [Self; 6] = [
+        Self::Yield,
+        Self::Corners,
+        Self::Optimization,
+        Self::Reliability,
+        Self::Regression,
+        Self::Drc,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Cockpit => "Verification cockpit",
-            Self::Specifications => "Specification matrix",
-            Self::Checks => "Design checks",
-            Self::Reliability => "Reliability and SOA",
-            Self::History => "Run history",
+            Self::Yield => "PVT & Monte Carlo verification",
+            Self::Corners => "Process-corner verification",
+            Self::Tuning => "Live design-space exploration",
+            Self::Optimization => "Optimization candidate",
+            Self::Reliability => "Reliability and safe-operating-area verification",
+            Self::Regression => "Golden regression comparison",
+            Self::Drc => "Design-rule checking",
+        }
+    }
+}
+
+/// Verification-flow interaction state. Immutable evidence remains in result
+/// datasets; this owns only explicit review cursors and ephemeral receipts.
+/// Unknown legacy fields are ignored so sessions written by the removed
+/// synthetic tuning sandbox migrate without reviving that unavailable flow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VerificationSessionState {
+    #[serde(default)]
+    pub regression_baseline_run: Option<crate::product::RunId>,
+    #[serde(skip, default = "default_verification_action_receipt")]
+    pub action_receipt: String,
+}
+
+fn default_verification_action_receipt() -> String {
+    "No verification action has been committed this session.".to_owned()
+}
+
+impl Default for VerificationSessionState {
+    fn default() -> Self {
+        Self {
+            regression_baseline_run: None,
+            action_receipt: default_verification_action_receipt(),
         }
     }
 }
@@ -962,6 +1007,8 @@ pub struct WorkbenchState {
     #[serde(default)]
     pub verification_page: VerificationPage,
     #[serde(default)]
+    pub verification: VerificationSessionState,
+    #[serde(default)]
     pub models_page: ModelsPage,
     /// Analysis row whose configuration is shown in the simulation plan.
     /// Retained only to migrate pre-instance session selection.
@@ -1074,7 +1121,8 @@ impl Default for WorkbenchState {
             design_panel: DesignPanel::Navigator,
             documents: WorkspaceDocumentRegistry::default(),
             project_page: ProjectPage::Dashboard,
-            verification_page: VerificationPage::Cockpit,
+            verification_page: VerificationPage::Yield,
+            verification: VerificationSessionState::default(),
             models_page: ModelsPage::Models,
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,
@@ -1109,7 +1157,9 @@ impl WorkbenchState {
             || self.notification_center_open
             || matches!(
                 self.current_route().surface_id(),
-                SurfaceId::Preferences | SurfaceId::FeatureAvailability
+                SurfaceId::Preferences
+                    | SurfaceId::AccountOrganization
+                    | SurfaceId::FeatureAvailability
             )
     }
 
@@ -1873,5 +1923,33 @@ mod tests {
         assert!(!state.take_browser_history_effect_queue_overflowed());
         assert!(!state.has_pending_browser_history_effects());
         assert_eq!(state.current_route().surface_id(), SurfaceId::Results);
+    }
+
+    #[test]
+    fn verification_routes_are_the_exact_canonical_seven() {
+        assert_eq!(
+            VerificationPage::ALL,
+            [
+                VerificationPage::Yield,
+                VerificationPage::Corners,
+                VerificationPage::Tuning,
+                VerificationPage::Optimization,
+                VerificationPage::Reliability,
+                VerificationPage::Regression,
+                VerificationPage::Drc,
+            ]
+        );
+    }
+
+    #[test]
+    fn removed_tuning_sandbox_fields_migrate_without_restoring_fake_state() {
+        let restored: VerificationSessionState = serde_json::from_value(serde_json::json!({
+            "tuning_baseline": {"rgain_ohm": 499.0, "cfilt_nf": 22.0, "vref_v": 2.5},
+            "tuning_values": {"rgain_ohm": 620.0, "cfilt_nf": 31.0, "vref_v": 2.8},
+            "regression_baseline_run": null
+        }))
+        .expect("legacy tuning fields are ignored during migration");
+
+        assert_eq!(restored, VerificationSessionState::default());
     }
 }

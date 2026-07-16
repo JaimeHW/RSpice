@@ -39,6 +39,7 @@ const BLOCKED_SUMMARY: &str =
 /// project revision. A blocked report opens immediately; a clean report leaves
 /// the operator on the current surface, matching the mockup workflow.
 pub(crate) fn run(app: &mut RSpiceApp) {
+    app.state.sync_active_schematic_to_workspace();
     crate::common::menu_bar::run_design_rule_check(&mut app.state);
     let mut report = collect_report(&app.state);
     if report.blockers.is_empty() {
@@ -125,6 +126,37 @@ fn collect_report(state: &AppState) -> PreflightReport {
             check: "Design topology".to_owned(),
             observed: "The active schematic contains no components.".to_owned(),
             required: "A non-empty circuit topology".to_owned(),
+            remediation: PreflightRemediation::DesignChecks,
+        });
+    }
+
+    let hierarchy = state.workspace.resolve_hierarchy_with_active(
+        &state.library_manager,
+        &state.workspace.active_view,
+        &state.schematic,
+    );
+    for binding in hierarchy
+        .bindings
+        .iter()
+        .filter(|binding| !binding.status.is_resolved())
+    {
+        let instance_scope = if binding.instance_count == 1 {
+            String::new()
+        } else {
+            format!(" · {} instances", binding.instance_count)
+        };
+        let diagnostic = binding.diagnostic.clone().unwrap_or_else(|| {
+            format!(
+                "{}/{} is {}",
+                binding.reference.library,
+                binding.reference.cell,
+                binding.status.label()
+            )
+        });
+        blockers.push(PreflightIssue {
+            check: "Hierarchy binding".to_owned(),
+            observed: format!("{diagnostic}{instance_scope}"),
+            required: "A finite executable master for every hierarchical instance".to_owned(),
             remediation: PreflightRemediation::DesignChecks,
         });
     }
@@ -641,7 +673,7 @@ fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
     match remediation {
         PreflightRemediation::DesignChecks => {
             Command::RunChecks.execute(app);
-            Command::VerificationPage(VerificationPage::Checks).execute(app);
+            Command::VerificationPage(VerificationPage::Yield).execute(app);
         }
         PreflightRemediation::SimulationPlan => {
             Command::OpenWorkspace(Workspace::Simulate).execute(app);
@@ -710,6 +742,44 @@ mod tests {
             state.workspace.project.revision().get()
         );
         assert_eq!(report.topology_revision, state.schematic.topology_version());
+    }
+
+    #[test]
+    fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
+        let mut state = AppState::default();
+        state.schematic.add_library_cell_component(
+            crate::state::Point::new(20, 20),
+            crate::state::LibraryCellInstance::new(
+                "missing_library",
+                "missing_master",
+                "schematic",
+            ),
+        );
+        assert!(
+            state
+                .workspace
+                .schematic_buffers
+                .get(&crate::state::CellViewRef::default_top().key())
+                .expect("persisted root schematic")
+                .components
+                .is_empty(),
+            "fixture must remain unsynchronized to exercise the live overlay"
+        );
+        crate::common::menu_bar::run_design_rule_check(&mut state);
+
+        let report = collect_report(&state);
+
+        let hierarchy = report
+            .blockers
+            .iter()
+            .find(|issue| issue.check == "Hierarchy binding")
+            .expect("unbound master blocks preflight");
+        assert!(
+            hierarchy
+                .observed
+                .contains("missing_library/missing_master")
+        );
+        assert_eq!(hierarchy.remediation, PreflightRemediation::DesignChecks);
     }
 
     #[test]

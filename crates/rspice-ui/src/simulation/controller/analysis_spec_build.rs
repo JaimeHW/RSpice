@@ -1,6 +1,171 @@
 use super::*;
 
 impl SimulationController {
+    pub(super) fn build_manifest_preview_spec(
+        &self,
+        draft: &crate::simulation::plan::AnalysisDraft,
+    ) -> Result<Option<AnalysisSpec>, String> {
+        use crate::simulation::plan::AnalysisDraft;
+
+        if let Some(error) = draft.manifest_configuration_error() {
+            return Err(error);
+        }
+        let spec = match draft {
+            AnalysisDraft::Qpss(draft) => {
+                let frequencies = parse_csv_si(&draft.tones, "QPSS tones")?;
+                let harmonics = parse_csv_usize(&draft.harmonics, "QPSS harmonics")?;
+                let tones = frequencies
+                    .into_iter()
+                    .zip(harmonics)
+                    .enumerate()
+                    .map(|(index, (frequency, harmonics))| {
+                        HbToneSpec::new(frequency, harmonics)
+                            .with_name(format!("tone{}", index + 1))
+                    })
+                    .collect();
+                AnalysisSpec::Qpss {
+                    tones,
+                    max_iterations: parse_usize(&draft.max_iterations, "QPSS max iterations")?,
+                    relative_tolerance: parse_si(
+                        &draft.relative_tolerance,
+                        "QPSS relative tolerance",
+                    )?,
+                    autonomous: draft.autonomous,
+                    oscillator_node: (!draft.oscillator_node.trim().is_empty())
+                        .then(|| draft.oscillator_node.trim().to_owned()),
+                }
+            }
+            AnalysisDraft::Hbsp(draft) => {
+                let (start_freq, stop_freq, points_per_unit, sweep) =
+                    parse_manifest_sweep(&draft.sweep)?;
+                AnalysisSpec::Hbsp {
+                    start_freq,
+                    stop_freq,
+                    points_per_unit,
+                    sweep,
+                    ports: parse_manifest_ports(&draft.ports)?,
+                    max_sideband: parse_usize(&draft.max_sideband, "HBSP max sideband")?,
+                    mixed_mode: draft.mixed_mode,
+                    noise_parameters: draft.noise_parameters,
+                }
+            }
+            AnalysisDraft::Hbnoise(draft) => {
+                let (start_freq, stop_freq, points_per_unit, sweep) =
+                    parse_manifest_sweep(&draft.sweep)?;
+                AnalysisSpec::Hbnoise {
+                    start_freq,
+                    stop_freq,
+                    points_per_unit,
+                    sweep,
+                    output_node: draft.output_node.trim().to_owned(),
+                    output_ref: draft.output_ref.trim().to_owned(),
+                    input_source: draft.input_source.trim().to_owned(),
+                    max_sideband: parse_usize(&draft.max_sideband, "HBNOISE max sideband")?,
+                    integrated_noise: draft.integrated_noise,
+                    noise_figure: draft.noise_figure,
+                    contributor_ranking: draft.contributor_ranking,
+                }
+            }
+            AnalysisDraft::Psp(draft) => {
+                let (start_freq, stop_freq, points_per_unit, sweep) =
+                    parse_manifest_sweep(&draft.sweep)?;
+                AnalysisSpec::Psp {
+                    start_freq,
+                    stop_freq,
+                    points_per_unit,
+                    sweep,
+                    ports: parse_manifest_ports(&draft.ports)?,
+                    max_sideband: parse_usize(&draft.max_sideband, "PSP max sideband")?,
+                    mixed_mode: draft.mixed_mode,
+                    noise_parameters: draft.noise_parameters,
+                }
+            }
+            AnalysisDraft::Qpac(draft) => {
+                let (start_freq, stop_freq, points_per_unit, sweep) =
+                    parse_manifest_sweep(&draft.sweep)?;
+                AnalysisSpec::Qpac {
+                    start_freq,
+                    stop_freq,
+                    points_per_unit,
+                    sweep,
+                    input_source: draft.input_source.trim().to_owned(),
+                    output_node: draft.output_node.trim().to_owned(),
+                    output_ref: draft.output_ref.trim().to_owned(),
+                    input_lattice: parse_lattice_pair(&draft.input_lattice, "QPAC input lattice")?,
+                    output_lattice: parse_lattice_pair(
+                        &draft.output_lattice,
+                        "QPAC output lattice",
+                    )?,
+                }
+            }
+            AnalysisDraft::Qpnoise(draft) => {
+                let (start_freq, stop_freq, points_per_unit, sweep) =
+                    parse_manifest_sweep(&draft.sweep)?;
+                let (lattice_min, lattice_max) = parse_lattice_ranges(&draft.lattice_products)?;
+                AnalysisSpec::Qpnoise {
+                    start_freq,
+                    stop_freq,
+                    points_per_unit,
+                    sweep,
+                    output_node: draft.output_node.trim().to_owned(),
+                    output_ref: draft.output_ref.trim().to_owned(),
+                    input_source: draft.input_source.trim().to_owned(),
+                    lattice_min,
+                    lattice_max,
+                    integrated_noise: draft.integrated_noise,
+                    contributor_ranking: draft.contributor_ranking,
+                }
+            }
+            AnalysisDraft::Qpxf(draft) => {
+                let (start_freq, stop_freq, points_per_unit, sweep) =
+                    parse_manifest_sweep(&draft.sweep)?;
+                AnalysisSpec::Qpxf {
+                    start_freq,
+                    stop_freq,
+                    points_per_unit,
+                    sweep,
+                    input_source: draft.input_source.trim().to_owned(),
+                    output_node: draft.output_node.trim().to_owned(),
+                    output_ref: draft.output_ref.trim().to_owned(),
+                    input_lattice: parse_lattice_pair(&draft.input_lattice, "QPXF input lattice")?,
+                    output_lattice: parse_lattice_pair(
+                        &draft.output_lattice,
+                        "QPXF output lattice",
+                    )?,
+                    group_delay: draft.group_delay,
+                }
+            }
+            AnalysisDraft::TransientNoise(draft) => AnalysisSpec::TransientNoise {
+                stop_time: parse_si(&draft.stop_time, "TNOISE stop time")?,
+                step_time: parse_si(&draft.step_time, "TNOISE step time")?,
+                start_time: parse_si(&draft.start_time, "TNOISE start time")?,
+                max_timestep: parse_si(&draft.max_step, "TNOISE max step")?,
+                seed: draft
+                    .seed
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|_| "TNOISE seed must be an unsigned integer".to_owned())?,
+                noise_fmax: parse_si(&draft.noise_fmax, "TNOISE maximum noise frequency")?,
+                scale: parse_si(&draft.scale, "TNOISE noise scale")?,
+                uic: draft.use_initial_conditions,
+            },
+            AnalysisDraft::DcMismatch(draft) => AnalysisSpec::DcMismatch {
+                output_expression: draft.output_expression.trim().to_owned(),
+                sigma_multiplier: parse_si(&draft.sigma_multiplier, "DCMATCH sigma multiplier")?,
+                contributor_limit: parse_usize(
+                    &draft.contributor_limit,
+                    "DCMATCH contributor limit",
+                )?,
+                include_process: draft.include_process,
+                include_mismatch: draft.include_mismatch,
+                normalized_contributions: draft.normalized_contributions,
+            },
+            _ => return Ok(None),
+        };
+        spec.validate()?;
+        Ok(Some(spec))
+    }
+
     pub(super) fn build_analysis_spec_for_index(
         &self,
         state: &AppState,
@@ -602,5 +767,136 @@ impl SimulationController {
             ac_mode,
             frequency: ac_mode.then_some(sens_cfg.ac_freq),
         })
+    }
+}
+
+fn parse_si(text: &str, field: &str) -> Result<f64, String> {
+    crate::simulation::dialog::options::parse_si_value(text)
+        .map_err(|error| format!("invalid {field}: {error}"))
+}
+
+fn parse_usize(text: &str, field: &str) -> Result<usize, String> {
+    text.trim()
+        .parse::<usize>()
+        .map_err(|_| format!("{field} must be a positive integer"))
+}
+
+fn parse_csv_si(text: &str, field: &str) -> Result<Vec<f64>, String> {
+    text.split(',')
+        .map(|value| parse_si(value.trim(), field))
+        .collect()
+}
+
+fn parse_csv_usize(text: &str, field: &str) -> Result<Vec<usize>, String> {
+    text.split(',')
+        .map(|value| parse_usize(value.trim(), field))
+        .collect()
+}
+
+fn parse_manifest_sweep(
+    draft: &crate::simulation::plan::FrequencySweepDraft,
+) -> Result<(f64, f64, usize, FrequencySweep), String> {
+    let sweep = match draft.sweep {
+        0 => FrequencySweep::Decade,
+        1 => FrequencySweep::Octave,
+        2 => FrequencySweep::Linear,
+        _ => return Err("frequency sweep mode is outside the supported schema".to_owned()),
+    };
+    Ok((
+        parse_si(&draft.start, "start frequency")?,
+        parse_si(&draft.stop, "stop frequency")?,
+        parse_usize(&draft.points, "sweep point count")?,
+        sweep,
+    ))
+}
+
+fn parse_manifest_ports(
+    ports: &[crate::simulation::plan::NetworkPortDraft],
+) -> Result<Vec<SpPort>, String> {
+    ports
+        .iter()
+        .map(|port| {
+            Ok(SpPort {
+                node_pos: port.node_pos.trim().to_owned(),
+                node_neg: port.node_neg.trim().to_owned(),
+                z0: Some(parse_si(&port.z0, "port reference impedance")?),
+            })
+        })
+        .collect()
+}
+
+fn parse_lattice_pair(text: &str, field: &str) -> Result<[i32; 2], String> {
+    let values = text
+        .split(',')
+        .map(|value| value.trim().parse::<i32>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| format!("{field} must contain two integers"))?;
+    values
+        .try_into()
+        .map_err(|_| format!("{field} must contain exactly two integers"))
+}
+
+fn parse_lattice_ranges(text: &str) -> Result<([i32; 2], [i32; 2]), String> {
+    let ranges = text
+        .split(',')
+        .map(|range| {
+            let bounds = range
+                .split(':')
+                .map(|value| value.trim().parse::<i32>())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "QPNOISE lattice ranges require integers".to_owned())?;
+            let [min, max]: [i32; 2] = bounds
+                .try_into()
+                .map_err(|_| "each QPNOISE lattice range requires min:max".to_owned())?;
+            Ok((min, max))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let [(min0, max0), (min1, max1)]: [(i32, i32); 2] = ranges
+        .try_into()
+        .map_err(|_| "QPNOISE requires exactly two lattice ranges".to_owned())?;
+    Ok(([min0, min1], [max0, max1]))
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn every_new_manifest_draft_builds_its_exact_typed_spec() {
+        let controller = SimulationController::new();
+        for kind in [
+            AnalysisKind::Qpss,
+            AnalysisKind::Hbsp,
+            AnalysisKind::Hbnoise,
+            AnalysisKind::Psp,
+            AnalysisKind::Qpac,
+            AnalysisKind::Qpnoise,
+            AnalysisKind::Qpxf,
+            AnalysisKind::TransientNoise,
+            AnalysisKind::DcMismatch,
+        ] {
+            let draft = AnalysisDraft::for_kind(kind);
+            let spec = controller
+                .build_manifest_preview_spec(&draft)
+                .expect("default draft parses")
+                .expect("manifest draft has a typed spec");
+            assert!(matches!(
+                (kind, &spec),
+                (AnalysisKind::Qpss, AnalysisSpec::Qpss { .. })
+                    | (AnalysisKind::Hbsp, AnalysisSpec::Hbsp { .. })
+                    | (AnalysisKind::Hbnoise, AnalysisSpec::Hbnoise { .. })
+                    | (AnalysisKind::Psp, AnalysisSpec::Psp { .. })
+                    | (AnalysisKind::Qpac, AnalysisSpec::Qpac { .. })
+                    | (AnalysisKind::Qpnoise, AnalysisSpec::Qpnoise { .. })
+                    | (AnalysisKind::Qpxf, AnalysisSpec::Qpxf { .. })
+                    | (
+                        AnalysisKind::TransientNoise,
+                        AnalysisSpec::TransientNoise { .. }
+                    )
+                    | (AnalysisKind::DcMismatch, AnalysisSpec::DcMismatch { .. })
+            ));
+            assert!(spec.validate().is_ok());
+        }
     }
 }

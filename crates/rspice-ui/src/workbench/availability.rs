@@ -98,7 +98,11 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         },
         SurfaceId::Preferences => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui canonical Preferences manager",
-            evidence_boundary: "Persisted runtime-backed settings and their responsive interaction executor are present; withheld mockup categories remain unavailable until their product behavior exists.",
+            evidence_boundary: "Runtime-backed appearance, workspace, schematic-grid, recovery, accessibility, shortcut, capability, notification, and licensing controls are executable; unowned mockup settings remain omitted rather than inert.",
+        },
+        SurfaceId::AccountOrganization => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui local account, organization, and licensing boundary manager",
+            evidence_boundary: "The verified on-device license and current local application process are executable data owners; account identity, organization policy, remote sessions, server licensing, and external administration remain explicitly unconfigured and expose no speculative actions.",
         },
         SurfaceId::FeatureAvailability => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui capability and platform matrix manager",
@@ -150,6 +154,7 @@ mod tests {
                 SurfaceId::Models,
                 SurfaceId::Netlist,
                 SurfaceId::Preferences,
+                SurfaceId::AccountOrganization,
                 SurfaceId::FeatureAvailability,
             ]
         );

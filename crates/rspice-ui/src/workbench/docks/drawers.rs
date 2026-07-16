@@ -311,7 +311,7 @@ const SETTINGS_ACTIONS: [MobileNavigationAction; 2] = [
         detail: "Personal appearance, files and shortcuts",
     },
     MobileNavigationAction {
-        command: Command::License,
+        command: Command::AccountOrganization,
         icon: WorkbenchIcon::Verify,
         label: "Organization & licensing",
         detail: "Identity, roles, managed policy and entitlements",
@@ -906,6 +906,15 @@ mod tests {
         assert_eq!(MOBILE_NAV_CARD_HEIGHT, 72.0);
         assert_eq!(MOBILE_NAV_GRID_PADDING, 12.0);
         assert_eq!(MOBILE_NAV_GRID_GAP, 8.0);
+    }
+
+    #[test]
+    fn mobile_organization_entry_opens_the_canonical_account_manager() {
+        let action = SETTINGS_ACTIONS
+            .iter()
+            .find(|action| action.label == "Organization & licensing")
+            .expect("mockup account entry");
+        assert_eq!(action.command, Command::AccountOrganization);
     }
 
     #[test]

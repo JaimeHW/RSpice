@@ -31,6 +31,19 @@ impl SimulationController {
             AnalysisSpec::Pxf => self.build_pxf_command(state),
             AnalysisSpec::Pstb => self.build_pstb_command(state),
             AnalysisSpec::Tf => self.build_tf_command(state),
+            AnalysisSpec::Qpss { .. }
+            | AnalysisSpec::Hbsp { .. }
+            | AnalysisSpec::Hbnoise { .. }
+            | AnalysisSpec::Psp { .. }
+            | AnalysisSpec::Qpac { .. }
+            | AnalysisSpec::Qpnoise { .. }
+            | AnalysisSpec::Qpxf { .. }
+            | AnalysisSpec::TransientNoise { .. }
+            | AnalysisSpec::DcMismatch { .. } => Err(format!(
+                "{} is configured but cannot produce an engine directive: {}",
+                spec.run_type().display_name(),
+                manifest_spec_execution_blocker(spec)
+            )),
             _ => self
                 .analysis_spec_to_config(state, spec)
                 .map(|cfg| cfg.to_spice()),
@@ -323,6 +336,21 @@ impl SimulationController {
             merged.push('\n');
         }
         merged
+    }
+}
+
+fn manifest_spec_execution_blocker(spec: &AnalysisSpec) -> &'static str {
+    match spec {
+        AnalysisSpec::Qpss { .. } => "the QPSS spectral-lattice solver is unavailable",
+        AnalysisSpec::Hbsp { .. } => "HB large-signal network linearization is unavailable",
+        AnalysisSpec::Hbnoise { .. } => "harmonic-balance noise execution is unavailable",
+        AnalysisSpec::Psp { .. } => "periodic S-parameter execution is unavailable",
+        AnalysisSpec::Qpac { .. } => "QPAC conversion-matrix execution is unavailable",
+        AnalysisSpec::Qpnoise { .. } => "quasi-periodic noise execution is unavailable",
+        AnalysisSpec::Qpxf { .. } => "quasi-periodic transfer execution is unavailable",
+        AnalysisSpec::TransientNoise { .. } => "transient device-noise execution is unavailable",
+        AnalysisSpec::DcMismatch { .. } => "DC mismatch contribution extraction is unavailable",
+        _ => "the selected engine capability is unavailable",
     }
 }
 

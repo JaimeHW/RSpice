@@ -91,7 +91,7 @@ impl ShortcutCategory {
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Design),
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Simulate),
                 Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-                Command::VerificationPage(crate::workbench::state::VerificationPage::Cockpit),
+                Command::VerificationPage(crate::workbench::state::VerificationPage::Yield),
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Models),
                 Command::OpenWorkspace(crate::workbench::state::Workspace::Netlist),
             ],

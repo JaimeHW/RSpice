@@ -69,6 +69,18 @@ pub(super) fn run_spec_request(
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Stb { .. }
         | AnalysisSpec::Pstb => frequency::run_frequency_spec(spec, options, netlist, abort_flag),
+        AnalysisSpec::Qpss { .. }
+        | AnalysisSpec::Hbsp { .. }
+        | AnalysisSpec::Hbnoise { .. }
+        | AnalysisSpec::Psp { .. }
+        | AnalysisSpec::Qpac { .. }
+        | AnalysisSpec::Qpnoise { .. }
+        | AnalysisSpec::Qpxf { .. }
+        | AnalysisSpec::TransientNoise { .. }
+        | AnalysisSpec::DcMismatch { .. } => Err(SimulationError::InvalidConfig(format!(
+            "{} execution is unavailable in this engine build; the request was rejected before dispatch",
+            spec.run_type().display_name()
+        ))),
         AnalysisSpec::DcOp
         | AnalysisSpec::DcSweep { .. }
         | AnalysisSpec::Transient { .. }
@@ -166,6 +178,15 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
         AnalysisSpec::Pnoise => "AnalysisSpec::Pnoise",
         AnalysisSpec::Stb { .. } => "AnalysisSpec::Stb",
         AnalysisSpec::Pstb => "AnalysisSpec::Pstb",
+        AnalysisSpec::Qpss { .. } => "AnalysisSpec::Qpss",
+        AnalysisSpec::Hbsp { .. } => "AnalysisSpec::Hbsp",
+        AnalysisSpec::Hbnoise { .. } => "AnalysisSpec::Hbnoise",
+        AnalysisSpec::Psp { .. } => "AnalysisSpec::Psp",
+        AnalysisSpec::Qpac { .. } => "AnalysisSpec::Qpac",
+        AnalysisSpec::Qpnoise { .. } => "AnalysisSpec::Qpnoise",
+        AnalysisSpec::Qpxf { .. } => "AnalysisSpec::Qpxf",
+        AnalysisSpec::TransientNoise { .. } => "AnalysisSpec::TransientNoise",
+        AnalysisSpec::DcMismatch { .. } => "AnalysisSpec::DcMismatch",
     }
 }
 
@@ -287,6 +308,34 @@ R2 out 0 1k\n\
                 assert!(message.contains("AnalysisConfig::Noise"));
             }
             other => panic!("expected invalid config for lossy noise spec fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unavailable_manifest_spec_is_rejected_before_engine_dispatch() {
+        let spec = AnalysisSpec::DcMismatch {
+            output_expression: "V(out)".to_owned(),
+            sigma_multiplier: 3.0,
+            contributor_limit: 25,
+            include_process: false,
+            include_mismatch: true,
+            normalized_contributions: true,
+        };
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            "blocked preview\nV1 out 0 1\n.end\n",
+            None,
+            &rspice_core::abort_signal::NoAbort,
+        );
+        match result {
+            Err(SimulationError::InvalidConfig(message)) => {
+                assert!(message.contains("DC Mismatch Contribution"));
+                assert!(message.contains("unavailable"));
+                assert!(message.contains("rejected before dispatch"));
+            }
+            other => panic!("expected fail-closed capability rejection, got {other:?}"),
         }
     }
 

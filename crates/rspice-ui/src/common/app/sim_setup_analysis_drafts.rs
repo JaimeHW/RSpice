@@ -236,6 +236,12 @@ impl SimSetupState {
     /// Validate one raw instance draft with the same parser used by the
     /// existing controller, without mutating the authoritative plan.
     pub(crate) fn analysis_draft_validation_error(&self, draft: &AnalysisDraft) -> Option<String> {
+        if let Some(error) = draft.manifest_configuration_error() {
+            return Some(error);
+        }
+        if let Some(blocker) = draft.kind().execution_blocker() {
+            return Some(format!("Execution unavailable: {blocker}"));
+        }
         let mut projection = self.clone();
         projection.apply_analysis_draft_projection(draft);
         if matches!(draft, AnalysisDraft::OperatingPoint(_)) {
@@ -246,6 +252,9 @@ impl SimSetupState {
 
     /// Render the existing concise summary from one exact instance draft.
     pub(crate) fn analysis_draft_summary(&self, draft: &AnalysisDraft) -> String {
+        if let Some(summary) = draft.manifest_summary() {
+            return summary;
+        }
         let mut projection = self.clone();
         projection.apply_analysis_draft_projection(draft);
         if matches!(draft, AnalysisDraft::OperatingPoint(_)) {
@@ -334,6 +343,15 @@ impl SimSetupState {
                 sweep: self.ac.clone(),
                 f2_over_f1: self.disto_f2_over_f1.clone(),
             }),
+            AnalysisKind::Qpss
+            | AnalysisKind::Hbsp
+            | AnalysisKind::Hbnoise
+            | AnalysisKind::Psp
+            | AnalysisKind::Qpac
+            | AnalysisKind::Qpnoise
+            | AnalysisKind::Qpxf
+            | AnalysisKind::TransientNoise
+            | AnalysisKind::DcMismatch => AnalysisDraft::for_kind(kind),
         }
     }
 
@@ -382,6 +400,15 @@ impl SimSetupState {
                 self.ac = value.sweep.clone();
                 self.disto_f2_over_f1.clone_from(&value.f2_over_f1);
             }
+            AnalysisDraft::Qpss(_)
+            | AnalysisDraft::Hbsp(_)
+            | AnalysisDraft::Hbnoise(_)
+            | AnalysisDraft::Psp(_)
+            | AnalysisDraft::Qpac(_)
+            | AnalysisDraft::Qpnoise(_)
+            | AnalysisDraft::Qpxf(_)
+            | AnalysisDraft::TransientNoise(_)
+            | AnalysisDraft::DcMismatch(_) => {}
         }
     }
 }

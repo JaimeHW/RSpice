@@ -34,6 +34,23 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_manifest_spec_round_trips_without_losing_typed_fields() {
+        let spec = AnalysisSpec::DcMismatch {
+            output_expression: "V(out)".to_owned(),
+            sigma_multiplier: 3.0,
+            contributor_limit: 25,
+            include_process: false,
+            include_mismatch: true,
+            normalized_contributions: true,
+        };
+        let worker = WorkerAnalysisSpec::try_from(&spec).expect("worker spec converts");
+        let encoded = serde_json::to_vec(&worker).expect("worker spec serializes");
+        let restored: WorkerAnalysisSpec =
+            serde_json::from_slice(&encoded).expect("worker spec restores");
+        assert_eq!(AnalysisSpec::from(restored), spec);
+    }
+
+    #[test]
     fn legacy_hb_specs_default_the_exact_collocation_grid() {
         let analysis = AnalysisSpec::HarmonicBalance {
             tones: vec![HbToneSpec::new(1.0e6, 3)],
@@ -2824,6 +2841,10 @@ pub(crate) enum WorkerAnalysisSpec {
         start_time: f64,
         stop_time: f64,
     },
+    /// Canonical manifest analysis whose typed request is transportable but
+    /// whose engine capability is not present. The worker preserves the exact
+    /// request and the dispatcher rejects it fail-closed.
+    ManifestPreview(AnalysisSpec),
 }
 
 impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
@@ -3091,6 +3112,15 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 start_time: *start_time,
                 stop_time: *stop_time,
             }),
+            AnalysisSpec::Qpss { .. }
+            | AnalysisSpec::Hbsp { .. }
+            | AnalysisSpec::Hbnoise { .. }
+            | AnalysisSpec::Psp { .. }
+            | AnalysisSpec::Qpac { .. }
+            | AnalysisSpec::Qpnoise { .. }
+            | AnalysisSpec::Qpxf { .. }
+            | AnalysisSpec::TransientNoise { .. }
+            | AnalysisSpec::DcMismatch { .. } => Ok(Self::ManifestPreview(value.clone())),
         }
     }
 }
@@ -3358,6 +3388,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 start_time,
                 stop_time,
             },
+            WorkerAnalysisSpec::ManifestPreview(spec) => spec,
         }
     }
 }

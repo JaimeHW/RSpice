@@ -41,27 +41,35 @@ const SETTING_ROW_COLUMN_GAP: f32 = 24.0;
 const SETTING_ROW_PHONE_VALUE_GAP: f32 = 10.0;
 const SHELL_ID: &str = "rspice.preferences.shell";
 
-/// Preference categories whose controls are fully connected to RSpice.
-///
-/// The mockup contains additional future categories. They deliberately stay
-/// absent until their underlying product behavior exists; exposing a dead
-/// category would make the Preferences surface lie about product readiness.
+/// Canonical categories whose current controls have runtime consumers.
+/// Remaining mockup categories stay capability-gated rather than exposing
+/// form values that no engineering subsystem observes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum PreferenceCategory {
     #[default]
     Appearance,
     Workspace,
     Files,
+    Accessibility,
+    Shortcuts,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 3] = [Self::Appearance, Self::Workspace, Self::Files];
+    pub(super) const ALL: [Self; 5] = [
+        Self::Appearance,
+        Self::Workspace,
+        Self::Files,
+        Self::Accessibility,
+        Self::Shortcuts,
+    ];
 
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
             Self::Workspace => "Workspace",
             Self::Files => "Files & storage",
+            Self::Accessibility => "Accessibility",
+            Self::Shortcuts => "Shortcuts",
         }
     }
 
@@ -70,6 +78,8 @@ impl PreferenceCategory {
             Self::Appearance => "appearance",
             Self::Workspace => "workspace",
             Self::Files => "files",
+            Self::Accessibility => "accessibility",
+            Self::Shortcuts => "shortcuts",
         }
     }
 }
@@ -77,7 +87,9 @@ impl PreferenceCategory {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct PreferencesShellResponse {
     pub(super) close_requested: bool,
-    pub(super) license_activation_requested: bool,
+    /// The mockup's organization/licensing owner entry routes to the truthful
+    /// local account and organization authority surface.
+    pub(super) account_organization_requested: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -235,7 +247,7 @@ pub(super) fn show(
         }
         initial_focus_control_id = render_body(&mut surface, body, layout, category, render_page);
         if render_footer(&mut surface, footer) {
-            response.license_activation_requested = true;
+            response.account_organization_requested = true;
         }
         let dialog_response = dialog_ui.response();
         dialog_response
@@ -253,7 +265,7 @@ pub(super) fn show(
                 y1: f64::from(layout.surface.bottom()),
             });
             node.set_description(
-                "Personal and device appearance, workspace, and file preferences. Changes apply immediately; project settings remain versioned.",
+                "Personal, device, accessibility, shortcut, and engineering preferences. Changes apply immediately; project settings remain versioned.",
             );
             node.set_modal();
         });
@@ -618,8 +630,8 @@ fn render_footer(surface: &mut Ui, rect: Rect) -> bool {
     );
     ui.spacing_mut().item_spacing.x = FOOTER_ITEM_GAP;
     let clicked = ui
-        .push_id("license-activation", |ui| {
-            Button::new("License activation…").show(ui).clicked()
+        .push_id("account-organization", |ui| {
+            Button::new("Organization & licensing…").show(ui).clicked()
         })
         .inner;
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -1003,7 +1015,8 @@ pub(super) fn preference_switch(
     let large_target = ui.ctx().content_rect().width() <= NARROW_MAX_WIDTH
         || ui.ctx().input(|input| input.has_touch_screen());
     let hit = if large_target {
-        vec2(TOUCH_TARGET, TOUCH_TARGET)
+        let target = TOUCH_TARGET.max(ui.spacing().interact_size.y);
+        vec2(target, target)
     } else {
         vec2(SWITCH_TRACK_WIDTH, SWITCH_TRACK_HEIGHT)
     };
@@ -1229,10 +1242,16 @@ mod tests {
     }
 
     #[test]
-    fn only_runtime_backed_categories_are_exposed() {
+    fn category_navigation_exposes_only_runtime_backed_mockup_pages() {
         assert_eq!(
             PreferenceCategory::ALL.map(PreferenceCategory::label),
-            ["Appearance", "Workspace", "Files & storage"]
+            [
+                "Appearance",
+                "Workspace",
+                "Files & storage",
+                "Accessibility",
+                "Shortcuts",
+            ]
         );
     }
 
@@ -1342,7 +1361,7 @@ mod tests {
             node.role() == egui::accesskit::Role::Dialog
                 && node.label() == Some("Preferences")
                 && node.description().is_some_and(|description| {
-                    description.contains("appearance, workspace, and file preferences")
+                    description.contains("accessibility, shortcut, and engineering")
                 })
                 && node.is_modal()
         }));

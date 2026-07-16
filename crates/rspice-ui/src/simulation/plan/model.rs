@@ -1895,6 +1895,29 @@ mod tests {
     }
 
     #[test]
+    fn quasi_periodic_dependencies_form_a_stable_explicit_graph() {
+        let mut plan = SimulationPlan::new();
+        let (op, _) = plan
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("OP inserts");
+        let (qpss, _) = plan.insert(AnalysisKind::Qpss).expect("QPSS inserts");
+        plan.auto_bind_dependencies(qpss).expect("QPSS binds to OP");
+        let (qpac, _) = plan.insert(AnalysisKind::Qpac).expect("QPAC inserts");
+        plan.auto_bind_dependencies(qpac)
+            .expect("QPAC binds to QPSS");
+
+        assert_eq!(
+            plan.instance(qpss).expect("QPSS exists").dependencies(),
+            &[AnalysisDependency::new(AnalysisKind::OperatingPoint, op)]
+        );
+        assert_eq!(
+            plan.instance(qpac).expect("QPAC exists").dependencies(),
+            &[AnalysisDependency::new(AnalysisKind::Qpss, qpss)]
+        );
+        assert!(plan.freeze().is_ok());
+    }
+
+    #[test]
     fn deep_clone_is_inserted_after_source_and_edits_do_not_alias() {
         let mut plan = SimulationPlan::new();
         let source = plan.instances()[0].id();

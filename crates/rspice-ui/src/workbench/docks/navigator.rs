@@ -56,9 +56,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 Workspace::Simulate => simulate(ui, app),
                 Workspace::Results => results(ui, app),
                 Workspace::Verify => {
+                    let scroll_bar_visibility =
+                        if verification_navigator_requires_scroll(ui.available_height()) {
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible
+                        } else {
+                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+                        };
                     ScrollArea::vertical()
                         .id_salt("workbench.verify.navigator")
                         .auto_shrink([false, false])
+                        .scroll_bar_visibility(scroll_bar_visibility)
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             verify(ui, app);
@@ -757,121 +764,11 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.cursor().top(),
         egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
     );
-    for page in VerificationPage::ALL {
-        let (label, detail, status, tone) = match page {
-            VerificationPage::Cockpit => {
-                let result = active_dataset_yield_results(&app.state.simulation)
-                    .iter()
-                    .min_by(|a, b| {
-                        a.yield_percent
-                            .partial_cmp(&b.yield_percent)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                (
-                    "PVT & Monte Carlo".to_owned(),
-                    result.map_or_else(
-                        || "No retained Monte Carlo evidence for active dataset".to_owned(),
-                        |result| format!("{} samples · {}", result.total_runs, result.spec.target),
-                    ),
-                    result.map_or_else(
-                        || "not run".to_owned(),
-                        |result| format!("{:.2}% yield", result.yield_percent),
-                    ),
-                    if result.is_some_and(|result| result.fail_count == 0) {
-                        FlowTone::Ok
-                    } else {
-                        FlowTone::Warn
-                    },
-                )
-            }
-            VerificationPage::Specifications => {
-                let active = app
-                    .state
-                    .simulation
-                    .active_run()
-                    .or_else(|| app.state.simulation.runs.first());
-                let covered = app
-                    .state
-                    .workspace
-                    .specs
-                    .iter()
-                    .filter(|spec| {
-                        active.is_some_and(|run| {
-                            run.analyses.iter().any(|analysis| {
-                                analysis.measurements.iter().any(|measurement| {
-                                    measurement.name.eq_ignore_ascii_case(&spec.measurement)
-                                        && measurement.value.is_some()
-                                })
-                            })
-                        })
-                    })
-                    .count();
-                let total = app.state.workspace.specs.len();
-                (
-                    "Specification evidence".to_owned(),
-                    format!("{total} tracked measurement limits"),
-                    format!("{covered} / {total} covered"),
-                    if total > 0 && covered == total {
-                        FlowTone::Ok
-                    } else {
-                        FlowTone::Warn
-                    },
-                )
-            }
-            VerificationPage::Checks => {
-                let result = app.state.dialogs.drc_results.as_ref();
-                let errors = result.map_or(0, |result| {
-                    let summary = result.summary();
-                    summary.critical + summary.errors
-                });
-                (
-                    "Design checks".to_owned(),
-                    "Schematic connectivity and electrical-rule checks".to_owned(),
-                    result.map_or_else(
-                        || "not run".to_owned(),
-                        |result| format!("{} markers", result.total_count()),
-                    ),
-                    if result.is_some() && errors == 0 {
-                        FlowTone::Ok
-                    } else {
-                        FlowTone::Warn
-                    },
-                )
-            }
-            VerificationPage::Reliability => {
-                let violations = app.state.simulation.soa_violations.len();
-                let aging = app.state.simulation.reliability_results.len();
-                (
-                    "Electrical reliability & SOA".to_owned(),
-                    format!("{aging} aging results · {violations} SOA violations"),
-                    if aging == 0 && violations == 0 {
-                        "not run".to_owned()
-                    } else if violations == 0 {
-                        "SOA pass".to_owned()
-                    } else {
-                        format!("{violations} violations")
-                    },
-                    if violations == 0 && aging > 0 {
-                        FlowTone::Ok
-                    } else {
-                        FlowTone::Warn
-                    },
-                )
-            }
-            VerificationPage::History => {
-                let runs = app.state.simulation.runs.len();
-                (
-                    "Retained run history".to_owned(),
-                    "Immutable datasets available for review".to_owned(),
-                    format!("{runs} runs"),
-                    if runs > 0 {
-                        FlowTone::Accent
-                    } else {
-                        FlowTone::Neutral
-                    },
-                )
-            }
-        };
+    for page in VerificationPage::NAVIGATION {
+        let flow = verification_flow_presentation(app, page);
+        let label = &flow.label;
+        let detail = &flow.detail;
+        let status = &flow.status;
         if !query.is_empty()
             && !format!("{label} {detail} {status}")
                 .to_ascii_lowercase()
@@ -879,30 +776,39 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
         {
             continue;
         }
-        if flow_row(
-            ui,
-            &label,
-            &detail,
-            &status,
-            tone,
-            app.state.workbench.verification_page == page,
-        ) {
+        if flow_row(ui, &flow, app.state.workbench.verification_page == page) {
             app.state.workbench.verification_page = page;
         }
     }
     section_header(ui, "Active evidence coverage", None);
-    property_row(
-        ui,
-        "Specifications",
-        &app.state.workspace.specs.len().to_string(),
+    let coverage = verification_coverage(app);
+    ui.label(
+        egui::RichText::new(&coverage.status)
+            .color(if coverage.gaps == 0 {
+                Tokens::get(ui.ctx()).color.ok
+            } else {
+                Tokens::get(ui.ctx()).color.warn
+            })
+            .strong(),
     );
     property_row(
         ui,
-        "Retained datasets",
-        &app.state.simulation.runs.len().to_string(),
+        "Mapped specifications",
+        &format!("{} / {}", coverage.mapped, coverage.total),
     );
-    let executable = active_mc_sample_trail(&app.state.simulation);
-    property_row(ui, "MC sample trail", &executable.to_string());
+    property_row(
+        ui,
+        "PVT points",
+        &format!("{} retained", coverage.pvt_points),
+    );
+    property_row(
+        ui,
+        "Executable checks",
+        &format!(
+            "{} executed · {} passed",
+            coverage.executed, coverage.passed
+        ),
+    );
     ui.painter().hline(
         ui.max_rect().x_range(),
         ui.cursor().top(),
@@ -910,14 +816,329 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn active_dataset_yield_results(
-    simulation: &crate::state::SimulationState,
-) -> &[crate::services::yield_manager::YieldResult] {
-    simulation.yield_results_for_active_dataset().unwrap_or(&[])
+#[derive(Clone)]
+struct VerificationFlowPresentation {
+    label: String,
+    detail: String,
+    status: String,
+    glyph: &'static str,
+    icon_tone: FlowTone,
+    status_tone: FlowTone,
 }
 
+const fn verification_flow_label(page: VerificationPage) -> &'static str {
+    match page {
+        VerificationPage::Yield => "PVT & Monte Carlo",
+        VerificationPage::Corners => "Process corners",
+        VerificationPage::Tuning => "Parameter tuning (unavailable)",
+        VerificationPage::Optimization => "Optimization",
+        VerificationPage::Reliability => "Electrical reliability & SOA",
+        VerificationPage::Regression => "Regression · main",
+        VerificationPage::Drc => "Physical DRC",
+    }
+}
+
+fn verification_flow_presentation(
+    app: &RSpiceApp,
+    page: VerificationPage,
+) -> VerificationFlowPresentation {
+    let active_run = app.state.simulation.active_run();
+    match page {
+        VerificationPage::Yield => {
+            let evidence = active_run.and_then(|run| {
+                app.state
+                    .simulation
+                    .yield_provenance
+                    .filter(|provenance| {
+                        provenance.source_run_id == run.run_id
+                            && provenance.source_dataset_id == run.dataset_id
+                    })
+                    .map(|provenance| (run, provenance))
+            });
+            let results = evidence
+                .and_then(|(run, _)| {
+                    app.state
+                        .simulation
+                        .yield_results_for_dataset(run.dataset_id)
+                })
+                .unwrap_or(&[]);
+            let worst = results.iter().min_by(|left, right| {
+                left.yield_percent
+                    .partial_cmp(&right.yield_percent)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            VerificationFlowPresentation {
+                label: evidence.map_or_else(
+                    || verification_flow_label(page).to_owned(),
+                    |(run, _)| format!("PVT & Monte Carlo · Run {}", run.id),
+                ),
+                detail: evidence.map_or_else(
+                    || "No retained Monte Carlo evidence for the active dataset".to_owned(),
+                    |(_, provenance)| {
+                        format!(
+                            "{} / {} samples · seed {:#x}",
+                            provenance.runs_completed, provenance.runs_requested, provenance.seed
+                        )
+                    },
+                ),
+                status: worst.map_or_else(
+                    || "not run".to_owned(),
+                    |result| format!("{:.2}% retained yield", result.yield_percent),
+                ),
+                glyph: "△",
+                icon_tone: if worst.is_some_and(|result| result.fail_count == 0) {
+                    FlowTone::Ok
+                } else if worst.is_some() {
+                    FlowTone::Warn
+                } else {
+                    FlowTone::Neutral
+                },
+                status_tone: if worst.is_some_and(|result| result.fail_count == 0) {
+                    FlowTone::Ok
+                } else if worst.is_some() {
+                    FlowTone::Warn
+                } else {
+                    FlowTone::Neutral
+                },
+            }
+        }
+        VerificationPage::Corners => {
+            let result = active_run
+                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Corner));
+            let point_count = result
+                .and_then(|analysis| analysis.waveforms.first())
+                .map_or(0, |waveform| waveform.x.len());
+            VerificationFlowPresentation {
+                label: verification_flow_label(page).to_owned(),
+                detail: if point_count == 0 {
+                    "No retained process-corner evidence".to_owned()
+                } else {
+                    format!("{point_count} retained corner points")
+                },
+                status: if point_count == 0 {
+                    "not run".to_owned()
+                } else if result.is_some_and(|analysis| analysis.success) {
+                    format!("{point_count} complete")
+                } else {
+                    "failed / incomplete".to_owned()
+                },
+                glyph: if result.is_some_and(|analysis| analysis.success) {
+                    "✓"
+                } else {
+                    "△"
+                },
+                icon_tone: if result.is_some_and(|analysis| analysis.success) {
+                    FlowTone::Ok
+                } else if result.is_some() {
+                    FlowTone::Warn
+                } else {
+                    FlowTone::Neutral
+                },
+                status_tone: if result.is_some_and(|analysis| analysis.success) {
+                    FlowTone::Ok
+                } else if result.is_some() {
+                    FlowTone::Warn
+                } else {
+                    FlowTone::Neutral
+                },
+            }
+        }
+        VerificationPage::Tuning => VerificationFlowPresentation {
+            label: verification_flow_label(page).to_owned(),
+            detail: "Capability unavailable".to_owned(),
+            status: "not exposed".to_owned(),
+            glyph: "·",
+            icon_tone: FlowTone::Neutral,
+            status_tone: FlowTone::Neutral,
+        },
+        VerificationPage::Optimization => {
+            let result = active_run
+                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Optimization));
+            VerificationFlowPresentation {
+                label: verification_flow_label(page).to_owned(),
+                detail: if result.is_some() {
+                    "Source-attributed optimization result retained".to_owned()
+                } else {
+                    "Bounded production optimization analysis".to_owned()
+                },
+                status: if result.is_some() {
+                    "retained result".to_owned()
+                } else {
+                    "not run".to_owned()
+                },
+                glyph: "O",
+                icon_tone: if result.is_some() {
+                    FlowTone::Accent
+                } else {
+                    FlowTone::Neutral
+                },
+                status_tone: if result.is_some() {
+                    FlowTone::Accent
+                } else {
+                    FlowTone::Neutral
+                },
+            }
+        }
+        VerificationPage::Reliability => {
+            let soa_evidence =
+                active_run.and_then(|run| verified_analysis(run, crate::state::AnalysisType::Soa));
+            let aging_evidence = active_run
+                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Reliability));
+            let has_evidence = soa_evidence.is_some() || aging_evidence.is_some();
+            VerificationFlowPresentation {
+                label: verification_flow_label(page).to_owned(),
+                detail: if has_evidence {
+                    "Execution receipt retained · dataset-owned payload unavailable".to_owned()
+                } else {
+                    "No source-attributed reliability or SOA evidence".to_owned()
+                },
+                status: if has_evidence {
+                    "verdict unavailable".to_owned()
+                } else {
+                    "not run".to_owned()
+                },
+                glyph: "△",
+                icon_tone: if has_evidence {
+                    FlowTone::Warn
+                } else {
+                    FlowTone::Neutral
+                },
+                status_tone: if has_evidence {
+                    FlowTone::Warn
+                } else {
+                    FlowTone::Neutral
+                },
+            }
+        }
+        VerificationPage::Regression => VerificationFlowPresentation {
+            label: verification_flow_label(page).to_owned(),
+            detail: "Measurements and waveforms vs governed baseline".to_owned(),
+            status: if app.state.simulation.runs.len() >= 2 {
+                format!("{} retained runs", app.state.simulation.runs.len())
+            } else {
+                "baseline unavailable".to_owned()
+            },
+            glyph: if app.state.simulation.runs.len() >= 2 {
+                "✓"
+            } else {
+                "·"
+            },
+            icon_tone: if app.state.simulation.runs.len() >= 2 {
+                FlowTone::Accent
+            } else {
+                FlowTone::Neutral
+            },
+            status_tone: if app.state.simulation.runs.len() >= 2 {
+                FlowTone::Accent
+            } else {
+                FlowTone::Neutral
+            },
+        },
+        VerificationPage::Drc => VerificationFlowPresentation {
+            label: verification_flow_label(page).to_owned(),
+            detail: "Geometry rules · markers · waivers · sign-off".to_owned(),
+            status: "no physical evidence".to_owned(),
+            glyph: "·",
+            icon_tone: FlowTone::Neutral,
+            status_tone: FlowTone::Error,
+        },
+    }
+}
+
+fn verified_analysis(
+    run: &crate::state::SimulationRun,
+    analysis_type: crate::state::AnalysisType,
+) -> Option<&crate::state::AnalysisResult> {
+    run.analyses.iter().find(|analysis| {
+        analysis.analysis_type == analysis_type && analysis.success && analysis.provenance.is_some()
+    })
+}
+
+struct VerificationCoverage {
+    total: usize,
+    mapped: usize,
+    executed: usize,
+    passed: usize,
+    pvt_points: usize,
+    gaps: usize,
+    status: String,
+}
+
+fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
+    let run = app.state.simulation.active_run();
+    let total = app.state.workspace.specs.len();
+    let values = app
+        .state
+        .workspace
+        .specs
+        .iter()
+        .map(|spec| {
+            run.and_then(|run| {
+                run.analyses.iter().find_map(|analysis| {
+                    if !analysis.success || analysis.provenance.is_none() {
+                        return None;
+                    }
+                    analysis.measurements.iter().find_map(|measurement| {
+                        (measurement.name.eq_ignore_ascii_case(&spec.measurement)
+                            && measurement.passed
+                            && measurement.error.is_none())
+                        .then_some(measurement.value)
+                        .flatten()
+                        .filter(|value| value.is_finite())
+                    })
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let mapped = app
+        .state
+        .workspace
+        .specs
+        .iter()
+        .filter(|spec| !spec.measurement.trim().is_empty())
+        .count();
+    let executed = values.iter().filter(|value| value.is_some()).count();
+    let passed = app
+        .state
+        .workspace
+        .specs
+        .iter()
+        .zip(&values)
+        .filter(|(spec, value)| value.is_some_and(|value| spec.passes(value)))
+        .count();
+    let pvt_points = run
+        .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Corner))
+        .and_then(|analysis| analysis.waveforms.first())
+        .map_or(0, |waveform| waveform.x.len());
+    let gaps = total.saturating_sub(executed);
+    VerificationCoverage {
+        total,
+        mapped,
+        executed,
+        passed,
+        pvt_points,
+        gaps,
+        status: if total == 0 {
+            "No project specifications configured".to_owned()
+        } else if gaps == 0 {
+            "Coverage current for active dataset".to_owned()
+        } else {
+            format!("{gaps} evidence gaps · review required")
+        },
+    }
+}
+
+fn verification_navigator_requires_scroll(available_height: f32) -> bool {
+    const HISTORY_COVERAGE_HEIGHT: f32 = 126.0;
+    let flow_height = VerificationPage::NAVIGATION.len() as f32 * FLOW_ROW_HEIGHT;
+    available_height < flow_height + HISTORY_COVERAGE_HEIGHT
+}
+
+#[cfg(test)]
 fn active_mc_sample_trail(simulation: &crate::state::SimulationState) -> usize {
-    active_dataset_yield_results(simulation)
+    simulation
+        .yield_results_for_active_dataset()
+        .unwrap_or(&[])
         .iter()
         .map(|result| result.trail.len())
         .max()
@@ -930,6 +1151,7 @@ enum FlowTone {
     Accent,
     Ok,
     Warn,
+    Error,
 }
 
 fn flow_row_geometry(detail_lines: usize) -> (f32, f32) {
@@ -940,14 +1162,15 @@ fn flow_row_geometry(detail_lines: usize) -> (f32, f32) {
     )
 }
 
-fn flow_row(
-    ui: &mut Ui,
-    label: &str,
-    detail: &str,
-    status: &str,
-    tone: FlowTone,
-    selected: bool,
-) -> bool {
+fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selected: bool) -> bool {
+    let VerificationFlowPresentation {
+        label,
+        detail,
+        status,
+        glyph,
+        icon_tone,
+        status_tone,
+    } = flow;
     let t = Tokens::get(ui.ctx());
     let text_width = (ui.available_width() - FLOW_TEXT_LEFT - 9.0).max(1.0);
     let detail_galley = ui.painter().layout(
@@ -992,29 +1215,35 @@ fn flow_row(
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let (icon_ink, glyph, status_dot, status_ink) = match tone {
-        FlowTone::Neutral => (
-            t.color.text_faint,
-            "·",
-            t.color.text_faint,
-            t.color.text_dim,
-        ),
-        FlowTone::Accent => (t.color.accent, "T", t.color.accent, t.color.text_dim),
-        FlowTone::Ok => (t.color.ok, "✓", t.color.ok, t.color.text_dim),
-        FlowTone::Warn => (t.color.warn, "△", t.color.warn, t.color.warn),
+    let icon_ink = match *icon_tone {
+        FlowTone::Neutral => t.color.text_faint,
+        FlowTone::Accent => t.color.accent,
+        FlowTone::Ok => t.color.ok,
+        FlowTone::Warn => t.color.warn,
+        FlowTone::Error => t.color.err,
+    };
+    let (status_dot, status_ink) = match *status_tone {
+        FlowTone::Neutral => (t.color.text_faint, t.color.text_dim),
+        FlowTone::Accent => (t.color.accent, t.color.text_dim),
+        FlowTone::Ok => (t.color.ok, t.color.text_dim),
+        FlowTone::Warn => (t.color.warn, t.color.warn),
+        FlowTone::Error => (t.color.err, t.color.err),
     };
     let status_circle = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 17.5, rect.top() + 16.5),
         egui::vec2(17.0, 17.0),
     );
-    let circle_fill = match tone {
+    let circle_fill = match *icon_tone {
         FlowTone::Ok => t.color.ok.gamma_multiply(0.14),
         FlowTone::Warn => t.color.warn.gamma_multiply(0.14),
         FlowTone::Accent => t.color.accent.gamma_multiply(0.14),
         FlowTone::Neutral => t.color.bg_panel_2,
+        FlowTone::Error => t.color.err.gamma_multiply(0.14),
     };
-    let circle_border = match tone {
-        FlowTone::Ok | FlowTone::Warn | FlowTone::Accent => icon_ink.gamma_multiply(0.7),
+    let circle_border = match *icon_tone {
+        FlowTone::Ok | FlowTone::Warn | FlowTone::Accent | FlowTone::Error => {
+            icon_ink.gamma_multiply(0.7)
+        }
         FlowTone::Neutral => icon_ink,
     };
     ui.painter()
@@ -1320,12 +1549,15 @@ mod tests {
         EMPTY_HINT_PADDING_X, EMPTY_HINT_PADDING_Y, EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP,
         FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, PANEL_SEARCH_MARGIN_X,
         SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail, flow_row_geometry,
-        panel_search_field_width, responsive_result_control_height,
+        panel_search_field_width, responsive_result_control_height, verification_coverage,
+        verification_flow_label, verification_navigator_requires_scroll,
     };
+    use crate::common::RSpiceApp;
     use crate::services::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
     };
     use crate::state::{SimulationRun, SimulationState};
+    use crate::workbench::state::VerificationPage;
 
     fn result(trail: Vec<bool>) -> YieldResult {
         let pass_count = trail.iter().filter(|passes| **passes).count();
@@ -1362,6 +1594,51 @@ mod tests {
         assert_eq!(flow_row_geometry(1), (63.0, 43.0));
         assert_eq!(flow_row_geometry(2), (78.0, 58.0));
         assert_eq!(flow_row_geometry(3), (93.0, 73.0));
+    }
+
+    #[test]
+    fn verification_navigation_omits_unimplemented_tuning_route() {
+        assert_eq!(VerificationPage::NAVIGATION.len(), 6);
+        let labels = VerificationPage::NAVIGATION.map(verification_flow_label);
+        assert_eq!(
+            labels,
+            [
+                "PVT & Monte Carlo",
+                "Process corners",
+                "Optimization",
+                "Electrical reliability & SOA",
+                "Regression · main",
+                "Physical DRC",
+            ]
+        );
+    }
+
+    #[test]
+    fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workspace.specs.push(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            min: Some(1.0),
+            max: None,
+            unit: "V/V".to_owned(),
+        });
+        app.state.simulation.active_run_idx = None;
+
+        let coverage = verification_coverage(&app);
+
+        assert_eq!(coverage.mapped, 1);
+        assert_eq!(coverage.executed, 0);
+        assert_eq!(coverage.passed, 0);
+        assert_eq!(coverage.gaps, 1);
+        assert_ne!(coverage.status, "Coverage current for active dataset");
+    }
+
+    #[test]
+    fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
+        assert!(verification_navigator_requires_scroll(500.0));
+        assert!(verification_navigator_requires_scroll(390.0));
+        assert!(!verification_navigator_requires_scroll(560.0));
+        assert!(!verification_navigator_requires_scroll(700.0));
     }
 
     #[test]

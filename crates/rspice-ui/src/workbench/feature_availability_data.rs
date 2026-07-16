@@ -1760,7 +1760,7 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
         code: "QPSS",
         title: "Quasi-periodic steady state",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::Qpss),
     },
     AnalysisAvailabilityRow {
         id: "hb",
@@ -1781,14 +1781,14 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
         code: "HBSP",
         title: "Large-signal S-parameters",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::Hbsp),
     },
     AnalysisAvailabilityRow {
         id: "hbnoise",
         code: "HBNOISE",
         title: "Harmonic-balance noise",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::Hbnoise),
     },
     AnalysisAvailabilityRow {
         id: "envelope",
@@ -1830,35 +1830,35 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
         code: "PSP",
         title: "Periodic S-parameters",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::Psp),
     },
     AnalysisAvailabilityRow {
         id: "qpac",
         code: "QPAC",
         title: "Quasi-periodic AC",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::Qpac),
     },
     AnalysisAvailabilityRow {
         id: "qpnoise",
         code: "QPNOISE",
         title: "Quasi-periodic noise",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::Qpnoise),
     },
     AnalysisAvailabilityRow {
         id: "qpxf",
         code: "QPXF",
         title: "Quasi-periodic transfer",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::Qpxf),
     },
     AnalysisAvailabilityRow {
         id: "tnoise",
         code: "TNOISE",
         title: "Transient noise",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::TransientNoise),
     },
     AnalysisAvailabilityRow {
         id: "mc",
@@ -1886,7 +1886,7 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
         code: "DCMATCH",
         title: "DC mismatch contribution",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: None,
+        analysis_kind: Some(AnalysisKind::DcMismatch),
     },
     AnalysisAvailabilityRow {
         id: "fourier",
@@ -3194,7 +3194,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_kind_mapping_is_exact_and_has_nine_intentional_absences() {
+    fn analysis_kind_mapping_is_exact_and_covers_the_full_manifest() {
         let mapped = ANALYSIS_AVAILABILITY_ROWS
             .iter()
             .filter_map(|row| row.analysis_kind)
@@ -3218,12 +3218,7 @@ mod tests {
             .filter(|row| row.analysis_kind.is_none())
             .map(|row| row.id)
             .collect::<Vec<_>>();
-        assert_eq!(
-            absent,
-            [
-                "qpss", "hbsp", "hbnoise", "psp", "qpac", "qpnoise", "qpxf", "tnoise", "dcmatch",
-            ]
-        );
+        assert!(absent.is_empty());
     }
 
     #[test]

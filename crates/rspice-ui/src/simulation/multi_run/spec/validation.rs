@@ -577,6 +577,168 @@ impl AnalysisSpec {
                 }
                 Ok(())
             }
+            AnalysisSpec::Qpss {
+                tones,
+                max_iterations,
+                relative_tolerance,
+                autonomous,
+                oscillator_node,
+            } => validate_qpss(
+                tones,
+                *max_iterations,
+                *relative_tolerance,
+                *autonomous,
+                oscillator_node.as_deref(),
+            ),
+            AnalysisSpec::Hbsp {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                ports,
+                max_sideband,
+                ..
+            }
+            | AnalysisSpec::Psp {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                ports,
+                max_sideband,
+                ..
+            } => validate_periodic_network(
+                *start_freq,
+                *stop_freq,
+                *points_per_unit,
+                ports,
+                *max_sideband,
+            ),
+            AnalysisSpec::Hbnoise {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                output_node,
+                input_source,
+                max_sideband,
+                ..
+            } => {
+                validate_frequency_sweep(*start_freq, *stop_freq, *points_per_unit)?;
+                if output_node.trim().is_empty() || input_source.trim().is_empty() {
+                    return Err("HBNOISE requires an output node and input source".to_owned());
+                }
+                if *max_sideband == 0 {
+                    return Err("HBNOISE max_sideband must be > 0".to_owned());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Qpac {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                input_source,
+                output_node,
+                ..
+            }
+            | AnalysisSpec::Qpxf {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                input_source,
+                output_node,
+                ..
+            } => {
+                validate_frequency_sweep(*start_freq, *stop_freq, *points_per_unit)?;
+                if input_source.trim().is_empty() || output_node.trim().is_empty() {
+                    return Err(
+                        "quasi-periodic transfer requires an input source and output node"
+                            .to_owned(),
+                    );
+                }
+                Ok(())
+            }
+            AnalysisSpec::Qpnoise {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                output_node,
+                input_source,
+                lattice_min,
+                lattice_max,
+                ..
+            } => {
+                validate_frequency_sweep(*start_freq, *stop_freq, *points_per_unit)?;
+                if output_node.trim().is_empty() || input_source.trim().is_empty() {
+                    return Err("QPNOISE requires an output node and input source".to_owned());
+                }
+                if lattice_min
+                    .iter()
+                    .zip(lattice_max)
+                    .any(|(min, max)| min > max)
+                {
+                    return Err("QPNOISE lattice minima must not exceed maxima".to_owned());
+                }
+                Ok(())
+            }
+            AnalysisSpec::TransientNoise {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                seed,
+                noise_fmax,
+                scale,
+                ..
+            } => {
+                if !stop_time.is_finite() || *stop_time <= 0.0 {
+                    return Err("TNOISE stop_time must be finite and > 0".to_owned());
+                }
+                if !step_time.is_finite() || *step_time <= 0.0 || step_time > stop_time {
+                    return Err("TNOISE step_time must be finite, > 0, and <= stop_time".to_owned());
+                }
+                if !start_time.is_finite() || *start_time < 0.0 || start_time >= stop_time {
+                    return Err(
+                        "TNOISE start_time must be finite, >= 0, and < stop_time".to_owned()
+                    );
+                }
+                if !max_timestep.is_finite() || *max_timestep <= 0.0 || max_timestep > stop_time {
+                    return Err(
+                        "TNOISE max_timestep must be finite, > 0, and <= stop_time".to_owned()
+                    );
+                }
+                if *seed == 0
+                    || !noise_fmax.is_finite()
+                    || *noise_fmax <= 0.0
+                    || !scale.is_finite()
+                    || *scale <= 0.0
+                {
+                    return Err(
+                        "TNOISE requires a nonzero seed, positive fmax, and positive scale"
+                            .to_owned(),
+                    );
+                }
+                Ok(())
+            }
+            AnalysisSpec::DcMismatch {
+                output_expression,
+                sigma_multiplier,
+                contributor_limit,
+                include_process,
+                include_mismatch,
+                ..
+            } => {
+                if output_expression.trim().is_empty() {
+                    return Err("DCMATCH output_expression is required".to_owned());
+                }
+                if !sigma_multiplier.is_finite() || *sigma_multiplier <= 0.0 {
+                    return Err("DCMATCH sigma_multiplier must be finite and > 0".to_owned());
+                }
+                if *contributor_limit == 0 {
+                    return Err("DCMATCH contributor_limit must be > 0".to_owned());
+                }
+                if !include_process && !include_mismatch {
+                    return Err("DCMATCH requires process or mismatch contributions".to_owned());
+                }
+                Ok(())
+            }
             AnalysisSpec::Tf
             | AnalysisSpec::Pac
             | AnalysisSpec::Pnoise
@@ -587,6 +749,73 @@ impl AnalysisSpec {
             | AnalysisSpec::Corner => Ok(()),
         }
     }
+}
+
+fn validate_frequency_sweep(start: f64, stop: f64, points: usize) -> Result<(), String> {
+    if !start.is_finite() || start <= 0.0 || !stop.is_finite() || stop <= start {
+        return Err("frequency sweep requires finite 0 < start < stop".to_owned());
+    }
+    if points == 0 {
+        return Err("frequency sweep point count must be > 0".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_qpss(
+    tones: &[super::HbToneSpec],
+    max_iterations: usize,
+    relative_tolerance: f64,
+    autonomous: bool,
+    oscillator_node: Option<&str>,
+) -> Result<(), String> {
+    if tones.len() < 2 {
+        return Err("QPSS requires at least two tones".to_owned());
+    }
+    if tones
+        .iter()
+        .any(|tone| !tone.frequency.is_finite() || tone.frequency <= 0.0 || tone.harmonics == 0)
+    {
+        return Err(
+            "QPSS tones require positive finite frequencies and harmonic orders".to_owned(),
+        );
+    }
+    if max_iterations == 0 || !relative_tolerance.is_finite() || relative_tolerance <= 0.0 {
+        return Err("QPSS requires positive iterations and relative tolerance".to_owned());
+    }
+    if autonomous && oscillator_node.is_none_or(|node| node.trim().is_empty()) {
+        return Err("autonomous QPSS requires an oscillator node".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_periodic_network(
+    start: f64,
+    stop: f64,
+    points: usize,
+    ports: &[super::SpPort],
+    max_sideband: usize,
+) -> Result<(), String> {
+    validate_frequency_sweep(start, stop, points)?;
+    if ports.is_empty() || max_sideband == 0 {
+        return Err(
+            "periodic network analysis requires a port and positive max_sideband".to_owned(),
+        );
+    }
+    for (index, port) in ports.iter().enumerate() {
+        if port.node_pos.trim().is_empty() || port.node_neg.trim().is_empty() {
+            return Err(format!(
+                "periodic network port {} requires both nodes",
+                index + 1
+            ));
+        }
+        if port.z0.is_some_and(|z0| !z0.is_finite() || z0 <= 0.0) {
+            return Err(format!(
+                "periodic network port {} z0 must be > 0",
+                index + 1
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
