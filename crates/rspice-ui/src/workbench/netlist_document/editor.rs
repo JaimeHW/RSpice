@@ -409,6 +409,14 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
             vec![Diagnostic::error(message).with_line(line.checked_sub(1))],
             None,
         ),
+        Err(
+            ref error @ rspice_core::netlist::ParseError::MissingSubcircuitEnds {
+                ref opened_at, ..
+            },
+        ) => (
+            vec![Diagnostic::error(error.to_string()).with_line(opened_at.line.checked_sub(1))],
+            None,
+        ),
         Err(other) => (vec![Diagnostic::error(other.to_string())], None),
     }
 }
@@ -456,6 +464,21 @@ mod tests {
         assert!(diagnostic.span.is_none());
         assert!(diagnostic.fix.is_none());
         assert!(!diagnostic.message.trim().is_empty());
+    }
+
+    #[test]
+    fn parse_buffer_maps_missing_ends_to_opening_line() {
+        let source = "* missing ends\n.subckt Cell a b\nR1 a b 1\n.end\n";
+
+        let (diagnostics, symbols) = parse_buffer(source);
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostic.line, Some(1));
+        assert!(diagnostic.message.contains("Subcircuit CELL missing .ENDS"));
+        assert!(diagnostic.message.contains("reached .END"));
     }
 
     #[test]

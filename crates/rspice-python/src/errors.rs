@@ -63,13 +63,57 @@ create_exception!(
 
 /// Convert a parse error to PyErr
 pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
-    use rspice_core::netlist::ParseError as CoreParseError;
+    use rspice_core::netlist::{MissingSubcircuitEndsBoundary, ParseError as CoreParseError};
 
     let message = err.to_string();
-    let (kind, line, detail) = match &err {
-        CoreParseError::Syntax { line, message } => ("syntax", Some(*line), Some(message.as_str())),
-        CoreParseError::UnknownDevice(value) => ("unknown_device", None, Some(value.as_str())),
-        CoreParseError::InvalidNode(value) => ("invalid_node", None, Some(value.as_str())),
+    let (
+        kind,
+        line,
+        detail,
+        source,
+        detected_line,
+        detected_source,
+        boundary,
+        authored_name,
+        canonical_name,
+        qualified_name,
+    ) = match &err {
+        CoreParseError::Syntax { line, message } => (
+            "syntax",
+            Some(*line),
+            Some(message.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        CoreParseError::UnknownDevice(value) => (
+            "unknown_device",
+            None,
+            Some(value.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        CoreParseError::InvalidNode(value) => (
+            "invalid_node",
+            None,
+            Some(value.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
         CoreParseError::DuplicateName {
             canonical_name,
             duplicate_line,
@@ -77,16 +121,84 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         } => (
             "duplicate_name",
             Some(*duplicate_line),
-            Some(canonical_name.as_str()),
+            Some(canonical_name.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ),
-        CoreParseError::MissingParameter(value) => {
-            ("missing_parameter", None, Some(value.as_str()))
-        }
-        CoreParseError::UndefinedParameter(value) => {
-            ("undefined_parameter", None, Some(value.as_str()))
-        }
-        CoreParseError::InvalidValue(value) => ("invalid_value", None, Some(value.as_str())),
-        CoreParseError::Io(_) => ("io", None, None),
+        CoreParseError::MissingSubcircuitEnds {
+            authored_name,
+            canonical_name,
+            qualified_name,
+            opened_at,
+            detected_at,
+            boundary,
+        } => (
+            "missing_subcircuit_ends",
+            Some(opened_at.line),
+            Some(canonical_name.clone()),
+            opened_at
+                .path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            Some(detected_at.line),
+            detected_at
+                .path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            Some(
+                match boundary {
+                    MissingSubcircuitEndsBoundary::EndCard => "end_card",
+                    MissingSubcircuitEndsBoundary::AlterCard => "alter_card",
+                    MissingSubcircuitEndsBoundary::EndOfSource => "end_of_source",
+                }
+                .to_string(),
+            ),
+            Some(authored_name.clone()),
+            Some(canonical_name.clone()),
+            Some(qualified_name.clone()),
+        ),
+        CoreParseError::MissingParameter(value) => (
+            "missing_parameter",
+            None,
+            Some(value.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        CoreParseError::UndefinedParameter(value) => (
+            "undefined_parameter",
+            None,
+            Some(value.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        CoreParseError::InvalidValue(value) => (
+            "invalid_value",
+            None,
+            Some(value.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        CoreParseError::Io(_) => ("io", None, None, None, None, None, None, None, None, None),
     };
     let error = ParseError::new_err(message);
     let _attribute_result = Python::attach(|py| {
@@ -94,6 +206,13 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         value.setattr("kind", kind)?;
         value.setattr("line", line)?;
         value.setattr("detail", detail)?;
+        value.setattr("source", source)?;
+        value.setattr("detected_line", detected_line)?;
+        value.setattr("detected_source", detected_source)?;
+        value.setattr("boundary", boundary)?;
+        value.setattr("authored_name", authored_name)?;
+        value.setattr("canonical_name", canonical_name)?;
+        value.setattr("qualified_name", qualified_name)?;
         Ok::<_, PyErr>(())
     });
     error

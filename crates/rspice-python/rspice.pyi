@@ -1,7 +1,7 @@
 """Type stubs for the rspice extension module."""
 
 import os
-from typing import Iterator, Sequence, final
+from typing import Iterator, Literal, Sequence, final
 
 import numpy as np
 import numpy.typing as npt
@@ -69,6 +69,13 @@ class ParseError(RSpiceError):
     kind: str
     line: int | None
     detail: str | None
+    source: str | None
+    detected_line: int | None
+    detected_source: str | None
+    boundary: Literal["end_card", "alter_card", "end_of_source"] | None
+    authored_name: str | None
+    canonical_name: str | None
+    qualified_name: str | None
 
 class SimulationError(RSpiceError):
     """Raised when simulation fails due to circuit or solver errors."""

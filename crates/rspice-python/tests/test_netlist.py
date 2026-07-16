@@ -85,6 +85,29 @@ class TestParseFile:
         )
         assert netlist.num_elements == 3
 
+    def test_missing_ends_exposes_included_source_provenance(
+        self, tmp_path: pathlib.Path
+    ):
+        child = tmp_path / "missing.ends"
+        child.write_text(".subckt testsub a b\nR1 a b 1\n")
+        deck = tmp_path / "deck.cir"
+        deck.write_text("missing ends\n.include missing.ends\n.end\n")
+
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse_file(deck)
+
+        error = exc_info.value
+        assert error.kind == "missing_subcircuit_ends"
+        assert error.line == 1
+        assert pathlib.Path(error.source).resolve() == child.resolve()
+        assert error.detected_line == 3
+        assert pathlib.Path(error.detected_source).resolve() == child.resolve()
+        assert error.boundary == "end_of_source"
+        assert error.authored_name == "testsub"
+        assert error.canonical_name == "TESTSUB"
+        assert error.qualified_name == "TESTSUB"
+        assert error.detail == "TESTSUB"
+
 
 class TestIntrospection:
     def test_counts_and_names(self):
