@@ -295,6 +295,14 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "expected_failure_missing_subcircuit_name_parse",
         ),
         (
+            "Netlists/Message/Subcircuit/subckt_a2_dup_error.cir",
+            "expected_failure_message_subckt_a2_duplicate_binding_build",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_j1_dup_error.cir",
+            "expected_failure_message_subckt_j1_duplicate_binding_build",
+        ),
+        (
             "Netlists/Message/Subcircuit/subckt_missing_ends.cir",
             "expected_failure_subckt_missing_ends_end_card_parse",
         ),
@@ -439,8 +447,8 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        37,
-        "the expected-failure oracle census is exactly thirty-seven distinct physical records"
+        39,
+        "the expected-failure oracle census is exactly thirty-nine distinct physical records"
     );
 }
 

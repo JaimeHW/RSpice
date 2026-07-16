@@ -22,10 +22,10 @@ use crate::netlist::expr::{
 };
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, DeviceInitialConditionError, DeviceInitialConditionSource,
-    ElementKind, ExpressionDialect, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError,
-    Netlist, NetlistParseOptions, ParameterRedefinitionPolicy, ParametricValue, ParseError,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    DuplicateSubcircuitPortBindingError, ElementKind, ExpressionDialect,
+    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist, NetlistParseOptions,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, StatisticalParamMode, StepCommand,
+    StepSweep, StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -139,6 +139,10 @@ const XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/subcircuit/subckt_missing_ends3.cir";
 const XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/subcircuit/subckt_missing_ends4.cir";
+const XYCE_SUBCKT_A2_DUP_BINDING_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/subcircuit/subckt_a2_dup_error.cir";
+const XYCE_SUBCKT_J1_DUP_BINDING_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/subcircuit/subckt_j1_dup_error.cir";
 const XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD: &str =
     "netlists/message/input/dc_excessargs.cir";
 const XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD: &str =
@@ -219,6 +223,10 @@ const XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_SOURCE_BLAKE3: &str =
     "0b74635ac9a645a8e9604152ef35223c5e98b351edab65b49baf3c1008ed62c2";
 const XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_SOURCE_BLAKE3: &str =
     "16e9eb7f9f462997ea78c9ea2e9974c9816f2810c9de647ee430345575273334";
+const XYCE_SUBCKT_A2_DUP_BINDING_SOURCE_BLAKE3: &str =
+    "ef26ce0ef8c46541453810ca118f555f600d75f9ade4ff75f02aef26933ff4ee";
+const XYCE_SUBCKT_J1_DUP_BINDING_SOURCE_BLAKE3: &str =
+    "c1519e204897df0c4002245cdc259549c21751798ebca58e08b79d9affe4d453";
 const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3: &str =
     "7e198f9c1c164fa0a80560c99a8f5e85777ae6e19a1484b954459692db603661";
 const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES: usize = 43;
@@ -381,6 +389,8 @@ enum XyceExpectedFailureKind {
     MessageSubcircuitMissingEndsIncludeEof,
     MessageSubcircuitMissingEndsTopLevelEof,
     MessageSubcircuitMissingEndsTsInvEof,
+    MessageSubcircuitDuplicateBindingA2,
+    MessageSubcircuitDuplicateBindingJ1,
     MessageDcExcessArguments,
     MessageAcUnsupportedSweepType,
     MessageNoiseUnsupportedSweepType,
@@ -537,6 +547,12 @@ impl XyceExpectedFailureKind {
             XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD => {
                 Some(Self::MessageSubcircuitMissingEndsTsInvEof)
             }
+            XYCE_SUBCKT_A2_DUP_BINDING_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageSubcircuitDuplicateBindingA2)
+            }
+            XYCE_SUBCKT_J1_DUP_BINDING_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessageSubcircuitDuplicateBindingJ1)
+            }
             XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD => Some(Self::MessageDcExcessArguments),
             XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD => {
                 Some(Self::MessageAcUnsupportedSweepType)
@@ -620,6 +636,12 @@ impl XyceExpectedFailureKind {
             Self::MessageSubcircuitMissingEndsTsInvEof => {
                 XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD
             }
+            Self::MessageSubcircuitDuplicateBindingA2 => {
+                XYCE_SUBCKT_A2_DUP_BINDING_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessageSubcircuitDuplicateBindingJ1 => {
+                XYCE_SUBCKT_J1_DUP_BINDING_EXPECTED_FAILURE_RECORD
+            }
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD,
             Self::MessageAcUnsupportedSweepType => {
                 XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD
@@ -686,6 +708,8 @@ impl XyceExpectedFailureKind {
             Self::MessageSubcircuitMissingEndsTsInvEof => {
                 XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_SOURCE_BLAKE3
             }
+            Self::MessageSubcircuitDuplicateBindingA2 => XYCE_SUBCKT_A2_DUP_BINDING_SOURCE_BLAKE3,
+            Self::MessageSubcircuitDuplicateBindingJ1 => XYCE_SUBCKT_J1_DUP_BINDING_SOURCE_BLAKE3,
             Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3,
             Self::MessageAcUnsupportedSweepType => XYCE_AC_UNSUPPORTED_SWEEP_SOURCE_BLAKE3,
             Self::MessageNoiseUnsupportedSweepType => XYCE_NOISE_UNSUPPORTED_SWEEP_SOURCE_BLAKE3,
@@ -739,6 +763,12 @@ impl XyceExpectedFailureKind {
             }
             Self::MessageSubcircuitMissingEndsTsInvEof => {
                 "expected_failure_subckt_missing_ends_ts_inv_eof_parse"
+            }
+            Self::MessageSubcircuitDuplicateBindingA2 => {
+                "expected_failure_message_subckt_a2_duplicate_binding_build"
+            }
+            Self::MessageSubcircuitDuplicateBindingJ1 => {
+                "expected_failure_message_subckt_j1_duplicate_binding_build"
             }
             Self::MessageDcExcessArguments => "expected_failure_dc_excess_arguments_parse",
             Self::MessageAcUnsupportedSweepType => {
@@ -830,6 +860,14 @@ impl XyceExpectedFailureKind {
                 "Subcircuit TESTSUB missing .ENDS",
             ][..],
             Self::MessageSubcircuitMissingEndsTsInvEof => &["Subcircuit TS_INV missing .ENDS"][..],
+            Self::MessageSubcircuitDuplicateBindingA2 => &[
+                "Duplicate nodes in .subckt INV1 point to different nodes in X line invocation",
+                "Error invoking subcircuit INV1 instance XINV1",
+            ][..],
+            Self::MessageSubcircuitDuplicateBindingJ1 => &[
+                "Duplicate nodes in .subckt ONEBIT point to different nodes in X line invocation",
+                "Error invoking subcircuit ONEBIT instance X1",
+            ][..],
             Self::MessageDcExcessArguments => &["Extraneous values"][..],
             Self::MessageAcUnsupportedSweepType => &["Unsupported AC sweep type: BOGO"][..],
             Self::MessageNoiseUnsupportedSweepType => &["Unsupported NOISE sweep type: BOGO"][..],
@@ -985,6 +1023,36 @@ impl XyceExpectedFailureKind {
                     "subckt_missing_ends4.cir:22".to_string(),
                     "subckt_missing_ends4.cir:32".to_string(),
                     "END_OF_SOURCE".to_string(),
+                ],
+            },
+            Self::MessageSubcircuitDuplicateBindingA2 => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::CircuitBuild,
+                category: XyceExpectedFailureCategory::DuplicateSubcircuitPortBinding,
+                identifiers: vec![
+                    "INV1".to_string(),
+                    "Xinv1".to_string(),
+                    "XINV1".to_string(),
+                    "Xinv1".to_string(),
+                    "GND".to_string(),
+                    "4".to_string(),
+                    "8".to_string(),
+                    "0".to_string(),
+                    "VDD".to_string(),
+                ],
+            },
+            Self::MessageSubcircuitDuplicateBindingJ1 => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::CircuitBuild,
+                category: XyceExpectedFailureCategory::DuplicateSubcircuitPortBinding,
+                identifiers: vec![
+                    "ONEBIT".to_string(),
+                    "X1".to_string(),
+                    "X1".to_string(),
+                    "X1".to_string(),
+                    "6".to_string(),
+                    "6".to_string(),
+                    "8".to_string(),
+                    "99".to_string(),
+                    "1".to_string(),
                 ],
             },
             Self::MessageDcExcessArguments => XyceExpectedFailureObservation {
@@ -1203,7 +1271,9 @@ impl XyceExpectedFailureKind {
             | Self::MessageSubcircuitMissingEndsEndCard
             | Self::MessageSubcircuitMissingEndsIncludeEof
             | Self::MessageSubcircuitMissingEndsTopLevelEof
-            | Self::MessageSubcircuitMissingEndsTsInvEof => Some(XyceExpectedFailureFamilyCensus {
+            | Self::MessageSubcircuitMissingEndsTsInvEof
+            | Self::MessageSubcircuitDuplicateBindingA2
+            | Self::MessageSubcircuitDuplicateBindingJ1 => Some(XyceExpectedFailureFamilyCensus {
                 physical_cir_count: 8,
                 physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
                 manifest_owner_count: 8,
@@ -1288,6 +1358,8 @@ impl XyceExpectedFailureKind {
             self,
             Self::MessageAcUnsupportedSweepType
                 | Self::MessageNoiseUnsupportedSweepType
+                | Self::MessageSubcircuitDuplicateBindingA2
+                | Self::MessageSubcircuitDuplicateBindingJ1
                 | Self::MessageMissingLibraryEndl
                 | Self::MessageMissingLibraryFileUnquoted
                 | Self::MessageMissingLibraryFileQuoted
@@ -1324,6 +1396,7 @@ enum XyceExpectedFailureCategory {
     MissingLibraryEndl,
     MissingSubcircuitName,
     MissingSubcircuitEnds,
+    DuplicateSubcircuitPortBinding,
     DcExcessArguments,
     InvalidFrequencySweepType,
     MissingLibraryFile,
@@ -5374,6 +5447,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof => {
                 Self::observe_missing_subcircuit_ends_failure(source, &deck.path, kind)?
             }
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2
+            | XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1 => {
+                Self::observe_message_duplicate_subcircuit_binding_failure(
+                    source, &deck.path, kind,
+                )?
+            }
             XyceExpectedFailureKind::MessageDcExcessArguments => {
                 Self::observe_dc_excess_args_failure(source, &deck.path)?
             }
@@ -6361,6 +6440,153 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 Self::expected_failure_location_identifier(&opened_at)?,
                 Self::expected_failure_location_identifier(&detected_at)?,
                 boundary_identifier.to_string(),
+            ],
+        })
+    }
+
+    fn observe_message_duplicate_subcircuit_binding_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let (label, file_name, expected_error) = match kind {
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2 => {
+                Self::require_expected_failure_source_lines(
+                    "Message/Subcircuit subckt_a2_dup_error",
+                    source,
+                    82,
+                    &[
+                        (28, ".subckt INV1 IN OUT VDD GND IN OUT VDD GND"),
+                        (47, ".ends"),
+                        (49, ".subckt INV2 IN OUT VDD GND IN OUT VDD GND"),
+                        (68, ".ends"),
+                        (70, "Xinv1 IN MID VDD 0 IN MID VDD VDD INV1"),
+                        (71, "Xinv2 MID OUT VDD 0 MID OUT VDD 0 INV2"),
+                        (78, ".tran 20ns 30us"),
+                        (79, ".print tran PRECISION=10 WIDTH=19 v(out) v(in) v(1)"),
+                        (82, ".end"),
+                    ],
+                )?;
+                (
+                    "Message/Subcircuit subckt_a2_dup_error",
+                    "subckt_a2_dup_error.cir",
+                    DuplicateSubcircuitPortBindingError {
+                        subcircuit_name: "INV1".to_string(),
+                        instance_name: "Xinv1".to_string(),
+                        canonical_instance_name: "XINV1".to_string(),
+                        qualified_instance_name: "Xinv1".to_string(),
+                        formal_port: "GND".to_string(),
+                        first_position: 4,
+                        conflicting_position: 8,
+                        first_actual_node: "0".to_string(),
+                        conflicting_actual_node: "VDD".to_string(),
+                    },
+                )
+            }
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1 => {
+                Self::require_expected_failure_source_lines(
+                    "Message/Subcircuit subckt_j1_dup_error",
+                    source,
+                    93,
+                    &[
+                        (29, "X1 1 2 3 9 13 99 99 1 ONEBIT"),
+                        (42, ".TRAN 0.5N 200N"),
+                        (43, ".PRINT TRAN V(1) V(2) V(3) V(9) V(13)"),
+                        (45, ".options linsol type=klu"),
+                        (46, ".OPTIONS TIMEINT ABSTOL=1.0E-3 RELTOL=1.0E-3"),
+                        (48, ".subckt myres 1 2"),
+                        (51, ".ends"),
+                        (53, ".SUBCKT ONEBIT 1 2 3 4 5 6 6 6"),
+                        (71, ".SUBCKT AND 1 2 3 4 1 2 3 4"),
+                        (79, ".SUBCKT XOR 1 2 3 4 1  p1=0 r=1"),
+                        (
+                            89,
+                            "X4 3 7 9 6 3 7 9 6 AND ; these two lines of ONEBIT here to test context switching",
+                        ),
+                        (91, ".ENDS ONEBIT"),
+                        (93, ".END   "),
+                    ],
+                )?;
+                (
+                    "Message/Subcircuit subckt_j1_dup_error",
+                    "subckt_j1_dup_error.cir",
+                    DuplicateSubcircuitPortBindingError {
+                        subcircuit_name: "ONEBIT".to_string(),
+                        instance_name: "X1".to_string(),
+                        canonical_instance_name: "X1".to_string(),
+                        qualified_instance_name: "X1".to_string(),
+                        formal_port: "6".to_string(),
+                        first_position: 6,
+                        conflicting_position: 8,
+                        first_actual_node: "99".to_string(),
+                        conflicting_actual_node: "1".to_string(),
+                    },
+                )
+            }
+            _ => {
+                return Err(format!(
+                    "non-duplicate-binding expected-failure kind passed to duplicate-binding observer: {kind:?}"
+                ));
+            }
+        };
+        Self::require_expected_failure_file_name(label, deck_path, file_name)?;
+
+        let netlist = Self::parse_xyce_netlist(source, deck_path)
+            .map_err(|error| format!("{label} must parse before hierarchy validation: {error}"))?;
+        let diagnostics_are_exact = match kind {
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2 => {
+                netlist.diagnostics.is_empty()
+            }
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1 => {
+                netlist.diagnostics.len() == 2
+                    && netlist.diagnostics[0].line == 45
+                    && netlist.diagnostics[0].code == "unknown-option"
+                    && netlist.diagnostics[0].message == "unknown .options key 'LINSOL' ignored"
+                    && netlist.diagnostics[1].line == 45
+                    && netlist.diagnostics[1].code == "unknown-option"
+                    && netlist.diagnostics[1].message == "unknown .options key 'TYPE' ignored"
+            }
+            _ => false,
+        };
+        if !diagnostics_are_exact {
+            return Err(format!(
+                "{label} parser diagnostics changed: {:?}",
+                netlist.diagnostics
+            ));
+        }
+
+        let error = match crate::netlist::flatten_netlist_with_models(&netlist) {
+            Err(error) => error,
+            Ok(_) => {
+                return Err(format!(
+                    "{label} unexpectedly flattened; the conflicting duplicate-formal binding is absent"
+                ));
+            }
+        };
+        let ParseError::DuplicateSubcircuitPortBinding(actual_error) = error else {
+            return Err(format!(
+                "{label} produced the wrong typed hierarchy failure: {error:?}"
+            ));
+        };
+        if *actual_error != expected_error {
+            return Err(format!(
+                "{label} duplicate-formal binding observation changed: expected {expected_error:?}, got {actual_error:?}"
+            ));
+        }
+
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::CircuitBuild,
+            category: XyceExpectedFailureCategory::DuplicateSubcircuitPortBinding,
+            identifiers: vec![
+                actual_error.subcircuit_name,
+                actual_error.instance_name,
+                actual_error.canonical_instance_name,
+                actual_error.qualified_instance_name,
+                actual_error.formal_port,
+                actual_error.first_position.to_string(),
+                actual_error.conflicting_position.to_string(),
+                actual_error.first_actual_node,
+                actual_error.conflicting_actual_node,
             ],
         })
     }
@@ -68583,6 +68809,20 @@ R2 2 0 1
                 &["Subcircuit name required"][..],
             ),
             (
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+                &[
+                    "Duplicate nodes in .subckt INV1 point to different nodes in X line invocation",
+                    "Error invoking subcircuit INV1 instance XINV1",
+                ][..],
+            ),
+            (
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+                &[
+                    "Duplicate nodes in .subckt ONEBIT point to different nodes in X line invocation",
+                    "Error invoking subcircuit ONEBIT instance X1",
+                ][..],
+            ),
+            (
                 XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
                 &["Subcircuit TESTSUB missing .ENDS"][..],
             ),
@@ -68772,7 +69012,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_thirty_seven_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_thirty_nine_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -68920,6 +69160,14 @@ R2 2 0 1
                     XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
                 ),
                 (
+                    XYCE_SUBCKT_A2_DUP_BINDING_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+                ),
+                (
+                    XYCE_SUBCKT_J1_DUP_BINDING_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+                ),
+                (
                     XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
                 ),
@@ -68947,7 +69195,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            37,
+            39,
             "each record requires a distinct contract"
         );
     }
@@ -68976,6 +69224,14 @@ R2 2 0 1
             (
                 "Netlists/Certification_Tests/BUG_387_SON/bug_387.cir",
                 "expected_failure_missing_library_endl_parse",
+            ),
+            (
+                "Netlists/Message/Subcircuit/subckt_a2_dup_error.cir",
+                "expected_failure_message_subckt_a2_duplicate_binding_build",
+            ),
+            (
+                "Netlists/Message/Subcircuit/subckt_j1_dup_error.cir",
+                "expected_failure_message_subckt_j1_duplicate_binding_build",
             ),
             (
                 "Netlists/Message/Subcircuit/subckt_noname.cir",
@@ -69130,6 +69386,8 @@ R2 2 0 1
             XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof,
             XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
             XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
         ] {
             assert_eq!(member.shared_family_census(), message_subcircuit_census);
         }
@@ -69383,6 +69641,51 @@ R2 2 0 1
                     .is_some_and(|error| error.contains("must not own checked-in output artifacts")),
             "target artifact must fail closed: {result:?}"
         );
+        fs::remove_file(&artifact).expect("remove noname output artifact");
+
+        for file_name in ["subckt_a2_dup_error.cir", "subckt_j1_dup_error.cir"] {
+            let target_path = temp_family.join(file_name);
+            let run_target = || {
+                XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&target_path)
+            };
+            let canonical_target = run_target();
+            assert!(
+                canonical_target.passed && !canonical_target.expected_unsupported,
+                "canonical copied {file_name} must execute its typed adapter: {canonical_target:?}"
+            );
+
+            let source = fs::read(&target_path)
+                .unwrap_or_else(|error| panic!("read copied {file_name}: {error}"));
+            let mut changed_source = source.clone();
+            changed_source.extend_from_slice(b"\r\n");
+            fs::write(&target_path, changed_source)
+                .unwrap_or_else(|error| panic!("mutate copied {file_name}: {error}"));
+            let changed = run_target();
+            assert!(
+                !changed.passed
+                    && changed
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains("source digest changed")),
+                "{file_name} source mutation must fail its pinned digest: {changed:?}"
+            );
+            fs::write(&target_path, &source)
+                .unwrap_or_else(|error| panic!("restore copied {file_name}: {error}"));
+
+            let artifact = output_dir.join(format!("{}.ERR", file_name.to_ascii_uppercase()));
+            fs::write(&artifact, "forbidden")
+                .unwrap_or_else(|error| panic!("write {file_name} artifact: {error}"));
+            let artifact_result = run_target();
+            assert!(
+                !artifact_result.passed
+                    && artifact_result.error.as_deref().is_some_and(|error| {
+                        error.contains("must not own checked-in output artifacts")
+                    }),
+                "{file_name} artifact must fail closed: {artifact_result:?}"
+            );
+            fs::remove_file(artifact)
+                .unwrap_or_else(|error| panic!("remove {file_name} artifact: {error}"));
+        }
 
         fs::remove_dir_all(temp_root).expect("remove shared-family provenance fixture");
     }
@@ -69736,6 +70039,88 @@ R2 2 0 1
                 XyceTestRunner::observe_subckt_noname_failure(&mutated, &path).is_err(),
                 "{label} must not satisfy subckt_noname"
             );
+        }
+    }
+
+    #[test]
+    fn duplicate_subcircuit_binding_observers_reject_corrections_shifts_and_identity_mutations() {
+        let root = expected_failure_test_root();
+        let family = root.join("Netlists/Message/Subcircuit");
+        for (file_name, kind, malformed, corrected, alternate_conflict) in [
+            (
+                "subckt_a2_dup_error.cir",
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+                "Xinv1 IN MID VDD 0 IN MID VDD VDD INV1",
+                "Xinv1 IN MID VDD 0 IN MID VDD 0 INV1",
+                "Xinv1 IN MID VDD 0 OTHER MID VDD 0 INV1",
+            ),
+            (
+                "subckt_j1_dup_error.cir",
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+                "X1 1 2 3 9 13 99 99 1 ONEBIT",
+                "X1 1 2 3 9 13 99 99 99 ONEBIT",
+                "X1 1 2 3 9 13 99 1 99 ONEBIT",
+            ),
+        ] {
+            let path = family.join(file_name);
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {file_name}: {error}"));
+            XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                &source, &path, kind,
+            )
+            .unwrap_or_else(|error| {
+                panic!("canonical {file_name} duplicate binding is observed: {error}")
+            });
+
+            let corrected_source = source.replacen(malformed, corrected, 1);
+            assert_ne!(corrected_source, source);
+            let corrected_netlist = XyceTestRunner::parse_xyce_netlist(&corrected_source, &path)
+                .unwrap_or_else(|error| panic!("corrected {file_name} parses: {error}"));
+            crate::netlist::flatten_netlist_with_models(&corrected_netlist)
+                .unwrap_or_else(|error| panic!("corrected {file_name} flattens: {error}"));
+            assert!(
+                XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                    &corrected_source,
+                    &path,
+                    kind,
+                )
+                .is_err(),
+                "corrected {file_name} must not satisfy its duplicate-binding oracle"
+            );
+
+            let moved_conflict = source.replacen(malformed, alternate_conflict, 1);
+            assert_ne!(moved_conflict, source);
+            assert!(
+                XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                    &moved_conflict,
+                    &path,
+                    kind,
+                )
+                .is_err(),
+                "{file_name} conflict-position mutation must fail closed"
+            );
+
+            let shifted = format!("\r\n{source}");
+            assert!(
+                XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                    &shifted, &path, kind,
+                )
+                .is_err(),
+                "shifted {file_name} must fail exact authored-line provenance"
+            );
+
+            let temp_dir = unique_expected_failure_temp_dir("duplicate-subckt-binding-path");
+            fs::create_dir_all(&temp_dir).expect("create duplicate-binding path fixture");
+            let renamed = temp_dir.join("renamed.cir");
+            fs::write(&renamed, &source).expect("write renamed duplicate-binding fixture");
+            assert!(
+                XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                    &source, &renamed, kind,
+                )
+                .is_err(),
+                "renamed {file_name} must fail exact record identity"
+            );
+            fs::remove_dir_all(temp_dir).expect("remove duplicate-binding path fixture");
         }
     }
 
@@ -70110,6 +70495,14 @@ R2 2 0 1
             .expect("write allowed options");
 
         for (kind, file_name) in [
+            (
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+                "subckt_a2_dup_error.cir",
+            ),
+            (
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+                "subckt_j1_dup_error.cir",
+            ),
             (
                 XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
                 "AC_setupSweepParam.cir",
