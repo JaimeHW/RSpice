@@ -289,6 +289,36 @@ pub fn behavioral_expression_references_runtime_quantity(expression: &str) -> bo
     net_expr_references_runtime_quantity(&parsed)
 }
 
+/// Return whether an expression depends specifically on the active AC
+/// frequency. Unlike textual scans, this ignores quoted text, function formal
+/// names, and parameter-definition left-hand sides.
+pub fn behavioral_expression_references_frequency(expression: &str) -> bool {
+    if let Ok(expression) = crate::expr::parse_expression_strict(expression) {
+        return strict_expr_references_frequency(&expression);
+    }
+    parse_net_expr(expression)
+        .ok()
+        .is_some_and(|expression| net_expr_references_frequency(&expression))
+}
+
+/// Return whether an expression contains an AC frequency symbol that is not
+/// explicitly bound in the supplied parameter scope.
+///
+/// Parsing the permissive parameter AST first preserves the distinction
+/// between `FREQ` and `HERTZ` so user-defined constants can shadow either
+/// spelling without freezing genuinely runtime-dependent globals.
+pub fn behavioral_expression_references_unbound_frequency(
+    expression: &str,
+    params: &ParamContext,
+) -> bool {
+    if let Ok(expression) = parse_net_expr(expression) {
+        return net_expr_references_unbound_frequency(&expression, params);
+    }
+    crate::expr::parse_expression_strict(expression)
+        .ok()
+        .is_some_and(|expression| strict_expr_references_frequency(&expression))
+}
+
 fn strict_expr_references_runtime_quantity(expression: &crate::expr::Expr) -> bool {
     match expression {
         crate::expr::Expr::NodeVoltage(_)
@@ -308,6 +338,26 @@ fn strict_expr_references_runtime_quantity(expression: &crate::expr::Expr) -> bo
         }
         crate::expr::Expr::Const(_)
         | crate::expr::Expr::StringLiteral(_)
+        | crate::expr::Expr::Temperature => false,
+    }
+}
+
+fn strict_expr_references_frequency(expression: &crate::expr::Expr) -> bool {
+    match expression {
+        crate::expr::Expr::Frequency => true,
+        crate::expr::Expr::Unary { operand, .. } => strict_expr_references_frequency(operand),
+        crate::expr::Expr::Binary { left, right, .. } => {
+            strict_expr_references_frequency(left) || strict_expr_references_frequency(right)
+        }
+        crate::expr::Expr::Function { args, .. } => {
+            args.iter().any(strict_expr_references_frequency)
+        }
+        crate::expr::Expr::Const(_)
+        | crate::expr::Expr::StringLiteral(_)
+        | crate::expr::Expr::NodeVoltage(_)
+        | crate::expr::Expr::BranchCurrent(_)
+        | crate::expr::Expr::LookupTable(_)
+        | crate::expr::Expr::Time
         | crate::expr::Expr::Temperature => false,
     }
 }
@@ -353,6 +403,43 @@ fn net_expr_references_runtime_quantity(expression: &NetExpr) -> bool {
         NetExpr::FnCall { name, args } => {
             is_circuit_probe(name) || args.iter().any(net_expr_references_runtime_quantity)
         }
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
+    }
+}
+
+fn net_expr_references_frequency(expression: &NetExpr) -> bool {
+    match expression {
+        NetExpr::Param(name) => matches!(
+            name.to_ascii_uppercase().as_str(),
+            "FREQ" | "FREQUENCY" | "F" | "HERTZ"
+        ),
+        NetExpr::UnaryOp { operand, .. } => net_expr_references_frequency(operand),
+        NetExpr::BinOp { left, right, .. } => {
+            net_expr_references_frequency(left) || net_expr_references_frequency(right)
+        }
+        NetExpr::FnCall { args, .. } => args.iter().any(net_expr_references_frequency),
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
+    }
+}
+
+fn net_expr_references_unbound_frequency(expression: &NetExpr, params: &ParamContext) -> bool {
+    match expression {
+        NetExpr::Param(name) if name.eq_ignore_ascii_case("FREQ") => params.get("FREQ").is_none(),
+        NetExpr::Param(name) if name.eq_ignore_ascii_case("HERTZ") => params.get("HERTZ").is_none(),
+        NetExpr::Param(name)
+            if name.eq_ignore_ascii_case("FREQUENCY") || name.eq_ignore_ascii_case("F") =>
+        {
+            true
+        }
+        NetExpr::Param(_) => false,
+        NetExpr::UnaryOp { operand, .. } => net_expr_references_unbound_frequency(operand, params),
+        NetExpr::BinOp { left, right, .. } => {
+            net_expr_references_unbound_frequency(left, params)
+                || net_expr_references_unbound_frequency(right, params)
+        }
+        NetExpr::FnCall { args, .. } => args
+            .iter()
+            .any(|argument| net_expr_references_unbound_frequency(argument, params)),
         NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
     }
 }

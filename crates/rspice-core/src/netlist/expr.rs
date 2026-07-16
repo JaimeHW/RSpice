@@ -26,8 +26,9 @@ pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
 };
 pub use behavioral::{
-    ParameterCircuitProbe, ParameterCircuitProbeKind,
-    behavioral_expression_references_runtime_quantity, parameter_expression_circuit_probe,
+    ParameterCircuitProbe, ParameterCircuitProbeKind, behavioral_expression_references_frequency,
+    behavioral_expression_references_runtime_quantity,
+    behavioral_expression_references_unbound_frequency, parameter_expression_circuit_probe,
     prepare_behavioral_expression, validate_global_parameter_expressions,
 };
 pub use context::{

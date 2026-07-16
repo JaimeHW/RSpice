@@ -1149,6 +1149,34 @@ fn parameter_circuit_probe_classifier_matches_xyce_classes_and_precedence() {
 }
 
 #[test]
+fn frequency_dependency_classifier_uses_expression_structure() {
+    for expression in ["FREQ", "2*PI*HERTZ", "IF(1,FREQUENCY,0)", "-F"] {
+        assert!(
+            behavioral_expression_references_frequency(expression),
+            "{expression} contains an AC frequency symbol"
+        );
+    }
+    for expression in ["5", "\"FREQ\"", "V(FREQ)", "I(HERTZ)"] {
+        assert!(
+            !behavioral_expression_references_frequency(expression),
+            "{expression} does not use frequency as an expression value"
+        );
+    }
+
+    let mut bound = ParamContext::new();
+    bound.set("FREQ", 5.0);
+    bound.set("HERTZ", 1_000.0);
+    assert!(
+        !behavioral_expression_references_unbound_frequency("FREQ+HERTZ", &bound),
+        "explicit parameter bindings shadow runtime frequency spellings"
+    );
+    assert!(
+        behavioral_expression_references_unbound_frequency("FREQUENCY", &bound),
+        "unshadowed frequency aliases remain runtime-dependent"
+    );
+}
+
+#[test]
 fn global_parameter_validation_accepts_static_statistical_projections() {
     let mut params = ParamContext::new();
     for (name, expression, value) in [

@@ -17,7 +17,9 @@ use crate::engine::{
 };
 use crate::expr::{BinaryOp, CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict};
 use crate::netlist::expr::ComplexValue as ExprComplexValue;
-use crate::netlist::expr::prepare_behavioral_expression;
+use crate::netlist::expr::{
+    behavioral_expression_references_unbound_frequency, prepare_behavioral_expression,
+};
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
     ParameterRedefinitionPolicy, ParametricValue, ParseError, StatisticalParamMode, StepCommand,
@@ -2829,9 +2831,33 @@ impl XyceTestRunner {
             || message.contains("UNDEFINED PARAMETER: HERTZ")
     }
 
-    fn text_contains_ascii_identifier(text: &str, identifier: &str) -> bool {
-        text.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-            .any(|token| token.eq_ignore_ascii_case(identifier))
+    fn text_contains_ascii_identifier_reference(text: &str, identifier: &str) -> bool {
+        let bytes = text.as_bytes();
+        let mut index = 0usize;
+        while index < bytes.len() {
+            if !(bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_') {
+                index += 1;
+                continue;
+            }
+            let start = index;
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+            {
+                index += 1;
+            }
+            if !text[start..index].eq_ignore_ascii_case(identifier) {
+                continue;
+            }
+            let mut following = index;
+            while following < bytes.len() && bytes[following].is_ascii_whitespace() {
+                following += 1;
+            }
+            if following >= bytes.len() || bytes[following] != b'=' {
+                return true;
+            }
+        }
+        false
     }
 
     fn parse_error_is_unbound_ac_frequency_dependency(
@@ -2849,14 +2875,36 @@ impl XyceTestRunner {
             return false;
         }
 
+        Self::source_has_ac_frequency_dependent_parameter(source)
+    }
+
+    fn source_has_ac_frequency_dependent_parameter(source: &str) -> bool {
         Self::logical_netlist_lines(source).into_iter().any(|line| {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
             let command = trimmed.split_whitespace().next().unwrap_or_default();
             (command.eq_ignore_ascii_case(".PARAM")
+                || command.eq_ignore_ascii_case(".CSPARAM")
                 || command.eq_ignore_ascii_case(".GLOBAL_PARAM"))
-                && (Self::text_contains_ascii_identifier(&trimmed, "FREQ")
-                    || Self::text_contains_ascii_identifier(&trimmed, "HERTZ"))
+                && (Self::text_contains_ascii_identifier_reference(&trimmed, "FREQ")
+                    || Self::text_contains_ascii_identifier_reference(&trimmed, "HERTZ"))
         })
+    }
+
+    fn parsed_netlist_has_ac_frequency_dependent_global(netlist: &Netlist) -> bool {
+        netlist
+            .params
+            .all_global_expressions()
+            .into_iter()
+            .any(|(_, expression)| {
+                prepare_behavioral_expression(&expression, &netlist.params)
+                    .ok()
+                    .is_some_and(|prepared| {
+                        behavioral_expression_references_unbound_frequency(
+                            &prepared,
+                            &netlist.params,
+                        )
+                    })
+            })
     }
 
     fn source_with_ac_frequency_bindings(source: &str, frequency: Value) -> String {
@@ -6518,6 +6566,16 @@ impl XyceTestRunner {
         }
 
         let (netlist, frequency_bound) = match Self::parse_xyce_netlist(&source, &deck.path) {
+            Ok(netlist) if Self::parsed_netlist_has_ac_frequency_dependent_global(&netlist) => {
+                let frequency_bound_source = Self::source_with_ac_frequency_bindings(&source, 1.0);
+                let netlist = Self::parse_xyce_netlist(&frequency_bound_source, &deck.path)
+                    .map_err(|retry_err| {
+                        format!(
+                            "netlist parser does not accept this Xyce deck with AC frequency bindings: {retry_err}"
+                        )
+                    })?;
+                (netlist, true)
+            }
             Ok(netlist) => (netlist, false),
             Err(err) if Self::parse_error_is_unbound_ac_frequency_dependency(&source, &err) => {
                 let frequency_bound_source = Self::source_with_ac_frequency_bindings(&source, 1.0);
@@ -53963,6 +54021,157 @@ V1 a 0 AC 1
                 .abs()
                 < 1.0e-12
         );
+    }
+
+    #[test]
+    fn ac_frequency_error_fallback_scan_covers_all_parameter_directives() {
+        for directive in [
+            ".PARAM SCALE={FREQ+1}",
+            ".CSPARAM SCALE={HERTZ+1}",
+            ".GLOBAL_PARAM SCALE={2*PI*FREQ}",
+        ] {
+            assert!(
+                XyceTestRunner::source_has_ac_frequency_dependent_parameter(&format!(
+                    "frequency parameter\n{directive}\n.end\n"
+                )),
+                "{directive} must request pointwise AC frequency binding"
+            );
+        }
+        assert!(
+            !XyceTestRunner::source_has_ac_frequency_dependent_parameter(
+                "frequency print only\n.PRINT AC FREQ HERTZ\n.end\n"
+            ),
+            "ordinary AC output columns do not require source rebinding"
+        );
+        assert!(
+            !XyceTestRunner::source_has_ac_frequency_dependent_parameter(
+                "explicit frequency params\n.PARAM FREQ=10 HERTZ=10\n.end\n"
+            ),
+            "explicit parameter definitions are bindings, not dependencies"
+        );
+    }
+
+    #[test]
+    fn parsed_ac_frequency_detection_uses_retained_expression_structure() {
+        let parse = |source: &str| {
+            XyceTestRunner::parse_xyce_netlist(source, Path::new("frequency-detection.cir"))
+                .expect("frequency-dependency fixture parses")
+        };
+        for source in [
+            "direct global\n.GLOBAL_PARAM SCALE={FREQ+1}\n.end\n",
+            "nested function global\n.FUNC SCALE(x)={x*FREQ}\n.GLOBAL_PARAM VALUE={SCALE(2)}\n.end\n",
+        ] {
+            let netlist = parse(source);
+            assert!(
+                XyceTestRunner::parsed_netlist_has_ac_frequency_dependent_global(&netlist),
+                "retained frequency dependency must be detected: {source}"
+            );
+        }
+        for source in [
+            "constant-fed global\n.PARAM FREQ=5\n.GLOBAL_PARAM VALUE={FREQ+1}\n.end\n",
+            "constant HERTZ global\n.CSPARAM HERTZ=1000\n.GLOBAL_PARAM VALUE={HERTZ+1}\n.end\n",
+            "function formal\n.FUNC ID(FREQ)={FREQ+1}\n.GLOBAL_PARAM VALUE={ID(2)}\n.end\n",
+            "quoted text\n.GLOBAL_PARAM LABEL=\"FREQ\"\n.end\n",
+        ] {
+            let netlist = parse(source);
+            assert!(
+                !XyceTestRunner::parsed_netlist_has_ac_frequency_dependent_global(&netlist),
+                "names, formals, and quoted text are not frequency dependencies: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn bug1212_static_ac_plan_binds_retained_frequency_globals_and_executes() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Certification_Tests/BUG_1212_SON/bug1212.cir";
+        let path = root.join(relative);
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+
+        let plan = runner
+            .static_ac_plan_for_deck(&deck)
+            .expect("BUG 1212 has a native frequency-bound AC plan");
+        assert!(
+            plan.frequency_bound,
+            "retained FREQ globals still require pointwise AC source binding"
+        );
+        assert!(plan.steps.is_empty());
+        assert!(plan.ac.data_points().is_none());
+
+        let result = runner.run_test(&path);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG 1212 must execute its checked-in AC oracle: {result:?}"
+        );
+        assert_eq!(result.contract, "wrapper_static_fd_prn_ac");
+        assert!(result.mismatches.is_empty());
+    }
+
+    #[test]
+    fn retained_frequency_globals_preserve_step_and_data_plan_guards() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-frequency-ac-guards-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        let netlists = root.join("Netlists/FREQ_GUARDS");
+        fs::create_dir_all(&netlists).expect("create frequency-guard fixtures");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (file_name, source, expected_error) in [
+            (
+                "step.cir",
+                "frequency STEP guard\n\
+                 .GLOBAL_PARAM SCALE={FREQ+1}\n\
+                 V1 1 0 AC 1\n\
+                 R1 1 0 {SCALE}\n\
+                 .AC LIN 2 1 2\n\
+                 .STEP PARAM UNUSED 1 2 1\n\
+                 .PRINT AC V(1)\n\
+                 .END\n",
+                ".STEP combined with AC frequency-dependent parameters is not implemented in the native Xyce oracle",
+            ),
+            (
+                "data.cir",
+                "frequency DATA guard\n\
+                 .GLOBAL_PARAM SCALE={FREQ+1}\n\
+                 V1 1 0 AC 1\n\
+                 R1 1 0 {SCALE}\n\
+                 .AC DATA=TABLE1\n\
+                 .DATA TABLE1\n\
+                 + FREQ UNUSED\n\
+                 + 1 0\n\
+                 + 2 0\n\
+                 .ENDDATA\n\
+                 .PRINT AC V(1)\n\
+                 .END\n",
+                ".AC DATA combined with AC frequency-dependent parameters is not implemented in the native Xyce oracle",
+            ),
+        ] {
+            let path = netlists.join(file_name);
+            fs::write(&path, source).expect("write frequency-guard fixture");
+            let deck = XyceDeck {
+                path,
+                relative_path: format!("Netlists/FREQ_GUARDS/{file_name}"),
+                section: XyceDeckSection::Netlists,
+            };
+            let error = runner
+                .static_ac_plan_for_deck(&deck)
+                .expect_err("unsupported frequency-bound AC plan combination must fail");
+            assert_eq!(error, expected_error, "{file_name}");
+        }
+        fs::remove_dir_all(root).expect("remove frequency-guard fixtures");
     }
 
     #[test]
