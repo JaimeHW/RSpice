@@ -404,25 +404,44 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
             diagnostics.extend(unknown_reference_diagnostics(buffer));
             (diagnostics, Some(harvest_symbols(&netlist)))
         }
-        Err(rspice_core::netlist::ParseError::Syntax { line, message }) => (
+        Err(error) => (vec![parse_error_diagnostic(error)], None),
+    }
+}
+
+fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic {
+    use rspice_core::netlist::ParseError;
+
+    match error {
+        ParseError::Syntax { line, message } => {
             // Parser lines are 1-based; `line == 0` means "unlocated".
-            vec![Diagnostic::error(message).with_line(line.checked_sub(1))],
-            None,
-        ),
-        Err(rspice_core::netlist::ParseError::MissingSubcircuitEnds(error)) => (
-            vec![
-                Diagnostic::error(error.to_string()).with_line(error.opened_at.line.checked_sub(1)),
-            ],
-            None,
-        ),
-        Err(rspice_core::netlist::ParseError::DeviceInitialCondition(error)) => {
-            let origin = device_initial_condition_diagnostic_origin(&error);
-            (
-                vec![Diagnostic::error(error.to_string()).with_line(origin.line.checked_sub(1))],
-                None,
-            )
+            Diagnostic::error(message).with_line(line.checked_sub(1))
         }
-        Err(other) => (vec![Diagnostic::error(other.to_string())], None),
+        ParseError::MissingSubcircuitEnds(error) => {
+            Diagnostic::error(error.to_string()).with_line(error.opened_at.line.checked_sub(1))
+        }
+        ParseError::DuplicateSubcircuitPortBinding(error) => Diagnostic::error(format!(
+            "{}\nInstance: {} · formal {} · positions {} and {} · effective nodes {} and {}",
+            error,
+            error.qualified_instance_name,
+            error.formal_port,
+            error.first_position,
+            error.conflicting_position,
+            error.first_actual_node,
+            error.conflicting_actual_node,
+        )),
+        ParseError::GlobalSubcircuitPortBinding(error) => Diagnostic::error(format!(
+            "{}\nInstance: {} · formal {} · position {} · effective node {}",
+            error,
+            error.qualified_instance_name,
+            error.formal_port,
+            error.position,
+            error.actual_node,
+        )),
+        ParseError::DeviceInitialCondition(error) => {
+            let origin = device_initial_condition_diagnostic_origin(&error);
+            Diagnostic::error(error.to_string()).with_line(origin.line.checked_sub(1))
+        }
+        other => Diagnostic::error(other.to_string()),
     }
 }
 
@@ -520,6 +539,52 @@ mod tests {
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
         assert_eq!(diagnostic.line, Some(2));
         assert!(diagnostic.message.contains("may appear only once"));
+    }
+
+    #[test]
+    fn duplicate_subcircuit_binding_diagnostic_preserves_hierarchy_context() {
+        let diagnostic = parse_error_diagnostic(
+            rspice_core::netlist::ParseError::DuplicateSubcircuitPortBinding(Box::new(
+                rspice_core::netlist::DuplicateSubcircuitPortBindingError {
+                    subcircuit_name: "INV1".into(),
+                    instance_name: "Xinv1".into(),
+                    canonical_instance_name: "XINV1".into(),
+                    qualified_instance_name: "TOP.Xinv1".into(),
+                    formal_port: "GND".into(),
+                    first_position: 4,
+                    conflicting_position: 8,
+                    first_actual_node: "0".into(),
+                    conflicting_actual_node: "VDD".into(),
+                },
+            )),
+        );
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostic.line, None);
+        assert!(diagnostic.message.contains("TOP.Xinv1"));
+        assert!(diagnostic.message.contains("positions 4 and 8"));
+        assert!(diagnostic.message.contains("effective nodes 0 and VDD"));
+    }
+
+    #[test]
+    fn global_subcircuit_binding_diagnostic_preserves_effective_node() {
+        let diagnostic = parse_error_diagnostic(
+            rspice_core::netlist::ParseError::GlobalSubcircuitPortBinding(Box::new(
+                rspice_core::netlist::GlobalSubcircuitPortBindingError {
+                    subcircuit_name: "CELL".into(),
+                    instance_name: "X1".into(),
+                    canonical_instance_name: "X1".into(),
+                    qualified_instance_name: "TOP.X1".into(),
+                    formal_port: "$G_SHARED".into(),
+                    position: 1,
+                    actual_node: "LOCAL".into(),
+                },
+            )),
+        );
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert!(diagnostic.message.contains("TOP.X1"));
+        assert!(diagnostic.message.contains("effective node LOCAL"));
     }
 
     #[test]

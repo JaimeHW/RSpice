@@ -72,6 +72,8 @@ class ParseError(RSpiceError):
         "invalid_node",
         "duplicate_name",
         "missing_subcircuit_ends",
+        "duplicate_subcircuit_port_binding",
+        "global_subcircuit_port_binding",
         "device_initial_condition_duplicate_directive",
         "device_initial_condition_missing_information",
         "device_initial_condition_malformed_directive",
@@ -86,7 +88,7 @@ class ParseError(RSpiceError):
         "invalid_value",
         "io",
     ]
-    category: Literal["device_initial_condition"] | None
+    category: Literal["device_initial_condition", "subcircuit_binding"] | None
     line: int | None
     detail: str | None
     source: str | None
@@ -100,6 +102,17 @@ class ParseError(RSpiceError):
     authored_name: str | None
     canonical_name: str | None
     qualified_name: str | None
+    subcircuit_name: str | None
+    instance_name: str | None
+    canonical_instance_name: str | None
+    qualified_instance_name: str | None
+    formal_port: str | None
+    first_position: int | None
+    conflicting_position: int | None
+    first_actual_node: str | None
+    conflicting_actual_node: str | None
+    position: int | None
+    actual_node: str | None
     device: str | None
     requested_path: str | None
     value_index: int | None
