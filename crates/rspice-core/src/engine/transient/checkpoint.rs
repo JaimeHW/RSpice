@@ -324,6 +324,74 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
     }
 }
 
+fn effective_device_initial_condition_projection(
+    netlist: &Netlist,
+) -> Option<Vec<(String, &'static str, Vec<Option<u64>>)>> {
+    let mut isolated = netlist.clone();
+    isolated.params = netlist.params.checkpoint_isolated_clone();
+    let flattened = flatten_netlist_with_models(&isolated).ok()?;
+    Some(
+        flattened
+            .elements
+            .iter()
+            .filter_map(|element| {
+                let canonical_name = element.name.trim().replace(':', ".").to_ascii_uppercase();
+                match &element.kind {
+                    ElementKind::Capacitor {
+                        initial_voltage, ..
+                    } => Some((
+                        canonical_name,
+                        "capacitor",
+                        vec![initial_voltage.map(f64::to_bits)],
+                    )),
+                    ElementKind::Mosfet {
+                        instance_params, ..
+                    } => {
+                        const LABELS: [&str; 5] =
+                            ["IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS"];
+                        Some((
+                            canonical_name,
+                            "mosfet",
+                            LABELS
+                                .iter()
+                                .map(|label| {
+                                    instance_params
+                                        .iter()
+                                        .rev()
+                                        .find(|(name, _)| name.eq_ignore_ascii_case(label))
+                                        .map(|(_, value)| value.to_bits())
+                                })
+                                .collect(),
+                        ))
+                    }
+                    _ => None,
+                }
+            })
+            .collect(),
+    )
+}
+
+fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, netlist: &Netlist) {
+    if netlist.device_initial_conditions.is_none() {
+        return;
+    }
+    let Some(applied) = effective_device_initial_condition_projection(netlist) else {
+        return;
+    };
+    let mut baseline = netlist.clone();
+    baseline.device_initial_conditions = None;
+    let Some(without_directive) = effective_device_initial_condition_projection(&baseline) else {
+        return;
+    };
+    if applied != without_directive {
+        hash_field(
+            hasher,
+            "effective_device_initial_condition_overlay",
+            applied,
+        );
+    }
+}
+
 /// Collision-resistant identity of the fully elaborated semantic netlist.
 /// Source paths, diagnostics, and original source spelling are excluded;
 /// expanded include/SPEF content and public post-parse AST edits are included.
@@ -347,11 +415,6 @@ pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
         "initial_conditions",
         &netlist.initial_conditions,
     );
-    hash_field(
-        &mut hasher,
-        "device_initial_conditions",
-        &netlist.device_initial_conditions,
-    );
     hash_field(&mut hasher, "node_sets", &netlist.node_sets);
     let mut global_nodes = netlist.global_nodes.iter().collect::<Vec<_>>();
     global_nodes.sort_unstable();
@@ -361,6 +424,7 @@ pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     hash_field(&mut hasher, "options", &netlist.options);
     hash_field(&mut hasher, "veriloga_includes", &netlist.veriloga_includes);
     hash_field(&mut hasher, "spef_includes", &netlist.spef_includes);
+    hash_effective_device_initial_condition_overlay(&mut hasher, netlist);
     hash_external_dependencies(&mut hasher, netlist);
     Some(hasher.finalize().to_hex().to_string())
 }
@@ -1888,7 +1952,7 @@ mod tests {
     }
 
     #[test]
-    fn initcond_directive_and_resolved_content_identity_affect_checkpoint_identity() {
+    fn initcond_checkpoint_identity_uses_effective_semantic_overlay() {
         let first = Netlist::parse("initcond checkpoint\n.INITCOND C1 IC=1\nC1 1 0 1u\n.END\n")
             .expect("first INITCOND deck parses");
         let second = Netlist::parse("initcond checkpoint\n.INITCOND C1 IC=2\nC1 1 0 1u\n.END\n")
@@ -1897,6 +1961,93 @@ mod tests {
             netlist_checkpoint_identity(&first),
             netlist_checkpoint_identity(&second),
             "semantic INITCOND values must participate in checkpoint identity"
+        );
+
+        let relocated_source = "relocated initcond\n.INITCOND C1 IC=1\nC1 1 0 1u\n.END\n";
+        let relocated_a = Netlist::parse_with_path(
+            relocated_source,
+            std::path::Path::new("location-a/deck.cir"),
+        )
+        .expect("first relocated deck parses");
+        let relocated_b = Netlist::parse_with_path(
+            relocated_source,
+            std::path::Path::new("location-b/deck.cir"),
+        )
+        .expect("second relocated deck parses");
+        assert_eq!(
+            netlist_checkpoint_identity(&relocated_a),
+            netlist_checkpoint_identity(&relocated_b),
+            "directive source paths must not perturb semantic checkpoint identity"
+        );
+
+        let colon = Netlist::parse(
+            "hierarchy spelling\n\
+             .SUBCKT CELL d g s b\n\
+             M1 d g s b MOD\n\
+             .ENDS\n\
+             .INITCOND X1:M1 IC=2,0\n\
+             X1 1 2 0 0 CELL\n\
+             .MODEL MOD NMOS\n\
+             .END\n",
+        )
+        .expect("colon hierarchy deck parses");
+        let dotted = Netlist::parse(
+            "hierarchy spelling\n\
+             .SUBCKT CELL d g s b\n\
+             M1 d g s b MOD\n\
+             .ENDS\n\
+             .INITCOND x1.m1 IC=2,0\n\
+             X1 1 2 0 0 CELL\n\
+             .MODEL MOD NMOS\n\
+             .END\n",
+        )
+        .expect("dotted hierarchy deck parses");
+        assert_eq!(
+            netlist_checkpoint_identity(&colon),
+            netlist_checkpoint_identity(&dotted),
+            "case and hierarchy-separator aliases must have one semantic identity"
+        );
+
+        let duplicate_history =
+            Netlist::parse("last wins\n.INITCOND C1 IC=1 C1 IC=2\nC1 1 0 1u\n.END\n")
+                .expect("duplicate target history parses");
+        let effective_only = Netlist::parse("last wins\n.INITCOND C1 IC=2\nC1 1 0 1u\n.END\n")
+            .expect("effective-only target parses");
+        assert_eq!(
+            netlist_checkpoint_identity(&duplicate_history),
+            netlist_checkpoint_identity(&effective_only),
+            "overwritten INITCOND history must not perturb checkpoint identity"
+        );
+
+        let no_overlay = Netlist::parse(
+            "no-op targets\n\
+             .SUBCKT CELL p n\n\
+             R1 p n 1\n\
+             .ENDS\n\
+             L1 1 0 1m IC=10\n\
+             L2 2 0 2m\n\
+             K1 L1 L2 .5\n\
+             X1 1 0 CELL\n\
+             .END\n",
+        )
+        .expect("baseline no-op target deck parses");
+        let ignored_overlay = Netlist::parse(
+            "no-op targets\n\
+             .SUBCKT CELL p n\n\
+             R1 p n 1\n\
+             .ENDS\n\
+             .INITCOND L1 IC=99 K1 IC=.1 X1 IC=7 NO_SUCH_DEVICE IC=8\n\
+             L1 1 0 1m IC=10\n\
+             L2 2 0 2m\n\
+             K1 L1 L2 .5\n\
+             X1 1 0 CELL\n\
+             .END\n",
+        )
+        .expect("ignored target deck parses");
+        assert_eq!(
+            netlist_checkpoint_identity(&no_overlay),
+            netlist_checkpoint_identity(&ignored_overlay),
+            "X/K/L and unmatched INITCOND targets are semantic no-ops"
         );
 
         let mut external = first.clone();
@@ -1927,10 +2078,21 @@ mod tests {
             panic!("external directive retained");
         };
         *content_identity = Some("b".repeat(64));
+        assert_eq!(
+            netlist_checkpoint_identity(&external),
+            netlist_checkpoint_identity(&changed_content),
+            "raw external content identity is provenance, not simulation semantics"
+        );
+        changed_content
+            .device_initial_conditions
+            .as_mut()
+            .expect("external directive retained")
+            .entries[0]
+            .values[0] = 2.0;
         assert_ne!(
             netlist_checkpoint_identity(&external),
             netlist_checkpoint_identity(&changed_content),
-            "resolved external source content identity must participate in checkpoint identity"
+            "external content that changes the effective IC value must change identity"
         );
     }
 
