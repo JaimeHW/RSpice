@@ -94,6 +94,8 @@ const XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE: f64 = 1.0e-6;
 const XYCE_ANALYTIC_FMOD_DC_RECORD: &str = "netlists/abm_nint_fmod/fmod.cir";
 const XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD: &str =
     "netlists/abm_int_floor_ceil/int_floor_ceil_bsrc.cir";
+const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
+const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
@@ -399,6 +401,47 @@ impl XyceAnalyticIntegerDcKind {
 struct XyceAnalyticIntegerDcContract {
     plan: XyceStaticDcPlan,
     kind: XyceAnalyticIntegerDcKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceResistorDtempRole {
+    Owner,
+    Reference,
+}
+
+impl XyceResistorDtempRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Owner => "resistor_dtemp_relational_wrapper_owner",
+            Self::Reference => "resistor_dtemp_relational_wrapper_reference",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceResistorDtempContract {
+    owner_plan: XyceStaticDcPlan,
+    reference_plan: XyceStaticDcPlan,
+    role: XyceResistorDtempRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceResistorDtempSnapshot {
+    resistor_name: String,
+    resistor_nodes: [String; 2],
+    resistance_bits: u64,
+    model_name: String,
+    source_name: String,
+    source_nodes: [String; 2],
+    source_value_bits: u64,
+    model_type: String,
+    model_params: Vec<(String, u64)>,
+    dc_source: String,
+    dc_start_bits: u64,
+    dc_stop_bits: u64,
+    dc_step_bits: u64,
+    probes: Vec<String>,
+    effective_temperature_bits: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2614,6 +2657,28 @@ impl XyceTestRunner {
                     start,
                     "analytic_integer_dc_wrapper",
                     format!("analytic integer DC qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.resistor_dtemp_relational_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_resistor_dtemp_relational_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "resistor_dtemp_relational_wrapper",
+                    format!("resistor DTEMP relational qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -11411,6 +11476,219 @@ impl XyceTestRunner {
                 mismatches,
             )
         }
+    }
+
+    fn run_resistor_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceResistorDtempContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        // Preserve the upstream wrapper's execution order: res_ref.cir is the
+        // independently simulated good data and res_dtemp.cir is the test.
+        let reference = match self.simulate_resistor_dtemp_step_plan(
+            &contract.reference_plan,
+            start,
+            "reference",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("resistor DTEMP reference execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let owner = match self.simulate_resistor_dtemp_step_plan(
+            &contract.owner_plan,
+            start,
+            "DTEMP owner",
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("resistor DTEMP owner execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mismatches = match self.compare_resistor_dtemp_tables(&reference, &owner) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("resistor DTEMP relational comparison failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} resistor DTEMP relational mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    fn simulate_resistor_dtemp_step_plan(
+        &self,
+        plan: &XyceStaticDcPlan,
+        start: Instant,
+        role: &str,
+    ) -> Result<XycePrnTable, String> {
+        let netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+            &plan.source,
+            &plan.deck_path,
+            plan.expression_dialect,
+            plan.parameter_redefinition_policy,
+            plan.execution_dir.as_deref(),
+        )
+        .map_err(|err| format!("{role} parse failed: {err}"))?;
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let engine = self.create_dc_engine();
+        let step_runs = Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        )
+        .map_err(|err| format!("{role} STEP expansion failed: {err}"))?;
+        if step_runs.len() != 3 {
+            return Err(format!(
+                "{role} STEP expansion produced {} batches instead of three",
+                step_runs.len()
+            ));
+        }
+
+        let mut columns = vec!["Index".to_string()];
+        columns.extend(plan.print.probes.iter().cloned());
+        let mut rows = Vec::new();
+        for (step_index, run) in step_runs.into_iter().enumerate() {
+            let results = engine
+                .run_dc_sweep2_spec_with_report_and_abort(
+                    &run.netlist,
+                    &plan.dc.source,
+                    &plan.dc.primary_spec(),
+                    plan.dc.sweep2.as_ref(),
+                    &abort,
+                )
+                .map_err(|err| {
+                    format!("{role} step {} simulation failed: {err}", step_index + 1)
+                })?;
+            if results.len() != 6 {
+                return Err(format!(
+                    "{role} step {} produced {} DC points instead of six",
+                    step_index + 1,
+                    results.len()
+                ));
+            }
+            for (row_index, point) in results.iter().enumerate() {
+                let sweep_point = XyceDcSweepPoint {
+                    primary: point.sweep_value,
+                    secondary: None,
+                };
+                let mut row = vec![row_index as Value];
+                for probe in &plan.print.probes {
+                    row.push(Self::evaluate_dc_probe(
+                        probe,
+                        &run.netlist,
+                        &plan.dc,
+                        sweep_point,
+                        &point.result,
+                        &point.device_op_report,
+                    )?);
+                }
+                rows.push(row);
+            }
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn compare_resistor_dtemp_tables(
+        &self,
+        reference: &XycePrnTable,
+        owner: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if reference.columns != owner.columns
+            || reference.columns.len() != 3
+            || reference.columns[0] != "Index"
+        {
+            return Err(format!(
+                "upstream-compatible stepped PRN columns differ or are noncanonical: reference={:?}, owner={:?}",
+                reference.columns, owner.columns
+            ));
+        }
+        if reference.rows.len() != 18 || owner.rows.len() != reference.rows.len() {
+            return Err(format!(
+                "upstream-compatible stepped PRN row census must be 18, got reference={} owner={}",
+                reference.rows.len(),
+                owner.rows.len()
+            ));
+        }
+
+        // The removed wrapper's first and effective oracle is `diff` over the
+        // two default PRNs. It supplies no good-result artifact for the
+        // attempted xyce_verify fallback, so this adapter intentionally keeps
+        // segment order, per-step Index resets, columns, and serialized numeric
+        // payload exact instead of admitting a tolerant substitute.
+        let mut mismatches = Vec::new();
+        for (row_index, (expected_row, actual_row)) in
+            reference.rows.iter().zip(&owner.rows).enumerate()
+        {
+            if expected_row.len() != reference.columns.len()
+                || actual_row.len() != owner.columns.len()
+            {
+                return Err(format!(
+                    "stepped PRN row {row_index} has a noncanonical width"
+                ));
+            }
+            let expected_index = (row_index % 6) as Value;
+            if expected_row[0].to_bits() != expected_index.to_bits()
+                || actual_row[0].to_bits() != expected_index.to_bits()
+            {
+                return Err(format!(
+                    "stepped PRN row {row_index} does not preserve the canonical per-segment Index reset"
+                ));
+            }
+            for (column_index, (&expected, &actual)) in
+                expected_row.iter().zip(actual_row).enumerate()
+            {
+                let expected_text = Self::xyce_default_prn_text(expected)?;
+                let actual_text = Self::xyce_default_prn_text(actual)?;
+                if expected_text != actual_text {
+                    let scale = expected.abs().max(actual.abs()).max(Value::MIN_POSITIVE);
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: reference.columns[column_index].clone(),
+                        expected,
+                        actual,
+                        relative_error: (expected - actual).abs() / scale,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn compare_analytic_integer_dc_table(
@@ -42868,7 +43146,7 @@ impl XyceTestRunner {
             if !metadata.is_file() || metadata.len() == 0 {
                 return Err("wrapper deck must be a nonempty regular file".to_string());
             }
-            self.reject_analytic_integer_dc_artifacts(&deck.path)?;
+            self.reject_wrapper_output_artifacts(&deck.path)?;
             let plan = self.static_dc_plan_for_path(&deck.path, ExpressionDialect::Xyce)?;
             let netlist =
                 Self::parse_xyce_netlist(&plan.source, &plan.deck_path).map_err(|err| {
@@ -42879,7 +43157,399 @@ impl XyceTestRunner {
         })())
     }
 
-    fn reject_analytic_integer_dc_artifacts(&self, deck_path: &Path) -> Result<(), String> {
+    fn resistor_dtemp_relational_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceResistorDtempContract, String>> {
+        let relative = Self::normalize_manifest_key(&deck.relative_path);
+        let role = match relative.as_str() {
+            XYCE_RESISTOR_DTEMP_OWNER_RECORD => XyceResistorDtempRole::Owner,
+            XYCE_RESISTOR_DTEMP_REFERENCE_RECORD => XyceResistorDtempRole::Reference,
+            _ => return None,
+        };
+        Some((|| {
+            let parent = deck
+                .path
+                .parent()
+                .ok_or_else(|| "resistor DTEMP record has no sibling directory".to_string())?;
+            let owner_path = parent.join("res_dtemp.cir");
+            let reference_path = parent.join("res_ref.cir");
+            if Self::normalize_manifest_key(&self.relative_key(&owner_path))
+                != XYCE_RESISTOR_DTEMP_OWNER_RECORD
+                || Self::normalize_manifest_key(&self.relative_key(&reference_path))
+                    != XYCE_RESISTOR_DTEMP_REFERENCE_RECORD
+            {
+                return Err(
+                    "owner/reference paths do not form the exact manifest-owned sibling pair"
+                        .to_string(),
+                );
+            }
+            if !self.requires_upstream_wrapper(XYCE_RESISTOR_DTEMP_OWNER_RECORD)
+                || self.requires_upstream_wrapper(XYCE_RESISTOR_DTEMP_REFERENCE_RECORD)
+            {
+                return Err(
+                    "exactly res_dtemp.cir must own the removed upstream wrapper".to_string(),
+                );
+            }
+            for (member_role, path) in [("owner", &owner_path), ("reference", &reference_path)] {
+                let metadata = fs::metadata(path)
+                    .map_err(|err| format!("could not inspect {member_role} sibling: {err}"))?;
+                if !metadata.is_file() || metadata.len() == 0 {
+                    return Err(format!(
+                        "resistor DTEMP {member_role} sibling must be a nonempty regular file"
+                    ));
+                }
+                self.reject_wrapper_output_artifacts(path)
+                    .map_err(|err| format!("resistor DTEMP {member_role} {err}"))?;
+            }
+
+            let owner_plan = self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?;
+            let reference_plan =
+                self.static_dc_plan_for_path(&reference_path, ExpressionDialect::Xyce)?;
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_path)
+                .map_err(|err| format!("owner netlist parse failed: {err}"))?;
+            let reference_netlist =
+                Self::parse_xyce_netlist(&reference_plan.source, &reference_path)
+                    .map_err(|err| format!("reference netlist parse failed: {err}"))?;
+            let owner_snapshot = Self::resistor_dtemp_snapshot(
+                &owner_plan,
+                &owner_netlist,
+                XyceResistorDtempRole::Owner,
+            )?;
+            let reference_snapshot = Self::resistor_dtemp_snapshot(
+                &reference_plan,
+                &reference_netlist,
+                XyceResistorDtempRole::Reference,
+            )?;
+            if owner_snapshot != reference_snapshot {
+                return Err(format!(
+                    "owner/reference semantics differ after TEMP-versus-DTEMP normalization: owner={owner_snapshot:?}, reference={reference_snapshot:?}"
+                ));
+            }
+            Ok(XyceResistorDtempContract {
+                owner_plan,
+                reference_plan,
+                role,
+            })
+        })())
+    }
+
+    fn resistor_dtemp_snapshot(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        role: XyceResistorDtempRole,
+    ) -> Result<XyceResistorDtempSnapshot, String> {
+        Self::validate_resistor_dtemp_statement_envelope(&plan.source, role)?;
+        if plan.execution_dir.is_some()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || !plan.diagnostics.is_empty()
+            || plan.steps.len() != 1
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+            || plan.dc.start.to_bits() != 0.0f64.to_bits()
+            || plan.dc.stop.to_bits() != 5.0f64.to_bits()
+            || plan.dc.step.to_bits() != 1.0f64.to_bits()
+            || plan.print.probes.len() != 2
+        {
+            return Err("resistor DTEMP pair requires one diagnostic-free three-member STEP, one 0:1:5 linear DC sweep, and one default two-probe PRN output".to_string());
+        }
+        let dc_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
+            .count();
+        let step_count = netlist
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Step(_)))
+            .count();
+        if netlist.analyses.len() != 2
+            || dc_count != 1
+            || step_count != 1
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || netlist.elements.len() != 2
+            || netlist.models.len() != 1
+        {
+            return Err("resistor DTEMP pair requires only one resistor, one independent source, one resistor model, one DC analysis, and one STEP analysis".to_string());
+        }
+
+        let step_values = match &plan.steps[0].sweep {
+            StepSweep::List(values) if values.len() == 3 => values,
+            _ => {
+                return Err(
+                    "resistor DTEMP pair requires an exact three-value LIST sweep".to_string(),
+                );
+            }
+        };
+        let canonical_grid = [-55.0f64, 25.0, 72.0];
+        let effective_temperatures = match role {
+            XyceResistorDtempRole::Owner => {
+                if plan.steps[0].target != StepTarget::Param
+                    || !plan.steps[0].name.eq_ignore_ascii_case("resDtemp")
+                    || plan.steps[0].param_name.is_some()
+                    || netlist.options.temp.map(Value::to_bits) != Some(27.0f64.to_bits())
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne([-82.0f64, -2.0, 45.0].into_iter().map(Value::to_bits))
+                {
+                    return Err("DTEMP owner must fix device TEMP=27 C and STEP resDtemp through -82, -2, 45 C".to_string());
+                }
+                step_values
+                    .iter()
+                    .map(|dtemp| 27.0 + dtemp)
+                    .collect::<Vec<_>>()
+            }
+            XyceResistorDtempRole::Reference => {
+                if plan.steps[0].target != StepTarget::Temp
+                    || !plan.steps[0].name.eq_ignore_ascii_case("TEMP")
+                    || plan.steps[0].param_name.is_some()
+                    || netlist.options.temp.is_some()
+                    || step_values
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .ne(canonical_grid.into_iter().map(Value::to_bits))
+                {
+                    return Err("reference must STEP global TEMP through -55, 25, 72 C without a fixed TEMP option".to_string());
+                }
+                step_values.clone()
+            }
+        };
+        if effective_temperatures
+            .iter()
+            .map(|value| value.to_bits())
+            .ne(canonical_grid.into_iter().map(Value::to_bits))
+        {
+            return Err(
+                "TEMP and TEMP+DTEMP effective-temperature grids are not identical".to_string(),
+            );
+        }
+
+        let explicit_params = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(name.to_ascii_uppercase().as_str(), "TEMP" | "TEMPER" | "VT")
+            })
+            .collect::<Vec<_>>();
+        match role {
+            XyceResistorDtempRole::Owner
+                if explicit_params.len() == 1
+                    && explicit_params[0].0.eq_ignore_ascii_case("resDtemp")
+                    && explicit_params[0].1.to_bits() == (-82.0f64).to_bits() => {}
+            XyceResistorDtempRole::Reference if explicit_params.is_empty() => {}
+            _ => {
+                return Err(format!(
+                    "only the owner's resDtemp=-82 parameter is admitted in the pair, got {explicit_params:?}"
+                ));
+            }
+        }
+
+        let resistor = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+            .ok_or_else(|| "resistor DTEMP pair has no resistor".to_string())?;
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::VoltageSource(_)))
+            .ok_or_else(|| "resistor DTEMP pair has no independent voltage source".to_string())?;
+        let (resistance, model_name, instance_params) = match &resistor.kind {
+            ElementKind::Resistor {
+                value,
+                value_expr: None,
+                model: Some(model),
+                instance_params,
+                deferred_params,
+            } if value.to_bits() == 1000.0f64.to_bits() && deferred_params.is_empty() => {
+                (*value, model, instance_params)
+            }
+            _ => {
+                return Err(
+                    "resistor must retain the exact 1 kOhm modeled representation".to_string(),
+                );
+            }
+        };
+        match role {
+            XyceResistorDtempRole::Owner
+                if instance_params.len() == 1
+                    && instance_params[0].0.eq_ignore_ascii_case("DTEMP")
+                    && instance_params[0].1.to_bits() == (-82.0f64).to_bits() => {}
+            XyceResistorDtempRole::Reference if instance_params.is_empty() => {}
+            _ => return Err("only the owner resistor may carry DTEMP=resDtemp".to_string()),
+        }
+        let source_value = match &source.kind {
+            ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                if value.to_bits() == 5.0f64.to_bits() =>
+            {
+                *value
+            }
+            _ => return Err("resistor DTEMP pair requires one finite 5 V DC source".to_string()),
+        };
+        let canonical_nodes = |nodes: &[String]| -> Result<[String; 2], String> {
+            let normalized = nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            normalized
+                .try_into()
+                .map_err(|_| "resistor DTEMP elements must be two-terminal".to_string())
+        };
+        let resistor_nodes = canonical_nodes(&resistor.nodes)?;
+        let source_nodes = canonical_nodes(&source.nodes)?;
+        if resistor_nodes != ["1".to_string(), "0".to_string()]
+            || source_nodes != resistor_nodes
+            || !plan.dc.source.eq_ignore_ascii_case(&source.name)
+        {
+            return Err("resistor/source topology or swept-source mapping changed".to_string());
+        }
+
+        let model = &netlist.models[0];
+        if !model.name.eq_ignore_ascii_case(model_name)
+            || !matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "R" | "RES" | "RESISTOR"
+            )
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(
+                "resistor DTEMP pair requires one native scalar resistor model".to_string(),
+            );
+        }
+        let mut model_params = model
+            .params
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+            .collect::<Vec<_>>();
+        model_params.sort();
+        let expected_model_params = vec![
+            ("tc1".to_string(), 0.0007325f64.to_bits()),
+            ("tc2".to_string(), (-2.217e-7f64).to_bits()),
+        ];
+        if model_params != expected_model_params {
+            return Err(
+                "resistor model must retain exactly TC1=0.0007325 and TC2=-2.217e-7".to_string(),
+            );
+        }
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if probes != ["v(1)".to_string(), "i(v1)".to_string()] {
+            return Err("resistor DTEMP pair requires ordered V(1), I(V1) probes".to_string());
+        }
+
+        Ok(XyceResistorDtempSnapshot {
+            resistor_name: resistor.name.to_ascii_lowercase(),
+            resistor_nodes,
+            resistance_bits: resistance.to_bits(),
+            model_name: model_name.to_ascii_lowercase(),
+            source_name: source.name.to_ascii_lowercase(),
+            source_nodes,
+            source_value_bits: source_value.to_bits(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_params,
+            dc_source: plan.dc.source.to_ascii_lowercase(),
+            dc_start_bits: plan.dc.start.to_bits(),
+            dc_stop_bits: plan.dc.stop.to_bits(),
+            dc_step_bits: plan.dc.step.to_bits(),
+            probes,
+            effective_temperature_bits: effective_temperatures
+                .into_iter()
+                .map(Value::to_bits)
+                .collect(),
+        })
+    }
+
+    fn validate_resistor_dtemp_statement_envelope(
+        source: &str,
+        role: XyceResistorDtempRole,
+    ) -> Result<(), String> {
+        let body = source.split_once('\n').map_or("", |(_, body)| body);
+        let mut counts = BTreeMap::<String, usize>::new();
+        for line in Self::logical_netlist_lines(body) {
+            let statement = Self::strip_netlist_comment(&line).trim();
+            if statement.is_empty() {
+                continue;
+            }
+            let head = statement
+                .split_ascii_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let key = if head.starts_with('.') {
+                match head.as_str() {
+                    ".param" | ".options" | ".dc" | ".model" | ".print" | ".step" | ".end" => head,
+                    _ => {
+                        return Err(format!(
+                            "unrelated directive '{head}' is outside the resistor DTEMP envelope"
+                        ));
+                    }
+                }
+            } else {
+                match head.as_bytes().first().map(u8::to_ascii_lowercase) {
+                    Some(b'r') => "r".to_string(),
+                    Some(b'v') => "v".to_string(),
+                    _ => {
+                        return Err(format!(
+                            "unrelated element '{head}' is outside the resistor DTEMP envelope"
+                        ));
+                    }
+                }
+            };
+            *counts.entry(key).or_default() += 1;
+        }
+        for key in ["r", "v", ".dc", ".model", ".print", ".step", ".end"] {
+            if counts.remove(key) != Some(1) {
+                return Err(format!(
+                    "resistor DTEMP statement count for '{key}' must be one"
+                ));
+            }
+        }
+        match role {
+            XyceResistorDtempRole::Owner => {
+                if counts.remove(".param") != Some(1) || counts.remove(".options") != Some(1) {
+                    return Err(
+                        "DTEMP owner requires exactly one .PARAM and one .OPTIONS statement"
+                            .to_string(),
+                    );
+                }
+            }
+            XyceResistorDtempRole::Reference => {
+                if counts.contains_key(".param") || counts.contains_key(".options") {
+                    return Err(
+                        "TEMP reference must not carry .PARAM or .OPTIONS state".to_string()
+                    );
+                }
+            }
+        }
+        if !counts.is_empty() {
+            return Err(format!(
+                "resistor DTEMP source contains extra statements: {counts:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_wrapper_output_artifacts(&self, deck_path: &Path) -> Result<(), String> {
         let Some(output_path) = self.static_output_reference_path(deck_path, "prn") else {
             return Err("wrapper deck is not rooted under the Xyce Netlists corpus".to_string());
         };
@@ -42909,7 +43579,7 @@ impl XyceTestRunner {
             Ok(())
         } else {
             Err(format!(
-                "analytic wrapper must not have checked-in output artifacts: {}",
+                "relational/generated wrapper must not have checked-in output artifacts: {}",
                 artifacts
                     .iter()
                     .map(|path| self.display_path(path))
@@ -48455,6 +49125,287 @@ Vbias source 0 0\n\
         .DC V1 -1 1 .1\n\
         .print DC V(1) v(2) v(3) v(4)\n\
         .end\n";
+
+    const RESISTOR_DTEMP_OWNER_SOURCE: &str = "resistor DTEMP owner\n\
+.param resDtemp = -82\n\
+.options device temp = 27.0\n\
+R1 1 0 1K RMODEL DTEMP='resDtemp'\n\
+V1 1 0 5V\n\
+.DC V1 0 5V 1V\n\
+.MODEL RMODEL R (TC1=0.0007325 TC2=-2.217E-07)\n\
+.PRINT DC V(1) I(V1)\n\
+.step resDtemp list -82 -2 45\n\
+.END\n";
+
+    const RESISTOR_DTEMP_REFERENCE_SOURCE: &str = "resistor TEMP reference\n\
+R1 1 0 1K RMODEL\n\
+V1 1 0 5V\n\
+.DC V1 0 5V 1V\n\
+.MODEL RMODEL R (TC1=0.0007325 TC2=-2.217E-07)\n\
+.PRINT DC V(1) I(V1)\n\
+.step TEMP list -55 25 72\n\
+.END\n";
+
+    fn resistor_dtemp_fixture(
+        label: &str,
+        owner_source: &str,
+        reference_source: &str,
+    ) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-resistor-dtemp-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let family = root.join("Netlists/DTEMP");
+        fs::create_dir_all(&family).expect("create resistor DTEMP fixture directory");
+        let owner_path = family.join("res_dtemp.cir");
+        let reference_path = family.join("res_ref.cir");
+        fs::write(&owner_path, owner_source).expect("write resistor DTEMP owner fixture");
+        fs::write(&reference_path, reference_source)
+            .expect("write resistor DTEMP reference fixture");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/DTEMP/res_dtemp.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write resistor DTEMP wrapper provenance");
+        let owner = XyceDeck {
+            path: owner_path,
+            relative_path: "Netlists/DTEMP/res_dtemp.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let reference = XyceDeck {
+            path: reference_path,
+            relative_path: "Netlists/DTEMP/res_ref.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        (root, owner, reference, runner)
+    }
+
+    #[test]
+    fn resistor_dtemp_pair_is_manifest_owned_and_structurally_normalized() {
+        let (root, owner, reference, runner) = resistor_dtemp_fixture(
+            "qualification",
+            RESISTOR_DTEMP_OWNER_SOURCE,
+            RESISTOR_DTEMP_REFERENCE_SOURCE,
+        );
+        let owner_contract = runner
+            .resistor_dtemp_relational_contract(&owner)
+            .expect("owner is selected")
+            .expect("owner pair qualifies");
+        let reference_contract = runner
+            .resistor_dtemp_relational_contract(&reference)
+            .expect("reference is selected")
+            .expect("reference pair qualifies");
+        assert_eq!(owner_contract.role, XyceResistorDtempRole::Owner);
+        assert_eq!(reference_contract.role, XyceResistorDtempRole::Reference);
+        assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+        assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+        fs::remove_dir_all(root).expect("remove resistor DTEMP fixture");
+    }
+
+    #[test]
+    fn resistor_dtemp_pair_rejects_semantic_mutations() {
+        let mutations = [
+            (
+                RESISTOR_DTEMP_OWNER_SOURCE.replace("list -82 -2 45", "list -81 -2 45"),
+                RESISTOR_DTEMP_REFERENCE_SOURCE.to_string(),
+                "effective-temperature grid",
+            ),
+            (
+                RESISTOR_DTEMP_OWNER_SOURCE.replace("R1 1 0", "R1 2 0"),
+                RESISTOR_DTEMP_REFERENCE_SOURCE.to_string(),
+                "topology",
+            ),
+            (
+                RESISTOR_DTEMP_OWNER_SOURCE.replace("1K RMODEL", "2K RMODEL"),
+                RESISTOR_DTEMP_REFERENCE_SOURCE.to_string(),
+                "resistance",
+            ),
+            (
+                RESISTOR_DTEMP_OWNER_SOURCE.to_string(),
+                RESISTOR_DTEMP_REFERENCE_SOURCE.replace("TC1=0.0007325", "TC1=0.001"),
+                "model",
+            ),
+            (
+                RESISTOR_DTEMP_OWNER_SOURCE.to_string(),
+                RESISTOR_DTEMP_REFERENCE_SOURCE.replace("V(1) I(V1)", "I(V1) V(1)"),
+                "probe order",
+            ),
+            (
+                RESISTOR_DTEMP_OWNER_SOURCE.to_string(),
+                RESISTOR_DTEMP_REFERENCE_SOURCE.replace("list -55 25 72", "list -55 27 72"),
+                "reference TEMP grid",
+            ),
+        ];
+        for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+            let (root, owner, _, runner) = resistor_dtemp_fixture(
+                &format!("mutation-{index}"),
+                &owner_source,
+                &reference_source,
+            );
+            assert!(
+                runner
+                    .resistor_dtemp_relational_contract(&owner)
+                    .expect("owner remains selected")
+                    .is_err(),
+                "{reason} mutation must fail closed"
+            );
+            fs::remove_dir_all(root).expect("remove resistor DTEMP mutation fixture");
+        }
+    }
+
+    #[test]
+    fn resistor_dtemp_pair_requires_exact_wrapper_provenance() {
+        let (root, owner, _, _runner) = resistor_dtemp_fixture(
+            "manifest",
+            RESISTOR_DTEMP_OWNER_SOURCE,
+            RESISTOR_DTEMP_REFERENCE_SOURCE,
+        );
+        fs::write(root.join(HARNESS_MANIFEST_FILE), "")
+            .expect("remove resistor DTEMP wrapper provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            runner
+                .resistor_dtemp_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "missing wrapper provenance must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove resistor DTEMP manifest fixture");
+    }
+
+    #[test]
+    fn resistor_dtemp_comparator_is_serialized_exact_and_segment_aware() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let rows = (0..18)
+            .map(|row| {
+                let index = (row % 6) as Value;
+                vec![index, index, -index / 1000.0]
+            })
+            .collect::<Vec<_>>();
+        let reference = XycePrnTable {
+            columns: vec!["Index".to_string(), "V(1)".to_string(), "I(V1)".to_string()],
+            rows,
+        };
+        assert!(
+            runner
+                .compare_resistor_dtemp_tables(&reference, &reference)
+                .expect("canonical identical stepped tables compare")
+                .is_empty()
+        );
+
+        let mut changed_value = reference.clone();
+        changed_value.rows[8][2] += 1.0e-7;
+        assert_eq!(
+            runner
+                .compare_resistor_dtemp_tables(&reference, &changed_value)
+                .expect("serialized value difference is a comparison mismatch")
+                .len(),
+            1,
+            "a numeric difference must not enter a tolerant fallback"
+        );
+
+        let mut changed_segment = reference.clone();
+        changed_segment.rows[6][0] = 6.0;
+        assert!(
+            runner
+                .compare_resistor_dtemp_tables(&reference, &changed_segment)
+                .is_err(),
+            "Index must reset at each independently simulated STEP segment"
+        );
+    }
+
+    #[test]
+    fn resistor_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let corpus_root = workspace_root.join("tests/xyce");
+        let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+        let discovered = runner.discover_tests();
+        let discovered_by_path = discovered
+            .iter()
+            .map(|deck| {
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    deck,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut independent_candidates = BTreeSet::new();
+        for owner in discovered.iter().filter(|deck| {
+            runner.requires_upstream_wrapper(&deck.relative_path)
+                && deck
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("res_dtemp.cir"))
+        }) {
+            let source = fs::read_to_string(&owner.path).expect("read candidate owner");
+            let normalized = XyceTestRunner::normalize_probe(&source);
+            if !normalized.contains("dtemp='resdtemp'")
+                || !normalized.contains(".modelrmodelr(tc1=")
+                || !normalized.contains(".stepresdtemplist")
+            {
+                continue;
+            }
+            let reference_key = XyceTestRunner::normalize_manifest_key(
+                &runner.relative_key(&owner.path.with_file_name("res_ref.cir")),
+            );
+            if discovered_by_path.contains_key(&reference_key) {
+                independent_candidates
+                    .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+                independent_candidates.insert(reference_key);
+            }
+        }
+        let selected = discovered
+            .iter()
+            .filter_map(|deck| {
+                runner
+                    .resistor_dtemp_relational_contract(deck)
+                    .map(|contract| {
+                        contract
+                            .unwrap_or_else(|err| panic!("candidate failed qualification: {err}"));
+                        XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(independent_candidates, selected);
+        assert_eq!(
+            selected,
+            BTreeSet::from([
+                XYCE_RESISTOR_DTEMP_OWNER_RECORD.to_string(),
+                XYCE_RESISTOR_DTEMP_REFERENCE_RECORD.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn resistor_dtemp_relational_pair_executes_both_roles() {
+        let (root, owner, reference, runner) = resistor_dtemp_fixture(
+            "execution",
+            RESISTOR_DTEMP_OWNER_SOURCE,
+            RESISTOR_DTEMP_REFERENCE_SOURCE,
+        );
+        for (deck, expected_contract) in [
+            (owner, "resistor_dtemp_relational_wrapper_owner"),
+            (reference, "resistor_dtemp_relational_wrapper_reference"),
+        ] {
+            let result = runner.run_discovered_test(&deck);
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "resistor DTEMP role must execute: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+        }
+        fs::remove_dir_all(root).expect("remove resistor DTEMP execution fixture");
+    }
 
     #[test]
     fn analytic_integer_dc_wrappers_are_manifest_owned_and_structurally_qualified() {
