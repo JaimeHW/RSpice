@@ -58,9 +58,9 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
                     })
                 );
             } else {
-                println!("✗ Syntax error: {}", e);
+                println!("✗ Netlist error: {}", e);
             }
-            return Err(CliError::parse_error(e.to_string()));
+            return Err(e);
         }
     };
 
@@ -479,5 +479,55 @@ fn output_text(result: &ValidationResult, quiet: bool) {
     }
     if !quiet && result.is_ok() && result.warnings.is_empty() {
         println!("✓ Netlist is valid");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn undefined_mutual_inductor_fails_before_topology_checks() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-cli-bug75-{}-{}.cir",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            "BUG75 CLI ordering\n\
+             L1 2 0 1\n\
+             L3 2 0 1\n\
+             K3 L1 L2 0\n\
+             .end\n",
+        )
+        .expect("temporary deck writes");
+
+        let result = execute(
+            CheckArgs {
+                input: path.clone(),
+                connectivity: true,
+                models: true,
+                strict: false,
+                json: false,
+            },
+            false,
+            true,
+        );
+        let _ = std::fs::remove_file(path);
+
+        let error = result.expect_err("semantic reference failure must reject check");
+        let message = error.to_string();
+        assert!(
+            message.contains("Undefined inductor L2 in mutual inductor K3 definition."),
+            "{message}"
+        );
+        assert!(
+            !message.contains("closes a loop"),
+            "topology must not run before semantic validation: {message}"
+        );
     }
 }
