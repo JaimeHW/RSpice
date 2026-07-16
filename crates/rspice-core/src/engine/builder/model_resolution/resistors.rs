@@ -395,7 +395,24 @@ fn resolve_level1_model_default_resistance(
     Ok(rsh * squares)
 }
 
-pub(in crate::engine::builder) fn resolve_resistor_instance_value(
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ResolvedResistorParameters {
+    pub resistance: f64,
+    pub width: f64,
+    pub tc1: f64,
+    pub tc2: f64,
+    pub temperature_celsius: f64,
+}
+
+/// Resolve the effective scalar parameters of a native resistor instance.
+///
+/// This is the canonical source for both circuit construction and device-
+/// parameter reporting. In particular, Xyce resistor parameters which are
+/// copied from a model remain live model values after a model-parameter STEP:
+/// `W` inherits the model `DEFW` (then the Xyce 10 um default), `TC1` and
+/// `TC2` inherit their model values (then zero), and `TEMP` inherits the
+/// active circuit temperature when the instance has no override.
+pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     netlist: &Netlist,
     element_name: &str,
     value: f64,
@@ -403,7 +420,7 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
-) -> Result<f64, SimulationError> {
+) -> Result<ResolvedResistorParameters, SimulationError> {
     let model_def = if let Some(model_name) = model_name {
         let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
             SimulationError::Circuit(format!(
@@ -515,6 +532,45 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         }
     })?;
 
+    let reported_temp_c = instance_param(instance_params, &["TEMP"])
+        .map(normalize_temperature_param_to_celsius)
+        .unwrap_or_else(|| crate::analysis::temperature::kelvin_to_celsius(temperature_kelvin));
+    let width = if let Some(width) = instance_param(instance_params, &["W", "WIDTH"]) {
+        width
+    } else if let Some(model_def) = model_def {
+        resolve_model_param(model_def, &["DEFW"], &eval_ctx)?.unwrap_or(10.0e-6)
+    } else {
+        10.0e-6
+    };
+    let tc1 = if let Some(tc1) = instance_param(instance_params, &["TC1", "TC"]) {
+        tc1
+    } else if let Some(model_def) = model_def {
+        resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)?.unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let tc2 = if let Some(tc2) = instance_param(instance_params, &["TC2"]) {
+        tc2
+    } else if let Some(model_def) = model_def {
+        resolve_model_param(model_def, &["TC2"], &eval_ctx)?.unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    for (name, value) in [
+        ("W", width),
+        ("TC1", tc1),
+        ("TC2", tc2),
+        ("TEMP", reported_temp_c),
+        ("effective TEMP", current_temp_c),
+    ] {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' resolved effective {} to non-finite value {}",
+                element_name, name, value
+            )));
+        }
+    }
+
     let tce = if let Some(tce) = instance_param(instance_params, &["TCE"]) {
         Some(tce)
     } else if let Some(model_def) = model_def {
@@ -533,20 +589,6 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         }
         resolved *= scale;
     } else {
-        let tc1 = if let Some(tc1) = instance_param(instance_params, &["TC1", "TC"]) {
-            tc1
-        } else if let Some(model_def) = model_def {
-            resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)?.unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        let tc2 = if let Some(tc2) = instance_param(instance_params, &["TC2"]) {
-            tc2
-        } else if let Some(model_def) = model_def {
-            resolve_model_param(model_def, &["TC2"], &eval_ctx)?.unwrap_or(0.0)
-        } else {
-            0.0
-        };
         if tc1 != 0.0 || tc2 != 0.0 {
             let temp_ctx =
                 crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
@@ -555,7 +597,36 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         }
     }
 
-    apply_resistor_instance_scaling(element_name, "resistance", resolved, instance_params)
+    let resistance =
+        apply_resistor_instance_scaling(element_name, "resistance", resolved, instance_params)?;
+    Ok(ResolvedResistorParameters {
+        resistance,
+        width,
+        tc1,
+        tc2,
+        temperature_celsius: reported_temp_c,
+    })
+}
+
+pub(in crate::engine::builder) fn resolve_resistor_instance_value(
+    netlist: &Netlist,
+    element_name: &str,
+    value: f64,
+    value_expr: Option<&str>,
+    model_name: Option<&str>,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<f64, SimulationError> {
+    resolve_resistor_effective_parameters(
+        netlist,
+        element_name,
+        value,
+        value_expr,
+        model_name,
+        instance_params,
+        temperature_kelvin,
+    )
+    .map(|parameters| parameters.resistance)
 }
 
 pub(in crate::engine::builder) struct ResolvedBehavioralResistorPolicy {
@@ -697,6 +768,99 @@ mod tests {
             .expect("resistor AC value resolves");
 
         (dc, ac)
+    }
+
+    fn resolve_effective_parameters_from_source(
+        source: &str,
+        name: &str,
+    ) -> ResolvedResistorParameters {
+        let netlist = crate::netlist::Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("Xyce resistor parameter deck parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .expect("test resistor exists");
+        let crate::netlist::ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("test element is not a resistor");
+        };
+        resolve_resistor_effective_parameters(
+            &netlist,
+            &element.name,
+            *value,
+            value_expr.as_deref(),
+            model.as_deref(),
+            instance_params,
+            crate::analysis::temperature::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0)),
+        )
+        .expect("effective resistor parameters resolve")
+    }
+
+    #[test]
+    fn effective_parameter_accessor_uses_instance_model_and_global_precedence() {
+        let model_inherited = resolve_effective_parameters_from_source(
+            r#"model inherited resistor parameters
+.options temp=35
+R1 a 0 rm L=1000u
+.model rm R (RSH=1 W=9u DEFW=4u TC1=2e-2 TC2=3e-4 TNOM=27)
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(model_inherited.width, 4e-6);
+        assert_eq!(model_inherited.tc1, 2e-2);
+        assert_eq!(model_inherited.tc2, 3e-4);
+        assert_eq!(model_inherited.temperature_celsius, 35.0);
+
+        let instance_overrides = resolve_effective_parameters_from_source(
+            r#"instance resistor parameters win
+.options temp=35
+R1 a 0 rm L=1000u W=5u TC1=4e-2 TC2=6e-4 TEMP=31
+.model rm R (RSH=1 DEFW=4u TC1=2e-2 TC2=3e-4 TNOM=27)
+.end
+"#,
+            "R1",
+        );
+        assert!((instance_overrides.width - 5e-6).abs() < 1e-20);
+        assert_eq!(instance_overrides.tc1, 4e-2);
+        assert_eq!(instance_overrides.tc2, 6e-4);
+        assert_eq!(instance_overrides.temperature_celsius, 31.0);
+
+        let defaults = resolve_effective_parameters_from_source(
+            r#"default resistor report values
+R1 a 0 1k
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(defaults.width, 10e-6);
+        assert_eq!(defaults.tc1, 0.0);
+        assert_eq!(defaults.tc2, 0.0);
+        assert_eq!(defaults.temperature_celsius, 27.0);
+
+        let dtemp = resolve_effective_parameters_from_source(
+            r#"DTEMP changes resistance temperature, not reported TEMP
+.options temp=35
+R1 a 0 1k TC1=0.1 DTEMP=5
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(dtemp.temperature_celsius, 35.0);
+        assert_eq!(dtemp.resistance, 2_300.0);
     }
 
     #[test]

@@ -16028,7 +16028,7 @@ impl XyceTestRunner {
                 resistor.name
             ));
         }
-        let effective_resistance = Self::effective_resistor_value(netlist, &resistor.name)
+        let effective_resistance = Self::effective_resistor_value(netlist, &resistor.name)?
             .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| format!("{LABEL} resistance did not resolve"))?;
         if effective_resistance.to_bits() != source.resistance_bits {
@@ -16869,7 +16869,7 @@ impl XyceTestRunner {
                 resistor.name
             ));
         }
-        let effective_resistance = Self::effective_resistor_value(netlist, &resistor.name)
+        let effective_resistance = Self::effective_resistor_value(netlist, &resistor.name)?
             .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| format!("{LABEL} resistance did not resolve"))?;
         if effective_resistance.to_bits() != source.resistance_bits {
@@ -18475,7 +18475,7 @@ impl XyceTestRunner {
         if !instance_form_matches || literal_bits != resistor_value.to_bits() {
             return Err("resistor source representation, parsed primary value, or normalized R instance parameter differs".to_string());
         }
-        let effective = Self::effective_resistor_value(netlist, &resistor_name)
+        let effective = Self::effective_resistor_value(netlist, &resistor_name)?
             .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| "resistor effective primary value did not resolve".to_string())?;
         if effective.to_bits() != resistor_value.to_bits() {
@@ -19906,7 +19906,7 @@ impl XyceTestRunner {
             }
             let fingerprint = match &element.kind {
                 ElementKind::Resistor { .. } => {
-                    let value = Self::effective_resistor_value(netlist, &element.name)
+                    let value = Self::effective_resistor_value(netlist, &element.name)?
                         .ok_or_else(|| format!("{LABEL} could not resolve resistor value"))?;
                     if !value.is_finite() || value <= 0.0 {
                         return Err(format!(
@@ -30154,7 +30154,7 @@ impl XyceTestRunner {
         netlist: &Netlist,
         element_name: &str,
     ) -> Result<(), String> {
-        let resistance = Self::effective_resistor_value(netlist, element_name).ok_or_else(|| {
+        let resistance = Self::effective_resistor_value(netlist, element_name)?.ok_or_else(|| {
             format!(
                 "native .STEP .PRINT TRAN comparison could not resolve resistor '{}' to a static resistance",
                 element_name
@@ -31300,7 +31300,7 @@ impl XyceTestRunner {
                 "l" if Self::find_inductor_element(netlist, &element_name).is_some() => {
                     return Ok(());
                 }
-                "temp" if Self::resistor_temperature_value(netlist, &element_name).is_some() => {
+                "temp" if Self::resistor_temperature_value(netlist, &element_name)?.is_some() => {
                     return Ok(());
                 }
                 _ => {}
@@ -31926,7 +31926,7 @@ impl XyceTestRunner {
                         return Ok(());
                     }
                 }
-                "temp" if Self::resistor_temperature_value(netlist, &element_name).is_some() => {
+                "temp" if Self::resistor_temperature_value(netlist, &element_name)?.is_some() => {
                     return Ok(());
                 }
                 _ => {
@@ -31959,7 +31959,7 @@ impl XyceTestRunner {
             if Self::source_is_current_source(netlist, &element_name) {
                 return Ok(());
             }
-            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)? {
                 if resistance.is_finite()
                     || (resistance.is_infinite() && resistance.is_sign_positive())
                 {
@@ -31983,7 +31983,7 @@ impl XyceTestRunner {
             ));
         }
         if let Some(element_name) = Self::parse_power_probe(normalized) {
-            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)? {
                 if resistance.is_finite()
                     || (resistance.is_infinite() && resistance.is_sign_positive())
                 {
@@ -32148,7 +32148,7 @@ impl XyceTestRunner {
             {
                 return Ok(current);
             }
-            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)? {
                 return Self::evaluate_resistor_current(netlist, result, &element_name, resistance);
             }
         }
@@ -32157,7 +32157,7 @@ impl XyceTestRunner {
             if let Some(power) = result.try_dc_observable_named(normalized) {
                 return Ok(power);
             }
-            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)? {
                 return Self::evaluate_resistor_power(netlist, result, &element_name, resistance);
             }
         }
@@ -32675,8 +32675,12 @@ impl XyceTestRunner {
                         "AC device parameter probe '{element_name}:ACPHASE' has no independent source"
                     )
                 }),
-            "r" => Self::effective_resistor_value(netlist, &element_name).ok_or_else(|| {
-                format!("AC device parameter probe '{element_name}:R' has no finite resistance")
+            "r" => Self::effective_resistor_value(netlist, &element_name).and_then(|value| {
+                value.ok_or_else(|| {
+                    format!(
+                        "AC device parameter probe '{element_name}:R' has no finite resistance"
+                    )
+                })
             }),
             "c" => Self::effective_capacitor_value(netlist, &element_name).ok_or_else(|| {
                 format!("AC device parameter probe '{element_name}:C' has no finite capacitance")
@@ -32757,7 +32761,7 @@ impl XyceTestRunner {
         let (element_name, parameter) = Self::parse_device_parameter_probe(&normalized)
             .ok_or_else(|| format!("invalid transient device parameter token '{token}'"))?;
         match parameter.as_str() {
-            "r" => Self::effective_resistor_value(netlist, &element_name).ok_or_else(|| {
+            "r" => Self::effective_resistor_value(netlist, &element_name)?.ok_or_else(|| {
                 format!("resistor parameter probe '{token}' has no finite resistance")
             }),
             "c" => Self::effective_capacitor_value(netlist, &element_name).ok_or_else(|| {
@@ -32766,7 +32770,7 @@ impl XyceTestRunner {
             "l" => Self::effective_inductor_value(netlist, &element_name).ok_or_else(|| {
                 format!("inductor parameter probe '{token}' has no finite inductance")
             }),
-            "temp" => Self::resistor_temperature_value(netlist, &element_name).ok_or_else(|| {
+            "temp" => Self::resistor_temperature_value(netlist, &element_name)?.ok_or_else(|| {
                 format!("resistor parameter probe '{token}' has no finite temperature")
             }),
             _ => Err(format!(
@@ -33903,7 +33907,7 @@ impl XyceTestRunner {
                     ))
                 })
             }
-            "temp" => Self::resistor_temperature_value(netlist, element_name).ok_or_else(|| {
+            "temp" => Self::resistor_temperature_value(netlist, element_name)?.ok_or_else(|| {
                 format!(
                     "resistor parameter probe '{}:TEMP' targets an unknown resistor",
                     element_name
@@ -34249,7 +34253,7 @@ impl XyceTestRunner {
                 time,
                 element_name,
             ),
-            "temp" => Self::resistor_temperature_value(netlist, element_name).ok_or_else(|| {
+            "temp" => Self::resistor_temperature_value(netlist, element_name)?.ok_or_else(|| {
                 format!(
                     "resistor parameter probe '{}:TEMP' targets an unknown resistor",
                     element_name
@@ -34325,10 +34329,10 @@ impl XyceTestRunner {
             ));
         };
 
-        if Self::resistor_uses_xyce_default_marker(instance_params)
-            && let Some(resistance) = Self::effective_resistor_value(netlist, name)
-        {
-            return Ok(resistance);
+        if Self::resistor_uses_xyce_default_marker(instance_params) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, name)? {
+                return Ok(resistance);
+            }
         }
         let value = Self::evaluate_transient_static_passive_parameter_value(
             netlist,
@@ -34344,10 +34348,10 @@ impl XyceTestRunner {
         if value.is_ok() {
             return value;
         }
-        if model.is_some()
-            && let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)
-        {
-            return Ok(resistance);
+        if model.is_some() {
+            if let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)? {
+                return Ok(resistance);
+            }
         }
         value
     }
@@ -36049,14 +36053,13 @@ impl XyceTestRunner {
             .any(|(name, _)| name.eq_ignore_ascii_case(parameter_name))
     }
 
-    fn effective_resistor_value(netlist: &Netlist, name: &str) -> Option<Value> {
+    fn effective_resistor_value(netlist: &Netlist, name: &str) -> Result<Option<Value>, String> {
         Engine::new(SimulationConfig {
             spice_dialect: SpiceDialect::Xyce,
             ..SimulationConfig::default()
         })
-        .resolved_resistor_value(netlist, name)
-        .ok()
-        .flatten()
+        .resolved_resistor_parameter(netlist, name, "R")
+        .map_err(|err| format!("resistor '{name}' parameter resolution failed: {err}"))
     }
 
     fn effective_capacitor_value(netlist: &Netlist, name: &str) -> Option<Value> {
@@ -36113,8 +36116,10 @@ impl XyceTestRunner {
         })
     }
 
-    fn resistor_parameter_r_value(netlist: &Netlist, name: &str) -> Option<Value> {
-        let element = Self::find_resistor_element(netlist, name)?;
+    fn resistor_parameter_r_value(netlist: &Netlist, name: &str) -> Result<Option<Value>, String> {
+        let Some(element) = Self::find_resistor_element(netlist, name) else {
+            return Ok(None);
+        };
         let ElementKind::Resistor {
             value,
             value_expr,
@@ -36123,24 +36128,24 @@ impl XyceTestRunner {
             ..
         } = &element.kind
         else {
-            return None;
+            return Ok(None);
         };
 
-        if Self::resistor_uses_xyce_default_marker(instance_params)
-            && let Some(resistance) = Self::effective_resistor_value(netlist, name)
-        {
-            return Some(resistance);
+        if Self::resistor_uses_xyce_default_marker(instance_params) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, name)? {
+                return Ok(Some(resistance));
+            }
         }
         if let Some(resistance) = Self::instance_param(instance_params, &["R", "VALUE"]) {
-            return Some(resistance);
+            return Ok(Some(resistance));
         }
-        Self::resistor_parameter_r_value_from_parts(
+        Ok(Self::resistor_parameter_r_value_from_parts(
             *value,
             value_expr.as_deref(),
             model.as_deref(),
             instance_params,
             &Self::print_eval_context(netlist, None, None),
-        )
+        ))
     }
 
     fn evaluate_resistor_parameter_r_value(
@@ -36167,10 +36172,10 @@ impl XyceTestRunner {
             ));
         };
 
-        if Self::resistor_uses_xyce_default_marker(instance_params)
-            && let Some(resistance) = Self::effective_resistor_value(netlist, name)
-        {
-            return Ok(resistance);
+        if Self::resistor_uses_xyce_default_marker(instance_params) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, name)? {
+                return Ok(resistance);
+            }
         }
         if let Some(resistance) = Self::instance_param(instance_params, &["R", "VALUE"]) {
             return Ok(resistance);
@@ -36200,10 +36205,10 @@ impl XyceTestRunner {
                 format!("failed to evaluate resistor parameter probe '{name}:R': {err}")
             });
         }
-        if model.is_some()
-            && let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)
-        {
-            return Ok(resistance);
+        if model.is_some() {
+            if let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)? {
+                return Ok(resistance);
+            }
         }
 
         Err(format!(
@@ -36241,22 +36246,13 @@ impl XyceTestRunner {
         None
     }
 
-    fn resistor_temperature_value(netlist: &Netlist, name: &str) -> Option<Value> {
-        let element = Self::find_resistor_element(netlist, name)?;
-        let ElementKind::Resistor {
-            instance_params, ..
-        } = &element.kind
-        else {
-            return None;
-        };
-
-        if let Some(temp) = Self::instance_param(instance_params, &["TEMP"]) {
-            return Some(Self::normalize_temperature_param_to_celsius(temp));
-        }
-        if let Some(dtemp) = Self::instance_param(instance_params, &["DTEMP"]) {
-            return Some(Self::netlist_temperature_c(netlist) + dtemp);
-        }
-        Some(Self::netlist_temperature_c(netlist))
+    fn resistor_temperature_value(netlist: &Netlist, name: &str) -> Result<Option<Value>, String> {
+        Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        })
+        .resolved_resistor_parameter(netlist, name, "TEMP")
+        .map_err(|err| format!("resistor '{name}' parameter resolution failed: {err}"))
     }
 
     fn resistor_instance_parameter_probe_is_supported(
@@ -36264,7 +36260,19 @@ impl XyceTestRunner {
         name: &str,
         parameter: &str,
     ) -> bool {
-        Self::resistor_instance_parameter_value(netlist, name, parameter).is_some()
+        let Some(element) = Self::find_resistor_element(netlist, name) else {
+            return false;
+        };
+        let ElementKind::Resistor {
+            instance_params, ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        ["W", "WIDTH", "TC", "TC1", "TC2", "M"]
+            .iter()
+            .any(|candidate| parameter.eq_ignore_ascii_case(candidate))
+            || Self::instance_param(instance_params, &[parameter]).is_some()
     }
 
     fn evaluate_resistor_instance_parameter_probe(
@@ -36272,7 +36280,7 @@ impl XyceTestRunner {
         name: &str,
         parameter: &str,
     ) -> Result<Value, String> {
-        Self::resistor_instance_parameter_value(netlist, name, parameter).ok_or_else(|| {
+        Self::resistor_instance_parameter_value(netlist, name, parameter)?.ok_or_else(|| {
             format!(
                 "resistor parameter probe '{}:{}' targets an unknown or unset resistor instance parameter",
                 name, parameter
@@ -36284,19 +36292,34 @@ impl XyceTestRunner {
         netlist: &Netlist,
         name: &str,
         parameter: &str,
-    ) -> Option<Value> {
-        let element = Self::find_resistor_element(netlist, name)?;
+    ) -> Result<Option<Value>, String> {
+        let Some(element) = Self::find_resistor_element(netlist, name) else {
+            return Ok(None);
+        };
         let ElementKind::Resistor {
             instance_params, ..
         } = &element.kind
         else {
-            return None;
+            return Ok(None);
         };
 
-        if parameter.eq_ignore_ascii_case("M") {
-            return Some(Self::instance_param(instance_params, &[parameter]).unwrap_or(1.0));
+        if ["W", "WIDTH", "TC", "TC1", "TC2"]
+            .iter()
+            .any(|candidate| parameter.eq_ignore_ascii_case(candidate))
+        {
+            return Engine::new(SimulationConfig {
+                spice_dialect: SpiceDialect::Xyce,
+                ..SimulationConfig::default()
+            })
+            .resolved_resistor_parameter(netlist, name, parameter)
+            .map_err(|err| format!("resistor '{name}' parameter resolution failed: {err}"));
         }
-        Self::instance_param(instance_params, &[parameter])
+        if parameter.eq_ignore_ascii_case("M") {
+            return Ok(Some(
+                Self::instance_param(instance_params, &[parameter]).unwrap_or(1.0),
+            ));
+        }
+        Ok(Self::instance_param(instance_params, &[parameter]))
     }
 
     fn find_recorded_two_terminal_branch_element(
@@ -36416,10 +36439,6 @@ impl XyceTestRunner {
                 .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
                 .map(|(_, value)| *value)
         })
-    }
-
-    fn normalize_temperature_param_to_celsius(value: Value) -> Value {
-        value
     }
 
     fn step_commands(netlist: &Netlist) -> Result<Vec<StepCommand>, String> {

@@ -2899,11 +2899,11 @@ set auto_bridge_parm_d = vdd
 }
 
 impl Engine {
-    pub(crate) fn resolved_resistor_value(
+    pub(crate) fn resolved_resistor_parameters(
         &self,
         netlist: &Netlist,
         resistor_name: &str,
-    ) -> Result<Option<f64>, SimulationError> {
+    ) -> Result<Option<ResolvedResistorParameters>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         let flattened = flatten_netlist_with_models(netlist)
             .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
@@ -2935,7 +2935,7 @@ impl Engine {
             return Ok(None);
         };
 
-        resolve_resistor_instance_value(
+        resolve_resistor_effective_parameters(
             netlist,
             &element.name,
             *value,
@@ -2945,6 +2945,28 @@ impl Engine {
             engine.config.temperature,
         )
         .map(Some)
+    }
+
+    /// Return a canonical effective resistor parameter suitable for device
+    /// reporting. Parameters copied from the model are resolved through the
+    /// same path used to construct the simulated resistor.
+    pub(crate) fn resolved_resistor_parameter(
+        &self,
+        netlist: &Netlist,
+        resistor_name: &str,
+        parameter: &str,
+    ) -> Result<Option<f64>, SimulationError> {
+        let Some(parameters) = self.resolved_resistor_parameters(netlist, resistor_name)? else {
+            return Ok(None);
+        };
+        Ok(match parameter.to_ascii_uppercase().as_str() {
+            "R" | "VALUE" | "RES" | "RESISTANCE" => Some(parameters.resistance),
+            "W" | "WIDTH" | "DEFW" => Some(parameters.width),
+            "TC" | "TC1" => Some(parameters.tc1),
+            "TC2" => Some(parameters.tc2),
+            "TEMP" | "TEMPER" => Some(parameters.temperature_celsius),
+            _ => None,
+        })
     }
 
     pub(crate) fn resolved_inductor_value(
