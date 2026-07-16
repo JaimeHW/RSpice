@@ -27,7 +27,9 @@ mod topology;
 mod xspice_parser;
 
 pub use ast::*;
-pub use expr::{ExpressionDialect, ParamContext, RandomState, StatisticalParamMode};
+pub use expr::{
+    ExpressionDialect, ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
+};
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
     flatten_netlist, flatten_netlist_with_models,
@@ -8877,6 +8879,192 @@ mod tests {
             .expect("flattened subcircuit resistor exists");
 
         assert_eq!(resistance, 5.0);
+    }
+
+    #[test]
+    fn parameter_redefinition_policy_selects_first_or_last_definition() {
+        let source = "parameter redefinition policy\n\
+             .param value=10\n\
+             .param value=20\n\
+             R1 1 0 {value}\n\
+             .end\n";
+
+        for (policy, expected) in [
+            (ParameterRedefinitionPolicy::UseFirst, 10.0),
+            (ParameterRedefinitionPolicy::UseLast, 20.0),
+        ] {
+            let netlist = Netlist::parse_with_options(
+                source,
+                NetlistParseOptions {
+                    parameter_redefinition_policy: policy,
+                    ..NetlistParseOptions::default()
+                },
+            )
+            .expect("redefinition policy deck parses");
+            assert_eq!(netlist.params.get("value"), Some(expected));
+            let resistance = netlist
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Resistor { value, .. } => Some(*value),
+                    _ => None,
+                })
+                .expect("resistor exists");
+            assert_eq!(resistance, expected);
+        }
+    }
+
+    #[test]
+    fn resolvable_subckt_default_expression_rebinds_after_instance_overrides() {
+        let netlist = Netlist::parse(
+            "resolvable subckt default expression\n\
+             .subckt simple in out PARAMS: par1=2 par2=2 par3='par1*par2*2'\n\
+             Rinside in out {par3}\n\
+             .ends\n\
+             Xtest 1 0 simple par1=2 par2=12\n\
+             .end\n",
+        )
+        .expect("dependent subcircuit default parses");
+        assert!(
+            netlist.subcircuits[0]
+                .expr_params
+                .iter()
+                .any(|(name, expression)| {
+                    name.eq_ignore_ascii_case("par3")
+                        && expression.eq_ignore_ascii_case("par1*par2*2")
+                }),
+            "expression-valued default remains authoritative at instantiation"
+        );
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("dependent subcircuit default flattens after overrides");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. }
+                    if element.name.eq_ignore_ascii_case("Xtest.Rinside") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened resistor exists");
+        assert_eq!(resistance, 48.0);
+    }
+
+    #[test]
+    fn subckt_formal_and_body_parameter_precedence_follows_redefinition_policy() {
+        let cases = [
+            (
+                ".subckt simple in out params: value=10\n.param VALUE=20",
+                10.0,
+                20.0,
+            ),
+            (
+                ".subckt simple in out params: base=5 value='base*2'\n.param value=30",
+                10.0,
+                30.0,
+            ),
+            (
+                ".subckt simple in out params: base=5 value=10\n.param value='base*3'",
+                10.0,
+                15.0,
+            ),
+        ];
+
+        for (declarations, first, last) in cases {
+            let source = format!(
+                "subckt formal/body precedence\n{declarations}\nRinside in out {{value}}\n.ends\nXtest 1 0 simple\n.end\n"
+            );
+            for (policy, expected) in [
+                (ParameterRedefinitionPolicy::UseFirst, first),
+                (ParameterRedefinitionPolicy::UseLast, last),
+            ] {
+                let netlist = Netlist::parse_with_options(
+                    &source,
+                    NetlistParseOptions {
+                        parameter_redefinition_policy: policy,
+                        ..NetlistParseOptions::default()
+                    },
+                )
+                .expect("formal/body precedence deck parses");
+                let flattened = flatten_netlist_with_models(&netlist)
+                    .expect("formal/body precedence deck flattens");
+                let resistance = flattened
+                    .elements
+                    .iter()
+                    .find_map(|element| match &element.kind {
+                        ElementKind::Resistor { value, .. } => Some(*value),
+                        _ => None,
+                    })
+                    .expect("flattened resistor exists");
+                assert_eq!(resistance, expected, "{declarations} under {policy:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn subckt_instance_parameter_override_wins_under_both_redefinition_policies() {
+        let source = "subckt instance precedence\n\
+             .subckt simple in out params: value=10\n\
+             .param value=20\n\
+             Rinside in out {value}\n\
+             .ends\n\
+             Xtest 1 0 simple value=40\n\
+             .end\n";
+        for policy in [
+            ParameterRedefinitionPolicy::UseFirst,
+            ParameterRedefinitionPolicy::UseLast,
+        ] {
+            let netlist = Netlist::parse_with_options(
+                source,
+                NetlistParseOptions {
+                    parameter_redefinition_policy: policy,
+                    ..NetlistParseOptions::default()
+                },
+            )
+            .expect("instance precedence deck parses");
+            let flattened =
+                flatten_netlist_with_models(&netlist).expect("instance precedence deck flattens");
+            let resistance = flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Resistor { value, .. } => Some(*value),
+                    _ => None,
+                })
+                .expect("flattened resistor exists");
+            assert_eq!(resistance, 40.0, "instance override under {policy:?}");
+        }
+    }
+
+    #[test]
+    fn ignored_parameter_redefinition_does_not_advance_statistical_stream() {
+        let options = NetlistParseOptions {
+            statistical_mode: StatisticalParamMode::Sample,
+            parameter_redefinition_policy: ParameterRedefinitionPolicy::UseFirst,
+            ..NetlistParseOptions::default()
+        };
+        let retained = Netlist::parse_with_options(
+            "ignored statistical duplicate\n\
+             .param value=gauss(10,0.1,1)\n\
+             .param value=gauss(20,0.1,1)\n\
+             .param next=gauss(30,0.1,1)\n\
+             .end\n",
+            options,
+        )
+        .expect("duplicate statistical deck parses");
+        let baseline = Netlist::parse_with_options(
+            "statistical baseline\n\
+             .param value=gauss(10,0.1,1)\n\
+             .param next=gauss(30,0.1,1)\n\
+             .end\n",
+            options,
+        )
+        .expect("statistical baseline parses");
+        assert_eq!(retained.params.get("value"), baseline.params.get("value"));
+        assert_eq!(retained.params.get("next"), baseline.params.get("next"));
     }
 
     #[test]

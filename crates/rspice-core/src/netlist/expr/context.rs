@@ -1,5 +1,6 @@
 use super::*;
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -115,6 +116,29 @@ impl Default for StatisticalParamMode {
     }
 }
 
+/// Value-selection policy for repeated parameter definitions within one
+/// netlist scope.
+///
+/// SPICE dialects disagree here: traditional Xyce keeps the first definition,
+/// while HSPICE-compatible and many other flows keep the last. Keeping this
+/// policy explicit prevents source rewriting and makes the selected semantics
+/// part of the parsed parameter environment. Warning/error handling for a
+/// duplicate is a separate diagnostic policy and is intentionally not encoded
+/// by this value-selection type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterRedefinitionPolicy {
+    /// Retain the first definition encountered in the current scope.
+    UseFirst,
+    /// Replace an earlier definition with the last one encountered.
+    UseLast,
+}
+
+impl Default for ParameterRedefinitionPolicy {
+    fn default() -> Self {
+        Self::UseLast
+    }
+}
+
 /// Dialect-specific expression-function semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExpressionDialect {
@@ -170,6 +194,14 @@ pub struct ParamContext {
     statistical_mode: StatisticalParamMode,
     /// Dialect-specific expression-function behavior.
     expression_dialect: ExpressionDialect,
+    /// Repeated-definition behavior selected for this parse/elaboration.
+    parameter_redefinition_policy: ParameterRedefinitionPolicy,
+    /// Names defined by `.PARAM`/`.CSPARAM` in the current parser scope.
+    scope_parameter_definitions: HashSet<String>,
+    /// Names defined by `.GLOBAL_PARAM` in the current parser scope.
+    scope_global_parameter_definitions: HashSet<String>,
+    /// Function names defined in the current parser scope.
+    scope_function_definitions: HashSet<String>,
 }
 
 impl ParamContext {
@@ -356,6 +388,48 @@ impl ParamContext {
         self.expression_dialect
     }
 
+    /// Select repeated parameter-definition behavior for subsequent parsing.
+    pub fn set_parameter_redefinition_policy(&mut self, policy: ParameterRedefinitionPolicy) {
+        self.parameter_redefinition_policy = policy;
+    }
+
+    /// Repeated parameter-definition behavior retained by this context.
+    pub fn parameter_redefinition_policy(&self) -> ParameterRedefinitionPolicy {
+        self.parameter_redefinition_policy
+    }
+
+    /// Begin a `.PARAM`/`.CSPARAM` or `.GLOBAL_PARAM` definition.
+    ///
+    /// Returns whether this definition is authoritative under the configured
+    /// policy. The parser still consumes and validates ignored definitions.
+    pub(crate) fn accepts_parameter_definition(&mut self, name: &str, global: bool) -> bool {
+        let definitions = if global {
+            &mut self.scope_global_parameter_definitions
+        } else {
+            &mut self.scope_parameter_definitions
+        };
+        let first = definitions.insert(name.to_ascii_uppercase());
+        first || self.parameter_redefinition_policy == ParameterRedefinitionPolicy::UseLast
+    }
+
+    /// Begin a parameter-function definition in the current parser scope.
+    pub(crate) fn accepts_parameter_function_definition(&mut self, name: &str) -> bool {
+        let first = self
+            .scope_function_definitions
+            .insert(name.to_ascii_uppercase());
+        first || self.parameter_redefinition_policy == ParameterRedefinitionPolicy::UseLast
+    }
+
+    /// Reset parse-time definition tracking when entering a child scope.
+    ///
+    /// Values and policy remain inherited; only same-scope redefinition
+    /// history is cleared so a local definition can shadow its caller.
+    pub(crate) fn begin_child_definition_scope(&mut self) {
+        self.scope_parameter_definitions.clear();
+        self.scope_global_parameter_definitions.clear();
+        self.scope_function_definitions.clear();
+    }
+
     /// Get all parameters as a vector of (name, value) tuples
     pub fn all_params(&self) -> Vec<(String, Value)> {
         self.params.iter().map(|(k, v)| (k.clone(), *v)).collect()
@@ -446,8 +520,11 @@ impl ParamContext {
         let mut functions = self.functions.values().cloned().collect::<Vec<_>>();
         functions.sort_unstable_by(|left, right| left.name.cmp(&right.name));
         format!(
-            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nglobals={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nexpression_dialect={:?}\n",
-            self.random.seed, self.statistical_mode, self.expression_dialect,
+            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nglobals={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nexpression_dialect={:?}\nparameter_redefinition_policy={:?}\n",
+            self.random.seed,
+            self.statistical_mode,
+            self.expression_dialect,
+            self.parameter_redefinition_policy,
         )
     }
 
@@ -455,13 +532,19 @@ impl ParamContext {
     /// draw counter. Checkpoint provenance may elaborate a circuit to discover
     /// dependencies, but that read-only operation must not perturb the live
     /// simulation's deterministic statistical stream.
-    pub(crate) fn checkpoint_isolated_clone(&self) -> Self {
+    pub(crate) fn isolated_random_clone(&self) -> Self {
         let mut cloned = self.clone();
         cloned.random = RandomState {
             seed: self.random.seed,
             counter: Arc::new(AtomicU64::new(self.random.counter.load(Ordering::Relaxed))),
         };
         cloned
+    }
+
+    /// Clone this context for checkpoint provenance without sharing the live
+    /// statistical draw counter.
+    pub(crate) fn checkpoint_isolated_clone(&self) -> Self {
+        self.isolated_random_clone()
     }
 
     /// Number of user-defined functions in this scope. Behavioral lowering

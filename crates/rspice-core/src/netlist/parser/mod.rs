@@ -13,11 +13,12 @@ use super::{
     AnalysisCommand, BjtType, DataTable, Element, ElementKind, ExpressionDialect, FftAnalysis,
     FftFormat, FftOutput, FftWindow, FreqVariation, InitialCondition, JfetType, MesfetType,
     ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet, ParamContext,
-    ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError, PoleZeroAnalysisType,
-    PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal,
-    SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
-    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
+    ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
+    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
+    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
+    VerilogAInclude, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
+    poll_parse_text,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -61,6 +62,7 @@ type MeasureStatement = crate::analysis::MeasureStatement;
 pub struct NetlistParseOptions {
     pub statistical_mode: StatisticalParamMode,
     pub expression_dialect: ExpressionDialect,
+    pub parameter_redefinition_policy: ParameterRedefinitionPolicy,
 }
 
 impl Default for NetlistParseOptions {
@@ -68,6 +70,7 @@ impl Default for NetlistParseOptions {
         Self {
             statistical_mode: StatisticalParamMode::Sample,
             expression_dialect: ExpressionDialect::Ngspice,
+            parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
         }
     }
 }
@@ -278,6 +281,9 @@ pub fn parse_netlist_with_options_and_abort(
     state
         .params
         .set_expression_dialect(options.expression_dialect);
+    state
+        .params
+        .set_parameter_redefinition_policy(options.parameter_redefinition_policy);
 
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the

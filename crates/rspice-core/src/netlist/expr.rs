@@ -30,8 +30,8 @@ pub use behavioral::{
     validate_global_parameter_expressions,
 };
 pub use context::{
-    DEFAULT_RANDOM_SEED, ExpressionDialect, FunctionDef, ParamContext, RandomState,
-    StatisticalParamMode,
+    DEFAULT_RANDOM_SEED, ExpressionDialect, FunctionDef, ParamContext, ParameterRedefinitionPolicy,
+    RandomState, StatisticalParamMode,
 };
 pub use error::ExprError;
 pub use eval::{evaluate, evaluate_complex};

@@ -5656,11 +5656,14 @@ fn resolve_subckt_default_params(
     ),
     ParseError,
 > {
-    let mut eval_ctx = params_ctx.clone();
+    let mut eval_ctx = params_ctx.isolated_random_clone();
     let mut params = Vec::new();
     let mut expr_params = Vec::new();
     let mut string_params = Vec::new();
-    let mut pending = assignments;
+    let mut pending = authoritative_subckt_default_assignments(
+        assignments,
+        params_ctx.parameter_redefinition_policy(),
+    );
 
     while !pending.is_empty() {
         let mut progress = false;
@@ -5679,6 +5682,10 @@ fn resolve_subckt_default_params(
             match parse_numeric_field_value(&raw_value, &eval_ctx, line_num) {
                 Ok(value) => {
                     eval_ctx.set(&param_name, value);
+                    if parse_spice_value(raw_value.trim()).is_err() {
+                        let expr = strip_wrapping_expression_delimiters(&raw_value).to_string();
+                        upsert_param_expression(&mut expr_params, param_name.clone(), expr);
+                    }
                     params.push((param_name, value));
                     progress = true;
                 }
@@ -5709,6 +5716,32 @@ fn resolve_subckt_default_params(
     }
 
     Ok((params, expr_params, string_params))
+}
+
+fn authoritative_subckt_default_assignments(
+    assignments: Vec<(String, String)>,
+    policy: ParameterRedefinitionPolicy,
+) -> Vec<(String, String)> {
+    let mut selected = HashSet::new();
+    let mut authoritative = Vec::with_capacity(assignments.len());
+    match policy {
+        ParameterRedefinitionPolicy::UseFirst => {
+            for assignment in assignments {
+                if selected.insert(assignment.0.to_ascii_uppercase()) {
+                    authoritative.push(assignment);
+                }
+            }
+        }
+        ParameterRedefinitionPolicy::UseLast => {
+            for assignment in assignments.into_iter().rev() {
+                if selected.insert(assignment.0.to_ascii_uppercase()) {
+                    authoritative.push(assignment);
+                }
+            }
+            authoritative.reverse();
+        }
+    }
+    authoritative
 }
 
 pub(super) fn parameter_error_can_defer(err: &ParseError) -> bool {

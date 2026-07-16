@@ -23,7 +23,8 @@ use super::param_scope::ParamResolver;
 use super::parser::parse_source_spec_text;
 use super::{
     Element, ElementKind, InitialCondition, ModelDef, Netlist, NodeSet, ParamContext,
-    ParametricValue, ParseError, RandomState, SourceSpec, SubcircuitDef,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, RandomState, SourceSpec,
+    SubcircuitDef,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -2139,6 +2140,29 @@ fn build_subcircuit_param_scope(
     let mut scope = caller_scope.clone();
     scope.adopt_random(random);
 
+    let formal_names = subckt
+        .params
+        .iter()
+        .map(|(name, _)| name)
+        .chain(subckt.expr_params.iter().map(|(name, _)| name))
+        .chain(subckt.string_params.iter().map(|(name, _)| name))
+        .map(|name| name.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    let body_names = subckt
+        .body_params
+        .iter()
+        .map(|(name, _)| name)
+        .chain(subckt.body_expr_params.iter().map(|(name, _)| name))
+        .chain(subckt.body_string_params.iter().map(|(name, _)| name))
+        .map(|name| name.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    let use_first =
+        caller_scope.parameter_redefinition_policy() == ParameterRedefinitionPolicy::UseFirst;
+    let formal_is_authoritative =
+        |name: &str| use_first || !body_names.contains(&name.to_ascii_uppercase());
+    let body_is_authoritative =
+        |name: &str| !use_first || !formal_names.contains(&name.to_ascii_uppercase());
+
     for (name, value) in &subckt.params {
         scope.set(name, *value);
     }
@@ -2146,10 +2170,14 @@ fn build_subcircuit_param_scope(
         scope.set_string(name, value.clone());
     }
     for (name, value) in &subckt.body_params {
-        scope.set(name, *value);
+        if body_is_authoritative(name) {
+            scope.set(name, *value);
+        }
     }
     for (name, value) in &subckt.body_string_params {
-        scope.set_string(name, value.clone());
+        if body_is_authoritative(name) {
+            scope.set_string(name, value.clone());
+        }
     }
     for function in &subckt.body_functions {
         scope.import_function(function.clone());
@@ -2161,13 +2189,20 @@ fn build_subcircuit_param_scope(
     for (name, value) in instance_numeric {
         scope.set(&name, value);
     }
-    resolve_deferred_param_expressions(&subckt.expr_params, &mut scope, random, &instance_names)?;
-    resolve_deferred_param_expressions(
-        &subckt.body_expr_params,
-        &mut scope,
-        random,
-        &instance_names,
-    )?;
+    let formal_expr_params = subckt
+        .expr_params
+        .iter()
+        .filter(|(name, _)| formal_is_authoritative(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    let body_expr_params = subckt
+        .body_expr_params
+        .iter()
+        .filter(|(name, _)| body_is_authoritative(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    resolve_deferred_param_expressions(&formal_expr_params, &mut scope, random, &instance_names)?;
+    resolve_deferred_param_expressions(&body_expr_params, &mut scope, random, &instance_names)?;
 
     Ok(scope)
 }

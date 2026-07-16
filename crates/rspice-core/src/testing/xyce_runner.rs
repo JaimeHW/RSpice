@@ -2305,6 +2305,11 @@ impl XyceTestRunner {
         let options = NetlistParseOptions {
             statistical_mode: StatisticalParamMode::Nominal,
             expression_dialect,
+            // Existing static contracts retain their historical parse
+            // selection. Relational families that model Xyce's
+            // `-redefined_params` modes select their policy explicitly in
+            // their execution plan.
+            parameter_redefinition_policy: crate::netlist::ParameterRedefinitionPolicy::UseLast,
         };
         if let Some(execution_dir) = execution_dir {
             return Netlist::parse_with_path_and_execution_dir(
@@ -45313,6 +45318,7 @@ M1 d g s b nmod W=1u L=0.18u
             crate::netlist::NetlistParseOptions {
                 statistical_mode: crate::netlist::StatisticalParamMode::Sample,
                 expression_dialect: ExpressionDialect::Xyce,
+                parameter_redefinition_policy: crate::netlist::ParameterRedefinitionPolicy::UseLast,
             },
         )
         .expect("deck parses");

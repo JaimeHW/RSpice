@@ -187,11 +187,24 @@ pub(super) fn process_line(
             .last()
             .map(|frame| frame.local_params.clone())
             .unwrap_or_else(|| state.params.clone());
+        local_params.begin_child_definition_scope();
         for (name, value) in &subckt.params {
             local_params.set(name, *value);
         }
         for (name, value) in &subckt.string_params {
             local_params.set_string(name, value.clone());
+        }
+        let mut formal_names = HashSet::new();
+        for name in subckt
+            .params
+            .iter()
+            .map(|(name, _)| name)
+            .chain(subckt.expr_params.iter().map(|(name, _)| name))
+            .chain(subckt.string_params.iter().map(|(name, _)| name))
+        {
+            if formal_names.insert(name.to_ascii_uppercase()) {
+                debug_assert!(local_params.accepts_parameter_definition(name, false));
+            }
         }
         state.subckt_stack.push(SubcktFrame {
             def: subckt,
@@ -578,6 +591,11 @@ fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &Param
         || command.eq_ignore_ascii_case(".GLOBAL_PARAM")
     {
         for name in subckt_body_param_names(&fields) {
+            if params.parameter_redefinition_policy() == ParameterRedefinitionPolicy::UseFirst
+                && subckt_formal_param_contains(def, &name)
+            {
+                continue;
+            }
             if def
                 .body_expr_params
                 .iter()
@@ -612,6 +630,20 @@ fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &Param
             .retain(|existing| !existing.name.eq_ignore_ascii_case(name));
         def.body_functions.push(function);
     }
+}
+
+fn subckt_formal_param_contains(def: &SubcircuitDef, name: &str) -> bool {
+    def.params
+        .iter()
+        .any(|(existing, _)| existing.eq_ignore_ascii_case(name))
+        || def
+            .expr_params
+            .iter()
+            .any(|(existing, _)| existing.eq_ignore_ascii_case(name))
+        || def
+            .string_params
+            .iter()
+            .any(|(existing, _)| existing.eq_ignore_ascii_case(name))
 }
 
 fn function_name_from_field(field: &str) -> &str {
