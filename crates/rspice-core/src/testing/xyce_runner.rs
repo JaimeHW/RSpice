@@ -21,10 +21,11 @@ use crate::netlist::expr::{
     behavioral_expression_references_unbound_frequency, prepare_behavioral_expression,
 };
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, DeviceInitialConditionError, ElementKind, ExpressionDialect,
-    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist, NetlistParseOptions,
-    ParameterRedefinitionPolicy, ParametricValue, ParseError, StatisticalParamMode, StepCommand,
-    StepSweep, StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    AnalysisCommand, DcSecondSweep, DeviceInitialConditionError, DeviceInitialConditionSource,
+    ElementKind, ExpressionDialect, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError,
+    Netlist, NetlistParseOptions, ParameterRedefinitionPolicy, ParametricValue, ParseError,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -162,6 +163,14 @@ const XYCE_BUG702_EMPTY_INITCOND_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_702/empty-initcond.cir";
 const XYCE_BUG702_MISSING_INITCOND_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_702/missing-initcond.cir";
+const XYCE_BUG702_EXTERNAL_POSITIVE_RECORD: &str =
+    "netlists/certification_tests/bug_702/external.cir";
+const XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD: &str =
+    "netlists/certification_tests/bug_702/inlined-multiple.cir";
+const XYCE_BUG702_INLINED_SINGLE_POSITIVE_RECORD: &str =
+    "netlists/certification_tests/bug_702/inlined-single.cir";
+const XYCE_BUG702_PRECEDENCE_POSITIVE_RECORD: &str =
+    "netlists/certification_tests/bug_702/precedence.cir";
 const XYCE_ISSUE455_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/issue_455/issue455.cir";
 const XYCE_BUG204_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_204/bug204.cir";
@@ -237,12 +246,30 @@ const XYCE_BUG702_EMPTY_INITCOND_SOURCE_BLAKE3: &str =
     "ffc26554455d078bd6a2f66715ee65fa7f624422efbb97991f791998ece99874";
 const XYCE_BUG702_MISSING_INITCOND_SOURCE_BLAKE3: &str =
     "0a75b775d3532734bcbcbdc24f47f156130dbefb32dd4ebee201d4a2c4eaa352";
+const XYCE_BUG702_EXTERNAL_SOURCE_BLAKE3: &str =
+    "4452f5b7b61579e9b1f9af22e377fbe8981afef85d6bf2d5532f91f0d6bea451";
+const XYCE_BUG702_INLINED_MULTIPLE_SOURCE_BLAKE3: &str =
+    "54ea0e1913a26ef18a67a1f001de5c8a6246fa0546fdb23a5a73fd58ba6034cd";
+const XYCE_BUG702_INLINED_SINGLE_SOURCE_BLAKE3: &str =
+    "f3d1cdc6272202931b57a5d1926e0828bb0e8aca6d2cfc43c3d5166dabda4728";
+const XYCE_BUG702_PRECEDENCE_SOURCE_BLAKE3: &str =
+    "e161ec6f122bfab85b62444b1ee1a0df866d8950717b7430ba01a5eb7626e45e";
 const XYCE_BUG702_INITCOND_DATA_BLAKE3: &str =
     "aeb67f1437f1c271fc8803120cb2a4b9b2b476baf4313c3627634cf5732534f9";
 const XYCE_BUG702_INITCOND_DATA_BYTES: usize = 26;
 const XYCE_BUG702_NOINITS_DATA_BLAKE3: &str =
     "544397224dca2dae387a0754c1e039de23d7d9d8d75269ee9aeaba68eedcffba";
 const XYCE_BUG702_NOINITS_DATA_BYTES: usize = 29;
+const XYCE_BUG702_INV1XIC_REFERENCE_BLAKE3: &str =
+    "14bf3cff491747a8ee5fa3e6e6dedf3a5672fd4773ab4576ecce0bb0f27de984";
+const XYCE_BUG702_INV1XIC_REFERENCE_BYTES: usize = 208_655;
+const XYCE_BUG702_NLRCS10_REFERENCE_BLAKE3: &str =
+    "5c82790a07c8078d3503e3045aa6e79b967e8801423045103171c119c381b437";
+const XYCE_BUG702_NLRCS10_REFERENCE_BYTES: usize = 95_773;
+const XYCE_BUG702_CANONICAL_INV1XIC_SOURCE_BLAKE3: &str =
+    "3d718166f51cc05da45f17893410e2119aa967753c19bd03dd2ffc7284b1a157";
+const XYCE_BUG702_CANONICAL_NLRCS10_SOURCE_BLAKE3: &str =
+    "2bd3ed0701cd20d41b69856d33d41e6bea50f10a2ccbac48088c9d661d49ac24";
 const XYCE_ISSUE455_SOURCE_BLAKE3: &str =
     "9552abaee2c6162c1f1b389708fd6e338fb9ea212e04e1c8be5ea972bf04c875";
 const XYCE_BUG204_SOURCE_BLAKE3: &str =
@@ -387,6 +414,96 @@ struct XyceExpectedFailureRetainedArtifact {
     file_name: &'static str,
     bytes: usize,
     blake3: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug702PositiveKind {
+    External,
+    InlinedMultiple,
+    InlinedSingle,
+    Precedence,
+}
+
+impl XyceBug702PositiveKind {
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_BUG702_EXTERNAL_POSITIVE_RECORD => Some(Self::External),
+            XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD => Some(Self::InlinedMultiple),
+            XYCE_BUG702_INLINED_SINGLE_POSITIVE_RECORD => Some(Self::InlinedSingle),
+            XYCE_BUG702_PRECEDENCE_POSITIVE_RECORD => Some(Self::Precedence),
+            _ => None,
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::External => XYCE_BUG702_EXTERNAL_POSITIVE_RECORD,
+            Self::InlinedMultiple => XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD,
+            Self::InlinedSingle => XYCE_BUG702_INLINED_SINGLE_POSITIVE_RECORD,
+            Self::Precedence => XYCE_BUG702_PRECEDENCE_POSITIVE_RECORD,
+        }
+    }
+
+    fn source_blake3(self) -> &'static str {
+        match self {
+            Self::External => XYCE_BUG702_EXTERNAL_SOURCE_BLAKE3,
+            Self::InlinedMultiple => XYCE_BUG702_INLINED_MULTIPLE_SOURCE_BLAKE3,
+            Self::InlinedSingle => XYCE_BUG702_INLINED_SINGLE_SOURCE_BLAKE3,
+            Self::Precedence => XYCE_BUG702_PRECEDENCE_SOURCE_BLAKE3,
+        }
+    }
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::External => "bug702_external_initcond_alias_tran",
+            Self::InlinedMultiple => "bug702_inlined_multiple_initcond_alias_tran",
+            Self::InlinedSingle => "bug702_inlined_single_initcond_alias_tran",
+            Self::Precedence => "bug702_initcond_precedence_alias_tran",
+        }
+    }
+
+    fn canonical_source_record(self) -> &'static str {
+        match self {
+            Self::InlinedMultiple => "Netlists/BUG_174/nlrcs10.cir",
+            Self::External | Self::InlinedSingle | Self::Precedence => {
+                "Netlists/INIT_CONDS/inv1xIC.cir"
+            }
+        }
+    }
+
+    fn alias_reference_name(self) -> &'static str {
+        match self {
+            Self::InlinedMultiple => "nlrcs10.cir.prn",
+            Self::External | Self::InlinedSingle | Self::Precedence => "inv1xIC.cir.prn",
+        }
+    }
+
+    fn alias_reference_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::InlinedMultiple => (
+                XYCE_BUG702_NLRCS10_REFERENCE_BYTES,
+                XYCE_BUG702_NLRCS10_REFERENCE_BLAKE3,
+            ),
+            Self::External | Self::InlinedSingle | Self::Precedence => (
+                XYCE_BUG702_INV1XIC_REFERENCE_BYTES,
+                XYCE_BUG702_INV1XIC_REFERENCE_BLAKE3,
+            ),
+        }
+    }
+
+    fn scientific_precision(self) -> usize {
+        match self {
+            Self::InlinedMultiple => XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            Self::External | Self::InlinedSingle | Self::Precedence => 10,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceBug702PositiveContract {
+    kind: XyceBug702PositiveKind,
+    netlist: Netlist,
+    plan: XyceStaticTranPlan,
 }
 
 impl XyceExpectedFailureKind {
@@ -3899,6 +4016,30 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug702_positive_contract(deck) {
+            let result = match contract {
+                Ok(contract) => self.run_bug702_positive_contract(deck, contract, start),
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    XyceBug702PositiveKind::for_record(&deck.relative_path)
+                        .expect("recognized BUG702 positive record")
+                        .result_contract(),
+                    format!("BUG702 positive qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.passive_primary_value_composite_contract(deck) {
             let result = self.run_passive_primary_value_composite_contract(deck, contract, start);
             if self.config.verbose {
@@ -4395,6 +4536,544 @@ impl XyceTestRunner {
         Self::validate_expected_pwl_repeat_value_error_source(&source, &deck.path)
             .ok()
             .map(|()| self.passed_result(deck, start, contract))
+    }
+
+    fn validate_bug702_family_census(&self, family_dir: &Path, record: &str) -> Result<(), String> {
+        let mut physical_names = BTreeSet::new();
+        for entry in fs::read_dir(family_dir).map_err(|error| {
+            format!(
+                "failed to inspect BUG702 family {}: {error}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect BUG702 family entry in {}: {error}",
+                    family_dir.display()
+                )
+            })?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!(
+                    "failed to inspect BUG702 family member {}: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "BUG702 family member {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| format!("BUG702 family member {} is not UTF-8", path.display()))?
+                .to_ascii_lowercase();
+            if !physical_names.insert(name.clone()) {
+                return Err(format!(
+                    "BUG702 family contains case-colliding .cir name {name:?}"
+                ));
+            }
+        }
+        let physical_names = physical_names.into_iter().collect::<Vec<_>>();
+        let physical_hash = blake3::hash(physical_names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if physical_names.len() != 8 || physical_hash != XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3 {
+            return Err(format!(
+                "BUG702 physical .cir census changed: expected 8 / {}, got {} / {}",
+                XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3,
+                physical_names.len(),
+                physical_hash
+            ));
+        }
+
+        let manifest_records =
+            self.expected_failure_manifest_family_records("netlists/certification_tests/bug_702/")?;
+        let manifest_hash = blake3::hash(manifest_records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if manifest_records.len() != 8 || manifest_hash != XYCE_BUG702_MANIFEST_CENSUS_BLAKE3 {
+            return Err(format!(
+                "BUG702 manifest census changed: expected 8 / {}, got {} / {}",
+                XYCE_BUG702_MANIFEST_CENSUS_BLAKE3,
+                manifest_records.len(),
+                manifest_hash
+            ));
+        }
+        let manifest_names = manifest_records
+            .iter()
+            .map(|record| {
+                record
+                    .rsplit_once('/')
+                    .map(|(_, name)| name.to_ascii_lowercase())
+                    .ok_or_else(|| format!("BUG702 manifest record {record:?} has no filename"))
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?
+            .into_iter()
+            .collect::<Vec<_>>();
+        if manifest_names != physical_names {
+            return Err(format!(
+                "BUG702 manifest/physical census is not a bijection: physical={physical_names:?}, manifest={manifest_names:?}"
+            ));
+        }
+        if !manifest_records.iter().any(|candidate| candidate == record) {
+            return Err(format!(
+                "BUG702 positive record {record:?} is absent from the pinned manifest census"
+            ));
+        }
+        Ok(())
+    }
+
+    fn replace_bug702_block_once(
+        label: &str,
+        source: String,
+        old: &str,
+        new: &str,
+    ) -> Result<String, String> {
+        let count = source.matches(old).count();
+        if count != 1 {
+            return Err(format!(
+                "{label} canonical representation block count changed: expected 1, got {count}"
+            ));
+        }
+        Ok(source.replacen(old, new, 1))
+    }
+
+    fn bug702_effective_canonical_source(
+        kind: XyceBug702PositiveKind,
+        source: &str,
+    ) -> Result<String, String> {
+        let source = source.to_string();
+        match kind {
+            XyceBug702PositiveKind::InlinedMultiple => Self::replace_bug702_block_once(
+                "BUG702 inlined-multiple",
+                source,
+                "* Using multiple inlined initial conditions\r\n\
+.INITCOND C1 IC=400 XNLR1:CABS IC=0\r\n\
+C1         1 0  400uF  ",
+                "C1         1 0  400uF IC=400V",
+            ),
+            XyceBug702PositiveKind::InlinedSingle => {
+                let source = Self::replace_bug702_block_once(
+                    "BUG702 inlined-single device",
+                    source,
+                    "* MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=2,0 \r\n\
+MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u \r\n",
+                    "MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=2,0 \r\n",
+                )?;
+                Self::replace_bug702_block_once(
+                    "BUG702 inlined-single directive",
+                    source,
+                    "\r\n* NOTE the IC values are inlined here\r\n\
+.initcond XiNv1:mn1 IC=2,0\r\n",
+                    "",
+                )
+            }
+            XyceBug702PositiveKind::External => {
+                let source = Self::replace_bug702_block_once(
+                    "BUG702 external representation",
+                    source,
+                    "* NOTE the IC values are retrieved from an external file\r\n\
+.initCOND File \"initcond.dat\"",
+                    "* NOTE the IC values are inlined here\r\n\
+.initcond XiNv1:mn1 IC=2,0",
+                )?;
+                Self::bug702_effective_canonical_source(
+                    XyceBug702PositiveKind::InlinedSingle,
+                    &source,
+                )
+            }
+            XyceBug702PositiveKind::Precedence => {
+                let source = Self::replace_bug702_block_once(
+                    "BUG702 precedence device",
+                    source,
+                    "*MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=2000,1000 \r\n\
+*NOTE the MN1 line has nonsensical IC= values (no dcop)\r\n\
+MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,10000 \r\n",
+                    "MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=2,0 \r\n",
+                )?;
+                Self::replace_bug702_block_once(
+                    "BUG702 precedence directive",
+                    source,
+                    "\r\n* NOTE this initline overwrites the IC value above\r\n\
+.INITCOND XINV1:MN1 IC=2,0 \r\n",
+                    "",
+                )
+            }
+        }
+    }
+
+    fn validate_bug702_positive_typed_semantics(
+        kind: XyceBug702PositiveKind,
+        deck_path: &Path,
+        family_dir: &Path,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        let directive = netlist
+            .device_initial_conditions
+            .as_ref()
+            .ok_or_else(|| "BUG702 positive deck lost its typed .INITCOND directive".to_string())?;
+        let expected_line = match kind {
+            XyceBug702PositiveKind::External | XyceBug702PositiveKind::InlinedSingle => 20,
+            XyceBug702PositiveKind::InlinedMultiple => 17,
+            XyceBug702PositiveKind::Precedence => 21,
+        };
+        let directive_path = directive
+            .origin
+            .path
+            .as_deref()
+            .ok_or_else(|| "BUG702 .INITCOND directive has no source path".to_string())?;
+        if directive.origin.line != expected_line
+            || directive_path.canonicalize().ok() != deck_path.canonicalize().ok()
+        {
+            return Err(format!(
+                "BUG702 {:?} directive origin changed: {:?}",
+                kind, directive.origin
+            ));
+        }
+
+        let expected_entries: Vec<(&str, Vec<Value>)> = match kind {
+            XyceBug702PositiveKind::InlinedMultiple => {
+                vec![("C1", vec![400.0]), ("XNLR1:CABS", vec![0.0])]
+            }
+            XyceBug702PositiveKind::External | XyceBug702PositiveKind::InlinedSingle => {
+                vec![("XiNv1:mn1", vec![2.0, 0.0])]
+            }
+            XyceBug702PositiveKind::Precedence => {
+                vec![("XINV1:MN1", vec![2.0, 0.0])]
+            }
+        };
+        if directive.entries.len() != expected_entries.len() {
+            return Err(format!(
+                "BUG702 {:?} typed entry count changed: expected {}, got {}",
+                kind,
+                expected_entries.len(),
+                directive.entries.len()
+            ));
+        }
+        for (entry, (expected_device, expected_values)) in
+            directive.entries.iter().zip(expected_entries)
+        {
+            if entry.device != expected_device
+                || entry.values.len() != expected_values.len()
+                || entry
+                    .values
+                    .iter()
+                    .zip(&expected_values)
+                    .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+            {
+                return Err(format!(
+                    "BUG702 {:?} typed INITCOND entry changed: {:?}",
+                    kind, entry
+                ));
+            }
+        }
+
+        match (&kind, &directive.source) {
+            (
+                XyceBug702PositiveKind::External,
+                DeviceInitialConditionSource::File {
+                    requested_path,
+                    resolved_path: Some(resolved_path),
+                    content_identity: Some(content_identity),
+                },
+            ) => {
+                let expected_resource = Self::validate_bug702_resource(
+                    family_dir,
+                    "initcond.dat",
+                    XYCE_BUG702_INITCOND_DATA_BYTES,
+                    XYCE_BUG702_INITCOND_DATA_BLAKE3,
+                )?;
+                if requested_path != "initcond.dat"
+                    || resolved_path.canonicalize().ok() != Some(expected_resource)
+                    || content_identity != XYCE_BUG702_INITCOND_DATA_BLAKE3
+                {
+                    return Err(format!(
+                        "BUG702 external source provenance changed: {:?}",
+                        directive.source
+                    ));
+                }
+            }
+            (
+                XyceBug702PositiveKind::InlinedMultiple
+                | XyceBug702PositiveKind::InlinedSingle
+                | XyceBug702PositiveKind::Precedence,
+                DeviceInitialConditionSource::Inline,
+            ) => {}
+            _ => {
+                return Err(format!(
+                    "BUG702 {:?} INITCOND representation changed: {:?}",
+                    kind, directive.source
+                ));
+            }
+        }
+
+        let flattened = crate::netlist::flatten_netlist(netlist)
+            .map_err(|error| format!("BUG702 {:?} flattening failed: {error}", kind))?;
+        if kind == XyceBug702PositiveKind::InlinedMultiple {
+            for (device, expected) in [("C1", 400.0_f64), ("XNLR1.CABS", 0.0_f64)] {
+                let element = flattened
+                    .iter()
+                    .find(|element| element.name.eq_ignore_ascii_case(device))
+                    .ok_or_else(|| format!("BUG702 flattened target {device} is missing"))?;
+                let ElementKind::Capacitor {
+                    initial_voltage: Some(actual),
+                    ..
+                } = element.kind
+                else {
+                    return Err(format!(
+                        "BUG702 flattened target {device} lost its capacitor IC"
+                    ));
+                };
+                if actual.to_bits() != expected.to_bits() {
+                    return Err(format!(
+                        "BUG702 flattened target {device} IC changed: expected {expected}, got {actual}"
+                    ));
+                }
+            }
+            let inductor = flattened
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("L1"))
+                .ok_or_else(|| "BUG702 flattened L1 is missing".to_string())?;
+            if !matches!(
+                inductor.kind,
+                ElementKind::Inductor {
+                    initial_current: Some(value),
+                    ..
+                } if value.to_bits() == 10.0f64.to_bits()
+            ) {
+                return Err("BUG702 L1 lost its independent authored IC=10A".to_string());
+            }
+        } else {
+            let mos = flattened
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("XINV1.MN1"))
+                .ok_or_else(|| "BUG702 flattened XINV1.MN1 is missing".to_string())?;
+            let ElementKind::Mosfet {
+                instance_params, ..
+            } = &mos.kind
+            else {
+                return Err("BUG702 XINV1.MN1 is not a MOSFET".to_string());
+            };
+            let ic = instance_params
+                .iter()
+                .filter(|(name, _)| name.starts_with("IC_"))
+                .map(|(name, value)| (name.as_str(), value.to_bits()))
+                .collect::<Vec<_>>();
+            if ic != [("IC_VDS", 2.0f64.to_bits()), ("IC_VGS", 0.0f64.to_bits())] {
+                return Err(format!(
+                    "BUG702 {:?} effective MOS IC vector changed: {ic:?}",
+                    kind
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn bug702_positive_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceBug702PositiveContract, String>> {
+        let kind = XyceBug702PositiveKind::for_record(&deck.relative_path)?;
+        Some((|| {
+            if deck.section != XyceDeckSection::Netlists {
+                return Err("BUG702 positive record is not in the Netlists corpus".to_string());
+            }
+            let record = Self::normalize_manifest_key(&deck.relative_path);
+            if record != kind.record() {
+                return Err(format!(
+                    "BUG702 positive record path changed: expected {}, got {record}",
+                    kind.record()
+                ));
+            }
+            if !self.requires_upstream_wrapper(&deck.relative_path) {
+                return Err("BUG702 positive record lost wrapper provenance".to_string());
+            }
+            let expected_path = self.root.join(Path::new(&deck.relative_path));
+            if deck.path.canonicalize().ok() != expected_path.canonicalize().ok() {
+                return Err(format!(
+                    "BUG702 positive record resolved outside its canonical corpus path: {}",
+                    deck.path.display()
+                ));
+            }
+            let metadata = fs::symlink_metadata(&deck.path).map_err(|error| {
+                format!(
+                    "failed to inspect BUG702 positive record {}: {error}",
+                    deck.path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err("BUG702 positive record must be a regular non-symlink file".to_string());
+            }
+            let family_dir = deck
+                .path
+                .parent()
+                .ok_or_else(|| "BUG702 positive record has no family directory".to_string())?;
+            self.validate_bug702_family_census(family_dir, kind.record())?;
+
+            let source_bytes = fs::read(&deck.path)
+                .map_err(|error| format!("failed to read BUG702 positive deck: {error}"))?;
+            let source_hash = blake3::hash(&source_bytes).to_hex().to_string();
+            if source_hash != kind.source_blake3() {
+                return Err(format!(
+                    "BUG702 {:?} source digest changed: expected {}, got {source_hash}",
+                    kind,
+                    kind.source_blake3()
+                ));
+            }
+            let source = std::str::from_utf8(&source_bytes)
+                .map_err(|error| format!("BUG702 positive deck is not UTF-8: {error}"))?;
+            let effective_source = Self::bug702_effective_canonical_source(kind, source)?;
+            let canonical_path = self.root.join(kind.canonical_source_record());
+            let canonical_bytes = fs::read(&canonical_path).map_err(|error| {
+                format!(
+                    "failed to read BUG702 canonical source {}: {error}",
+                    canonical_path.display()
+                )
+            })?;
+            let expected_canonical_hash = if kind == XyceBug702PositiveKind::InlinedMultiple {
+                XYCE_BUG702_CANONICAL_NLRCS10_SOURCE_BLAKE3
+            } else {
+                XYCE_BUG702_CANONICAL_INV1XIC_SOURCE_BLAKE3
+            };
+            let canonical_hash = blake3::hash(&canonical_bytes).to_hex().to_string();
+            if canonical_hash != expected_canonical_hash
+                || effective_source.as_bytes() != canonical_bytes
+            {
+                return Err(format!(
+                    "BUG702 {:?} effective source is not byte-equivalent to canonical {}",
+                    kind,
+                    canonical_path.display()
+                ));
+            }
+
+            let netlist = Self::parse_netlist_with_expression_dialect_and_execution_dir(
+                source,
+                &deck.path,
+                ExpressionDialect::Xyce,
+                Some(family_dir),
+            )
+            .map_err(|error| format!("BUG702 {:?} parse failed: {error}", kind))?;
+            Self::validate_bug702_positive_typed_semantics(kind, &deck.path, family_dir, &netlist)?;
+
+            let mut plan = self.static_tran_plan_for_path_with_purpose(
+                &canonical_path,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+            )?;
+            let alias_path = self
+                .root
+                .join("OutputData/Certification_Tests/BUG_702")
+                .join(kind.alias_reference_name());
+            let alias_bytes = fs::read(&alias_path).map_err(|error| {
+                format!(
+                    "failed to read BUG702 alias reference {}: {error}",
+                    alias_path.display()
+                )
+            })?;
+            let (expected_bytes, expected_hash) = kind.alias_reference_identity();
+            let alias_hash = blake3::hash(&alias_bytes).to_hex().to_string();
+            if alias_bytes.len() != expected_bytes || alias_hash != expected_hash {
+                return Err(format!(
+                    "BUG702 {:?} alias reference changed: expected {expected_bytes} / {expected_hash}, got {} / {alias_hash}",
+                    kind,
+                    alias_bytes.len()
+                ));
+            }
+            let canonical_reference = fs::read(&plan.reference_path).map_err(|error| {
+                format!(
+                    "failed to read BUG702 canonical reference {}: {error}",
+                    plan.reference_path.display()
+                )
+            })?;
+            if alias_bytes != canonical_reference {
+                return Err(format!(
+                    "BUG702 {:?} alias reference is not byte-identical to canonical {}",
+                    kind,
+                    plan.reference_path.display()
+                ));
+            }
+            plan.reference_path = alias_path;
+            plan.comparison_mode = XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: kind.scientific_precision(),
+            };
+            Ok(XyceBug702PositiveContract {
+                kind,
+                netlist,
+                plan,
+            })
+        })())
+    }
+
+    fn run_bug702_positive_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug702PositiveContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.kind.result_contract();
+        let reference =
+            match Self::parse_xyce_verify_tran_reference_file(&contract.plan.reference_path) {
+                Ok(reference) => reference,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("BUG702 alias reference parse failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        let result =
+            match self.run_transient_family_netlist(&contract.plan, &contract.netlist, start, None)
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("BUG702 positive simulation failed: {error}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        let mismatches = match self.compare_static_tran_primary_reference(
+            &reference,
+            &contract.plan,
+            &contract.netlist,
+            &result,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG702 alias reference comparison failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if !mismatches.is_empty() {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("{} BUG702 alias transient mismatch(es)", mismatches.len()),
+                mismatches,
+            );
+        }
+        self.passed_result(deck, start, result_contract)
     }
 
     fn validate_expected_failure_oracle(
@@ -69434,6 +70113,122 @@ R2 2 0 1
             "missing noinits.dat must not be confused with malformed-file oracle"
         );
         fs::remove_dir_all(temp_empty).expect("remove empty-initcond fixture");
+    }
+
+    #[test]
+    fn bug702_inlined_multiple_positive_alias_runs_first() {
+        let root = expected_failure_test_root();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let result =
+            runner.run_test(root.join("Netlists/Certification_Tests/BUG_702/inlined-multiple.cir"));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG702 inlined-multiple must execute its alias transient oracle: {result:?}"
+        );
+        assert_eq!(
+            result.contract,
+            "bug702_inlined_multiple_initcond_alias_tran"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+
+    #[test]
+    fn bug702_inverter_positive_aliases_run_with_distinct_contracts() {
+        let root = expected_failure_test_root();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (file_name, expected_contract) in [
+            (
+                "inlined-single.cir",
+                "bug702_inlined_single_initcond_alias_tran",
+            ),
+            ("external.cir", "bug702_external_initcond_alias_tran"),
+            ("precedence.cir", "bug702_initcond_precedence_alias_tran"),
+        ] {
+            let result = runner.run_test(
+                root.join("Netlists/Certification_Tests/BUG_702")
+                    .join(file_name),
+            );
+            assert!(
+                result.passed && !result.expected_unsupported,
+                "BUG702 {file_name} must execute its inverter alias transient oracle: {result:?}"
+            );
+            assert_eq!(result.contract, expected_contract);
+            assert!(result.mismatches.is_empty());
+        }
+    }
+
+    #[test]
+    fn bug702_positive_effective_sources_are_exact_and_mutations_fail_closed() {
+        let root = expected_failure_test_root();
+        for (file_name, kind, canonical_relative, mutation) in [
+            (
+                "inlined-multiple.cir",
+                XyceBug702PositiveKind::InlinedMultiple,
+                "Netlists/BUG_174/nlrcs10.cir",
+                (".INITCOND C1 IC=400", ".INITCOND C1 IC=399"),
+            ),
+            (
+                "inlined-single.cir",
+                XyceBug702PositiveKind::InlinedSingle,
+                "Netlists/INIT_CONDS/inv1xIC.cir",
+                (".initcond XiNv1:mn1 IC=2,0", ".initcond XiNv1:mn1 IC=3,0"),
+            ),
+            (
+                "external.cir",
+                XyceBug702PositiveKind::External,
+                "Netlists/INIT_CONDS/inv1xIC.cir",
+                ("\"initcond.dat\"", "\"other.dat\""),
+            ),
+            (
+                "precedence.cir",
+                XyceBug702PositiveKind::Precedence,
+                "Netlists/INIT_CONDS/inv1xIC.cir",
+                ("ic=20000,10000", "ic=2,0"),
+            ),
+        ] {
+            let source = fs::read_to_string(
+                root.join("Netlists/Certification_Tests/BUG_702")
+                    .join(file_name),
+            )
+            .unwrap_or_else(|error| panic!("read BUG702 {file_name}: {error}"));
+            let effective = XyceTestRunner::bug702_effective_canonical_source(kind, &source)
+                .unwrap_or_else(|error| {
+                    panic!("derive BUG702 {file_name} effective source: {error}")
+                });
+            let canonical = fs::read_to_string(root.join(canonical_relative))
+                .unwrap_or_else(|error| panic!("read canonical {canonical_relative}: {error}"));
+            assert_eq!(
+                effective, canonical,
+                "BUG702 {file_name} must be byte-equivalent after applying its typed INITCOND representation"
+            );
+
+            let mutated = source.replacen(mutation.0, mutation.1, 1);
+            assert_ne!(mutated, source);
+            assert!(
+                XyceTestRunner::bug702_effective_canonical_source(kind, &mutated).is_err(),
+                "BUG702 {file_name} semantic mutation must fail exact representation qualification"
+            );
+        }
+
+        let mut contracts = BTreeSet::new();
+        for relative in [
+            "Netlists/Certification_Tests/BUG_702/inlined-multiple.cir",
+            "Netlists/Certification_Tests/BUG_702/inlined-single.cir",
+            "Netlists/Certification_Tests/BUG_702/external.cir",
+            "Netlists/Certification_Tests/BUG_702/precedence.cir",
+        ] {
+            let kind = XyceBug702PositiveKind::for_record(relative)
+                .unwrap_or_else(|| panic!("BUG702 positive record recognized: {relative}"));
+            assert_eq!(
+                XyceTestRunner::normalize_manifest_key(relative),
+                kind.record()
+            );
+            assert!(
+                contracts.insert(kind.result_contract()),
+                "BUG702 positive records require distinct result contracts"
+            );
+        }
+        assert_eq!(contracts.len(), 4);
     }
 
     #[test]
