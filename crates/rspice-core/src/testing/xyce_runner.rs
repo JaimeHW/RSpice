@@ -140,6 +140,10 @@ const XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_401/extra-space.cir";
 const XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_401/worse-device-line.cir";
+const XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_701/dup-toplevel.cir";
+const XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_701/dup-subcircuit.cir";
 const XYCE_BUG67_SOURCE_BLAKE3: &str =
     "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
 const XYCE_BUG671_SOURCE_BLAKE3: &str =
@@ -166,10 +170,18 @@ const XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3: &str =
     "934e28a8ccfbd346bf66b6884c818d74d08fce9f2265363887ed9d2b569c07b5";
 const XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3: &str =
     "d452d7f4844510bd2c1076ae6f6829d5c5ef421b36f0ee228a476900dd7e8fc3";
+const XYCE_BUG701_TOPLEVEL_SOURCE_BLAKE3: &str =
+    "0131acaf84d4e1602998aa6fe62660fdbee36d819070b81a470ba697d7dc8355";
+const XYCE_BUG701_SUBCIRCUIT_SOURCE_BLAKE3: &str =
+    "48e9bdb88c56c133bbbb6c5bfbe1c190b4fc8151c18be36247418d68cb8c847e";
 const XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3: &str =
     "ccdc1cb4b46160d2c993d155a6816c81e5671aecd700bd364ab8b7d512320a13";
 const XYCE_BUG401_MANIFEST_CENSUS_BLAKE3: &str =
     "427c97a38a5a66616877760976392652da5ddd5363a9abb64108bff5e40ea50b";
+const XYCE_BUG701_PHYSICAL_CENSUS_BLAKE3: &str =
+    "95e3fe513d175af26352a58c721926147fa8d61a106f2725baa16875738961e6";
+const XYCE_BUG701_MANIFEST_CENSUS_BLAKE3: &str =
+    "d0a587a88eb1110aa7f18e230d1be0ee6ae5e8a1f57ae5d9ab7123336c55afcc";
 const XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
     "bcd3e366443f97db8ccb98d5d9f0102cbb67a5903657382da3ea7770ed666afc";
 const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
@@ -224,6 +236,8 @@ enum XyceExpectedFailureKind {
     Bug401BadDeviceLine,
     Bug401ExtraSpace,
     Bug401WorseDeviceLine,
+    Bug701DuplicateTopLevelDevice,
+    Bug701DuplicateSubcircuitDevice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +272,12 @@ impl XyceExpectedFailureKind {
             XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401BadDeviceLine),
             XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401ExtraSpace),
             XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD => Some(Self::Bug401WorseDeviceLine),
+            XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug701DuplicateTopLevelDevice)
+            }
+            XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug701DuplicateSubcircuitDevice)
+            }
             _ => None,
         }
     }
@@ -277,6 +297,8 @@ impl XyceExpectedFailureKind {
             Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD,
             Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD,
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD,
+            Self::Bug701DuplicateTopLevelDevice => XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD,
+            Self::Bug701DuplicateSubcircuitDevice => XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD,
         }
     }
 
@@ -295,6 +317,8 @@ impl XyceExpectedFailureKind {
             Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_SOURCE_BLAKE3,
             Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3,
             Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3,
+            Self::Bug701DuplicateTopLevelDevice => XYCE_BUG701_TOPLEVEL_SOURCE_BLAKE3,
+            Self::Bug701DuplicateSubcircuitDevice => XYCE_BUG701_SUBCIRCUIT_SOURCE_BLAKE3,
         }
     }
 
@@ -319,6 +343,12 @@ impl XyceExpectedFailureKind {
             Self::Bug401BadDeviceLine => "expected_failure_bug401_bad_device_line_build",
             Self::Bug401ExtraSpace => "expected_failure_bug401_extra_space_build",
             Self::Bug401WorseDeviceLine => "expected_failure_bug401_worse_device_line_parse",
+            Self::Bug701DuplicateTopLevelDevice => {
+                "expected_failure_bug701_duplicate_toplevel_device_parse"
+            }
+            Self::Bug701DuplicateSubcircuitDevice => {
+                "expected_failure_bug701_duplicate_subcircuit_device_parse"
+            }
         }
     }
 
@@ -362,6 +392,8 @@ impl XyceExpectedFailureKind {
                 "in file worse-device-line.cir at or near line 6",
                 "Illegal value found for device REALLY",
             ][..],
+            Self::Bug701DuplicateTopLevelDevice => &["Duplicate device V1"][..],
+            Self::Bug701DuplicateSubcircuitDevice => &["Duplicate device XVNODES:R1"][..],
         };
         XyceUpstreamExpectedErrorPolicy {
             requires_nonzero_exit: true,
@@ -445,6 +477,27 @@ impl XyceExpectedFailureKind {
                     "line 6".to_string(),
                 ],
             },
+            Self::Bug701DuplicateTopLevelDevice => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::DuplicateDeviceName,
+                identifiers: vec![
+                    "V1".to_string(),
+                    "TOP_LEVEL".to_string(),
+                    "line 5".to_string(),
+                    "line 6".to_string(),
+                ],
+            },
+            Self::Bug701DuplicateSubcircuitDevice => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::DuplicateDeviceName,
+                identifiers: vec![
+                    "R1".to_string(),
+                    "SUBCIRCUIT:RNODES".to_string(),
+                    "XVNODES:R1".to_string(),
+                    "line 7".to_string(),
+                    "line 8".to_string(),
+                ],
+            },
         }
     }
 
@@ -470,6 +523,15 @@ impl XyceExpectedFailureKind {
                     physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
                     manifest_owner_count: 3,
                     manifest_records_blake3: XYCE_BUG401_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                })
+            }
+            Self::Bug701DuplicateTopLevelDevice | Self::Bug701DuplicateSubcircuitDevice => {
+                Some(XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 2,
+                    physical_names_blake3: XYCE_BUG701_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 2,
+                    manifest_records_blake3: XYCE_BUG701_MANIFEST_CENSUS_BLAKE3,
                     require_manifest_bijection: true,
                 })
             }
@@ -510,6 +572,7 @@ enum XyceExpectedFailureCategory {
     InvalidDcSweepArity,
     UnknownXspiceModel,
     MalformedResistorSpecification,
+    DuplicateDeviceName,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3734,6 +3797,12 @@ impl XyceTestRunner {
             XyceExpectedFailureKind::Bug401WorseDeviceLine => {
                 Self::observe_bug401_worse_device_line_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice => {
+                Self::observe_bug701_duplicate_toplevel_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice => {
+                Self::observe_bug701_duplicate_subcircuit_failure(source, &deck.path)?
+            }
         };
         let expected = kind.expected_observation();
         if observation != expected {
@@ -4596,6 +4665,124 @@ impl XyceTestRunner {
                 "REALLY".to_string(),
                 "PERFECT".to_string(),
                 "line 6".to_string(),
+            ],
+        })
+    }
+
+    fn require_exact_duplicate_device_failure(
+        label: &str,
+        source: &str,
+        deck_path: &Path,
+        expected_name: &str,
+        expected_scope: &str,
+        expected_first_line: usize,
+        expected_duplicate_line: usize,
+    ) -> Result<(), String> {
+        match Self::parse_xyce_netlist(source, deck_path) {
+            Err(ParseError::DuplicateName {
+                canonical_name,
+                first_name,
+                duplicate_name,
+                scope,
+                first_line,
+                duplicate_line,
+            }) if canonical_name == expected_name
+                && first_name == expected_name
+                && duplicate_name == expected_name
+                && scope == expected_scope
+                && first_line == expected_first_line
+                && duplicate_line == expected_duplicate_line =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(format!(
+                "{label} produced the wrong typed duplicate-device failure: {error:?}"
+            )),
+            Ok(_) => Err(format!(
+                "{label} unexpectedly parsed; the duplicate-device condition is absent"
+            )),
+        }
+    }
+
+    fn observe_bug701_duplicate_toplevel_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 701 dup-toplevel",
+            source,
+            14,
+            &[
+                (1, "dup-toplevel.cir"),
+                (5, "V1 22 0 4"),
+                (6, "V1 1 0 5"),
+                (8, "R1 1 22 1"),
+                (9, "R2 22 0 1"),
+                (11, ".dc V1 7 7 1"),
+                (12, ".print dc V(1) V(22)"),
+            ],
+        )?;
+        Self::require_exact_duplicate_device_failure(
+            "BUG 701 dup-toplevel",
+            source,
+            deck_path,
+            "V1",
+            "TOP_LEVEL",
+            5,
+            6,
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::DuplicateDeviceName,
+            identifiers: vec![
+                "V1".to_string(),
+                "TOP_LEVEL".to_string(),
+                "line 5".to_string(),
+                "line 6".to_string(),
+            ],
+        })
+    }
+
+    fn observe_bug701_duplicate_subcircuit_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        Self::require_expected_failure_source_lines(
+            "BUG 701 dup-subcircuit",
+            source,
+            19,
+            &[
+                (1, "dup-subcircuit.cir"),
+                (6, ".subckt rNodes a b "),
+                (7, "R1 a b 1"),
+                (8, "R1 b 0 1"),
+                (9, ".ends"),
+                (11, "V1 22 0 4"),
+                (12, "V2 1 0 5"),
+                (14, ".dc V1 7 7 1"),
+                (15, ".print dc V(1) V(22)"),
+                (17, "XvNodes 1 22 rNodes"),
+                (19, ".end"),
+            ],
+        )?;
+        Self::require_exact_duplicate_device_failure(
+            "BUG 701 dup-subcircuit",
+            source,
+            deck_path,
+            "R1",
+            "SUBCIRCUIT:RNODES",
+            7,
+            8,
+        )?;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::DuplicateDeviceName,
+            identifiers: vec![
+                "R1".to_string(),
+                "SUBCIRCUIT:RNODES".to_string(),
+                "XVNODES:R1".to_string(),
+                "line 7".to_string(),
+                "line 8".to_string(),
             ],
         })
     }
@@ -65308,6 +65495,14 @@ R2 2 0 1
                     "Illegal value found for device REALLY",
                 ][..],
             ),
+            (
+                XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice,
+                &["Duplicate device V1"][..],
+            ),
+            (
+                XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
+                &["Duplicate device XVNODES:R1"][..],
+            ),
         ];
 
         for (kind, patterns) in cases {
@@ -65334,7 +65529,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_thirteen_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_fifteen_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -65386,6 +65581,14 @@ R2 2 0 1
                     XyceExpectedFailureKind::Bug671InvalidPwlFile,
                 ),
                 (
+                    XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
+                ),
+                (
+                    XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice,
+                ),
+                (
                     XYCE_BUG726_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug726AdjacentCouplings,
                 ),
@@ -65413,7 +65616,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            13,
+            15,
             "each record requires a distinct contract"
         );
     }
@@ -65475,6 +65678,14 @@ R2 2 0 1
                 "Netlists/Certification_Tests/BUG_401/worse-device-line.cir",
                 "expected_failure_bug401_worse_device_line_parse",
             ),
+            (
+                "Netlists/Certification_Tests/BUG_701/dup-toplevel.cir",
+                "expected_failure_bug701_duplicate_toplevel_device_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir",
+                "expected_failure_bug701_duplicate_subcircuit_device_parse",
+            ),
         ] {
             let result = runner.run_test(root.join(relative));
             assert!(
@@ -65520,6 +65731,19 @@ R2 2 0 1
             XyceExpectedFailureKind::Bug401WorseDeviceLine,
         ] {
             assert_eq!(member.shared_family_census(), bug401_census);
+        }
+        let bug701_census = Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 2,
+            physical_names_blake3: XYCE_BUG701_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 2,
+            manifest_records_blake3: XYCE_BUG701_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: true,
+        });
+        for member in [
+            XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice,
+            XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
+        ] {
+            assert_eq!(member.shared_family_census(), bug701_census);
         }
         for singleton in [
             XyceExpectedFailureKind::Bug67BehavioralExpression,
@@ -66283,6 +66507,68 @@ R2 2 0 1
     }
 
     #[test]
+    fn bug701_expected_failure_observers_reject_corrected_and_structural_mutations() {
+        let root = expected_failure_test_root();
+        let family = root.join("Netlists/Certification_Tests/BUG_701");
+
+        let top_path = family.join("dup-toplevel.cir");
+        let top_source = fs::read_to_string(&top_path).expect("read BUG 701 dup-toplevel");
+        XyceTestRunner::observe_bug701_duplicate_toplevel_failure(&top_source, &top_path)
+            .expect("canonical BUG 701 top-level duplicate is observed");
+        let corrected_top = top_source.replacen("V1 1 0 5", "V2 1 0 5", 1);
+        assert_ne!(corrected_top, top_source);
+        XyceTestRunner::parse_xyce_netlist(&corrected_top, &top_path)
+            .expect("renamed top-level source genuinely parses");
+        for (mutated, label) in [
+            (corrected_top, "renamed duplicate source"),
+            (
+                top_source.replacen("V1 1 0 5", "v1 1 0 5", 1),
+                "case-variant canonical spelling",
+            ),
+            (format!("\r\n{top_source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, top_source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug701_duplicate_toplevel_failure(&mutated, &top_path)
+                    .is_err(),
+                "{label} must not satisfy BUG 701 dup-toplevel"
+            );
+        }
+
+        let sub_path = family.join("dup-subcircuit.cir");
+        let sub_source = fs::read_to_string(&sub_path).expect("read BUG 701 dup-subcircuit");
+        XyceTestRunner::observe_bug701_duplicate_subcircuit_failure(&sub_source, &sub_path)
+            .expect("canonical BUG 701 subcircuit duplicate is observed");
+        let corrected_sub = sub_source.replacen("R1 b 0 1", "R2 b 0 1", 1);
+        assert_ne!(corrected_sub, sub_source);
+        XyceTestRunner::parse_xyce_netlist(&corrected_sub, &sub_path)
+            .expect("renamed subcircuit resistor genuinely parses");
+        for (mutated, label) in [
+            (corrected_sub, "renamed duplicate resistor"),
+            (
+                sub_source.replacen("XvNodes 1 22 rNodes", "Xother 1 22 rNodes", 1),
+                "renamed flattening instance",
+            ),
+            (
+                sub_source.replacen("XvNodes 1 22 rNodes\r\n", "", 1),
+                "removed flattening instance",
+            ),
+            (
+                sub_source.replacen("XvNodes 1 22 rNodes", "XvNodes 1 22 other", 1),
+                "changed flattening target",
+            ),
+            (format!("\r\n{sub_source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, sub_source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug701_duplicate_subcircuit_failure(&mutated, &sub_path)
+                    .is_err(),
+                "{label} must not satisfy BUG 701 dup-subcircuit"
+            );
+        }
+    }
+
+    #[test]
     fn bug401_expected_failure_family_provenance_fails_closed() {
         let source_root = expected_failure_test_root();
         let source_family = source_root.join("Netlists/Certification_Tests/BUG_401");
@@ -66413,6 +66699,139 @@ R2 2 0 1
         );
 
         fs::remove_dir_all(temp_root).expect("remove BUG 401 family fixture");
+    }
+
+    #[test]
+    fn bug701_expected_failure_family_provenance_fails_closed() {
+        let source_root = expected_failure_test_root();
+        let source_family = source_root.join("Netlists/Certification_Tests/BUG_701");
+        let temp_root = unique_expected_failure_temp_dir("bug701-family");
+        let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_701");
+        fs::create_dir_all(&temp_family).expect("create BUG 701 family fixture");
+        for file_name in ["dup-subcircuit.cir", "dup-toplevel.cir"] {
+            fs::copy(source_family.join(file_name), temp_family.join(file_name))
+                .expect("copy BUG 701 family member");
+        }
+        let canonical_manifest = [
+            "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir\trequires_upstream_wrapper",
+            "Netlists/Certification_Tests/BUG_701/dup-toplevel.cir\trequires_upstream_wrapper",
+        ]
+        .join("\n")
+            + "\n";
+        let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+        fs::write(&manifest_path, &canonical_manifest).expect("write BUG 701 manifest");
+        let deck_path = temp_family.join("dup-toplevel.cir");
+        let run =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+        let assert_rejected = |label: &str, expected_error: &str| {
+            let result = run();
+            assert!(
+                !result.passed
+                    && result
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains(expected_error)),
+                "{label} must fail closed with {expected_error:?}: {result:?}"
+            );
+        };
+
+        let canonical = run();
+        assert!(
+            canonical.passed
+                && !canonical.expected_unsupported
+                && canonical.contract == "expected_failure_bug701_duplicate_toplevel_device_parse",
+            "canonical copied BUG 701 family must pass: {canonical:?}"
+        );
+
+        let added = temp_family.join("added.cir");
+        fs::write(&added, "added\n.end\n").expect("add BUG 701 physical member");
+        assert_rejected("added physical member", "physical .cir census changed");
+        fs::remove_file(&added).expect("remove added BUG 701 member");
+
+        let subcircuit = temp_family.join("dup-subcircuit.cir");
+        let subcircuit_source = fs::read(&subcircuit).expect("read BUG 701 subcircuit member");
+        fs::remove_file(&subcircuit).expect("remove BUG 701 physical member");
+        assert_rejected("removed physical member", "physical .cir census changed");
+        fs::write(&subcircuit, &subcircuit_source).expect("restore BUG 701 member");
+
+        let renamed = temp_family.join("renamed-subcircuit.cir");
+        fs::rename(&subcircuit, &renamed).expect("rename BUG 701 physical member");
+        assert_rejected("renamed physical member", "physical .cir census changed");
+        fs::rename(&renamed, &subcircuit).expect("restore BUG 701 physical name");
+
+        let collision_paths = [
+            temp_family.join("RSpice_Case_Probe.cir"),
+            temp_family.join("rspice_case_probe.CIR"),
+        ];
+        fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+        fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+        let case_probe_entries = fs::read_dir(&temp_family)
+            .expect("read BUG 701 case-probe directory")
+            .map(|entry| entry.expect("read BUG 701 case-probe entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+            })
+            .collect::<Vec<_>>();
+        if case_probe_entries.len() == 2 {
+            assert_rejected("case-colliding physical members", "case-colliding");
+        }
+        for path in case_probe_entries {
+            fs::remove_file(path).expect("remove BUG 701 case probe");
+        }
+
+        let duplicate_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_701/dup-toplevel.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, duplicate_manifest).expect("write duplicate BUG 701 owner");
+        assert_rejected(
+            "duplicate manifest owner",
+            "duplicate or case-colliding record",
+        );
+
+        let case_variant_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_701/DUP-TOPLEVEL.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, case_variant_manifest).expect("write case-variant BUG 701 owner");
+        assert_rejected(
+            "case-variant manifest owner",
+            "duplicate or case-colliding record",
+        );
+
+        let non_bijective_manifest = canonical_manifest.replace(
+            "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir",
+            "Netlists/Certification_Tests/BUG_701/missing-subcircuit.cir",
+        );
+        fs::write(&manifest_path, non_bijective_manifest)
+            .expect("write non-bijective BUG 701 manifest");
+        assert_rejected(
+            "non-bijective manifest owner",
+            "manifest/physical .cir census is not a bijection",
+        );
+
+        let prefix_isolation_manifest = format!(
+            "{canonical_manifest}Netlists/Certification_Tests/BUG_701_SON/ac_files.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+        );
+        fs::write(&manifest_path, prefix_isolation_manifest)
+            .expect("write BUG 701 SON prefix-isolation row");
+        let prefix_isolated = run();
+        assert!(
+            prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+            "BUG_701_SON manifest rows must not enter the BUG_701 family census: {prefix_isolated:?}"
+        );
+
+        fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 701 manifest");
+        let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_701");
+        fs::create_dir_all(&output_dir).expect("create BUG 701 OutputData fixture");
+        fs::write(output_dir.join("dup-toplevel.cir.prn"), "forbidden")
+            .expect("write forbidden BUG 701 artifact");
+        assert_rejected(
+            "target output artifact",
+            "must not own checked-in output artifacts",
+        );
+
+        fs::remove_dir_all(temp_root).expect("remove BUG 701 family fixture");
     }
 
     #[test]

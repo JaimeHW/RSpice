@@ -322,6 +322,14 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "Netlists/Certification_Tests/BUG_401/worse-device-line.cir",
             "expected_failure_bug401_worse_device_line_parse",
         ),
+        (
+            "Netlists/Certification_Tests/BUG_701/dup-toplevel.cir",
+            "expected_failure_bug701_duplicate_toplevel_device_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir",
+            "expected_failure_bug701_duplicate_subcircuit_device_parse",
+        ),
     ];
 
     let mut observed_contracts = BTreeSet::new();
@@ -343,8 +351,8 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        13,
-        "the expected-failure oracle census is exactly thirteen distinct physical records"
+        15,
+        "the expected-failure oracle census is exactly fifteen distinct physical records"
     );
 }
 
