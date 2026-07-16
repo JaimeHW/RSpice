@@ -319,6 +319,10 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
             "expected_failure_bug258_unrecognized_line_parse",
         ),
         (
+            "Netlists/Certification_Tests/BUG_587/587.cir",
+            "expected_failure_bug587_invalid_numeric_notation_parse",
+        ),
+        (
             "Netlists/Certification_Tests/BUG_281/bug_281.cir",
             "expected_failure_bug281_invalid_dc_sweep_arity_parse",
         ),
@@ -375,8 +379,8 @@ fn test_xyce_typed_expected_failure_wrapper_cases_run() {
     }
     assert_eq!(
         observed_contracts.len(),
-        21,
-        "the expected-failure oracle census is exactly twenty-one distinct physical records"
+        22,
+        "the expected-failure oracle census is exactly twenty-two distinct physical records"
     );
 }
 
