@@ -405,10 +405,12 @@ impl Toasts {
         if soonest_expiry.is_finite() {
             ctx.request_repaint_after(Duration::from_secs_f64(soonest_expiry));
         }
-        if self
-            .queue
-            .iter()
-            .any(|toast| now - toast.created < TOAST_ENTER)
+        let animate_entry = ctx.style().animation_time > 0.0;
+        if animate_entry
+            && self
+                .queue
+                .iter()
+                .any(|toast| now - toast.created < TOAST_ENTER)
         {
             ctx.request_repaint();
         }
@@ -433,7 +435,7 @@ impl Toasts {
                 ui.spacing_mut().item_spacing.y = TOAST_GAP;
                 for toast in &self.queue {
                     let age = now - toast.created;
-                    let opacity = (age / TOAST_ENTER).clamp(0.0, 1.0) as f32;
+                    let opacity = toast_entry_opacity(age, animate_entry);
                     let edge = match toast.kind {
                         ToastKind::Success => c.ok,
                         ToastKind::Info => c.accent,
@@ -480,6 +482,14 @@ impl Toasts {
         if let Some(id) = dismissed {
             self.queue.retain(|toast| toast.id != id);
         }
+    }
+}
+
+fn toast_entry_opacity(age: f64, animate_entry: bool) -> f32 {
+    if animate_entry {
+        (age / TOAST_ENTER).clamp(0.0, 1.0) as f32
+    } else {
+        1.0
     }
 }
 
@@ -734,5 +744,12 @@ mod tests {
         assert_eq!(TOAST_LIFETIME, 5.2);
         assert_eq!(TOAST_MIN_HEIGHT, 49.0);
         assert_eq!(TOAST_GAP, 7.0);
+    }
+
+    #[test]
+    fn reduced_motion_skips_the_toast_entry_fade() {
+        assert_eq!(toast_entry_opacity(0.0, false), 1.0);
+        assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, false), 1.0);
+        assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, true), 0.5);
     }
 }

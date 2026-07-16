@@ -200,9 +200,11 @@ impl<'a> Button<'a> {
             return response;
         }
 
-        let hover =
-            ui.ctx()
-                .animate_bool_with_time(response.id, response.hovered() && self.enabled, 0.16);
+        let hover = ui.ctx().animate_bool_with_time(
+            response.id,
+            response.hovered() && self.enabled,
+            ui.style().animation_time,
+        );
         let pressed = response.is_pointer_button_down_on() && self.enabled;
 
         let (fill, stroke_color) = if self.accent {
@@ -373,9 +375,11 @@ impl<'a> IconButton<'a> {
             return response;
         }
 
-        let hover =
-            ui.ctx()
-                .animate_bool_with_time(response.id, response.hovered() && self.enabled, 0.16);
+        let hover = ui.ctx().animate_bool_with_time(
+            response.id,
+            response.hovered() && self.enabled,
+            ui.style().animation_time,
+        );
         let pressed = response.is_pointer_button_down_on() && self.enabled;
 
         let opacity = if self.enabled { 1.0 } else { 0.35 };

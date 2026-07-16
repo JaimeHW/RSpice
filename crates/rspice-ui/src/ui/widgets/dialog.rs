@@ -919,9 +919,11 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
                     node.set_selected(false);
                 }
             });
-            let hover =
-                ui.ctx()
-                    .animate_bool_with_time(response.id, response.hovered() && !selected, 0.16);
+            let hover = ui.ctx().animate_bool_with_time(
+                response.id,
+                response.hovered() && !selected,
+                ui.style().animation_time,
+            );
             let color = if selected {
                 c.accent
             } else {

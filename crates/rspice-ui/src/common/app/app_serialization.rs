@@ -688,6 +688,45 @@ mod tests {
     }
 
     #[test]
+    fn future_preferences_cannot_discard_the_recoverable_application_session() {
+        let mut state = AppState::default();
+        state
+            .workspace
+            .project
+            .rename("Session with future preferences")
+            .expect("valid project name");
+        let mut wire = serde_json::to_value(&state).expect("session serializes");
+        let preferences = &mut wire["ui_session"]["preferences"];
+        preferences["choices"]["future-density-mode"] = serde_json::json!(7);
+        preferences["toggles"]["future-motion-policy"] = serde_json::json!({"mode":"quiet"});
+        preferences["units"] = serde_json::json!({
+            "frequency-display":"future-quantum-frequency",
+            "future-exact-copy":{"digits":19}
+        });
+        preferences["future-results-policy"] = serde_json::json!({"digits":11,"mode":"exact"});
+
+        let restored: AppState =
+            serde_json::from_value(wire).expect("future preferences remain isolated");
+        assert_eq!(
+            restored.workspace.project.name(),
+            "Session with future preferences"
+        );
+        let rewritten = serde_json::to_value(&restored).expect("session rewrites");
+        let preferences = &rewritten["ui_session"]["preferences"];
+        assert_eq!(preferences["choices"]["future-density-mode"], 7);
+        assert_eq!(
+            preferences["toggles"]["future-motion-policy"]["mode"],
+            "quiet"
+        );
+        assert_eq!(
+            preferences["units"]["frequency-display"],
+            "future-quantum-frequency"
+        );
+        assert_eq!(preferences["units"]["future-exact-copy"]["digits"], 19);
+        assert_eq!(preferences["future-results-policy"]["digits"], 11);
+    }
+
+    #[test]
     fn legacy_autosave_interval_is_migrated_before_the_session_is_rewritten() {
         let mut state = AppState::default();
         state.ui.autosave_minutes = 15;

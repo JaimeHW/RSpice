@@ -75,9 +75,9 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
             format!("{action_label}, {title}"),
         )
     });
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.16);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     if hover > 0.0 {
         painter.rect_filled(
             action_rect,

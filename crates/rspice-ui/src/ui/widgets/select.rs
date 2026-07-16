@@ -24,9 +24,9 @@ pub fn select(
     response.widget_info(|| {
         WidgetInfo::labeled(WidgetType::ComboBox, ui.is_enabled(), accessible_label)
     });
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.16);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     let painter = ui.painter();
     painter.rect(
         rect,

@@ -29,7 +29,6 @@ pub(super) fn render(
         PreferenceCategory::Workspace => workspace(ui, state, actions),
         PreferenceCategory::Files => files(ui, state),
         PreferenceCategory::Accessibility => accessibility(ui, state),
-        PreferenceCategory::Shortcuts => shortcuts(ui, actions),
     }
 }
 
@@ -86,11 +85,15 @@ fn choice_row(
 }
 
 fn appearance(ui: &mut Ui, state: &mut AppState) {
-    scope_strip(ui, "User profile", "portable across desktop and web");
+    scope_strip(
+        ui,
+        "User profile",
+        "saved in this application profile on the current device",
+    );
     page_heading(
         ui,
         "Appearance",
-        "Shared across desktop and web. Touch target sizing follows the active platform.",
+        "Applied to this application profile. Touch target sizing follows the active platform.",
     );
     setting_row(
         ui,
@@ -257,16 +260,6 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
         "Workspace layout",
         "Saved per device while project documents remain portable.",
     );
-    section_label(ui, "Attention and navigation");
-    if action_row(
-        ui,
-        "Notifications and job alerts",
-        "Completion, failure, approval, quota and quiet-hours behavior.",
-        "notification-policy",
-        "Configure…",
-    ) {
-        actions.open_notification_center = true;
-    }
 }
 
 fn files(ui: &mut Ui, state: &mut AppState) {
@@ -315,7 +308,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
     scope_strip(
         ui,
         "User profile",
-        "device capability may increase minimum touch targets",
+        "saved on this device; capability may increase minimum touch targets",
     );
     page_heading(
         ui,
@@ -359,28 +352,6 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         "Applied automatically on coarse pointers.",
         &["44 px · WCAG recommended", "48 px"],
     );
-}
-
-fn shortcuts(ui: &mut Ui, actions: &mut PreferencePageActions) {
-    scope_strip(
-        ui,
-        "User profile",
-        "portable bindings with platform and organization exceptions",
-    );
-    page_heading(
-        ui,
-        "Keyboard and command shortcuts",
-        "Bindings are context-aware, platform-validated and portable. Protected browser commands always expose a conflict-free alternate.",
-    );
-    if action_row(
-        ui,
-        "Command reference",
-        "Review every active binding and its platform-safe alternate.",
-        "shortcut-editor",
-        "Open shortcuts…",
-    ) {
-        actions.open_shortcuts = true;
-    }
 }
 
 fn setting_detail(ui: &mut Ui, text: &str) {

@@ -17,8 +17,6 @@ pub(super) const CAPABILITY_MATRIX_HELP: &str = "See installed, licensed, previe
 #[derive(Debug, Default)]
 pub(super) struct PreferencePageActions {
     pub(super) open_capability_matrix: bool,
-    pub(super) open_notification_center: bool,
-    pub(super) open_shortcuts: bool,
     pub(super) updated_profile_label: Option<&'static str>,
 }
 
@@ -45,10 +43,8 @@ impl RSpiceApp {
         let mut actions = PreferencePageActions::default();
         // The retained parent does not consume Escape while one of its real
         // child executors is open above it.
-        let nested_modal_open = self.state.dialogs.license_dialog.open
-            || self.state.dialogs.shortcuts_help
-            || self.state.workbench.notification_center_open
-            || retained_under_child_manager;
+        let nested_modal_open =
+            self.state.dialogs.license_dialog.open || retained_under_child_manager;
         let shell_response = {
             let state = &mut self.state;
             preferences_shell::show(ctx, &mut category, !nested_modal_open, |ui, category| {
@@ -81,12 +77,6 @@ impl RSpiceApp {
     }
 
     fn execute_preference_page_actions(&mut self, actions: PreferencePageActions) {
-        if actions.open_shortcuts {
-            crate::workbench::commands::Command::KeyboardShortcuts.execute(self);
-        }
-        if actions.open_notification_center {
-            self.state.workbench.notification_center_open = true;
-        }
         if actions.open_capability_matrix {
             crate::workbench::commands::Command::FeatureAvailability.execute(self);
             self.state.dialogs.preferences_open =
@@ -304,14 +294,6 @@ mod tests {
             .workbench
             .navigate(preferences_route(), RouteTransitionSource::BrowserPop)
             .unwrap();
-        app.execute_preference_page_actions(PreferencePageActions {
-            open_shortcuts: true,
-            open_notification_center: true,
-            ..PreferencePageActions::default()
-        });
-        assert!(app.state.dialogs.shortcuts_help);
-        assert!(app.state.workbench.notification_center_open);
-
         app.execute_preference_page_actions(PreferencePageActions {
             open_capability_matrix: true,
             ..PreferencePageActions::default()

@@ -1160,7 +1160,7 @@ fn viewer_tab(
     let hover = ui.ctx().animate_bool_with_time(
         response.id,
         availability.available && !active && response.hovered(),
-        0.16,
+        ui.style().animation_time,
     );
     let (fill, text_color) = if active {
         (c.accent_dim, c.accent)

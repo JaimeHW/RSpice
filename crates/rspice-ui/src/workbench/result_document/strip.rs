@@ -254,9 +254,9 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
         return response;
     }
 
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.16);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     let painter = ui.painter();
     painter.rect(
         rect,
@@ -309,9 +309,9 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
         return response;
     }
 
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.16);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     let opacity = if chip.on { 1.0 } else { 0.38 };
     let painter = ui.painter();
     if hover > 0.0 {

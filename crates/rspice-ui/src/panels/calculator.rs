@@ -504,9 +504,9 @@ fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.12);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     let painter = ui.painter();
     if hover > 0.0 {
         painter.rect_filled(
@@ -556,9 +556,9 @@ fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.12);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     let painter = ui.painter();
     if hover > 0.0 {
         painter.rect_filled(

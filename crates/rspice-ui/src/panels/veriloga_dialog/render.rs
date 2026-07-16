@@ -456,24 +456,28 @@ fn render_compiling_pane(ui: &mut Ui, state: &VerilogALoadDialogState, now: f64)
             });
         });
         ui.add_space(8.0);
-        progress_sweep(ui, now);
+        progress_sweep(ui, now, ui.style().animation_time > 0.0);
     });
-    // The clock and the sweep animate; keep frames coming while we wait —
-    // at animation rate, not vsync, since this runs for the whole compile.
-    ui.ctx()
-        .request_repaint_after(std::time::Duration::from_millis(33));
+    // Reduced motion retains a useful elapsed-time update without sweeping
+    // the progress segment or repainting at animation cadence.
+    let interval = if ui.style().animation_time > 0.0 {
+        std::time::Duration::from_millis(33)
+    } else {
+        std::time::Duration::from_secs(1)
+    };
+    ui.ctx().request_repaint_after(interval);
 }
 
 /// Indeterminate progress: a thin track with an accent segment sweeping
 /// left to right (the spec's `.prog`).
-fn progress_sweep(ui: &mut Ui, now: f64) {
+fn progress_sweep(ui: &mut Ui, now: f64, animate: bool) {
     let c = Tokens::get(ui.ctx()).color;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 3.0), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 1.5, c.bg_hover);
     let seg_w = rect.width() * 0.28;
     let span = rect.width() + seg_w;
-    let phase = ((now * 0.45) % 1.0) as f32;
+    let phase = progress_phase(now, animate);
     let x0 = rect.left() - seg_w + span * phase;
     let seg = Rect::from_min_max(
         egui::pos2(x0.max(rect.left()), rect.top()),
@@ -481,6 +485,14 @@ fn progress_sweep(ui: &mut Ui, now: f64) {
     );
     if seg.width() > 1.0 {
         painter.rect_filled(seg, 1.5, c.accent);
+    }
+}
+
+fn progress_phase(now: f64, animate: bool) -> f32 {
+    if animate {
+        ((now * 0.45) % 1.0) as f32
+    } else {
+        0.5
     }
 }
 
@@ -758,5 +770,17 @@ fn fmt_bytes(bytes: u64) -> String {
         format!("{:.0} KiB", b / KB)
     } else {
         format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reduced_motion_keeps_indeterminate_progress_static() {
+        assert_eq!(progress_phase(0.0, false), 0.5);
+        assert_eq!(progress_phase(10.0, false), 0.5);
+        assert_ne!(progress_phase(0.0, true), progress_phase(1.0, true));
     }
 }

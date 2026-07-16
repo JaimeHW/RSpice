@@ -325,9 +325,11 @@ fn source_row(
                 )
             });
             let hovered = ui.rect_contains_pointer(rect);
-            let hover = ui
-                .ctx()
-                .animate_bool_with_time(row_id.with("hover"), hovered, 0.12);
+            let hover = ui.ctx().animate_bool_with_time(
+                row_id.with("hover"),
+                hovered,
+                ui.style().animation_time,
+            );
 
             {
                 let painter = ui.painter();
@@ -562,9 +564,11 @@ fn env_row(
             let rect = ui.max_rect();
             let row_id = ui.id().with(("rspice.pdk.env", index));
             let hovered = ui.rect_contains_pointer(rect);
-            let hover = ui
-                .ctx()
-                .animate_bool_with_time(row_id.with("hover"), hovered, 0.12);
+            let hover = ui.ctx().animate_bool_with_time(
+                row_id.with("hover"),
+                hovered,
+                ui.style().animation_time,
+            );
             if hover > 0.0 {
                 ui.painter().rect_filled(
                     rect,
@@ -653,9 +657,9 @@ fn env_add_prompt_row(ui: &mut Ui) -> bool {
     if !ui.is_rect_visible(rect) {
         return false;
     }
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.12);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     let painter = ui.painter();
     if hover > 0.0 {
         painter.rect_filled(
@@ -906,9 +910,9 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.12);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     if hover > 0.0 {
         ui.painter().rect_filled(
             rect,

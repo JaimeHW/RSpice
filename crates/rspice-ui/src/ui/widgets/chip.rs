@@ -32,9 +32,9 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
         return response;
     }
 
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.16);
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
 
     let (fill, border, text_color) = if on {
         (c.accent_dim, c.accent, c.text)

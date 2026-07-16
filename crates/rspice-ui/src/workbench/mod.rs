@@ -106,7 +106,10 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         .ui
         .preferences
         .toggle(TogglePreference::ReducedMotion);
-    ctx.style_mut(|style| style.animation_time = if reduced_motion { 0.0 } else { 0.25 });
+    // Custom widgets read this same policy instead of hard-coding their own
+    // durations, so reduced motion is an application-wide contract rather
+    // than an egui-default-only hint.
+    ctx.style_mut(|style| style.animation_time = if reduced_motion { 0.0 } else { 0.16 });
     app.state.workbench.reconcile_drawer_mode(
         layout.navigator_uses_drawer,
         layout.inspector_uses_drawer,

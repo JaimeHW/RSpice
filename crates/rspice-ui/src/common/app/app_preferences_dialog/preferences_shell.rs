@@ -25,6 +25,7 @@ const SCOPE_NARROW_MAX_WIDTH: f32 = 760.0;
 const SECTION_LABEL_NARROW_MAX_WIDTH: f32 = 620.0;
 const HEADER_HEIGHT: f32 = 57.0;
 const FOOTER_HEIGHT: f32 = 48.0;
+const PHONE_FOOTER_HEIGHT: f32 = 96.0;
 const CATEGORY_RAIL_WIDTH: f32 = 208.0;
 const CATEGORY_ROW_HEIGHT: f32 = 36.0;
 const TOUCH_TARGET: f32 = 44.0;
@@ -51,16 +52,14 @@ pub(super) enum PreferenceCategory {
     Workspace,
     Files,
     Accessibility,
-    Shortcuts,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 4] = [
         Self::Appearance,
         Self::Workspace,
         Self::Files,
         Self::Accessibility,
-        Self::Shortcuts,
     ];
 
     pub(super) const fn label(self) -> &'static str {
@@ -69,7 +68,6 @@ impl PreferenceCategory {
             Self::Workspace => "Workspace",
             Self::Files => "Files & storage",
             Self::Accessibility => "Accessibility",
-            Self::Shortcuts => "Shortcuts",
         }
     }
 
@@ -79,7 +77,6 @@ impl PreferenceCategory {
             Self::Workspace => "workspace",
             Self::Files => "files",
             Self::Accessibility => "accessibility",
-            Self::Shortcuts => "shortcuts",
         }
     }
 }
@@ -232,7 +229,7 @@ pub(super) fn show(
             egui::pos2(inner.right(), inner.top() + HEADER_HEIGHT),
         );
         let footer = Rect::from_min_max(
-            egui::pos2(inner.left(), inner.bottom() - FOOTER_HEIGHT),
+            egui::pos2(inner.left(), inner.bottom() - footer_height(layout)),
             inner.max,
         );
         let body = Rect::from_min_max(
@@ -246,7 +243,7 @@ pub(super) fn show(
             response.close_requested = true;
         }
         initial_focus_control_id = render_body(&mut surface, body, layout, category, render_page);
-        if render_footer(&mut surface, footer) {
+        if render_footer(&mut surface, footer, layout.phone) {
             response.account_organization_requested = true;
         }
         let dialog_response = dialog_ui.response();
@@ -265,7 +262,7 @@ pub(super) fn show(
                 y1: f64::from(layout.surface.bottom()),
             });
             node.set_description(
-                "Personal, device, accessibility, shortcut, and engineering preferences. Changes apply immediately; project settings remain versioned.",
+                "Personal, device, accessibility, and recovery preferences. Changes apply immediately; project settings remain versioned.",
             );
             node.set_modal();
         });
@@ -617,12 +614,48 @@ fn render_scrolling_page(
         });
 }
 
-fn render_footer(surface: &mut Ui, rect: Rect) -> bool {
+fn footer_height(layout: PreferencesLayout) -> f32 {
+    if layout.phone {
+        PHONE_FOOTER_HEIGHT
+    } else {
+        FOOTER_HEIGHT
+    }
+}
+
+fn render_footer(surface: &mut Ui, rect: Rect, phone: bool) -> bool {
     let t = Tokens::get(surface.ctx());
     surface.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     surface
         .painter()
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
+    if phone {
+        let mut ui = surface.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(vec2(12.0, 6.0)))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        ui.spacing_mut().item_spacing.y = FOOTER_ITEM_GAP;
+        ui.set_width(ui.available_width());
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(
+                    "Personal and device preferences apply immediately. Project settings remain versioned.",
+                )
+                .font(theme::sans(tokens::FS_2, FontWeight::Regular))
+                .color(t.color.text_dim),
+            )
+            .wrap(),
+        );
+        return ui
+            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.push_id("account-organization", |ui| {
+                    Button::new("Organization & licensing…").show(ui).clicked()
+                })
+                .inner
+            })
+            .inner;
+    }
+
     let mut ui = surface.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(vec2(12.0, 0.0)))
@@ -799,23 +832,23 @@ pub(super) fn setting_row<R>(
                 let available = (ui.available_width() - gap).max(0.0);
                 let left = (available * 0.45).max(220.0);
                 let right = (available - left).max(240.0);
-                let (row_rect, _) = ui.allocate_exact_size(
-                    vec2(ui.available_width(), SETTING_ROW_DESKTOP_CONTENT_HEIGHT),
-                    Sense::hover(),
-                );
-                let mut row = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(row_rect)
-                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                );
-                row.spacing_mut().item_spacing.x = gap;
-                row.vertical(|ui| {
-                    ui.set_width(left);
-                    setting_copy(ui, title, help);
-                });
-                row.vertical(|ui| {
-                    ui.set_width(right);
-                    add_value(ui)
+                ui.horizontal(|ui| {
+                    // The mockup specifies a 70 px minimum row, not a fixed
+                    // track. Let either column grow for wrapped help text,
+                    // stacked controls, validation, or managed-policy detail.
+                    ui.set_min_height(SETTING_ROW_DESKTOP_CONTENT_HEIGHT);
+                    ui.spacing_mut().item_spacing.x = gap;
+                    ui.vertical(|ui| {
+                        ui.set_width(left);
+                        ui.set_min_height(SETTING_ROW_DESKTOP_CONTENT_HEIGHT);
+                        setting_copy(ui, title, help);
+                    });
+                    ui.vertical(|ui| {
+                        ui.set_width(right);
+                        ui.set_min_height(SETTING_ROW_DESKTOP_CONTENT_HEIGHT);
+                        add_value(ui)
+                    })
+                    .inner
                 })
                 .inner
             }
@@ -1180,6 +1213,7 @@ mod tests {
     fn shell_structure_matches_preferences_mockup_tokens() {
         assert_eq!(HEADER_HEIGHT, 57.0);
         assert_eq!(FOOTER_HEIGHT, 48.0);
+        assert_eq!(PHONE_FOOTER_HEIGHT, 96.0);
         assert_eq!(CATEGORY_RAIL_WIDTH, 208.0);
         assert_eq!(CATEGORY_ROW_HEIGHT, 36.0);
         assert_eq!(NARROW_MAX_WIDTH, 820.0);
@@ -1208,6 +1242,7 @@ mod tests {
         assert_eq!(layout.surface.size(), vec2(382.0, 836.0));
         assert!(layout.narrow);
         assert!(layout.phone);
+        assert_eq!(footer_height(layout), PHONE_FOOTER_HEIGHT);
     }
 
     #[test]
@@ -1217,6 +1252,7 @@ mod tests {
         assert_eq!(layout.surface.size(), vec2(740.0, 680.0));
         assert!(layout.narrow);
         assert!(!layout.phone);
+        assert_eq!(footer_height(layout), FOOTER_HEIGHT);
     }
 
     #[test]
@@ -1250,7 +1286,6 @@ mod tests {
                 "Workspace",
                 "Files & storage",
                 "Accessibility",
-                "Shortcuts",
             ]
         );
     }
@@ -1331,6 +1366,49 @@ mod tests {
     }
 
     #[test]
+    fn desktop_setting_rows_grow_for_wrapped_copy_and_stacked_values() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+            ..Default::default()
+        };
+        let mut category = PreferenceCategory::Appearance;
+        let output = ctx.run(input, |ctx| {
+            let _ = show(ctx, &mut category, true, |ui, _| {
+                setting_row(
+                    ui,
+                    "Expandable fidelity row",
+                    "This deliberately long preference explanation wraps across several lines so the row must measure content instead of clipping it into a fixed-height track.",
+                    |ui| {
+                        ui.label("Resolved value");
+                        ui.label("Managed source");
+                        ui.label("Validation and restart impact");
+                    },
+                );
+                setting_row(ui, "Following fidelity row", "", |_| {});
+            });
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update");
+        let first = node_bounds(
+            &update.nodes,
+            egui::accesskit::Role::Label,
+            "Expandable fidelity row",
+        );
+        let second = node_bounds(
+            &update.nodes,
+            egui::accesskit::Role::Label,
+            "Following fidelity row",
+        );
+
+        assert!(second.y0 - first.y0 > 70.0);
+    }
+
+    #[test]
     fn shell_publishes_dialog_navigation_heading_and_current_page_semantics() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
@@ -1360,9 +1438,9 @@ mod tests {
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Dialog
                 && node.label() == Some("Preferences")
-                && node.description().is_some_and(|description| {
-                    description.contains("accessibility, shortcut, and engineering")
-                })
+                && node
+                    .description()
+                    .is_some_and(|description| description.contains("accessibility, and recovery"))
                 && node.is_modal()
         }));
         assert!(nodes.iter().any(|(_, node)| {

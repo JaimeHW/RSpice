@@ -74,7 +74,7 @@ impl<'a> Pill<'a> {
             PillState::Running => c.warn,
             PillState::Error => c.err,
         };
-        if self.state == PillState::Running {
+        if self.state == PillState::Running && ui.style().animation_time > 0.0 {
             // 1 s pulse: dip to 35 % opacity at midpoint, like the design.
             let phase = (ui.input(|i| i.time) % 1.0) as f32;
             let wave = (phase * std::f32::consts::TAU).cos() * 0.5 + 0.5; // 1→0→1

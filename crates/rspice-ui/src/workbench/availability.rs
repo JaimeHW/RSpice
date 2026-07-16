@@ -98,7 +98,7 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         },
         SurfaceId::Preferences => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui canonical Preferences manager",
-            evidence_boundary: "Runtime-backed appearance, workspace, schematic-grid, recovery, accessibility, shortcut, capability, notification, and licensing controls are executable; unowned mockup settings remain omitted rather than inert.",
+            evidence_boundary: "Only the currently visible runtime-backed appearance, workspace, autosave, accessibility, capability, and local account/licensing controls are executable; incomplete mockup categories and actions remain omitted rather than inert.",
         },
         SurfaceId::AccountOrganization => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui local account, organization, and licensing boundary manager",

@@ -176,9 +176,11 @@ impl<'a> TreeRow<'a> {
             };
         }
 
-        let hover = ui
-            .ctx()
-            .animate_bool_with_time(response.id, response.hovered(), 0.16);
+        let hover = ui.ctx().animate_bool_with_time(
+            response.id,
+            response.hovered(),
+            ui.style().animation_time,
+        );
 
         let painter = ui.painter();
         if self.selected {

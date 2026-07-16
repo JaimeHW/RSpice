@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -29,6 +30,24 @@ pub enum ChoicePreference {
 }
 
 impl ChoicePreference {
+    const ALL: [Self; 5] = [
+        Self::LegacyWorkspacePreset,
+        Self::LegacyConsoleOnLaunch,
+        Self::LegacySchematicGrid,
+        Self::InterfaceScale,
+        Self::MinimumTouchTarget,
+    ];
+
+    const fn stable_id(self) -> &'static str {
+        match self {
+            Self::LegacyWorkspacePreset => "workspace-preset",
+            Self::LegacyConsoleOnLaunch => "console-on-launch",
+            Self::LegacySchematicGrid => "schematic-grid",
+            Self::InterfaceScale => "interface-scale",
+            Self::MinimumTouchTarget => "minimum-touch-target",
+        }
+    }
+
     const fn max_value(self) -> u8 {
         match self {
             Self::LegacyWorkspacePreset | Self::LegacySchematicGrid => 2,
@@ -48,13 +67,30 @@ pub enum TogglePreference {
     ReducedMotion,
 }
 
+impl TogglePreference {
+    const ALL: [Self; 1] = [Self::ReducedMotion];
+
+    const fn stable_id(self) -> &'static str {
+        match self {
+            Self::ReducedMotion => "reduced-motion",
+        }
+    }
+}
+
 /// User/device overrides consumed by the workbench at runtime. Missing values
 /// read as the reviewed zero/false defaults, keeping legacy sessions valid.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UserPreferences {
-    choices: BTreeMap<ChoicePreference, u8>,
-    toggles: BTreeMap<TogglePreference, bool>,
+    /// String-keyed wire storage keeps a newer preference from invalidating
+    /// the complete recoverable application session in an older build.
+    /// Known keys are validated through the typed accessors below; unknown
+    /// keys are retained byte-semantically for a later compatible build.
+    choices: BTreeMap<String, Value>,
+    toggles: BTreeMap<String, Value>,
+    /// Forward-compatible typed domains that this build does not understand.
+    #[serde(flatten)]
+    unknown_domains: BTreeMap<String, Value>,
 }
 
 impl UserPreferences {
@@ -65,8 +101,9 @@ impl UserPreferences {
         }
         usize::from(
             self.choices
-                .get(&key)
-                .copied()
+                .get(key.stable_id())
+                .and_then(Value::as_u64)
+                .and_then(|value| u8::try_from(value).ok())
                 .filter(|value| *value <= key.max_value())
                 .unwrap_or_default(),
         )
@@ -81,29 +118,52 @@ impl UserPreferences {
             return Err("choice index is outside the preference domain");
         }
         if value == 0 {
-            self.choices.remove(&key);
+            self.choices.remove(key.stable_id());
         } else {
-            self.choices.insert(key, value);
+            self.choices
+                .insert(key.stable_id().to_owned(), Value::from(value));
         }
         Ok(())
     }
 
     #[must_use]
     pub fn toggle(&self, key: TogglePreference) -> bool {
-        self.toggles.get(&key).copied().unwrap_or_default()
+        self.toggles
+            .get(key.stable_id())
+            .and_then(Value::as_bool)
+            .unwrap_or_default()
     }
 
     pub fn set_toggle(&mut self, key: TogglePreference, value: bool) {
         if value {
-            self.toggles.insert(key, true);
+            self.toggles
+                .insert(key.stable_id().to_owned(), Value::Bool(true));
         } else {
-            self.toggles.remove(&key);
+            self.toggles.remove(key.stable_id());
         }
     }
 
     pub(crate) fn normalize(&mut self) {
-        self.choices
-            .retain(|key, value| key.is_runtime_consumed() && *value <= key.max_value());
+        for key in ChoicePreference::ALL {
+            if !key.is_runtime_consumed()
+                || self
+                    .choices
+                    .get(key.stable_id())
+                    .and_then(Value::as_u64)
+                    .is_none_or(|value| value > u64::from(key.max_value()))
+            {
+                self.choices.remove(key.stable_id());
+            }
+        }
+        for key in TogglePreference::ALL {
+            if self
+                .toggles
+                .get(key.stable_id())
+                .is_some_and(|value| !value.is_boolean())
+            {
+                self.toggles.remove(key.stable_id());
+            }
+        }
     }
 
     #[must_use]
@@ -172,5 +232,44 @@ mod tests {
                 .set_choice(ChoicePreference::LegacyWorkspacePreset, 1)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn unknown_preference_keys_and_domains_do_not_invalidate_or_disappear() {
+        let source = r#"{
+            "choices":{"interface-scale":2,"future-density-mode":7},
+            "toggles":{"reduced-motion":true,"future-motion-policy":{"mode":"quiet"}},
+            "units":{},
+            "future-results-policy":{"digits":11,"mode":"exact"}
+        }"#;
+        let mut restored: UserPreferences = serde_json::from_str(source).unwrap();
+        restored.normalize();
+
+        assert_eq!(restored.choice(ChoicePreference::InterfaceScale), 2);
+        assert!(restored.toggle(TogglePreference::ReducedMotion));
+        let encoded = serde_json::to_value(&restored).unwrap();
+        assert_eq!(encoded["choices"]["future-density-mode"], 7);
+        assert_eq!(encoded["toggles"]["future-motion-policy"]["mode"], "quiet");
+        assert_eq!(encoded["future-results-policy"]["digits"], 11);
+    }
+
+    #[test]
+    fn malformed_known_values_are_isolated_without_touching_unknown_values() {
+        let mut restored: UserPreferences = serde_json::from_str(
+            r#"{
+                "choices":{"interface-scale":"large","future-choice":9},
+                "toggles":{"reduced-motion":17,"future-toggle":false}
+            }"#,
+        )
+        .unwrap();
+        restored.normalize();
+
+        assert_eq!(restored.choice(ChoicePreference::InterfaceScale), 0);
+        assert!(!restored.toggle(TogglePreference::ReducedMotion));
+        let encoded = serde_json::to_value(restored).unwrap();
+        assert_eq!(encoded["choices"]["future-choice"], 9);
+        assert_eq!(encoded["toggles"]["future-toggle"], false);
+        assert!(encoded["choices"].get("interface-scale").is_none());
+        assert!(encoded["toggles"].get("reduced-motion").is_none());
     }
 }
