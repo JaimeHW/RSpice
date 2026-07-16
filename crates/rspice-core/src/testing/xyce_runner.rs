@@ -53009,6 +53009,8 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
         (root, owner, reference, runner)
     }
 
+    const BUG655_DEBUG_EXECUTION_TIMEOUT_MS: u128 = 600_000;
+
     fn bug655_continuation_sources() -> (String, String) {
         let owner = XYCE_BUG655_CANONICAL_OWNER_SOURCE.to_string();
         let mut reference_lines = owner.lines().map(str::to_string).collect::<Vec<_>>();
@@ -53054,7 +53056,13 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
                 .to_string(),
             section: XyceDeckSection::Netlists,
         };
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let mut config = XyceRunnerConfig::default();
+        // Each physical-role assertion below independently executes the paired
+        // oracle, for four debug Level-1 BJT sweeps in total. Under the fully
+        // parallel core suite, either paired execution can exceed the ordinary
+        // three-minute production deck budget solely from CPU contention.
+        config.max_time_per_test_ms = BUG655_DEBUG_EXECUTION_TIMEOUT_MS;
+        let runner = XyceTestRunner::new(&root, config);
         (root, owner, reference, runner)
     }
 
