@@ -316,6 +316,7 @@ pub(super) fn process_line(
             let fft_analyses = &mut state.fft_analyses;
             let unknown_warned = &mut state.unknown_warned;
             let models = &mut state.models;
+            let device_initial_conditions = &mut state.device_initial_conditions;
             let global_nodes = &mut state.global_nodes;
             let saves = &mut state.saves;
             let options = &mut state.options;
@@ -343,12 +344,14 @@ pub(super) fn process_line(
                     unknown_warned,
                     models,
                     initial_conditions: &mut subckt_initial_conditions,
+                    device_initial_conditions,
                     node_sets: &mut subckt_node_sets,
                     global_nodes,
                     saves,
                     options,
                     diagnostics,
                     spef_includes,
+                    origin,
                     deferred_body_params: Some(&mut frame.def.body_expr_params),
                 },
             )?;
@@ -385,12 +388,14 @@ pub(super) fn process_line(
             unknown_warned: &mut state.unknown_warned,
             models: &mut state.models,
             initial_conditions: &mut state.initial_conditions,
+            device_initial_conditions: &mut state.device_initial_conditions,
             node_sets: &mut state.node_sets,
             global_nodes: &mut state.global_nodes,
             saves: &mut state.saves,
             options: &mut state.options,
             diagnostics: &mut state.diagnostics,
             spef_includes: &mut state.spef_includes,
+            origin,
             deferred_body_params: None,
         },
     )?;
@@ -417,12 +422,14 @@ pub(super) fn parse_line(
         unknown_warned,
         models,
         initial_conditions,
+        device_initial_conditions,
         node_sets,
         global_nodes,
         saves,
         options,
         diagnostics,
         spef_includes,
+        origin,
         deferred_body_params,
     } = context;
 
@@ -460,6 +467,7 @@ pub(super) fn parse_line(
                 models,
                 params,
                 initial_conditions,
+                device_initial_conditions,
                 node_sets,
                 global_nodes,
                 measurements,
@@ -467,6 +475,7 @@ pub(super) fn parse_line(
                 options,
                 diagnostics,
                 spef_includes,
+                origin,
                 defer_scoped_values: defer_simple_param_refs,
                 deferred_body_params,
             },

@@ -17,6 +17,7 @@ pub mod expr;
 mod flattener;
 pub mod hierarchy_path;
 pub mod include;
+mod initcond;
 pub mod lexer;
 pub mod multi_run;
 pub mod param_scope;
@@ -40,6 +41,10 @@ pub use include::{
     DEFAULT_MAX_INCLUDE_DEPTH, IncludeProcessor, SealedSourceBundle, SealedSourceEdge,
     normalize_source_path_literal, parse_include_directive, parse_lib_directive,
 };
+pub use initcond::{
+    DeviceInitialConditionSourceProvider, DeviceInitialConditionSourceText,
+    MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
+};
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
@@ -57,6 +62,7 @@ pub(crate) use xspice_parser::{
 
 use thiserror::Error;
 
+use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 
 /// Exact physical location in one netlist source.
@@ -128,6 +134,79 @@ pub struct MissingSubcircuitEndsError {
     pub boundary: MissingSubcircuitEndsBoundary,
 }
 
+/// Structured `.INITCOND` failures retained across parser, source-provider,
+/// hierarchy, and public adapter boundaries.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum DeviceInitialConditionError {
+    #[error(".INITCOND line may appear only once. First card at {first}; duplicate at {duplicate}")]
+    DuplicateDirective {
+        first: NetlistSourceLocation,
+        duplicate: NetlistSourceLocation,
+    },
+
+    #[error("{origin}: .INITCOND line is missing information")]
+    MissingInformation { origin: NetlistSourceLocation },
+
+    #[error("{origin}: .INITCOND line is not formatted properly: {detail}")]
+    MalformedDirective {
+        origin: NetlistSourceLocation,
+        detail: String,
+    },
+
+    #[error("Could not open the .INITCOND file {requested_path} (referenced at {origin})")]
+    SourceUnavailable {
+        origin: NetlistSourceLocation,
+        requested_path: String,
+    },
+
+    #[error(
+        ".INITCOND file '{requested_path}' is not formatted properly at {record_origin}: {detail}"
+    )]
+    MalformedSource {
+        origin: NetlistSourceLocation,
+        requested_path: String,
+        record_origin: NetlistSourceLocation,
+        detail: String,
+    },
+
+    #[error(
+        "{origin}: .INITCOND value {value_index} for device '{device}' must be finite, found {value}"
+    )]
+    NonFiniteValue {
+        origin: NetlistSourceLocation,
+        device: String,
+        value_index: usize,
+        value: Value,
+    },
+
+    #[error(
+        "{origin}: .INITCOND FILE '{requested_path}' has not been resolved through a source provider"
+    )]
+    UnresolvedSource {
+        origin: NetlistSourceLocation,
+        requested_path: String,
+    },
+
+    #[error(
+        "{origin}: .INITCOND for device '{device}' requires {expected}, found {actual} value(s)"
+    )]
+    InvalidArity {
+        origin: NetlistSourceLocation,
+        device: String,
+        expected: String,
+        actual: usize,
+    },
+
+    #[error(
+        "{origin}: .INITCOND target '{device}' is a matched {device_type}, whose IC grammar and startup physics are not supported"
+    )]
+    UnsupportedTarget {
+        origin: NetlistSourceLocation,
+        device: String,
+        device_type: String,
+    },
+}
+
 /// Errors that can occur during netlist parsing
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -154,6 +233,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     MissingSubcircuitEnds(Box<MissingSubcircuitEndsError>),
+
+    #[error(transparent)]
+    DeviceInitialCondition(Box<DeviceInitialConditionError>),
 
     #[error("Missing required parameter: {0}")]
     MissingParameter(String),
@@ -276,6 +358,8 @@ pub struct Netlist {
     pub params: ParamContext,
     /// Initial conditions from .IC statements
     pub initial_conditions: Vec<InitialCondition>,
+    /// Netlist-wide device `IC=` overrides from Xyce's `.INITCOND` directive.
+    pub device_initial_conditions: Option<DeviceInitialConditionDirective>,
     /// Operating-point node voltage hints from .NODESET statements
     pub node_sets: Vec<NodeSet>,
     /// Global nodes from .GLOBAL (not renamed in subcircuits)
@@ -484,12 +568,10 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let expanded = Self::preprocess_includes_mapped_with_execution_dir_and_abort(
-            input,
-            file_path,
-            execution_dir,
-            abort,
-        )?;
+        let mut include_processor =
+            IncludeProcessor::new_with_execution_dir(file_path, execution_dir);
+        let expanded =
+            include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
         let (sanitized, mut diagnostics) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
         let mut netlist =
@@ -500,9 +582,15 @@ impl Netlist {
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::apply_spef_includes_with_abort(&mut netlist, file_path, abort)?;
+        netlist.source_path = Some(file_path.to_path_buf());
+        let default_execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
+        let initcond_execution_dir = execution_dir.unwrap_or(default_execution_dir.as_path());
+        let initcond_source_provider =
+            IncludeProcessor::new_with_execution_dir(file_path, Some(initcond_execution_dir));
+        netlist
+            .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
-        netlist.source_path = Some(file_path.to_path_buf());
         ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
@@ -644,9 +732,14 @@ impl Netlist {
         Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::apply_spef_includes_with_abort(&mut netlist, path, abort)?;
+        netlist.source_path = Some(path.to_path_buf());
+        let execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
+        let initcond_source_provider =
+            IncludeProcessor::new_with_execution_dir(path, Some(&execution_dir));
+        netlist
+            .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
-        netlist.source_path = Some(path.to_path_buf());
         ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
@@ -1695,6 +1788,7 @@ impl Default for Netlist {
             subcircuits: Vec::new(),
             params: ParamContext::new(),
             initial_conditions: Vec::new(),
+            device_initial_conditions: None,
             node_sets: Vec::new(),
             global_nodes: HashSet::new(),
             measurements: Vec::new(),

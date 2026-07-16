@@ -22,6 +22,7 @@ use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::parser::parse_source_spec_text;
 use super::{
+    DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
     Element, ElementKind, InitialCondition, ModelDef, Netlist, NodeSet, ParamContext,
     ParameterRedefinitionPolicy, ParametricValue, ParseError, RandomState, SourceSpec,
     SubcircuitDef,
@@ -284,6 +285,10 @@ impl<'a> Flattener<'a> {
             )?;
         }
 
+        apply_device_initial_conditions(
+            netlist.device_initial_conditions.as_ref(),
+            &mut flat_elements,
+        )?;
         Ok(flat_elements)
     }
 
@@ -2063,6 +2068,139 @@ impl<'a> Flattener<'a> {
         self.scoped_models.push(scoped_model);
         Ok(scoped_name)
     }
+}
+
+fn apply_device_initial_conditions(
+    directive: Option<&DeviceInitialConditionDirective>,
+    elements: &mut [Element],
+) -> Result<(), ParseError> {
+    let Some(directive) = directive else {
+        return Ok(());
+    };
+    if let DeviceInitialConditionSource::File {
+        requested_path,
+        resolved_path: None,
+        ..
+    } = &directive.source
+    {
+        return Err(ParseError::DeviceInitialCondition(Box::new(
+            DeviceInitialConditionError::UnresolvedSource {
+                origin: directive.origin.clone(),
+                requested_path: requested_path.clone(),
+            },
+        )));
+    }
+
+    let element_indices = elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| {
+            (
+                canonical_device_initial_condition_name(&element.name),
+                index,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    for entry in &directive.entries {
+        let canonical = canonical_device_initial_condition_name(&entry.device);
+        let Some(index) = element_indices.get(&canonical).copied() else {
+            continue;
+        };
+        apply_device_initial_condition_entry(&mut elements[index], entry)?;
+    }
+    Ok(())
+}
+
+fn canonical_device_initial_condition_name(name: &str) -> String {
+    name.trim().replace(':', ".").to_ascii_uppercase()
+}
+
+fn apply_device_initial_condition_entry(
+    element: &mut Element,
+    entry: &super::DeviceInitialConditionEntry,
+) -> Result<(), ParseError> {
+    match &mut element.kind {
+        ElementKind::Capacitor {
+            initial_voltage, ..
+        } => {
+            require_device_initial_condition_arity(entry, "exactly 1 value", 1, 1)?;
+            *initial_voltage = Some(entry.values[0]);
+        }
+        ElementKind::Mosfet {
+            instance_params,
+            deferred_params,
+            ..
+        } => {
+            require_device_initial_condition_arity(entry, "between 1 and 5 values", 1, 5)?;
+            const LABELS: [&str; 5] = ["IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS"];
+            instance_params
+                .retain(|(name, _)| !LABELS.iter().any(|label| name.eq_ignore_ascii_case(label)));
+            deferred_params
+                .retain(|(name, _)| !LABELS.iter().any(|label| name.eq_ignore_ascii_case(label)));
+            instance_params.extend(
+                LABELS
+                    .iter()
+                    .zip(&entry.values)
+                    .map(|(label, value)| ((*label).to_string(), *value)),
+            );
+        }
+        ElementKind::Inductor { .. }
+        | ElementKind::JilesAthertonInductor { .. }
+        | ElementKind::Coupling { .. }
+        | ElementKind::Subcircuit { .. } => {}
+        kind => {
+            return Err(ParseError::DeviceInitialCondition(Box::new(
+                DeviceInitialConditionError::UnsupportedTarget {
+                    origin: entry.origin.clone(),
+                    device: entry.device.clone(),
+                    device_type: device_initial_condition_element_type(kind).to_string(),
+                },
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn device_initial_condition_element_type(kind: &ElementKind) -> &'static str {
+    match kind {
+        ElementKind::Resistor { .. } => "resistor",
+        ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => "voltage source",
+        ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => "current source",
+        ElementKind::Diode { .. } => "diode",
+        ElementKind::Bjt { .. } => "BJT",
+        ElementKind::Jfet { .. } => "JFET",
+        ElementKind::Mesfet { .. } => "MESFET",
+        ElementKind::Vcvs { .. }
+        | ElementKind::Cccs { .. }
+        | ElementKind::Vccs { .. }
+        | ElementKind::Ccvs { .. } => "controlled source",
+        ElementKind::BehavioralVoltage { .. } | ElementKind::BehavioralCurrent { .. } => {
+            "behavioral source"
+        }
+        ElementKind::TransmissionLine { .. } => "transmission line",
+        ElementKind::Xspice { .. } => "XSPICE instance",
+        _ => "device",
+    }
+}
+
+fn require_device_initial_condition_arity(
+    entry: &super::DeviceInitialConditionEntry,
+    expected: &str,
+    minimum: usize,
+    maximum: usize,
+) -> Result<(), ParseError> {
+    if (minimum..=maximum).contains(&entry.values.len()) {
+        return Ok(());
+    }
+    Err(ParseError::DeviceInitialCondition(Box::new(
+        DeviceInitialConditionError::InvalidArity {
+            origin: entry.origin.clone(),
+            device: entry.device.clone(),
+            expected: expected.to_string(),
+            actual: entry.values.len(),
+        },
+    )))
 }
 
 fn parametric_value_is_string(value: &ParametricValue) -> bool {

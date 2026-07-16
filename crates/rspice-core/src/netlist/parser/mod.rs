@@ -11,16 +11,17 @@ use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::xspice_parser;
 use super::{
-    AnalysisCommand, BjtType, DataTable, Element, ElementKind, ExpressionDialect, FftAnalysis,
-    FftFormat, FftOutput, FftWindow, FreqVariation, InitialCondition, JfetType, MesfetType,
-    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, ModelDef, MonteCarloCommand,
-    MonteCarloDistribution, MosType, Netlist, NetlistSourceLocation, NodeSet, ParamContext,
-    ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
-    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
-    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
-    VerilogAInclude, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
-    poll_parse_text,
+    AnalysisCommand, BjtType, DataTable, DeviceInitialConditionDirective,
+    DeviceInitialConditionEntry, DeviceInitialConditionError, DeviceInitialConditionSource,
+    Element, ElementKind, ExpressionDialect, FftAnalysis, FftFormat, FftOutput, FftWindow,
+    FreqVariation, InitialCondition, JfetType, MesfetType, MissingSubcircuitEndsBoundary,
+    MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
+    Netlist, NetlistSourceLocation, NodeSet, ParamContext, ParameterRedefinitionPolicy,
+    ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError, PoleZeroAnalysisType,
+    PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal,
+    SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -316,6 +317,22 @@ pub(crate) fn parse_expanded_netlist_with_options_and_abort(
         Some(SourceEventSchedule::from_expanded(expanded)),
         abort,
     )
+}
+
+pub(crate) fn parse_device_initial_condition_record(
+    record: &str,
+    line_num: usize,
+    params: &ParamContext,
+    origin: &NetlistSourceLocation,
+) -> Result<Vec<DeviceInitialConditionEntry>, ParseError> {
+    let tokens = tokenize(record).map_err(|error| lex_to_parse_error(error, line_num))?;
+    let mut stream = TokenStream::new(tokens);
+    stream.skip_newlines();
+    parse_device_initial_condition_entries(&mut stream, line_num, params, origin)
+}
+
+pub(crate) fn strip_device_initial_condition_record_comment(record: &str) -> &str {
+    line::strip_inline_semicolon_comment(record)
 }
 
 fn parse_netlist_impl(

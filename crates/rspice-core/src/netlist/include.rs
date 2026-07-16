@@ -529,7 +529,7 @@ impl IncludeProcessor {
     }
 
     /// Resolve a filename to an absolute path
-    fn resolve_path_from_with_abort(
+    pub(crate) fn resolve_path_from_with_abort(
         &self,
         owner_path: &Path,
         filename: &str,
@@ -627,7 +627,50 @@ impl IncludeProcessor {
         .into())
     }
 
-    fn read_source_with_abort(
+    /// Resolve a dependency using Xyce's execution-directory-only rule.
+    ///
+    /// `.INITCOND FILE` is opened directly by Xyce and does not inherit the
+    /// including source's directory or model-library search paths. In sealed
+    /// mode the top-level source identity owns an authenticated edge to the
+    /// resource that represents the execution-directory decision.
+    pub(crate) fn resolve_execution_path_with_abort(
+        &self,
+        top_level_path: &Path,
+        filename: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<PathBuf, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
+        let clean_name = filename.trim_matches('"').trim_matches('\'');
+        if let Some(sources) = &self.sealed_sources {
+            return sources
+                .resolve_edge(top_level_path, clean_name)
+                .map_err(ParseWithAbortError::from);
+        }
+
+        let path = Path::new(clean_name);
+        let candidate = if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(relative) = windows_drive_relative_suffix(clean_name) {
+            self.execution_dir.join(spice_relative_path(relative))
+        } else {
+            self.execution_dir.join(spice_relative_path(clean_name))
+        };
+        if candidate.exists() {
+            Ok(candidate)
+        } else {
+            Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Execution-directory dependency not found: {} (searched {})",
+                    clean_name,
+                    self.execution_dir.display()
+                ),
+            }
+            .into())
+        }
+    }
+
+    pub(crate) fn read_source_with_abort(
         &self,
         path: &Path,
         requested_name: &str,

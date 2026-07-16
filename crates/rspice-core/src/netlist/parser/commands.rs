@@ -16,6 +16,7 @@ pub(super) fn parse_command(
         models,
         params,
         initial_conditions,
+        device_initial_conditions,
         node_sets,
         global_nodes,
         measurements,
@@ -23,6 +24,7 @@ pub(super) fn parse_command(
         options,
         diagnostics,
         spef_includes,
+        origin,
         defer_scoped_values,
         deferred_body_params,
     } = context;
@@ -248,6 +250,15 @@ pub(super) fn parse_command(
                 params,
                 initial_conditions,
                 defer_scoped_values,
+            )?;
+        }
+        ".INITCOND" => {
+            parse_device_initial_condition_command(
+                stream,
+                line_num,
+                params,
+                origin,
+                device_initial_conditions,
             )?;
         }
         ".NODESET" => {

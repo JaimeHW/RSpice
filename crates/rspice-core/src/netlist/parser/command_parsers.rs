@@ -1,5 +1,174 @@
 use super::*;
 
+pub(super) fn parse_device_initial_condition_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    origin: &NetlistSourceLocation,
+    directive: &mut Option<DeviceInitialConditionDirective>,
+) -> Result<(), ParseError> {
+    if let Some(first) = directive {
+        return Err(ParseError::DeviceInitialCondition(Box::new(
+            DeviceInitialConditionError::DuplicateDirective {
+                first: first.origin.clone(),
+                duplicate: origin.clone(),
+            },
+        )));
+    }
+
+    if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Err(ParseError::DeviceInitialCondition(Box::new(
+            DeviceInitialConditionError::MissingInformation {
+                origin: origin.clone(),
+            },
+        )));
+    }
+
+    if matches!(&stream.peek().kind, TokenKind::Ident(value) if value.eq_ignore_ascii_case("FILE"))
+    {
+        stream.advance();
+        let requested_path = match &stream.peek().kind {
+            TokenKind::StringLit(path) => {
+                let path = path.clone();
+                stream.advance();
+                path
+            }
+            _ => take_authored_initcond_token(stream).ok_or_else(|| {
+                ParseError::DeviceInitialCondition(Box::new(
+                    DeviceInitialConditionError::MalformedDirective {
+                        origin: origin.clone(),
+                        detail: "FILE requires one path".to_string(),
+                    },
+                ))
+            })?,
+        };
+        if requested_path.trim().is_empty()
+            || !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+        {
+            return Err(ParseError::DeviceInitialCondition(Box::new(
+                DeviceInitialConditionError::MalformedDirective {
+                    origin: origin.clone(),
+                    detail: "FILE requires exactly one non-empty path".to_string(),
+                },
+            )));
+        }
+        *directive = Some(DeviceInitialConditionDirective {
+            origin: origin.clone(),
+            source: DeviceInitialConditionSource::File {
+                requested_path,
+                resolved_path: None,
+                content_identity: None,
+            },
+            entries: Vec::new(),
+        });
+        return Ok(());
+    }
+
+    let entries = parse_device_initial_condition_entries(stream, line_num, params, origin)?;
+    *directive = Some(DeviceInitialConditionDirective {
+        origin: origin.clone(),
+        source: DeviceInitialConditionSource::Inline,
+        entries,
+    });
+    Ok(())
+}
+
+fn take_authored_initcond_token(stream: &mut TokenStream) -> Option<String> {
+    let first = stream.peek().clone();
+    if matches!(first.kind, TokenKind::Newline | TokenKind::Eof) {
+        return None;
+    }
+    let mut path = first.lexeme;
+    let mut end = first.span.end;
+    stream.advance();
+    while stream.peek().span.start == end
+        && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+    {
+        let token = stream.peek().clone();
+        path.push_str(&token.lexeme);
+        end = token.span.end;
+        stream.advance();
+    }
+    Some(path)
+}
+
+pub(super) fn parse_device_initial_condition_entries(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    origin: &NetlistSourceLocation,
+) -> Result<Vec<DeviceInitialConditionEntry>, ParseError> {
+    let mut entries = Vec::new();
+
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let device = take_authored_initcond_token(stream).ok_or_else(|| {
+            ParseError::DeviceInitialCondition(Box::new(
+                DeviceInitialConditionError::MalformedDirective {
+                    origin: origin.clone(),
+                    detail: "expected a fully qualified device name".to_string(),
+                },
+            ))
+        })?;
+        let keyword = expect_ident(stream, line_num).map_err(|_| {
+            ParseError::DeviceInitialCondition(Box::new(
+                DeviceInitialConditionError::MalformedDirective {
+                    origin: origin.clone(),
+                    detail: format!("device '{device}' must be followed by IC=<value>"),
+                },
+            ))
+        })?;
+        if !keyword.eq_ignore_ascii_case("IC") || !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::DeviceInitialCondition(Box::new(
+                DeviceInitialConditionError::MalformedDirective {
+                    origin: origin.clone(),
+                    detail: format!("device '{device}' must be followed by IC=<value>"),
+                },
+            )));
+        }
+
+        let mut values = Vec::new();
+        loop {
+            let value = expect_value(stream, line_num, params).map_err(|error| {
+                ParseError::DeviceInitialCondition(Box::new(
+                    DeviceInitialConditionError::MalformedDirective {
+                        origin: origin.clone(),
+                        detail: format!("device '{device}' has an invalid IC value: {error}"),
+                    },
+                ))
+            })?;
+            if !value.is_finite() {
+                return Err(ParseError::DeviceInitialCondition(Box::new(
+                    DeviceInitialConditionError::NonFiniteValue {
+                        origin: origin.clone(),
+                        device: device.clone(),
+                        value_index: values.len() + 1,
+                        value,
+                    },
+                )));
+            }
+            values.push(value);
+            if !stream.consume(&TokenKind::Comma) {
+                break;
+            }
+        }
+
+        entries.push(DeviceInitialConditionEntry {
+            device,
+            values,
+            origin: origin.clone(),
+        });
+    }
+
+    if entries.is_empty() {
+        return Err(ParseError::DeviceInitialCondition(Box::new(
+            DeviceInitialConditionError::MissingInformation {
+                origin: origin.clone(),
+            },
+        )));
+    }
+    Ok(entries)
+}
+
 pub(super) fn parse_step_command(
     stream: &mut TokenStream,
     line_num: usize,

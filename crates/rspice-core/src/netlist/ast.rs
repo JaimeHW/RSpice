@@ -2160,6 +2160,64 @@ pub struct InitialCondition {
     pub voltage_expr: Option<String>,
 }
 
+/// One device-targeted initial-condition override from Xyce's `.INITCOND`
+/// directive.
+///
+/// Device names are retained exactly as authored for diagnostics. Matching is
+/// case-insensitive and treats Xyce's `:` hierarchy separator as equivalent to
+/// RSpice's canonical `.` separator when the hierarchy is flattened.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceInitialConditionEntry {
+    /// Fully qualified device name, for example `XINV1:MN1`.
+    pub device: String,
+    /// Device-specific `IC=` vector in authored order.
+    pub values: Vec<Value>,
+    /// Exact source record that supplied this entry.
+    pub origin: super::NetlistSourceLocation,
+}
+
+/// Origin of a device-targeted `.INITCOND` data set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceInitialConditionSource {
+    /// Values were authored directly on the `.INITCOND` card.
+    Inline,
+    /// Values were loaded from an external text resource.
+    File {
+        /// Path exactly as authored on the `.INITCOND FILE` card.
+        requested_path: String,
+        /// Canonical provider identity after successful resolution.
+        resolved_path: Option<std::path::PathBuf>,
+        /// BLAKE3 identity of the exact decoded source text consumed by the
+        /// parser.
+        content_identity: Option<String>,
+    },
+}
+
+/// Typed representation of one netlist-wide `.INITCOND` directive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceInitialConditionDirective {
+    /// Exact source location of the directive itself.
+    pub origin: super::NetlistSourceLocation,
+    /// Inline or external-file provenance.
+    pub source: DeviceInitialConditionSource,
+    /// Resolved entries. External-file directives remain empty until a source
+    /// provider resolves them.
+    pub entries: Vec<DeviceInitialConditionEntry>,
+}
+
+impl DeviceInitialConditionDirective {
+    /// Whether an external-file directive still requires source resolution.
+    pub fn requires_source_resolution(&self) -> bool {
+        matches!(
+            self.source,
+            DeviceInitialConditionSource::File {
+                resolved_path: None,
+                ..
+            }
+        )
+    }
+}
+
 /// Nodeset hint for operating point
 #[derive(Debug, Clone)]
 pub struct NodeSet {
