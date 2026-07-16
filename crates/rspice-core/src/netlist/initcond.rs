@@ -258,6 +258,38 @@ mod tests {
     }
 
     #[test]
+    fn quoted_windows_file_paths_retain_drive_and_unc_backslashes() {
+        for (literal, expected) in [
+            (
+                r#""C:\models\startup\initcond.dat""#,
+                r"C:\models\startup\initcond.dat",
+            ),
+            (
+                r#""\\server\share\startup\initcond.dat""#,
+                r"\\server\share\startup\initcond.dat",
+            ),
+            (
+                r"'C:\single-quoted\initcond.dat'",
+                r"C:\single-quoted\initcond.dat",
+            ),
+        ] {
+            let source = format!("quoted path\n.INITCOND FILE {literal}\nC1 1 0 1u\n.END\n");
+            let netlist = Netlist::parse(&source).expect("quoted INITCOND path parses");
+            let directive = netlist
+                .device_initial_conditions
+                .expect("file directive retained");
+            assert!(matches!(
+                directive.source,
+                DeviceInitialConditionSource::File {
+                    requested_path,
+                    resolved_path: None,
+                    ..
+                } if requested_path == expected
+            ));
+        }
+    }
+
+    #[test]
     fn duplicate_card_is_rejected_before_malformed_second_card_is_parsed() {
         let error = Netlist::parse(
             "duplicate initcond\n\

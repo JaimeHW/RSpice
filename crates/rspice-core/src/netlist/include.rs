@@ -647,13 +647,13 @@ impl IncludeProcessor {
                 .map_err(ParseWithAbortError::from);
         }
 
-        let path = Path::new(clean_name);
+        let path = source_path_literal_to_host_path(clean_name);
         let candidate = if path.is_absolute() {
-            path.to_path_buf()
+            path
         } else if let Some(relative) = windows_drive_relative_suffix(clean_name) {
             self.execution_dir.join(spice_relative_path(relative))
         } else {
-            self.execution_dir.join(spice_relative_path(clean_name))
+            self.execution_dir.join(path)
         };
         if candidate.exists() {
             Ok(candidate)

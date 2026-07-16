@@ -583,8 +583,14 @@ impl Netlist {
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::apply_spef_includes_with_abort(&mut netlist, file_path, abort)?;
         netlist.source_path = Some(file_path.to_path_buf());
-        let default_execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
-        let initcond_execution_dir = execution_dir.unwrap_or(default_execution_dir.as_path());
+        let default_execution_dir = if execution_dir.is_none() {
+            Some(std::env::current_dir().map_err(ParseError::Io)?)
+        } else {
+            None
+        };
+        let initcond_execution_dir = execution_dir
+            .or(default_execution_dir.as_deref())
+            .expect("explicit or process execution directory is available");
         let initcond_source_provider =
             IncludeProcessor::new_with_execution_dir(file_path, Some(initcond_execution_dir));
         netlist

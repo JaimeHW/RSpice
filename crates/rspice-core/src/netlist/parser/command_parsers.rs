@@ -27,21 +27,14 @@ pub(super) fn parse_device_initial_condition_command(
     if matches!(&stream.peek().kind, TokenKind::Ident(value) if value.eq_ignore_ascii_case("FILE"))
     {
         stream.advance();
-        let requested_path = match &stream.peek().kind {
-            TokenKind::StringLit(path) => {
-                let path = path.clone();
-                stream.advance();
-                path
-            }
-            _ => take_authored_initcond_token(stream).ok_or_else(|| {
-                ParseError::DeviceInitialCondition(Box::new(
-                    DeviceInitialConditionError::MalformedDirective {
-                        origin: origin.clone(),
-                        detail: "FILE requires one path".to_string(),
-                    },
-                ))
-            })?,
-        };
+        let requested_path = take_authored_initcond_path(stream).ok_or_else(|| {
+            ParseError::DeviceInitialCondition(Box::new(
+                DeviceInitialConditionError::MalformedDirective {
+                    origin: origin.clone(),
+                    detail: "FILE requires one path".to_string(),
+                },
+            ))
+        })?;
         if requested_path.trim().is_empty()
             || !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
         {
@@ -71,6 +64,20 @@ pub(super) fn parse_device_initial_condition_command(
         entries,
     });
     Ok(())
+}
+
+fn take_authored_initcond_path(stream: &mut TokenStream) -> Option<String> {
+    let token = stream.peek().clone();
+    let raw = token.lexeme.as_str();
+    if raw.len() >= 2 {
+        let first = raw.as_bytes()[0];
+        let last = raw.as_bytes()[raw.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            stream.advance();
+            return Some(raw[1..raw.len() - 1].to_string());
+        }
+    }
+    take_authored_initcond_token(stream)
 }
 
 fn take_authored_initcond_token(stream: &mut TokenStream) -> Option<String> {
