@@ -626,26 +626,75 @@ fn apply_root_preprocessing(
     let root_path = source_schedule
         .and_then(|schedule| schedule.origin(0))
         .and_then(|origin| origin.path.as_deref());
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum LogicalLinePolicy {
+        Rewrite,
+        ProtectedDirective,
+        AuthoredOutput,
+        InertIncludedPreprocess,
+    }
+
+    fn logical_line_policy(line: &str, is_root: bool) -> LogicalLinePolicy {
+        let head = strip_inline_semicolon_comment(line)
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+        if !is_root && head.eq_ignore_ascii_case(".PREPROCESS") {
+            return LogicalLinePolicy::InertIncludedPreprocess;
+        }
+        if matches!(
+            head.to_ascii_uppercase().as_str(),
+            ".SUBCKT" | ".INCLUDE" | ".INC" | ".INCL" | ".LIB" | ".ENDL"
+        ) {
+            return LogicalLinePolicy::ProtectedDirective;
+        }
+        // These cards are intentionally parsed from authored spelling. Their
+        // execution-facing SaveSet/MEASURE/FOUR fields are normalized after
+        // parsing, while OutputRequest retains exact user provenance.
+        if matches!(
+            head.to_ascii_uppercase().as_str(),
+            ".SAVE" | ".PROBE" | ".PRINT" | ".PLOT" | ".MEAS" | ".MEASURE" | ".FOUR" | ".FOURIER"
+        ) {
+            return LogicalLinePolicy::AuthoredOutput;
+        }
+        LogicalLinePolicy::Rewrite
+    }
+
     let mut transformed = String::with_capacity(input.len());
+    let mut active_source_path: Option<Option<&std::path::Path>> = None;
+    let mut logical_policy = LogicalLinePolicy::Rewrite;
     for (index, line) in lines.iter().enumerate() {
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
-        let is_root = source_schedule.is_none_or(|schedule| {
-            schedule
-                .origin(index)
-                .is_some_and(|origin| origin.path.as_deref() == root_path)
-        });
-        let is_inert_included_preprocess = !is_root
-            && strip_inline_semicolon_comment(line)
-                .split_whitespace()
-                .next()
-                .is_some_and(|head| head.eq_ignore_ascii_case(".PREPROCESS"));
-        if is_inert_included_preprocess {
-            // Xyce selects and validates preprocessing controls from the root
-            // file only. Included cards do not enable, disable, or diagnose
-            // root preprocessing.
-        } else if replace_ground && index != 0 {
-            transformed.push_str(&replace_ground_fields(line));
+        let source_path = source_schedule
+            .and_then(|schedule| schedule.origin(index))
+            .and_then(|origin| origin.path.as_deref());
+        let is_root = source_schedule.is_none_or(|_| source_path == root_path);
+        if active_source_path != Some(source_path) {
+            active_source_path = Some(source_path);
+            logical_policy = LogicalLinePolicy::Rewrite;
+        }
+
+        let stripped = strip_inline_semicolon_comment(line).trim();
+        let is_comment_or_blank = stripped.is_empty() || stripped.starts_with('*');
+        let is_continuation = !is_comment_or_blank && stripped.starts_with('+');
+        if !is_comment_or_blank && !is_continuation {
+            logical_policy = logical_line_policy(line, is_root);
+        }
+        if index == 0 {
+            logical_policy = LogicalLinePolicy::Rewrite;
+        }
+
+        if logical_policy == LogicalLinePolicy::InertIncludedPreprocess {
+            // Root preprocessing controls are selected before include
+            // expansion in Xyce. Drop the entire included logical card so it
+            // cannot be parsed later as an active root command.
+        } else if replace_ground
+            && index != 0
+            && logical_policy == LogicalLinePolicy::Rewrite
+            && !is_comment_or_blank
+        {
+            transformed.push_str(&replace_ground_fields_with_abort(line, abort)?);
         } else {
             transformed.push_str(line);
         }
@@ -657,83 +706,124 @@ fn apply_root_preprocessing(
     Ok(transformed)
 }
 
+#[cfg(test)]
 fn replace_ground_fields(line: &str) -> String {
+    replace_ground_fields_with_abort(line, &NoAbort)
+        .expect("NoAbort cannot cancel ground-field rewriting")
+}
+
+fn replace_ground_fields_with_abort(
+    line: &str,
+    abort: &dyn AbortSignal,
+) -> Result<String, ParseWithAbortError> {
     let trimmed = line.trim_start();
     if trimmed.is_empty() || trimmed.starts_with('*') {
-        return line.to_string();
-    }
-    let head = trimmed.split_whitespace().next().unwrap_or_default();
-    if matches!(
-        head.to_ascii_uppercase().as_str(),
-        ".SUBCKT"
-            | ".INCLUDE"
-            | ".INC"
-            | ".INCL"
-            | ".LIB"
-            | ".ENDL"
-            | ".SAVE"
-            | ".PROBE"
-            | ".PRINT"
-            | ".PLOT"
-            | ".MEAS"
-            | ".MEASURE"
-            | ".FOUR"
-            | ".FOURIER"
-    ) {
-        return line.to_string();
+        return Ok(line.to_string());
     }
 
     let mut output = String::with_capacity(line.len());
-    let mut token = String::new();
-    let mut braces = 0usize;
-    let mut single_quote = false;
-    let mut double_quote = false;
-    let flush = |output: &mut String, token: &mut String, protected: bool| {
-        if !protected
-            && matches!(
-                token.to_ascii_uppercase().as_str(),
-                "GND" | "GND!" | "GROUND"
-            )
-        {
-            output.push('0');
-        } else {
-            output.push_str(token);
+    let mut cursor = 0usize;
+
+    // Xyce turns a leading continuation marker into whitespace before field
+    // tokenization. Preserve it for RSpice's logical-line parser, but do not
+    // let it become part of the first field.
+    let leading = line.len() - trimmed.len();
+    if trimmed.starts_with('+') {
+        let marker_end = leading + 1;
+        output.push_str(&line[..marker_end]);
+        cursor = marker_end;
+    }
+
+    while cursor < line.len() {
+        poll_parse_abort(abort, cursor)?;
+        let character = line[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        if character == ';' {
+            output.push_str(&line[cursor..]);
+            break;
         }
-        token.clear();
-    };
-    for (byte_index, ch) in line.char_indices() {
-        let protected = braces != 0 || single_quote || double_quote;
-        if ch == ';' && !protected {
-            flush(&mut output, &mut token, false);
-            output.push_str(&line[byte_index..]);
-            return output;
-        }
-        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '.' | ':' | '!') {
-            token.push(ch);
+        if character == '{' {
+            let start = cursor;
+            let mut depth = 0usize;
+            while cursor < line.len() {
+                poll_parse_abort(abort, cursor)?;
+                let current = line[cursor..]
+                    .chars()
+                    .next()
+                    .expect("cursor remains on a character boundary");
+                cursor += current.len_utf8();
+                if current == '{' {
+                    depth += 1;
+                } else if current == '}' {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+            output.push_str(&line[start..cursor]);
             continue;
         }
-        flush(&mut output, &mut token, protected);
-        output.push(ch);
-        match ch {
-            '{' if !single_quote && !double_quote => braces += 1,
-            '}' if !single_quote && !double_quote => braces = braces.saturating_sub(1),
-            '\'' if braces == 0 && !double_quote => single_quote = !single_quote,
-            '"' if braces == 0 && !single_quote => double_quote = !double_quote,
-            _ => {}
+        if matches!(character, '\'' | '"') {
+            let quote = character;
+            let start = cursor;
+            cursor += character.len_utf8();
+            while cursor < line.len() {
+                poll_parse_abort(abort, cursor)?;
+                let current = line[cursor..]
+                    .chars()
+                    .next()
+                    .expect("cursor remains on a character boundary");
+                cursor += current.len_utf8();
+                if current == quote {
+                    break;
+                }
+            }
+            output.push_str(&line[start..cursor]);
+            continue;
+        }
+        if character.is_whitespace() || matches!(character, '(' | ')' | '}' | ',' | '=') {
+            output.push(character);
+            cursor += character.len_utf8();
+            continue;
+        }
+
+        let field_start = cursor;
+        while cursor < line.len() {
+            poll_parse_abort(abort, cursor)?;
+            let current = line[cursor..]
+                .chars()
+                .next()
+                .expect("cursor remains on a character boundary");
+            if current == ';'
+                || current.is_whitespace()
+                || matches!(current, '(' | ')' | '{' | '}' | ',' | '=' | '\'')
+            {
+                break;
+            }
+            cursor += current.len_utf8();
+        }
+        let field = &line[field_start..cursor];
+        if matches!(
+            field.to_ascii_uppercase().as_str(),
+            "GND" | "GND!" | "GROUND"
+        ) {
+            output.push('0');
+        } else {
+            output.push_str(field);
         }
     }
-    flush(
-        &mut output,
-        &mut token,
-        braces != 0 || single_quote || double_quote,
-    );
-    output
+    ensure_parse_not_aborted(abort)?;
+    Ok(output)
 }
 
 #[cfg(test)]
 mod replaceground_lexical_tests {
-    use super::replace_ground_fields;
-    use crate::netlist::Netlist;
+    use super::{NetlistParseOptions, apply_root_preprocessing, replace_ground_fields};
+    use crate::abort_signal::NoAbort;
+    use crate::netlist::{ExpressionDialect, Netlist, ParseError, ParseWithAbortError, SaveSignal};
 
     fn temporary_include_deck(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let unique = std::time::SystemTime::now()
@@ -758,33 +848,115 @@ mod replaceground_lexical_tests {
             replace_ground_fields("B1 out 0 V={V(GND)+V(GROUND)} label='GND'"),
             "B1 out 0 V={V(GND)+V(GROUND)} label='GND'"
         );
+        assert_eq!(
+            replace_ground_fields("E1 out 0 VALUE={V(X1:GND)}"),
+            "E1 out 0 VALUE={V(X1:GND)}"
+        );
+        for near_miss in [
+            "GND+X", "GND-X", "GND/X", "X:GND", "X.GND", "GND?", "GROUND_1",
+        ] {
+            let source = format!("R1 out {near_miss} 1");
+            assert_eq!(replace_ground_fields(&source), source);
+        }
+        assert_eq!(
+            replace_ground_fields("E1 out 0 GND,GROUND 1"),
+            "E1 out 0 0,0 1"
+        );
     }
 
     #[test]
-    fn protected_directive_tails_are_not_rewritten() {
-        for source in [
-            ".SUBCKT CELL GND GROUND",
-            ".INCLUDE GND",
-            ".INC GND!",
-            ".INCL GROUND",
-            ".LIB GND SECTION",
-            ".ENDL GND",
-            ".SAVE V(GND)",
-            ".PROBE V(GROUND)",
-            ".PRINT TRAN V(GND!)",
-            ".PLOT TRAN V(GND)",
-            ".MEAS TRAN M AVG V(GROUND)",
-            ".FOUR 1k V(GND!)",
-        ] {
-            assert_eq!(replace_ground_fields(source), source);
+    fn upstream_protected_directive_tails_are_protected_across_continuations() {
+        for directive in [".SUBCKT CELL", ".INCLUDE", ".INC", ".INCL", ".LIB", ".ENDL"] {
+            let source = format!(
+                "protected directive\n.PREPROCESS REPLACEGROUND TRUE\n{directive}\n+ GND GROUND\n"
+            );
+            let lines = source.lines().collect::<Vec<_>>();
+            let transformed = apply_root_preprocessing(&source, &lines, None, true, &NoAbort)
+                .expect("NoAbort cannot cancel preprocessing");
+            assert!(
+                transformed.contains("+ GND GROUND"),
+                "directive continuation changed for {directive}: {transformed}"
+            );
         }
+    }
+
+    #[test]
+    fn logical_preprocess_card_selects_policy_and_exact_fields_only() {
+        let netlist = Netlist::parse_with_options(
+            "logical preprocess\n\
+             .PREPROCESS\n\
+             + REPLACEGROUND\n\
+             + TRUE\n\
+             R1 out GROUND_1 1\n\
+             R2 out GND 1\n\
+             .END\n",
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("continued root preprocessing card is valid");
+
+        assert_eq!(netlist.options.replace_ground, Some(true));
+        assert_eq!(netlist.elements[0].nodes, ["OUT", "GROUND_1"]);
+        assert_eq!(netlist.elements[1].nodes, ["OUT", "0"]);
+    }
+
+    #[test]
+    fn title_text_is_inert_during_root_prescan() {
+        let netlist = Netlist::parse_with_options(
+            ".PREPROCESS REPLACEGROUND TRUE\nR1 out GND! 1\n.END\n",
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("title is not a preprocessing card");
+        assert_eq!(netlist.options.replace_ground, None);
+        assert_eq!(netlist.elements[0].nodes, ["OUT", "GND!"]);
+    }
+
+    #[test]
+    fn output_continuations_keep_authored_provenance_but_normalize_execution() {
+        let source = "authored output\n\
+                      V1 out 0 1\n\
+                      .PRINT OP V(out)\n\
+                      + V(GND!)\n\
+                      .OP\n\
+                      .PREPROCESS REPLACEGROUND TRUE\n\
+                      .END\n";
+        let netlist = Netlist::parse_with_options(
+            source,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("continued output card parses");
+
+        assert!(netlist.output_requests.iter().any(|request| {
+            request
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.symbol == "GND!")
+        }));
+        assert!(
+            netlist
+                .saves
+                .signals
+                .iter()
+                .any(|signal| matches!(signal, SaveSignal::Voltage(node) if node == "0"))
+        );
     }
 
     #[test]
     fn root_replaceground_transforms_included_content_and_ignores_child_control() {
         let (root, child) = temporary_include_deck("root-controls-child");
-        std::fs::write(&child, ".PREPROCESS REPLACEGROUND MAYBE\nR1 out GND! 1k\n")
-            .expect("write included deck");
+        std::fs::write(
+            &child,
+            ".PREPROCESS\n+ REPLACEGROUND MAYBE\nR1 out GND! 1k\n",
+        )
+        .expect("write included deck");
         let source = "root controls preprocessing\n.include child.inc\n.PRINT OP V(out)\n.OP\n.END\n.PREPROCESS REPLACEGROUND TRUE\n";
         let netlist = Netlist::parse_with_path(source, &root)
             .expect("included invalid control is inert and root TRUE applies");
@@ -831,6 +1003,41 @@ mod replaceground_lexical_tests {
             diagnostic.code == "replaceground-extra-parameters" && diagnostic.line == 4
         }));
     }
+
+    #[test]
+    fn included_lines_do_not_perturb_root_physical_diagnostic_origin() {
+        let (root, child) = temporary_include_deck("root-origin");
+        std::fs::write(&child, "R1 1 0 1\nR2 2 0 2\nR3 3 0 3\n").expect("write included deck");
+        let source = "physical origin\n.include child.inc\nR4 4 0 4\n.PREPROCESS\n+ REPLACEGROUND MAYBE\n.END\n";
+        let error = Netlist::parse_with_path(source, &root)
+            .expect_err("invalid root value must retain the root card origin");
+        std::fs::remove_dir_all(root.parent().expect("root has parent"))
+            .expect("remove test directory");
+
+        assert!(matches!(
+            error,
+            ParseError::Syntax { line: 4, message }
+                if message.contains("Unknown argument MAYBE")
+        ));
+    }
+
+    #[test]
+    fn ground_preprocessing_aborts_inside_one_large_logical_field() {
+        let near_miss = format!("GND+{}", "X".repeat(16_384));
+        let source =
+            format!("abort fixture\n.PREPROCESS REPLACEGROUND TRUE\nR1 out {near_miss} 1\n.END\n");
+        let abort = crate::abort_signal::CountingAbort::new(256);
+        let result = super::parse_netlist_with_options_and_abort(
+            &source,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+            &abort,
+        );
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > 256);
+    }
 }
 
 fn prescan_root_replaceground(
@@ -844,15 +1051,32 @@ fn prescan_root_replaceground(
     let mut selected = None;
     let mut extra_lines = Vec::new();
     let mut first_line = 0usize;
+    let mut logical_line = String::new();
+    let mut logical_origin_line = 0usize;
     for (index, line) in lines.iter().enumerate() {
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
+        // The root's first physical record is always its title. Xyce consumes
+        // it before parsePreprocess(), so title text can never select policy.
+        if index == 0 {
+            continue;
+        }
         let mut physical_line = index + 1;
         if let Some(schedule) = source_schedule {
             let Some(origin) = schedule.origin(index) else {
                 continue;
             };
             if origin.path.as_deref() != root_path {
+                scan_root_replaceground_logical_line(
+                    &logical_line,
+                    logical_origin_line,
+                    &mut selected,
+                    &mut first_line,
+                    &mut extra_lines,
+                    abort,
+                )?;
+                logical_line.clear();
+                logical_origin_line = 0;
                 continue;
             }
             physical_line = origin.line;
@@ -861,47 +1085,175 @@ fn prescan_root_replaceground(
         if stripped.is_empty() || stripped.starts_with('*') {
             continue;
         }
-        let fields = stripped.split_whitespace().collect::<Vec<_>>();
-        if fields.len() < 2
-            || !fields[0].eq_ignore_ascii_case(".PREPROCESS")
-            || !fields[1].eq_ignore_ascii_case("REPLACEGROUND")
-        {
+        if let Some(continuation) = stripped.strip_prefix('+') {
+            if !logical_line.is_empty() {
+                logical_line.push(' ');
+            }
+            logical_line.push_str(continuation);
             continue;
         }
-        if selected.is_some() {
-            return Err(ParseError::Syntax {
-                line: physical_line,
-                message: format!(
-                    "Multiple .PREPROCESS REPLACEGROUND statements (first at line {first_line})"
-                ),
-            }
-            .into());
-        }
-        let Some(value) = fields.get(2) else {
-            return Err(ParseError::Syntax {
-                line: physical_line,
-                message: ".PREPROCESS REPLACEGROUND requires TRUE or FALSE".to_string(),
-            }
-            .into());
-        };
-        selected = Some(if value.eq_ignore_ascii_case("TRUE") {
-            true
-        } else if value.eq_ignore_ascii_case("FALSE") {
-            false
-        } else {
-            return Err(ParseError::Syntax {
-                line: physical_line,
-                message: format!("Unknown argument {value} in .PREPROCESS REPLACEGROUND statement"),
-            }
-            .into());
-        });
-        if fields.len() > 3 {
-            extra_lines.push(physical_line);
-        }
-        first_line = physical_line;
+        scan_root_replaceground_logical_line(
+            &logical_line,
+            logical_origin_line,
+            &mut selected,
+            &mut first_line,
+            &mut extra_lines,
+            abort,
+        )?;
+        logical_line.clear();
+        logical_line.push_str(stripped);
+        logical_origin_line = physical_line;
     }
+    scan_root_replaceground_logical_line(
+        &logical_line,
+        logical_origin_line,
+        &mut selected,
+        &mut first_line,
+        &mut extra_lines,
+        abort,
+    )?;
     ensure_parse_not_aborted(abort)?;
     Ok((selected, extra_lines))
+}
+
+fn scan_root_replaceground_logical_line(
+    logical_line: &str,
+    physical_line: usize,
+    selected: &mut Option<bool>,
+    first_line: &mut usize,
+    extra_lines: &mut Vec<usize>,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    if logical_line.is_empty() {
+        return Ok(());
+    }
+    let fields = xyce_logical_fields_with_abort(logical_line, abort)?;
+    if fields.len() < 2
+        || !fields[0].eq_ignore_ascii_case(".PREPROCESS")
+        || !fields[1].eq_ignore_ascii_case("REPLACEGROUND")
+    {
+        return Ok(());
+    }
+    if selected.is_some() {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: format!(
+                "Multiple .PREPROCESS REPLACEGROUND statements (first at line {first_line})"
+            ),
+        }
+        .into());
+    }
+    let Some(value) = fields.get(2) else {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: ".PREPROCESS REPLACEGROUND requires TRUE or FALSE".to_string(),
+        }
+        .into());
+    };
+    *selected = Some(if value.eq_ignore_ascii_case("TRUE") {
+        true
+    } else if value.eq_ignore_ascii_case("FALSE") {
+        false
+    } else {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: format!("Unknown argument {value} in .PREPROCESS REPLACEGROUND statement"),
+        }
+        .into());
+    });
+    if fields.len() > 3 {
+        extra_lines.push(physical_line);
+    }
+    *first_line = physical_line;
+    Ok(())
+}
+
+/// Tokenize one logical record with Xyce's separated-field boundaries. In
+/// particular arithmetic punctuation is part of an ordinary field, which is
+/// why `GND+X` is not the same field as the exact ground synonym `GND`.
+fn xyce_logical_fields_with_abort(
+    line: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<String>, ParseWithAbortError> {
+    let mut fields = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < line.len() {
+        poll_parse_abort(abort, cursor)?;
+        let character = line[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        if character == ';' {
+            break;
+        }
+        if character.is_whitespace() {
+            cursor += character.len_utf8();
+            continue;
+        }
+        if matches!(character, '(' | ')' | '}' | ',' | '=') {
+            fields.push(character.to_string());
+            cursor += character.len_utf8();
+            continue;
+        }
+        if character == '{' {
+            let start = cursor;
+            let mut depth = 0usize;
+            while cursor < line.len() {
+                poll_parse_abort(abort, cursor)?;
+                let current = line[cursor..]
+                    .chars()
+                    .next()
+                    .expect("cursor remains on a character boundary");
+                cursor += current.len_utf8();
+                if current == '{' {
+                    depth += 1;
+                } else if current == '}' {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+            fields.push(line[start..cursor].to_string());
+            continue;
+        }
+        if matches!(character, '\'' | '"') {
+            let quote = character;
+            let start = cursor;
+            cursor += character.len_utf8();
+            while cursor < line.len() {
+                poll_parse_abort(abort, cursor)?;
+                let current = line[cursor..]
+                    .chars()
+                    .next()
+                    .expect("cursor remains on a character boundary");
+                cursor += current.len_utf8();
+                if current == quote {
+                    break;
+                }
+            }
+            fields.push(line[start..cursor].to_string());
+            continue;
+        }
+        let start = cursor;
+        while cursor < line.len() {
+            poll_parse_abort(abort, cursor)?;
+            let current = line[cursor..]
+                .chars()
+                .next()
+                .expect("cursor remains on a character boundary");
+            if current == ';'
+                || current.is_whitespace()
+                || matches!(current, '(' | ')' | '{' | '}' | ',' | '=' | '\'')
+            {
+                break;
+            }
+            cursor += current.len_utf8();
+        }
+        fields.push(line[start..cursor].to_string());
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(fields)
 }
 
 #[allow(clippy::too_many_arguments)]
