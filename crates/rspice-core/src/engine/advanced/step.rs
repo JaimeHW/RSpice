@@ -504,9 +504,10 @@ impl Engine {
         let mut netlist = if reparse_overrides.is_empty() {
             base_netlist.clone()
         } else {
-            Self::create_perturbed_netlist_multi_with_abort(
+            Self::create_perturbed_netlist_multi_with_limits_and_abort(
                 base_netlist,
                 &reparse_overrides,
+                self.config.resource_limits,
                 abort,
             )?
             .0
@@ -787,8 +788,13 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (modified_netlist, rebuilt) =
-                Self::create_perturbed_netlist(netlist, param_name, value)?;
+            let (modified_netlist, rebuilt) = Self::create_perturbed_netlist_with_limits_and_abort(
+                netlist,
+                param_name,
+                value,
+                self.config.resource_limits,
+                abort,
+            )?;
             any_binding |= rebuilt > 0;
 
             match self.run_dc_op_with_abort(&modified_netlist, abort) {
@@ -832,7 +838,8 @@ impl Engine {
         }
         self.ensure_batch_runs(values.len())?;
         if matches!(step_cmd.sweep, StepSweep::Data { .. }) {
-            let stepped_netlists = self.step_netlists_for_command(netlist, step_cmd, values)?;
+            let stepped_netlists =
+                self.step_netlists_for_command_with_abort(netlist, step_cmd, values, abort)?;
             let mut results = Vec::with_capacity(stepped_netlists.len());
             let mut retained_values = 0usize;
             for (index, stepped_netlist) in stepped_netlists {
@@ -875,8 +882,18 @@ impl Engine {
         step_cmd: &StepCommand,
         values: &[Value],
     ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
+        self.step_netlists_for_command_with_abort(netlist, step_cmd, values, &NoAbort)
+    }
+
+    fn step_netlists_for_command_with_abort(
+        &self,
+        netlist: &Netlist,
+        step_cmd: &StepCommand,
+        values: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
         if let StepSweep::Data { table_name } = &step_cmd.sweep {
-            return self.data_step_netlists_for_table(netlist, table_name);
+            return self.data_step_netlists_for_table(netlist, table_name, abort);
         }
 
         validate_step_values(values)?;
@@ -885,8 +902,11 @@ impl Engine {
         let mut stepped = Vec::with_capacity(values.len());
         let mut any_binding = false;
         for &value in values {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let (netlist, bindings) =
-                Self::step_netlist_for_command_value(netlist, step_cmd, value)?;
+                self.step_netlist_for_command_value(netlist, step_cmd, value, abort)?;
             any_binding |= bindings > 0;
             stepped.push((value, netlist));
         }
@@ -905,19 +925,28 @@ impl Engine {
         &self,
         netlist: &Netlist,
         table_name: &str,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
-        let table = Self::validated_data_step_table(netlist, table_name, &NoAbort)?;
+        let table = Self::validated_data_step_table(netlist, table_name, abort)?;
         self.ensure_batch_runs(table.rows.len())?;
 
         let mut stepped = Vec::with_capacity(table.rows.len());
         for (row_index, row) in table.rows.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let overrides = table
                 .params
                 .iter()
                 .cloned()
                 .zip(row.iter().copied())
                 .collect::<Vec<_>>();
-            let (netlist, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+            let (netlist, _) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+                netlist,
+                &overrides,
+                self.config.resource_limits,
+                abort,
+            )?;
             stepped.push((row_index as Value, netlist));
         }
 
@@ -1006,12 +1035,20 @@ impl Engine {
     }
 
     fn step_netlist_for_command_value(
+        &self,
         netlist: &Netlist,
         step_cmd: &StepCommand,
         value: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
         match step_cmd.target {
-            StepTarget::Param => Self::create_perturbed_netlist(netlist, &step_cmd.name, value),
+            StepTarget::Param => Self::create_perturbed_netlist_with_limits_and_abort(
+                netlist,
+                &step_cmd.name,
+                value,
+                self.config.resource_limits,
+                abort,
+            ),
             StepTarget::Device => {
                 let mut stepped = netlist.clone();
                 Self::apply_ast_step_value_in_place(&mut stepped, step_cmd, value)?;
@@ -1024,7 +1061,7 @@ impl Engine {
                 Self::mark_ast_stepped_netlist(&mut stepped);
                 Ok((stepped, 1))
             }
-            StepTarget::Temp => Self::step_temperature_netlist(netlist, value),
+            StepTarget::Temp => self.step_temperature_netlist(netlist, value, abort),
         }
     }
 
@@ -1091,8 +1128,10 @@ impl Engine {
     }
 
     fn step_temperature_netlist(
+        &self,
         netlist: &Netlist,
         value: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
         let vt = thermal_voltage_celsius(value);
         let overrides = [
@@ -1100,7 +1139,12 @@ impl Engine {
             ("TEMPER".to_string(), value),
             ("VT".to_string(), vt),
         ];
-        let (mut stepped, bindings) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+        let (mut stepped, bindings) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+            netlist,
+            &overrides,
+            self.config.resource_limits,
+            abort,
+        )?;
         apply_temperature_scalars(&mut stepped, value, vt);
         Ok((stepped, bindings.max(1)))
     }
@@ -1122,7 +1166,7 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (stepped, _) = Self::step_temperature_netlist(netlist, value)?;
+            let (stepped, _) = self.step_temperature_netlist(netlist, value, abort)?;
 
             match self.run_dc_op_with_abort(&stepped, abort) {
                 Ok(result) => {

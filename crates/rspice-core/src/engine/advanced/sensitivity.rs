@@ -245,17 +245,6 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn create_perturbed_netlist(
-        netlist: &Netlist,
-        param_name: &str,
-        param_value: Value,
-    ) -> Result<(Netlist, usize), SimulationError> {
-        Self::create_perturbed_netlist_multi(
-            netlist,
-            &[(param_name.to_ascii_uppercase(), param_value)],
-        )
-    }
-
     pub(crate) fn create_perturbed_netlist_multi(
         netlist: &Netlist,
         overrides: &[(String, Value)],
@@ -266,6 +255,35 @@ impl Engine {
     pub(crate) fn create_perturbed_netlist_multi_with_abort(
         netlist: &Netlist,
         overrides: &[(String, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
+        Self::create_perturbed_netlist_multi_with_limits_and_abort(
+            netlist,
+            overrides,
+            crate::resource::ResourceLimits::default(),
+            abort,
+        )
+    }
+
+    pub(crate) fn create_perturbed_netlist_with_limits_and_abort(
+        netlist: &Netlist,
+        param_name: &str,
+        param_value: Value,
+        resource_limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
+        Self::create_perturbed_netlist_multi_with_limits_and_abort(
+            netlist,
+            &[(param_name.to_ascii_uppercase(), param_value)],
+            resource_limits,
+            abort,
+        )
+    }
+
+    pub(crate) fn create_perturbed_netlist_multi_with_limits_and_abort(
+        netlist: &Netlist,
+        overrides: &[(String, Value)],
+        resource_limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
         if abort.is_aborted() {
@@ -320,7 +338,7 @@ impl Engine {
             statistical_mode: netlist.params.statistical_mode(),
             expression_dialect: netlist.params.expression_dialect(),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),
-            ..crate::netlist::NetlistParseOptions::default()
+            resource_limits,
         };
         let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {
             Netlist::parse_with_path_and_options_and_abort(
@@ -334,6 +352,9 @@ impl Engine {
         }
         .map_err(|error| match error {
             crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+            crate::netlist::ParseWithAbortError::Parse(
+                crate::netlist::ParseError::ResourceLimit(error),
+            ) => SimulationError::ResourceLimit(error),
             crate::netlist::ParseWithAbortError::Parse(error) => SimulationError::Netlist(format!(
                 "Failed to reparse netlist for parameter override set {:?}: {}",
                 param_overrides, error
@@ -722,10 +743,20 @@ impl Engine {
         }
         let h = Self::sensitivity_step(param_value, delta)?;
 
-        let (netlist_plus, rebuilt_plus) =
-            Self::create_perturbed_netlist(netlist, param_name, param_value + h)?;
-        let (netlist_minus, rebuilt_minus) =
-            Self::create_perturbed_netlist(netlist, param_name, param_value - h)?;
+        let (netlist_plus, rebuilt_plus) = Self::create_perturbed_netlist_with_limits_and_abort(
+            netlist,
+            param_name,
+            param_value + h,
+            self.config.resource_limits,
+            abort,
+        )?;
+        let (netlist_minus, rebuilt_minus) = Self::create_perturbed_netlist_with_limits_and_abort(
+            netlist,
+            param_name,
+            param_value - h,
+            self.config.resource_limits,
+            abort,
+        )?;
 
         if netlist.source_text.is_some() && rebuilt_plus == 0 && rebuilt_minus == 0 {
             return Err(SimulationError::Circuit(format!(
@@ -794,10 +825,20 @@ impl Engine {
         }
         let h = Self::sensitivity_step(param_value, delta)?;
 
-        let (netlist_plus, rebuilt_plus) =
-            Self::create_perturbed_netlist(netlist, param_name, param_value + h)?;
-        let (netlist_minus, rebuilt_minus) =
-            Self::create_perturbed_netlist(netlist, param_name, param_value - h)?;
+        let (netlist_plus, rebuilt_plus) = Self::create_perturbed_netlist_with_limits_and_abort(
+            netlist,
+            param_name,
+            param_value + h,
+            self.config.resource_limits,
+            abort,
+        )?;
+        let (netlist_minus, rebuilt_minus) = Self::create_perturbed_netlist_with_limits_and_abort(
+            netlist,
+            param_name,
+            param_value - h,
+            self.config.resource_limits,
+            abort,
+        )?;
 
         if netlist.source_text.is_some() && rebuilt_plus == 0 && rebuilt_minus == 0 {
             return Err(SimulationError::Circuit(format!(

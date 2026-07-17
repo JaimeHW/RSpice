@@ -1007,7 +1007,12 @@ impl Netlist {
         Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
-        Self::apply_spef_includes_with_abort(&mut netlist, file_path, abort)?;
+        Self::apply_spef_includes_with_abort(
+            &mut netlist,
+            file_path,
+            options.resource_limits,
+            abort,
+        )?;
         netlist.source_path = Some(file_path.to_path_buf());
         let default_execution_dir = if execution_dir.is_none() {
             Some(std::env::current_dir().map_err(ParseError::Io)?)
@@ -1017,9 +1022,13 @@ impl Netlist {
         let initcond_execution_dir = execution_dir
             .or(default_execution_dir.as_deref())
             .expect("explicit or process execution directory is available");
+        let mut initcond_resource_limits = options.resource_limits;
+        initcond_resource_limits.max_dependency_source_bytes = initcond_resource_limits
+            .max_dependency_source_bytes
+            .min(MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES);
         let initcond_source_provider =
             IncludeProcessor::new_with_execution_dir(file_path, Some(initcond_execution_dir))
-                .with_resource_limits(options.resource_limits);
+                .with_resource_limits(initcond_resource_limits);
         netlist
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
@@ -1033,6 +1042,7 @@ impl Netlist {
     fn apply_spef_includes_with_abort(
         netlist: &mut Netlist,
         deck_path: &std::path::Path,
+        resource_limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
         if netlist.spef_includes.is_empty() {
@@ -1042,6 +1052,7 @@ impl Netlist {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| std::path::Path::new("."));
+        let mut retained_source_bytes = 0usize;
         for (index, entry) in netlist.spef_includes.clone().into_iter().enumerate() {
             poll_parse_abort(abort, index)?;
             let candidate = std::path::Path::new(&entry);
@@ -1050,12 +1061,23 @@ impl Netlist {
             } else {
                 base.join(candidate)
             };
-            let content = read_file_with_encoding_with_abort(&path, abort).map_err(|error| {
-                map_abort_parse_error(error, |error| ParseError::Syntax {
-                    line: 0,
-                    message: format!("failed to read SPEF file `{}`: {error}", path.display()),
+            let (content, source_bytes) = read_file_with_encoding_limited_with_abort(
+                &path,
+                crate::resource::ResourceKind::DependencySourceBytes,
+                retained_source_bytes,
+                resource_limits.max_dependency_source_bytes,
+                abort,
+            )
+            .map_err(|error| {
+                map_abort_parse_error(error, |error| match error {
+                    error @ ParseError::ResourceLimit(_) => error,
+                    error => ParseError::Syntax {
+                        line: 0,
+                        message: format!("failed to read SPEF file `{}`: {error}", path.display()),
+                    },
                 })
             })?;
+            retained_source_bytes = retained_source_bytes.saturating_add(source_bytes);
             let parasitics = spef::SpefFile::parse_with_abort(&content, abort)?;
             let report = parasitics.apply_with_abort(netlist, abort)?;
             log::info!(
@@ -1074,8 +1096,17 @@ impl Netlist {
 
     /// Parse a netlist from a file with include expansion
     pub fn parse_file(path: &std::path::Path) -> Result<Self, ParseError> {
-        let content = read_file_with_encoding(path)?;
-        Self::parse_with_path(&content, path)
+        Self::parse_file_with_options(path, NetlistParseOptions::default())
+    }
+
+    /// Parse a netlist file with an explicit parsing and resource policy.
+    pub fn parse_file_with_options(
+        path: &std::path::Path,
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_file_with_options_and_abort(
+            path, options, &NoAbort,
+        ))
     }
 
     /// Parse a netlist file with include expansion and cooperative
@@ -1085,15 +1116,47 @@ impl Netlist {
         path: &std::path::Path,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let content = read_file_with_encoding_with_abort(path, abort)?;
-        Self::parse_with_path_and_abort(&content, path, abort)
+        Self::parse_file_with_options_and_abort(path, NetlistParseOptions::default(), abort)
+    }
+
+    /// Parse a netlist file with explicit options and cooperative cancellation.
+    pub fn parse_file_with_options_and_abort(
+        path: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let (content, _) = read_file_with_encoding_limited_with_abort(
+            path,
+            crate::resource::ResourceKind::NetlistBytes,
+            0,
+            options.resource_limits.max_netlist_bytes,
+            abort,
+        )?;
+        Self::parse_with_path_and_options_and_abort(&content, path, options, abort)
     }
 
     /// Read a deck file with the same encoding handling `parse_file` uses
     /// (UTF-8 with fallbacks), without parsing — for callers that
     /// preprocess the text first (multi-run expansion).
     pub fn read_source(path: &std::path::Path) -> Result<String, ParseError> {
-        Ok(read_file_with_encoding(path)?)
+        Self::read_source_with_options(path, NetlistParseOptions::default())
+    }
+
+    /// Read and decode a root source file under an explicit byte policy.
+    pub fn read_source_with_options(
+        path: &std::path::Path,
+        options: NetlistParseOptions,
+    ) -> Result<String, ParseError> {
+        finish_non_aborting_parse(
+            read_file_with_encoding_limited_with_abort(
+                path,
+                crate::resource::ResourceKind::NetlistBytes,
+                0,
+                options.resource_limits.max_netlist_bytes,
+                &NoAbort,
+            )
+            .map(|(source, _)| source),
+        )
     }
 
     /// Parse a netlist from a file with additional include search directories
@@ -1105,8 +1168,25 @@ impl Netlist {
         path: &std::path::Path,
         search_paths: &[std::path::PathBuf],
     ) -> Result<Self, ParseError> {
-        let content = read_file_with_encoding(path)?;
-        Self::parse_with_search_paths(&content, path, search_paths)
+        Self::parse_file_with_search_paths_and_options(
+            path,
+            search_paths,
+            NetlistParseOptions::default(),
+        )
+    }
+
+    /// Parse a file with include search paths and an explicit resource policy.
+    pub fn parse_file_with_search_paths_and_options(
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_file_with_search_paths_and_options_and_abort(
+            path,
+            search_paths,
+            options,
+            &NoAbort,
+        ))
     }
 
     /// Parse a netlist file with additional include search paths and
@@ -1116,8 +1196,35 @@ impl Netlist {
         search_paths: &[std::path::PathBuf],
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let content = read_file_with_encoding_with_abort(path, abort)?;
-        Self::parse_with_search_paths_and_abort(&content, path, search_paths, abort)
+        Self::parse_file_with_search_paths_and_options_and_abort(
+            path,
+            search_paths,
+            NetlistParseOptions::default(),
+            abort,
+        )
+    }
+
+    /// Parse a file with search paths, explicit options, and cancellation.
+    pub fn parse_file_with_search_paths_and_options_and_abort(
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let (content, _) = read_file_with_encoding_limited_with_abort(
+            path,
+            crate::resource::ResourceKind::NetlistBytes,
+            0,
+            options.resource_limits.max_netlist_bytes,
+            abort,
+        )?;
+        Self::parse_with_search_paths_and_options_and_abort(
+            &content,
+            path,
+            search_paths,
+            options,
+            abort,
+        )
     }
 
     /// Parse netlist source text as if it lived at `path`, with additional
@@ -1129,10 +1236,26 @@ impl Netlist {
         path: &std::path::Path,
         search_paths: &[std::path::PathBuf],
     ) -> Result<Self, ParseError> {
-        finish_non_aborting_parse(Self::parse_with_search_paths_and_abort(
+        Self::parse_with_search_paths_and_options(
             input,
             path,
             search_paths,
+            NetlistParseOptions::default(),
+        )
+    }
+
+    /// Parse source text with search paths and explicit parsing options.
+    pub fn parse_with_search_paths_and_options(
+        input: &str,
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
+        finish_non_aborting_parse(Self::parse_with_search_paths_and_options_and_abort(
+            input,
+            path,
+            search_paths,
+            options,
             &NoAbort,
         ))
     }
@@ -1145,9 +1268,26 @@ impl Netlist {
         search_paths: &[std::path::PathBuf],
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let resource_limits = crate::resource::ResourceLimits::default();
-        Self::enforce_root_source_limits_with_abort(input, resource_limits, abort)?;
-        let mut processor = IncludeProcessor::new(path);
+        Self::parse_with_search_paths_and_options_and_abort(
+            input,
+            path,
+            search_paths,
+            NetlistParseOptions::default(),
+            abort,
+        )
+    }
+
+    /// Parse source text with search paths, explicit options, and cancellation.
+    pub fn parse_with_search_paths_and_options_and_abort(
+        input: &str,
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
+        let mut processor =
+            IncludeProcessor::new(path).with_resource_limits(options.resource_limits);
         for (index, dir) in search_paths.iter().enumerate() {
             poll_parse_abort(abort, index)?;
             processor.add_lib_path(dir.clone());
@@ -1155,21 +1295,23 @@ impl Netlist {
         let expanded = processor.expand_content_mapped_with_abort(input, path, abort)?;
         let (sanitized, mut diagnostics) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
-        let mut netlist = parser::parse_expanded_netlist_with_options_and_abort(
-            &sanitized,
-            NetlistParseOptions::default(),
-            abort,
-        )?;
+        let mut netlist =
+            parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         Self::normalize_model_string_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
-        Self::apply_spef_includes_with_abort(&mut netlist, path, abort)?;
+        Self::apply_spef_includes_with_abort(&mut netlist, path, options.resource_limits, abort)?;
         netlist.source_path = Some(path.to_path_buf());
         let execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
+        let mut initcond_resource_limits = options.resource_limits;
+        initcond_resource_limits.max_dependency_source_bytes = initcond_resource_limits
+            .max_dependency_source_bytes
+            .min(MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES);
         let initcond_source_provider =
-            IncludeProcessor::new_with_execution_dir(path, Some(&execution_dir));
+            IncludeProcessor::new_with_execution_dir(path, Some(&execution_dir))
+                .with_resource_limits(initcond_resource_limits);
         netlist
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
@@ -2239,35 +2381,48 @@ impl Default for Netlist {
     }
 }
 
-/// Read a file with automatic encoding detection
-///
-/// Handles:
-/// - UTF-8 with or without BOM
-/// - UTF-16 LE (common from Windows Notepad "Unicode" option)
-/// - UTF-16 BE
-/// - Falls back to Latin-1 if UTF-8 decoding fails
-fn read_file_with_encoding(path: &std::path::Path) -> Result<String, std::io::Error> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(path)?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
-
-    decode_source_bytes(&bytes)
-}
-
 /// Read and decode source text while polling between bounded I/O chunks.
+#[cfg(test)]
 fn read_file_with_encoding_with_abort(
     path: &std::path::Path,
     abort: &dyn AbortSignal,
 ) -> Result<String, ParseWithAbortError> {
+    read_file_with_encoding_limited_with_abort(
+        path,
+        crate::resource::ResourceKind::NetlistBytes,
+        0,
+        usize::MAX,
+        abort,
+    )
+    .map(|(source, _)| source)
+}
+
+fn read_file_with_encoding_limited_with_abort(
+    path: &std::path::Path,
+    resource: crate::resource::ResourceKind,
+    retained_bytes: usize,
+    limit: usize,
+    abort: &dyn AbortSignal,
+) -> Result<(String, usize), ParseWithAbortError> {
     use std::io::Read;
 
     const READ_CHUNK_BYTES: usize = 64 * 1024;
 
     ensure_parse_not_aborted(abort)?;
     let mut file = std::fs::File::open(path).map_err(ParseError::Io)?;
-    let mut bytes = Vec::new();
+    let metadata_bytes = file
+        .metadata()
+        .ok()
+        .and_then(|metadata| usize::try_from(metadata.len()).ok());
+    if let Some(file_bytes) = metadata_bytes {
+        crate::resource::ResourceLimitError::ensure(
+            resource,
+            retained_bytes.saturating_add(file_bytes),
+            limit,
+        )
+        .map_err(ParseError::from)?;
+    }
+    let mut bytes = Vec::with_capacity(metadata_bytes.unwrap_or(0));
     let mut chunk = [0_u8; READ_CHUNK_BYTES];
     loop {
         ensure_parse_not_aborted(abort)?;
@@ -2275,10 +2430,27 @@ fn read_file_with_encoding_with_abort(
         if count == 0 {
             break;
         }
+        crate::resource::ResourceLimitError::ensure(
+            resource,
+            retained_bytes
+                .saturating_add(bytes.len())
+                .saturating_add(count),
+            limit,
+        )
+        .map_err(ParseError::from)?;
         bytes.extend_from_slice(&chunk[..count]);
     }
     ensure_parse_not_aborted(abort)?;
-    decode_source_bytes_with_abort(bytes, abort)
+    let source_bytes = bytes.len();
+    let source = decode_source_bytes_with_abort(bytes, abort)?;
+    let retained_source_bytes = source_bytes.max(source.len());
+    crate::resource::ResourceLimitError::ensure(
+        resource,
+        retained_bytes.saturating_add(retained_source_bytes),
+        limit,
+    )
+    .map_err(ParseError::from)?;
+    Ok((source, retained_source_bytes))
 }
 
 fn decode_source_bytes_with_abort(

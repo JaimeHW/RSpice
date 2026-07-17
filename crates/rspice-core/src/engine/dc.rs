@@ -499,8 +499,13 @@ impl Engine {
                 );
                 swept
             } else if outer_is_parameter {
-                let (swept, bindings) =
-                    Self::create_perturbed_netlist(netlist, &sweep2.source, outer_value)?;
+                let (swept, bindings) = Self::create_perturbed_netlist_with_limits_and_abort(
+                    netlist,
+                    &sweep2.source,
+                    outer_value,
+                    engine.config.resource_limits,
+                    abort,
+                )?;
                 any_outer_parameter_binding |= bindings > 0;
                 swept
             } else {
@@ -873,8 +878,13 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (swept, bindings) =
-                Self::create_perturbed_netlist(netlist, param_name, sweep_value)?;
+            let (swept, bindings) = Self::create_perturbed_netlist_with_limits_and_abort(
+                netlist,
+                param_name,
+                sweep_value,
+                self.config.resource_limits,
+                abort,
+            )?;
             any_binding |= bindings > 0;
             let (result, device_op_report) = self
                 .run_dc_op_with_report_and_abort(&swept, abort)

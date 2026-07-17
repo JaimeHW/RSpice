@@ -18,6 +18,8 @@ pub enum ResourceKind {
     NetlistLines,
     /// Bytes materialized after include and library expansion.
     ExpandedSourceBytes,
+    /// Decoded source bytes retained from external dependency files.
+    DependencySourceBytes,
     /// Active include/library nesting depth.
     IncludeDepth,
     /// Active subcircuit hierarchy depth.
@@ -43,6 +45,7 @@ impl ResourceKind {
             Self::NetlistBytes => "netlist_bytes",
             Self::NetlistLines => "netlist_lines",
             Self::ExpandedSourceBytes => "expanded_source_bytes",
+            Self::DependencySourceBytes => "dependency_source_bytes",
             Self::IncludeDepth => "include_depth",
             Self::HierarchyDepth => "hierarchy_depth",
             Self::FlattenedElements => "flattened_elements",
@@ -108,6 +111,8 @@ pub struct ResourceLimits {
     pub max_netlist_lines: usize,
     /// Maximum bytes materialized after include and library expansion.
     pub max_expanded_source_bytes: usize,
+    /// Maximum decoded bytes retained from external dependency files.
+    pub max_dependency_source_bytes: usize,
     /// Maximum active include/library nesting depth.
     pub max_include_depth: usize,
     /// Maximum active subcircuit hierarchy depth.
@@ -132,6 +137,7 @@ impl Default for ResourceLimits {
             max_netlist_bytes: 64 * 1024 * 1024,
             max_netlist_lines: 2_000_000,
             max_expanded_source_bytes: 256 * 1024 * 1024,
+            max_dependency_source_bytes: 256 * 1024 * 1024,
             max_include_depth: crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH,
             max_hierarchy_depth: 100,
             max_flattened_elements: 250_000,
@@ -151,6 +157,7 @@ impl ResourceLimits {
             max_netlist_bytes: usize::MAX,
             max_netlist_lines: usize::MAX,
             max_expanded_source_bytes: usize::MAX,
+            max_dependency_source_bytes: usize::MAX,
             max_include_depth: usize::MAX,
             max_hierarchy_depth: usize::MAX,
             max_flattened_elements: usize::MAX,
@@ -173,6 +180,10 @@ mod tests {
             ResourceKind::FlattenedElements.as_str(),
             "flattened_elements"
         );
+        assert_eq!(
+            ResourceKind::DependencySourceBytes.as_str(),
+            "dependency_source_bytes"
+        );
         assert_eq!(ResourceKind::MatrixUnknowns.to_string(), "matrix_unknowns");
     }
 
@@ -182,6 +193,7 @@ mod tests {
         assert_eq!(limits.max_netlist_bytes, usize::MAX);
         assert_eq!(limits.max_netlist_lines, usize::MAX);
         assert_eq!(limits.max_expanded_source_bytes, usize::MAX);
+        assert_eq!(limits.max_dependency_source_bytes, usize::MAX);
         assert_eq!(limits.max_include_depth, usize::MAX);
         assert_eq!(limits.max_hierarchy_depth, usize::MAX);
         assert_eq!(limits.max_flattened_elements, usize::MAX);

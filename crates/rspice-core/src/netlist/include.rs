@@ -11,14 +11,14 @@
 //! - Library section extraction
 //! - Case-insensitive matching for Windows compatibility
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::{
     NetlistSourceLocation, ParseError, ParseWithAbortError, ensure_parse_not_aborted,
     finish_non_aborting_parse, map_abort_parse_error, poll_parse_abort, poll_parse_text,
-    read_file_with_encoding_with_abort,
+    read_file_with_encoding_limited_with_abort,
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
@@ -303,12 +303,22 @@ pub struct IncludeProcessor {
     sealed_sources: Option<SealedSourceBundle>,
     /// Shared parsing and expansion resource policy.
     resource_limits: ResourceLimits,
+    /// Canonical dependency sources retained once per expansion. Reusing an
+    /// Arc both makes parsing deterministic if a file changes mid-run and
+    /// avoids repeated I/O for libraries selected through multiple sections.
+    source_cache: Mutex<DependencySourceCache>,
     /// Current include depth
     current_depth: usize,
     /// Exact successful filesystem/sealed-bundle reads performed while
     /// expanding the current source. This is an execution-derived audit trail,
     /// not a second dependency resolver.
     resolved_dependencies: Vec<ResolvedIncludeDependency>,
+}
+
+#[derive(Debug, Default)]
+struct DependencySourceCache {
+    retained_bytes: usize,
+    sources: HashMap<PathBuf, Arc<str>>,
 }
 
 /// One exact external source edge resolved by [`IncludeProcessor`]. The source
@@ -412,6 +422,7 @@ impl IncludeProcessor {
             lib_paths: Vec::new(),
             sealed_sources: None,
             resource_limits: ResourceLimits::default(),
+            source_cache: Mutex::new(DependencySourceCache::default()),
             current_depth: 0,
             resolved_dependencies: Vec::new(),
         }
@@ -421,6 +432,18 @@ impl IncludeProcessor {
     pub fn with_resource_limits(mut self, resource_limits: ResourceLimits) -> Self {
         self.resource_limits = resource_limits;
         self
+    }
+
+    fn begin_source_operation(&mut self) {
+        self.active_includes.clear();
+        self.current_depth = 0;
+        self.resolved_dependencies.clear();
+        let cache = self
+            .source_cache
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.retained_bytes = 0;
+        cache.sources.clear();
     }
 
     /// Exact dependency edges read by the most recent expansion, in traversal
@@ -464,6 +487,7 @@ impl IncludeProcessor {
         filename: &str,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.begin_source_operation();
         let owner = self.base_dir.join("__rspice_include_owner__");
         self.process_include_from_with_abort(&owner, filename, abort)
     }
@@ -494,6 +518,7 @@ impl IncludeProcessor {
         section: Option<&str>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.begin_source_operation();
         let owner = self.base_dir.join("__rspice_include_owner__");
         self.process_lib_from_with_abort(&owner, filename, section, abort)
     }
@@ -515,6 +540,7 @@ impl IncludeProcessor {
         section: Option<&str>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.begin_source_operation();
         ensure_parse_not_aborted(abort)?;
         let sources = self
             .sealed_sources
@@ -600,6 +626,7 @@ impl IncludeProcessor {
         current_path: &Path,
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
+        self.begin_source_operation();
         self.expand_content_from_mapped_with_abort(content, current_path, None, false, false, abort)
     }
 
@@ -752,6 +779,13 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<Arc<str>, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
+        let mut cache = self
+            .source_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(content) = cache.sources.get(path) {
+            return Ok(Arc::clone(content));
+        }
         if let Some(sources) = &self.sealed_sources {
             let content = sources
                 .content(path)
@@ -763,18 +797,45 @@ impl IncludeProcessor {
                     ),
                 })
                 .map_err(ParseWithAbortError::from)?;
+            let retained_bytes = cache.retained_bytes.saturating_add(content.len());
+            ResourceLimitError::ensure(
+                ResourceKind::DependencySourceBytes,
+                retained_bytes,
+                self.resource_limits.max_dependency_source_bytes,
+            )
+            .map_err(ParseError::from)?;
+            cache.retained_bytes = retained_bytes;
+            cache
+                .sources
+                .insert(path.to_path_buf(), Arc::clone(&content));
             ensure_parse_not_aborted(abort)?;
             return Ok(content);
         }
 
-        read_file_with_encoding_with_abort(path, abort)
-            .map(Arc::from)
-            .map_err(|error| {
-                map_abort_parse_error(error, |error| ParseError::Syntax {
+        read_file_with_encoding_limited_with_abort(
+            path,
+            ResourceKind::DependencySourceBytes,
+            cache.retained_bytes,
+            self.resource_limits.max_dependency_source_bytes,
+            abort,
+        )
+        .map(|(source, retained_bytes)| {
+            let content = Arc::<str>::from(source);
+            cache.retained_bytes = cache.retained_bytes.saturating_add(retained_bytes);
+            cache
+                .sources
+                .insert(path.to_path_buf(), Arc::clone(&content));
+            content
+        })
+        .map_err(|error| {
+            map_abort_parse_error(error, |error| match error {
+                error @ ParseError::ResourceLimit(_) => error,
+                error => ParseError::Syntax {
                     line: 0,
                     message: format!("Failed to include '{}': {error}", requested_name),
-                })
+                },
             })
+        })
     }
 
     fn process_include_from_with_abort(
@@ -824,7 +885,7 @@ impl IncludeProcessor {
             .map_err(ParseWithAbortError::from)?;
 
         let result = (|| {
-            let content = self.read_source_with_abort(&path, filename, abort)?;
+            let content = self.read_source_with_abort(&canonical, filename, abort)?;
             self.resolved_dependencies.push(ResolvedIncludeDependency {
                 owner_path: owner_path.to_path_buf(),
                 directive_line,
@@ -878,7 +939,7 @@ impl IncludeProcessor {
             .map_err(ParseWithAbortError::from)?;
 
         let result = (|| {
-            let content = self.read_source_with_abort(&path, filename, abort)?;
+            let content = self.read_source_with_abort(&canonical, filename, abort)?;
             self.resolved_dependencies.push(ResolvedIncludeDependency {
                 owner_path: owner_path.to_path_buf(),
                 directive_line,

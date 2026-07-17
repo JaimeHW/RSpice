@@ -14,7 +14,7 @@ use crate::netlist::{
     XspicePort, flatten_netlist_with_models, flatten_netlist_with_models_config_with_abort,
     reduce_supernode_topology,
 };
-use crate::resource::{ResourceKind, ResourceLimitError};
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
 use serde::{Deserialize, Serialize};
@@ -1647,14 +1647,20 @@ fn parse_generated_xspice_auto_bridge_deck(
     generated_deck: &str,
     source_path: Option<&Path>,
     resolve_includes: bool,
-) -> Result<Netlist, crate::netlist::ParseError> {
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Netlist, ParseWithAbortError> {
+    let options = crate::netlist::NetlistParseOptions {
+        resource_limits,
+        ..crate::netlist::NetlistParseOptions::default()
+    };
     if !resolve_includes {
-        return Netlist::parse(generated_deck);
+        return Netlist::parse_with_options_and_abort(generated_deck, options, abort);
     }
 
     let synthetic_path =
         source_path.unwrap_or_else(|| Path::new("rspice_generated_auto_bridge.cir"));
-    Netlist::parse_with_path(generated_deck, synthetic_path)
+    Netlist::parse_with_path_and_options_and_abort(generated_deck, synthetic_path, options, abort)
 }
 
 fn add_generated_xspice_auto_bridge_resistor(
@@ -2041,7 +2047,10 @@ fn add_template_xspice_auto_bridge(
     digital_delay_type: Option<i64>,
     spice_dialect: SpiceDialect,
     node_names: Option<&[String]>,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
+    check_build_abort(abort)?;
     let Some(first_bridge) = bridges.first().copied() else {
         return Ok(());
     };
@@ -2115,14 +2124,23 @@ fn add_template_xspice_auto_bridge(
 
     let generated_deck =
         format!("RSpice generated XSPICE auto bridge\n{setup_card}\n{device_card}\n.end\n");
-    let generated =
-        parse_generated_xspice_auto_bridge_deck(&generated_deck, source_path, setup_is_include)
-            .map_err(|err| {
-                SimulationError::Circuit(format!(
-                    "Failed to parse generated XSPICE auto-bridge template '{}': {}",
-                    template.key, err
-                ))
-            })?;
+    let generated = parse_generated_xspice_auto_bridge_deck(
+        &generated_deck,
+        source_path,
+        setup_is_include,
+        resource_limits,
+        abort,
+    )
+    .map_err(|error| match error {
+        ParseWithAbortError::Aborted => SimulationError::Aborted,
+        ParseWithAbortError::Parse(ParseError::ResourceLimit(error)) => {
+            SimulationError::ResourceLimit(error)
+        }
+        ParseWithAbortError::Parse(error) => SimulationError::Circuit(format!(
+            "Failed to parse generated XSPICE auto-bridge template '{}': {}",
+            template.key, error
+        )),
+    })?;
     if device_is_subcircuit {
         add_generated_xspice_auto_bridge_subcircuit(
             circuit,
@@ -2185,7 +2203,10 @@ fn add_planned_xspice_auto_bridges(
     digital_delay_type: Option<i64>,
     spice_dialect: SpiceDialect,
     show_generated: bool,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
+    check_build_abort(abort)?;
     let node_names = show_generated.then(|| circuit.node_names_sorted());
     let effective_templates =
         xspice_auto_bridge_effective_templates(templates, bridges, source_path, family_enabled);
@@ -2193,6 +2214,7 @@ fn add_planned_xspice_auto_bridges(
     let mut consumed = vec![false; bridges.len()];
 
     for index in 0..bridges.len() {
+        check_build_abort(abort)?;
         if consumed[index] {
             continue;
         }
@@ -2212,6 +2234,8 @@ fn add_planned_xspice_auto_bridges(
                 digital_delay_type,
                 spice_dialect,
                 node_names.as_deref(),
+                resource_limits,
+                abort,
             )?;
             continue;
         };
@@ -2222,6 +2246,9 @@ fn add_planned_xspice_auto_bridges(
         group.push(bridge);
 
         for candidate_index in index + 1..bridges.len() {
+            if candidate_index.is_multiple_of(64) {
+                check_build_abort(abort)?;
+            }
             if group.len() >= max_nodes {
                 break;
             }
@@ -2251,6 +2278,8 @@ fn add_planned_xspice_auto_bridges(
             digital_delay_type,
             spice_dialect,
             node_names.as_deref(),
+            resource_limits,
+            abort,
         )?;
     }
     Ok(())
@@ -2283,6 +2312,8 @@ fn add_planned_xspice_auto_bridge(
     digital_delay_type: Option<i64>,
     spice_dialect: SpiceDialect,
     node_names: Option<&[String]>,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
     use crate::xspice::PortConnection;
 
@@ -2298,6 +2329,8 @@ fn add_planned_xspice_auto_bridge(
             digital_delay_type,
             spice_dialect,
             node_names,
+            resource_limits,
+            abort,
         );
     }
 
@@ -2444,6 +2477,30 @@ fn add_planned_xspice_auto_bridge(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_auto_bridge_decks_inherit_resource_limits() {
+        let generated = "generated bridge\n.model adc adc_bridge\n.end\n";
+        let mut limits = ResourceLimits::default();
+        limits.max_netlist_bytes = generated.len() - 1;
+
+        assert!(matches!(
+            parse_generated_xspice_auto_bridge_deck(
+                generated,
+                None,
+                false,
+                limits,
+                &NoAbort,
+            ),
+            Err(ParseWithAbortError::Parse(ParseError::ResourceLimit(
+                ResourceLimitError {
+                    resource: ResourceKind::NetlistBytes,
+                    requested,
+                    limit,
+                }
+            ))) if requested == generated.len() && limit == generated.len() - 1
+        ));
+    }
 
     struct DiscardingStamper;
 
@@ -5920,6 +5977,8 @@ impl Engine {
                     self.config.digital_delay_type,
                     self.config.spice_dialect,
                     netlist.options.auto_bridge_show_generated.unwrap_or(false),
+                    self.config.resource_limits,
+                    abort,
                 )?;
             } else {
                 reject_disabled_xspice_auto_bridge(&circuit, &auto_bridges)?;

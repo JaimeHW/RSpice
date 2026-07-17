@@ -181,6 +181,7 @@ impl Engine {
             }
         }
 
+        let resource_limits = self.config.resource_limits;
         let materialize_run =
             |run_index: usize| -> Result<std::borrow::Cow<'_, Netlist>, SimulationError> {
                 if monte_params.is_empty() {
@@ -191,7 +192,12 @@ impl Engine {
                     .zip(&run_variations[run_index])
                     .map(|((name, _), value)| (name.clone(), *value))
                     .collect::<Vec<_>>();
-                let (perturbed, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+                let (perturbed, _) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+                    netlist,
+                    &overrides,
+                    resource_limits,
+                    abort,
+                )?;
                 Ok(std::borrow::Cow::Owned(perturbed))
             };
 

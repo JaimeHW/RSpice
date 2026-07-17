@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rspice_core::analysis::HbConfig;
 use rspice_core::netlist::{IncludeProcessor, NetlistParseOptions, ParseError};
@@ -14,6 +15,29 @@ fn limits_with(update: impl FnOnce(&mut ResourceLimits)) -> ResourceLimits {
     limits
 }
 
+struct TestDirectory(std::path::PathBuf);
+
+impl TestDirectory {
+    fn new(label: &str) -> Self {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "rspice-resource-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).expect("create test directory");
+        Self(path)
+    }
+}
+
+impl Drop for TestDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn parser_rejects_root_bytes_before_materializing_lines() {
     let source = "limited source\nR1 1 0 1k\n.end\n";
@@ -24,6 +48,27 @@ fn parser_rejects_root_bytes_before_materializing_lines() {
 
     assert!(matches!(
         Netlist::parse_with_options(source, options),
+        Err(ParseError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::NetlistBytes,
+            requested,
+            limit,
+        })) if requested == source.len() && limit == source.len() - 1
+    ));
+}
+
+#[test]
+fn file_parser_rejects_root_bytes_before_reading_the_entire_file() {
+    let directory = TestDirectory::new("root-file");
+    let deck = directory.0.join("root.cir");
+    let source = "limited source file\nR1 1 0 1k\n.end\n";
+    std::fs::write(&deck, source).expect("write root deck");
+    let options = NetlistParseOptions {
+        resource_limits: limits_with(|limits| limits.max_netlist_bytes = source.len() - 1),
+        ..NetlistParseOptions::default()
+    };
+
+    assert!(matches!(
+        Netlist::parse_file_with_options(&deck, options),
         Err(ParseError::ResourceLimit(ResourceLimitError {
             resource: ResourceKind::NetlistBytes,
             requested,
@@ -64,6 +109,45 @@ fn include_expansion_rejects_oversized_materialized_source() {
             limit,
         })) if requested == source.len() && limit == source.len() - 1
     ));
+}
+
+#[test]
+fn include_reads_enforce_an_aggregate_dependency_source_budget() {
+    let directory = TestDirectory::new("dependency-files");
+    let root = directory.0.join("root.cir");
+    let first = "R1 1 0 1k\n";
+    let second = "R2 2 0 2k\n";
+    std::fs::write(directory.0.join("first.inc"), first).expect("write first include");
+    std::fs::write(directory.0.join("second.inc"), second).expect("write second include");
+    let source = ".include \"first.inc\"\n.include \"second.inc\"\n";
+    let total = first.len() + second.len();
+    let limits = limits_with(|limits| limits.max_dependency_source_bytes = total - 1);
+    let mut processor = IncludeProcessor::new(&root).with_resource_limits(limits);
+
+    assert!(matches!(
+        processor.expand_content(source, &root),
+        Err(ParseError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::DependencySourceBytes,
+            requested,
+            limit,
+        })) if requested == total && limit == total - 1
+    ));
+}
+
+#[test]
+fn repeated_include_reads_share_one_cached_dependency_source() {
+    let directory = TestDirectory::new("dependency-cache");
+    let root = directory.0.join("root.cir");
+    let child = "R1 1 0 1k\n";
+    std::fs::write(directory.0.join("child.inc"), child).expect("write child include");
+    let source = ".include \"child.inc\"\n.include \"./child.inc\"\n";
+    let limits = limits_with(|limits| limits.max_dependency_source_bytes = child.len());
+    let mut processor = IncludeProcessor::new(&root).with_resource_limits(limits);
+
+    let expanded = processor
+        .expand_content(source, &root)
+        .expect("the same source is retained once");
+    assert_eq!(expanded.matches("R1 1 0 1k").count(), 2);
 }
 
 #[test]
@@ -234,6 +318,29 @@ fn independent_batch_analyses_enforce_run_budgets() {
             requested: 3,
             limit: 2,
         }))
+    ));
+}
+
+#[test]
+fn generated_batch_decks_inherit_the_engine_parse_policy() {
+    let source = "limited generated deck\n\
+                  .param P=1\n\
+                  V1 1 0 1\n\
+                  R1 1 0 {P}\n\
+                  .end\n";
+    let netlist = Netlist::parse(source).expect("fixture parses under the default policy");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_netlist_bytes = source.len() - 1),
+        ..SimulationConfig::default()
+    };
+
+    assert!(matches!(
+        Engine::new(config).run_step(&netlist, "P", &[2.0]),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::NetlistBytes,
+            requested,
+            limit,
+        })) if requested > source.len() - 1 && limit == source.len() - 1
     ));
 }
 
