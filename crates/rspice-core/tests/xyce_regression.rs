@@ -8,6 +8,7 @@ use rspice_core::testing::{XyceDeckSection, XyceRunnerConfig, XyceTestRunner};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 fn xyce_runner_lock() -> &'static Mutex<()> {
@@ -4421,6 +4422,121 @@ fn test_xyce_addresistors_generated_netlist_cases_run_relationally() {
             "addresistors_generated_netlist_relational_wrapper"
         );
     }
+}
+
+#[test]
+fn test_xyce_abm_pow_generated_gold_dc_wrappers_run_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/ABM_POW/abmpow1.cir",
+        "Netlists/ABM_POW/abmpow2.cir",
+        "Netlists/ABM_POW/abmpow3.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed shell/Perl wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should execute its exact native generated-gold DC oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(result.contract, "abm_pow_generated_gold_dc_wrapper");
+    }
+}
+
+#[test]
+fn test_xyce_abm_pow_provenance_mutations_fail_closed() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
+    let corpus = get_xyce_tests_dir();
+    let make_fixture = |label: &str| {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-abm-pow-{label}-{}-{}",
+            std::process::id(),
+            FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let family = root.join("Netlists/ABM_POW");
+        fs::create_dir_all(&family).expect("create ABM_POW fixture family");
+        for name in ["abmpow1.cir", "abmpow2.cir", "abmpow3.cir"] {
+            fs::copy(
+                corpus.join("Netlists/ABM_POW").join(name),
+                family.join(name),
+            )
+            .expect("copy canonical ABM_POW source");
+        }
+        fs::write(
+            root.join("RSPICE-HARNESS-MANIFEST.tsv"),
+            "Netlists/ABM_POW/abmpow1.cir\trequires_upstream_wrapper\n\
+             Netlists/ABM_POW/abmpow2.cir\trequires_upstream_wrapper\n\
+             Netlists/ABM_POW/abmpow3.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write ABM_POW fixture manifest");
+        root
+    };
+    let assert_fails = |root: &Path, relative: &str, label: &str| {
+        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            !result.passed && !result.expected_unsupported,
+            "{label} must fail the exact ABM_POW oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, "abm_pow_generated_gold_dc_wrapper");
+    };
+
+    let root = make_fixture("source");
+    let path = root.join("Netlists/ABM_POW/abmpow1.cir");
+    let source = fs::read_to_string(&path).expect("read mutation source");
+    fs::write(&path, source.replace("-V(1)**2", "V(1)**2")).expect("write precedence mutation");
+    assert_fails(
+        &root,
+        "Netlists/ABM_POW/abmpow1.cir",
+        "power-precedence source mutation",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM_POW source fixture");
+
+    let root = make_fixture("manifest");
+    fs::write(
+        root.join("RSPICE-HARNESS-MANIFEST.tsv"),
+        "Netlists/ABM_POW/abmpow1.cir\trequires_upstream_wrapper\n\
+         Netlists/ABM_POW/abmpow2.cir\trequires_upstream_wrapper\n",
+    )
+    .expect("remove ABM_POW manifest owner");
+    assert_fails(
+        &root,
+        "Netlists/ABM_POW/abmpow3.cir",
+        "removed wrapper ownership",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM_POW manifest fixture");
+
+    let root = make_fixture("family");
+    fs::write(root.join("Netlists/ABM_POW/unexpected.txt"), "unexpected\n")
+        .expect("write extra ABM_POW family member");
+    assert_fails(
+        &root,
+        "Netlists/ABM_POW/abmpow2.cir",
+        "family census mutation",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM_POW family fixture");
+
+    let root = make_fixture("output");
+    fs::create_dir_all(root.join("OutputData/ABM_POW"))
+        .expect("create forbidden ABM_POW output directory");
+    fs::write(
+        root.join("OutputData/ABM_POW/abmpow1.cir.prn"),
+        "forbidden static gold\n",
+    )
+    .expect("write forbidden ABM_POW output artifact");
+    assert_fails(
+        &root,
+        "Netlists/ABM_POW/abmpow1.cir",
+        "forbidden checked-in output",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM_POW output fixture");
 }
 
 #[test]

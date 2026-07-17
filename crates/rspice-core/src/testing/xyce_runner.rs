@@ -102,6 +102,18 @@ const XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE: f64 = 1.0e-6;
 const XYCE_ANALYTIC_FMOD_DC_RECORD: &str = "netlists/abm_nint_fmod/fmod.cir";
 const XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD: &str =
     "netlists/abm_int_floor_ceil/int_floor_ceil_bsrc.cir";
+const XYCE_ABM_POW_FAMILY_PREFIX: &str = "netlists/abm_pow/";
+const XYCE_ABM_POW_SOURCE_DIRECTORY_COUNT: usize = 3;
+const XYCE_ABM_POW_SOURCE_DIRECTORY_BLAKE3: &str =
+    "918d2fdc102269c9cf62b83ba5f62f4037ceb53b288ba4772532b9477f84ff39";
+const XYCE_ABM_POW_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
+    "3c3f42c4ef37d6742df6380a85820b438154c6ed9231cc42beb66714bbe2d917";
+const XYCE_ABM_POW_CANDIDATE_BLAKE3: &str =
+    "8f4fa483c6b5862124323c57f642e8763050821be3344c4d5ae036733617c144";
+const XYCE_ABM_POW_CANDIDATE_CONTENT_BLAKE3: &str =
+    "2ffe099c0701a75920d9dd5b26db68736bf85297ce7ae794e673fdbaf93dd7eb";
+const XYCE_ABM_POW_MANIFEST_BLAKE3: &str =
+    "8f4fa483c6b5862124323c57f642e8763050821be3344c4d5ae036733617c144";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
@@ -2629,6 +2641,105 @@ struct XyceXdmReplaceGroundElementSnapshot {
     nodes: Vec<String>,
     kind: String,
     value_bits: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmPowKind {
+    UnaryMinusPrecedence,
+    NegativeIntegerExponent,
+    FractionalPrincipalComplex,
+}
+
+impl XyceAbmPowKind {
+    const ALL: [Self; 3] = [
+        Self::UnaryMinusPrecedence,
+        Self::NegativeIntegerExponent,
+        Self::FractionalPrincipalComplex,
+    ];
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL.into_iter().find(|kind| kind.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::UnaryMinusPrecedence => "netlists/abm_pow/abmpow1.cir",
+            Self::NegativeIntegerExponent => "netlists/abm_pow/abmpow2.cir",
+            Self::FractionalPrincipalComplex => "netlists/abm_pow/abmpow3.cir",
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::UnaryMinusPrecedence => (
+                383,
+                "26c41b1da2a996e49a877cfe72fca3a8ba4efc2b9cb9b626e0049977c06a349b",
+            ),
+            Self::NegativeIntegerExponent => (
+                481,
+                "d9a7f907b68ba8ba393572508efb283a08980daa85cd4906dfaa0530c43489ad",
+            ),
+            Self::FractionalPrincipalComplex => (
+                523,
+                "0395a7d3c8f7630e47aa92c7b02d7be840ca2fa258d394d64a7ec9377de12a3b",
+            ),
+        }
+    }
+
+    /// Immutable audit identity of the removed Release 7.10 shell wrapper.
+    /// The artifact is intentionally not vendored; this is SHA-256 over the
+    /// canonical Xyce-Regression-history bytes.
+    fn historical_wrapper_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::UnaryMinusPrecedence => (
+                1317,
+                "82cbb932d8e66ead0da5a5b76706b002edc01b729ca43bd7ae5bf59f0c8a87f9",
+            ),
+            Self::NegativeIntegerExponent => (
+                1317,
+                "e506a1a09bddb9b87e3d18b42d7bc6fd4cf9c4bc436ce3519363d3c977cc5810",
+            ),
+            Self::FractionalPrincipalComplex => (
+                1317,
+                "7e9a7edba0297dff479afd1cbcc7f194f76ca36ea8ea0608580a8915e71f1479",
+            ),
+        }
+    }
+
+    /// Immutable SHA-256 identity of the Perl `.prn.gs` generator invoked by
+    /// the corresponding historical shell wrapper.
+    fn historical_perl_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::UnaryMinusPrecedence => (
+                482,
+                "59773e5ec007455f7284a62006f89a993103dc6a2c045ff3f392b60546e4db23",
+            ),
+            Self::NegativeIntegerExponent => (
+                564,
+                "fbe426be52c542c082cbc56f12f713a6e2b6fe0847e7e7b75360a5db0c96481a",
+            ),
+            Self::FractionalPrincipalComplex => (
+                1647,
+                "ae6134403646e522b17845aed86c58fdef866dd80a4209241ef7a4868a20d699",
+            ),
+        }
+    }
+
+    fn expected_columns(self) -> &'static [&'static str] {
+        match self {
+            Self::UnaryMinusPrecedence => &["Index", "V(1)", "V(4)"],
+            Self::NegativeIntegerExponent => &["Index", "V(1)", "V(5)", "V(6)"],
+            Self::FractionalPrincipalComplex => &["Index", "V(1)", "V(5)", "V(6)"],
+        }
+    }
+
+    fn expected_rows(self) -> usize {
+        match self {
+            Self::UnaryMinusPrecedence => 51,
+            Self::NegativeIntegerExponent | Self::FractionalPrincipalComplex => 26,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5437,6 +5548,23 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(kind) = XyceAbmPowKind::for_record(&deck.relative_path) {
+            let contract = "abm_pow_generated_gold_dc_wrapper";
+            let result = match self.validate_abm_pow_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(kind) = XyceAddResistorsKind::for_record(&deck.relative_path) {
             let contract = "addresistors_generated_netlist_relational_wrapper";
             let result = match self.validate_addresistors_oracle(deck, kind, start) {
@@ -5961,6 +6089,498 @@ impl XyceTestRunner {
             duration_ms: start.elapsed().as_millis(),
             contract: contract.to_string(),
         }
+    }
+
+    fn validate_abm_pow_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceAbmPowKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        let source_bytes = self.validate_abm_pow_provenance(deck, kind)?;
+        self.check_abm_pow_deadline(start, "provenance")?;
+        let source = std::str::from_utf8(&source_bytes)
+            .map_err(|error| format!("ABM_POW source is not UTF-8: {error}"))?;
+        let plan = self.static_dc_plan_for_source_with_execution_dir(
+            &deck.path,
+            source.to_string(),
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        let parsed = Self::parse_xyce_netlist(source, &deck.path)
+            .map_err(|error| format!("ABM_POW parse failed: {error}"))?;
+        Self::validate_abm_pow_plan(&plan, &parsed, kind)?;
+        Self::validate_abm_pow_topology(&parsed, kind)?;
+        self.check_abm_pow_deadline(start, "parse and exact topology")?;
+
+        let (netlist, results) =
+            self.run_static_dc_results(&plan, start)
+                .map_err(|error| match error {
+                    SimulationError::Aborted => format!(
+                        "ABM_POW native DC execution exceeded shared timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    other => format!("ABM_POW native DC execution failed: {other}"),
+                })?;
+        Self::validate_abm_pow_topology(&netlist, kind)?;
+        let actual = self.dc_results_to_prn_table(&plan, &netlist, &results)?;
+        Self::validate_abm_pow_output_domain(&actual, &results, kind)?;
+        let gold = Self::abm_pow_dynamic_gold_table(&actual, kind)?;
+        let mismatches = self.compare_release_7_10_xyce_verify_dc_tables(
+            "ABM_POW", &gold, &actual, &results, &results,
+        )?;
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "ABM_POW Release 7.10 generated-gold comparison produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ));
+        }
+
+        // Each Perl sidecar derives its gold columns from the DUT's serialized
+        // V(1), so defend against common-mode execution errors with a semantic
+        // counterfactual that implements the exact bug the deck is meant to
+        // catch.  A passing counterfactual would prove that the selected power
+        // grammar/complex projection is not causally observed by this oracle.
+        let counterfactual = Self::abm_pow_counterfactual_table(&actual, kind)?;
+        if self
+            .compare_release_7_10_xyce_verify_dc_tables(
+                "ABM_POW counterfactual",
+                &counterfactual,
+                &actual,
+                &results,
+                &results,
+            )
+            .is_ok_and(|mismatches| mismatches.is_empty())
+        {
+            return Err("ABM_POW counterfactual unexpectedly reproduced the native output".into());
+        }
+        self.check_abm_pow_deadline(start, "native execution, generated gold, and causality")
+    }
+
+    fn check_abm_pow_deadline(&self, start: Instant, phase: &str) -> Result<(), String> {
+        if DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1)).is_aborted() {
+            Err(format!(
+                "ABM_POW shared deadline expired during {phase} ({}ms)",
+                self.config.max_time_per_test_ms
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_abm_pow_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceAbmPowKind,
+    ) -> Result<Vec<u8>, String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err(format!(
+                "ABM_POW record '{}' lost exact removed-wrapper ownership",
+                kind.record()
+            ));
+        }
+        let canonical_deck = deck
+            .path
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize ABM_POW record: {error}"))?;
+        let canonical_expected = self
+            .root
+            .join(Path::new(kind.record()))
+            .canonicalize()
+            .map_err(|error| format!("canonical ABM_POW record is missing: {error}"))?;
+        if canonical_deck != canonical_expected {
+            return Err("ABM_POW record resolved outside its canonical corpus path".into());
+        }
+        let family = canonical_expected
+            .parent()
+            .ok_or_else(|| "ABM_POW record has no family directory".to_string())?;
+        let family_metadata = fs::symlink_metadata(family)
+            .map_err(|error| format!("failed to inspect ABM_POW family: {error}"))?;
+        if !family_metadata.file_type().is_dir() || family_metadata.file_type().is_symlink() {
+            return Err("ABM_POW family must be a regular non-symlink directory".into());
+        }
+
+        let mut complete = BTreeSet::new();
+        let mut content = BTreeSet::new();
+        for entry in fs::read_dir(family)
+            .map_err(|error| format!("failed to read ABM_POW family: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("failed to inspect ABM_POW member: {error}"))?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect ABM_POW member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "ABM_POW member {} must be a regular non-symlink file",
+                    entry.path().display()
+                ));
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| "ABM_POW filename is not UTF-8".to_string())?
+                .to_ascii_lowercase();
+            if !complete.insert(name.clone()) {
+                return Err(format!("ABM_POW family has case-colliding name {name:?}"));
+            }
+            let bytes = fs::read(entry.path())
+                .map_err(|error| format!("failed to hash ABM_POW member: {error}"))?;
+            content.insert(format!("{name}\0{}", blake3::hash(&bytes).to_hex()));
+        }
+        let complete = complete.into_iter().collect::<Vec<_>>();
+        let content = content.into_iter().collect::<Vec<_>>();
+        let complete_hash = blake3::hash(complete.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if complete.len() != XYCE_ABM_POW_SOURCE_DIRECTORY_COUNT
+            || complete_hash != XYCE_ABM_POW_SOURCE_DIRECTORY_BLAKE3
+            || content.len() != XYCE_ABM_POW_SOURCE_DIRECTORY_COUNT
+            || content_hash != XYCE_ABM_POW_SOURCE_CONTENT_CENSUS_BLAKE3
+        {
+            return Err(format!(
+                "ABM_POW family census changed: complete={}/{complete_hash}, content={}/{content_hash}",
+                complete.len(),
+                content.len()
+            ));
+        }
+
+        let mut candidates = BTreeSet::new();
+        let mut candidate_content = BTreeSet::new();
+        for candidate in XyceAbmPowKind::ALL {
+            let path = self.root.join(Path::new(candidate.record()));
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!("ABM_POW candidate {} is missing: {error}", path.display())
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "ABM_POW candidate {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read ABM_POW candidate: {error}"))?;
+            Self::validate_xdm_replaceground_identity(
+                "ABM_POW source",
+                candidate.record(),
+                &bytes,
+                candidate.source_identity(),
+            )?;
+            candidates.insert(candidate.record().to_string());
+            candidate_content.insert(format!(
+                "{}\t{}",
+                candidate.record(),
+                blake3::hash(&bytes).to_hex()
+            ));
+            self.reject_wrapper_output_artifacts(&path)?;
+        }
+        let candidates = candidates.into_iter().collect::<Vec<_>>();
+        let candidate_content = candidate_content.into_iter().collect::<Vec<_>>();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let candidate_content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let manifest = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(XYCE_ABM_POW_FAMILY_PREFIX))
+            .cloned()
+            .collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XyceAbmPowKind::ALL.len()
+            || candidate_hash != XYCE_ABM_POW_CANDIDATE_BLAKE3
+            || candidate_content_hash != XYCE_ABM_POW_CANDIDATE_CONTENT_BLAKE3
+            || manifest != candidates
+            || manifest_hash != XYCE_ABM_POW_MANIFEST_BLAKE3
+        {
+            return Err(format!(
+                "ABM_POW candidate/manifest bijection changed: candidates={}/{candidate_hash}/{candidate_content_hash}, manifest={}/{manifest_hash}",
+                candidates.len(),
+                manifest.len()
+            ));
+        }
+        Self::validate_abm_pow_historical_identities()?;
+        fs::read(&deck.path).map_err(|error| format!("failed to read ABM_POW owner: {error}"))
+    }
+
+    fn validate_abm_pow_historical_identities() -> Result<(), String> {
+        let mut wrappers = BTreeSet::new();
+        let mut perl = BTreeSet::new();
+        for kind in XyceAbmPowKind::ALL {
+            let (wrapper_bytes, wrapper_sha256) = kind.historical_wrapper_identity();
+            let (perl_bytes, perl_sha256) = kind.historical_perl_identity();
+            if wrapper_bytes == 0
+                || perl_bytes == 0
+                || wrapper_sha256.len() != 64
+                || perl_sha256.len() != 64
+                || !wrapper_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || !perl_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err("ABM_POW historical wrapper/Perl identity is malformed".into());
+            }
+            wrappers.insert((kind.record(), wrapper_bytes, wrapper_sha256));
+            perl.insert((kind.record(), perl_bytes, perl_sha256));
+        }
+        if wrappers.len() != 3 || perl.len() != 3 {
+            return Err("ABM_POW historical wrapper/Perl provenance is incomplete".into());
+        }
+        Ok(())
+    }
+
+    fn validate_abm_pow_plan(
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        kind: XyceAbmPowKind,
+    ) -> Result<(), String> {
+        let expected_step: Value = if kind == XyceAbmPowKind::UnaryMinusPrecedence {
+            0.1
+        } else {
+            0.2
+        };
+        let expected_probes = kind
+            .expected_columns()
+            .iter()
+            .skip(1)
+            .map(|probe| probe.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if !plan.dc.source.eq_ignore_ascii_case("VS")
+            || plan.dc.start.to_bits() != (-2.5f64).to_bits()
+            || plan.dc.stop.to_bits() != 2.5f64.to_bits()
+            || plan.dc.step.to_bits() != expected_step.to_bits()
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+            || plan.dc.sweep2.is_some()
+            || plan.dc_data.is_some()
+            || !plan.steps.is_empty()
+            || !plan.diagnostics.is_empty()
+            || plan.print_format.is_some()
+            || probes != expected_probes
+            || netlist.analyses.len() != 1
+            || netlist.output_requests.len() != 1
+        {
+            return Err(format!(
+                "ABM_POW exact DC/PRINT contract changed: sweep={:?}, probes={probes:?}, analyses={}, outputs={}",
+                plan.dc,
+                netlist.analyses.len(),
+                netlist.output_requests.len()
+            ));
+        }
+        if netlist.options.replace_ground.is_some()
+            || netlist.options.remove_unused.is_some()
+            || netlist.options.add_resistors.is_some()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+        {
+            return Err("ABM_POW deck acquired unrelated model, hierarchy, parameter, data, or preprocessing state".into());
+        }
+        Ok(())
+    }
+
+    fn validate_abm_pow_topology(netlist: &Netlist, kind: XyceAbmPowKind) -> Result<(), String> {
+        let expected_behavioral: &[(&str, &str, &str)] = match kind {
+            XyceAbmPowKind::UnaryMinusPrecedence => &[("b4", "4", "-v(1)**2")],
+            XyceAbmPowKind::NegativeIntegerExponent => {
+                &[("b5", "5", "(v(1))**-2"), ("b6", "6", "(v(1))**-3")]
+            }
+            XyceAbmPowKind::FractionalPrincipalComplex => {
+                &[("b5", "5", "(v(1))**2.1"), ("b6", "6", "(-v(1))**3.1")]
+            }
+        };
+        let expected_count = 2 + 2 * expected_behavioral.len();
+        if netlist.elements.len() != expected_count {
+            return Err(format!(
+                "ABM_POW topology has {} elements instead of {expected_count}",
+                netlist.elements.len()
+            ));
+        }
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("VS"))
+            .ok_or_else(|| "ABM_POW has no VS source".to_string())?;
+        if source.nodes != ["1", "0"]
+            || !matches!(&source.kind, ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) if value.to_bits() == (-2.5f64).to_bits())
+        {
+            return Err("ABM_POW swept VS source topology/value changed".into());
+        }
+        for (name, nodes) in std::iter::once(("r1", ["1", "0"])).chain(
+            expected_behavioral.iter().map(|(name, node, _)| {
+                let resistor = if *name == "b4" {
+                    "r4"
+                } else if *name == "b5" {
+                    "r5"
+                } else {
+                    "r6"
+                };
+                (resistor, [*node, "0"])
+            }),
+        ) {
+            let resistor = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("ABM_POW is missing resistor {name}"))?;
+            if resistor.nodes != nodes
+                || !matches!(&resistor.kind, ElementKind::Resistor { value, value_expr: None, model: None, instance_params, deferred_params } if value.to_bits() == 1.0f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+            {
+                return Err(format!(
+                    "ABM_POW resistor {name} changed exact unit-load topology"
+                ));
+            }
+        }
+        for (name, output, expected_expression) in expected_behavioral {
+            let behavioral = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("ABM_POW is missing behavioral source {name}"))?;
+            let ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            } = &behavioral.kind
+            else {
+                return Err(format!("ABM_POW {name} is not a behavioral voltage source"));
+            };
+            if behavioral.nodes != [*output, "0"]
+                || tc1.to_bits() != 0.0f64.to_bits()
+                || tc2.to_bits() != 0.0f64.to_bits()
+                || Self::normalize_probe(expression) != *expected_expression
+            {
+                return Err(format!(
+                    "ABM_POW {name} topology/expression changed: nodes={:?}, expression={expression:?}",
+                    behavioral.nodes
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_abm_pow_output_domain(
+        table: &XycePrnTable,
+        results: &[DcSweepPointResult],
+        kind: XyceAbmPowKind,
+    ) -> Result<(), String> {
+        if table.columns != kind.expected_columns()
+            || table.rows.len() != kind.expected_rows()
+            || results.len() != kind.expected_rows()
+        {
+            return Err(format!(
+                "ABM_POW output layout changed: columns={:?}, rows={}, sweep_points={}",
+                table.columns,
+                table.rows.len(),
+                results.len()
+            ));
+        }
+        for (index, (row, point)) in table.rows.iter().zip(results).enumerate() {
+            if row.len() != table.columns.len()
+                || row.iter().any(|value| !value.is_finite())
+                || row[0].to_bits() != (index as Value).to_bits()
+            {
+                return Err(format!(
+                    "ABM_POW row {index} is malformed or nonfinite: {row:?}"
+                ));
+            }
+            let printed_sweep = Self::xyce_default_prn_roundtrip(point.sweep_value)?;
+            let printed_input = Self::xyce_default_prn_roundtrip(row[1])?;
+            if printed_sweep.to_bits() != printed_input.to_bits() {
+                return Err(format!(
+                    "ABM_POW V(1) lost swept-source causality at row {index}: sweep={printed_sweep}, V(1)={printed_input}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn abm_pow_dynamic_gold_table(
+        actual: &XycePrnTable,
+        kind: XyceAbmPowKind,
+    ) -> Result<XycePrnTable, String> {
+        Self::abm_pow_derived_table(actual, kind, false)
+    }
+
+    fn abm_pow_counterfactual_table(
+        actual: &XycePrnTable,
+        kind: XyceAbmPowKind,
+    ) -> Result<XycePrnTable, String> {
+        Self::abm_pow_derived_table(actual, kind, true)
+    }
+
+    fn abm_pow_derived_table(
+        actual: &XycePrnTable,
+        kind: XyceAbmPowKind,
+        counterfactual: bool,
+    ) -> Result<XycePrnTable, String> {
+        if actual.columns != kind.expected_columns() || actual.rows.len() != kind.expected_rows() {
+            return Err("ABM_POW derived gold received a table outside its exact layout".into());
+        }
+        let mut rows = Vec::with_capacity(actual.rows.len());
+        for (row_index, row) in actual.rows.iter().enumerate() {
+            if row.len() != actual.columns.len() {
+                return Err(format!(
+                    "ABM_POW derived-gold row {row_index} has wrong width"
+                ));
+            }
+            // The Perl programs split the already serialized default PRN and
+            // calculate from its V(1) token, then printf every result as %.8e.
+            let input = Self::xyce_default_prn_roundtrip(row[1])?;
+            let expected = match (kind, counterfactual) {
+                (XyceAbmPowKind::UnaryMinusPrecedence, false) => vec![-(input * input)],
+                (XyceAbmPowKind::UnaryMinusPrecedence, true) => vec![input * input],
+                (XyceAbmPowKind::NegativeIntegerExponent, false) => {
+                    let inverse = 1.0 / input;
+                    vec![inverse * inverse, inverse * inverse * inverse]
+                }
+                (XyceAbmPowKind::NegativeIntegerExponent, true) => {
+                    vec![input * input, input * input * input]
+                }
+                (XyceAbmPowKind::FractionalPrincipalComplex, false) => vec![
+                    Complex64::new(input, 0.0).powf(2.1).re,
+                    Complex64::new(-input, 0.0).powf(3.1).re,
+                ],
+                (XyceAbmPowKind::FractionalPrincipalComplex, true) => vec![
+                    if input < 0.0 { 0.0 } else { input.powf(2.1) },
+                    if -input < 0.0 {
+                        0.0
+                    } else {
+                        (-input).powf(3.1)
+                    },
+                ],
+            };
+            let mut derived = vec![row[0], input];
+            for value in expected {
+                derived.push(Self::xyce_default_prn_roundtrip(value)?);
+            }
+            if derived.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "ABM_POW derived gold produced nonfinite row {row_index}"
+                ));
+            }
+            rows.push(derived);
+        }
+        Ok(XycePrnTable {
+            columns: actual.columns.clone(),
+            rows,
+        })
     }
 
     fn validate_xdm_replaceground_oracle(
@@ -6743,6 +7363,31 @@ impl XyceTestRunner {
         good: &XycePrnTable,
         test: &XycePrnTable,
         good_results: &[DcSweepPointResult],
+        test_results: &[DcSweepPointResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        // See the constants above: these declared wrapper values were not
+        // forwarded by Release 7.10's HSPICE branch.
+        if XYCE_XDM_REPLACEGROUND_DECLARED_ABSOLUTE_TOLERANCE.to_bits() != 1.0e-5f64.to_bits()
+            || XYCE_XDM_REPLACEGROUND_DECLARED_RELATIVE_TOLERANCE.to_bits() != 1.0e-3f64.to_bits()
+            || XYCE_XDM_REPLACEGROUND_DECLARED_ZERO_TOLERANCE.to_bits() != 1.0e-10f64.to_bits()
+        {
+            return Err("XDM wrapper declared-tolerance provenance changed".to_string());
+        }
+        self.compare_release_7_10_xyce_verify_dc_tables(
+            "XDM REPLACEGROUND",
+            good,
+            test,
+            good_results,
+            test_results,
+        )
+    }
+
+    fn compare_release_7_10_xyce_verify_dc_tables(
+        &self,
+        label: &str,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        good_results: &[DcSweepPointResult],
         _test_results: &[DcSweepPointResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         if good.columns.len() != test.columns.len()
@@ -6755,33 +7400,24 @@ impl XyceTestRunner {
             || good_results.len() != good.rows.len()
         {
             return Err(format!(
-                "XDM REPLACEGROUND comparison layout differs: translated-good {:?}/{} rows, gold-test {:?}/{} rows",
+                "{label} comparison layout differs: good {:?}/{} rows, test {:?}/{} rows",
                 good.columns,
                 good.rows.len(),
                 test.columns,
                 test.rows.len()
             ));
         }
-        // See the constants above: these declared wrapper values were not
-        // forwarded by Release 7.10's HSPICE branch.
-        if XYCE_XDM_REPLACEGROUND_DECLARED_ABSOLUTE_TOLERANCE.to_bits() != 1.0e-5f64.to_bits()
-            || XYCE_XDM_REPLACEGROUND_DECLARED_RELATIVE_TOLERANCE.to_bits() != 1.0e-3f64.to_bits()
-            || XYCE_XDM_REPLACEGROUND_DECLARED_ZERO_TOLERANCE.to_bits() != 1.0e-10f64.to_bits()
-        {
-            return Err("XDM wrapper declared-tolerance provenance changed".to_string());
-        }
         if good.rows.len() < 2 {
-            return Err(
-                "XDM REPLACEGROUND xyce_verify comparison requires at least two DC points"
-                    .to_string(),
-            );
+            return Err(format!(
+                "{label} xyce_verify comparison requires at least two DC points"
+            ));
         }
         for row_index in 0..good.rows.len() {
             if good.rows[row_index].len() != good.columns.len()
                 || test.rows[row_index].len() != test.columns.len()
             {
                 return Err(format!(
-                    "XDM REPLACEGROUND comparison row {row_index} does not match its column layout"
+                    "{label} comparison row {row_index} does not match its column layout"
                 ));
             }
             let requested_sweep = Self::xyce_prn_scientific_roundtrip(
@@ -6801,7 +7437,7 @@ impl XyceTestRunner {
                 > XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE
             {
                 return Err(format!(
-                    "XDM REPLACEGROUND translated-good V(1) does not match the formatted requested sweep at row {row_index}: requested={requested_sweep}, good={good_axis}"
+                    "{label} good V(1) does not match the formatted requested sweep at row {row_index}: requested={requested_sweep}, good={good_axis}"
                 ));
             }
             let expected_index = row_index as Value;
@@ -6817,15 +7453,15 @@ impl XyceTestRunner {
                 || test_index.to_bits() != expected_index.to_bits()
             {
                 return Err(format!(
-                    "XDM REPLACEGROUND serialized Index differs at row {row_index}: translated-good={good_index}, gold-test={test_index}"
+                    "{label} serialized Index differs at row {row_index}: good={good_index}, test={test_index}"
                 ));
             }
         }
 
-        // Release 7.10 xyce_verify treats the translated output as `good`,
-        // the canonical rerun as `test`, integrates squared normalized error
-        // with the trapezoidal rule over the independent axis, and fails a
-        // signal only when normalized RMS exceeds one.
+        // Release 7.10 xyce_verify treats its first numeric file as `good`,
+        // its second as `test`, integrates squared normalized error with the
+        // trapezoidal rule over the independent axis, and fails a signal only
+        // when normalized RMS exceeds one.
         let mut mismatches = Vec::new();
         let serialized_test_axis = test
             .rows
@@ -6847,7 +7483,7 @@ impl XyceTestRunner {
         let axis_span = (axis_stop - axis_start).abs();
         if !axis_span.is_finite() || axis_span <= 0.0 {
             return Err(format!(
-                "XDM REPLACEGROUND xyce_verify axis has invalid span {axis_start}..{axis_stop}"
+                "{label} xyce_verify axis has invalid span {axis_start}..{axis_stop}"
             ));
         }
         // The one-variable DC verifier treats V(1) as the independent
@@ -6867,7 +7503,7 @@ impl XyceTestRunner {
                 )?;
                 if !raw_good_value.is_finite() || !raw_test_value.is_finite() {
                     return Err(format!(
-                        "XDM REPLACEGROUND comparison contains non-finite {} at row {row_index}: translated-good={raw_good_value}, gold-test={raw_test_value}",
+                        "{label} comparison contains non-finite {} at row {row_index}: good={raw_good_value}, test={raw_test_value}",
                         good.columns[column_index]
                     ));
                 }
