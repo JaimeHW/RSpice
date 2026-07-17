@@ -85,6 +85,7 @@ pub(super) fn parse_coupling(
             coefficient,
         },
         nodes: vec![], // Coupling doesn't have direct node connections
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -111,6 +112,7 @@ pub(super) fn parse_vswitch(
                 initial_state,
             },
             nodes: vec![node_pos, node_neg],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
         return Ok(());
     }
@@ -131,6 +133,7 @@ pub(super) fn parse_vswitch(
             initial_state,
         },
         nodes: vec![node_pos, node_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -217,6 +220,7 @@ pub(super) fn parse_iswitch(
             initial_state,
         },
         nodes: vec![node_pos, node_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -273,6 +277,7 @@ pub(super) fn parse_transmission_line(
             model: parsed.model,
         },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())

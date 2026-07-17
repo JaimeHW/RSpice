@@ -228,6 +228,7 @@ impl SpefFile {
                         deferred_params: Vec::new(),
                     },
                     nodes: vec![n1, n2],
+                    provenance: crate::netlist::ElementProvenance::Authored,
                 });
                 report.capacitors += 1;
             }
@@ -248,6 +249,7 @@ impl SpefFile {
                         deferred_params: Vec::new(),
                     },
                     nodes: vec![node_name(&res.a), node_name(&res.b)],
+                    provenance: crate::netlist::ElementProvenance::Authored,
                 });
                 report.resistors += 1;
             }

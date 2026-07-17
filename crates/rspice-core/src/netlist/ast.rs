@@ -128,6 +128,33 @@ pub struct Element {
     pub kind: ElementKind,
     /// Connected nodes
     pub nodes: Vec<String>,
+    /// Internal construction provenance used to preserve semantic ownership
+    /// across hierarchy flattening. Authored elements always use the default.
+    pub provenance: ElementProvenance,
+}
+
+/// Construction provenance for an element.
+///
+/// This is explicit metadata rather than a naming convention: valid authored
+/// names may contain the same suffixes used for parser-generated elements.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ElementProvenance {
+    #[default]
+    Authored,
+    GeneratedPassiveHelper {
+        /// Name of the authored passive that owns this helper in the same
+        /// hierarchy scope.
+        owner: String,
+        role: GeneratedPassiveHelperRole,
+    },
+}
+
+/// Role of a parser-generated passive parasitic element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedPassiveHelperRole {
+    SeriesResistance,
+    ParallelResistance,
+    ParallelCapacitance,
 }
 
 /// Types of circuit elements
@@ -2449,6 +2476,72 @@ pub struct NodeSet {
 // Simulation Options
 //=============================================================================
 
+/// Device designator selected by Xyce `.PREPROCESS REMOVEUNUSED`.
+///
+/// The variants are intentionally limited to the eight device families Xyce
+/// 7.10 accepts. Keeping this typed prevents an unknown designator from
+/// becoming an inert string that silently changes preprocessing behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RemoveUnusedDeviceType {
+    Capacitor,
+    Diode,
+    CurrentSource,
+    Inductor,
+    Mosfet,
+    Bjt,
+    Resistor,
+    VoltageSource,
+}
+
+impl RemoveUnusedDeviceType {
+    /// Parse one canonical one-letter Xyce selector.
+    pub fn from_xyce_selector(selector: &str) -> Option<Self> {
+        match selector.to_ascii_uppercase().as_str() {
+            "C" => Some(Self::Capacitor),
+            "D" => Some(Self::Diode),
+            "I" => Some(Self::CurrentSource),
+            "L" => Some(Self::Inductor),
+            "M" => Some(Self::Mosfet),
+            "Q" => Some(Self::Bjt),
+            "R" => Some(Self::Resistor),
+            "V" => Some(Self::VoltageSource),
+            _ => None,
+        }
+    }
+
+    /// Canonical Xyce spelling used in diagnostics and serialization.
+    pub fn xyce_selector(self) -> &'static str {
+        match self {
+            Self::Capacitor => "C",
+            Self::Diode => "D",
+            Self::CurrentSource => "I",
+            Self::Inductor => "L",
+            Self::Mosfet => "M",
+            Self::Bjt => "Q",
+            Self::Resistor => "R",
+            Self::VoltageSource => "V",
+        }
+    }
+}
+
+/// Normalized device-family selection for `.PREPROCESS REMOVEUNUSED`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemoveUnusedPolicy {
+    /// Selected families. A set makes repeated authored selectors idempotent
+    /// and keeps semantic/checkpoint identity deterministic.
+    pub device_types: std::collections::BTreeSet<RemoveUnusedDeviceType>,
+}
+
+impl RemoveUnusedPolicy {
+    pub fn contains(&self, device_type: RemoveUnusedDeviceType) -> bool {
+        self.device_types.contains(&device_type)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.device_types.is_empty()
+    }
+}
+
 /// Ngspice-style XSPICE auto-bridge template from `set auto_bridge_* = (...)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct XspiceAutoBridgeTemplate {
@@ -2567,6 +2660,9 @@ pub struct SimulationOptions {
     /// case-insensitive fields `GND`, `GND!`, and `GROUND` are node-zero
     /// aliases throughout circuit elaboration and output expressions.
     pub replace_ground: Option<bool>,
+    /// Xyce `.PREPROCESS REMOVEUNUSED` device-family selection. `None` is the
+    /// semantic default and leaves every authored device in the circuit.
+    pub remove_unused: Option<RemoveUnusedPolicy>,
     /// Xyce `.OPTIONS MEASURE MEASFAIL`: emit `FAILED` rather than the
     /// calculation default value in machine-readable measurement files.
     /// Xyce defaults this to enabled.
@@ -2689,6 +2785,9 @@ impl SimulationOptions {
     pub fn merge(&mut self, other: &SimulationOptions) {
         if other.replace_ground.is_some() {
             self.replace_ground = other.replace_ground;
+        }
+        if other.remove_unused.is_some() {
+            self.remove_unused = other.remove_unused.clone();
         }
         if other.measure_fail_output.is_some() {
             self.measure_fail_output = other.measure_fail_output;

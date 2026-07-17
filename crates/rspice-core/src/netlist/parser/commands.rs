@@ -495,11 +495,16 @@ fn parse_preprocess_command(
         line: line_num,
         message: ".PREPROCESS requires an operation".to_string(),
     })?;
+    if operation.eq_ignore_ascii_case("REMOVEUNUSED") {
+        // Root-wide semantic validation and the typed selection are owned by
+        // the physical-file prescan, which also sees cards after `.END` and
+        // suppresses controls from included files. The ordinary command pass
+        // only consumes the already validated logical card.
+        stream.skip_to_eol();
+        return Ok(());
+    }
     if !operation.eq_ignore_ascii_case("REPLACEGROUND") {
-        if !matches!(
-            operation.to_ascii_uppercase().as_str(),
-            "REMOVEUNUSED" | "ADDRESISTORS"
-        ) {
+        if !operation.eq_ignore_ascii_case("ADDRESISTORS") {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: format!("Unknown .PREPROCESS operation '{operation}'"),

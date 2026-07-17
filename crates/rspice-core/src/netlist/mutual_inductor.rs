@@ -577,6 +577,7 @@ mod tests {
                     initial_current: None,
                 },
                 nodes: vec!["1".into(), "0".into()],
+                provenance: crate::netlist::ElementProvenance::Authored,
             }
         }
         fn coupling(name: &str, missing: &str) -> Element {
@@ -587,6 +588,7 @@ mod tests {
                     coefficient: 0.5,
                 },
                 nodes: Vec::new(),
+                provenance: crate::netlist::ElementProvenance::Authored,
             }
         }
         fn subcircuit(

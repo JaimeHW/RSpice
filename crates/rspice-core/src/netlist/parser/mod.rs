@@ -12,6 +12,10 @@ use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize
 use super::mutual_inductor::{
     MutualInductorSemanticRecord, validate_mutual_inductor_semantic_records_with_abort,
 };
+use super::remove_unused::{
+    designator_type as removeunused_designator_type,
+    filter_elements_with_abort as filter_removeunused_elements_with_abort,
+};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, DataTable, DeviceInitialConditionDirective,
@@ -21,12 +25,13 @@ use super::{
     MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
     Netlist, NetlistSourceLocation, NodeSet, OutputDirectiveKind, OutputRequest, ParamContext,
     ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
-    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
-    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
-    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
-    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
-    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
+    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode,
+    RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal, SensitivityAcSweep,
+    SimulationOptions, SourceRfPort, SourceSpec, StartupDiagnosticCode,
+    StartupDirectiveDisposition, StartupDirectiveEntry, StartupDirectiveKind,
+    StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
+    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude, ensure_parse_not_aborted,
+    finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
 use crate::Value;
@@ -357,13 +362,12 @@ fn parse_netlist_impl(
     if original_lines.is_empty() {
         return Ok(Netlist::default());
     }
-    let (replace_ground, replace_ground_extra_lines) =
-        prescan_root_replaceground(&original_lines, source_schedule.as_ref(), abort)?;
+    let preprocess = prescan_root_preprocess(&original_lines, source_schedule.as_ref(), abort)?;
     let transformed_input = apply_root_preprocessing(
         input,
         &original_lines,
         source_schedule.as_ref(),
-        replace_ground == Some(true),
+        preprocess.replace_ground == Some(true),
         abort,
     )?;
     let parse_input = transformed_input.as_str();
@@ -372,7 +376,7 @@ fn parse_netlist_impl(
     // First line is the title
     let title = lines[0].to_string();
     let mut state = ParseState::new();
-    for line in replace_ground_extra_lines {
+    for line in preprocess.replace_ground_extra_lines {
         state.diagnostics.push(ParseDiagnostic::warning(
             line,
             "replaceground-extra-parameters",
@@ -386,7 +390,8 @@ fn parse_netlist_impl(
     state
         .params
         .set_parameter_redefinition_policy(options.parameter_redefinition_policy);
-    state.options.replace_ground = replace_ground;
+    state.options.replace_ground = preprocess.replace_ground;
+    state.options.remove_unused = preprocess.remove_unused;
 
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
@@ -416,6 +421,7 @@ fn parse_netlist_impl(
         &mut continuation_line,
         &mut continuation_origin,
         &mut state,
+        abort,
     )?;
 
     for (line_index, line) in lines.iter().skip(1).enumerate() {
@@ -429,6 +435,7 @@ fn parse_netlist_impl(
             &mut continuation_line,
             &mut continuation_origin,
             &mut state,
+            abort,
         )?;
         poll_parse_abort(abort, line_index)?;
         poll_parse_text(abort, line)?;
@@ -455,6 +462,7 @@ fn parse_netlist_impl(
                 &mut continuation_line,
                 &mut continuation_origin,
                 &mut state,
+                abort,
             )?;
             apply_deferred_source_boundaries(
                 &mut deferred_source_boundaries,
@@ -550,6 +558,7 @@ fn parse_netlist_impl(
             &mut continuation_line,
             &mut continuation_origin,
             &mut state,
+            abort,
         )?;
     }
 
@@ -568,6 +577,7 @@ fn parse_netlist_impl(
             &mut continuation_line,
             &mut continuation_origin,
             &mut state,
+            abort,
         )?;
     }
     if termination.is_none() {
@@ -603,6 +613,14 @@ fn parse_netlist_impl(
         }
     }
 
+    if let Some(policy) = state.options.remove_unused.clone() {
+        apply_remove_unused_policy_with_abort(
+            &mut state.elements,
+            &mut state.subcircuits,
+            &policy,
+            abort,
+        )?;
+    }
     normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
     resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
     validate_resistor_model_references_with_abort(&state, abort)?;
@@ -678,14 +696,22 @@ fn apply_root_preprocessing(
         let stripped = strip_inline_semicolon_comment(line).trim();
         let is_comment_or_blank = stripped.is_empty() || stripped.starts_with('*');
         let is_continuation = !is_comment_or_blank && stripped.starts_with('+');
-        if !is_comment_or_blank && !is_continuation {
+        let is_indented_preprocess_comment = line.starts_with([' ', '\t'])
+            && !is_continuation
+            && stripped
+                .split_whitespace()
+                .next()
+                .is_some_and(|head| head.eq_ignore_ascii_case(".PREPROCESS"));
+        if !is_comment_or_blank && !is_continuation && !is_indented_preprocess_comment {
             logical_policy = logical_line_policy(line, is_root);
         }
         if index == 0 {
             logical_policy = LogicalLinePolicy::Rewrite;
         }
 
-        if logical_policy == LogicalLinePolicy::InertIncludedPreprocess {
+        if is_indented_preprocess_comment
+            || logical_policy == LogicalLinePolicy::InertIncludedPreprocess
+        {
             // Root preprocessing controls are selected before include
             // expansion in Xyce. Drop the entire included logical card so it
             // cannot be parsed later as an active root command.
@@ -914,6 +940,31 @@ mod replaceground_lexical_tests {
         .expect("title is not a preprocessing card");
         assert_eq!(netlist.options.replace_ground, None);
         assert_eq!(netlist.elements[0].nodes, ["OUT", "GND!"]);
+
+        let netlist = Netlist::parse_with_options(
+            "indented preprocessing comment\n  .PREPROCESS REPLACEGROUND MAYBE\nR1 out GND! 1\n.END\n",
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("an indented new preprocessing card is an inert scan comment");
+        assert_eq!(netlist.options.replace_ground, None);
+        assert_eq!(netlist.elements[0].nodes, ["OUT", "GND!"]);
+    }
+
+    #[test]
+    fn whitespace_prefixed_plus_continues_column_one_preprocess_card() {
+        let netlist = Netlist::parse_with_options(
+            "continued preprocessing\n.PREPROCESS\n   + REPLACEGROUND TRUE\nR1 out GND! 1\n.END\n",
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("whitespace before a continuation marker is accepted");
+        assert_eq!(netlist.options.replace_ground, Some(true));
+        assert_eq!(netlist.elements[0].nodes, ["OUT", "0"]);
     }
 
     #[test]
@@ -1040,17 +1091,563 @@ mod replaceground_lexical_tests {
     }
 }
 
-fn prescan_root_replaceground(
+#[cfg(test)]
+mod removeunused_tests {
+    use super::{NetlistParseOptions, apply_remove_unused_policy_with_abort};
+    use crate::netlist::{ExpressionDialect, Netlist, ParseError, RemoveUnusedDeviceType};
+
+    fn xyce_options() -> NetlistParseOptions {
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..Default::default()
+        }
+    }
+
+    fn element_names(netlist: &Netlist) -> Vec<&str> {
+        netlist
+            .elements
+            .iter()
+            .map(|element| element.name.as_str())
+            .collect()
+    }
+
+    fn temporary_include_deck(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-removeunused-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create test directory");
+        (directory.join("root.cir"), directory.join("child.inc"))
+    }
+
+    #[test]
+    fn selected_two_terminal_families_are_removed_without_false_removal() {
+        let netlist = Netlist::parse_with_options(
+            "two terminal removal\n\
+             .PREPROCESS REMOVEUNUSED C,D,I,L,R,V\n\
+             R_DROP same SAME 1\n\
+             R_KEEP same other 1\n\
+             C_DROP same same 1p\n\
+             C_KEEP same other 1p\n\
+             D_DROP same same DM\n\
+             D_KEEP same other DM\n\
+             I_DROP same same 1\n\
+             I_KEEP same other 1\n\
+             L_DROP same same 1u\n\
+             L_KEEP same other 1u\n\
+             V_DROP same same 1\n\
+             V_KEEP same other 1\n\
+             .MODEL DM D\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("all selected two-terminal families parse");
+
+        assert_eq!(
+            element_names(&netlist),
+            ["R_KEEP", "C_KEEP", "D_KEEP", "I_KEEP", "L_KEEP", "V_KEEP"]
+        );
+        let policy = netlist
+            .options
+            .remove_unused
+            .as_ref()
+            .expect("typed policy is retained");
+        for device_type in [
+            RemoveUnusedDeviceType::Capacitor,
+            RemoveUnusedDeviceType::Diode,
+            RemoveUnusedDeviceType::CurrentSource,
+            RemoveUnusedDeviceType::Inductor,
+            RemoveUnusedDeviceType::Resistor,
+            RemoveUnusedDeviceType::VoltageSource,
+        ] {
+            assert!(policy.contains(device_type));
+        }
+    }
+
+    #[test]
+    fn mosfet_and_bjt_compare_exactly_the_first_three_nodes() {
+        let netlist = Netlist::parse_with_options(
+            "three terminal removal\n\
+             .PREPROCESS REMOVEUNUSED M Q\n\
+             M_DROP n N n bulk NM\n\
+             M_KEEP12 n n other bulk NM\n\
+             M_KEEP13 n other n bulk NM\n\
+             Q_DROP q Q q QM\n\
+             Q_KEEP12 q q other QM\n\
+             Q_KEEP13 q other q QM\n\
+             .MODEL NM NMOS LEVEL=1\n\
+             .MODEL QM NPN\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("M/Q fixtures parse");
+
+        assert_eq!(
+            element_names(&netlist),
+            ["M_KEEP12", "M_KEEP13", "Q_KEEP12", "Q_KEEP13"]
+        );
+    }
+
+    #[test]
+    fn unselected_and_unsupported_designators_are_never_removed() {
+        let netlist = Netlist::parse_with_options(
+            "selective removal\n\
+             .PREPROCESS REMOVEUNUSED C\n\
+             R1 same same 1\n\
+             E1 same same same same 1\n\
+             C1 same other 1p\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("unselected devices remain valid");
+        assert_eq!(element_names(&netlist), ["R1", "E1", "C1"]);
+
+        let mut synthesized = Netlist::parse_with_options(
+            "typed helper\nR_AUTHORED same same 1\n.END\n",
+            xyce_options(),
+        )
+        .expect("typed helper fixture parses");
+        synthesized.elements[0].name = "E_SYNTHESIZED_RESISTOR".to_string();
+        let mut policy = crate::netlist::RemoveUnusedPolicy::default();
+        policy.device_types.insert(RemoveUnusedDeviceType::Resistor);
+        apply_remove_unused_policy_with_abort(
+            &mut synthesized.elements,
+            &mut synthesized.subcircuits,
+            &policy,
+            &crate::abort_signal::NoAbort,
+        )
+        .expect("typed helper filtering succeeds");
+        assert_eq!(element_names(&synthesized), ["E_SYNTHESIZED_RESISTOR"]);
+    }
+
+    #[test]
+    fn removal_applies_to_every_subcircuit_definition_depth() {
+        let mut netlist = Netlist::parse_with_options(
+            "nested removal\n\
+             .SUBCKT OUTER a b\n\
+             R_OUT_DROP a a 1\n\
+             R_OUT_KEEP a b 1\n\
+             .ENDS OUTER\n\
+             .SUBCKT INNER x y\n\
+             R_IN_DROP x x 1\n\
+             R_IN_KEEP x y 1\n\
+             .ENDS INNER\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("subcircuit fixtures parse");
+        let inner = netlist.subcircuits.remove(1);
+        netlist.subcircuits[0].nested_subcircuits.push(inner);
+        let mut policy = crate::netlist::RemoveUnusedPolicy::default();
+        policy.device_types.insert(RemoveUnusedDeviceType::Resistor);
+        apply_remove_unused_policy_with_abort(
+            &mut netlist.elements,
+            &mut netlist.subcircuits,
+            &policy,
+            &crate::abort_signal::NoAbort,
+        )
+        .expect("recursive filtering succeeds");
+        let outer = &netlist.subcircuits[0];
+        assert_eq!(
+            outer
+                .elements
+                .iter()
+                .map(|element| element.name.as_str())
+                .collect::<Vec<_>>(),
+            ["R_OUT_KEEP"]
+        );
+        let inner = &outer.nested_subcircuits[0];
+        assert_eq!(
+            inner
+                .elements
+                .iter()
+                .map(|element| element.name.as_str())
+                .collect::<Vec<_>>(),
+            ["R_IN_KEEP"]
+        );
+    }
+
+    #[test]
+    fn continuation_commas_repetition_and_after_end_are_supported() {
+        let netlist = Netlist::parse_with_options(
+            "continued after end\n\
+             R1 same same 1\n\
+             C1 same same 1p\n\
+             .END\n\
+             .PREPROCESS\n\
+             + REMOVEUNUSED\n\
+             + R, R, c\n",
+            xyce_options(),
+        )
+        .expect("continued control after END applies");
+        assert!(netlist.elements.is_empty());
+
+        Netlist::parse_with_options(
+            "recognized after end\nR1 1 0 1\n.END\n.PREPROCESS ADDRESISTORS ONETERMINAL 1e12\n",
+            xyce_options(),
+        )
+        .expect("recognized ADDRESISTORS remains non-fatal after END");
+    }
+
+    #[test]
+    fn replaceground_runs_before_redundancy_comparison_in_either_card_order() {
+        for controls in [
+            ".PREPROCESS REPLACEGROUND TRUE\n.PREPROCESS REMOVEUNUSED R",
+            ".PREPROCESS REMOVEUNUSED R\n.PREPROCESS REPLACEGROUND TRUE",
+        ] {
+            let source =
+                format!("ground ordering\n{controls}\nR_DROP GND 0 1\nR_KEEP GND other 1\n.END\n");
+            let netlist = Netlist::parse_with_options(&source, xyce_options())
+                .expect("both preprocessing card orders are valid");
+            assert_eq!(element_names(&netlist), ["R_KEEP"]);
+        }
+    }
+
+    #[test]
+    fn title_and_indented_controls_are_inert() {
+        for source in [
+            ".PREPROCESS REMOVEUNUSED R\nR1 same same 1\n.END\n",
+            "indented control\n  .PREPROCESS REMOVEUNUSED R\nR1 same same 1\n.END\n",
+            "indented invalid control\n\t.PREPROCESS REMOVEUNUSED BOGUS\nR1 same same 1\n.END\n",
+        ] {
+            let netlist = Netlist::parse_with_options(source, xyce_options())
+                .expect("inert title/indented control cannot select or diagnose policy");
+            assert_eq!(element_names(&netlist), ["R1"]);
+            assert!(netlist.options.remove_unused.is_none());
+        }
+    }
+
+    #[test]
+    fn included_controls_are_inert_but_root_policy_applies_to_included_devices() {
+        let (root, child) = temporary_include_deck("included-control");
+        std::fs::write(
+            &child,
+            ".PREPROCESS REMOVEUNUSED BOGUS\nR_CHILD same same 1\nC_CHILD same same 1p\n",
+        )
+        .expect("write included deck");
+        let source = "root policy\n.include child.inc\n.PREPROCESS REMOVEUNUSED C\n.END\n";
+        let netlist = Netlist::parse_with_path_and_options(source, &root, xyce_options())
+            .expect("child control is inert and root policy is global");
+        std::fs::remove_dir_all(root.parent().expect("root has parent"))
+            .expect("remove test directory");
+
+        assert_eq!(element_names(&netlist), ["R_CHILD"]);
+    }
+
+    #[test]
+    fn missing_unknown_and_duplicate_cards_are_fatal_at_physical_origin() {
+        for (source, line, expected) in [
+            (
+                "missing\n.PREPROCESS REMOVEUNUSED\n.END\n",
+                2,
+                "No remove parameters specified",
+            ),
+            (
+                "commas only\n.PREPROCESS REMOVEUNUSED , ,\n.END\n",
+                2,
+                "No remove parameters specified",
+            ),
+            (
+                "unknown\n.PREPROCESS REMOVEUNUSED RR\n.END\n",
+                2,
+                "Unknown argument type RR",
+            ),
+            (
+                "duplicate\n.PREPROCESS REMOVEUNUSED R\nR1 1 0 1\n.END\n.PREPROCESS REMOVEUNUSED C\n",
+                5,
+                "Multiple .PREPROCESS REMOVEUNUSED",
+            ),
+            (
+                "bare after end\nR1 1 0 1\n.END\n.PREPROCESS\n",
+                4,
+                ".PREPROCESS requires an operation",
+            ),
+            (
+                "unknown operation after end\nR1 1 0 1\n.END\n.PREPROCESS BOGUS X\n",
+                4,
+                "Unknown .PREPROCESS operation 'BOGUS'",
+            ),
+        ] {
+            let error = Netlist::parse_with_options(source, xyce_options())
+                .expect_err("invalid REMOVEUNUSED card must fail");
+            assert!(matches!(
+                error,
+                ParseError::Syntax { line: actual, message }
+                    if actual == line && message.contains(expected)
+            ));
+        }
+    }
+
+    #[test]
+    fn included_expansion_does_not_shift_invalid_root_card_origin() {
+        let (root, child) = temporary_include_deck("physical-origin");
+        std::fs::write(&child, "R1 1 0 1\nR2 2 0 2\nR3 3 0 3\n").expect("write included deck");
+        let source =
+            "root origin\n.include child.inc\nR4 4 0 4\n.PREPROCESS REMOVEUNUSED X\n.END\n";
+        let error = Netlist::parse_with_path_and_options(source, &root, xyce_options())
+            .expect_err("invalid root selector must fail");
+        std::fs::remove_dir_all(root.parent().expect("root has parent"))
+            .expect("remove test directory");
+        assert!(matches!(
+            error,
+            ParseError::Syntax { line: 4, message }
+                if message.contains("Unknown argument type X")
+        ));
+    }
+
+    #[test]
+    fn removal_is_transactional_when_cancellation_arrives() {
+        let mut netlist = Netlist::parse_with_options(
+            "abort removal\n.PREPROCESS REMOVEUNUSED R\nR1 same same 1\nR2 same same 2\n.END\n",
+            xyce_options(),
+        )
+        .expect("fixture parses");
+        // Reconstitute authored elements to exercise the private filtering
+        // transaction directly; ordinary parsing already applied the policy.
+        let authored = Netlist::parse_with_options(
+            "authored fixture\nR1 same same 1\nR2 same same 2\n.END\n",
+            xyce_options(),
+        )
+        .expect("authored fixture parses");
+        netlist.elements = authored.elements;
+        let before = element_names(&netlist)
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let policy = netlist
+            .options
+            .remove_unused
+            .clone()
+            .expect("policy exists");
+        let abort = crate::abort_signal::CountingAbort::new(1);
+        let result = apply_remove_unused_policy_with_abort(
+            &mut netlist.elements,
+            &mut netlist.subcircuits,
+            &policy,
+            &abort,
+        );
+        assert!(matches!(
+            result,
+            Err(crate::netlist::ParseWithAbortError::Aborted)
+        ));
+        assert_eq!(
+            element_names(&netlist)
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+            before
+        );
+    }
+
+    #[test]
+    fn selected_redundant_names_never_enter_duplicate_registry() {
+        for device_lines in [
+            "R1 same same 1\nR1 same live 2",
+            "R1 same live 2\nR1 same same 1",
+        ] {
+            let source = format!(
+                "top duplicate ordering\n.PREPROCESS REMOVEUNUSED R\n{device_lines}\n.END\n"
+            );
+            let netlist = Netlist::parse_with_options(&source, xyce_options())
+                .expect("the selected redundant duplicate is never registered");
+            assert_eq!(element_names(&netlist), ["R1"]);
+            assert_eq!(netlist.elements[0].nodes, ["SAME", "LIVE"]);
+        }
+
+        for device_lines in ["R1 a a 1\nR1 a b 2", "R1 a b 2\nR1 a a 1"] {
+            let source = format!(
+                "subcircuit duplicate ordering\n.PREPROCESS REMOVEUNUSED R\n.SUBCKT CELL a b\n{device_lines}\n.ENDS\n.END\n"
+            );
+            let netlist = Netlist::parse_with_options(&source, xyce_options())
+                .expect("subcircuit redundant duplicate is never registered");
+            assert_eq!(netlist.subcircuits[0].elements.len(), 1);
+            assert_eq!(netlist.subcircuits[0].elements[0].name, "R1");
+            assert_eq!(netlist.subcircuits[0].elements[0].nodes, ["A", "B"]);
+        }
+    }
+
+    #[test]
+    fn selected_redundant_card_is_skipped_before_tail_parsing_or_synthesis() {
+        let netlist = Netlist::parse_with_options(
+            "lexical rejection\n\
+             .PREPROCESS REMOVEUNUSED R\n\
+             R_MALFORMED same same ) this tail is never parsed\n\
+             R_PARASITIC same same 1 RPAR=2 CPAR=3 RSER=4\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("selected redundant cards are rejected before parsing their tails");
+        assert!(netlist.elements.is_empty());
+
+        let error = Netlist::parse_with_options(
+            "unselected malformed\n.PREPROCESS REMOVEUNUSED C\nR1 same same )\n.END\n",
+            xyce_options(),
+        )
+        .expect_err("an unselected malformed resistor still reaches its parser");
+        assert!(matches!(error, ParseError::Syntax { .. }));
+    }
+
+    #[test]
+    fn generated_passive_helpers_are_never_independently_rejected() {
+        let mut netlist = Netlist::parse_with_options(
+            "generated parasitic\nR1 a b 1 RPAR=2\n.END\n",
+            xyce_options(),
+        )
+        .expect("passive parasitic fixture parses");
+        let helper = netlist
+            .elements
+            .iter_mut()
+            .find(|element| element.name.ends_with("#PAR"))
+            .expect("RPAR helper was synthesized");
+        helper.nodes[1] = helper.nodes[0].clone();
+
+        let mut policy = crate::netlist::RemoveUnusedPolicy::default();
+        policy.device_types.insert(RemoveUnusedDeviceType::Resistor);
+        let filtered = super::filter_removeunused_elements_with_abort(
+            &netlist.elements,
+            &policy,
+            &crate::abort_signal::NoAbort,
+        )
+        .expect("post-flatten defense filters transactionally");
+        assert_eq!(filtered.len(), 2);
+        assert!(
+            filtered
+                .iter()
+                .any(|element| element.name.ends_with("#PAR"))
+        );
+    }
+
+    #[test]
+    fn unselected_redundant_name_still_participates_in_duplicate_registry() {
+        let error = Netlist::parse_with_options(
+            "unselected duplicate\n.PREPROCESS REMOVEUNUSED C\nR1 same same 1\nR1 same live 2\n.END\n",
+            xyce_options(),
+        )
+        .expect_err("an unselected resistor remains a real duplicate");
+        assert!(matches!(error, ParseError::DuplicateName { .. }));
+    }
+
+    #[test]
+    fn post_flatten_filter_rechecks_resolved_subcircuit_actual_nodes() {
+        let netlist = Netlist::parse_with_options(
+            "resolved actual equality\n\
+             .PREPROCESS REMOVEUNUSED R\n\
+             .SUBCKT CELL a b\n\
+             R_BODY a b 1\n\
+             .ENDS CELL\n\
+             X1 n n CELL\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("subcircuit fixture parses");
+        assert_eq!(netlist.subcircuits[0].elements.len(), 1);
+
+        let flattened = crate::netlist::flatten_netlist_with_models(&netlist)
+            .expect("subcircuit fixture flattens");
+        assert!(flattened.elements.is_empty());
+
+        let circuit = crate::Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit build omits the newly redundant flattened resistor");
+        assert!(circuit.get_node_by_name("n").is_none());
+    }
+
+    #[test]
+    fn post_flatten_filter_removes_resolved_passive_and_its_synthesized_batch() {
+        let netlist = Netlist::parse_with_options(
+            "resolved parasitic batch equality\n\
+             .PREPROCESS REMOVEUNUSED R\n\
+             .SUBCKT CELL a b\n\
+             R_BODY a b 1 RSER=2 RPAR=3 CPAR=4\n\
+             .ENDS CELL\n\
+             X1 n n CELL\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("passive parasitic subcircuit fixture parses");
+        assert_eq!(netlist.subcircuits[0].elements.len(), 4);
+
+        let flattened = crate::netlist::flatten_netlist_with_models(&netlist)
+            .expect("passive parasitic subcircuit fixture flattens");
+        assert!(
+            flattened.elements.is_empty(),
+            "the redundant authored passive and every synthesized helper form one batch"
+        );
+
+        let circuit = crate::Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit build omits the rejected passive batch");
+        assert!(circuit.get_node_by_name("n").is_none());
+    }
+
+    #[test]
+    fn rejected_owner_does_not_capture_an_authored_helper_shaped_name() {
+        let netlist = Netlist::parse_with_options(
+            "authored helper-name collision\n\
+             .PREPROCESS REMOVEUNUSED R\n\
+             .SUBCKT CELL a b c\n\
+             R1 a b 1 RSER=2\n\
+             RR1#PAR a c 7\n\
+             .ENDS CELL\n\
+             X1 n n live CELL\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("authored helper-shaped element name is legal");
+
+        let flattened = crate::netlist::flatten_netlist_with_models(&netlist)
+            .expect("helper-name collision fixture flattens");
+        assert_eq!(flattened.elements.len(), 1);
+        assert_eq!(flattened.elements[0].name, "X1.RR1#PAR");
+        assert_eq!(flattened.elements[0].nodes, ["N", "LIVE"]);
+        assert!(matches!(
+            flattened.elements[0].provenance,
+            crate::netlist::ElementProvenance::Authored
+        ));
+    }
+
+    #[test]
+    fn authored_helper_shaped_name_is_normally_removed_after_binding() {
+        let netlist = Netlist::parse_with_options(
+            "authored helper-name redundancy\n\
+             .PREPROCESS REMOVEUNUSED R\n\
+             .SUBCKT CELL a b\n\
+             RR1#PAR a b 7\n\
+             .ENDS CELL\n\
+             X1 n n CELL\n\
+             .END\n",
+            xyce_options(),
+        )
+        .expect("authored helper-shaped redundant fixture parses");
+
+        let flattened = crate::netlist::flatten_netlist_with_models(&netlist)
+            .expect("authored helper-shaped redundant fixture flattens");
+        assert!(flattened.elements.is_empty());
+    }
+}
+
+#[derive(Debug, Default)]
+struct RootPreprocessPolicy {
+    replace_ground: Option<bool>,
+    replace_ground_extra_lines: Vec<usize>,
+    remove_unused: Option<RemoveUnusedPolicy>,
+}
+
+fn prescan_root_preprocess(
     lines: &[&str],
     source_schedule: Option<&SourceEventSchedule>,
     abort: &dyn AbortSignal,
-) -> Result<(Option<bool>, Vec<usize>), ParseWithAbortError> {
+) -> Result<RootPreprocessPolicy, ParseWithAbortError> {
     let root_path = source_schedule
         .and_then(|schedule| schedule.origin(0))
         .and_then(|origin| origin.path.as_deref());
-    let mut selected = None;
-    let mut extra_lines = Vec::new();
-    let mut first_line = 0usize;
+    let mut policy = RootPreprocessPolicy::default();
+    let mut first_replace_ground_line = 0usize;
+    let mut first_remove_unused_line = 0usize;
     let mut logical_line = String::new();
     let mut logical_origin_line = 0usize;
     for (index, line) in lines.iter().enumerate() {
@@ -1067,12 +1664,12 @@ fn prescan_root_replaceground(
                 continue;
             };
             if origin.path.as_deref() != root_path {
-                scan_root_replaceground_logical_line(
+                scan_root_preprocess_logical_line(
                     &logical_line,
                     logical_origin_line,
-                    &mut selected,
-                    &mut first_line,
-                    &mut extra_lines,
+                    &mut policy,
+                    &mut first_replace_ground_line,
+                    &mut first_remove_unused_line,
                     abort,
                 )?;
                 logical_line.clear();
@@ -1081,60 +1678,112 @@ fn prescan_root_replaceground(
             }
             physical_line = origin.line;
         }
-        let stripped = strip_inline_semicolon_comment(line).trim();
-        if stripped.is_empty() || stripped.starts_with('*') {
+        let without_comment = strip_inline_semicolon_comment(line);
+        let first_nonblank = without_comment.trim_start_matches([' ', '\t']);
+        if first_nonblank.is_empty() || first_nonblank.starts_with('*') {
             continue;
         }
-        if let Some(continuation) = stripped.strip_prefix('+') {
+        if let Some(continuation) = first_nonblank.strip_prefix('+') {
             if !logical_line.is_empty() {
                 logical_line.push(' ');
+                logical_line.push_str(continuation.trim());
             }
-            logical_line.push_str(continuation);
             continue;
         }
-        scan_root_replaceground_logical_line(
+
+        // During Xyce's root preprocessing scan, a new physical card that
+        // starts with horizontal whitespace is a comment. Whitespace is only
+        // significant when the first nonblank byte is the continuation '+'
+        // handled above.
+        if without_comment.starts_with([' ', '\t']) {
+            continue;
+        }
+
+        scan_root_preprocess_logical_line(
             &logical_line,
             logical_origin_line,
-            &mut selected,
-            &mut first_line,
-            &mut extra_lines,
+            &mut policy,
+            &mut first_replace_ground_line,
+            &mut first_remove_unused_line,
             abort,
         )?;
         logical_line.clear();
-        logical_line.push_str(stripped);
+        logical_line.push_str(without_comment.trim_end());
         logical_origin_line = physical_line;
     }
-    scan_root_replaceground_logical_line(
+    scan_root_preprocess_logical_line(
         &logical_line,
         logical_origin_line,
-        &mut selected,
-        &mut first_line,
-        &mut extra_lines,
+        &mut policy,
+        &mut first_replace_ground_line,
+        &mut first_remove_unused_line,
         abort,
     )?;
     ensure_parse_not_aborted(abort)?;
-    Ok((selected, extra_lines))
+    Ok(policy)
 }
 
-fn scan_root_replaceground_logical_line(
+fn scan_root_preprocess_logical_line(
     logical_line: &str,
     physical_line: usize,
-    selected: &mut Option<bool>,
-    first_line: &mut usize,
-    extra_lines: &mut Vec<usize>,
+    policy: &mut RootPreprocessPolicy,
+    first_replace_ground_line: &mut usize,
+    first_remove_unused_line: &mut usize,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     if logical_line.is_empty() {
         return Ok(());
     }
     let fields = xyce_logical_fields_with_abort(logical_line, abort)?;
-    if fields.len() < 2
-        || !fields[0].eq_ignore_ascii_case(".PREPROCESS")
-        || !fields[1].eq_ignore_ascii_case("REPLACEGROUND")
+    if !fields
+        .first()
+        .is_some_and(|field| field.eq_ignore_ascii_case(".PREPROCESS"))
     {
         return Ok(());
     }
-    if selected.is_some() {
+    let Some(operation) = fields.get(1) else {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: ".PREPROCESS requires an operation".to_string(),
+        }
+        .into());
+    };
+    if operation.eq_ignore_ascii_case("REPLACEGROUND") {
+        return scan_root_replaceground_fields(
+            &fields,
+            physical_line,
+            policy,
+            first_replace_ground_line,
+        );
+    }
+    if operation.eq_ignore_ascii_case("REMOVEUNUSED") {
+        return scan_root_removeunused_fields(
+            &fields,
+            physical_line,
+            policy,
+            first_remove_unused_line,
+        );
+    }
+    if operation.eq_ignore_ascii_case("ADDRESISTORS") {
+        // Recognized but execution remains owned by the existing unsupported
+        // command path. The physical prescan must still distinguish it from
+        // an unknown operation, including after `.END`.
+        return Ok(());
+    }
+    Err(ParseError::Syntax {
+        line: physical_line,
+        message: format!("Unknown .PREPROCESS operation '{operation}'"),
+    }
+    .into())
+}
+
+fn scan_root_replaceground_fields(
+    fields: &[String],
+    physical_line: usize,
+    policy: &mut RootPreprocessPolicy,
+    first_line: &mut usize,
+) -> Result<(), ParseWithAbortError> {
+    if policy.replace_ground.is_some() {
         return Err(ParseError::Syntax {
             line: physical_line,
             message: format!(
@@ -1150,7 +1799,7 @@ fn scan_root_replaceground_logical_line(
         }
         .into());
     };
-    *selected = Some(if value.eq_ignore_ascii_case("TRUE") {
+    policy.replace_ground = Some(if value.eq_ignore_ascii_case("TRUE") {
         true
     } else if value.eq_ignore_ascii_case("FALSE") {
         false
@@ -1162,8 +1811,54 @@ fn scan_root_replaceground_logical_line(
         .into());
     });
     if fields.len() > 3 {
-        extra_lines.push(physical_line);
+        policy.replace_ground_extra_lines.push(physical_line);
     }
+    *first_line = physical_line;
+    Ok(())
+}
+
+fn scan_root_removeunused_fields(
+    fields: &[String],
+    physical_line: usize,
+    policy: &mut RootPreprocessPolicy,
+    first_line: &mut usize,
+) -> Result<(), ParseWithAbortError> {
+    if policy.remove_unused.is_some() {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: format!(
+                "Multiple .PREPROCESS REMOVEUNUSED statements (first at line {first_line})"
+            ),
+        }
+        .into());
+    }
+
+    let mut selected = RemoveUnusedPolicy::default();
+    for field in fields.iter().skip(2) {
+        if field == "," {
+            continue;
+        }
+        let Some(device_type) = RemoveUnusedDeviceType::from_xyce_selector(field) else {
+            return Err(ParseError::Syntax {
+                line: physical_line,
+                message: format!(
+                    "Unknown argument type {} in .PREPROCESS REMOVEUNUSED statement",
+                    field.to_ascii_uppercase()
+                ),
+            }
+            .into());
+        };
+        selected.device_types.insert(device_type);
+    }
+    if selected.is_empty() {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: "No remove parameters specified in .PREPROCESS REMOVEUNUSED statement"
+                .to_string(),
+        }
+        .into());
+    }
+    policy.remove_unused = Some(selected);
     *first_line = physical_line;
     Ok(())
 }
@@ -1256,6 +1951,113 @@ fn xyce_logical_fields_with_abort(
     Ok(fields)
 }
 
+fn apply_remove_unused_policy_with_abort(
+    elements: &mut Vec<Element>,
+    subcircuits: &mut Vec<SubcircuitDef>,
+    policy: &RemoveUnusedPolicy,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let staged_elements = filter_removeunused_elements_with_abort(elements, policy, abort)?;
+    let staged_subcircuits = stage_removeunused_subcircuits_with_abort(subcircuits, policy, abort)?;
+    ensure_parse_not_aborted(abort)?;
+    *elements = staged_elements;
+    *subcircuits = staged_subcircuits;
+    Ok(())
+}
+
+fn stage_removeunused_subcircuits_with_abort(
+    subcircuits: &[SubcircuitDef],
+    policy: &RemoveUnusedPolicy,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<SubcircuitDef>, ParseWithAbortError> {
+    let mut staged = Vec::with_capacity(subcircuits.len());
+    for (index, subcircuit) in subcircuits.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        let elements =
+            filter_removeunused_elements_with_abort(&subcircuit.elements, policy, abort)?;
+        let nested_subcircuits = stage_removeunused_subcircuits_with_abort(
+            &subcircuit.nested_subcircuits,
+            policy,
+            abort,
+        )?;
+        staged.push(SubcircuitDef {
+            name: subcircuit.name.clone(),
+            ports: clone_slice_with_parse_abort(&subcircuit.ports, abort)?,
+            elements,
+            initial_conditions: clone_slice_with_parse_abort(
+                &subcircuit.initial_conditions,
+                abort,
+            )?,
+            node_sets: clone_slice_with_parse_abort(&subcircuit.node_sets, abort)?,
+            params: clone_slice_with_parse_abort(&subcircuit.params, abort)?,
+            expr_params: clone_slice_with_parse_abort(&subcircuit.expr_params, abort)?,
+            string_params: clone_slice_with_parse_abort(&subcircuit.string_params, abort)?,
+            body_params: clone_slice_with_parse_abort(&subcircuit.body_params, abort)?,
+            body_expr_params: clone_slice_with_parse_abort(&subcircuit.body_expr_params, abort)?,
+            body_string_params: clone_slice_with_parse_abort(
+                &subcircuit.body_string_params,
+                abort,
+            )?,
+            body_functions: clone_slice_with_parse_abort(&subcircuit.body_functions, abort)?,
+            local_options: clone_map_with_parse_abort(&subcircuit.local_options, abort)?,
+            library_ref: subcircuit.library_ref.clone(),
+            nested_subcircuits,
+        });
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(staged)
+}
+
+fn clone_slice_with_parse_abort<T: Clone>(
+    values: &[T],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<T>, ParseWithAbortError> {
+    let mut cloned = Vec::with_capacity(values.len());
+    for (index, value) in values.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        cloned.push(value.clone());
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(cloned)
+}
+
+fn clone_map_with_parse_abort<K, V>(
+    values: &HashMap<K, V>,
+    abort: &dyn AbortSignal,
+) -> Result<HashMap<K, V>, ParseWithAbortError>
+where
+    K: Clone + Eq + std::hash::Hash,
+    V: Clone,
+{
+    let mut cloned = HashMap::with_capacity(values.len());
+    for (index, (key, value)) in values.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        cloned.insert(key.clone(), value.clone());
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(cloned)
+}
+
+fn logical_line_is_selected_redundant_device(
+    logical_line: &str,
+    policy: &RemoveUnusedPolicy,
+    abort: &dyn AbortSignal,
+) -> Result<bool, ParseWithAbortError> {
+    let fields = xyce_logical_fields_with_abort(logical_line, abort)?;
+    let Some(designator) = fields.first().and_then(|name| name.chars().next()) else {
+        return Ok(false);
+    };
+    let Some((device_type, compared_nodes)) = removeunused_designator_type(designator) else {
+        return Ok(false);
+    };
+    if !policy.contains(device_type) || fields.len() <= compared_nodes {
+        return Ok(false);
+    }
+    Ok(fields[1..=compared_nodes]
+        .windows(2)
+        .all(|pair| pair[0].eq_ignore_ascii_case(&pair[1])))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_source_events_at(
     source_schedule: Option<&mut SourceEventSchedule>,
@@ -1266,6 +2068,7 @@ fn process_source_events_at(
     continuation_line: &mut Option<usize>,
     continuation_origin: &mut Option<NetlistSourceLocation>,
     state: &mut ParseState,
+    abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     let Some(source_schedule) = source_schedule else {
         return Ok(());
@@ -1282,6 +2085,7 @@ fn process_source_events_at(
                     continuation_line,
                     continuation_origin,
                     state,
+                    abort,
                 )?;
                 apply_deferred_source_boundaries(
                     deferred_source_boundaries,
@@ -1375,6 +2179,7 @@ fn flush_pending_logical_line(
     continuation_line: &mut Option<usize>,
     continuation_origin: &mut Option<NetlistSourceLocation>,
     state: &mut ParseState,
+    abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     if continuation.is_empty() {
         return Ok(());
@@ -1385,6 +2190,12 @@ fn flush_pending_logical_line(
     let logical_origin = continuation_origin
         .take()
         .unwrap_or_else(|| NetlistSourceLocation::in_memory(logical_line));
+    if let Some(policy) = state.options.remove_unused.as_ref()
+        && logical_line_is_selected_redundant_device(continuation, policy, abort)?
+    {
+        continuation.clear();
+        return Ok(());
+    }
     process_line_gated(continuation, logical_line, &logical_origin, state)
         .map_err(ParseWithAbortError::from)?;
     continuation.clear();

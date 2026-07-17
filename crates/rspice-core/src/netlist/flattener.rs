@@ -21,6 +21,7 @@ use super::expr::{
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::parser::parse_source_spec_text;
+use super::remove_unused::filter_elements_with_abort as filter_removeunused_elements_with_abort;
 use super::{
     DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
     DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
@@ -313,6 +314,10 @@ impl<'a> Flattener<'a> {
                 &mut flat_elements,
                 abort,
             )?;
+        }
+
+        if let Some(policy) = netlist.options.remove_unused.as_ref() {
+            flat_elements = filter_removeunused_elements_with_abort(&flat_elements, policy, abort)?;
         }
 
         apply_device_initial_conditions(
@@ -964,6 +969,15 @@ impl<'a> Flattener<'a> {
             name: new_name,
             kind: new_kind,
             nodes: new_nodes,
+            provenance: match &element.provenance {
+                super::ElementProvenance::Authored => super::ElementProvenance::Authored,
+                super::ElementProvenance::GeneratedPassiveHelper { owner, role } => {
+                    super::ElementProvenance::GeneratedPassiveHelper {
+                        owner: Self::remap_local_element_reference(owner, prefix),
+                        role: *role,
+                    }
+                }
+            },
         }
     }
 
@@ -1560,6 +1574,7 @@ impl<'a> Flattener<'a> {
             name: element.name.clone(),
             kind: new_kind,
             nodes: element.nodes.clone(),
+            provenance: element.provenance.clone(),
         })
     }
 

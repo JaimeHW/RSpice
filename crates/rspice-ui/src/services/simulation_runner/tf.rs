@@ -526,6 +526,7 @@ fn inject_tf_output_test_source(
             phase: 0.0,
         }),
         nodes: vec![output_node.to_string(), output_ref.to_string()],
+        provenance: rspice_core::netlist::ElementProvenance::Authored,
     });
     Ok(())
 }

@@ -495,6 +495,7 @@ pub(super) fn synthesize_laplace(
             name: name.to_string(),
             kind: output_kind(format!("{}*({})", fmt_value(d), input_expr)),
             nodes: vec![node_pos.to_string(), node_neg.to_string()],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
         return Ok(elements);
     }
@@ -533,6 +534,7 @@ pub(super) fn synthesize_laplace(
                 deferred_params: Vec::new(),
             },
             nodes: vec![state_node(i), "0".to_string()],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
     }
 
@@ -546,6 +548,7 @@ pub(super) fn synthesize_laplace(
                 tc2: 0.0,
             },
             nodes: vec!["0".to_string(), state_node(i)],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
     }
 
@@ -563,6 +566,7 @@ pub(super) fn synthesize_laplace(
             tc2: 0.0,
         },
         nodes: vec!["0".to_string(), state_node(n)],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     // Output: y = Σ b̂_k z_{k+1} + d·u.
@@ -580,6 +584,7 @@ pub(super) fn synthesize_laplace(
         name: name.to_string(),
         kind: output_kind(output_terms.join(" + ")),
         nodes: vec![node_pos.to_string(), node_neg.to_string()],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(elements)

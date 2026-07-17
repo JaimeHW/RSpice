@@ -143,6 +143,7 @@ impl Engine {
                 // Current flows n+ -> n- inside the source, i.e. 1 A is
                 // injected into the probe's positive node.
                 nodes: vec![probe_neg.clone(), probe_pos.clone()],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
             let zout_solution = self.single_zero_hz_solve_with_abort(&zout_deck, abort)?;
             voltage_difference(&zout_solution, &probe_pos, Some(&probe_neg))?

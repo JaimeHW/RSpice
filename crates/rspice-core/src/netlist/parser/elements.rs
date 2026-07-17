@@ -1,7 +1,7 @@
 //! Device and subcircuit element parsers.
 
 use super::*;
-use crate::netlist::XspicePort;
+use crate::netlist::{ElementProvenance, GeneratedPassiveHelperRole, XspicePort};
 
 pub(super) fn parse_resistor(
     stream: &mut TokenStream,
@@ -258,6 +258,7 @@ pub(super) fn parse_resistor(
             deferred_params,
         },
         nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -331,6 +332,10 @@ fn expand_passive_parasitics(
                 deferred_params: Vec::new(),
             },
             nodes: vec![outer_pos, internal],
+            provenance: ElementProvenance::GeneratedPassiveHelper {
+                owner: name.to_string(),
+                role: GeneratedPassiveHelperRole::SeriesResistance,
+            },
         });
     }
 
@@ -347,6 +352,10 @@ fn expand_passive_parasitics(
                 deferred_params: Vec::new(),
             },
             nodes: vec![nodes[0].clone(), nodes[1].clone()],
+            provenance: ElementProvenance::GeneratedPassiveHelper {
+                owner: name.to_string(),
+                role: GeneratedPassiveHelperRole::ParallelResistance,
+            },
         });
     }
 
@@ -364,6 +373,10 @@ fn expand_passive_parasitics(
                 deferred_params: Vec::new(),
             },
             nodes: vec![nodes[0].clone(), nodes[1].clone()],
+            provenance: ElementProvenance::GeneratedPassiveHelper {
+                owner: name.to_string(),
+                role: GeneratedPassiveHelperRole::ParallelCapacitance,
+            },
         });
     }
 }
@@ -629,6 +642,7 @@ pub(super) fn parse_capacitor(
             deferred_params: tail.deferred_params,
         },
         nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -680,6 +694,7 @@ pub(super) fn parse_inductor(
             deferred_params: tail.deferred_params,
         },
         nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -706,6 +721,7 @@ pub(super) fn parse_voltage_source(
                 ElementKind::VoltageSourceDeferred(raw_spec)
             },
             nodes: vec![node_pos, node_neg],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
         return Ok(());
     }
@@ -726,6 +742,7 @@ pub(super) fn parse_voltage_source(
                 name,
                 kind: ElementKind::VoltageSourceDeferred(raw_spec),
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
             return Ok(());
         }
@@ -736,6 +753,7 @@ pub(super) fn parse_voltage_source(
         name,
         kind: ElementKind::VoltageSource(source_spec),
         nodes: vec![node_pos, node_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -762,6 +780,7 @@ pub(super) fn parse_current_source(
                 ElementKind::CurrentSourceDeferred(raw_spec)
             },
             nodes: vec![node_pos, node_neg],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
         return Ok(());
     }
@@ -782,6 +801,7 @@ pub(super) fn parse_current_source(
                 name,
                 kind: ElementKind::CurrentSourceDeferred(raw_spec),
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
             return Ok(());
         }
@@ -792,6 +812,7 @@ pub(super) fn parse_current_source(
         name,
         kind: ElementKind::CurrentSource(source_spec),
         nodes: vec![node_pos, node_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -3109,6 +3130,7 @@ fn push_pspice_u_xspice_element_with_params(
             real_vector_expr_params: Vec::new(),
         },
         nodes: Vec::new(),
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 }
 
@@ -3493,6 +3515,7 @@ pub(super) fn parse_diode(
             deferred_params,
         },
         nodes: vec![anode, cathode],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -3712,6 +3735,7 @@ pub(super) fn parse_bjt(
             deferred_params,
         },
         nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -3872,6 +3896,7 @@ pub(super) fn parse_mosfet(
             deferred_params,
         },
         nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4008,6 +4033,7 @@ pub(super) fn parse_jfet(
             deferred_params,
         },
         nodes: vec![drain, gate, source],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4038,6 +4064,7 @@ pub(super) fn parse_mesfet(
             deferred_params,
         },
         nodes: vec![drain, gate, source],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4163,6 +4190,7 @@ pub(super) fn parse_lossless_tline(
             model: parsed.model,
         },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4207,6 +4235,7 @@ pub(super) fn parse_lossy_tline(
             model: parsed.model,
         },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4281,6 +4310,7 @@ pub(super) fn parse_coupled_tlines(
             model,
         },
         nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4369,6 +4399,7 @@ fn parse_xyce_port(
                 deferred_params: Vec::new(),
             },
             nodes: vec![node_pos, node_neg],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
         return Ok(());
     }
@@ -4382,6 +4413,7 @@ fn parse_xyce_port(
         name,
         kind: ElementKind::VoltageSource(source_spec),
         nodes: vec![internal_node.clone(), node_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
     elements.push(Element {
         name: resistor_name,
@@ -4393,6 +4425,7 @@ fn parse_xyce_port(
             deferred_params: Vec::new(),
         },
         nodes: vec![node_pos, internal_node],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4470,6 +4503,7 @@ pub(super) fn parse_subcircuit_instance(
             params,
         },
         nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())
@@ -4880,6 +4914,7 @@ fn parse_voltage_controlled_source(
             name,
             kind: lower_behavioral(expression),
             nodes: vec![node_pos, node_neg],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
         return Ok(());
     }
@@ -4906,6 +4941,7 @@ fn parse_voltage_controlled_source(
                 name,
                 kind: lower_behavioral(poly_expression(&vars, &coeffs)),
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
         }
         Some(ControlledSourceForm::Value) => {
@@ -4914,6 +4950,7 @@ fn parse_voltage_controlled_source(
                 name,
                 kind: lower_behavioral(expression),
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
         }
         Some(ControlledSourceForm::Table) => {
@@ -4932,6 +4969,7 @@ fn parse_voltage_controlled_source(
                 name,
                 kind: lower_behavioral(table_transfer_expression(&input_expr, &pairs)),
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
         }
         Some(ControlledSourceForm::Laplace) => {
@@ -4993,6 +5031,7 @@ fn parse_voltage_controlled_source(
                 name,
                 kind,
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
         }
     }
@@ -5049,6 +5088,7 @@ fn try_parse_multi_input_vcvs(
             ],
         },
         nodes: Vec::new(),
+        provenance: crate::netlist::ElementProvenance::Authored,
     }))
 }
 
@@ -5172,6 +5212,7 @@ fn parse_current_controlled_source(
                 name,
                 kind,
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
         }
         Some(other) => {
@@ -5211,6 +5252,7 @@ fn parse_current_controlled_source(
                 name,
                 kind,
                 nodes: vec![node_pos, node_neg],
+                provenance: crate::netlist::ElementProvenance::Authored,
             });
         }
     }
@@ -5401,6 +5443,7 @@ pub(super) fn parse_behavioral(
         name,
         kind,
         nodes: vec![node_pos, node_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())

@@ -283,6 +283,7 @@ mod tests {
                 deferred_params: Vec::new(),
             },
             nodes: vec!["1".to_string(), "0".to_string()],
+            provenance: crate::netlist::ElementProvenance::Authored,
         }
     }
 

@@ -228,6 +228,7 @@ pub fn parse_xspice(
             real_vector_expr_params,
         },
         nodes: Vec::new(), // XSPICE uses ports instead of simple nodes
+        provenance: crate::netlist::ElementProvenance::Authored,
     });
 
     Ok(())

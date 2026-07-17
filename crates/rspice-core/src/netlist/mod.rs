@@ -24,6 +24,7 @@ mod mutual_inductor;
 mod output_symbols;
 pub mod param_scope;
 mod parser;
+mod remove_unused;
 pub mod source_map;
 pub mod spef;
 mod startup;
@@ -5351,6 +5352,7 @@ mod tests {
                     real_vector_expr_params: Vec::new(),
                 },
                 nodes: Vec::new(),
+                provenance: crate::netlist::ElementProvenance::Authored,
             }],
             initial_conditions: Vec::new(),
             node_sets: Vec::new(),
@@ -5372,6 +5374,7 @@ mod tests {
                 params: vec![("g".to_string(), ParametricValue::Resolved(5.0))],
             },
             nodes: vec!["a".to_string(), "b".to_string()],
+            provenance: crate::netlist::ElementProvenance::Authored,
         });
 
         let flattened = flatten_netlist_with_models(&netlist)

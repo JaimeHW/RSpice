@@ -280,6 +280,7 @@ fn inject_sparameter_port_sources(
                 ac_magnitude: magnitude,
                 ac_phase: 0.0,
             }),
+            provenance: rspice_core::netlist::ElementProvenance::Authored,
         });
         port_sources.push(name);
     }
