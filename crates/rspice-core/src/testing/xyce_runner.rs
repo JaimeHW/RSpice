@@ -27,7 +27,8 @@ use crate::netlist::{
     OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy, ParametricValue,
     ParseError, StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind,
     StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
-    TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, validate_output_symbols,
+    TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist,
+    validate_output_symbols,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -141,6 +142,32 @@ const XYCE_BUG667_SCOPED_GLOBAL_WARNING_BLAKE3: &str =
     "be5e0b168367716ca744c38417952c0b680ae063d309859100202d2b37242f19";
 const XYCE_IC_NODESET_CONFLICT_BLAKE3: &str =
     "1e7597f00478759e105259a832d7aa298c3ffcb3c4d3a8efda4c236504ebed6b";
+
+const XYCE_XDM_REPLACEGROUND_FAMILY_PREFIX: &str = "netlists/xdm/hspice/other_parsing/";
+const XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_COUNT: usize = 27;
+const XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_BLAKE3: &str =
+    "e5ace1dae889fc1b11fa88db05c96d21a62d1ae688e9cde5a97373205cc049e6";
+const XYCE_XDM_REPLACEGROUND_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
+    "490b8ebcd683dbdcfb6db7ab97f9b3c26e7e8b6356e1ae0f06d1a80fd89388aa";
+const XYCE_XDM_REPLACEGROUND_PHYSICAL_COUNT: usize = 13;
+const XYCE_XDM_REPLACEGROUND_PHYSICAL_BLAKE3: &str =
+    "5157bce8c21053398ed7c64eb02dd2ce217587a254b6e964c843b100ed7c48ab";
+const XYCE_XDM_REPLACEGROUND_CANDIDATE_COUNT: usize = 4;
+const XYCE_XDM_REPLACEGROUND_CANDIDATE_BLAKE3: &str =
+    "7b9fdd009d18bdc864e24e8c14aa1d7f56ab10b13f32209fb3e85963c798a406";
+const XYCE_XDM_REPLACEGROUND_MANIFEST_COUNT: usize = 13;
+const XYCE_XDM_REPLACEGROUND_MANIFEST_BLAKE3: &str =
+    "d9ef24c15d50f61735c7b136c407c5b0ba026ba3831537da5f088b178f726c75";
+
+// The four removed XDM wrappers declare abs=1e-5, rel=1e-3, and zero=1e-10,
+// but `verifyXDMtranslation` never forwards those variables for HSPICE.  It
+// invokes Release 7.10 `xyce_verify` without tolerance flags, so the effective
+// comparison is the verifier default below.  Keep the declared values visible
+// to prevent a future adapter from accidentally claiming that they governed
+// the authoritative run.
+const XYCE_XDM_REPLACEGROUND_DECLARED_ABSOLUTE_TOLERANCE: Value = 1.0e-5;
+const XYCE_XDM_REPLACEGROUND_DECLARED_RELATIVE_TOLERANCE: Value = 1.0e-3;
+const XYCE_XDM_REPLACEGROUND_DECLARED_ZERO_TOLERANCE: Value = 1.0e-10;
 
 const XYCE_STARTUP_MESSAGE_INPUT_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
     "c1c3aab2bbf03214039de43671c9c36fe3b4e69a2baf92fd60124de6da76e950";
@@ -2444,6 +2471,129 @@ struct XyceStaticDcPlan {
     dc_data: Option<XyceDcDataSweep>,
     steps: Vec<StepCommand>,
     diagnostics: Vec<crate::netlist::ParseDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceXdmReplaceGroundKind {
+    GndExclamation,
+    Gnd,
+    Ground,
+    SubcircuitInstantiation,
+}
+
+impl XyceXdmReplaceGroundKind {
+    const ALL: [Self; 4] = [
+        Self::GndExclamation,
+        Self::Gnd,
+        Self::Ground,
+        Self::SubcircuitInstantiation,
+    ];
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL.into_iter().find(|kind| kind.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::GndExclamation => {
+                "netlists/xdm/hspice/other_parsing/gnd_exclamation_point_node_symbol.cir"
+            }
+            Self::Gnd => "netlists/xdm/hspice/other_parsing/gnd_node_symbol.cir",
+            Self::Ground => "netlists/xdm/hspice/other_parsing/ground_node_symbol.cir",
+            Self::SubcircuitInstantiation => {
+                "netlists/xdm/hspice/other_parsing/ground_node_synonym_in_subckt_instantiation.cir"
+            }
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::GndExclamation => (
+                455,
+                "fb7b552397cff95363430acd8ab5bf0792005cfff40e515ce20b80bb52aab0c2",
+            ),
+            Self::Gnd => (
+                455,
+                "d7fc61d258f0ad0f25535ac05a5e185d72a330aed8d6bdbf004da8b2d9e3a258",
+            ),
+            Self::Ground => (
+                460,
+                "ffb1e9c3d1c313dc78f60f813421115adc320872b5e4d4b9755d32b3d245e983",
+            ),
+            Self::SubcircuitInstantiation => (
+                732,
+                "6ad3d7ff0187cb31c3c663355bf8065d6d190f32cf1d058e6be5041abe3c8c1e",
+            ),
+        }
+    }
+
+    fn hspice_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::GndExclamation => (
+                331,
+                "56873a1f3a09f35f150881bb303522bfd86fc6e76a9f4d6fc8b54877776f5081",
+            ),
+            Self::Gnd => (
+                329,
+                "f57040ab2f79c2a5c9b97d8926b2f5a09aef9e4885ce5e46c993e5b6639725f6",
+            ),
+            Self::Ground => (
+                384,
+                "25e79e5ca36bad4d780f31418c1ee5097eb7c1991feddd673263af27fa783230",
+            ),
+            Self::SubcircuitInstantiation => (
+                581,
+                "247d13e7043ebbf8074f457eb9a08bea8a0d197924eae80ddb02d5eb504293f2",
+            ),
+        }
+    }
+
+    fn authored_alias(self) -> &'static str {
+        match self {
+            Self::GndExclamation => "GND!",
+            Self::Gnd | Self::SubcircuitInstantiation => "GND",
+            Self::Ground => "GROUND",
+        }
+    }
+
+    fn requires_subcircuit(self) -> bool {
+        self == Self::SubcircuitInstantiation
+    }
+
+    fn expected_flattened_snapshot(self) -> Vec<XyceXdmReplaceGroundElementSnapshot> {
+        let element = |name: &str, nodes: &[&str], kind: &str, value: Value| {
+            XyceXdmReplaceGroundElementSnapshot {
+                name: name.to_string(),
+                nodes: nodes.iter().map(|node| (*node).to_string()).collect(),
+                kind: kind.to_string(),
+                value_bits: value.to_bits(),
+            }
+        };
+        if self.requires_subcircuit() {
+            vec![
+                element("r1", &["1", "2"], "R", 15.0),
+                element("va", &["1", "0"], "V:DC", 0.0),
+                element("x1.r1", &["2", "x1.a1"], "R", 5.0),
+                element("x1.r2", &["x1.a1", "x1.a2"], "R", 5.0),
+                element("x1.r3", &["x1.a2", "0"], "R", 5.0),
+            ]
+        } else {
+            vec![
+                element("r1", &["1", "2"], "R", 10.0),
+                element("r2", &["2", "0"], "R", 10.0),
+                element("va", &["1", "0"], "V:DC", 0.0),
+            ]
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceXdmReplaceGroundElementSnapshot {
+    name: String,
+    nodes: Vec<String>,
+    kind: String,
+    value_bits: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -4966,6 +5116,23 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(kind) = XyceXdmReplaceGroundKind::for_record(&deck.relative_path) {
+            let contract = "xdm_hspice_replaceground_dc_relational_wrapper";
+            let result = match self.validate_xdm_replaceground_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(result) = self.run_expected_error_contract(deck, start) {
             if self.config.verbose {
                 println!(
@@ -5456,6 +5623,1255 @@ impl XyceTestRunner {
             duration_ms: start.elapsed().as_millis(),
             contract: contract.to_string(),
         }
+    }
+
+    fn validate_xdm_replaceground_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceXdmReplaceGroundKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        let hspice_path = self.validate_xdm_replaceground_provenance(deck, kind)?;
+        self.check_xdm_replaceground_deadline(start, "provenance")?;
+        let canonical_bytes = fs::read(&deck.path).map_err(|error| {
+            format!(
+                "failed to read canonical XDM REPLACEGROUND deck {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        let hspice_bytes = fs::read(&hspice_path).map_err(|error| {
+            format!(
+                "failed to read paired HSPICE source {}: {error}",
+                hspice_path.display()
+            )
+        })?;
+        Self::validate_xdm_replaceground_identity(
+            "canonical Xyce deck",
+            kind.record(),
+            &canonical_bytes,
+            kind.source_identity(),
+        )?;
+        Self::validate_xdm_replaceground_identity(
+            "paired HSPICE source",
+            kind.record(),
+            &hspice_bytes,
+            kind.hspice_identity(),
+        )?;
+        let canonical_source = std::str::from_utf8(&canonical_bytes).map_err(|error| {
+            format!(
+                "canonical XDM REPLACEGROUND deck '{}' is not UTF-8: {error}",
+                kind.record()
+            )
+        })?;
+        let hspice_source = std::str::from_utf8(&hspice_bytes).map_err(|error| {
+            format!(
+                "paired HSPICE source for '{}' is not UTF-8: {error}",
+                kind.record()
+            )
+        })?;
+
+        Self::validate_xdm_replaceground_directives(canonical_source, 1, true)?;
+        Self::validate_xdm_replaceground_directives(hspice_source, 0, false)?;
+        let projected_source = Self::project_xdm_replaceground_hspice(hspice_source)?;
+        Self::validate_xdm_replaceground_directives(&projected_source, 1, true)?;
+        self.check_xdm_replaceground_deadline(start, "source projection")?;
+
+        let canonical_plan = self.static_dc_plan_for_source_with_execution_dir(
+            &deck.path,
+            canonical_source.to_string(),
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        let projected_plan = self.static_dc_plan_for_source_with_execution_dir(
+            &hspice_path,
+            projected_source.clone(),
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        Self::validate_xdm_replaceground_plan(&canonical_plan, kind, "canonical")?;
+        Self::validate_xdm_replaceground_plan(&projected_plan, kind, "projected HSPICE")?;
+        self.check_xdm_replaceground_deadline(start, "plan validation")?;
+        if !Self::dc_sweeps_match_exactly(&canonical_plan.dc, &projected_plan.dc) {
+            return Err("canonical and projected HSPICE DC sweeps differ".to_string());
+        }
+        let canonical_probes = canonical_plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let projected_probes = projected_plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if canonical_probes != projected_probes {
+            return Err(format!(
+                "canonical and projected HSPICE probe sets differ: {canonical_probes:?} versus {projected_probes:?}"
+            ));
+        }
+
+        let canonical_netlist = Self::parse_netlist_with_expression_dialect(
+            canonical_source,
+            &deck.path,
+            ExpressionDialect::Xyce,
+        )
+        .map_err(|error| format!("canonical XDM REPLACEGROUND parse failed: {error}"))?;
+        let projected_netlist = Self::parse_netlist_with_expression_dialect(
+            &projected_source,
+            &hspice_path,
+            ExpressionDialect::Xyce,
+        )
+        .map_err(|error| format!("projected HSPICE parse failed: {error}"))?;
+        Self::validate_xdm_replaceground_effective_options(
+            &canonical_netlist.options,
+            true,
+            "canonical",
+        )?;
+        Self::validate_xdm_replaceground_effective_options(
+            &projected_netlist.options,
+            true,
+            "projected HSPICE",
+        )?;
+        Self::validate_xdm_replaceground_subcircuit_topology(&canonical_netlist, kind)?;
+        Self::validate_xdm_replaceground_subcircuit_topology(&projected_netlist, kind)?;
+        let canonical_structure =
+            Self::xdm_replaceground_element_snapshot(&canonical_netlist, kind)?;
+        let projected_structure =
+            Self::xdm_replaceground_element_snapshot(&projected_netlist, kind)?;
+        let expected_structure = kind.expected_flattened_snapshot();
+        if canonical_structure != expected_structure {
+            return Err(format!(
+                "canonical XDM REPLACEGROUND flattened snapshot differs from its exact expected topology: expected={expected_structure:?}, actual={canonical_structure:?}"
+            ));
+        }
+        if projected_structure != expected_structure {
+            return Err(format!(
+                "projected HSPICE flattened snapshot differs from its exact expected topology: expected={expected_structure:?}, actual={projected_structure:?}"
+            ));
+        }
+        self.check_xdm_replaceground_deadline(start, "hierarchy and flattened topology")?;
+
+        let (canonical_run_netlist, canonical_results) = self
+            .run_static_dc_results(&canonical_plan, start)
+            .map_err(|error| format!("canonical REPLACEGROUND DC execution failed: {error}"))?;
+        let (projected_run_netlist, projected_results) = self
+            .run_static_dc_results(&projected_plan, start)
+            .map_err(|error| {
+                format!("projected HSPICE REPLACEGROUND DC execution failed: {error}")
+            })?;
+        self.check_xdm_replaceground_deadline(start, "active DC executions")?;
+        let canonical_table = self.dc_results_to_prn_table(
+            &canonical_plan,
+            &canonical_run_netlist,
+            &canonical_results,
+        )?;
+        let projected_table = self.dc_results_to_prn_table(
+            &projected_plan,
+            &projected_run_netlist,
+            &projected_results,
+        )?;
+        Self::validate_xdm_replaceground_analytic_table(&canonical_table, &canonical_results)?;
+        Self::validate_xdm_replaceground_analytic_table(&projected_table, &projected_results)?;
+        let comparison_mismatches = self.compare_xdm_replaceground_tables(
+            &projected_table,
+            &canonical_table,
+            &projected_results,
+            &canonical_results,
+        )?;
+        if !comparison_mismatches.is_empty() {
+            return Err(format!(
+                "canonical and projected HSPICE outputs differ under the effective Xyce 7.10 default verifier tolerance: {comparison_mismatches:?}"
+            ));
+        }
+        self.check_xdm_replaceground_deadline(start, "effective verifier comparison")?;
+
+        // Demonstrate causality rather than merely observing that two decks
+        // which both happen to contain the same string agree.  Turning the
+        // generated policy off must leave the authored HSPICE alias literal,
+        // alter topology, and fail or numerically distinguish the circuit.
+        let policy_off_source = projected_source.replacen(
+            ".PREPROCESS REPLACEGROUND TRUE",
+            ".PREPROCESS REPLACEGROUND FALSE",
+            1,
+        );
+        Self::validate_xdm_replaceground_directives(&policy_off_source, 1, false)?;
+        let policy_off_plan = self.static_dc_plan_for_source_with_execution_dir(
+            &hspice_path,
+            policy_off_source.clone(),
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        let policy_off_netlist = Self::parse_netlist_with_expression_dialect(
+            &policy_off_source,
+            &hspice_path,
+            ExpressionDialect::Xyce,
+        )
+        .map_err(|error| format!("policy-off HSPICE parse failed: {error}"))?;
+        // Parser canonicalization intentionally represents an explicit FALSE
+        // policy as `None`: both select literal authored-node semantics.
+        Self::validate_xdm_replaceground_effective_options(
+            &policy_off_netlist.options,
+            false,
+            "policy-off HSPICE",
+        )?;
+        let policy_off_structure =
+            Self::xdm_replaceground_element_snapshot(&policy_off_netlist, kind)?;
+        let authored_alias = kind.authored_alias().to_ascii_lowercase();
+        if !policy_off_structure
+            .iter()
+            .any(|element| element.nodes.iter().any(|node| node == &authored_alias))
+        {
+            return Err(format!(
+                "policy-off projection lost authored alias '{}' instead of retaining it literally",
+                kind.authored_alias()
+            ));
+        }
+        if policy_off_structure == canonical_structure {
+            return Err(
+                "REPLACEGROUND policy-off projection did not alter the circuit topology"
+                    .to_string(),
+            );
+        }
+        match self.run_static_dc_results(&policy_off_plan, start) {
+            Err(SimulationError::Aborted) => {
+                return Err(format!(
+                    "shared XDM REPLACEGROUND deadline expired ({}ms)",
+                    self.config.max_time_per_test_ms
+                ));
+            }
+            Err(_) => {}
+            Ok((policy_off_run_netlist, policy_off_results)) => {
+                let policy_off_table = self.dc_results_to_prn_table(
+                    &policy_off_plan,
+                    &policy_off_run_netlist,
+                    &policy_off_results,
+                )?;
+                let policy_off_comparison = self.compare_xdm_replaceground_tables(
+                    &projected_table,
+                    &policy_off_table,
+                    &projected_results,
+                    &policy_off_results,
+                );
+                if policy_off_comparison.is_ok_and(|mismatches| mismatches.is_empty()) {
+                    return Err(
+                        "REPLACEGROUND policy-off circuit unexpectedly reproduced the grounded output"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        self.check_xdm_replaceground_deadline(start, "policy-off causality")?;
+        Ok(())
+    }
+
+    fn check_xdm_replaceground_deadline(&self, start: Instant, phase: &str) -> Result<(), String> {
+        let deadline = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
+        if deadline.is_aborted() {
+            return Err(format!(
+                "XDM REPLACEGROUND shared deadline expired during {phase} ({}ms)",
+                self.config.max_time_per_test_ms
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_xdm_replaceground_identity(
+        role: &str,
+        record: &str,
+        bytes: &[u8],
+        expected: (usize, &str),
+    ) -> Result<(), String> {
+        let actual_hash = blake3::hash(bytes).to_hex().to_string();
+        if bytes.len() != expected.0 || actual_hash != expected.1 {
+            return Err(format!(
+                "{role} identity changed for '{record}': expected {} bytes / {}, got {} bytes / {actual_hash}",
+                expected.0,
+                expected.1,
+                bytes.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_xdm_replaceground_effective_options(
+        options: &crate::netlist::SimulationOptions,
+        replace_ground: bool,
+        role: &str,
+    ) -> Result<(), String> {
+        let expected_replace_ground = replace_ground.then_some(true);
+        if options.replace_ground != expected_replace_ground
+            || options.tnom.map(Value::to_bits) != Some(25.0f64.to_bits())
+            || options.measure_fail_output.is_some()
+            || options.measure_default_value.is_some()
+            || options.measure_use_cont_files.is_some()
+            || !options.hb_num_frequencies.is_empty()
+            || options.nonlinear_continuation.is_some()
+            || options.reltol.is_some()
+            || options.abstol.is_some()
+            || options.vntol.is_some()
+            || options.iabstol.is_some()
+            || options.residual_reltol.is_some()
+            || options.gmin.is_some()
+            || options.method.is_some()
+            || options.trtol.is_some()
+            || options.timeint_reltol.is_some()
+            || options.timeint_abstol.is_some()
+            || options.transient_lte_reference.is_some()
+            || options.transient_new_bp_stepping.is_some()
+            || options.ramptime.is_some()
+            || options.digital_delay_type.is_some()
+            || options.xspice_event_trace_save.is_some()
+            || options.itl1.is_some()
+            || options.itl2.is_some()
+            || options.itl4.is_some()
+            || options.itl6.is_some()
+            || options.chgtol.is_some()
+            || options.pivtol.is_some()
+            || options.temp.is_some()
+            || options.seed.is_some()
+            || options.allow_simplified_mos.is_some()
+            || options.auto_bridge.is_some()
+            || options.auto_bridge_show_generated.is_some()
+            || options.auto_bridge_family.is_some()
+            || !options.auto_bridge_templates.is_empty()
+            || !options.auto_bridge_param_names.is_empty()
+            || options.topology_supernode.is_some()
+            || options.device_zero_resistance_tol.is_some()
+            || options.b3soi_gmin_scaling.is_some()
+        {
+            return Err(format!(
+                "{role} XDM REPLACEGROUND deck has unexpected effective option state; required only REPLACEGROUND={replace_ground} and DEVICE TNOM=25, got {options:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_xdm_replaceground_directives(
+        source: &str,
+        expected_count: usize,
+        expected_value: bool,
+    ) -> Result<(), String> {
+        let mut values = Vec::new();
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim();
+            let fields = trimmed.split_whitespace().collect::<Vec<_>>();
+            if !fields
+                .first()
+                .is_some_and(|field| field.eq_ignore_ascii_case(".PREPROCESS"))
+            {
+                continue;
+            }
+            if fields.len() != 3 || !fields[1].eq_ignore_ascii_case("REPLACEGROUND") {
+                return Err(format!(
+                    "XDM REPLACEGROUND projection contains an unsupported .PREPROCESS card: '{trimmed}'"
+                ));
+            }
+            let value = if fields[2].eq_ignore_ascii_case("TRUE") {
+                true
+            } else if fields[2].eq_ignore_ascii_case("FALSE") {
+                false
+            } else {
+                return Err(format!(
+                    "XDM REPLACEGROUND projection has invalid policy value '{}'",
+                    fields[2]
+                ));
+            };
+            values.push(value);
+        }
+        if values.len() != expected_count || values.iter().any(|value| *value != expected_value) {
+            return Err(format!(
+                "XDM REPLACEGROUND directive contract expected {expected_count} card(s) set to {expected_value}, got {values:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn project_xdm_replaceground_hspice(source: &str) -> Result<String, String> {
+        let mut physical_lines = source.lines();
+        let title = physical_lines
+            .next()
+            .ok_or_else(|| "paired HSPICE source is empty".to_string())?;
+        if !title.trim_start().starts_with('$') {
+            return Err(
+                "paired HSPICE source must retain its authored '$' title record".to_string(),
+            );
+        }
+        let mut projected = String::new();
+        projected.push_str(title);
+        projected.push('\n');
+        projected.push_str(".PREPROCESS REPLACEGROUND TRUE\n");
+        projected.push_str(".OPTIONS DEVICE TNOM=25\n");
+        let mut print_count = 0usize;
+        for line in physical_lines {
+            let trimmed = line.trim();
+            let fields = trimmed.split_whitespace().collect::<Vec<_>>();
+            if fields
+                .first()
+                .is_some_and(|field| field.eq_ignore_ascii_case(".PREPROCESS"))
+                || fields
+                    .first()
+                    .is_some_and(|field| field.eq_ignore_ascii_case(".OPTIONS"))
+                || fields
+                    .first()
+                    .is_some_and(|field| field.eq_ignore_ascii_case(".CONTROL"))
+            {
+                return Err(format!(
+                    "paired HSPICE source contains pre-existing translation control '{trimmed}'"
+                ));
+            }
+            if fields
+                .first()
+                .is_some_and(|field| field.eq_ignore_ascii_case(".PRINT"))
+                && fields
+                    .get(1)
+                    .is_some_and(|analysis| analysis.eq_ignore_ascii_case("DC"))
+            {
+                if fields.len() < 3
+                    || fields
+                        .iter()
+                        .skip(2)
+                        .any(|field| field.to_ascii_uppercase().starts_with("FORMAT"))
+                {
+                    return Err(
+                        "paired HSPICE projection requires one plain nonempty .PRINT DC card"
+                            .to_string(),
+                    );
+                }
+                print_count += 1;
+            }
+            projected.push_str(line);
+            projected.push('\n');
+        }
+        if print_count != 1 {
+            return Err(format!(
+                "paired HSPICE projection requires exactly one .PRINT DC card, found {print_count}"
+            ));
+        }
+        Ok(projected)
+    }
+
+    fn validate_xdm_replaceground_plan(
+        plan: &XyceStaticDcPlan,
+        _kind: XyceXdmReplaceGroundKind,
+        role: &str,
+    ) -> Result<(), String> {
+        if plan.dc_data.is_some() || !plan.steps.is_empty() || !plan.diagnostics.is_empty() {
+            return Err(format!(
+                "{role} XDM REPLACEGROUND plan contains DATA/STEP/diagnostic state outside the bounded contract"
+            ));
+        }
+        if plan.print.probes.len() != 2 {
+            return Err(format!(
+                "{role} XDM REPLACEGROUND plan requires one V(1), V(2) output"
+            ));
+        }
+        if role == "canonical"
+            && plan
+                .print_format
+                .as_deref()
+                .is_none_or(|format| !format.eq_ignore_ascii_case("PROBE"))
+        {
+            return Err(
+                "canonical XDM REPLACEGROUND deck lost its PROBE output format".to_string(),
+            );
+        }
+        if role != "canonical" && plan.print_format.is_some() {
+            return Err(
+                "bounded HSPICE projection unexpectedly rewrote the authored output format"
+                    .to_string(),
+            );
+        }
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if probes != ["v(1)", "v(2)"] {
+            return Err(format!(
+                "{role} XDM REPLACEGROUND plan has unexpected probes {probes:?}"
+            ));
+        }
+        if !plan.dc.source.eq_ignore_ascii_case("VA")
+            || plan.dc.start.to_bits() != 0.0f64.to_bits()
+            || plan.dc.stop.to_bits() != 10.0f64.to_bits()
+            || plan.dc.step.to_bits() != 1.0f64.to_bits()
+            || plan.dc.sweep2.is_some()
+        {
+            return Err(format!(
+                "{role} XDM REPLACEGROUND plan has an unexpected DC sweep: {:?}",
+                plan.dc
+            ));
+        }
+        let expected_mode = crate::netlist::DcSweepMode::Linear;
+        if !Self::dc_sweep_modes_match_exactly(&plan.dc.mode, &expected_mode) {
+            return Err(format!(
+                "{role} XDM REPLACEGROUND plan has an unexpected DC sweep mode"
+            ));
+        }
+        Ok(())
+    }
+
+    fn xdm_replaceground_element_snapshot(
+        netlist: &Netlist,
+        kind: XyceXdmReplaceGroundKind,
+    ) -> Result<Vec<XyceXdmReplaceGroundElementSnapshot>, String> {
+        let flattened = flatten_netlist(netlist)
+            .map_err(|error| format!("failed to flatten XDM REPLACEGROUND circuit: {error}"))?;
+        let mut snapshot = Vec::with_capacity(flattened.len());
+        for element in flattened {
+            let (kind_name, value) = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    ("R", *value)
+                }
+                ElementKind::VoltageSource(spec) if extract_dc_value(spec).is_finite() => {
+                    ("V:DC", extract_dc_value(spec))
+                }
+                other => {
+                    return Err(format!(
+                        "XDM REPLACEGROUND circuit contains an element outside its resistor/DC-source envelope: {} {other:?}",
+                        element.name
+                    ));
+                }
+            };
+            if element.nodes.len() != 2 {
+                return Err(format!(
+                    "XDM REPLACEGROUND element '{}' is not two-terminal",
+                    element.name
+                ));
+            }
+            snapshot.push(XyceXdmReplaceGroundElementSnapshot {
+                name: element.name.to_ascii_lowercase(),
+                nodes: element
+                    .nodes
+                    .iter()
+                    .map(|node| node.to_ascii_lowercase())
+                    .collect(),
+                kind: kind_name.to_string(),
+                value_bits: value.to_bits(),
+            });
+        }
+        snapshot.sort_by(|left, right| left.name.cmp(&right.name));
+        let expected_count = if kind.requires_subcircuit() { 5 } else { 3 };
+        if snapshot.len() != expected_count {
+            return Err(format!(
+                "XDM REPLACEGROUND circuit flattened to {} elements, expected {expected_count}: {snapshot:?}",
+                snapshot.len()
+            ));
+        }
+        Ok(snapshot)
+    }
+
+    fn validate_xdm_replaceground_subcircuit_topology(
+        netlist: &Netlist,
+        kind: XyceXdmReplaceGroundKind,
+    ) -> Result<(), String> {
+        if !kind.requires_subcircuit() {
+            if !netlist.subcircuits.is_empty() || netlist.elements.len() != 3 {
+                return Err(
+                    "flat XDM REPLACEGROUND record does not retain exactly three authored top-level elements"
+                        .to_string(),
+                );
+            }
+            let authored = netlist
+                .elements
+                .iter()
+                .map(|element| {
+                    let value = match &element.kind {
+                        ElementKind::VoltageSource(spec) => extract_dc_value(spec),
+                        ElementKind::Resistor { value, .. } => *value,
+                        _ => Value::NAN,
+                    };
+                    (
+                        element.name.to_ascii_lowercase(),
+                        element
+                            .nodes
+                            .iter()
+                            .map(|node| node.to_ascii_lowercase())
+                            .collect::<Vec<_>>(),
+                        value.to_bits(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let expected = vec![
+                (
+                    "va".to_string(),
+                    vec!["1".to_string(), "0".to_string()],
+                    0.0f64.to_bits(),
+                ),
+                (
+                    "r1".to_string(),
+                    vec!["1".to_string(), "2".to_string()],
+                    10.0f64.to_bits(),
+                ),
+                (
+                    "r2".to_string(),
+                    vec!["2".to_string(), "0".to_string()],
+                    10.0f64.to_bits(),
+                ),
+            ];
+            if authored != expected {
+                return Err(format!(
+                    "flat XDM REPLACEGROUND authored snapshot differs: expected={expected:?}, actual={authored:?}"
+                ));
+            }
+            return Ok(());
+        }
+        if netlist.subcircuits.len() != 1 {
+            return Err(format!(
+                "subcircuit REPLACEGROUND record requires one definition, found {}",
+                netlist.subcircuits.len()
+            ));
+        }
+        let definition = &netlist.subcircuits[0];
+        if !definition.name.eq_ignore_ascii_case("subckt_resistor")
+            || definition
+                .ports
+                .iter()
+                .map(|port| port.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                != ["a", "b"]
+            || definition.elements.len() != 3
+            || definition.params.len() != 1
+            || !definition.params[0].0.eq_ignore_ascii_case("resistance")
+            || definition.params[0].1.to_bits() != 1.0f64.to_bits()
+        {
+            return Err(format!(
+                "subcircuit REPLACEGROUND definition is outside the exact three-resistor parameterized topology: {definition:?}"
+            ));
+        }
+        let expected_body = [
+            ("r1", ["a", "a1"]),
+            ("r2", ["a1", "a2"]),
+            ("r3", ["a2", "b"]),
+        ];
+        for (element, (expected_name, expected_nodes)) in
+            definition.elements.iter().zip(expected_body)
+        {
+            let ElementKind::Resistor {
+                value_expr,
+                model,
+                instance_params,
+                deferred_params,
+                ..
+            } = &element.kind
+            else {
+                return Err(format!(
+                    "subcircuit authored body element '{}' is not a resistor",
+                    element.name
+                ));
+            };
+            if !element.name.eq_ignore_ascii_case(expected_name)
+                || element
+                    .nodes
+                    .iter()
+                    .map(|node| node.to_ascii_lowercase())
+                    .collect::<Vec<_>>()
+                    != expected_nodes
+                || value_expr
+                    .as_deref()
+                    .is_none_or(|expression| !expression.eq_ignore_ascii_case("resistance"))
+                || model.is_some()
+                || !instance_params.is_empty()
+                || !deferred_params.is_empty()
+            {
+                return Err(format!(
+                    "subcircuit authored body snapshot differs at '{}': {element:?}",
+                    element.name
+                ));
+            }
+        }
+        let instances = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } => Some((element, subckt_name, params)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if instances.len() != 1
+            || !instances[0].0.name.eq_ignore_ascii_case("X1")
+            || !instances[0].1.eq_ignore_ascii_case("subckt_resistor")
+            || instances[0].0.nodes.len() != 2
+            || !instances[0]
+                .0
+                .nodes
+                .iter()
+                .map(|node| node.to_ascii_lowercase())
+                .eq(["2".to_string(), "0".to_string()])
+            || instances[0].2.len() != 1
+            || !instances[0].2[0].0.eq_ignore_ascii_case("resistance")
+            || instances[0].2[0].1.as_value().map(Value::to_bits) != Some(5.0f64.to_bits())
+        {
+            return Err(format!(
+                "subcircuit REPLACEGROUND instance is outside the exact X1 RESISTANCE=5 topology: {instances:?}"
+            ));
+        }
+        let top_names = netlist
+            .elements
+            .iter()
+            .map(|element| element.name.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        if top_names != ["va", "r1", "x1"]
+            || !netlist.elements[0]
+                .nodes
+                .iter()
+                .map(String::as_str)
+                .eq(["1", "0"])
+            || !netlist.elements[1]
+                .nodes
+                .iter()
+                .map(String::as_str)
+                .eq(["1", "2"])
+            || extract_dc_value(match &netlist.elements[0].kind {
+                ElementKind::VoltageSource(spec) => spec,
+                _ => return Err("subcircuit top-level VA is not a DC voltage source".to_string()),
+            })
+            .to_bits()
+                != 0.0f64.to_bits()
+            || !matches!(&netlist.elements[1].kind, ElementKind::Resistor { value, .. } if value.to_bits() == 15.0f64.to_bits())
+        {
+            return Err(format!(
+                "subcircuit REPLACEGROUND top-level authored snapshot differs: {:?}",
+                netlist.elements
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_xdm_replaceground_analytic_table(
+        table: &XycePrnTable,
+        results: &[DcSweepPointResult],
+    ) -> Result<(), String> {
+        if table.columns.len() != 3
+            || !table.columns[0].eq_ignore_ascii_case("Index")
+            || !table.columns[1].eq_ignore_ascii_case("V(1)")
+            || !table.columns[2].eq_ignore_ascii_case("V(2)")
+            || table.rows.len() != 11
+        {
+            return Err(format!(
+                "XDM REPLACEGROUND analytic table requires Index/V(1)/V(2) and 11 rows, got {:?} / {}",
+                table.columns,
+                table.rows.len()
+            ));
+        }
+        if results.len() != table.rows.len() {
+            return Err(format!(
+                "XDM REPLACEGROUND raw sweep has {} points for {} table rows",
+                results.len(),
+                table.rows.len()
+            ));
+        }
+        for (row_index, (row, point)) in table.rows.iter().zip(results).enumerate() {
+            if row.len() != 3 || row.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "XDM REPLACEGROUND row {row_index} is not a finite three-column row: {row:?}"
+                ));
+            }
+            let sweep = point.sweep_value;
+            if !sweep.is_finite()
+                || (row[1] - sweep).abs() > 1.0e-10
+                || (row[2] - 0.5 * sweep).abs() > 1.0e-10
+            {
+                return Err(format!(
+                    "XDM REPLACEGROUND analytic invariant failed at row {row_index}: sweep={sweep}, V1={}, V2={} (expected V1=sweep, V2=sweep/2)",
+                    row[1], row[2]
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn compare_xdm_replaceground_tables(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        good_results: &[DcSweepPointResult],
+        _test_results: &[DcSweepPointResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if good.columns.len() != test.columns.len()
+            || !good
+                .columns
+                .iter()
+                .zip(&test.columns)
+                .all(|(good, test)| good.eq_ignore_ascii_case(test))
+            || good.rows.len() != test.rows.len()
+            || good_results.len() != good.rows.len()
+        {
+            return Err(format!(
+                "XDM REPLACEGROUND comparison layout differs: translated-good {:?}/{} rows, gold-test {:?}/{} rows",
+                good.columns,
+                good.rows.len(),
+                test.columns,
+                test.rows.len()
+            ));
+        }
+        // See the constants above: these declared wrapper values were not
+        // forwarded by Release 7.10's HSPICE branch.
+        if XYCE_XDM_REPLACEGROUND_DECLARED_ABSOLUTE_TOLERANCE.to_bits() != 1.0e-5f64.to_bits()
+            || XYCE_XDM_REPLACEGROUND_DECLARED_RELATIVE_TOLERANCE.to_bits() != 1.0e-3f64.to_bits()
+            || XYCE_XDM_REPLACEGROUND_DECLARED_ZERO_TOLERANCE.to_bits() != 1.0e-10f64.to_bits()
+        {
+            return Err("XDM wrapper declared-tolerance provenance changed".to_string());
+        }
+        if good.rows.len() < 2 {
+            return Err(
+                "XDM REPLACEGROUND xyce_verify comparison requires at least two DC points"
+                    .to_string(),
+            );
+        }
+        for row_index in 0..good.rows.len() {
+            if good.rows[row_index].len() != good.columns.len()
+                || test.rows[row_index].len() != test.columns.len()
+            {
+                return Err(format!(
+                    "XDM REPLACEGROUND comparison row {row_index} does not match its column layout"
+                ));
+            }
+            let requested_sweep = Self::xyce_prn_scientific_roundtrip(
+                good_results[row_index].sweep_value,
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            let raw_good_axis = Self::xyce_prn_scientific_roundtrip(
+                good.rows[row_index][1],
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            let good_axis = if raw_good_axis.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                0.0
+            } else {
+                raw_good_axis
+            };
+            if (requested_sweep - good_axis).abs()
+                > XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE
+            {
+                return Err(format!(
+                    "XDM REPLACEGROUND translated-good V(1) does not match the formatted requested sweep at row {row_index}: requested={requested_sweep}, good={good_axis}"
+                ));
+            }
+            let expected_index = row_index as Value;
+            let good_index = Self::xyce_prn_scientific_roundtrip(
+                good.rows[row_index][0],
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            let test_index = Self::xyce_prn_scientific_roundtrip(
+                test.rows[row_index][0],
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            if good_index.to_bits() != expected_index.to_bits()
+                || test_index.to_bits() != expected_index.to_bits()
+            {
+                return Err(format!(
+                    "XDM REPLACEGROUND serialized Index differs at row {row_index}: translated-good={good_index}, gold-test={test_index}"
+                ));
+            }
+        }
+
+        // Release 7.10 xyce_verify treats the translated output as `good`,
+        // the canonical rerun as `test`, integrates squared normalized error
+        // with the trapezoidal rule over the independent axis, and fails a
+        // signal only when normalized RMS exceeds one.
+        let mut mismatches = Vec::new();
+        let serialized_test_axis = test
+            .rows
+            .iter()
+            .map(|row| {
+                let raw_axis = Self::xyce_prn_scientific_roundtrip(
+                    row[1],
+                    XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                )?;
+                Ok::<Value, String>(if raw_axis.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                    0.0
+                } else {
+                    raw_axis
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let axis_start = serialized_test_axis[0];
+        let axis_stop = serialized_test_axis[serialized_test_axis.len() - 1];
+        let axis_span = (axis_stop - axis_start).abs();
+        if !axis_span.is_finite() || axis_span <= 0.0 {
+            return Err(format!(
+                "XDM REPLACEGROUND xyce_verify axis has invalid span {axis_start}..{axis_stop}"
+            ));
+        }
+        // The one-variable DC verifier treats V(1) as the independent
+        // variable after removing Index. It validates only the good axis
+        // against the requested sweep and starts dependent comparisons at
+        // V(2); the test V(1) values supply errNorm's integration grid.
+        for column_index in 2..good.columns.len() {
+            let mut errors = Vec::with_capacity(good.rows.len());
+            for row_index in 0..good.rows.len() {
+                let raw_good_value = Self::xyce_prn_scientific_roundtrip(
+                    good.rows[row_index][column_index],
+                    XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                )?;
+                let raw_test_value = Self::xyce_prn_scientific_roundtrip(
+                    test.rows[row_index][column_index],
+                    XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                )?;
+                if !raw_good_value.is_finite() || !raw_test_value.is_finite() {
+                    return Err(format!(
+                        "XDM REPLACEGROUND comparison contains non-finite {} at row {row_index}: translated-good={raw_good_value}, gold-test={raw_test_value}",
+                        good.columns[column_index]
+                    ));
+                }
+                // xyce_verify applies each column's ZEROTOL while loading
+                // both files, before computing differences and error norms.
+                let good_value = if raw_good_value.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                    0.0
+                } else {
+                    raw_good_value
+                };
+                let test_value = if raw_test_value.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                    0.0
+                } else {
+                    raw_test_value
+                };
+                let difference = good_value - test_value;
+                let normalized =
+                    if difference.abs() < XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE {
+                        0.0
+                    } else {
+                        difference
+                            / (XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE * good_value.abs()
+                                + XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE)
+                    };
+                errors.push(normalized);
+            }
+            let mut integral = 0.0;
+            for row_index in 1..errors.len() {
+                let width =
+                    (serialized_test_axis[row_index] - serialized_test_axis[row_index - 1]).abs();
+                integral +=
+                    0.5 * width * (errors[row_index - 1].powi(2) + errors[row_index].powi(2));
+            }
+            let normalized_rms = (integral / axis_span).sqrt();
+            if !normalized_rms.is_finite() || normalized_rms > 1.0 {
+                mismatches.push(XyceValueMismatch {
+                    row: good.rows.len() - 1,
+                    probe: good.columns[column_index].clone(),
+                    expected: good.rows.last().expect("nonempty good table")[column_index],
+                    actual: test.rows.last().expect("nonempty test table")[column_index],
+                    relative_error: normalized_rms,
+                });
+            }
+        }
+        Ok(mismatches)
+    }
+
+    fn validate_xdm_replaceground_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceXdmReplaceGroundKind,
+    ) -> Result<PathBuf, String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
+        {
+            return Err(format!(
+                "XDM REPLACEGROUND deck path does not match its recognized record: {}",
+                deck.relative_path
+            ));
+        }
+        let canonical_deck = deck.path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize XDM REPLACEGROUND deck {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        let canonical_expected = self
+            .root
+            .join(Path::new(&deck.relative_path))
+            .canonicalize()
+            .map_err(|error| {
+                format!(
+                    "canonical XDM REPLACEGROUND corpus record '{}' is missing: {error}",
+                    kind.record()
+                )
+            })?;
+        if canonical_deck != canonical_expected {
+            return Err(format!(
+                "XDM REPLACEGROUND record '{}' resolved outside its canonical corpus path",
+                kind.record()
+            ));
+        }
+        if !self.requires_upstream_wrapper(&deck.relative_path) {
+            return Err(format!(
+                "XDM REPLACEGROUND record '{}' lost removed-wrapper manifest provenance",
+                kind.record()
+            ));
+        }
+        let family_dir = deck
+            .path
+            .parent()
+            .ok_or_else(|| "XDM REPLACEGROUND record has no family directory".to_string())?;
+        let expected_family = self
+            .root
+            .join("Netlists/XDM/HSPICE/OTHER_PARSING")
+            .canonicalize()
+            .map_err(|error| format!("XDM REPLACEGROUND family is missing: {error}"))?;
+        if family_dir.canonicalize().ok() != Some(expected_family) {
+            return Err(format!(
+                "XDM REPLACEGROUND family resolved outside canonical OTHER_PARSING: {}",
+                family_dir.display()
+            ));
+        }
+
+        let mut complete = BTreeSet::new();
+        let mut content_census = BTreeSet::new();
+        let mut physical = BTreeSet::new();
+        let mut candidates = BTreeSet::new();
+        for entry in fs::read_dir(family_dir).map_err(|error| {
+            format!(
+                "failed to inspect XDM REPLACEGROUND family {}: {error}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!("failed to inspect XDM REPLACEGROUND family entry: {error}")
+            })?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect XDM REPLACEGROUND family member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "XDM REPLACEGROUND family member {} must be a regular non-symlink file",
+                    entry.path().display()
+                ));
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| {
+                    format!(
+                        "XDM REPLACEGROUND family filename in {} is not UTF-8",
+                        family_dir.display()
+                    )
+                })?
+                .to_ascii_lowercase();
+            if !complete.insert(name.clone()) {
+                return Err(format!(
+                    "XDM REPLACEGROUND family contains case-colliding name {name:?}"
+                ));
+            }
+            let member_bytes = fs::read(entry.path()).map_err(|error| {
+                format!(
+                    "failed to hash XDM REPLACEGROUND family member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            content_census.insert(format!("{name}\0{}", blake3::hash(&member_bytes).to_hex()));
+            if name.ends_with(".cir") {
+                physical.insert(name.clone());
+                let source = fs::read_to_string(entry.path()).map_err(|error| {
+                    format!(
+                        "failed to read XDM REPLACEGROUND family candidate {}: {error}",
+                        entry.path().display()
+                    )
+                })?;
+                if Self::validate_xdm_replaceground_directives(&source, 1, true).is_ok() {
+                    let mut paired_name = entry.file_name();
+                    paired_name.push(".hspice");
+                    if family_dir.join(paired_name).is_file() {
+                        candidates.insert(name);
+                    }
+                }
+            }
+        }
+        let complete = complete.into_iter().collect::<Vec<_>>();
+        let content_census = content_census.into_iter().collect::<Vec<_>>();
+        let physical = physical.into_iter().collect::<Vec<_>>();
+        let candidates = candidates.into_iter().collect::<Vec<_>>();
+        let complete_hash = blake3::hash(complete.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content_census.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let physical_hash = blake3::hash(physical.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if complete.len() != XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_COUNT
+            || complete_hash != XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_BLAKE3
+        {
+            return Err(format!(
+                "XDM HSPICE OTHER_PARSING source-directory census changed: expected {} / {}, got {} / {complete_hash}",
+                XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_COUNT,
+                XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_BLAKE3,
+                complete.len()
+            ));
+        }
+        if content_census.len() != XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_COUNT
+            || content_hash != XYCE_XDM_REPLACEGROUND_SOURCE_CONTENT_CENSUS_BLAKE3
+        {
+            return Err(format!(
+                "XDM HSPICE OTHER_PARSING path+content census changed: expected {} / {}, got {} / {content_hash}",
+                XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_COUNT,
+                XYCE_XDM_REPLACEGROUND_SOURCE_CONTENT_CENSUS_BLAKE3,
+                content_census.len()
+            ));
+        }
+        if physical.len() != XYCE_XDM_REPLACEGROUND_PHYSICAL_COUNT
+            || physical_hash != XYCE_XDM_REPLACEGROUND_PHYSICAL_BLAKE3
+        {
+            return Err(format!(
+                "XDM HSPICE OTHER_PARSING physical census changed: expected {} / {}, got {} / {physical_hash}",
+                XYCE_XDM_REPLACEGROUND_PHYSICAL_COUNT,
+                XYCE_XDM_REPLACEGROUND_PHYSICAL_BLAKE3,
+                physical.len()
+            ));
+        }
+        if candidates.len() != XYCE_XDM_REPLACEGROUND_CANDIDATE_COUNT
+            || candidate_hash != XYCE_XDM_REPLACEGROUND_CANDIDATE_BLAKE3
+        {
+            return Err(format!(
+                "XDM HSPICE REPLACEGROUND candidate census changed: expected {} / {}, got {} / {candidate_hash}: {candidates:?}",
+                XYCE_XDM_REPLACEGROUND_CANDIDATE_COUNT,
+                XYCE_XDM_REPLACEGROUND_CANDIDATE_BLAKE3,
+                candidates.len()
+            ));
+        }
+
+        let manifest_records = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(XYCE_XDM_REPLACEGROUND_FAMILY_PREFIX))
+            .cloned()
+            .collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest_records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if manifest_records.len() != XYCE_XDM_REPLACEGROUND_MANIFEST_COUNT
+            || manifest_hash != XYCE_XDM_REPLACEGROUND_MANIFEST_BLAKE3
+        {
+            return Err(format!(
+                "XDM HSPICE OTHER_PARSING manifest census changed: expected {} / {}, got {} / {manifest_hash}",
+                XYCE_XDM_REPLACEGROUND_MANIFEST_COUNT,
+                XYCE_XDM_REPLACEGROUND_MANIFEST_BLAKE3,
+                manifest_records.len()
+            ));
+        }
+        let manifest_names = manifest_records
+            .iter()
+            .map(|record| {
+                record
+                    .rsplit_once('/')
+                    .map(|(_, name)| name.to_ascii_lowercase())
+                    .ok_or_else(|| {
+                        format!("XDM REPLACEGROUND manifest record {record:?} has no filename")
+                    })
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?
+            .into_iter()
+            .collect::<Vec<_>>();
+        if manifest_names != physical {
+            return Err(format!(
+                "XDM HSPICE OTHER_PARSING manifest/physical census is not a bijection: physical={physical:?}, manifest={manifest_names:?}"
+            ));
+        }
+        if !manifest_records
+            .iter()
+            .any(|record| record == kind.record())
+        {
+            return Err(format!(
+                "XDM REPLACEGROUND record '{}' is absent from its pinned manifest family",
+                kind.record()
+            ));
+        }
+        if family_dir.join("options").exists() {
+            return Err(
+                "XDM HSPICE REPLACEGROUND family unexpectedly contains an options sidecar"
+                    .to_string(),
+            );
+        }
+        let mut hspice_os = deck.path.as_os_str().to_os_string();
+        hspice_os.push(".hspice");
+        let hspice_path = PathBuf::from(hspice_os);
+        for path in [&deck.path, &hspice_path] {
+            let metadata = fs::symlink_metadata(path).map_err(|error| {
+                format!(
+                    "failed to inspect XDM REPLACEGROUND source {}: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "XDM REPLACEGROUND source {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+        }
+        self.reject_xdm_replaceground_output_artifacts(&deck.path)?;
+        Ok(hspice_path)
+    }
+
+    fn reject_xdm_replaceground_output_artifacts(&self, deck_path: &Path) -> Result<(), String> {
+        let anchor = self
+            .static_output_reference_path(deck_path, "anchor")
+            .ok_or_else(|| "XDM REPLACEGROUND deck cannot be mapped into OutputData".to_string())?;
+        let Some(output_dir) = anchor.parent() else {
+            return Err("XDM REPLACEGROUND OutputData anchor has no parent".to_string());
+        };
+        if !output_dir.exists() {
+            return Ok(());
+        }
+        let metadata = fs::symlink_metadata(output_dir)
+            .map_err(|error| format!("failed to inspect XDM REPLACEGROUND OutputData: {error}"))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "XDM REPLACEGROUND OutputData path {} must be a regular non-symlink directory",
+                output_dir.display()
+            ));
+        }
+        let deck_name = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "XDM REPLACEGROUND deck filename is not UTF-8".to_string())?;
+        let prefix = format!("{deck_name}.").to_ascii_lowercase();
+        let mut artifacts = Vec::new();
+        for entry in fs::read_dir(output_dir).map_err(|error| {
+            format!("failed to inspect XDM REPLACEGROUND OutputData entries: {error}")
+        })? {
+            let entry = entry.map_err(|error| {
+                format!("failed to inspect XDM REPLACEGROUND OutputData entry: {error}")
+            })?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&prefix))
+            {
+                artifacts.push(entry.path());
+            }
+        }
+        artifacts.sort();
+        if !artifacts.is_empty() {
+            return Err(format!(
+                "XDM REPLACEGROUND candidate must not own checked-in OutputData artifacts: {artifacts:?}"
+            ));
+        }
+        Ok(())
     }
 
     fn validate_startup_diagnostic_oracle(
@@ -56181,6 +57597,581 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn xdm_replaceground_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
+        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+        let source_family = source_root.join("Netlists/XDM/HSPICE/OTHER_PARSING");
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xdm-replaceground-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        let family = root.join("Netlists/XDM/HSPICE/OTHER_PARSING");
+        fs::create_dir_all(&family).expect("create XDM REPLACEGROUND fixture family");
+        for entry in fs::read_dir(&source_family).expect("read canonical OTHER_PARSING family") {
+            let entry = entry.expect("read canonical OTHER_PARSING member");
+            fs::copy(entry.path(), family.join(entry.file_name()))
+                .expect("copy canonical OTHER_PARSING member");
+        }
+        let manifest = fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE))
+            .expect("read canonical harness manifest")
+            .lines()
+            .filter(|line| {
+                line.split('\t').next().is_some_and(|record| {
+                    XyceTestRunner::normalize_manifest_key(record)
+                        .starts_with(XYCE_XDM_REPLACEGROUND_FAMILY_PREFIX)
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(root.join(HARNESS_MANIFEST_FILE), format!("{manifest}\n"))
+            .expect("write XDM REPLACEGROUND fixture manifest");
+        (root, family)
+    }
+
+    fn assert_xdm_replaceground_fixture_fails(root: &Path, family: &Path, context: &str) {
+        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+        let result = runner.run_test(family.join("gnd_node_symbol.cir"));
+        assert!(
+            !result.passed && !result.expected_unsupported,
+            "{context} must fail closed: {result:?}"
+        );
+        assert_eq!(
+            result.contract,
+            "xdm_hspice_replaceground_dc_relational_wrapper"
+        );
+    }
+
+    fn xdm_replaceground_unit_source() -> String {
+        "$ ground alias fixture\n\
+         .PREPROCESS REPLACEGROUND TRUE\n\
+         .OPTIONS DEVICE TNOM=25\n\
+         VA 1 0 dc=0\n\
+         R1 1 2 10\n\
+         R2 2 gnd 10\n\
+         .DC VA 0 10 1\n\
+         .PRINT DC V(1) V(2)\n"
+            .to_string()
+    }
+
+    fn xdm_replaceground_unit_results() -> Vec<DcSweepPointResult> {
+        (0..=10)
+            .map(|sweep| DcSweepPointResult {
+                sweep_value: sweep as Value,
+                result: crate::SimulationResult::new(0, 0),
+                device_op_report: crate::circuit::DeviceOpReport::default(),
+            })
+            .collect()
+    }
+
+    fn xdm_replaceground_unit_table(axis_offset: Value, dependent: Value) -> XycePrnTable {
+        XycePrnTable {
+            columns: vec!["Index".to_string(), "V(1)".to_string(), "V(2)".to_string()],
+            rows: (0..=10)
+                .map(|index| vec![index as Value, index as Value + axis_offset, dependent])
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn xdm_replaceground_projection_only_injects_canonical_controls() {
+        let source = "$ ground alias fixture\n\
+                      * retained comment\n\
+                      VA 1 0 dc=0\n\
+                      R1 1 2 10\n\
+                      R2 2 gNd! 10\n\
+                      .DC VA 0 10 1\n\
+                      .PRINT DC V(1) V(2)\n";
+        let projected = XyceTestRunner::project_xdm_replaceground_hspice(source)
+            .expect("bounded HSPICE projection succeeds");
+        assert_eq!(
+            projected,
+            "$ ground alias fixture\n\
+             .PREPROCESS REPLACEGROUND TRUE\n\
+             .OPTIONS DEVICE TNOM=25\n\
+             * retained comment\n\
+             VA 1 0 dc=0\n\
+             R1 1 2 10\n\
+             R2 2 gNd! 10\n\
+             .DC VA 0 10 1\n\
+             .PRINT DC V(1) V(2)\n"
+        );
+        XyceTestRunner::validate_xdm_replaceground_directives(&projected, 1, true)
+            .expect("projection has one effective generated policy");
+        for mutation in [
+            source.replacen(
+                "VA 1 0 dc=0",
+                ".PREPROCESS REPLACEGROUND TRUE\nVA 1 0 dc=0",
+                1,
+            ),
+            source.replacen("VA 1 0 dc=0", ".OPTIONS DEVICE TNOM=30\nVA 1 0 dc=0", 1),
+            source.replace(".PRINT DC V(1) V(2)\n", ""),
+        ] {
+            assert!(
+                XyceTestRunner::project_xdm_replaceground_hspice(&mutation).is_err(),
+                "translation-control or output mutation must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn xdm_replaceground_exact_source_and_sidecar_mutations_fail_closed() {
+        for (label, suffix, needle, replacement) in [
+            ("canonical", "", "R=10", "R=11"),
+            ("hspice", ".hspice", "R2 2 gnd 10", "R2 2 floating 10"),
+        ] {
+            let (root, family) = xdm_replaceground_mutation_fixture(label);
+            let mut path = family.join("gnd_node_symbol.cir");
+            if !suffix.is_empty() {
+                let mut os = path.as_os_str().to_os_string();
+                os.push(suffix);
+                path = PathBuf::from(os);
+            }
+            let source = fs::read_to_string(&path).expect("read mutation target");
+            assert!(source.contains(needle));
+            fs::write(&path, source.replacen(needle, replacement, 1))
+                .expect("write semantic mutation");
+
+            let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+            let result = runner.run_test(family.join("gnd_node_symbol.cir"));
+            assert!(
+                !result.passed && !result.expected_unsupported,
+                "{label} semantic mutation must fail closed: {result:?}"
+            );
+            assert_eq!(
+                result.contract,
+                "xdm_hspice_replaceground_dc_relational_wrapper"
+            );
+            assert!(
+                result.error.as_deref().is_some_and(|error| {
+                    error.contains("identity changed")
+                        || error.contains("path+content census changed")
+                }),
+                "{label} semantic mutation should fail exact identity/content census: {result:?}"
+            );
+            fs::remove_dir_all(root).expect("remove XDM REPLACEGROUND mutation fixture");
+        }
+    }
+
+    #[test]
+    fn xdm_replaceground_manifest_owner_mutations_fail_closed() {
+        for (label, mutate) in [
+            ("manifest-owner-removed", "remove"),
+            ("manifest-contract-changed", "contract"),
+        ] {
+            let (root, family) = xdm_replaceground_mutation_fixture(label);
+            let manifest_path = root.join(HARNESS_MANIFEST_FILE);
+            let manifest = fs::read_to_string(&manifest_path).expect("read fixture manifest");
+            let owner = "Netlists/XDM/HSPICE/OTHER_PARSING/gnd_node_symbol.cir\trequires_upstream_wrapper\n";
+            assert!(manifest.contains(owner));
+            let mutated = if mutate == "remove" {
+                manifest.replacen(owner, "", 1)
+            } else {
+                manifest.replacen(
+                    owner,
+                    "Netlists/XDM/HSPICE/OTHER_PARSING/gnd_node_symbol.cir\tchanged_contract\n",
+                    1,
+                )
+            };
+            fs::write(&manifest_path, mutated).expect("write manifest mutation");
+            assert_xdm_replaceground_fixture_fails(&root, &family, label);
+            fs::remove_dir_all(root).expect("remove manifest mutation fixture");
+        }
+    }
+
+    #[test]
+    fn xdm_replaceground_missing_or_symlinked_pair_fails_closed() {
+        let (root, family) = xdm_replaceground_mutation_fixture("missing-pair");
+        let pair = family.join("gnd_node_symbol.cir.hspice");
+        fs::remove_file(&pair).expect("remove paired HSPICE source");
+        assert_xdm_replaceground_fixture_fails(&root, &family, "missing paired HSPICE source");
+        fs::remove_dir_all(root).expect("remove missing-pair fixture");
+
+        let (root, family) = xdm_replaceground_mutation_fixture("symlink-pair");
+        let pair = family.join("gnd_node_symbol.cir.hspice");
+        let target = family.join("ground_node_symbol.cir.hspice");
+        fs::remove_file(&pair).expect("remove regular pair before symlink mutation");
+        #[cfg(unix)]
+        let symlink_result = std::os::unix::fs::symlink(&target, &pair);
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_file(&target, &pair);
+        if symlink_result.is_ok() {
+            assert_xdm_replaceground_fixture_fails(
+                &root,
+                &family,
+                "symlinked paired HSPICE source",
+            );
+        }
+        fs::remove_dir_all(root).expect("remove symlink-pair fixture");
+    }
+
+    #[test]
+    fn xdm_replaceground_candidate_output_artifact_fails_closed() {
+        let (root, family) = xdm_replaceground_mutation_fixture("output-artifact");
+        let output = root.join("OutputData/XDM/HSPICE/OTHER_PARSING");
+        fs::create_dir_all(&output).expect("create candidate OutputData family");
+        fs::write(output.join("gnd_node_symbol.cir.prn"), "forbidden oracle\n")
+            .expect("write forbidden candidate artifact");
+        assert_xdm_replaceground_fixture_fails(&root, &family, "candidate OutputData artifact");
+        fs::remove_dir_all(root).expect("remove output-artifact fixture");
+    }
+
+    #[test]
+    fn xdm_replaceground_policy_and_plan_mutations_fail_closed() {
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_directives(
+                ".PREPROCESS REPLACEGROUND FALSE\n",
+                1,
+                true,
+            )
+            .is_err(),
+            "FALSE must not satisfy an active generated-policy contract"
+        );
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_directives(
+                ".PREPROCESS REPLACEGROUND TRUE\n.PREPROCESS REPLACEGROUND TRUE\n",
+                1,
+                true,
+            )
+            .is_err(),
+            "duplicate active directives must fail closed"
+        );
+
+        let source = xdm_replaceground_unit_source();
+        let path = PathBuf::from("xdm-replaceground-plan.cir");
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let plan = runner
+            .static_dc_plan_for_source_with_execution_dir(
+                &path,
+                source.clone(),
+                ExpressionDialect::Xyce,
+                None,
+            )
+            .expect("construct valid bounded REPLACEGROUND plan");
+        XyceTestRunner::validate_xdm_replaceground_plan(
+            &plan,
+            XyceXdmReplaceGroundKind::Gnd,
+            "projected HSPICE",
+        )
+        .expect("baseline plan qualifies");
+
+        let mut extra_state = plan.clone();
+        extra_state.steps.push(StepCommand {
+            target: StepTarget::Param,
+            name: "X".to_string(),
+            param_name: None,
+            sweep: StepSweep::List(vec![1.0]),
+        });
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_plan(
+                &extra_state,
+                XyceXdmReplaceGroundKind::Gnd,
+                "projected HSPICE",
+            )
+            .is_err(),
+            "extra plan state must fail closed"
+        );
+
+        let mut probe = plan.clone();
+        probe.print.probes[1] = "V(3)".to_string();
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_plan(
+                &probe,
+                XyceXdmReplaceGroundKind::Gnd,
+                "projected HSPICE",
+            )
+            .is_err(),
+            "probe mutation must fail closed"
+        );
+
+        let mut sweep = plan.clone();
+        sweep.dc.stop = 9.0;
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_plan(
+                &sweep,
+                XyceXdmReplaceGroundKind::Gnd,
+                "projected HSPICE",
+            )
+            .is_err(),
+            "DC sweep mutation must fail closed"
+        );
+
+        let mut topology = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("parse valid REPLACEGROUND topology");
+        topology.elements.pop();
+        assert!(
+            XyceTestRunner::xdm_replaceground_element_snapshot(
+                &topology,
+                XyceXdmReplaceGroundKind::Gnd,
+            )
+            .is_err(),
+            "topology mutation must fail closed"
+        );
+    }
+
+    #[test]
+    fn xdm_replaceground_analytic_half_divider_mutation_fails_closed() {
+        let results = xdm_replaceground_unit_results();
+        let mut table = XycePrnTable {
+            columns: vec!["Index".to_string(), "V(1)".to_string(), "V(2)".to_string()],
+            rows: results
+                .iter()
+                .enumerate()
+                .map(|(index, point)| {
+                    vec![index as Value, point.sweep_value, 0.5 * point.sweep_value]
+                })
+                .collect(),
+        };
+        XyceTestRunner::validate_xdm_replaceground_analytic_table(&table, &results)
+            .expect("baseline half-divider invariant qualifies");
+        table.rows[5][2] += 0.1;
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_analytic_table(&table, &results).is_err(),
+            "half-divider mutation must fail closed"
+        );
+    }
+
+    #[test]
+    fn xdm_replaceground_effective_verifier_threshold_and_zero_clamp_are_exact() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let results = xdm_replaceground_unit_results();
+        let good = xdm_replaceground_unit_table(0.0, 1.0);
+
+        let within = xdm_replaceground_unit_table(0.0, 1.009);
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &within, &results, &results)
+                .expect("effective verifier comparison succeeds")
+                .is_empty(),
+            "0.9 normalized RMS must pass"
+        );
+
+        let beyond = xdm_replaceground_unit_table(0.0, 1.011);
+        let mismatches = runner
+            .compare_xdm_replaceground_tables(&good, &beyond, &results, &results)
+            .expect("effective verifier comparison produces typed mismatches");
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].probe, "V(2)");
+        assert!(mismatches[0].relative_error > 1.0);
+
+        let zero_good = xdm_replaceground_unit_table(0.0, 5.0e-13);
+        let zero_test = xdm_replaceground_unit_table(0.0, -5.0e-13);
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&zero_good, &zero_test, &results, &results)
+                .expect("zero-clamped verifier comparison succeeds")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn xdm_replaceground_unrelated_family_content_mutation_fails_closed() {
+        let (root, family) = xdm_replaceground_mutation_fixture("unrelated-content");
+        let unrelated = family.join("special_variables.cir.hspice");
+        let source = fs::read_to_string(&unrelated).expect("read unrelated family member");
+        fs::write(&unrelated, format!("{source}\n* unrelated mutation\n"))
+            .expect("mutate unrelated family content");
+        assert_xdm_replaceground_fixture_fails(&root, &family, "unrelated family content mutation");
+        fs::remove_dir_all(root).expect("remove unrelated-content fixture");
+    }
+
+    #[test]
+    fn xdm_replaceground_exact_authored_snapshots_reject_common_mode_mutations() {
+        let path = PathBuf::from("xdm-replaceground-authored.cir");
+        let baseline = XyceTestRunner::parse_xyce_netlist(&xdm_replaceground_unit_source(), &path)
+            .expect("parse authored snapshot fixture");
+        for mutation in ["name", "node", "value"] {
+            let mut canonical = baseline.clone();
+            let mut projected = baseline.clone();
+            for netlist in [&mut canonical, &mut projected] {
+                match mutation {
+                    "name" => netlist.elements[1].name = "R_COMMON".to_string(),
+                    "node" => netlist.elements[1].nodes[1] = "3".to_string(),
+                    "value" => {
+                        let ElementKind::Resistor { value, .. } = &mut netlist.elements[1].kind
+                        else {
+                            panic!("fixture R1 remains a resistor")
+                        };
+                        *value = 11.0;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            for netlist in [&canonical, &projected] {
+                assert!(
+                    XyceTestRunner::validate_xdm_replaceground_subcircuit_topology(
+                        netlist,
+                        XyceXdmReplaceGroundKind::Gnd,
+                    )
+                    .is_err(),
+                    "common-mode authored {mutation} mutation must fail exact snapshot"
+                );
+            }
+        }
+
+        let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../tests/xyce/Netlists/XDM/HSPICE/OTHER_PARSING/ground_node_synonym_in_subckt_instantiation.cir",
+        );
+        let source = fs::read_to_string(&corpus).expect("read subcircuit snapshot record");
+        let mut netlist = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
+            .expect("parse subcircuit snapshot record");
+        netlist.subcircuits[0].elements[1].name = "R_BODY_MUTATED".to_string();
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_subcircuit_topology(
+                &netlist,
+                XyceXdmReplaceGroundKind::SubcircuitInstantiation,
+            )
+            .is_err(),
+            "subcircuit body mutation must fail exact hierarchy snapshot"
+        );
+    }
+
+    #[test]
+    fn xdm_replaceground_verifier_serialization_layout_and_axis_fail_closed() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let results = xdm_replaceground_unit_results();
+        let good = xdm_replaceground_unit_table(0.0, 1.000_000_000_1);
+        let rounded_same = xdm_replaceground_unit_table(0.0, 1.000_000_000_2);
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &rounded_same, &results, &results)
+                .expect("serialization-boundary comparison succeeds")
+                .is_empty(),
+            "values which round to the same 8-digit Xyce PRN token must compare equal"
+        );
+
+        let mut bad_index = good.clone();
+        bad_index.rows[3][0] = 4.0;
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &bad_index, &results, &results)
+                .is_err()
+        );
+        let mut bad_layout = good.clone();
+        bad_layout.rows[2].pop();
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &bad_layout, &results, &results)
+                .is_err()
+        );
+        let mut nonfinite = good.clone();
+        nonfinite.rows[2][1] = Value::NAN;
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &nonfinite, &results, &results)
+                .is_err()
+        );
+        let mut bad_good_axis = good.clone();
+        bad_good_axis.rows[4][1] = 4.5;
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&bad_good_axis, &good, &results, &results)
+                .is_err()
+        );
+
+        let mut zero_floor_good_axis = good.clone();
+        zero_floor_good_axis.rows[0][1] = 1.000_000_004e-12;
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&zero_floor_good_axis, &good, &results, &results,)
+                .expect("good V(1) at the serialized ZEROTOL/ABSDIFFTOL floor compares")
+                .is_empty(),
+            "ReadDataFile zero-clamps the serialized good axis before applying the strict greater-than ABSDIFFTOL check"
+        );
+        let mut above_zero_floor_good_axis = good.clone();
+        above_zero_floor_good_axis.rows[0][1] = 1.000_000_006e-12;
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(
+                    &above_zero_floor_good_axis,
+                    &good,
+                    &results,
+                    &results,
+                )
+                .is_err(),
+            "a serialized good-axis difference above ZEROTOL and ABSDIFFTOL must fail"
+        );
+
+        let mut shifted_test_axis = good.clone();
+        for row in &mut shifted_test_axis.rows {
+            row[1] *= 2.0;
+        }
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &shifted_test_axis, &results, &[])
+                .expect("test V(1) is an independent axis, not a dependent comparison")
+                .is_empty()
+        );
+        let mut zero_clamped_test_axis = good.clone();
+        zero_clamped_test_axis.rows[10][1] = 1.000_000_004e-12;
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &zero_clamped_test_axis, &results, &[],)
+                .is_err(),
+            "serialized TEST V(1) is zero-clamped before it defines the integration-axis span"
+        );
+
+        let mut localized_error = good.clone();
+        localized_error.rows[10][2] = 1.02;
+        assert!(
+            runner
+                .compare_xdm_replaceground_tables(&good, &localized_error, &results, &results)
+                .expect("uniform test-axis verifier comparison succeeds")
+                .is_empty()
+        );
+        localized_error.rows[10][1] = 100.0;
+        assert!(
+            !runner
+                .compare_xdm_replaceground_tables(&good, &localized_error, &results, &results)
+                .expect("test V(1) supplies errNorm integration widths")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn xdm_replaceground_options_policy_and_deadline_fail_closed() {
+        let source = xdm_replaceground_unit_source();
+        let path = PathBuf::from("xdm-replaceground-options.cir");
+        let mut netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("parse exact options fixture");
+        XyceTestRunner::validate_xdm_replaceground_effective_options(
+            &netlist.options,
+            true,
+            "test",
+        )
+        .expect("exact TNOM/policy options qualify");
+        netlist.options.tnom = Some(27.0);
+        assert!(
+            XyceTestRunner::validate_xdm_replaceground_effective_options(
+                &netlist.options,
+                true,
+                "test",
+            )
+            .is_err(),
+            "TNOM mutation must fail closed"
+        );
+
+        let (root, family) = xdm_replaceground_mutation_fixture("expired-deadline");
+        let runner = XyceTestRunner::new(
+            &root,
+            XyceRunnerConfig {
+                max_time_per_test_ms: 0,
+                ..XyceRunnerConfig::default()
+            },
+        );
+        let result = runner.run_test(family.join("gnd_node_symbol.cir"));
+        assert!(!result.passed);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("shared deadline expired"))
+        );
+        fs::remove_dir_all(root).expect("remove expired-deadline fixture");
+    }
 
     fn compare_generic_step_res_fixture(content: &str) -> Result<(), String> {
         let nonce = std::time::SystemTime::now()

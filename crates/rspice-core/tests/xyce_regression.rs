@@ -4340,6 +4340,35 @@ fn test_xyce_plain_static_dc_wrapper_cases_run_natively() {
 }
 
 #[test]
+fn test_xyce_xdm_hspice_replaceground_cases_run_relationally() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/XDM/HSPICE/OTHER_PARSING/gnd_exclamation_point_node_symbol.cir",
+        "Netlists/XDM/HSPICE/OTHER_PARSING/gnd_node_symbol.cir",
+        "Netlists/XDM/HSPICE/OTHER_PARSING/ground_node_symbol.cir",
+        "Netlists/XDM/HSPICE/OTHER_PARSING/ground_node_synonym_in_subckt_instantiation.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed XDM wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should execute its native XDM HSPICE REPLACEGROUND relational oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(
+            result.contract,
+            "xdm_hspice_replaceground_dc_relational_wrapper"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_model_binning_static_dc_wrapper_case_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
