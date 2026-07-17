@@ -178,6 +178,7 @@ mod tests {
                 passed: true,
                 expected: Some(1e-9),
                 tolerance: Some(1e-12),
+                event_axis: Some(1e-9),
             }],
         };
 
@@ -5659,6 +5660,7 @@ pub(crate) struct WorkerMeasurement {
     pub passed: bool,
     pub expected: Option<f64>,
     pub tolerance: Option<f64>,
+    pub event_axis: Option<f64>,
 }
 
 #[cfg(test)]
@@ -5667,7 +5669,8 @@ impl WorkerMeasurement {
         f64_payload_bytes(
             usize::from(self.value.is_some())
                 + usize::from(self.expected.is_some())
-                + usize::from(self.tolerance.is_some()),
+                + usize::from(self.tolerance.is_some())
+                + usize::from(self.event_axis.is_some()),
         )
     }
 }
@@ -5681,6 +5684,7 @@ impl From<rspice_core::MeasureResult> for WorkerMeasurement {
             passed: value.passed,
             expected: value.expected,
             tolerance: value.tolerance,
+            event_axis: value.event_axis,
         }
     }
 }
@@ -5694,6 +5698,7 @@ impl From<WorkerMeasurement> for rspice_core::MeasureResult {
             passed: value.passed,
             expected: value.expected,
             tolerance: value.tolerance,
+            event_axis: value.event_axis,
         }
     }
 }
