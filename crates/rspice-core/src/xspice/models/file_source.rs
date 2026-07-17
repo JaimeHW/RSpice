@@ -5,7 +5,6 @@ use crate::xspice::{
     AnalysisType, CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec,
     PortDirection, PortSpec, PortType, data_file,
 };
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 #[derive(Debug, Default)]
@@ -126,7 +125,7 @@ struct FileSourceTransformedRowsResource {
 #[derive(Debug, Default)]
 struct FileSourceCache {
     virtual_epoch: u64,
-    entries: HashMap<FileSourceCacheKey, Arc<Vec<RawFileSourceField>>>,
+    entries: crate::resource::BoundedCache<FileSourceCacheKey, Arc<Vec<RawFileSourceField>>>,
 }
 
 impl FileSourceCache {
@@ -152,6 +151,21 @@ fn lock_filesource_cache() -> MutexGuard<'static, FileSourceCache> {
     filesource_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn filesource_cache_entry_bytes(
+    key: &FileSourceCacheKey,
+    fields: &Arc<Vec<RawFileSourceField>>,
+) -> usize {
+    let value_bytes = std::mem::size_of::<Vec<RawFileSourceField>>().saturating_add(
+        fields
+            .capacity()
+            .saturating_mul(std::mem::size_of::<RawFileSourceField>()),
+    );
+    crate::resource::estimated_cache_entry_bytes::<FileSourceCacheKey, Arc<Vec<RawFileSourceField>>>(
+        key.file.len(),
+        value_bytes,
+    )
 }
 
 fn filesource_error(file: &str, message: impl Into<String>) -> CmError {
@@ -425,14 +439,17 @@ fn load_filesource_limited(
     {
         let mut guard = lock_filesource_cache();
         guard.sync_virtual_epoch();
-        if let Some(fields) = guard.entries.get(&key) {
+        guard
+            .entries
+            .enforce_limit(resource_limits.max_shared_cache_bytes);
+        if let Some(fields) = guard.entries.get_cloned(&key) {
             crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ExternalDataValues,
                 fields.len(),
                 resource_limits.max_external_data_values,
             )
             .map_err(|error| filesource_error(file, error.to_string()))?;
-            return Ok((fields.clone(), virtual_stamp));
+            return Ok((fields, virtual_stamp));
         }
     }
 
@@ -444,7 +461,13 @@ fn load_filesource_limited(
     )?);
     let mut guard = lock_filesource_cache();
     guard.sync_virtual_epoch();
-    guard.entries.insert(key, fields.clone());
+    let retained_bytes = filesource_cache_entry_bytes(&key, &fields);
+    let fields = guard.entries.insert_or_get(
+        key,
+        fields,
+        retained_bytes,
+        resource_limits.max_shared_cache_bytes,
+    );
     Ok((fields, virtual_stamp))
 }
 
@@ -1058,6 +1081,24 @@ mod tests {
                 .to_string()
                 .contains("external_data_bytes limit exceeded")
         );
+        data_file::unregister_data_file(file).expect("unregister filesource data");
+    }
+
+    #[test]
+    fn filesource_loader_honors_zero_shared_cache_retention() {
+        let _guard = data_file_test_guard();
+        let file = "virtual://filesource/zero-cache-retention";
+        let _ = data_file::unregister_data_file(file);
+        data_file::register_data_file(file, "0 1\n1 2\n").expect("register filesource data");
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_shared_cache_bytes = 0;
+
+        let (fields, _) = load_filesource_limited(file, 1, limits)
+            .expect("zero-retention policy still returns parsed fields");
+        assert_eq!(fields.len(), 4);
+        let cache = lock_filesource_cache();
+        assert!(cache.entries.keys().all(|key| key.file != file));
+
         data_file::unregister_data_file(file).expect("unregister filesource data");
     }
 

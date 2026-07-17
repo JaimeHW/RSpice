@@ -5,7 +5,6 @@ use crate::xspice::{
     data_file,
 };
 use crate::{Complex64, Value};
-use std::collections::HashMap;
 use std::sync::{
     Arc, Mutex, MutexGuard, OnceLock,
     atomic::{AtomicUsize, Ordering},
@@ -113,6 +112,25 @@ impl TableAxis {
 
     fn values(&self) -> &[Value] {
         &self.values
+    }
+
+    fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(
+                self.values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value>()),
+            )
+            .saturating_add(
+                self.local_diffs
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value>()),
+            )
+            .saturating_add(
+                self.inverse_spans
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value>()),
+            )
     }
 }
 
@@ -223,6 +241,33 @@ struct Table3DData {
     values: Vec<Value>,
 }
 
+impl Table2DData {
+    fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(self.x.retained_bytes())
+            .saturating_add(self.y.retained_bytes())
+            .saturating_add(
+                self.values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value>()),
+            )
+    }
+}
+
+impl Table3DData {
+    fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(self.x.retained_bytes())
+            .saturating_add(self.y.retained_bytes())
+            .saturating_add(self.z.retained_bytes())
+            .saturating_add(
+                self.values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value>()),
+            )
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AxisEval {
     lower: usize,
@@ -320,14 +365,14 @@ struct TableEvalScratch {
 #[derive(Debug)]
 struct TableDataCache<T> {
     virtual_epoch: u64,
-    entries: HashMap<TableCacheKey, Arc<T>>,
+    entries: crate::resource::BoundedCache<TableCacheKey, Arc<T>>,
 }
 
 impl<T> Default for TableDataCache<T> {
     fn default() -> Self {
         Self {
             virtual_epoch: 0,
-            entries: HashMap::new(),
+            entries: crate::resource::BoundedCache::default(),
         }
     }
 }
@@ -366,6 +411,13 @@ fn lock_table3d_cache() -> MutexGuard<'static, TableDataCache<Table3DData>> {
     table3d_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn table_cache_entry_bytes<T>(key: &TableCacheKey, retained_value_bytes: usize) -> usize {
+    crate::resource::estimated_cache_entry_bytes::<TableCacheKey, Arc<T>>(
+        key.file.len(),
+        retained_value_bytes,
+    )
 }
 
 fn table_file_error(model: &str, file: &str, message: impl Into<String>) -> CmError {
@@ -890,7 +942,10 @@ fn load_table2d_limited(
     {
         let mut guard = lock_table2d_cache();
         guard.sync_virtual_epoch();
-        if let Some(table) = guard.entries.get(&key) {
+        guard
+            .entries
+            .enforce_limit(resource_limits.max_shared_cache_bytes);
+        if let Some(table) = guard.entries.get_cloned(&key) {
             let retained_values = table
                 .x
                 .len()
@@ -902,7 +957,7 @@ fn load_table2d_limited(
                 resource_limits.max_external_data_values,
             )
             .map_err(|error| table_file_error(model, file, error.to_string()))?;
-            return Ok((Arc::clone(table), virtual_stamp));
+            return Ok((table, virtual_stamp));
         }
     }
 
@@ -913,7 +968,13 @@ fn load_table2d_limited(
     )?);
     let mut guard = lock_table2d_cache();
     guard.sync_virtual_epoch();
-    guard.entries.insert(key, Arc::clone(&table));
+    let retained_bytes = table_cache_entry_bytes::<Table2DData>(&key, table.retained_bytes());
+    let table = guard.entries.insert_or_get(
+        key,
+        table,
+        retained_bytes,
+        resource_limits.max_shared_cache_bytes,
+    );
     Ok((table, virtual_stamp))
 }
 
@@ -934,7 +995,10 @@ fn load_table3d_limited(
     {
         let mut guard = lock_table3d_cache();
         guard.sync_virtual_epoch();
-        if let Some(table) = guard.entries.get(&key) {
+        guard
+            .entries
+            .enforce_limit(resource_limits.max_shared_cache_bytes);
+        if let Some(table) = guard.entries.get_cloned(&key) {
             let retained_values = table
                 .x
                 .len()
@@ -947,7 +1011,7 @@ fn load_table3d_limited(
                 resource_limits.max_external_data_values,
             )
             .map_err(|error| table_file_error(model, file, error.to_string()))?;
-            return Ok((Arc::clone(table), virtual_stamp));
+            return Ok((table, virtual_stamp));
         }
     }
 
@@ -958,7 +1022,13 @@ fn load_table3d_limited(
     )?);
     let mut guard = lock_table3d_cache();
     guard.sync_virtual_epoch();
-    guard.entries.insert(key, Arc::clone(&table));
+    let retained_bytes = table_cache_entry_bytes::<Table3DData>(&key, table.retained_bytes());
+    let table = guard.entries.insert_or_get(
+        key,
+        table,
+        retained_bytes,
+        resource_limits.max_shared_cache_bytes,
+    );
     Ok((table, virtual_stamp))
 }
 
@@ -2537,6 +2607,35 @@ mod tests {
         ctx.set_input_analog("inx", 0.75);
         let changed_input = scaled_table2d_eval(&ctx).expect("changed input invalidates cache");
         assert_ne!(changed_input, sentinel);
+
+        let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
+    fn table_loader_honors_zero_shared_cache_retention() {
+        let _guard = data_file_test_guard();
+        let file = "virtual://table2d/zero-cache-retention";
+        let _ = data_file::unregister_data_file(file);
+        data_file::register_data_file(
+            file,
+            "\
+2
+2
+0 1
+0 1
+1 2
+3 4
+",
+        )
+        .expect("register virtual table2d data");
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_shared_cache_bytes = 0;
+
+        let (table, _) = load_table2d_limited(file, limits)
+            .expect("zero-retention policy still returns parsed table data");
+        assert_eq!(table.values.len(), 4);
+        let cache = lock_table2d_cache();
+        assert!(cache.entries.keys().all(|key| key.file != file));
 
         let _ = data_file::unregister_data_file(file);
     }

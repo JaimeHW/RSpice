@@ -252,6 +252,20 @@ impl PwlWaveform {
         self.times.len()
     }
 
+    pub(crate) fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(
+                self.times
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value>()),
+            )
+            .saturating_add(
+                self.values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value>()),
+            )
+    }
+
     /// Last source-time knot before scaling and offset.
     pub fn last_source_time(&self) -> Value {
         self.times.last().copied().unwrap_or(0.0)

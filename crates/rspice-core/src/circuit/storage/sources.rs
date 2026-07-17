@@ -24,6 +24,7 @@ struct TransientSourceContext {
     tstep: Value,
     tstop: Value,
     dialect: crate::engine::SpiceDialect,
+    resource_limits: crate::resource::ResourceLimits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,17 +64,32 @@ impl PwlCacheKey {
     }
 }
 
-fn pwl_waveform_cache()
--> &'static RwLock<HashMap<PwlCacheKey, Arc<crate::device::pwl_file::PwlWaveform>>> {
-    static CACHE: OnceLock<
-        RwLock<HashMap<PwlCacheKey, Arc<crate::device::pwl_file::PwlWaveform>>>,
-    > = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+type PwlWaveformCache =
+    crate::resource::BoundedCache<PwlCacheKey, Arc<crate::device::pwl_file::PwlWaveform>>;
+
+fn pwl_waveform_cache() -> &'static RwLock<PwlWaveformCache> {
+    static CACHE: OnceLock<RwLock<PwlWaveformCache>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(PwlWaveformCache::default()))
 }
 
-fn pwl_error_log_cache() -> &'static RwLock<HashSet<PwlCacheKey>> {
-    static CACHE: OnceLock<RwLock<HashSet<PwlCacheKey>>> = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(HashSet::new()))
+fn pwl_error_log_cache() -> &'static RwLock<crate::resource::BoundedCache<PwlCacheKey, ()>> {
+    static CACHE: OnceLock<RwLock<crate::resource::BoundedCache<PwlCacheKey, ()>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(crate::resource::BoundedCache::default()))
+}
+
+fn pwl_key_dynamic_bytes(key: &PwlCacheKey) -> usize {
+    key.path.len()
+}
+
+fn pwl_waveform_cache_entry_bytes(
+    key: &PwlCacheKey,
+    waveform: &crate::device::pwl_file::PwlWaveform,
+) -> usize {
+    crate::resource::estimated_cache_entry_bytes::<
+        PwlCacheKey,
+        Arc<crate::device::pwl_file::PwlWaveform>,
+    >(pwl_key_dynamic_bytes(key), waveform.retained_bytes())
 }
 
 impl VoltageSources {
@@ -139,6 +155,21 @@ impl VoltageSources {
         tstop: Value,
         dialect: crate::engine::SpiceDialect,
     ) {
+        self.set_transient_context_with_dialect_and_limits(
+            tstep,
+            tstop,
+            dialect,
+            crate::resource::ResourceLimits::default(),
+        );
+    }
+
+    pub(crate) fn set_transient_context_with_dialect_and_limits(
+        &mut self,
+        tstep: Value,
+        tstop: Value,
+        dialect: crate::engine::SpiceDialect,
+        resource_limits: crate::resource::ResourceLimits,
+    ) {
         let step = if tstep.is_finite() && tstep > 0.0 {
             tstep
         } else {
@@ -153,6 +184,7 @@ impl VoltageSources {
             tstep: step,
             tstop: stop,
             dialect,
+            resource_limits,
         });
     }
 
@@ -327,24 +359,6 @@ impl VoltageSources {
             .fold(0.0, Value::max)
     }
 
-    pub(crate) fn load_pwl_waveform_cached(
-        path: &str,
-        time_scale: Value,
-        value_scale: Value,
-        time_offset: Value,
-        value_offset: Value,
-    ) -> Result<Arc<crate::device::pwl_file::PwlWaveform>, String> {
-        Self::load_pwl_waveform_cached_with_limits(
-            path,
-            time_scale,
-            value_scale,
-            time_offset,
-            value_offset,
-            crate::resource::ResourceLimits::default(),
-        )
-        .map_err(|error| format!("failed to load PWL file '{path}': {error}"))
-    }
-
     pub(crate) fn load_pwl_waveform_cached_with_limits(
         path: &str,
         time_scale: Value,
@@ -365,15 +379,24 @@ impl VoltageSources {
             )?;
         }
 
-        if let Ok(cache) = pwl_waveform_cache().read()
-            && let Some(wf) = cache.get(&key)
-        {
+        let max_cache_bytes = resource_limits.max_shared_cache_bytes;
+        let cached = pwl_waveform_cache().read().ok().and_then(|cache| {
+            (cache.retained_bytes() <= max_cache_bytes)
+                .then(|| cache.get_cloned(&key))
+                .flatten()
+        });
+        let cached = cached.or_else(|| {
+            let mut cache = pwl_waveform_cache().write().ok()?;
+            cache.enforce_limit(max_cache_bytes);
+            cache.get_cloned(&key)
+        });
+        if let Some(wf) = cached {
             crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ExternalDataValues,
                 wf.len().saturating_mul(2),
                 resource_limits.max_external_data_values,
             )?;
-            return Ok(Arc::clone(wf));
+            return Ok(wf);
         }
 
         let waveform = crate::device::pwl_file::load_pwl_file_with_limits(path, resource_limits)?
@@ -381,16 +404,29 @@ impl VoltageSources {
         let waveform = Arc::new(waveform);
 
         if let Ok(mut cache) = pwl_waveform_cache().write() {
-            let entry = cache.entry(key).or_insert_with(|| Arc::clone(&waveform));
-            return Ok(Arc::clone(entry));
+            let retained_bytes = pwl_waveform_cache_entry_bytes(&key, &waveform);
+            let entry =
+                cache.insert_or_get(key, Arc::clone(&waveform), retained_bytes, max_cache_bytes);
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                entry.len().saturating_mul(2),
+                resource_limits.max_external_data_values,
+            )?;
+            return Ok(entry);
         }
 
         Ok(waveform)
     }
 
-    fn log_pwl_error_once(key: PwlCacheKey, msg: &str) {
+    fn log_pwl_error_once(key: PwlCacheKey, msg: &str, max_cache_bytes: usize) {
         if let Ok(mut logged) = pwl_error_log_cache().write() {
-            if logged.insert(key) {
+            logged.enforce_limit(max_cache_bytes);
+            if logged.get(&key).is_none() {
+                let retained_bytes = crate::resource::estimated_cache_entry_bytes::<PwlCacheKey, ()>(
+                    pwl_key_dynamic_bytes(&key),
+                    0,
+                );
+                logged.insert_or_get(key, (), retained_bytes, max_cache_bytes);
                 log::warn!("{}", msg);
             }
             return;
@@ -422,6 +458,7 @@ impl VoltageSources {
                 tstep: step,
                 tstop: stop,
                 dialect,
+                resource_limits: crate::resource::ResourceLimits::default(),
             }),
         )
     }
@@ -727,12 +764,16 @@ impl VoltageSources {
             } => {
                 let key =
                     PwlCacheKey::new(path, *time_scale, *value_scale, *time_offset, *value_offset);
-                match Self::load_pwl_waveform_cached(
+                let resource_limits = context
+                    .map(|context| context.resource_limits)
+                    .unwrap_or_default();
+                match Self::load_pwl_waveform_cached_with_limits(
                     path,
                     *time_scale,
                     *value_scale,
                     *time_offset,
                     *value_offset,
+                    resource_limits,
                 ) {
                     Ok(waveform) => {
                         if time < *delay {
@@ -742,7 +783,12 @@ impl VoltageSources {
                         }
                     }
                     Err(err) => {
-                        Self::log_pwl_error_once(key, &err);
+                        let message = format!("failed to load PWL file '{path}': {err}");
+                        Self::log_pwl_error_once(
+                            key,
+                            &message,
+                            resource_limits.max_shared_cache_bytes,
+                        );
                         *value_offset
                     }
                 }
@@ -1341,6 +1387,21 @@ impl CurrentSources {
         tstop: Value,
         dialect: crate::engine::SpiceDialect,
     ) {
+        self.set_transient_context_with_dialect_and_limits(
+            tstep,
+            tstop,
+            dialect,
+            crate::resource::ResourceLimits::default(),
+        );
+    }
+
+    pub(crate) fn set_transient_context_with_dialect_and_limits(
+        &mut self,
+        tstep: Value,
+        tstop: Value,
+        dialect: crate::engine::SpiceDialect,
+        resource_limits: crate::resource::ResourceLimits,
+    ) {
         let step = if tstep.is_finite() && tstep > 0.0 {
             tstep
         } else {
@@ -1355,6 +1416,7 @@ impl CurrentSources {
             tstep: step,
             tstop: stop,
             dialect,
+            resource_limits,
         });
     }
 
@@ -1480,6 +1542,7 @@ impl CurrentSources {
 mod tests {
     use super::*;
     use crate::netlist::SourceSpec;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn assert_close(actual: Value, expected: Value) {
         let tolerance = expected.abs().max(1.0) * 1.0e-12;
@@ -1489,11 +1552,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn pwl_loader_honors_zero_shared_cache_retention() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rspice-pwl-cache-{unique}.csv"));
+        std::fs::write(&path, "0 0\n1 1\n").expect("write PWL cache fixture");
+        let path_text = path.to_string_lossy().into_owned();
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_shared_cache_bytes = 0;
+
+        let waveform = VoltageSources::load_pwl_waveform_cached_with_limits(
+            &path_text, 1.0, 1.0, 0.0, 0.0, limits,
+        )
+        .expect("zero-retention policy still returns the parsed waveform");
+        assert_eq!(waveform.len(), 2);
+        let key = PwlCacheKey::new(&path_text, 1.0, 1.0, 0.0, 0.0);
+        let cache = pwl_waveform_cache().read().expect("read PWL cache");
+        assert!(cache.get(&key).is_none());
+
+        let _ = std::fs::remove_file(path);
+    }
+
     fn transient_context(tstep: Value, tstop: Value) -> Option<TransientSourceContext> {
         Some(TransientSourceContext {
             tstep,
             tstop,
             dialect: crate::engine::SpiceDialect::BestAvailable,
+            resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
 
@@ -1502,6 +1590,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::engine::SpiceDialect::Ngspice,
+            resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
 
@@ -1510,6 +1599,7 @@ mod tests {
             tstep,
             tstop,
             dialect: crate::engine::SpiceDialect::Xyce,
+            resource_limits: crate::resource::ResourceLimits::default(),
         })
     }
 

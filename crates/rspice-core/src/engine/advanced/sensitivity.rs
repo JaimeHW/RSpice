@@ -1132,6 +1132,7 @@ impl Engine {
 
     fn collect_ac_sensitivity_targets(
         netlist: &Netlist,
+        resource_limits: crate::resource::ResourceLimits,
     ) -> Result<Vec<AcSensitivityTarget>, SimulationError> {
         let mut targets = Vec::new();
         let mut seen = HashSet::new();
@@ -1189,7 +1190,10 @@ impl Engine {
                             element: name.clone(),
                             element_type,
                             parameter: "DC".to_string(),
-                            nominal_value: crate::engine::extract_dc_value(spec),
+                            nominal_value: crate::engine::extract_dc_value_with_limits(
+                                spec,
+                                resource_limits,
+                            ),
                             location: AcSensitivityLocation::SourceDc { element_index },
                         },
                     );
@@ -2269,7 +2273,7 @@ impl Engine {
         }
 
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
-        let targets = Self::collect_ac_sensitivity_targets(&flat)?
+        let targets = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
             .into_iter()
             .filter(Self::dc_sensitivity_target_active)
             .filter(|target| Self::sensitivity_target_selected(target, filters))
@@ -2437,7 +2441,7 @@ impl Engine {
         }
 
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
-        let targets = Self::collect_ac_sensitivity_targets(&flat)?
+        let targets = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
             .into_iter()
             .filter(|target| Self::sensitivity_target_selected(target, filters))
             .collect::<Vec<_>>();

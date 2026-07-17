@@ -69,4 +69,4 @@ pub use result::TransientResult;
 pub use stb::StbAnalysisResult;
 pub use transient::{TransientCheckpoint, netlist_fingerprint};
 
-pub(crate) use source_values::{extract_ac_value, extract_dc_value};
+pub(crate) use source_values::{extract_ac_value, extract_dc_value, extract_dc_value_with_limits};

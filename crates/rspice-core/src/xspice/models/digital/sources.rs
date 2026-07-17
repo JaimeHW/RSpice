@@ -44,6 +44,20 @@ impl DSourceRows {
         let start = index * self.width;
         &self.values[start..start + self.width]
     }
+
+    fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(
+                self.rows
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<DSourceRow>()),
+            )
+            .saturating_add(
+                self.values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<DigitalValue>()),
+            )
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -67,7 +81,7 @@ struct DSourceRowsResource {
 #[derive(Debug, Default)]
 struct DSourceCache {
     virtual_epoch: u64,
-    entries: HashMap<DSourceCacheKey, Arc<DSourceRows>>,
+    entries: crate::resource::BoundedCache<DSourceCacheKey, Arc<DSourceRows>>,
 }
 
 impl DSourceCache {
@@ -93,6 +107,13 @@ fn lock_d_source_cache() -> MutexGuard<'static, DSourceCache> {
     d_source_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn d_source_cache_entry_bytes(key: &DSourceCacheKey, rows: &DSourceRows) -> usize {
+    crate::resource::estimated_cache_entry_bytes::<DSourceCacheKey, Arc<DSourceRows>>(
+        key.input_file.len(),
+        rows.retained_bytes(),
+    )
 }
 
 fn d_source_error(input_file: &str, line: usize, message: impl Into<String>) -> CmError {
@@ -476,7 +497,10 @@ fn load_d_source_rows_limited(
     {
         let mut guard = lock_d_source_cache();
         guard.sync_virtual_epoch();
-        if let Some(rows) = guard.entries.get(&key) {
+        guard
+            .entries
+            .enforce_limit(resource_limits.max_shared_cache_bytes);
+        if let Some(rows) = guard.entries.get_cloned(&key) {
             let retained_values = rows.rows.len().saturating_add(rows.values.len());
             if let Err(error) = crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ExternalDataValues,
@@ -488,7 +512,7 @@ fn load_d_source_rows_limited(
                     Err(d_source_file_error(input_file, error.to_string())),
                 );
             }
-            return (virtual_stamp, Ok(Some(Arc::clone(rows))));
+            return (virtual_stamp, Ok(Some(rows)));
         }
     }
 
@@ -512,7 +536,13 @@ fn load_d_source_rows_limited(
     };
     let mut guard = lock_d_source_cache();
     guard.sync_virtual_epoch();
-    guard.entries.insert(key, Arc::clone(&rows));
+    let retained_bytes = d_source_cache_entry_bytes(&key, &rows);
+    let rows = guard.entries.insert_or_get(
+        key,
+        rows,
+        retained_bytes,
+        resource_limits.max_shared_cache_bytes,
+    );
     (virtual_stamp, Ok(Some(rows)))
 }
 
@@ -778,6 +808,60 @@ impl DStateTable {
             .saturating_add(wide_inputs)
             .saturating_add(packed_entries)
     }
+
+    fn retained_bytes(&self) -> usize {
+        let wide_input_bytes = self
+            .transitions
+            .iter()
+            .filter_map(|transition| transition.wide_inputs.as_ref())
+            .map(|inputs| {
+                inputs
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Option<bool>>())
+            })
+            .fold(0usize, usize::saturating_add);
+        let state_range_bytes = self.state_ranges.capacity().saturating_mul(
+            std::mem::size_of::<i64>()
+                .saturating_add(std::mem::size_of::<DStateRange>())
+                .saturating_add(16),
+        );
+        let packed_bytes = self.packed_match_index.as_ref().map_or(0, |index| {
+            let map_bytes = index.state_entries.capacity().saturating_mul(
+                std::mem::size_of::<i64>()
+                    .saturating_add(std::mem::size_of::<Box<[Option<usize>]>>())
+                    .saturating_add(16),
+            );
+            index
+                .state_entries
+                .values()
+                .map(|entries| {
+                    entries
+                        .len()
+                        .saturating_mul(std::mem::size_of::<Option<usize>>())
+                })
+                .fold(map_bytes, usize::saturating_add)
+                .saturating_add(
+                    index
+                        .missing_state_entries
+                        .len()
+                        .saturating_mul(std::mem::size_of::<Option<usize>>()),
+                )
+        });
+        std::mem::size_of::<Self>()
+            .saturating_add(
+                self.transitions
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<DStateTransition>()),
+            )
+            .saturating_add(wide_input_bytes)
+            .saturating_add(
+                self.output_values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<DigitalValue>()),
+            )
+            .saturating_add(state_range_bytes)
+            .saturating_add(packed_bytes)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -835,7 +919,7 @@ impl DStatePackedMatchIndex {
 #[derive(Debug, Default)]
 struct DStateCache {
     virtual_epoch: u64,
-    entries: HashMap<DStateCacheKey, Arc<DStateTable>>,
+    entries: crate::resource::BoundedCache<DStateCacheKey, Arc<DStateTable>>,
 }
 
 impl DStateCache {
@@ -861,6 +945,13 @@ fn lock_d_state_cache() -> MutexGuard<'static, DStateCache> {
     d_state_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn d_state_cache_entry_bytes(key: &DStateCacheKey, table: &DStateTable) -> usize {
+    crate::resource::estimated_cache_entry_bytes::<DStateCacheKey, Arc<DStateTable>>(
+        key.state_file.len(),
+        table.retained_bytes(),
+    )
 }
 
 fn d_state_file_error(state_file: &str, message: impl Into<String>) -> CmError {
@@ -1514,7 +1605,10 @@ fn load_d_state_table_limited(
     {
         let mut guard = lock_d_state_cache();
         guard.sync_virtual_epoch();
-        if let Some(table) = guard.entries.get(&key) {
+        guard
+            .entries
+            .enforce_limit(resource_limits.max_shared_cache_bytes);
+        if let Some(table) = guard.entries.get_cloned(&key) {
             let retained_values = table.retained_value_count();
             if let Err(error) = crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ExternalDataValues,
@@ -1526,7 +1620,7 @@ fn load_d_state_table_limited(
                     Err(d_state_file_error(state_file, error.to_string())),
                 );
             }
-            return (virtual_stamp, Ok(Some(Arc::clone(table))));
+            return (virtual_stamp, Ok(Some(table)));
         }
     }
 
@@ -1542,7 +1636,13 @@ fn load_d_state_table_limited(
     };
     let mut guard = lock_d_state_cache();
     guard.sync_virtual_epoch();
-    guard.entries.insert(key, Arc::clone(&table));
+    let retained_bytes = d_state_cache_entry_bytes(&key, &table);
+    let table = guard.entries.insert_or_get(
+        key,
+        table,
+        retained_bytes,
+        resource_limits.max_shared_cache_bytes,
+    );
     (virtual_stamp, Ok(Some(table)))
 }
 
@@ -2058,6 +2158,53 @@ mod tests {
 
         unregister_test_data_file(input_file);
         lock_d_source_cache().clear();
+    }
+
+    #[test]
+    fn digital_loaders_honor_zero_shared_cache_retention() {
+        let _guard = data_file_test_guard();
+        let input_file = "virtual://d_source/zero-cache-retention";
+        let state_file = "virtual://d_state/zero-cache-retention";
+        unregister_test_data_file(input_file);
+        unregister_test_data_file(state_file);
+        data_file::register_data_file(input_file, "0 0s\n1n 1s\n")
+            .expect("register virtual d_source data");
+        data_file::register_data_file(state_file, "0 0s 0 -> 0\n")
+            .expect("register virtual d_state data");
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_shared_cache_bytes = 0;
+
+        let (_, rows) = load_d_source_rows_limited(input_file, 1, limits);
+        assert!(
+            rows.expect("d_source load succeeds")
+                .expect("d_source data parses")
+                .len()
+                > 0
+        );
+        assert!(
+            lock_d_source_cache()
+                .entries
+                .keys()
+                .all(|key| key.input_file != input_file)
+        );
+
+        let (_, table) = load_d_state_table_limited(state_file, 1, 1, limits);
+        assert!(
+            table
+                .expect("d_state load succeeds")
+                .expect("d_state data parses")
+                .row_outputs(0)
+                .is_some()
+        );
+        assert!(
+            lock_d_state_cache()
+                .entries
+                .keys()
+                .all(|key| key.state_file != state_file)
+        );
+
+        unregister_test_data_file(input_file);
+        unregister_test_data_file(state_file);
     }
 
     #[test]

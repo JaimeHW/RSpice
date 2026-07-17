@@ -768,16 +768,22 @@ impl Engine {
         circuit.link_indices(&matrix);
 
         let source_step_hint = Self::transient_source_step_hint(netlist, hinted_max_step);
-        circuit.voltage_sources.set_transient_context_with_dialect(
-            source_step_hint,
-            tstop,
-            self.config.spice_dialect,
-        );
-        circuit.current_sources.set_transient_context_with_dialect(
-            source_step_hint,
-            tstop,
-            self.config.spice_dialect,
-        );
+        circuit
+            .voltage_sources
+            .set_transient_context_with_dialect_and_limits(
+                source_step_hint,
+                tstop,
+                self.config.spice_dialect,
+                self.config.resource_limits,
+            );
+        circuit
+            .current_sources
+            .set_transient_context_with_dialect_and_limits(
+                source_step_hint,
+                tstop,
+                self.config.spice_dialect,
+                self.config.resource_limits,
+            );
         circuit.set_xspice_transient_context(source_step_hint, tstop);
 
         // `.TRAN ... UIC` skips the operating point: integration starts

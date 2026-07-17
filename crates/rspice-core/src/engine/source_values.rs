@@ -4,9 +4,18 @@ use crate::Value;
 use crate::netlist::SourceSpec;
 /// Extract DC value from a SourceSpec enum
 pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
+    extract_dc_value_with_limits(spec, crate::resource::ResourceLimits::default())
+}
+
+pub(crate) fn extract_dc_value_with_limits(
+    spec: &SourceSpec,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Value {
     match spec {
-        SourceSpec::Distortion { inner, .. } => extract_dc_value(inner),
-        SourceSpec::RfPort { inner, .. } => extract_dc_value(inner),
+        SourceSpec::Distortion { inner, .. } => {
+            extract_dc_value_with_limits(inner, resource_limits)
+        }
+        SourceSpec::RfPort { inner, .. } => extract_dc_value_with_limits(inner, resource_limits),
         SourceSpec::Dc(v) => *v,
         SourceSpec::DcAc { dc_value, .. } => *dc_value,
         SourceSpec::DcTransient { dc_value, .. } => *dc_value,
@@ -53,12 +62,13 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
             value_offset,
             delay,
             repeat_from,
-        } => crate::circuit::VoltageSources::load_pwl_waveform_cached(
+        } => crate::circuit::VoltageSources::load_pwl_waveform_cached_with_limits(
             path,
             *time_scale,
             *value_scale,
             *time_offset,
             *value_offset,
+            resource_limits,
         )
         .map(|wf| {
             if 0.0 < *delay {

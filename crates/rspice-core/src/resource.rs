@@ -1,6 +1,8 @@
 //! Shared resource-governance types for untrusted and batch workloads.
 
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::hash::Hash;
 use std::io::Read;
 use std::path::Path;
 
@@ -165,6 +167,148 @@ pub(crate) fn read_utf8_file_limited(
     read_utf8_file_limited_with_metadata(path, resource, limit).map(|(contents, _)| contents)
 }
 
+#[derive(Debug)]
+struct BoundedCacheEntry<V> {
+    value: V,
+    retained_bytes: usize,
+}
+
+/// Conservative retained-byte estimate for one [`BoundedCache`] entry.
+pub(crate) fn estimated_cache_entry_bytes<K, V>(
+    dynamic_key_bytes: usize,
+    dynamic_value_bytes: usize,
+) -> usize {
+    const HASH_BUCKET_OVERHEAD: usize = 32;
+    std::mem::size_of::<K>()
+        .saturating_mul(2)
+        .saturating_add(std::mem::size_of::<BoundedCacheEntry<V>>())
+        .saturating_add(dynamic_key_bytes.saturating_mul(2))
+        .saturating_add(dynamic_value_bytes)
+        .saturating_add(HASH_BUCKET_OVERHEAD)
+}
+
+/// A byte-bounded insertion-order cache for process-wide parsed data.
+///
+/// The caller-provided weight must include the retained value, key, and any
+/// relevant cache bookkeeping. Eviction only releases the cache's ownership;
+/// callers that hold an `Arc` continue using the value safely.
+#[derive(Debug)]
+pub(crate) struct BoundedCache<K, V> {
+    entries: HashMap<K, BoundedCacheEntry<V>>,
+    insertion_order: VecDeque<K>,
+    retained_bytes: usize,
+}
+
+impl<K, V> Default for BoundedCache<K, V> {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            insertion_order: VecDeque::new(),
+            retained_bytes: 0,
+        }
+    }
+}
+
+impl<K, V> BoundedCache<K, V>
+where
+    K: Clone + Eq + Hash,
+    V: Clone,
+{
+    pub(crate) fn get(&self, key: &K) -> Option<&V> {
+        self.entries.get(key).map(|entry| &entry.value)
+    }
+
+    pub(crate) fn get_cloned(&self, key: &K) -> Option<V> {
+        self.get(key).cloned()
+    }
+
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.retained_bytes
+    }
+
+    pub(crate) fn enforce_limit(&mut self, limit: usize) {
+        while self.retained_bytes > limit {
+            let Some(key) = self.insertion_order.pop_front() else {
+                self.entries.clear();
+                self.retained_bytes = 0;
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&key) {
+                self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
+            }
+        }
+    }
+
+    /// Return an existing value or retain the supplied value if it fits.
+    ///
+    /// Cache allocation failure degrades to an uncached result because the
+    /// cache is an optimization and the caller already owns a valid value.
+    pub(crate) fn insert_or_get(
+        &mut self,
+        key: K,
+        value: V,
+        retained_bytes: usize,
+        limit: usize,
+    ) -> V {
+        self.enforce_limit(limit);
+        if let Some(existing) = self.get_cloned(&key) {
+            return existing;
+        }
+
+        let retained_bytes = retained_bytes.max(1);
+        if retained_bytes > limit {
+            return value;
+        }
+        while self.retained_bytes.saturating_add(retained_bytes) > limit {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                self.entries.clear();
+                self.retained_bytes = 0;
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&oldest) {
+                self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
+            }
+        }
+
+        if self.insertion_order.try_reserve(1).is_err() || self.entries.try_reserve(1).is_err() {
+            return value;
+        }
+        self.insertion_order.push_back(key.clone());
+        self.entries.insert(
+            key,
+            BoundedCacheEntry {
+                value: value.clone(),
+                retained_bytes,
+            },
+        );
+        self.retained_bytes = self.retained_bytes.saturating_add(retained_bytes);
+        value
+    }
+
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) {
+        self.entries.retain(|key, entry| keep(key, &entry.value));
+        self.retained_bytes = self
+            .entries
+            .values()
+            .map(|entry| entry.retained_bytes)
+            .fold(0usize, usize::saturating_add);
+        let entries = &self.entries;
+        self.insertion_order.retain(|key| entries.contains_key(key));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+        self.insertion_order.clear();
+        self.retained_bytes = 0;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &K> {
+        self.entries.keys()
+    }
+}
+
 /// Configurable limits applied at parsing, construction, and analysis
 /// boundaries.
 ///
@@ -279,6 +423,39 @@ mod tests {
             "shared_cache_bytes"
         );
         assert_eq!(ResourceKind::MatrixUnknowns.to_string(), "matrix_unknowns");
+    }
+
+    #[test]
+    fn bounded_cache_evicts_oldest_entries_and_honors_stricter_limits() {
+        let mut cache = BoundedCache::default();
+        assert_eq!(cache.insert_or_get("a", 1, 4, 8), 1);
+        assert_eq!(cache.insert_or_get("b", 2, 4, 8), 2);
+        assert_eq!(cache.retained_bytes(), 8);
+
+        assert_eq!(cache.insert_or_get("c", 3, 4, 8), 3);
+        assert!(cache.get(&"a").is_none());
+        assert_eq!(cache.get(&"b"), Some(&2));
+        assert_eq!(cache.get(&"c"), Some(&3));
+
+        cache.enforce_limit(4);
+        assert!(cache.get(&"b").is_none());
+        assert_eq!(cache.get(&"c"), Some(&3));
+        assert_eq!(cache.retained_bytes(), 4);
+    }
+
+    #[test]
+    fn bounded_cache_skips_oversized_values_and_reclaims_retained_entries() {
+        let mut cache = BoundedCache::default();
+        assert_eq!(cache.insert_or_get("oversized", 7, 9, 8), 7);
+        assert!(cache.get(&"oversized").is_none());
+
+        cache.insert_or_get("native", 1, 3, 8);
+        cache.insert_or_get("virtual", 2, 3, 8);
+        cache.retain(|key, _| *key != "virtual");
+        assert_eq!(cache.retained_bytes(), 3);
+        assert_eq!(cache.get(&"native"), Some(&1));
+        cache.clear();
+        assert_eq!(cache.retained_bytes(), 0);
     }
 
     #[test]

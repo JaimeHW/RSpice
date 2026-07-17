@@ -11,7 +11,6 @@ use crate::device::{
 };
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::{Complex64, Value};
-use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, RwLock};
 mod inductors;
 mod nonlinear;
