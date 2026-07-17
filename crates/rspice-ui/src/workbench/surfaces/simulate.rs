@@ -4623,6 +4623,7 @@ mod tests {
                     passed: false,
                     expected: None,
                     tolerance: None,
+                    event_axis: None,
                 },
             ]),
         ));
@@ -4642,6 +4643,7 @@ mod tests {
                     passed: false,
                     expected: Some(10.0),
                     tolerance: Some(0.1),
+                    event_axis: None,
                 },
             ]),
         ));

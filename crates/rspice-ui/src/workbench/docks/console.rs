@@ -893,6 +893,7 @@ mod tests {
             passed: true,
             expected: Some(1.0e-3),
             tolerance: Some(0.25e-3),
+            event_axis: None,
         };
         let row = measurement_presentation(&passing, "Transient");
         assert_eq!(row.status, "PASS");

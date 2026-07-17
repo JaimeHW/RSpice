@@ -3105,6 +3105,8 @@ pub struct ProjectMeasurement {
     pub expected: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tolerance: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_axis: Option<f64>,
 }
 
 impl ProjectMeasurement {
@@ -3116,13 +3118,15 @@ impl ProjectMeasurement {
             passed: self.passed,
             expected: self.expected,
             tolerance: self.tolerance,
+            event_axis: self.event_axis,
         }
     }
 
     fn validate(&self, prefix: &str) -> Result<(), String> {
         require_optional_finite(self.value, &format!("{prefix}.value"))?;
         require_optional_finite(self.expected, &format!("{prefix}.expected"))?;
-        require_optional_finite(self.tolerance, &format!("{prefix}.tolerance"))
+        require_optional_finite(self.tolerance, &format!("{prefix}.tolerance"))?;
+        require_optional_finite(self.event_axis, &format!("{prefix}.event_axis"))
     }
 }
 
@@ -3135,6 +3139,7 @@ impl From<&rspice_core::MeasureResult> for ProjectMeasurement {
             passed: measurement.passed,
             expected: measurement.expected,
             tolerance: measurement.tolerance,
+            event_axis: measurement.event_axis,
         }
     }
 }
