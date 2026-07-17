@@ -172,6 +172,9 @@ impl RSpiceApp {
             ShortcutCommand::PlaceWire => {
                 self.state.schematic.tool = Tool::Wire;
             }
+            ShortcutCommand::PlaceJunction => {
+                self.state.schematic.tool = Tool::Junction;
+            }
             ShortcutCommand::Place(ComponentType::Ground) => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Ground);
             }
@@ -494,6 +497,7 @@ impl RSpiceApp {
             }
             ShortcutCommand::Place(_)
             | ShortcutCommand::PlaceWire
+            | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceProbe
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::PlaceInstance
@@ -786,7 +790,11 @@ impl RSpiceApp {
 
     pub(super) fn action_edit_paste(&mut self) {
         let anchor = self.state.schematic_paste_anchor();
-        self.state.schematic.paste_at(anchor);
+        if !self.state.schematic.paste_at(anchor) {
+            self.state.push_user_message(ConsoleMessage::warning(
+                "Paste could not be completed at the current canvas target".to_owned(),
+            ));
+        }
     }
 
     pub(super) fn action_edit_cut(&mut self) {
@@ -800,9 +808,17 @@ impl RSpiceApp {
 
     pub(super) fn action_edit_select_all(&mut self) {
         let schematic = &mut self.state.schematic;
+        let junction_positions: Vec<_> = schematic
+            .junctions
+            .iter()
+            .map(|junction| junction.pos)
+            .collect();
         schematic.selection.clear();
         schematic.selection.components = schematic.components.iter().map(|c| c.id).collect();
         schematic.selection.wires = schematic.wires.iter().map(|w| w.id).collect();
+        for pos in junction_positions {
+            schematic.selection.select_junction(pos);
+        }
     }
 }
 
@@ -818,6 +834,7 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::Cut
             | ShortcutCommand::Delete
             | ShortcutCommand::PlaceWire
+            | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::Place(_)
             | ShortcutCommand::RotateSelection

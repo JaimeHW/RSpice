@@ -38,3 +38,16 @@ pub struct NetLabelInfo {
     pub x: f64,
     pub y: f64,
 }
+
+/// Simplified explicit-junction position for connectivity checking.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JunctionInfo {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl JunctionInfo {
+    pub fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+}

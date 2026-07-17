@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 
 /// Clipboard data for copy/paste operations
 ///
-/// Stores copied components and wires with their relative positions.
+/// Stores copied components, wires, and explicit junction intent with their
+/// relative positions.
 /// When pasting, elements are offset from the paste location based on
 /// the original selection's center.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -44,17 +45,17 @@ impl ClipboardData {
 
     /// Check if clipboard has any content
     pub fn has_content(&self) -> bool {
-        !self.components.is_empty() || !self.wires.is_empty()
+        !self.components.is_empty() || !self.wires.is_empty() || !self.junctions.is_empty()
     }
 
     /// Check if clipboard is empty
     pub fn is_empty(&self) -> bool {
-        self.components.is_empty() && self.wires.is_empty()
+        self.components.is_empty() && self.wires.is_empty() && self.junctions.is_empty()
     }
 
     /// Get total number of items in clipboard
     pub fn count(&self) -> usize {
-        self.components.len() + self.wires.len()
+        self.components.len() + self.wires.len() + self.junctions.len()
     }
 
     /// Clear all clipboard content
@@ -74,7 +75,7 @@ impl ClipboardData {
         wires: Vec<Wire>,
         junctions: Vec<Point>,
     ) -> Self {
-        let origin = Self::calculate_center(&components, &wires);
+        let origin = Self::calculate_center(&components, &wires, &junctions);
         Self {
             components,
             wires,
@@ -83,8 +84,8 @@ impl ClipboardData {
         }
     }
 
-    /// Calculate center point of a selection
-    fn calculate_center(components: &[Component], wires: &[Wire]) -> Point {
+    /// Calculate the center point of every copied schematic object.
+    fn calculate_center(components: &[Component], wires: &[Wire], junctions: &[Point]) -> Point {
         let mut cx = 0i32;
         let mut cy = 0i32;
         let mut count = 0;
@@ -103,6 +104,12 @@ impl ClipboardData {
             }
         }
 
+        for junction in junctions {
+            cx += junction.x;
+            cy += junction.y;
+            count += 1;
+        }
+
         if count > 0 {
             Point::new(cx / count, cy / count)
         } else {
@@ -114,3 +121,19 @@ impl ClipboardData {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn junction_only_clipboard_is_real_content_with_its_own_origin() {
+        let point = Point::new(30, -10);
+        let clipboard = ClipboardData::from_selection(Vec::new(), Vec::new(), vec![point]);
+
+        assert!(clipboard.has_content());
+        assert!(!clipboard.is_empty());
+        assert_eq!(clipboard.count(), 1);
+        assert_eq!(clipboard.origin, point);
+    }
+}

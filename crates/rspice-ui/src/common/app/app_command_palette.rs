@@ -1519,6 +1519,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
     };
     match command {
         Command::PlaceWire => Icon::Wire,
+        Command::PlaceJunction => Icon::Grid,
         Command::PlaceLabel => Icon::NetLabel,
         Command::PlaceProbe => Icon::Probe,
         Command::RunSimulation => Icon::Run,
@@ -1831,6 +1832,10 @@ mod tests {
 
         assert_eq!(
             PaletteScope::for_command(Command::PlaceProbe),
+            PaletteScope::Design
+        );
+        assert_eq!(
+            PaletteScope::for_command(Command::PlaceJunction),
             PaletteScope::Design
         );
         assert_eq!(

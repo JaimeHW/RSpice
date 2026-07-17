@@ -87,6 +87,32 @@ impl SchematicState {
             self.bump_topology_version();
         }
 
+        // A junction position has one electrical meaning and one stable
+        // identity. Preserve the first record at each position, then repair
+        // duplicate IDs among the remaining records so ID-based removal can
+        // never remove multiple markers or reveal a hidden duplicate.
+        let junction_count_before_repair = self.junctions.len();
+        let mut seen_positions = HashSet::with_capacity(self.junctions.len());
+        self.junctions
+            .retain(|junction| seen_positions.insert(junction.pos));
+        let mut seen_ids = HashSet::with_capacity(self.junctions.len());
+        let duplicate_junction_ids: Vec<usize> = self
+            .junctions
+            .iter()
+            .enumerate()
+            .filter(|(_, junction)| !seen_ids.insert(junction.id))
+            .map(|(index, _)| index)
+            .collect();
+        let junctions_repaired = self.junctions.len() != junction_count_before_repair
+            || !duplicate_junction_ids.is_empty();
+        for index in duplicate_junction_ids {
+            let replacement_id = self.next_id();
+            self.junctions[index].id = replacement_id;
+        }
+        if junctions_repaired {
+            self.bump_topology_version();
+        }
+
         // Rebuild component counters from existing component names
         self.component_counters.clear();
         for comp in &self.components {
@@ -161,7 +187,7 @@ impl SchematicState {
 
 #[cfg(test)]
 mod tests {
-    use crate::state::{ComponentType, Point, SchematicState};
+    use crate::state::{ComponentType, Junction, Point, SchematicState};
 
     #[test]
     fn recalculated_schematic_does_not_reuse_component_ids() {
@@ -199,5 +225,34 @@ mod tests {
             .filter(|component| component.id == stolen)
             .count();
         assert_eq!(matches, 1, "duplicate ids must be reassigned");
+    }
+
+    #[test]
+    fn recalculate_deduplicates_junction_positions_and_repairs_ids() {
+        let mut schematic = SchematicState::default();
+        schematic.junctions = vec![
+            Junction::new(7, Point::new(10, 10)),
+            Junction::new(7, Point::new(20, 20)),
+            Junction::new(9, Point::new(10, 10)),
+        ];
+        schematic.selection.select_junction(Point::new(10, 10));
+        schematic.selection.select_junction(Point::new(20, 20));
+
+        schematic.recalculate_runtime_state();
+
+        assert_eq!(schematic.junctions.len(), 2);
+        assert_eq!(schematic.junctions[0], Junction::new(7, Point::new(10, 10)));
+        assert_ne!(schematic.junctions[0].id, schematic.junctions[1].id);
+        assert!(schematic.selection.has_junction(Point::new(10, 10)));
+        assert!(schematic.selection.has_junction(Point::new(20, 20)));
+        let new_id = schematic.add_junction(Point::new(30, 30));
+        assert_eq!(
+            schematic
+                .junctions
+                .iter()
+                .filter(|junction| junction.id == new_id)
+                .count(),
+            1
+        );
     }
 }

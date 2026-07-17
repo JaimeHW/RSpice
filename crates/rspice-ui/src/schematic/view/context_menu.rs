@@ -298,7 +298,17 @@ fn capture_pointer_target(
 ) -> Option<egui::Pos2> {
     let pos = response.interact_pointer_pos()?;
     let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pos);
-    let target = if let Some(id) = symbol_context
+    let target = select_pointer_target(state, grid_pos, symbol_context);
+    state.dialogs.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
+    Some(pos)
+}
+
+fn select_pointer_target(
+    state: &mut AppState,
+    grid_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) -> ContextTarget {
+    if let Some(id) = symbol_context
         .component_at_resolved_symbol(&state.schematic.components, grid_pos)
         .or_else(|| state.schematic.component_at(grid_pos))
     {
@@ -308,6 +318,15 @@ fn capture_pointer_target(
             state.schematic.selection.select_component(id);
         }
         ContextTarget::Component(id)
+    } else if state.schematic.has_junction(grid_pos) {
+        state.schematic.net_highlight.clear();
+        if !state.schematic.selection.has_junction(grid_pos) {
+            state.schematic.selection.clear();
+            state.schematic.selection.select_junction(grid_pos);
+        }
+        // ContextTarget has no junction variant; the retained selection is
+        // authoritative for action availability and deletion review.
+        ContextTarget::Canvas
     } else if let Some(id) = state.schematic.wire_at(grid_pos) {
         state.schematic.net_highlight.clear();
         if !state.schematic.selection.has_wire(id) {
@@ -317,9 +336,7 @@ fn capture_pointer_target(
         ContextTarget::Wire(id)
     } else {
         ContextTarget::Canvas
-    };
-    state.dialogs.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
-    Some(pos)
+    }
 }
 
 fn keyboard_surface_anchor(trigger: Rect) -> egui::Pos2 {
@@ -362,6 +379,9 @@ fn keyboard_target(
             ContextTarget::Wire(id),
             Point::new((first.x + last.x) / 2, (first.y + last.y) / 2),
         );
+    }
+    if let Some(point) = state.schematic.selection.single_junction() {
+        return (ContextTarget::Canvas, point);
     }
     if let Some(id) = state.schematic.selection.components.iter().copied().min()
         && let Some(component) = state.schematic.components.iter().find(|item| item.id == id)
@@ -697,9 +717,8 @@ enum FocusMove {
 
 fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
     let selection = &state.schematic.selection;
-    // Clipboard and whole-object deletion currently operate on component and
-    // wire identities. A segment/vertex/junction-only selection must not make
-    // these rows appear actionable and then perform no work.
+    // Components, complete wires, and explicit junctions are clipboard and
+    // deletion objects. Wire segments and vertices remain edit handles.
     let has_live_component = state
         .schematic
         .components
@@ -710,7 +729,12 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .wires
         .iter()
         .any(|wire| selection.has_wire(wire.id));
-    let has_copyable_object = has_live_component || has_live_wire;
+    let has_live_junction = state
+        .schematic
+        .junctions
+        .iter()
+        .any(|junction| selection.has_junction(junction.pos));
+    let has_copyable_object = has_live_component || has_live_wire || has_live_junction;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
@@ -721,11 +745,29 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .wires
         .iter()
         .all(|id| state.schematic.wires.iter().any(|wire| wire.id == *id));
-    let has_wire_sub_object = !selection.wire_segments.is_empty()
-        || !selection.wire_vertices.is_empty()
-        || !selection.junctions.is_empty();
-    let whole_objects_only =
-        has_copyable_object && all_whole_object_ids_are_live && !has_wire_sub_object;
+    let all_junctions_are_live = selection.junctions.iter().all(|selected| {
+        state
+            .schematic
+            .junctions
+            .iter()
+            .any(|junction| junction.pos == selected.pos)
+    });
+    let has_wire_sub_object =
+        !selection.wire_segments.is_empty() || !selection.wire_vertices.is_empty();
+    let copyable_objects_only = has_copyable_object
+        && all_whole_object_ids_are_live
+        && all_junctions_are_live
+        && !has_wire_sub_object;
+    // Junction-only paste requires a separately chosen valid intersection, so
+    // fixed-offset Duplicate intentionally stays unavailable for that case.
+    let duplicable_objects_only = (has_live_component || has_live_wire)
+        && all_whole_object_ids_are_live
+        && all_junctions_are_live
+        && !has_wire_sub_object;
+    let deletable_objects_only = (has_copyable_object || has_live_junction)
+        && all_whole_object_ids_are_live
+        && all_junctions_are_live
+        && !has_wire_sub_object;
     let has_component = has_live_component;
     let writable = !state.schematic.read_only;
     match action {
@@ -745,16 +787,16 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "Select at least one editable component",
         ),
         ContextAction::Copy => (
-            whole_objects_only,
-            "Select at least one component or complete wire",
+            copyable_objects_only,
+            "Select at least one component, complete wire, or junction",
         ),
         ContextAction::Duplicate => (
-            writable && whole_objects_only,
+            writable && duplicable_objects_only,
             "Select at least one editable component or complete wire",
         ),
         ContextAction::Delete => (
-            writable && whole_objects_only,
-            "Select at least one editable component or complete wire",
+            writable && deletable_objects_only,
+            "Select at least one editable component, complete wire, or junction",
         ),
         ContextAction::Probe => (true, ""),
         ContextAction::OperatingPoint => (
@@ -794,7 +836,11 @@ fn execute_context_action(
 
 fn duplicate_selection_at(state: &mut AppState, click_pos: Point) {
     state.schematic.copy_selection();
-    state.schematic.paste_at(click_pos + Point::new(2, 2));
+    if !state.schematic.paste_at(click_pos + Point::new(2, 2)) {
+        state.push_user_message(ConsoleMessage::warning(
+            "Duplicate could not be completed at the current canvas target".to_owned(),
+        ));
+    }
 }
 
 fn open_operating_point(state: &mut AppState) {
@@ -819,12 +865,10 @@ fn delete_request_id() -> Id {
 
 fn request_delete_confirmation(ctx: &Context, state: &mut AppState) {
     let mut selection = state.schematic.selection.clone();
-    // The command is available only for complete components/wires. Keep the
-    // reviewed payload equally narrow so confirmation can never promise a
-    // segment-level edit that the whole-object transaction does not perform.
+    // Keep the reviewed payload to complete objects. Junctions are complete
+    // objects and must remain in the retained request.
     selection.wire_segments.clear();
     selection.wire_vertices.clear();
-    selection.junctions.clear();
     let request = DeleteSelectionRequest {
         selection,
         topology_version: state.schematic.topology_version(),
@@ -902,6 +946,11 @@ fn delete_review(
             objects.push(format!("wire #{}", wire.id));
         }
     }
+    for junction in &state.schematic.junctions {
+        if request.selection.has_junction(junction.pos) {
+            objects.push(format!("junction ({}, {})", junction.pos.x, junction.pos.y));
+        }
+    }
     let selection = if objects.is_empty() {
         "No live schematic objects".to_owned()
     } else {
@@ -927,6 +976,13 @@ fn delete_review(
             if let Some(net) = state.simulation.cross_probe.net_at(*point) {
                 nets.insert(net.clone());
             }
+        }
+    }
+    for junction in &state.schematic.junctions {
+        if request.selection.has_junction(junction.pos)
+            && let Some(net) = state.simulation.cross_probe.net_at(junction.pos)
+        {
+            nets.insert(net.clone());
         }
     }
     let affected_nets = if nets.is_empty() {
@@ -993,7 +1049,12 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
             .schematic
             .wires
             .iter()
-            .any(|wire| request.selection.has_wire(wire.id));
+            .any(|wire| request.selection.has_wire(wire.id))
+        || state
+            .schematic
+            .junctions
+            .iter()
+            .any(|junction| request.selection.has_junction(junction.pos));
     if !has_live_object {
         state.push_user_message(ConsoleMessage::warning(
             "The reviewed selection no longer contains deletable objects.".to_owned(),
@@ -1001,10 +1062,7 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
         return;
     }
     state.schematic.selection = request.selection;
-    if !state
-        .schematic
-        .with_undo("delete selection", |schematic| schematic.delete_selection())
-    {
+    if !state.schematic.delete_selection() {
         state.push_user_message(ConsoleMessage::warning(
             "The reviewed selection no longer contains deletable objects.".to_owned(),
         ));
@@ -1140,7 +1198,7 @@ impl SurfaceGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Component, ComponentType, LibraryCellInstance};
+    use crate::state::{Component, ComponentType, Junction, LibraryCellInstance, Wire};
 
     #[test]
     fn command_catalog_matches_the_mockup_exactly() {
@@ -1293,6 +1351,35 @@ mod tests {
         assert!(!action_availability(ContextAction::Copy, &state).0);
         state.schematic.read_only = true;
         assert!(action_availability(ContextAction::Probe, &state).0);
+
+        let mut junction_state = AppState::default();
+        let point = Point::new(4, 4);
+        junction_state
+            .schematic
+            .junctions
+            .push(Junction::new(81, point));
+        junction_state
+            .schematic
+            .selection
+            .select_only_junction(point);
+        assert!(action_availability(ContextAction::Delete, &junction_state).0);
+        assert!(action_availability(ContextAction::Copy, &junction_state).0);
+        assert!(!action_availability(ContextAction::Duplicate, &junction_state).0);
+    }
+
+    #[test]
+    fn pointer_target_prefers_a_junction_over_its_underlying_wire() {
+        let mut state = AppState::default();
+        let point = Point::new(10, 10);
+        state.schematic.wires = vec![Wire::new(17, vec![Point::new(0, 10), Point::new(20, 10)])];
+        state.schematic.junctions = vec![Junction::new(18, point)];
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+
+        let target = select_pointer_target(&mut state, point, &symbol_context);
+
+        assert!(matches!(target, ContextTarget::Canvas));
+        assert_eq!(state.schematic.selection.single_junction(), Some(point));
+        assert!(state.schematic.selection.wires.is_empty());
     }
 
     #[test]
@@ -1347,6 +1434,7 @@ mod tests {
         let mut state = AppState::default();
         state.schematic.selection.select_component(23);
         state.schematic.selection.select_wire_segment(17, 0);
+        state.schematic.selection.select_junction(Point::new(5, 8));
         request_delete_confirmation(&ctx, &mut state);
 
         assert!(state.dialogs.interaction.schematic_delete_confirmation_open);
@@ -1356,6 +1444,7 @@ mod tests {
             .expect("delete request is retained");
         assert!(request.selection.has_component(23));
         assert!(request.selection.wire_segments.is_empty());
+        assert!(request.selection.has_junction(Point::new(5, 8)));
 
         ctx.data_mut(|data| data.remove::<DeleteSelectionRequest>(delete_request_id()));
         let symbol_context = SchematicSymbolContext::from_state(&state);

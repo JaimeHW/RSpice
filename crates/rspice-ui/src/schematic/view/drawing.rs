@@ -504,9 +504,10 @@ pub(super) fn draw_junction(
         .hover_wire_vertex
         .map(|(x, y)| x == position.x && y == position.y)
         .unwrap_or(false);
+    let is_selected = state.schematic.selection.has_junction(position);
 
     let palette = crate::ui::tokens::active_palette();
-    if is_hovered {
+    if is_hovered || is_selected {
         // Draw larger highlight ring when hovered
         let highlight_radius = radius * 2.5;
         painter.circle_stroke(
@@ -516,7 +517,15 @@ pub(super) fn draw_junction(
         );
     }
 
-    painter.circle_filled(pos, radius, palette.wire);
+    painter.circle_filled(
+        pos,
+        radius,
+        if is_selected {
+            palette.accent
+        } else {
+            palette.wire
+        },
+    );
 }
 
 fn manhattan_distance(a: Point, b: Point) -> i32 {

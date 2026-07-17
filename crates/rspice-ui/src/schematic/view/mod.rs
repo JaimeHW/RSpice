@@ -346,6 +346,7 @@ fn schematic_accessibility_label(
         &[
             Command::SelectTool,
             Command::PlaceWire,
+            Command::PlaceJunction,
             Command::PlaceProbe,
             Command::ZoomFit,
             Command::Cancel,

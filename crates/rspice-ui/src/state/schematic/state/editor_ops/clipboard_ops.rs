@@ -5,7 +5,7 @@ impl SchematicState {
     // Clipboard Operations
     // =========================================================================
 
-    /// Copy selected components and wires to clipboard
+    /// Copy selected components, wires, and explicit junctions to clipboard.
     ///
     /// In addition to explicitly selected wires, automatically includes
     /// any wires that have both endpoints connected to selected components.
@@ -56,12 +56,17 @@ impl SchematicState {
 
         // Junction dots that sit on a copied wire travel with the selection;
         // a pasted multi-way joint must keep its explicit connection dots.
-        let junctions_to_copy: Vec<Point> = self
+        let mut junctions_to_copy: Vec<Point> = self
             .junctions
             .iter()
             .map(|j| j.pos)
-            .filter(|pos| wires_to_copy.iter().any(|w| w.points.contains(pos)))
+            .filter(|pos| {
+                self.selection.has_junction(*pos)
+                    || wires_to_copy.iter().any(|wire| wire.contains_point(*pos))
+            })
             .collect();
+        junctions_to_copy.sort_by_key(|point| (point.x, point.y));
+        junctions_to_copy.dedup();
 
         self.clipboard =
             ClipboardData::from_selection(selected_comps, wires_to_copy, junctions_to_copy);
@@ -73,9 +78,35 @@ impl SchematicState {
     }
 
     /// Paste clipboard contents at the given position (one undo entry)
-    pub fn paste_at(&mut self, pos: Point) {
+    pub fn paste_at(&mut self, pos: Point) -> bool {
         if !self.can_paste() {
-            return;
+            return false;
+        }
+
+        let junction_only = self.clipboard.components.is_empty() && self.clipboard.wires.is_empty();
+        // A junction-only clipboard is a connectivity edit, not decoration.
+        // Snap its anchor through the same ambiguous-crossing candidate set as
+        // the junction tool, then reject it before opening an undo transaction
+        // unless at least one translated marker would create a new connection.
+        let paste_pos = if junction_only {
+            let Some(candidate) = self.nearest_junction_candidate(pos, self.grid_size) else {
+                return false;
+            };
+            candidate
+        } else {
+            pos
+        };
+        if junction_only {
+            let offset_x = paste_pos.x - self.clipboard.origin.x;
+            let offset_y = paste_pos.y - self.clipboard.origin.y;
+            let has_valid_target = self.clipboard.junctions.iter().any(|junction| {
+                let target = Point::new(junction.x + offset_x, junction.y + offset_y);
+                !self.has_junction(target)
+                    && self.nearest_junction_candidate(target, 0) == Some(target)
+            });
+            if !has_valid_target {
+                return false;
+            }
         }
 
         self.with_undo("paste", |s| {
@@ -97,8 +128,8 @@ impl SchematicState {
                 return;
             }
 
-            let offset_x = pos.x - origin.x;
-            let offset_y = pos.y - origin.y;
+            let offset_x = paste_pos.x - origin.x;
+            let offset_y = paste_pos.y - origin.y;
 
             s.selection.clear();
 
@@ -126,14 +157,31 @@ impl SchematicState {
                 s.selection.select_wire(new_id);
             }
 
-            // Re-create junction dots on the pasted wires (deduplicated).
+            // Re-create junction dots only where at least two distinct wires
+            // meet. This makes junction-only copy/paste useful without ever
+            // manufacturing an electrically meaningless floating marker.
             for junction in clipboard_junctions {
-                s.add_junction(Point::new(junction.x + offset_x, junction.y + offset_y));
+                let target = Point::new(junction.x + offset_x, junction.y + offset_y);
+                let valid_target = if junction_only {
+                    s.nearest_junction_candidate(target, 0) == Some(target)
+                } else {
+                    s.wires
+                        .iter()
+                        .filter(|wire| wire.contains_point(target))
+                        .map(|wire| wire.id)
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        >= 2
+                };
+                if valid_target && !s.has_junction(target) {
+                    s.add_junction(target);
+                    s.selection.select_junction(target);
+                }
             }
 
             s.is_dirty = true;
             s.bump_topology_version();
-        });
+        })
     }
 }
 
@@ -162,5 +210,46 @@ mod tests {
             original_wire_count,
             "paste must not create additional invalid wires"
         );
+    }
+
+    #[test]
+    fn junction_only_clipboard_pastes_only_on_a_valid_intersection() {
+        let source = Point::new(20, 20);
+        let target = Point::new(80, 80);
+        let mut schematic = SchematicState::default();
+        schematic.wires = vec![
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
+            Wire::new(3, vec![Point::new(60, 80), Point::new(100, 80)]),
+            Wire::new(4, vec![Point::new(80, 60), Point::new(80, 100)]),
+        ];
+        schematic.add_junction(source);
+        schematic.selection.select_only_junction(source);
+        schematic.copy_selection();
+
+        assert!(schematic.can_paste());
+        assert_eq!(schematic.clipboard.origin, source);
+        assert!(schematic.paste_at(Point::new(target.x + 1, target.y - 1)));
+
+        assert!(schematic.has_junction(target));
+        assert!(schematic.selection.has_junction(target));
+        assert!(schematic.can_undo());
+    }
+
+    #[test]
+    fn junction_only_paste_rejects_empty_space_without_an_undo_step() {
+        let source = Point::new(20, 20);
+        let mut schematic = SchematicState::default();
+        schematic.wires = vec![
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
+        ];
+        schematic.add_junction(source);
+        schematic.selection.select_only_junction(source);
+        schematic.copy_selection();
+
+        assert!(!schematic.paste_at(Point::new(200, 200)));
+        assert!(!schematic.can_undo());
+        assert_eq!(schematic.junctions.len(), 1);
     }
 }

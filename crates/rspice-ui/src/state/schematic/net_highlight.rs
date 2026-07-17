@@ -29,42 +29,111 @@ use super::wire::Wire;
 /// 3. They are connected via a junction
 #[derive(Debug, Clone, Default)]
 pub struct NetGraph {
-    /// Map from point to set of wire IDs that touch that point
+    /// Map from electrical connection points to the wire IDs joined there.
     point_to_wires: HashMap<Point, HashSet<u64>>,
-    /// Map from wire ID to its endpoint positions
-    wire_endpoints: HashMap<u64, (Point, Point)>,
+    /// Wire-level connectivity used for transitive net traversal.
+    wire_adjacency: HashMap<u64, HashSet<u64>>,
+    /// Segment geometry retained so an arbitrary point on a wire can seed a
+    /// highlight even when it is not itself a connection point.
+    wire_segments: HashMap<u64, Vec<(Point, Point)>>,
 }
 
 impl NetGraph {
     /// Build a new net graph from wires and junctions
     pub fn build(wires: &[Wire], junctions: &[Junction]) -> Self {
         let mut graph = Self::default();
+        let mut segments = Vec::new();
 
         for wire in wires {
             if wire.points.len() < 2 {
                 continue;
             }
 
-            let start = wire.points[0];
-            let end = *wire.points.last().unwrap();
-
-            // Record wire endpoints
-            graph.wire_endpoints.insert(wire.id, (start, end));
-
-            // Map each point to this wire
-            graph
-                .point_to_wires
-                .entry(start)
-                .or_default()
-                .insert(wire.id);
-            graph.point_to_wires.entry(end).or_default().insert(wire.id);
+            graph.wire_adjacency.entry(wire.id).or_default();
+            for &point in &wire.points {
+                graph
+                    .point_to_wires
+                    .entry(point)
+                    .or_default()
+                    .insert(wire.id);
+            }
+            for points in wire.points.windows(2) {
+                let segment = (points[0], points[1]);
+                graph
+                    .wire_segments
+                    .entry(wire.id)
+                    .or_default()
+                    .push(segment);
+                segments.push((wire.id, segment.0, segment.1));
+            }
         }
 
-        // Junctions connect all wires at their position
+        // Spatially index segment bounding boxes so endpoint/T and junction
+        // checks remain responsive for large schematics.
+        const CELL: i32 = 256;
+        let mut cells: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+        for (index, &(_, start, end)) in segments.iter().enumerate() {
+            for cell_x in start.x.min(end.x).div_euclid(CELL)..=start.x.max(end.x).div_euclid(CELL)
+            {
+                for cell_y in
+                    start.y.min(end.y).div_euclid(CELL)..=start.y.max(end.y).div_euclid(CELL)
+                {
+                    cells.entry((cell_x, cell_y)).or_default().push(index);
+                }
+            }
+        }
+
+        // A wire vertex touching another wire's segment is an endpoint/T
+        // connection. Pure segment-interior crossings are not examined here,
+        // so they remain electrically separate unless explicitly marked.
+        for wire in wires {
+            for &point in &wire.points {
+                let cell = (point.x.div_euclid(CELL), point.y.div_euclid(CELL));
+                let Some(candidates) = cells.get(&cell) else {
+                    continue;
+                };
+                for &segment_index in candidates {
+                    let (other_wire_id, start, end) = segments[segment_index];
+                    if point_on_segment(point, start, end) {
+                        let wires_at_point = graph.point_to_wires.entry(point).or_default();
+                        wires_at_point.insert(wire.id);
+                        wires_at_point.insert(other_wire_id);
+                    }
+                }
+            }
+        }
+
+        // A persisted junction joins every segment that passes through its
+        // position, including otherwise-disconnected mid-segment crossings.
         for junction in junctions {
-            // Junctions are already handled by point matching above
-            // But we ensure the point exists in the map
-            graph.point_to_wires.entry(junction.pos).or_default();
+            let point = junction.pos;
+            let cell = (point.x.div_euclid(CELL), point.y.div_euclid(CELL));
+            let wires_at_point = graph.point_to_wires.entry(point).or_default();
+            if let Some(candidates) = cells.get(&cell) {
+                for &segment_index in candidates {
+                    let (wire_id, start, end) = segments[segment_index];
+                    if point_on_segment(point, start, end) {
+                        wires_at_point.insert(wire_id);
+                    }
+                }
+            }
+        }
+
+        // Collapse connection points into a wire-level graph. Traversing this
+        // graph naturally propagates through any number of junctions and Ts.
+        for wire_ids in graph.point_to_wires.values() {
+            for &wire_id in wire_ids {
+                graph.wire_adjacency.entry(wire_id).or_default();
+                for &other_wire_id in wire_ids {
+                    if wire_id != other_wire_id {
+                        graph
+                            .wire_adjacency
+                            .entry(wire_id)
+                            .or_default()
+                            .insert(other_wire_id);
+                    }
+                }
+            }
         }
 
         graph
@@ -74,44 +143,47 @@ impl NetGraph {
     ///
     /// Uses flood-fill algorithm to find all connected wires.
     pub fn find_connected_wires(&self, start_point: Point) -> HashSet<u64> {
-        let mut connected = HashSet::new();
-        let mut visited_points = HashSet::new();
-        let mut stack = vec![start_point];
-
-        while let Some(point) = stack.pop() {
-            if visited_points.contains(&point) {
-                continue;
+        if let Some(wire_ids) = self.point_to_wires.get(&start_point) {
+            let mut connected = HashSet::new();
+            for &wire_id in wire_ids {
+                connected.extend(self.find_connected_wires_from_wire(wire_id));
             }
-            visited_points.insert(point);
-
-            // Get all wires at this point
-            if let Some(wire_ids) = self.point_to_wires.get(&point) {
-                for &wire_id in wire_ids {
-                    if connected.insert(wire_id) {
-                        // Add wire's other endpoints to stack
-                        if let Some(&(start, end)) = self.wire_endpoints.get(&wire_id) {
-                            if !visited_points.contains(&start) {
-                                stack.push(start);
-                            }
-                            if !visited_points.contains(&end) {
-                                stack.push(end);
-                            }
-                        }
-                    }
-                }
-            }
+            return connected;
         }
 
-        connected
+        // Away from a connection point, seed from the wire containing the
+        // requested location. At an ambiguous unmarked crossing, use a stable
+        // single seed rather than incorrectly joining both electrical nets.
+        self.wire_segments
+            .iter()
+            .filter(|(_, segments)| {
+                segments
+                    .iter()
+                    .any(|&(start, end)| point_on_segment(start_point, start, end))
+            })
+            .map(|(&wire_id, _)| wire_id)
+            .min()
+            .map(|wire_id| self.find_connected_wires_from_wire(wire_id))
+            .unwrap_or_default()
     }
 
     /// Find all wire IDs in the same net as the given wire
     pub fn find_connected_wires_from_wire(&self, wire_id: u64) -> HashSet<u64> {
-        if let Some(&(start, _)) = self.wire_endpoints.get(&wire_id) {
-            self.find_connected_wires(start)
-        } else {
-            HashSet::new()
+        if !self.wire_adjacency.contains_key(&wire_id) {
+            return HashSet::new();
         }
+
+        let mut connected = HashSet::new();
+        let mut stack = vec![wire_id];
+        while let Some(current) = stack.pop() {
+            if !connected.insert(current) {
+                continue;
+            }
+            if let Some(neighbors) = self.wire_adjacency.get(&current) {
+                stack.extend(neighbors.iter().copied());
+            }
+        }
+        connected
     }
 
     /// Convenience method: Build from just wires (no junctions)
@@ -123,6 +195,22 @@ impl NetGraph {
     pub fn get_connected_wires(&self, wire_id: u64) -> HashSet<u64> {
         self.find_connected_wires_from_wire(wire_id)
     }
+}
+
+fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
+    let point_x = i128::from(point.x);
+    let point_y = i128::from(point.y);
+    let start_x = i128::from(start.x);
+    let start_y = i128::from(start.y);
+    let end_x = i128::from(end.x);
+    let end_y = i128::from(end.y);
+
+    let cross = (point_x - start_x) * (end_y - start_y) - (point_y - start_y) * (end_x - start_x);
+    cross == 0
+        && point_x >= start_x.min(end_x)
+        && point_x <= start_x.max(end_x)
+        && point_y >= start_y.min(end_y)
+        && point_y <= start_y.max(end_y)
 }
 
 // =============================================================================
@@ -177,3 +265,69 @@ impl NetHighlightState {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(values: &[u64]) -> HashSet<u64> {
+        values.iter().copied().collect()
+    }
+
+    #[test]
+    fn unmarked_mid_segment_crossing_stays_disconnected() {
+        let wires = vec![
+            Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)),
+            Wire::segment(2, Point::new(0, -100), Point::new(0, 100)),
+        ];
+
+        let graph = NetGraph::build(&wires, &[]);
+
+        assert_eq!(graph.get_connected_wires(1), ids(&[1]));
+        assert_eq!(graph.get_connected_wires(2), ids(&[2]));
+    }
+
+    #[test]
+    fn explicit_junction_connects_mid_segment_crossing() {
+        let wires = vec![
+            Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)),
+            Wire::segment(2, Point::new(0, -100), Point::new(0, 100)),
+        ];
+        let junctions = vec![Junction::new(10, Point::new(0, 0))];
+
+        let graph = NetGraph::build(&wires, &junctions);
+
+        assert_eq!(graph.get_connected_wires(1), ids(&[1, 2]));
+        assert_eq!(graph.find_connected_wires(Point::new(0, 0)), ids(&[1, 2]));
+    }
+
+    #[test]
+    fn endpoint_to_segment_contact_connects_without_junction() {
+        let wires = vec![
+            Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)),
+            Wire::segment(2, Point::new(0, 0), Point::new(0, 100)),
+        ];
+
+        let graph = NetGraph::build(&wires, &[]);
+
+        assert_eq!(graph.get_connected_wires(1), ids(&[1, 2]));
+    }
+
+    #[test]
+    fn connectivity_propagates_transitively_across_junctions() {
+        let wires = vec![
+            Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)),
+            Wire::segment(2, Point::new(0, -100), Point::new(0, 100)),
+            Wire::segment(3, Point::new(-100, 60), Point::new(100, 60)),
+        ];
+        let junctions = vec![
+            Junction::new(10, Point::new(0, 0)),
+            Junction::new(11, Point::new(0, 60)),
+        ];
+
+        let graph = NetGraph::build(&wires, &junctions);
+
+        assert_eq!(graph.get_connected_wires(1), ids(&[1, 2, 3]));
+        assert_eq!(graph.get_connected_wires(3), ids(&[1, 2, 3]));
+    }
+}

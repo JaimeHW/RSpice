@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::input::{ComponentInfo, NetLabelInfo, WireInfo};
+use super::input::{ComponentInfo, JunctionInfo, NetLabelInfo, WireInfo};
 use super::net::{
     DisjointSet, NetAccumulator, NetInfo, PointKey, ensure_point_id, merge_net_accumulator,
     point_on_segment, segment_intersection_point,
@@ -73,18 +73,38 @@ impl DrcChecker {
         id
     }
 
-    /// Run all DRC checks on the schematic.
+    /// Run legacy geometry-only DRC checks without explicit junction input.
+    ///
+    /// Pure interior/interior crossings are disconnected in this compatibility
+    /// API. Schematic callers must use [`Self::check_connectivity_with_junctions`]
+    /// with the junction-aware extraction bridge.
     pub fn check_connectivity(
         &mut self,
         components: &[ComponentInfo],
         wires: &[WireInfo],
         net_labels: &[NetLabelInfo],
     ) -> DrcResult {
+        self.check_connectivity_with_junctions(components, wires, net_labels, &[])
+    }
+
+    /// Run all DRC checks with the schematic's explicit junction positions.
+    ///
+    /// A crossing between the interiors of two segments is electrically
+    /// connected only when its position appears in `junctions`. Shared
+    /// endpoints and endpoint-to-segment (T) contacts remain connected
+    /// without an explicit junction, matching standard schematic semantics.
+    pub fn check_connectivity_with_junctions(
+        &mut self,
+        components: &[ComponentInfo],
+        wires: &[WireInfo],
+        net_labels: &[NetLabelInfo],
+        junctions: &[JunctionInfo],
+    ) -> DrcResult {
         let start = crate::common::time_compat::Instant::now();
         let mut result = DrcResult::new();
 
         // Build net connectivity map
-        let net_map = self.build_net_map(components, wires, net_labels);
+        let net_map = self.build_net_map(components, wires, net_labels, junctions);
 
         // Check for duplicate component names
         if self.config.check_duplicate_names {
@@ -120,6 +140,7 @@ impl DrcChecker {
         components: &[ComponentInfo],
         wires: &[WireInfo],
         net_labels: &[NetLabelInfo],
+        junctions: &[JunctionInfo],
     ) -> HashMap<String, NetInfo> {
         let mut net_map: HashMap<String, NetInfo> = HashMap::new();
         let mut point_ids: HashMap<PointKey, usize> = HashMap::new();
@@ -151,8 +172,9 @@ impl DrcChecker {
             }
         }
 
-        // Merge touching/crossing segments so T-junctions and wire intersections
-        // become a single electrical net.
+        // Merge shared endpoints and endpoint-to-segment contacts. A pure
+        // interior crossing is deliberately left disconnected; the explicit
+        // junction pass below handles marked crossings.
         let mut tested: std::collections::HashSet<(usize, usize)> =
             std::collections::HashSet::new();
         for bucket in cells.values() {
@@ -165,14 +187,21 @@ impl DrcChecker {
                     if let Some(intersection) =
                         segment_intersection_point(segments[pair.0], segments[pair.1])
                     {
+                        let (a0, a1) = segments[pair.0];
+                        let (b0, b1) = segments[pair.1];
+                        if intersection != a0
+                            && intersection != a1
+                            && intersection != b0
+                            && intersection != b1
+                        {
+                            continue;
+                        }
                         let p_id = ensure_point_id(
                             intersection,
                             &mut point_ids,
                             &mut points_by_id,
                             &mut dsu,
                         );
-                        let (a0, a1) = segments[pair.0];
-                        let (b0, b1) = segments[pair.1];
                         let a0_id = point_ids[&a0];
                         let a1_id = point_ids[&a1];
                         let b0_id = point_ids[&b0];
@@ -194,6 +223,21 @@ impl DrcChecker {
                 .map(|bucket| bucket.as_slice())
                 .unwrap_or(&[])
         };
+
+        // A persisted junction connects every segment passing through its
+        // position, including two (or more) segment interiors. Repeated
+        // junctions are harmless because the disjoint-set union is idempotent.
+        for junction in junctions {
+            let point = PointKey::from_f64(junction.x, junction.y);
+            let point_id = ensure_point_id(point, &mut point_ids, &mut points_by_id, &mut dsu);
+            for &seg_index in segments_near(point) {
+                let (start, end) = segments[seg_index];
+                if point_on_segment(point, start, end) {
+                    dsu.union(point_id, point_ids[&start]);
+                    dsu.union(point_id, point_ids[&end]);
+                }
+            }
+        }
 
         // Attach component pins to any segment they lie on.
         for comp in components {
@@ -772,9 +816,9 @@ mod tests {
     }
 
     #[test]
-    fn crossing_wires_merge_into_one_net() {
-        // Vertical and horizontal wires crossing at the origin carry one pin
-        // each; the intersection unifies them into a two-connection net.
+    fn unmarked_mid_segment_crossing_stays_disconnected() {
+        // The segments cross in both interiors. Without a persisted junction,
+        // each side remains a one-pin floating net.
         let components = vec![
             resistor(0, "R1", vec![pin_at("1", "", 0.0, 100.0), pin("2", "0")]),
             resistor(1, "R2", vec![pin_at("1", "", 100.0, 0.0), pin("2", "0")]),
@@ -786,6 +830,46 @@ mod tests {
         let labels = vec![label("x", 0.0, -100.0)];
         let mut checker = DrcChecker::new();
         let result = checker.check_connectivity(&components, &wires, &labels);
+        assert_eq!(of_type(&result, DrcViolationType::FloatingNode).len(), 2);
+    }
+
+    #[test]
+    fn explicit_junction_connects_mid_segment_crossing() {
+        let components = vec![
+            resistor(0, "R1", vec![pin_at("1", "", 0.0, 100.0), pin("2", "0")]),
+            resistor(1, "R2", vec![pin_at("1", "", 100.0, 0.0), pin("2", "0")]),
+        ];
+        let wires = vec![
+            wire(0, 0.0, -100.0, 0.0, 100.0),
+            wire(1, -100.0, 0.0, 100.0, 0.0),
+        ];
+        let labels = vec![label("x", 0.0, -100.0)];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity_with_junctions(
+            &components,
+            &wires,
+            &labels,
+            &[JunctionInfo::new(0.0, 0.0)],
+        );
+        assert!(
+            of_type(&result, DrcViolationType::FloatingNode).is_empty(),
+            "{:?}",
+            result.violations()
+        );
+    }
+
+    #[test]
+    fn endpoint_to_segment_contact_connects_without_junction() {
+        let components = vec![
+            resistor(0, "R1", vec![pin_at("1", "", -100.0, 0.0), pin("2", "0")]),
+            resistor(1, "R2", vec![pin_at("1", "", 0.0, 100.0), pin("2", "0")]),
+        ];
+        let wires = vec![
+            wire(0, -100.0, 0.0, 100.0, 0.0),
+            wire(1, 0.0, 0.0, 0.0, 100.0),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &wires, &[]);
         assert!(
             of_type(&result, DrcViolationType::FloatingNode).is_empty(),
             "{:?}",

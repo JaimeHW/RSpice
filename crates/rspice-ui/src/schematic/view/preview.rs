@@ -26,6 +26,7 @@ pub(super) fn draw_interaction_previews(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     draw_wire_preview(painter, response, state, viewport, symbol_context);
+    draw_junction_preview(painter, response, state, viewport);
     draw_component_preview(
         painter,
         response,
@@ -35,6 +36,38 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     draw_selection_rect(painter, state, viewport);
+}
+
+fn draw_junction_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &AppState,
+    viewport: &Viewport,
+) {
+    if state.schematic.read_only || state.schematic.tool != Tool::Junction {
+        return;
+    }
+    let Some(hover_pos) = response.hover_pos() else {
+        return;
+    };
+
+    let requested = screen_to_wire_grid(viewport, state.schematic.grid_size, hover_pos);
+    let candidate = state
+        .schematic
+        .nearest_junction_candidate(requested, state.schematic.grid_size);
+    let preview = candidate.unwrap_or(requested);
+    let pos = viewport.schematic_to_screen(preview);
+    let palette = crate::ui::tokens::active_palette();
+    let color = match candidate {
+        Some(point) if state.schematic.has_junction(point) => palette.warn,
+        Some(_) => palette.accent,
+        None => palette.err,
+    };
+    let radius = (4.0 * viewport.zoom).max(3.0);
+    painter.circle_stroke(pos, radius, Stroke::new(1.0, color));
+    if candidate.is_some_and(|point| !state.schematic.has_junction(point)) {
+        painter.circle_filled(pos, (1.75 * viewport.zoom).max(1.5), color);
+    }
 }
 
 fn draw_wire_preview(
