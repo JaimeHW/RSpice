@@ -6,7 +6,8 @@
 
 use crate::Value;
 use crate::expr::{
-    BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
+    BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile,
+    normalize_expression_boundary, parse_expression_strict, real_pow_with_derivative,
     resolve_file_lookup_functions,
 };
 use crate::netlist::ExpressionDialect;
@@ -739,8 +740,19 @@ fn analytic_expression_partial(
         expression_dialect,
         target,
     };
-    let (_, derivative) = eval_behavioral_expr_with_derivative(expr, &context)?;
+    let (_, derivative) = eval_behavioral_expr_with_derivative_at_boundary(expr, &context)?;
     derivative.is_finite().then_some(derivative)
+}
+
+fn eval_behavioral_expr_with_derivative_at_boundary(
+    expr: &Expr,
+    context: &BehavioralDerivativeContext<'_>,
+) -> Option<(Value, Value)> {
+    let (value, derivative) = eval_behavioral_expr_with_derivative(expr, context)?;
+    Some((
+        normalize_expression_boundary(value, context.expression_dialect),
+        normalize_expression_boundary(derivative, context.expression_dialect),
+    ))
 }
 
 fn eval_behavioral_expr_with_derivative(
@@ -793,6 +805,7 @@ fn eval_behavioral_expr_with_derivative(
                 left_derivative,
                 right_value,
                 right_derivative,
+                context.expression_dialect,
             )
         }
         Expr::Function { func, args } => eval_function_with_derivative(*func, args, context),
@@ -805,6 +818,7 @@ fn eval_binary_with_derivative(
     d_left: Value,
     right: Value,
     d_right: Value,
+    expression_dialect: ExpressionDialect,
 ) -> Option<(Value, Value)> {
     match op {
         BinaryOp::Add => Some((left + right, d_left + d_right)),
@@ -828,7 +842,7 @@ fn eval_binary_with_derivative(
                 Some((left % right, d_left - quotient * d_right))
             }
         }
-        BinaryOp::Pow => eval_pow_with_derivative(left, d_left, right, d_right),
+        BinaryOp::Pow => real_pow_with_derivative(left, d_left, right, d_right, expression_dialect),
         BinaryOp::Lt => Some((bool_value(left < right), 0.0)),
         BinaryOp::Le => Some((bool_value(left <= right), 0.0)),
         BinaryOp::Gt => Some((bool_value(left > right), 0.0)),
@@ -1112,7 +1126,7 @@ fn eval_function_with_derivative(
         Function::Pow => {
             let (left, d_left) = eval_arg(0)?;
             let (right, d_right) = eval_arg(1)?;
-            eval_pow_with_derivative(left, d_left, right, d_right)
+            real_pow_with_derivative(left, d_left, right, d_right, context.expression_dialect)
         }
         Function::Mod => {
             let (left, d_left) = eval_arg(0)?;
@@ -1159,26 +1173,6 @@ fn unary_derivative(
 ) -> Option<(Value, Value)> {
     let (x, dx) = input;
     Some((value_fn(x), derivative_fn(x) * dx))
-}
-
-fn eval_pow_with_derivative(
-    base: Value,
-    d_base: Value,
-    exponent: Value,
-    d_exponent: Value,
-) -> Option<(Value, Value)> {
-    let value = base.powf(exponent);
-    if d_exponent == 0.0 {
-        return Some((value, exponent * base.powf(exponent - 1.0) * d_base));
-    }
-    if base > 0.0 {
-        Some((
-            value,
-            value * (d_exponent * base.ln() + exponent * d_base / base),
-        ))
-    } else {
-        None
-    }
 }
 
 fn eval_table_function_with_derivative(
@@ -1871,6 +1865,97 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn xyce_power_analytic_derivative_matches_bytecode_and_finite_difference() {
+        for (expression, point) in [
+            ("v(n)**2.1", -2.5),
+            ("pow(v(n),2.1)", -2.5),
+            ("(-v(n))**3.1", 2.5),
+            ("v(n)**-3", -2.0),
+        ] {
+            let (analytic_value, analytic_derivative) = eval_node_derivative(expression, point);
+            let bytecode_value = eval_node_vm(expression, point, ExpressionDialect::Xyce);
+            assert_eq!(
+                analytic_value, bytecode_value,
+                "value mismatch for {expression}"
+            );
+
+            let step = 1.0e-6 * point.abs().max(1.0);
+            let numerical_derivative =
+                (eval_node_vm(expression, point + step, ExpressionDialect::Xyce)
+                    - eval_node_vm(expression, point - step, ExpressionDialect::Xyce))
+                    / (2.0 * step);
+            let scale = analytic_derivative
+                .abs()
+                .max(numerical_derivative.abs())
+                .max(1.0);
+            assert!(
+                (analytic_derivative - numerical_derivative).abs() <= 2.0e-9 * scale,
+                "derivative mismatch for {expression} at {point}: analytic={analytic_derivative:e}, numerical={numerical_derivative:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_power_exponent_derivative_matches_finite_difference() {
+        let expression = "(-2.5)**v(n)";
+        let point = 3.1;
+        let (analytic_value, analytic_derivative) = eval_node_derivative(expression, point);
+        assert_eq!(
+            analytic_value,
+            eval_node_vm(expression, point, ExpressionDialect::Xyce)
+        );
+
+        let step = 1.0e-6;
+        let numerical_derivative =
+            (eval_node_vm(expression, point + step, ExpressionDialect::Xyce)
+                - eval_node_vm(expression, point - step, ExpressionDialect::Xyce))
+                / (2.0 * step);
+        assert!(
+            (analytic_derivative - numerical_derivative).abs()
+                <= 2.0e-9 * analytic_derivative.abs().max(1.0),
+            "exponent derivative mismatch: analytic={analytic_derivative:e}, numerical={numerical_derivative:e}"
+        );
+    }
+
+    #[test]
+    fn xyce_analytic_boundary_normalizes_signed_nonfinite_value_and_derivative() {
+        let positive = eval_node_derivative("0*exp(v(n))", 1000.0);
+        assert_eq!(positive.0.abs(), 1.0e50);
+        assert_eq!(positive.1.abs(), 1.0e50);
+        let negative = eval_node_derivative("-(0*exp(v(n)))", 1000.0);
+        assert_eq!(negative, (-positive.0, -positive.1));
+
+        let (value, derivative) =
+            eval_node_derivative_with_dialect("0*exp(v(n))", 1000.0, ExpressionDialect::Ngspice);
+        assert!(value.is_nan());
+        assert!(derivative.is_nan());
+    }
+
+    #[test]
+    fn xyce_zero_base_power_has_zero_analytic_derivative_for_every_exponent_domain() {
+        for expression in [
+            "v(n)**-1",
+            "v(n)**0.5",
+            "v(n)**0",
+            "pow(v(n),-1)",
+            "0**v(n)",
+        ] {
+            let node_value = if expression == "0**v(n)" { -1.0 } else { 0.0 };
+            let (value, derivative) = eval_node_derivative(expression, node_value);
+            assert_eq!(derivative, 0.0, "zero-base slope changed for {expression}");
+            assert_eq!(
+                value,
+                eval_node_vm(expression, node_value, ExpressionDialect::Xyce),
+                "VM and analytic value differ for {expression}"
+            );
+        }
+
+        assert_eq!(eval_node_derivative("v(n)**-1", 0.0).0, 1.0e50);
+        assert_eq!(eval_node_derivative("v(n)**0.5", 0.0).0, 0.0);
+        assert_eq!(eval_node_derivative("v(n)**0", 0.0).0, 1.0);
+    }
+
+    #[test]
     fn analytic_derivative_keeps_ustep_boundary_value_and_zero_slope() {
         assert_eq!(eval_const_derivative("stp(0)"), (0.0, 0.0));
         assert_eq!(eval_const_derivative("u(-1)"), (0.0, 0.0));
@@ -1960,6 +2045,14 @@ mod tests {
     }
 
     fn eval_node_derivative(expression: &str, node_value: Value) -> (Value, Value) {
+        eval_node_derivative_with_dialect(expression, node_value, ExpressionDialect::Xyce)
+    }
+
+    fn eval_node_derivative_with_dialect(
+        expression: &str,
+        node_value: Value,
+        expression_dialect: ExpressionDialect,
+    ) -> (Value, Value) {
         let ast = parse_expression_strict(expression)
             .unwrap_or_else(|err| panic!("parse `{expression}` failed: {err}"));
         let program = compile(&ast);
@@ -1969,10 +2062,20 @@ mod tests {
             branch_values: &[],
             time: 0.0,
             temperature: 27.0,
-            expression_dialect: ExpressionDialect::Xyce,
+            expression_dialect,
             target: DerivativeTarget::Node(0),
         };
-        eval_behavioral_expr_with_derivative(&ast, &context)
+        eval_behavioral_expr_with_derivative_at_boundary(&ast, &context)
             .unwrap_or_else(|| panic!("analytic derivative for `{expression}` failed"))
+    }
+
+    fn eval_node_vm(expression: &str, node_value: Value, dialect: ExpressionDialect) -> Value {
+        let ast = parse_expression_strict(expression)
+            .unwrap_or_else(|err| panic!("parse `{expression}` failed: {err}"));
+        let program = compile(&ast);
+        Vm::new().execute(
+            &program,
+            &Context::dc(&[node_value], &[]).with_expression_dialect(dialect),
+        )
     }
 }

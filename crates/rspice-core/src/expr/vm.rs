@@ -289,7 +289,10 @@ impl Vm {
                 Instruction::Sub => self.binary_op(|a, b| a - b),
                 Instruction::Mul => self.binary_op(|a, b| a * b),
                 Instruction::Div => self.binary_op(|a, b| if b != 0.0 { a / b } else { 0.0 }),
-                Instruction::Pow => self.binary_op(|a, b| a.powf(b)),
+                Instruction::Pow => {
+                    let dialect = ctx.expression_dialect;
+                    self.binary_op(|a, b| super::real_pow(a, b, dialect));
+                }
 
                 // Comparisons
                 Instruction::Lt => self.binary_op(|a, b| if a < b { 1.0 } else { 0.0 }),
@@ -543,7 +546,10 @@ impl Vm {
             }
         }
 
-        self.stack.pop().unwrap_or(0.0)
+        super::normalize_expression_boundary(
+            self.stack.pop().unwrap_or(0.0),
+            ctx.expression_dialect,
+        )
     }
 
     #[inline]
@@ -841,6 +847,56 @@ fn xyce_atanh(value: Value) -> Value {
 mod tests {
     use super::*;
     use crate::expr::{compile, parse_expression_strict};
+
+    fn eval(expression: &str, voltage: Value, dialect: ExpressionDialect) -> Value {
+        let program = compile(
+            &parse_expression_strict(expression)
+                .unwrap_or_else(|error| panic!("parse `{expression}` failed: {error}")),
+        );
+        Vm::new().execute(
+            &program,
+            &Context::dc(&[voltage], &[]).with_expression_dialect(dialect),
+        )
+    }
+
+    #[test]
+    fn xyce_vm_matches_abm_power_gold_expressions() {
+        assert_eq!(eval("-v(n)**2", -2.5, ExpressionDialect::Xyce), -6.25);
+        assert_eq!(eval("v(n)**-2", -2.5, ExpressionDialect::Xyce), 0.16);
+        assert_eq!(eval("v(n)**-3", -2.5, ExpressionDialect::Xyce), -0.064);
+
+        let power_2_1 = 2.5_f64.powf(2.1) * (2.1 * std::f64::consts::PI).cos();
+        let power_3_1 = 2.5_f64.powf(3.1) * (3.1 * std::f64::consts::PI).cos();
+        assert_eq!(eval("v(n)**2.1", -2.5, ExpressionDialect::Xyce), power_2_1);
+        assert_eq!(
+            eval("pow(-v(n),3.1)", 2.5, ExpressionDialect::Xyce),
+            power_3_1
+        );
+    }
+
+    #[test]
+    fn negative_fractional_power_remains_nan_outside_xyce() {
+        assert!(eval("v(n)**2.1", -2.5, ExpressionDialect::Ngspice).is_nan());
+    }
+
+    #[test]
+    fn xyce_normalizes_only_the_completed_expression_boundary() {
+        assert_eq!(eval("exp(1000)", 0.0, ExpressionDialect::Xyce), 1.0e50);
+        assert_eq!(eval("-exp(1000)", 0.0, ExpressionDialect::Xyce), -1.0e50);
+        let nan_boundary = eval("0*exp(1000)", 0.0, ExpressionDialect::Xyce);
+        assert_eq!(
+            nan_boundary.abs(),
+            1.0e50,
+            "clamping exp(1000) before multiplication would incorrectly produce zero"
+        );
+        assert_eq!(
+            eval("-(0*exp(1000))", 0.0, ExpressionDialect::Xyce),
+            -nan_boundary
+        );
+
+        assert!(eval("exp(1000)", 0.0, ExpressionDialect::Ngspice).is_infinite());
+        assert!(eval("0*exp(1000)", 0.0, ExpressionDialect::Ngspice).is_nan());
+    }
 
     #[test]
     fn sdt_uses_committed_trapezoidal_history_without_trial_accumulation() {
