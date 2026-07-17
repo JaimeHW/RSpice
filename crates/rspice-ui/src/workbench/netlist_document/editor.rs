@@ -401,11 +401,56 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
     match rspice_core::Netlist::parse(buffer) {
         Ok(netlist) => {
             let mut diagnostics = parser_diagnostics(&netlist);
+            if let Err(error) = rspice_core::netlist::validate_output_symbols(&netlist) {
+                diagnostics.extend(parse_error_diagnostics(error));
+            }
             diagnostics.extend(unknown_reference_diagnostics(buffer));
             (diagnostics, Some(harvest_symbols(&netlist)))
         }
-        Err(error) => (vec![parse_error_diagnostic(error)], None),
+        Err(error) => (parse_error_diagnostics(error), None),
     }
+}
+
+/// Convert a typed parse failure into editor diagnostics. Aggregate semantic
+/// failures remain one row per authored card so distinct source origins are
+/// localized without flooding the strip; ordered and repeated occurrences are
+/// retained inside that card's message.
+fn parse_error_diagnostics(error: rspice_core::netlist::ParseError) -> Vec<Diagnostic> {
+    let rspice_core::netlist::ParseError::OutputSymbolValidation(validation) = error else {
+        return vec![parse_error_diagnostic(error)];
+    };
+
+    let mut groups = Vec::<(
+        rspice_core::netlist::OutputDirectiveKind,
+        rspice_core::netlist::NetlistSourceLocation,
+        Vec<String>,
+    )>::new();
+    for unresolved in validation.unresolved {
+        let entry = format!(
+            "{} `{}` via {}",
+            unresolved.kind, unresolved.symbol, unresolved.operator
+        );
+        match groups.last_mut() {
+            Some((directive, origin, entries))
+                if *directive == unresolved.directive && *origin == unresolved.origin =>
+            {
+                entries.push(entry);
+            }
+            _ => groups.push((unresolved.directive, unresolved.origin, vec![entry])),
+        }
+    }
+
+    groups
+        .into_iter()
+        .map(|(directive, origin, entries)| {
+            let line = origin.line.checked_sub(1);
+            Diagnostic::error(format!(
+                "Undefined output symbols in {directive} ({origin}): {}",
+                entries.join(", ")
+            ))
+            .with_line(line)
+        })
+        .collect()
 }
 
 fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic {
@@ -452,6 +497,9 @@ fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic
             error.reference_position,
         ))
         .with_line(error.origin.line.checked_sub(1)),
+        ParseError::OutputSymbolValidation(_) => {
+            unreachable!("aggregate output-symbol errors are expanded before scalar mapping")
+        }
         ParseError::DeviceInitialCondition(error) => {
             let origin = device_initial_condition_diagnostic_origin(&error);
             Diagnostic::error(error.to_string()).with_line(origin.line.checked_sub(1))
@@ -638,6 +686,65 @@ mod tests {
         assert!(diagnostic.message.contains("Coupling: K3 (canonical K3)"));
         assert!(diagnostic.message.contains("scope: top level"));
         assert!(diagnostic.message.contains("reference position 2"));
+    }
+
+    #[test]
+    fn output_symbol_diagnostics_preserve_origins_order_and_repetitions() {
+        let error = rspice_core::netlist::ParseError::OutputSymbolValidation(Box::new(
+            rspice_core::netlist::OutputSymbolValidationError {
+                unresolved: vec![
+                    rspice_core::netlist::UnresolvedOutputSymbol {
+                        directive: rspice_core::netlist::OutputDirectiveKind::Print,
+                        origin: rspice_core::netlist::NetlistSourceLocation::in_memory(7),
+                        operator: "V".into(),
+                        symbol: "missing".into(),
+                        kind: rspice_core::netlist::OutputSymbolKind::Node,
+                    },
+                    rspice_core::netlist::UnresolvedOutputSymbol {
+                        directive: rspice_core::netlist::OutputDirectiveKind::Measure,
+                        origin: rspice_core::netlist::NetlistSourceLocation::in_memory(11),
+                        operator: "I".into(),
+                        symbol: "Rbogus".into(),
+                        kind: rspice_core::netlist::OutputSymbolKind::Device,
+                    },
+                    rspice_core::netlist::UnresolvedOutputSymbol {
+                        directive: rspice_core::netlist::OutputDirectiveKind::Measure,
+                        origin: rspice_core::netlist::NetlistSourceLocation::in_memory(11),
+                        operator: "I".into(),
+                        symbol: "Rbogus".into(),
+                        kind: rspice_core::netlist::OutputSymbolKind::Device,
+                    },
+                ],
+            },
+        ));
+
+        let diagnostics = parse_error_diagnostics(error);
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].line, Some(6));
+        assert_eq!(diagnostics[1].line, Some(10));
+        assert!(diagnostics[0].message.contains("node `missing`"));
+        assert!(diagnostics[1].message.contains("device `Rbogus`"));
+        assert_eq!(diagnostics[1].message.matches("device `Rbogus`").count(), 2);
+    }
+
+    #[test]
+    fn editor_keeps_completion_symbols_when_only_output_validation_fails() {
+        let source = "output validation\n\
+                      V1 1 0 1\n\
+                      .PRINT OP V(missing)\n\
+                      .END\n";
+
+        let (diagnostics, symbols) = parse_buffer(source);
+
+        assert!(
+            symbols.is_some(),
+            "semantic lint must retain completion state"
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].line, Some(2));
+        assert!(diagnostics[0].message.contains("node `missing` via V"));
+        assert!(diagnostics[0].message.contains(".PRINT"));
     }
 
     #[test]
