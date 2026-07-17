@@ -2862,37 +2862,82 @@ fn matches_query(query: &str, values: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::{
+        collections::HashSet,
+        path::{Path, PathBuf},
+        sync::OnceLock,
+    };
 
     use serde_json::Value;
 
     use super::*;
     use crate::workbench::state::InteroperabilitySection;
 
-    const PRODUCT_MANIFEST_SOURCE: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../mockups/rspice-workbench-host/rspice-src/product-manifest.js"
-    ));
-    const PLATFORM_TASK_SOURCE: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../mockups/rspice-workbench-host/implementation/platform-task-contract.json"
-    ));
-    const CAPABILITY_FIXTURE_SOURCE: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../mockups/rspice-workbench-host/implementation/capability-readiness-fixture.json"
-    ));
-    const SURFACE_REGISTRY_SOURCE: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../mockups/rspice-workbench-host/implementation/surface-registry.json"
-    ));
-    const APP_SOURCE: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../mockups/rspice-workbench-host/rspice-src/app.js"
-    ));
-    const STYLES_SOURCE: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../mockups/rspice-workbench-host/rspice-src/styles.css"
-    ));
+    const MOCKUP_ROOT_ENV: &str = "RSPICE_MOCKUP_ROOT";
+
+    static PRODUCT_MANIFEST_SOURCE: OnceLock<String> = OnceLock::new();
+    static PLATFORM_TASK_SOURCE: OnceLock<String> = OnceLock::new();
+    static CAPABILITY_FIXTURE_SOURCE: OnceLock<String> = OnceLock::new();
+    static SURFACE_REGISTRY_SOURCE: OnceLock<String> = OnceLock::new();
+    static APP_SOURCE: OnceLock<String> = OnceLock::new();
+    static STYLES_SOURCE: OnceLock<String> = OnceLock::new();
+
+    fn mockup_root() -> PathBuf {
+        std::env::var_os(MOCKUP_ROOT_ENV).map_or_else(
+            || {
+                panic!(
+                    "set {MOCKUP_ROOT_ENV} to the rspice-workbench-host root before running ignored mockup parity tests"
+                )
+            },
+            PathBuf::from,
+        )
+    }
+
+    fn read_mockup_source(relative_path: &Path) -> String {
+        let path = mockup_root().join(relative_path);
+        std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("could not read governed source {}: {error}", path.display())
+        })
+    }
+
+    fn cached_mockup_source(cache: &'static OnceLock<String>, relative_path: &str) -> &'static str {
+        cache
+            .get_or_init(|| read_mockup_source(Path::new(relative_path)))
+            .as_str()
+    }
+
+    fn product_manifest_source() -> &'static str {
+        cached_mockup_source(&PRODUCT_MANIFEST_SOURCE, "rspice-src/product-manifest.js")
+    }
+
+    fn platform_task_source() -> &'static str {
+        cached_mockup_source(
+            &PLATFORM_TASK_SOURCE,
+            "implementation/platform-task-contract.json",
+        )
+    }
+
+    fn capability_fixture_source() -> &'static str {
+        cached_mockup_source(
+            &CAPABILITY_FIXTURE_SOURCE,
+            "implementation/capability-readiness-fixture.json",
+        )
+    }
+
+    fn surface_registry_source() -> &'static str {
+        cached_mockup_source(
+            &SURFACE_REGISTRY_SOURCE,
+            "implementation/surface-registry.json",
+        )
+    }
+
+    fn app_source() -> &'static str {
+        cached_mockup_source(&APP_SOURCE, "rspice-src/app.js")
+    }
+
+    fn styles_source() -> &'static str {
+        cached_mockup_source(&STYLES_SOURCE, "rspice-src/styles.css")
+    }
 
     fn parse_json(source: &str) -> Value {
         serde_json::from_str(source).expect("governed mockup source must be valid JSON")
@@ -2914,10 +2959,11 @@ mod tests {
 
     fn planned_specification_source(id: &str) -> &str {
         let marker = format!("if (action === \"{id}\") specification = {{");
-        let start = APP_SOURCE
+        let source = app_source();
+        let start = source
             .find(&marker)
             .unwrap_or_else(|| panic!("missing planned specification `{id}`"));
-        let tail = &APP_SOURCE[start..];
+        let tail = &source[start..];
         let end = tail
             .find("\n    };")
             .expect("planned specification must have a closed object literal");
@@ -3037,9 +3083,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn interoperability_document_copy_matches_the_mockup_exactly() {
         let source = source_section(
-            APP_SOURCE,
+            app_source(),
             "if (action === \"interoperability-matrix\")",
             "if (action === \"legal-privacy-center\")",
         );
@@ -3101,9 +3148,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn touch_edit_guide_document_and_responsive_contract_match_the_mockup_exactly() {
         let source = source_section(
-            APP_SOURCE,
+            app_source(),
             "if (action === \"touch-edit-guide\")",
             "if (action === \"platform-lifecycle\")",
         );
@@ -3120,7 +3168,11 @@ mod tests {
         }
         assert!(source.contains(TOUCH_EDIT_GUIDE_CONCEPT));
 
-        let styles = source_section(STYLES_SOURCE, ".touch-edit-guide {", ".canvas-breadcrumb {");
+        let styles = source_section(
+            styles_source(),
+            ".touch-edit-guide {",
+            ".canvas-breadcrumb {",
+        );
         for declaration in [
             "grid-template-columns: repeat(2, minmax(0, 1fr));",
             "grid-template-columns: 32px minmax(0, 1fr);",
@@ -3137,7 +3189,7 @@ mod tests {
         }
 
         let note_body_styles = source_section(
-            STYLES_SOURCE,
+            styles_source(),
             ".dialog-note-grid p {",
             ".detail-record-header {",
         );
@@ -3146,9 +3198,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn platform_lifecycle_document_copy_matches_the_mockup_exactly() {
         let source = source_section(
-            APP_SOURCE,
+            app_source(),
             "if (action === \"platform-lifecycle\")",
             "if (action === \"design-bulk-tools\")",
         );
@@ -3181,13 +3234,13 @@ mod tests {
         assert!(source.contains(&format!(">{TOUCH_EDIT_GUIDE_ACTION_LABEL}</button>")));
 
         let capability_toolbar = source_section(
-            APP_SOURCE,
+            app_source(),
             "function productCapabilityWorkflowMarkup()",
             "function specialistToolBrowserWorkflowMarkup()",
         );
         assert!(capability_toolbar.contains(">Format interoperability…</button>"));
         assert!(capability_toolbar.contains(">Lifecycle behavior…</button>"));
-        let help_menu = object_line(APP_SOURCE, "help: [[\"help\"");
+        let help_menu = object_line(app_source(), "help: [[\"help\"");
         assert!(help_menu.contains(
             "[\"compare\", \"Interoperability and format matrix…\", \"\", \"interoperability-matrix\"]"
         ));
@@ -3251,6 +3304,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn platform_rows_match_both_governed_sources_exactly() {
         const DIMENSIONS: [&str; 12] = [
             "viewport",
@@ -3267,8 +3321,8 @@ mod tests {
             "assistive-technology",
         ];
 
-        let contract = parse_json(PLATFORM_TASK_SOURCE);
-        let fixture = parse_json(CAPABILITY_FIXTURE_SOURCE);
+        let contract = parse_json(platform_task_source());
+        let fixture = parse_json(capability_fixture_source());
         for row in PLATFORM_AVAILABILITY_ROWS {
             let platform = &contract["platforms"][row.id];
             let target = &fixture["platformTargets"][row.id];
@@ -3306,9 +3360,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn planned_and_analysis_rows_match_the_product_manifest_source() {
         let analyses = source_section(
-            PRODUCT_MANIFEST_SOURCE,
+            product_manifest_source(),
             "const analyses = [",
             "].map((analysis)",
         );
@@ -3323,7 +3378,7 @@ mod tests {
         }
 
         let planned = source_section(
-            PRODUCT_MANIFEST_SOURCE,
+            product_manifest_source(),
             "const plannedCapabilityDesigns = [",
             "];",
         );
@@ -3338,9 +3393,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn planned_workflow_shared_frame_matches_the_mockup_exactly() {
         let frame = source_section(
-            APP_SOURCE,
+            app_source(),
             "function plannedCapabilityFrame",
             "function plannedCapabilityWorkflowMarkup",
         );
@@ -3372,21 +3428,22 @@ mod tests {
         assert!(frame.contains(PLANNED_WORKFLOW_FRAME.outputs_section_title));
         assert!(frame.contains(PLANNED_WORKFLOW_FRAME.implementation_boundary));
 
-        assert!(APP_SOURCE.contains(&format!(
+        assert!(app_source().contains(&format!(
             "${{meta.label}}{}",
             PLANNED_WORKFLOW_FRAME.dialog_title_suffix
         )));
-        assert!(APP_SOURCE.contains(&format!(
+        assert!(app_source().contains(&format!(
             "${{meta.group.toUpperCase()}} \u{00b7} {} \u{00b7} ${{meta.status.toUpperCase()}}",
             PLANNED_WORKFLOW_FRAME.dialog_eyebrow_status
         )));
-        assert!(APP_SOURCE.contains(&format!(
+        assert!(app_source().contains(&format!(
             "primary: {:?}",
             PLANNED_WORKFLOW_FRAME.primary_action
         )));
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn all_eleven_planned_workflow_specifications_match_the_mockup_exactly() {
         let metadata_ids = PLANNED_WORKFLOW_ROWS
             .iter()
@@ -3405,7 +3462,7 @@ mod tests {
             );
             let source = planned_specification_source(specification.id);
             assert_eq!(
-                APP_SOURCE
+                app_source()
                     .matches(&format!(
                         "if (action === \"{}\") specification = {{",
                         specification.id
@@ -3538,13 +3595,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn specialist_rows_match_manifest_and_registry_without_runtime_inference() {
         let manifest = source_section(
-            PRODUCT_MANIFEST_SOURCE,
+            product_manifest_source(),
             "const commercialWorkspaces = {",
             "const plannedCapabilityDesigns = [",
         );
-        let registry = parse_json(SURFACE_REGISTRY_SOURCE);
+        let registry = parse_json(surface_registry_source());
         let surfaces = registry["surfaces"]
             .as_array()
             .expect("surface registry has a surface array");
@@ -3585,6 +3643,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn engineering_profile_identity_copy_and_visibility_match_the_mockup_exactly() {
         let governed = [
             (
@@ -3607,7 +3666,7 @@ mod tests {
         ];
 
         for (profile, start, end) in governed {
-            let source = source_section(APP_SOURCE, start, end);
+            let source = source_section(app_source(), start, end);
             assert!(source.contains(&format!("label: {:?}", profile.label())));
             assert!(source.contains(&format!("detail: {:?}", profile.detail())));
             for row in SPECIALIST_WORKSPACE_ROWS {
@@ -3622,8 +3681,11 @@ mod tests {
             }
         }
 
-        let all_source =
-            source_section(APP_SOURCE, "\"all\": {", "function activeProductProfile()");
+        let all_source = source_section(
+            app_source(),
+            "\"all\": {",
+            "function activeProductProfile()",
+        );
         assert!(all_source.contains("actions: Object.keys(COMMERCIAL_WORKSPACE_META)"));
         assert!(
             SPECIALIST_WORKSPACE_ROWS
@@ -3695,8 +3757,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
     fn claim_projection_contains_only_product_cases_and_matches_fixture_sources() {
-        let fixture = parse_json(CAPABILITY_FIXTURE_SOURCE);
+        let fixture = parse_json(capability_fixture_source());
         assert_eq!(fixture["status"].as_str(), Some(CAPABILITY_FIXTURE_STATUS));
         assert_eq!(
             fixture["fixtureRevision"].as_str(),

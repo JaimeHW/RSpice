@@ -142,6 +142,20 @@ cargo run -p rspice-ui --release
 cargo test -p rspice-ui
 ```
 
+The default test suite is self-contained. Cross-repository parity checks for
+the separately governed `rspice-workbench-host` mockup sources are ignored by
+default; run them explicitly after pointing `RSPICE_MOCKUP_ROOT` at that
+source tree:
+
+```bash
+RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host \
+  cargo test -p rspice-ui --lib -- --ignored
+```
+
+Capability-resolver security tests do not depend on that external tree. Their
+closed-contract design fixture is tracked as Rust test data beside the
+resolver so clean checkouts exercise the fail-closed policy on every CI run.
+
 There are no runtime asset files to install: `build.rs` embeds the
 component-symbol SVGs and exports the git hash at compile time; fonts and
 the window icon are compiled in; on Windows, `winresource` embeds

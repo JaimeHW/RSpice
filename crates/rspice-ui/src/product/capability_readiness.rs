@@ -3237,17 +3237,20 @@ const fn evidence_kind_name(kind: EvidenceKind) -> &'static str {
 }
 
 #[cfg(test)]
+#[path = "capability_readiness_test_fixture.rs"]
+mod test_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
 
-    const CANONICAL_FIXTURE_JSON: &str = include_str!(
-        "../../../../mockups/rspice-workbench-host/implementation/capability-readiness-fixture.json"
-    );
-
     fn canonical_fixture() -> CapabilityFixture {
-        serde_json::from_str(CANONICAL_FIXTURE_JSON)
-            .expect("the canonical design fixture must match the closed Rust contract")
+        let fixture = super::test_fixture::canonical_fixture();
+        let serialized = serde_json::to_vec(&fixture)
+            .expect("the tracked design fixture must serialize through the closed contract");
+        serde_json::from_slice(&serialized)
+            .expect("the tracked design fixture must deserialize through the closed contract")
     }
 
     fn canonical_case<'a>(fixture: &'a CapabilityFixture, id: &str) -> &'a ResolutionCase {
@@ -4555,7 +4558,7 @@ mod tests {
 
     #[test]
     fn serde_contracts_are_closed_and_target_nulls_must_be_explicit() {
-        let mut root: serde_json::Value = serde_json::from_str(CANONICAL_FIXTURE_JSON).unwrap();
+        let mut root = serde_json::to_value(canonical_fixture()).unwrap();
         root.as_object_mut()
             .unwrap()
             .insert("unexpected".into(), serde_json::Value::Bool(true));
