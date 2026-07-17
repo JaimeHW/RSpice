@@ -54,7 +54,7 @@ pub use veriloga_cache::{
     register_project_veriloga_runtime_for_session, veriloga_cache_entries, veriloga_cache_stats,
 };
 #[cfg(feature = "veriloga")]
-use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
+use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga_with_limits};
 
 mod model_policy;
 use model_policy::*;
@@ -3382,7 +3382,10 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let entry = resolve_cached_or_compile_veriloga(&include.file_path)?;
+                let entry = resolve_cached_or_compile_veriloga_with_limits(
+                    &include.file_path,
+                    self.config.resource_limits,
+                )?;
                 let model = std::sync::Arc::clone(&entry.model);
 
                 let model_key = normalize_model_key(model.name.as_str());

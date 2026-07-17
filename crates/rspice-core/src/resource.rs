@@ -296,11 +296,19 @@ where
         self.insertion_order.retain(|key| entries.contains_key(key));
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.insertion_order.clear();
         self.retained_bytes = 0;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn remove(&mut self, key: &K) -> Option<V> {
+        let entry = self.entries.remove(key)?;
+        self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
+        self.insertion_order.retain(|queued| queued != key);
+        Some(entry.value)
     }
 
     #[cfg(test)]
