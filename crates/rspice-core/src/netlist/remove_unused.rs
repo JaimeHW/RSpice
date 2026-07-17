@@ -52,6 +52,7 @@ pub(crate) fn filter_elements_with_abort(
             ElementProvenance::GeneratedPassiveHelper { owner, .. } => {
                 rejected_owners.contains(&owner.to_ascii_uppercase())
             }
+            ElementProvenance::GeneratedXyceAddResistor { .. } => false,
         };
         if !rejected {
             filtered.push(element.clone());

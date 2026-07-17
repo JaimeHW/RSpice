@@ -12,6 +12,7 @@
 //! - File inclusion (.INCLUDE, .LIB)
 //! - Subcircuits with parameter passing
 
+mod add_resistors;
 mod ast;
 pub mod expr;
 mod flattener;
@@ -31,14 +32,17 @@ mod startup;
 mod topology;
 mod xspice_parser;
 
+pub use add_resistors::*;
 pub use ast::*;
 pub use expr::{
     ExpressionDialect, ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
 };
-pub(crate) use flattener::flatten_netlist_with_models_with_abort;
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
     flatten_netlist, flatten_netlist_with_models,
+};
+pub(crate) use flattener::{
+    flatten_netlist_with_models_config_with_abort, flatten_netlist_with_models_with_abort,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub(crate) use include::source_path_literal_to_host_path;

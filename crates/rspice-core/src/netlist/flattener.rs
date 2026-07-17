@@ -497,11 +497,7 @@ impl<'a> Flattener<'a> {
             })?;
 
         // Build new prefix for this instance
-        let new_prefix = if prefix.is_empty() {
-            instance.name.clone()
-        } else {
-            format!("{}.{}", prefix, instance.name)
-        };
+        let new_prefix = self.qualify_hierarchy_name(prefix, &instance.name);
 
         // Resolve every actual through the parent context before validating
         // repeated formal ports. Duplicate formals are legal only when every
@@ -649,11 +645,7 @@ impl<'a> Flattener<'a> {
         for (element_index, sub_element) in subckt.elements.iter().enumerate() {
             poll_parse_abort(abort, element_index)?;
             // Apply parameter substitution to element values
-            let element_path = if new_prefix.is_empty() {
-                sub_element.name.clone()
-            } else {
-                format!("{}.{}", new_prefix, sub_element.name)
-            };
+            let element_path = self.qualify_hierarchy_name(&new_prefix, &sub_element.name);
             let mut substituted =
                 self.substitute_params(sub_element, &param_scope, &element_path, &new_prefix)?;
             if multiplicity != 1.0 {
@@ -782,11 +774,7 @@ impl<'a> Flattener<'a> {
         prefix: &str,
         node_map: &HashMap<String, String>,
     ) -> Element {
-        let new_name = if prefix.is_empty() {
-            element.name.clone()
-        } else {
-            format!("{}.{}", prefix, element.name)
-        };
+        let new_name = self.qualify_hierarchy_name(prefix, &element.name);
 
         let new_nodes: Vec<String> = element
             .nodes
@@ -859,7 +847,7 @@ impl<'a> Flattener<'a> {
                 control_element,
             } => {
                 // Remap control element name with prefix (like element names)
-                let new_ctrl = Self::remap_local_element_reference(control_element, prefix);
+                let new_ctrl = self.remap_local_element_reference(control_element, prefix);
                 ElementKind::Cccs {
                     gain: *gain,
                     gain_expr: gain_expr.clone(),
@@ -871,7 +859,7 @@ impl<'a> Flattener<'a> {
                 transresistance_expr,
                 control_element,
             } => {
-                let new_ctrl = Self::remap_local_element_reference(control_element, prefix);
+                let new_ctrl = self.remap_local_element_reference(control_element, prefix);
                 ElementKind::Ccvs {
                     transresistance: *transresistance,
                     transresistance_expr: transresistance_expr.clone(),
@@ -894,7 +882,7 @@ impl<'a> Flattener<'a> {
                 model,
                 initial_state,
             } => ElementKind::ISwitch {
-                control_element: Self::remap_local_element_reference(control_element, prefix),
+                control_element: self.remap_local_element_reference(control_element, prefix),
                 model: model.clone(),
                 initial_state: *initial_state,
             },
@@ -917,7 +905,7 @@ impl<'a> Flattener<'a> {
             } => ElementKind::Coupling {
                 inductors: inductors
                     .iter()
-                    .map(|name| Self::remap_local_element_reference(name, prefix))
+                    .map(|name| self.remap_local_element_reference(name, prefix))
                     .collect(),
                 coefficient: *coefficient,
             },
@@ -973,19 +961,35 @@ impl<'a> Flattener<'a> {
                 super::ElementProvenance::Authored => super::ElementProvenance::Authored,
                 super::ElementProvenance::GeneratedPassiveHelper { owner, role } => {
                     super::ElementProvenance::GeneratedPassiveHelper {
-                        owner: Self::remap_local_element_reference(owner, prefix),
+                        owner: self.remap_local_element_reference(owner, prefix),
                         role: *role,
                     }
+                }
+                super::ElementProvenance::GeneratedXyceAddResistor { mode } => {
+                    super::ElementProvenance::GeneratedXyceAddResistor { mode: *mode }
                 }
             },
         }
     }
 
-    fn remap_local_element_reference(name: &str, prefix: &str) -> String {
-        if prefix.is_empty() {
+    fn remap_local_element_reference(&self, name: &str, prefix: &str) -> String {
+        self.qualify_hierarchy_name(prefix, name)
+    }
+
+    fn canonicalize_hierarchy_name(&self, name: &str) -> String {
+        if self.config.hierarchy_separator == ':' || !name.contains(':') {
             name.to_string()
         } else {
-            format!("{}.{}", prefix, name)
+            name.replace(':', &self.config.hierarchy_separator.to_string())
+        }
+    }
+
+    fn qualify_hierarchy_name(&self, prefix: &str, local_name: &str) -> String {
+        let local_name = self.canonicalize_hierarchy_name(local_name);
+        if prefix.is_empty() {
+            local_name
+        } else {
+            format!("{prefix}{}{local_name}", self.config.hierarchy_separator)
         }
     }
 
@@ -1022,9 +1026,9 @@ impl<'a> Flattener<'a> {
 
         // Internal node - prefix with instance path
         if prefix.is_empty() {
-            node.to_string()
+            self.canonicalize_hierarchy_name(node)
         } else {
-            format!("{}{}{}", prefix, self.config.hierarchy_separator, node)
+            self.qualify_hierarchy_name(prefix, node)
         }
     }
 
@@ -1120,7 +1124,7 @@ impl<'a> Flattener<'a> {
                     let remapped = if ident.eq_ignore_ascii_case("V") {
                         remap_voltage_probe_args(self, &inner, prefix, node_map)
                     } else {
-                        remap_current_probe_arg(prefix, &inner)
+                        remap_current_probe_arg(self, prefix, &inner)
                     };
                     out.push_str(&ident);
                     out.push('(');
@@ -2981,11 +2985,16 @@ pub(crate) fn flatten_netlist_with_models_with_abort(
     netlist: &Netlist,
     abort: &dyn AbortSignal,
 ) -> Result<FlattenedNetlist, ParseWithAbortError> {
-    let mut flattener = Flattener::with_models_config(
-        &netlist.subcircuits,
-        &netlist.models,
-        FlattenerConfig::default(),
-    );
+    flatten_netlist_with_models_config_with_abort(netlist, FlattenerConfig::default(), abort)
+}
+
+pub(crate) fn flatten_netlist_with_models_config_with_abort(
+    netlist: &Netlist,
+    config: FlattenerConfig,
+    abort: &dyn AbortSignal,
+) -> Result<FlattenedNetlist, ParseWithAbortError> {
+    let mut flattener =
+        Flattener::with_models_config(&netlist.subcircuits, &netlist.models, config);
     let elements = flattener.flatten_with_abort(netlist, abort)?;
     Ok(FlattenedNetlist {
         elements,
@@ -3091,16 +3100,12 @@ fn remap_voltage_probe_args(
     args.trim().to_string()
 }
 
-fn remap_current_probe_arg(prefix: &str, arg: &str) -> String {
+fn remap_current_probe_arg(flattener: &Flattener<'_>, prefix: &str, arg: &str) -> String {
     let trimmed = arg.trim();
     if trimmed.is_empty() || !is_simple_probe_name(trimmed) {
         return trimmed.to_string();
     }
-    if prefix.is_empty() {
-        trimmed.to_string()
-    } else {
-        format!("{}.{}", prefix, trimmed)
-    }
+    flattener.qualify_hierarchy_name(prefix, trimmed)
 }
 
 fn remap_probe_node(

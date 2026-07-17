@@ -475,7 +475,10 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         if resistance.is_none() && uses_xyce_default && model_def.is_none() {
             resistance = Some(1000.0);
         }
-        if resistance.is_none() && !uses_xyce_default && value.is_finite() {
+        if resistance.is_none()
+            && !uses_xyce_default
+            && (value.is_finite() || (value.is_infinite() && value.is_sign_positive()))
+        {
             resistance = Some(value);
         }
         if resistance.is_none()

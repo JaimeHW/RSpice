@@ -30,7 +30,8 @@ use super::{
     SimulationOptions, SourceRfPort, SourceSpec, StartupDiagnosticCode,
     StartupDirectiveDisposition, StartupDirectiveEntry, StartupDirectiveKind,
     StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
-    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude, ensure_parse_not_aborted,
+    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude, XyceAddResistorMode,
+    XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
     finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
@@ -383,6 +384,13 @@ fn parse_netlist_impl(
             "Additional parameters in .PREPROCESS REPLACEGROUND statement; ignoring them",
         ));
     }
+    for line in preprocess.add_resistors_extra_lines {
+        state.diagnostics.push(ParseDiagnostic::warning(
+            line,
+            "addresistors-extra-parameters",
+            "Additional parameters in .PREPROCESS ADDRESISTORS statement; ignoring them",
+        ));
+    }
     state.params.set_statistical_mode(options.statistical_mode);
     state
         .params
@@ -392,6 +400,7 @@ fn parse_netlist_impl(
         .set_parameter_redefinition_policy(options.parameter_redefinition_policy);
     state.options.replace_ground = preprocess.replace_ground;
     state.options.remove_unused = preprocess.remove_unused;
+    state.options.add_resistors = preprocess.add_resistors;
 
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
@@ -1635,6 +1644,8 @@ struct RootPreprocessPolicy {
     replace_ground: Option<bool>,
     replace_ground_extra_lines: Vec<usize>,
     remove_unused: Option<RemoveUnusedPolicy>,
+    add_resistors: Option<XyceAddResistorsPolicy>,
+    add_resistors_extra_lines: Vec<usize>,
 }
 
 fn prescan_root_preprocess(
@@ -1765,16 +1776,69 @@ fn scan_root_preprocess_logical_line(
         );
     }
     if operation.eq_ignore_ascii_case("ADDRESISTORS") {
-        // Recognized but execution remains owned by the existing unsupported
-        // command path. The physical prescan must still distinguish it from
-        // an unknown operation, including after `.END`.
-        return Ok(());
+        return scan_root_addresistors_fields(&fields, physical_line, policy);
     }
     Err(ParseError::Syntax {
         line: physical_line,
         message: format!("Unknown .PREPROCESS operation '{operation}'"),
     }
     .into())
+}
+
+fn scan_root_addresistors_fields(
+    fields: &[String],
+    physical_line: usize,
+    policy: &mut RootPreprocessPolicy,
+) -> Result<(), ParseWithAbortError> {
+    if fields.len() < 4 {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: "Missing resistance value in .PREPROCESS ADDRESISTORS statement".to_string(),
+        }
+        .into());
+    }
+
+    let mode = if fields[2].eq_ignore_ascii_case("ONETERMINAL") {
+        XyceAddResistorMode::OneTerminal
+    } else if fields[2].eq_ignore_ascii_case("NODCPATH") {
+        XyceAddResistorMode::NoDcPath
+    } else {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: format!(
+                "Unknown argument {} in .PREPROCESS ADDRESISTORS statement",
+                fields[2].to_ascii_uppercase()
+            ),
+        }
+        .into());
+    };
+
+    let add_resistors = policy
+        .add_resistors
+        .get_or_insert_with(XyceAddResistorsPolicy::default);
+    let destination = match mode {
+        XyceAddResistorMode::OneTerminal => &mut add_resistors.one_terminal,
+        XyceAddResistorMode::NoDcPath => &mut add_resistors.no_dc_path,
+    };
+    if let Some(first) = destination.as_ref() {
+        return Err(ParseError::Syntax {
+            line: physical_line,
+            message: format!(
+                "Multiple .PREPROCESS ADDRESISTORS {} statements (first at line {})",
+                mode.xyce_keyword(),
+                first.source_line
+            ),
+        }
+        .into());
+    }
+    *destination = Some(XyceAddResistorSpec {
+        raw_resistance: fields[3].clone(),
+        source_line: physical_line,
+    });
+    if fields.len() > 4 {
+        policy.add_resistors_extra_lines.push(physical_line);
+    }
+    Ok(())
 }
 
 fn scan_root_replaceground_fields(

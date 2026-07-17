@@ -489,13 +489,15 @@ fn remaining_command_source(stream: &TokenStream) -> String {
 fn parse_preprocess_command(
     stream: &mut TokenStream,
     line_num: usize,
-    diagnostics: &mut Vec<ParseDiagnostic>,
+    _diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Result<(), ParseError> {
     let operation = expect_ident(stream, line_num).map_err(|_| ParseError::Syntax {
         line: line_num,
         message: ".PREPROCESS requires an operation".to_string(),
     })?;
-    if operation.eq_ignore_ascii_case("REMOVEUNUSED") {
+    if operation.eq_ignore_ascii_case("REMOVEUNUSED")
+        || operation.eq_ignore_ascii_case("ADDRESISTORS")
+    {
         // Root-wide semantic validation and the typed selection are owned by
         // the physical-file prescan, which also sees cards after `.END` and
         // suppresses controls from included files. The ordinary command pass
@@ -504,20 +506,10 @@ fn parse_preprocess_command(
         return Ok(());
     }
     if !operation.eq_ignore_ascii_case("REPLACEGROUND") {
-        if !operation.eq_ignore_ascii_case("ADDRESISTORS") {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!("Unknown .PREPROCESS operation '{operation}'"),
-            });
-        }
-        let message = format!("unsupported .PREPROCESS operation '{operation}' ignored");
-        diagnostics.push(ParseDiagnostic::warning(
-            line_num,
-            "unsupported-preprocess-operation",
-            message,
-        ));
-        stream.skip_to_eol();
-        return Ok(());
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Unknown .PREPROCESS operation '{operation}'"),
+        });
     }
     let value = expect_ident(stream, line_num).map_err(|_| ParseError::Syntax {
         line: line_num,

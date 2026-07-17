@@ -715,6 +715,24 @@ pub fn parse_spice_value(s: &str) -> Result<Value, LexError> {
     }
 }
 
+/// Parse one complete SPICE numeric token with an optional engineering suffix.
+///
+/// Unlike [`parse_spice_value`], this rejects unconsumed trailing text. It is
+/// intended for security- and correctness-sensitive boundaries where a token
+/// such as `1bogus` must not silently resolve to the numeric prefix `1`.
+pub fn parse_spice_value_complete(s: &str) -> Result<Value, LexError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(LexError::InvalidNumber("empty".to_string(), 0));
+    }
+    let lexer = Lexer::new(s);
+    match lexer.parse_number(s) {
+        Ok((TokenKind::Number(value), consumed)) if consumed == s.len() => Ok(value),
+        Ok(_) => Err(LexError::InvalidNumber(s.to_string(), 0)),
+        Err(error) => Err(error),
+    }
+}
+
 //=============================================================================
 // Token Stream for Parser
 //=============================================================================

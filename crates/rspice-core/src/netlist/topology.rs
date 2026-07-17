@@ -181,8 +181,8 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
             groups
         }
         ElementKind::TransmissionLine { .. } if element.nodes.len() >= 4 => vec![
-            vec![element.nodes[0].as_str(), element.nodes[2].as_str()],
-            vec![element.nodes[1].as_str(), element.nodes[3].as_str()],
+            vec![element.nodes[0].as_str(), element.nodes[1].as_str()],
+            vec![element.nodes[2].as_str(), element.nodes[3].as_str()],
         ],
         ElementKind::Coupling { .. } => Vec::new(),
         ElementKind::Subcircuit { .. }
@@ -826,6 +826,41 @@ mod tests {
                 .iter()
                 .any(|node| node.eq_ignore_ascii_case("isolated")),
             "diagnostics={diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn xyce_transmission_line_dc_groups_follow_port_pairs() {
+        // Xyce 7.10 TRA devConMap is [1, 1, 2, 2]: the positive and
+        // negative terminal of each port share a DC lead group.
+        let deck = "transmission-line lead groups\n\
+                    V1 a 0 1\n\
+                    T1 a b c d Z0=50 TD=1n\n\
+                    .end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let flat = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+
+        let diagnostics = analyze_xyce_connectivity(&flat).expect("topology is supported");
+        assert!(
+            !diagnostics
+                .no_dc_path_nodes
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case("b")),
+            "port 1 negative terminal shares the grounded port-1 group"
+        );
+        assert!(
+            diagnostics
+                .no_dc_path_nodes
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case("c"))
+        );
+        assert!(
+            diagnostics
+                .no_dc_path_nodes
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case("d"))
         );
     }
 
