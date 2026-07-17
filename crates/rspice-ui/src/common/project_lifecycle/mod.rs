@@ -1509,6 +1509,8 @@ fn revert_document(
                 .apply_to_state(&mut simulation)
                 .map_err(ProjectLifecycleError::InvalidState)?;
             state.simulation = simulation;
+            state.workspace.report_documents = baseline.workspace.report_documents;
+            state.workspace.report_documents_dirty = false;
             state.clear_specialized_viewer_data();
         }
         ProjectDocumentId::VerificationSpecifications => {
@@ -1726,6 +1728,7 @@ fn overlay_document(
         }
         ProjectDocumentId::ResultHistory => {
             target.simulation_results = working.simulation_results.clone();
+            target.workspace.report_documents = working.workspace.report_documents.clone();
         }
         ProjectDocumentId::VerificationSpecifications => {
             target.workspace.specs = working.workspace.specs.clone();

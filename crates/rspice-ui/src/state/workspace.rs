@@ -14,8 +14,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
 use crate::product::{
-    AnalysisInstanceId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId, RevisionError,
-    RunId, SavedOutputId, SimulationPlanId,
+    AnalysisInstanceId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId,
+    ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId,
 };
 use crate::state::{
     AnalysisResultSourceDomain, Cell, ComponentType, Library, LibraryCellInstance, LibraryManager,
@@ -1839,6 +1839,10 @@ pub enum SimulationConfigurationError {
     InvalidProjectSourceRegistry { message: String },
     #[error("project plot export preset catalog has invalid ownership: {message}")]
     InvalidPlotExportPresetOwnership { message: String },
+    #[error("report_documents[{index}] is invalid: {message}")]
+    InvalidReportDocument { index: usize, message: String },
+    #[error("report document identity {document_id} is duplicated")]
+    DuplicateReportDocumentIdentity { document_id: ResultDocumentId },
     #[error("simulation_plan_payloads contains duplicate owner {plan_id}")]
     DuplicatePlanPayload { plan_id: SimulationPlanId },
     #[error("simulation_plan_payloads[{plan_id}].design_variables[{index}] is invalid: {message}")]
@@ -2582,6 +2586,11 @@ pub struct ProjectWorkspace {
     /// organization profile requires a connected organization authority.
     #[serde(default)]
     pub plot_export_presets: crate::results::plot_export_preset::PlotExportPresetCatalog,
+    /// Project-owned, versioned engineering report sources. Rendered review
+    /// artifacts are derived from these documents and are never represented
+    /// here unless a publication writer has produced and verified them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub report_documents: Vec<crate::results::report_document::ReportDocument>,
     /// Manually edited netlist source. When set, simulations run this
     /// deck instead of regenerating from the schematic (text-first mode);
     /// `None` means the netlist view shows the generated artifact.
@@ -2622,6 +2631,11 @@ pub struct ProjectWorkspace {
     #[serde(default, skip)]
     #[doc(hidden)]
     pub project_metadata_dirty: bool,
+    /// Runtime dirty projection for project-owned report sources. The report
+    /// documents themselves persist; accepted-baseline comparison remains the
+    /// canonical save/revert authority.
+    #[serde(default, skip)]
+    pub report_documents_dirty: bool,
 }
 
 impl Default for ProjectWorkspace {
@@ -2641,6 +2655,7 @@ impl Default for ProjectWorkspace {
             simulation_plan_payloads: Vec::new(),
             plot_export_presets:
                 crate::results::plot_export_preset::PlotExportPresetCatalog::default(),
+            report_documents: Vec::new(),
             netlist_source: None,
             netlist_document: None,
             netlist_descriptor: None,
@@ -2649,6 +2664,7 @@ impl Default for ProjectWorkspace {
             netlist_source_dirty: false,
             project_sources_dirty: false,
             project_metadata_dirty: false,
+            report_documents_dirty: false,
         }
     }
 }
@@ -2667,6 +2683,22 @@ impl ProjectWorkspace {
                     message: error.to_string(),
                 },
             )?;
+        let mut report_document_ids = std::collections::HashSet::new();
+        for (index, document) in self.report_documents.iter().enumerate() {
+            document.validate().map_err(|error| {
+                SimulationConfigurationError::InvalidReportDocument {
+                    index,
+                    message: error.to_string(),
+                }
+            })?;
+            if !report_document_ids.insert(document.id()) {
+                return Err(
+                    SimulationConfigurationError::DuplicateReportDocumentIdentity {
+                        document_id: document.id(),
+                    },
+                );
+            }
+        }
         self.project_sources.validate().map_err(|error| {
             SimulationConfigurationError::InvalidProjectSourceRegistry {
                 message: error.to_string(),
@@ -3845,6 +3877,7 @@ impl ProjectWorkspace {
         self.netlist_source_dirty = false;
         self.project_sources_dirty = false;
         self.project_metadata_dirty = false;
+        self.report_documents_dirty = false;
     }
 
     pub fn any_dirty(&self) -> bool {
@@ -3856,6 +3889,7 @@ impl ProjectWorkspace {
             || self.netlist_source_dirty
             || self.project_sources_dirty
             || self.project_metadata_dirty
+            || self.report_documents_dirty
     }
 
     pub fn attach_technology(

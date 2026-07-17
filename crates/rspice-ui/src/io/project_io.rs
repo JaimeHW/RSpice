@@ -3584,6 +3584,49 @@ mod tests {
     }
 
     #[test]
+    fn project_file_round_trips_project_owned_report_documents() {
+        use crate::results::report_document::{
+            ReportDocument, ReportEdit, ReportPageUpdatePolicy, ReportTemplate,
+        };
+
+        let mut libraries = LibraryManager::with_primitives();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let mut report =
+            ReportDocument::new_with_template("Verification report", ReportTemplate::DesignReview)
+                .expect("report document");
+        report
+            .transact(
+                report.revision(),
+                vec![ReportEdit::AddPage {
+                    title: "PVT and yield".to_owned(),
+                }],
+                10,
+            )
+            .expect("add page");
+        let page = report.pages()[0].clone();
+        report
+            .transact(
+                report.revision(),
+                vec![ReportEdit::SetPageUpdatePolicy {
+                    page_id: page.id(),
+                    expected_page_revision: page.revision(),
+                    update_policy: ReportPageUpdatePolicy::FreezeSelectedRevision,
+                }],
+                11,
+            )
+            .expect("set page policy");
+        workspace.report_documents.push(report.clone());
+        workspace.report_documents_dirty = true;
+        let project = ProjectFile::new(workspace, libraries);
+
+        let json = serialize_project_file(&project).expect("project serializes");
+        let restored = load_project_text(&json, None).expect("project reloads");
+
+        assert_eq!(restored.workspace.report_documents, vec![report]);
+        assert!(!restored.workspace.report_documents_dirty);
+    }
+
+    #[test]
     fn project_execution_context_round_trips_every_persisted_input() {
         let project = project_with_execution_context();
         let expected = serde_json::to_value(

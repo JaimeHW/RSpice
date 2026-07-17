@@ -6,12 +6,14 @@
 //! cursors live on one strip at a time; their values, deltas and windowed
 //! measurements render in the right panel.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use egui::Ui;
 
 use crate::analysis::calculator;
 use crate::common::AppState;
+use crate::results::visualization_document::AccessibleColorPalette;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
 };
@@ -22,7 +24,9 @@ use crate::ui::plot::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
-use crate::workbench::visualization_family::SourceSampleSelection;
+use crate::workbench::visualization_family::{
+    FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
+};
 use crate::workbench::{
     ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
 };
@@ -50,6 +54,23 @@ enum TraceKind {
     Imaginary,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) struct FamilyTraceVisibilityKey {
+    group_key: u64,
+    waveform_index: usize,
+    trace_kind: u8,
+}
+
+impl FamilyTraceVisibilityKey {
+    const fn new(group_key: u64, waveform_index: usize, trace_kind: TraceKind) -> Self {
+        Self {
+            group_key,
+            waveform_index,
+            trace_kind: trace_kind as u8,
+        }
+    }
+}
+
 impl TraceKind {
     const fn is_phase(self) -> bool {
         matches!(self, Self::PhaseDeg | Self::PhaseRad)
@@ -62,7 +83,12 @@ struct StripTrace {
     /// Name of the source waveform in the immutable dataset. Display names
     /// may be derived representations such as `re(V(out))`.
     source_waveform_name: String,
+    /// Undecorated signal name used to preserve overlay pairing when the
+    /// active source is expanded into several family groups.
+    base_name: String,
     name: String,
+    /// Ordinary signal color retained for non-family overlay runs.
+    signal_color: egui::Color32,
     color: egui::Color32,
     x: SharedWaveformValues,
     y: SharedWaveformValues,
@@ -73,6 +99,11 @@ struct StripTrace {
     /// Overlay traces come from a non-active run: same signal hue, reduced
     /// weight, visibility slaved to the active run's matching signal.
     overlay: bool,
+    /// Stable family-group identity mixed into all derived/cache keys.
+    presentation_key: u64,
+    family_group_ordinal: Option<usize>,
+    family_style: Option<FamilyTraceStyle>,
+    family_visibility_key: Option<FamilyTraceVisibilityKey>,
 }
 
 /// One strip (== one analysis of the active run).
@@ -82,7 +113,9 @@ pub(super) struct StripModel {
     kind_tag: String,
     subtitle: String,
     x_scale: XScale,
-    x_unit: &'static str,
+    x_dimension_key: String,
+    x_label: String,
+    x_unit: String,
     y_unit: &'static str,
     /// Phase traces carry the unwrapped (continuous) series instead of the
     /// raw ±180°-wrapped samples. Folded into the cache keys.
@@ -94,11 +127,13 @@ pub(super) struct StripModel {
     traces: Vec<StripTrace>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct CursorDomain {
     analysis_type: AnalysisType,
     x_scale: XScale,
-    x_unit: &'static str,
+    x_dimension_key: String,
+    x_label: String,
+    x_unit: String,
 }
 
 /// Frame cache for the strip models. Building them clones every trace name
@@ -121,6 +156,7 @@ fn models_fingerprint(
     phase_continuous: bool,
     complex_display: ComplexNumberDisplay,
     selection: Option<&SourceSampleSelection>,
+    hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
     t: &Tokens,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -131,6 +167,9 @@ fn models_fingerprint(
     selection
         .map(SourceSampleSelection::fingerprint)
         .hash(&mut h);
+    let mut hidden = hidden_family_traces.iter().copied().collect::<Vec<_>>();
+    hidden.sort_unstable();
+    hidden.hash(&mut h);
     for color in &t.color.traces {
         color.to_array().hash(&mut h);
     }
@@ -167,6 +206,7 @@ pub(super) fn cached_models(
         results.phase_continuous,
         complex_display,
         results.sample_selection.as_ref(),
+        &results.hidden_family_traces,
         t,
     );
     if let Some((cached_fp, models)) = &results.models.0
@@ -181,6 +221,7 @@ pub(super) fn cached_models(
         results.phase_continuous,
         complex_display,
         results.sample_selection.as_ref(),
+        &results.hidden_family_traces,
     ));
     results.models.0 = Some((fp, Arc::clone(&models)));
     models
@@ -230,25 +271,18 @@ fn matching_overlay_analysis<'a>(
 }
 
 impl StripModel {
-    const fn cursor_domain(&self) -> CursorDomain {
+    fn cursor_domain(&self) -> CursorDomain {
         CursorDomain {
             analysis_type: self.analysis_type,
             x_scale: self.x_scale,
-            x_unit: self.x_unit,
+            x_dimension_key: self.x_dimension_key.clone(),
+            x_label: self.x_label.clone(),
+            x_unit: self.x_unit.clone(),
         }
     }
 
-    fn x_label(&self) -> &'static str {
-        match self.x_scale {
-            XScale::Log10 => "f",
-            XScale::Linear => {
-                if self.x_unit == "s" {
-                    "t"
-                } else {
-                    "x"
-                }
-            }
-        }
+    fn x_label(&self) -> &str {
+        &self.x_label
     }
 
     fn format_x(
@@ -265,7 +299,7 @@ impl StripModel {
             if self.x_unit.is_empty() {
                 ""
             } else {
-                self.x_unit
+                &self.x_unit
             },
             significant_digits,
         )
@@ -300,25 +334,242 @@ fn selected_series_pair(
     let Some(selection) = selection else {
         return Some((Arc::clone(x), Arc::clone(y)));
     };
-    if x.len() != y.len()
-        || selection
-            .source_indices
-            .last()
-            .is_some_and(|index| *index >= x.len())
-    {
+    selected_series_pair_indices(x, y, &selection.source_indices)
+}
+
+fn selected_series_pair_indices(
+    x: &SharedWaveformValues,
+    y: &SharedWaveformValues,
+    source_indices: &[usize],
+) -> Option<(SharedWaveformValues, SharedWaveformValues)> {
+    if x.len() != y.len() || source_indices.last().is_some_and(|index| *index >= x.len()) {
         return None;
     }
-    let selected_x = selection
-        .source_indices
-        .iter()
-        .map(|index| x[*index])
-        .collect();
-    let selected_y = selection
-        .source_indices
-        .iter()
-        .map(|index| y[*index])
-        .collect();
+    let selected_x = source_indices.iter().map(|index| x[*index]).collect();
+    let selected_y = source_indices.iter().map(|index| y[*index]).collect();
     Some((Arc::new(selected_x), Arc::new(selected_y)))
+}
+
+struct FamilyProjection<'a> {
+    group: Option<&'a FamilyRenderGroup>,
+    x: SharedWaveformValues,
+    y: SharedWaveformValues,
+}
+
+fn projected_family_series<'a>(
+    x: &SharedWaveformValues,
+    y: &SharedWaveformValues,
+    selection: Option<&'a SourceSampleSelection>,
+) -> Vec<FamilyProjection<'a>> {
+    let Some(selection) = selection else {
+        return vec![FamilyProjection {
+            group: None,
+            x: Arc::clone(x),
+            y: Arc::clone(y),
+        }];
+    };
+    let groups = selection
+        .family_render_plan()
+        .map(|plan| plan.groups())
+        .filter(|groups| !groups.is_empty());
+    if let Some(groups) = groups {
+        return groups
+            .iter()
+            .filter_map(|group| {
+                selected_series_pair_indices(x, y, &group.source_indices).and_then(|(_, y)| {
+                    (group.x_values.len() == y.len()).then(|| FamilyProjection {
+                        group: Some(group),
+                        x: Arc::new(group.x_values.clone()),
+                        y,
+                    })
+                })
+            })
+            .collect();
+    }
+    selected_series_pair(x, y, Some(selection))
+        .map(|(x, y)| vec![FamilyProjection { group: None, x, y }])
+        .unwrap_or_default()
+}
+
+/// Project an already-selected derived series through the same exact source
+/// row groups. Expression evaluation returns rows in `source_indices` order,
+/// so this maps group source identities back to those retained positions
+/// without drawing false segments between different family categories.
+fn projected_selected_family_series<'a>(
+    x: &SharedWaveformValues,
+    y: &SharedWaveformValues,
+    selection: Option<&'a SourceSampleSelection>,
+) -> Option<Vec<FamilyProjection<'a>>> {
+    let Some(selection) = selection else {
+        return Some(vec![FamilyProjection {
+            group: None,
+            x: Arc::clone(x),
+            y: Arc::clone(y),
+        }]);
+    };
+    if x.len() != y.len() || x.len() != selection.source_indices.len() {
+        return None;
+    }
+    let Some(plan) = selection.family_render_plan() else {
+        return Some(vec![FamilyProjection {
+            group: None,
+            x: Arc::clone(x),
+            y: Arc::clone(y),
+        }]);
+    };
+    let mut projections = Vec::with_capacity(plan.groups().len());
+    for group in plan.groups() {
+        let positions = group
+            .source_indices
+            .iter()
+            .map(|source_index| selection.source_indices.binary_search(source_index))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        let projected_y = positions.iter().map(|position| y[*position]).collect();
+        if group.x_values.len() != positions.len() {
+            return None;
+        }
+        projections.push(FamilyProjection {
+            group: Some(group),
+            x: Arc::new(group.x_values.clone()),
+            y: Arc::new(projected_y),
+        });
+    }
+    Some(projections)
+}
+
+fn family_color(style: FamilyTraceStyle, fallback: egui::Color32) -> egui::Color32 {
+    let Some(color) = style.color else {
+        return fallback;
+    };
+    let palette: &[[u8; 3]] = match color.palette {
+        AccessibleColorPalette::OkabeItoCategorical => &[
+            [0x00, 0x72, 0xB2],
+            [0xE6, 0x9F, 0x00],
+            [0x00, 0x9E, 0x73],
+            [0xD5, 0x5E, 0x00],
+            [0x56, 0xB4, 0xE9],
+            [0xCC, 0x79, 0xA7],
+        ],
+        AccessibleColorPalette::TolBrightCategorical => &[
+            [0x44, 0x77, 0xAA],
+            [0xEE, 0x66, 0x77],
+            [0x22, 0x88, 0x33],
+            [0xCC, 0xBB, 0x44],
+            [0x66, 0xCC, 0xEE],
+            [0xAA, 0x33, 0x77],
+            [0xBB, 0xBB, 0xBB],
+        ],
+        AccessibleColorPalette::CividisSequential => &[
+            [0x00, 0x20, 0x4C],
+            [0x41, 0x4D, 0x6B],
+            [0x7C, 0x7B, 0x78],
+            [0xBA, 0xA8, 0x63],
+            [0xFF, 0xE9, 0x45],
+        ],
+        AccessibleColorPalette::ViridisSequential => &[
+            [0x44, 0x01, 0x54],
+            [0x3B, 0x52, 0x8B],
+            [0x21, 0x91, 0x8C],
+            [0x5E, 0xC9, 0x62],
+            [0xFD, 0xE7, 0x25],
+        ],
+    };
+    let index = match color.palette {
+        AccessibleColorPalette::CividisSequential | AccessibleColorPalette::ViridisSequential
+            if color.category_count > 1 =>
+        {
+            color.ordinal.saturating_mul(palette.len() - 1) / (color.category_count - 1)
+        }
+        _ => color.ordinal % palette.len(),
+    };
+    let [red, green, blue] = palette[index.min(palette.len() - 1)];
+    egui::Color32::from_rgb(red, green, blue)
+}
+
+fn apply_family_trace_style<'a>(
+    mut trace: Trace<'a>,
+    style: Option<FamilyTraceStyle>,
+) -> Trace<'a> {
+    let Some(style) = style else {
+        return trace;
+    };
+    trace = trace.show_single_point();
+    if let Some(ordinal) = style.dash_ordinal {
+        trace = trace.dash_style(ordinal);
+    }
+    if let Some(ordinal) = style.marker_ordinal {
+        trace = trace.marker_style(ordinal);
+    }
+    if let Some(width) = style.width_points {
+        trace = trace.width(width);
+    }
+    trace
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_projected_traces(
+    traces: &mut Vec<StripTrace>,
+    derived: &mut DerivedSeries,
+    analysis_index: usize,
+    waveform_index: usize,
+    run_id: u64,
+    selection_key: u64,
+    source_waveform_name: &str,
+    base_name: &str,
+    signal_color: egui::Color32,
+    kind: TraceKind,
+    source_x: &SharedWaveformValues,
+    source_y: &SharedWaveformValues,
+    sample_selection: Option<&SourceSampleSelection>,
+    hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
+    phase_continuous: bool,
+    visible: bool,
+) {
+    for projection in projected_family_series(source_x, source_y, sample_selection) {
+        let presentation_key = projection.group.map_or(0, |group| group.stable_key);
+        let derived_key = ((analysis_index as u64) << 32 | waveform_index as u64)
+            ^ selection_key
+            ^ presentation_key.rotate_left(23);
+        let y = match kind {
+            TraceKind::MagnitudeDb => derived.db(derived_key, &projection.y),
+            TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
+                derived,
+                derived_key,
+                &projection.y,
+                phase_continuous,
+                kind == TraceKind::PhaseRad,
+            ),
+            _ => projection.y,
+        };
+        let family_style = projection.group.map(|group| group.style);
+        let family_visibility_key = projection
+            .group
+            .map(|group| FamilyTraceVisibilityKey::new(group.stable_key, waveform_index, kind));
+        let name = projection.group.map_or_else(
+            || base_name.to_owned(),
+            |group| format!("{base_name} · {}", group.label),
+        );
+        traces.push(StripTrace {
+            waveform_index,
+            source_waveform_name: source_waveform_name.to_owned(),
+            base_name: base_name.to_owned(),
+            name,
+            signal_color,
+            color: family_style.map_or(signal_color, |style| family_color(style, signal_color)),
+            x: projection.x,
+            y,
+            kind,
+            visible: visible
+                && family_visibility_key.is_none_or(|key| !hidden_family_traces.contains(&key)),
+            run_id,
+            overlay: false,
+            presentation_key,
+            family_group_ordinal: projection.group.map(|group| group.ordinal),
+            family_style,
+            family_visibility_key,
+        });
+    }
 }
 
 /// Build strip models for every plottable analysis of the active run.
@@ -330,6 +581,7 @@ pub(super) fn build_models(
     phase_continuous: bool,
     complex_display: ComplexNumberDisplay,
     selection: Option<&SourceSampleSelection>,
+    hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
 ) -> Vec<StripModel> {
     let display_runs = simulation.display_runs();
     let Some((&run, overlay_runs)) = display_runs.split_first() else {
@@ -347,70 +599,77 @@ pub(super) fn build_models(
                 .waveforms
                 .iter()
                 .any(|waveform| waveform.complex.is_some());
-        let (x_scale, x_unit, y_unit) = match analysis.analysis_type {
-            AnalysisType::Ac if displays_cartesian_complex => (XScale::Log10, "Hz", ""),
-            AnalysisType::Ac => (XScale::Log10, "Hz", "dB"),
-            AnalysisType::Noise | AnalysisType::Pnoise => (XScale::Log10, "Hz", "V^2/Hz"),
-            AnalysisType::Transient => (XScale::Linear, "s", "V"),
-            AnalysisType::DcSweep => (XScale::Linear, "V", "V"),
-            _ => (XScale::Linear, "", "V"),
-        };
-
-        let mut traces = Vec::new();
         let sample_selection = selection.filter(|selection| {
             selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
         });
+        let (mut x_scale, mut x_dimension_key, mut x_label, mut x_unit, y_unit) =
+            match analysis.analysis_type {
+                AnalysisType::Ac if displays_cartesian_complex => {
+                    (XScale::Log10, "frequency", "f", "Hz", "")
+                }
+                AnalysisType::Ac => (XScale::Log10, "frequency", "f", "Hz", "dB"),
+                AnalysisType::Noise | AnalysisType::Pnoise => {
+                    (XScale::Log10, "frequency", "f", "Hz", "V^2/Hz")
+                }
+                AnalysisType::Transient => (XScale::Linear, "time", "t", "s", "V"),
+                AnalysisType::DcSweep => (XScale::Linear, "dc-sweep", "x", "V", "V"),
+                _ => (XScale::Linear, "x", "x", "", "V"),
+            };
+        if let Some(axis) = sample_selection
+            .and_then(SourceSampleSelection::family_render_plan)
+            .map(FamilyRenderPlan::x_axis)
+        {
+            // Family policies currently persist no logarithmic scale. Exact
+            // manifest coordinates therefore use the only truthful default.
+            x_scale = XScale::Linear;
+            x_dimension_key = &axis.dimension_key;
+            x_label = &axis.label;
+            x_unit = &axis.unit;
+        }
+
+        let mut traces = Vec::new();
         let selection_key = sample_selection
             .map(SourceSampleSelection::fingerprint)
             .unwrap_or_default()
             .rotate_left(17);
         for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
-            let Some((source_x, source_y)) =
-                selected_series_pair(&waveform.x, &waveform.y, sample_selection)
-            else {
-                continue;
-            };
             let color = waveform_color(waveform, waveform_index, tokens);
             let is_phase = waveform.name.starts_with("phase(");
             let is_mag = waveform.name.starts_with('|');
             if displays_cartesian_complex {
                 if let Some(complex) = &waveform.complex {
-                    let Some((_, source_real)) =
-                        selected_series_pair(&waveform.x, &complex.real, sample_selection)
-                    else {
-                        continue;
-                    };
-                    let Some((_, source_imaginary)) =
-                        selected_series_pair(&waveform.x, &complex.imag, sample_selection)
-                    else {
-                        continue;
-                    };
-                    for (kind, name, color, y) in [
+                    for (kind, name, signal_color, y) in [
                         (
                             TraceKind::Real,
                             format!("re({})", complex.source_name),
                             color,
-                            source_real,
+                            &complex.real,
                         ),
                         (
                             TraceKind::Imaginary,
                             format!("im({})", complex.source_name),
                             tokens.color.traces[(waveform_index + 1) % tokens.color.traces.len()],
-                            source_imaginary,
+                            &complex.imag,
                         ),
                     ] {
-                        traces.push(StripTrace {
+                        append_projected_traces(
+                            &mut traces,
+                            derived,
+                            analysis_index,
                             waveform_index,
-                            source_waveform_name: waveform.name.clone(),
-                            name,
-                            color,
-                            x: Arc::clone(&source_x),
-                            y,
+                            run.id,
+                            selection_key,
+                            &waveform.name,
+                            &name,
+                            signal_color,
                             kind,
-                            visible: waveform.visible,
-                            run_id: run.id,
-                            overlay: false,
-                        });
+                            &waveform.x,
+                            y,
+                            sample_selection,
+                            hidden_family_traces,
+                            phase_continuous,
+                            waveform.visible,
+                        );
                     }
                     continue;
                 }
@@ -434,79 +693,102 @@ pub(super) fn build_models(
             } else {
                 TraceKind::Value
             };
-            let y = match kind {
-                TraceKind::MagnitudeDb => derived.db(
-                    ((analysis_index as u64) << 32 | waveform_index as u64) ^ selection_key,
-                    &source_y,
-                ),
-                // Continuous phase display: cached unwrapped copy of the
-                // wrapped samples, same key convention as `db`.
-                TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
-                    derived,
-                    ((analysis_index as u64) << 32 | waveform_index as u64) ^ selection_key,
-                    &source_y,
-                    phase_continuous,
-                    kind == TraceKind::PhaseRad,
-                ),
-                _ => source_y,
-            };
-            traces.push(StripTrace {
+            append_projected_traces(
+                &mut traces,
+                derived,
+                analysis_index,
                 waveform_index,
-                source_waveform_name: waveform.name.clone(),
-                name: waveform.name.clone(),
+                run.id,
+                selection_key,
+                &waveform.name,
+                &waveform.name,
                 color,
-                x: source_x,
-                y,
                 kind,
-                visible: waveform.visible,
-                run_id: run.id,
-                overlay: false,
-            });
+                &waveform.x,
+                &waveform.y,
+                sample_selection,
+                hidden_family_traces,
+                phase_continuous,
+                waveform.visible,
+            );
         }
         let signal_trace_count = traces.len();
+        let overlay_signals = traces[..signal_trace_count]
+            .iter()
+            .map(|trace| {
+                (
+                    trace.source_waveform_name.clone(),
+                    trace.base_name.clone(),
+                    trace.name.clone(),
+                    trace.signal_color,
+                    trace.color,
+                    trace.kind,
+                    trace.visible,
+                    trace.presentation_key,
+                    trace.family_group_ordinal,
+                    trace.family_style,
+                )
+            })
+            .collect::<Vec<_>>();
 
         // Overlay runs: match the exact prepared analysis instance and merge
         // traces by signal name. Signal owns hue —
         // overlay traces reuse the active trace's color and visibility —
         // run owns weight (applied at draw time).
         let mut overlaid_run_count = 0usize;
+        let mut rejected_overlay_count = 0usize;
         for overlay_run in overlay_runs {
             let overlay_analysis = matching_overlay_analysis(analysis, overlay_run);
             let Some(overlay_analysis) = overlay_analysis else {
                 continue;
             };
 
+            let overlay_family_plan = match sample_selection
+                .map(|selection| selection.overlay_render_plan(overlay_analysis))
+                .transpose()
+            {
+                Ok(plan) => plan.flatten(),
+                Err(_) => {
+                    rejected_overlay_count += 1;
+                    continue;
+                }
+            };
+
             let mut contributed = false;
-            for signal_index in 0..signal_trace_count {
-                let (source_name, signal_name, signal_color, signal_kind, signal_visible) = {
-                    let signal = &traces[signal_index];
-                    (
-                        signal.source_waveform_name.clone(),
-                        signal.name.clone(),
-                        signal.color,
-                        signal.kind,
-                        signal.visible,
-                    )
-                };
+            let mut projected_overlay_traces = Vec::new();
+            let mut incompatible_x = false;
+            for (
+                source_name,
+                base_name,
+                signal_name,
+                signal_color,
+                display_color,
+                signal_kind,
+                signal_visible,
+                presentation_key,
+                family_group_ordinal,
+                family_style,
+            ) in &overlay_signals
+            {
                 let Some((overlay_index, overlay_waveform)) = overlay_analysis
                     .waveforms
                     .iter()
                     .enumerate()
-                    .find(|(_, waveform)| waveform.name == source_name)
+                    .find(|(_, waveform)| waveform.name == *source_name)
                 else {
                     continue;
                 };
 
                 let base_key = (analysis_index as u64) << 32 | overlay_index as u64;
                 let derived_key = run_mixed_key(base_key, overlay_run.id, true);
-                let y = match signal_kind {
+                let source_y = match *signal_kind {
                     TraceKind::MagnitudeDb => derived.db(derived_key, &overlay_waveform.y),
                     TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
                         derived,
                         derived_key,
                         &overlay_waveform.y,
                         phase_continuous,
-                        signal_kind == TraceKind::PhaseRad,
+                        *signal_kind == TraceKind::PhaseRad,
                     ),
                     TraceKind::Real => {
                         let Some(complex) = &overlay_waveform.complex else {
@@ -522,21 +804,64 @@ pub(super) fn build_models(
                     }
                     _ => Arc::clone(&overlay_waveform.y),
                 };
-                traces.push(StripTrace {
+                let projected = if let Some(plan) = overlay_family_plan.as_ref() {
+                    let Some(group) = family_group_ordinal
+                        .and_then(|ordinal| plan.groups().get(ordinal))
+                        .filter(|group| group.stable_key == *presentation_key)
+                    else {
+                        incompatible_x = true;
+                        break;
+                    };
+                    let Some((_, y)) = selected_series_pair_indices(
+                        &overlay_waveform.x,
+                        &source_y,
+                        &group.source_indices,
+                    ) else {
+                        incompatible_x = true;
+                        break;
+                    };
+                    if y.len() != group.x_values.len() {
+                        incompatible_x = true;
+                        break;
+                    }
+                    (Arc::new(group.x_values.clone()), y)
+                } else if let Some(selection) = sample_selection {
+                    let Some(series) =
+                        selected_series_pair(&overlay_waveform.x, &source_y, Some(selection))
+                    else {
+                        incompatible_x = true;
+                        break;
+                    };
+                    series
+                } else {
+                    (Arc::clone(&overlay_waveform.x), source_y)
+                };
+                projected_overlay_traces.push(StripTrace {
                     waveform_index: overlay_index,
-                    source_waveform_name: source_name,
-                    name: signal_name,
-                    color: signal_color,
-                    x: Arc::clone(&overlay_waveform.x),
-                    y,
-                    kind: signal_kind,
-                    visible: signal_visible,
+                    source_waveform_name: source_name.clone(),
+                    base_name: base_name.clone(),
+                    name: signal_name.clone(),
+                    signal_color: *signal_color,
+                    color: *display_color,
+                    x: projected.0,
+                    y: projected.1,
+                    kind: *signal_kind,
+                    visible: *signal_visible,
                     run_id: overlay_run.id,
                     overlay: true,
+                    presentation_key: *presentation_key,
+                    family_group_ordinal: *family_group_ordinal,
+                    family_style: *family_style,
+                    family_visibility_key: None,
                 });
                 contributed = true;
             }
+            if incompatible_x {
+                rejected_overlay_count += 1;
+                continue;
+            }
             if contributed {
+                traces.extend(projected_overlay_traces);
                 overlaid_run_count += 1;
             }
         }
@@ -548,6 +873,12 @@ pub(super) fn build_models(
                 if overlaid_run_count == 1 { "" } else { "s" }
             );
         }
+        if rejected_overlay_count > 0 {
+            subtitle = format!(
+                "{subtitle} · {rejected_overlay_count} incompatible family overlay{} hidden",
+                if rejected_overlay_count == 1 { "" } else { "s" }
+            );
+        }
 
         models.push(StripModel {
             analysis_index,
@@ -555,7 +886,9 @@ pub(super) fn build_models(
             kind_tag: analysis.analysis_type.short_label().to_uppercase(),
             subtitle,
             x_scale,
-            x_unit,
+            x_dimension_key: x_dimension_key.to_owned(),
+            x_label: x_label.to_owned(),
+            x_unit: x_unit.to_owned(),
             y_unit,
             phase_continuous,
             signal_trace_count,
@@ -599,7 +932,11 @@ fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
         | continuous << 43
         | (trace.waveform_index as u64) << 3
         | trace.kind as u64;
-    run_mixed_key(base, trace.run_id, trace.overlay)
+    run_mixed_key(
+        base ^ trace.presentation_key.rotate_left(11),
+        trace.run_id,
+        trace.overlay,
+    )
 }
 
 /// Y range of the visible traces on one axis side, padded 8 %. Per-trace
@@ -629,22 +966,36 @@ fn y_range(derived: &mut DerivedSeries, model: &StripModel, phase: bool) -> Opti
     Some((min - pad, max + pad))
 }
 
-/// X range of a strip (shared X across its traces).
+/// X range of a strip. Ordinary traces share one X series; family policies
+/// intentionally project disjoint exact-row groups, so the range must cover
+/// every visible group rather than assuming the first trace is authoritative.
 fn x_range(model: &StripModel) -> Option<(f64, f64)> {
-    let x = &model.traces.first()?.x;
-    if x.is_empty() {
+    let mut x0 = f64::INFINITY;
+    let mut x1 = f64::NEG_INFINITY;
+    for x in model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .flat_map(|trace| trace.x.iter().copied())
+        .filter(|value| value.is_finite())
+    {
+        if model.x_scale == XScale::Log10 && x <= 0.0 {
+            continue;
+        }
+        x0 = x0.min(x);
+        x1 = x1.max(x);
+    }
+    if !x0.is_finite() || !x1.is_finite() {
         return None;
     }
-    let (mut x0, x1) = (x[0], x[x.len() - 1]);
-    if model.x_scale == XScale::Log10 {
-        if x1 <= 0.0 {
-            return None;
-        }
-        if x0 <= 0.0 {
-            x0 = x.iter().copied().find(|&v| v > 0.0)?;
-        }
+    if x1 > x0 {
+        return Some((x0, x1));
     }
-    (x1 > x0).then_some((x0, x1))
+    if model.x_scale == XScale::Log10 {
+        Some((x0 / 10.0, x1 * 10.0))
+    } else {
+        Some((x0 - 1.0, x1 + 1.0))
+    }
 }
 
 const fn cursor_interpolation(policy: CursorInterpolation) -> SampleInterpolation {
@@ -715,6 +1066,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Deferred state mutations (collected while iterating immutably).
     let mut toggle_trace: Option<(usize, usize)> = None;
+    let mut toggle_family_trace: Option<FamilyTraceVisibilityKey> = None;
     let mut toggle_maximize: Option<usize> = None;
     let mut close_strip: Option<usize> = None;
     let mut fit_strip: Option<usize> = None;
@@ -801,8 +1153,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         if let Some(chip_index) = header.legend_clicked {
                             if chip_index < model.signal_trace_count {
                                 if let Some(trace) = model.traces.get(chip_index) {
-                                    toggle_trace =
-                                        Some((model.analysis_index, trace.waveform_index));
+                                    if let Some(key) = trace.family_visibility_key {
+                                        toggle_family_trace = Some(key);
+                                    } else {
+                                        toggle_trace =
+                                            Some((model.analysis_index, trace.waveform_index));
+                                    }
                                 }
                             } else {
                                 toggle_expr = Some((
@@ -837,7 +1193,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         // building) — only the space is reserved.
                         let plot_rect = ui.available_rect_before_wrap();
                         if ui.is_rect_visible(plot_rect) {
-                            show_strip_plot(ui, state, model, linked_cursor_domain);
+                            show_strip_plot(ui, state, model, linked_cursor_domain.as_ref());
                         } else {
                             ui.allocate_exact_size(plot_rect.size(), egui::Sense::hover());
                         }
@@ -849,6 +1205,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Apply deferred mutations.
     if let Some((analysis_index, waveform_index)) = toggle_trace {
         toggle_visibility(state, analysis_index, waveform_index);
+    }
+    if let Some(key) = toggle_family_trace {
+        state.ui.results.toggle_family_trace_visibility(key);
     }
     let results = &mut state.ui.results;
     if let Some(idx) = toggle_maximize {
@@ -1104,6 +1463,21 @@ fn evaluate_expression(
             (Err("expression produced no samples".to_owned()), None)
         }
         Ok(calculator::CalcValue::Scalar(value)) => {
+            if let Some(selection) = selection {
+                let selected_x = analysis.waveforms.first().and_then(|waveform| {
+                    selected_series_pair(&waveform.x, &waveform.y, Some(selection)).map(|(x, _)| x)
+                });
+                return match selected_x {
+                    Some(x) if !x.is_empty() => {
+                        let y = vec![value; x.len()];
+                        (Ok((x, y.into())), Some((value, value)))
+                    }
+                    _ => (
+                        Err("scalar result with no selected X rows".to_owned()),
+                        None,
+                    ),
+                };
+            }
             let span = analysis.waveforms.first().and_then(|waveform| {
                 let (x, _) = selected_series_pair(&waveform.x, &waveform.y, selection)?;
                 (x.len() >= 2).then(|| (x[0], x[x.len() - 1]))
@@ -1136,6 +1510,7 @@ struct ResolvedExpr {
     cache_key: u64,
     label: String,
     y_extremes: Option<(f64, f64)>,
+    family_style: Option<FamilyTraceStyle>,
 }
 
 /// Refresh the expression cache for a strip at the current data version and
@@ -1192,19 +1567,43 @@ fn resolve_strip_exprs(
         if !expr.visible {
             continue;
         }
-        if let Some(ExprSeries {
-            series: Ok((x, y)),
-            y_extremes,
-            ..
-        }) = state.ui.results.expr_cache.get(&key)
-        {
+        let cached = state.ui.results.expr_cache.get(&key).and_then(|cached| {
+            cached
+                .series
+                .as_ref()
+                .ok()
+                .map(|(x, y)| (Arc::clone(x), Arc::clone(y)))
+        });
+        let Some((x, y)) = cached else {
+            continue;
+        };
+        let Some(projections) = projected_selected_family_series(&x, &y, sample_selection.as_ref())
+        else {
+            state.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                "expression `{}`: selected rows do not match the active family render plan",
+                expr.text
+            )));
+            continue;
+        };
+        let base_color = expr_color(tokens, model.traces.len() + slot);
+        let base_cache_key = expr_cache_key(model.analysis_index, &expr.text);
+        let base_label = elide(&expr.text, 24);
+        for projection in projections {
+            let family_style = projection.group.map(|group| group.style);
             resolved.push(ResolvedExpr {
-                x: Arc::clone(x),
-                y: Arc::clone(y),
-                color: expr_color(tokens, model.traces.len() + slot),
-                cache_key: expr_cache_key(model.analysis_index, &expr.text),
-                label: elide(&expr.text, 24),
-                y_extremes: *y_extremes,
+                x: projection.x,
+                y_extremes: super::finite_extremes(&projection.y),
+                y: projection.y,
+                color: family_style.map_or(base_color, |style| family_color(style, base_color)),
+                cache_key: base_cache_key
+                    ^ projection
+                        .group
+                        .map_or(0, |group| group.stable_key.rotate_left(19)),
+                label: projection.group.map_or_else(
+                    || base_label.clone(),
+                    |group| format!("{base_label} · {}", group.label),
+                ),
+                family_style,
             });
         }
     }
@@ -1261,6 +1660,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let sample_selection = state.ui.results.sample_selection.clone();
+    let hidden_family_traces = state.ui.results.hidden_family_traces.clone();
     let models = build_models(
         &state.simulation,
         &mut state.ui.results.derived,
@@ -1268,6 +1668,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
         state.ui.results.phase_continuous,
         presentation.complex_number_display(),
         sample_selection.as_ref(),
+        &hidden_family_traces,
     );
     let model = state
         .ui
@@ -1297,7 +1698,7 @@ fn append_copied_cursor(
     let copied_x = if model.x_unit == "Hz" {
         policy.copy_frequency(x)
     } else {
-        policy.copy_si_value(x, model.x_unit)
+        policy.copy_si_value(x, &model.x_unit)
     };
     let _ = writeln!(
         target,
@@ -1326,7 +1727,7 @@ fn show_strip_plot(
     ui: &mut Ui,
     state: &mut AppState,
     model: &StripModel,
-    linked_cursor_domain: Option<CursorDomain>,
+    linked_cursor_domain: Option<&CursorDomain>,
 ) {
     let t = Tokens::get(ui.ctx());
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -1377,9 +1778,10 @@ fn show_strip_plot(
     let (y0, y1) = view.y.unwrap_or((y0, y1));
 
     let mut x_axis = match model.x_scale {
-        XScale::Log10 => Axis::log_decades(x0, x1, model.x_unit),
-        XScale::Linear => Axis::linear(x0, x1, model.x_unit),
-    };
+        XScale::Log10 => Axis::log_decades(x0, x1, &model.x_unit),
+        XScale::Linear => Axis::linear(x0, x1, &model.x_unit),
+    }
+    .with_label(&model.x_label);
     if model.x_unit == "Hz" {
         let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
         x_axis = x_axis.with_display_transform(scale, offset, unit);
@@ -1448,8 +1850,10 @@ fn show_strip_plot(
         } else {
             trace.color
         };
-        let mut plot_trace =
-            Trace::new(&trace.x, &trace.y, color).cache_key(trace_key(model, trace));
+        let mut plot_trace = apply_family_trace_style(
+            Trace::new(&trace.x, &trace.y, color).cache_key(trace_key(model, trace)),
+            trace.family_style,
+        );
         if trace.overlay {
             plot_trace = plot_trace.thin();
         }
@@ -1459,14 +1863,16 @@ fn show_strip_plot(
         spec.traces.push(plot_trace);
     }
     for expr in &exprs {
-        spec.traces.push(
+        spec.traces.push(apply_family_trace_style(
             Trace::new(&expr.x, &expr.y, expr.color)
                 .thin()
                 .cache_key(expr.cache_key),
-        );
+            expr.family_style,
+        ));
     }
 
-    let cursor_domain_matches = linked_cursor_domain == Some(model.cursor_domain());
+    let model_cursor_domain = model.cursor_domain();
+    let cursor_domain_matches = linked_cursor_domain == Some(&model_cursor_domain);
     let cursors = (state.ui.results.cursor_strip == Some(model.analysis_index)
         || (state.ui.results.linked_cursors && cursor_domain_matches))
         .then_some(state.ui.results.cursors);
@@ -1558,7 +1964,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 ui,
                 "A",
                 c.accent,
-                &model.format_x(a, significant_digits, quantity_policy),
+                &format!(
+                    "{} = {}",
+                    model.x_label(),
+                    model.format_x(a, significant_digits, quantity_policy)
+                ),
                 &value_rows(model, a, presentation, quantity_policy),
             );
             if let Some(b) = cursors.b {
@@ -1566,14 +1976,22 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                     ui,
                     "B",
                     c.traces[4],
-                    &model.format_x(b, significant_digits, quantity_policy),
+                    &format!(
+                        "{} = {}",
+                        model.x_label(),
+                        model.format_x(b, significant_digits, quantity_policy)
+                    ),
                     &value_rows(model, b, presentation, quantity_policy),
                 );
                 cursor_block(
                     ui,
                     "B − A",
                     c.text_faint,
-                    &model.format_x(b - a, significant_digits, quantity_policy),
+                    &format!(
+                        "Δ{} = {}",
+                        model.x_label(),
+                        model.format_x(b - a, significant_digits, quantity_policy)
+                    ),
                     &delta_rows(model, a, b, presentation, quantity_policy),
                 );
             }
@@ -1669,8 +2087,8 @@ fn delta_rows(
             ));
         }
         _ => rows.push((
-            "Δx".to_owned(),
-            fmt_si_significant(dx, model.x_unit, significant_digits),
+            format!("Δ{}", model.x_label()),
+            fmt_si_significant(dx, &model.x_unit, significant_digits),
         )),
     }
     for trace in model.traces.iter().filter(|t| t.visible).take(4) {
@@ -1844,9 +2262,72 @@ fn measurement_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::state::{AnalysisResult, AnalysisResultProvenance, SimulationRun, WaveformData};
+    use crate::product::{AnalysisInstanceId, ContentDigest, DatasetId, ObjectRevision};
+    use crate::results::visualization_document::{
+        FamilyAggregationMethod, FamilyAggregationPolicy, FamilyComparisonOperator,
+        FamilyDimension, FamilyEncodingMap, FamilyFilterExpression, FamilyPredicate,
+        FamilyPresentationPolicy, FamilyXDimension, FamilyXOrdering, MissingPointPolicy,
+        TypedValue, ValueType,
+    };
+    use crate::state::{
+        AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance, SimulationRun,
+        WaveformData,
+    };
     use crate::workbench::ChoicePreference;
+    use crate::workbench::visualization_family::FamilyManifest;
+
+    fn family_policy() -> FamilyPresentationPolicy {
+        let process = FamilyDimension::new("process", ValueType::Text).unwrap();
+        FamilyPresentationPolicy {
+            x_dimension: FamilyXDimension {
+                dimension: FamilyDimension::new("RGAIN", ValueType::Real).unwrap(),
+                ordering: FamilyXOrdering::Source,
+            },
+            family_dimensions: vec![process.clone()],
+            facet_layout: None,
+            aggregation: FamilyAggregationPolicy {
+                method: FamilyAggregationMethod::None,
+                over_dimensions: Vec::new(),
+            },
+            filter: None,
+            missing_points: MissingPointPolicy::ExcludeWithOmissionRecord,
+            encodings: vec![
+                FamilyEncodingMap::Color {
+                    dimension: process.clone(),
+                    palette: AccessibleColorPalette::OkabeItoCategorical,
+                },
+                FamilyEncodingMap::Dash {
+                    dimension: process.clone(),
+                },
+                FamilyEncodingMap::Marker { dimension: process },
+            ],
+        }
+    }
+
+    fn family_analysis(values: Vec<f64>) -> AnalysisResult {
+        AnalysisResult::new(41, AnalysisType::Corner, "PVT")
+            .with_waveforms(vec![WaveformData::new(
+                "V(out)",
+                vec![101.0, 102.0, 103.0, 104.0, 105.0, 106.0],
+                values,
+                "#fff",
+            )])
+            .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
+                x_values: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                x_label: "RGAIN".to_owned(),
+                x_unit: "kOhm".to_owned(),
+                temperatures_c: vec![27.0; 6],
+                corner_labels: vec![
+                    "SS".to_owned(),
+                    "SS".to_owned(),
+                    "TT".to_owned(),
+                    "TT".to_owned(),
+                    "FF".to_owned(),
+                    "FF".to_owned(),
+                ],
+                failed_corners: 0,
+            })
+    }
 
     #[test]
     fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
@@ -1865,6 +2346,7 @@ mod tests {
             false,
             ComplexNumberDisplay::MagnitudePhaseDegrees,
             None,
+            &HashSet::new(),
         );
 
         assert_eq!(models.len(), 1);
@@ -1898,6 +2380,7 @@ mod tests {
             false,
             ComplexNumberDisplay::MagnitudePhaseDegrees,
             Some(&selection),
+            &HashSet::new(),
         );
 
         assert_eq!(models[0].traces[0].x.as_slice(), &[2.0, 4.0]);
@@ -1905,6 +2388,296 @@ mod tests {
         let original = &simulation.active_run().unwrap().analyses[0].waveforms[0];
         assert_eq!(original.x.as_slice(), &[1.0, 2.0, 3.0, 4.0]);
         assert_eq!(original.y.as_slice(), &[10.0, 20.0, 30.0, 40.0]);
+    }
+
+    #[test]
+    fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
+        let mut active = SimulationRun::new(2);
+        active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
+        let active_dataset = active.dataset_id;
+        let manifest = FamilyManifest::from_analysis(&active.analyses[0])
+            .unwrap()
+            .unwrap();
+        let selection = SourceSampleSelection::new(active_dataset, 41, vec![0, 1, 2, 3, 4, 5])
+            .unwrap()
+            .with_family_presentation(&manifest, &family_policy())
+            .unwrap();
+
+        let mut overlay = SimulationRun::new(1);
+        overlay.add_analysis(family_analysis(vec![11.0, 21.0, 31.0, 41.0, 51.0, 61.0]));
+        let overlay_dataset = overlay.dataset_id;
+        let simulation = SimulationState {
+            runs: vec![active, overlay],
+            active_run_idx: Some(0),
+            active_analysis_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset],
+            ..SimulationState::default()
+        };
+        let mut derived = DerivedSeries::default();
+
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            Some(&selection),
+            &HashSet::new(),
+        );
+
+        let model = &models[0];
+        assert_eq!(model.signal_trace_count, 3);
+        assert_eq!(
+            model.traces.len(),
+            6,
+            "overlay signal must project through every exact family group"
+        );
+        assert_eq!(model.x_label, "RGAIN");
+        assert_eq!(model.x_unit, "kOhm");
+        assert_eq!(model.x_scale, XScale::Linear);
+        let ss = model
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay && trace.name.contains("SS"))
+            .unwrap();
+        let tt = model
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay && trace.name.contains("TT"))
+            .unwrap();
+        let tt_visibility_key = tt.family_visibility_key.unwrap();
+        assert_eq!(ss.x.as_slice(), &[1.0, 2.0]);
+        assert_eq!(ss.y.as_slice(), &[10.0, 20.0]);
+        assert_eq!(tt.x.as_slice(), &[3.0, 4.0]);
+        assert_eq!(tt.y.as_slice(), &[30.0, 40.0]);
+        assert_ne!(ss.color, tt.color);
+        assert_ne!(
+            ss.family_style.unwrap().marker_ordinal,
+            tt.family_style.unwrap().marker_ordinal
+        );
+        let styled = apply_family_trace_style(Trace::new(&ss.x, &ss.y, ss.color), ss.family_style);
+        assert_eq!(styled.dash_style, ss.family_style.unwrap().dash_ordinal);
+        assert_eq!(styled.marker_style, ss.family_style.unwrap().marker_ordinal);
+        assert!(styled.show_single_point);
+        assert!(model.traces.last().unwrap().overlay);
+        assert_eq!(model.traces.last().unwrap().x.as_slice(), &[3.0, 4.0]);
+
+        let source = &simulation.runs[0].analyses[0].waveforms[0];
+        assert_eq!(
+            source.x.as_slice(),
+            &[101.0, 102.0, 103.0, 104.0, 105.0, 106.0]
+        );
+        assert_eq!(source.y.as_slice(), &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+
+        let mut copied = String::new();
+        append_copied_cursor(
+            &mut copied,
+            "A",
+            3.0,
+            model,
+            SampleInterpolation::Linear,
+            crate::quantity::QuantityPresentationPolicy::default(),
+        );
+        assert!(copied.contains("A RGAIN ="));
+        assert!(copied.contains("kOhm"));
+        let domain = model.cursor_domain();
+        let mut incompatible_unit = domain.clone();
+        incompatible_unit.x_unit = "Ohm".to_owned();
+        assert_ne!(domain, incompatible_unit);
+        let mut incompatible_label = domain.clone();
+        incompatible_label.x_label = "Resistance".to_owned();
+        assert_ne!(domain, incompatible_label);
+
+        let mut results = ResultsState::default();
+        results.set_sample_selection(Some(selection.clone()));
+        results.toggle_family_trace_visibility(tt_visibility_key);
+        let toggled = build_models(
+            &simulation,
+            &mut results.derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            Some(&selection),
+            &results.hidden_family_traces,
+        );
+        let toggled_model = &toggled[0];
+        assert!(
+            toggled_model
+                .traces
+                .iter()
+                .find(|trace| !trace.overlay && trace.name.contains("SS"))
+                .unwrap()
+                .visible
+        );
+        assert!(
+            !toggled_model
+                .traces
+                .iter()
+                .find(|trace| !trace.overlay && trace.name.contains("TT"))
+                .unwrap()
+                .visible
+        );
+        for overlay in toggled_model.traces.iter().filter(|trace| trace.overlay) {
+            let active = toggled_model
+                .traces
+                .iter()
+                .find(|trace| {
+                    !trace.overlay
+                        && trace.presentation_key == overlay.presentation_key
+                        && trace.kind == overlay.kind
+                })
+                .unwrap();
+            assert_eq!(overlay.visible, active.visible);
+        }
+        assert!(
+            toggled_model
+                .traces
+                .iter()
+                .any(|trace| trace.overlay && trace.visible)
+        );
+        assert!(simulation.runs[0].analyses[0].waveforms[0].visible);
+        results.set_sample_selection(None);
+        assert!(results.hidden_family_traces.is_empty());
+    }
+
+    #[test]
+    fn incompatible_family_overlay_is_visibly_rejected_without_drawing_native_x() {
+        let mut active = SimulationRun::new(2);
+        active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
+        let manifest = FamilyManifest::from_analysis(&active.analyses[0])
+            .unwrap()
+            .unwrap();
+        let selection = SourceSampleSelection::new(active.dataset_id, 41, vec![0, 1, 2, 3, 4, 5])
+            .unwrap()
+            .with_family_presentation(&manifest, &family_policy())
+            .unwrap();
+
+        let mut incompatible = family_analysis(vec![11.0, 21.0, 31.0, 41.0, 51.0, 61.0]);
+        let Some(AnalysisResultFamilyMetadata::Corner { x_unit, .. }) =
+            incompatible.family_metadata.as_mut()
+        else {
+            panic!("corner metadata");
+        };
+        *x_unit = "Ohm".to_owned();
+        let mut overlay = SimulationRun::new(1);
+        overlay.add_analysis(incompatible);
+        let overlay_dataset = overlay.dataset_id;
+        let simulation = SimulationState {
+            runs: vec![active, overlay],
+            active_run_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset],
+            ..SimulationState::default()
+        };
+
+        let models = build_models(
+            &simulation,
+            &mut DerivedSeries::default(),
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            Some(&selection),
+            &HashSet::new(),
+        );
+        assert_eq!(models[0].traces.len(), models[0].signal_trace_count);
+        assert!(
+            models[0]
+                .subtitle
+                .contains("incompatible family overlay hidden")
+        );
+        assert!(models[0].traces.iter().all(|trace| !trace.overlay));
+    }
+
+    #[test]
+    fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
+        let mut active = SimulationRun::new(2);
+        active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
+        let manifest = FamilyManifest::from_analysis(&active.analyses[0])
+            .unwrap()
+            .unwrap();
+        let process = FamilyDimension::new("process", ValueType::Text).unwrap();
+        let mut policy = family_policy();
+        policy.filter = Some(FamilyFilterExpression {
+            // Deliberately contradictory UI source: the typed AST is the
+            // persisted execution contract.
+            source: "process = SS".to_owned(),
+            predicate: FamilyPredicate::Compare {
+                dimension: process,
+                operator: FamilyComparisonOperator::Equal,
+                value: TypedValue::Text("TT".to_owned()),
+            },
+        });
+        let indices = manifest
+            .matching_source_indices_for_filter(policy.filter.as_ref())
+            .unwrap();
+        assert_eq!(indices, [2, 3]);
+        let selection = SourceSampleSelection::new(active.dataset_id, 41, indices)
+            .unwrap()
+            .with_family_presentation(&manifest, &policy)
+            .unwrap();
+
+        let mut overlay_analysis = family_analysis(vec![11.0, 21.0, 31.0, 41.0, 51.0, 61.0]);
+        let Some(AnalysisResultFamilyMetadata::Corner { x_values, .. }) =
+            overlay_analysis.family_metadata.as_mut()
+        else {
+            panic!("corner metadata");
+        };
+        // Excluded SS rows are non-monotonic. Re-evaluating all overlay rows
+        // would reject this otherwise compatible filtered TT projection.
+        x_values[0] = 1.0;
+        x_values[1] = 1.0;
+        let mut overlay = SimulationRun::new(1);
+        overlay.add_analysis(overlay_analysis);
+        let overlay_dataset = overlay.dataset_id;
+        let simulation = SimulationState {
+            runs: vec![active, overlay],
+            active_run_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset],
+            ..SimulationState::default()
+        };
+
+        let models = build_models(
+            &simulation,
+            &mut DerivedSeries::default(),
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            Some(&selection),
+            &HashSet::new(),
+        );
+        assert_eq!(models[0].signal_trace_count, 1);
+        assert_eq!(models[0].traces.len(), 2);
+        let overlay = models[0].traces.iter().find(|trace| trace.overlay).unwrap();
+        assert_eq!(overlay.x.as_slice(), &[3.0, 4.0]);
+        assert_eq!(overlay.y.as_slice(), &[31.0, 41.0]);
+    }
+
+    #[test]
+    fn derived_expression_rows_are_split_by_the_exact_family_plan() {
+        let analysis = family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+        let manifest = FamilyManifest::from_analysis(&analysis).unwrap().unwrap();
+        let selection = SourceSampleSelection::new(DatasetId::new(), 41, vec![0, 2, 4])
+            .unwrap()
+            .with_family_presentation(&manifest, &family_policy())
+            .unwrap();
+        // Expression evaluation has already selected exact rows 0, 2, 4.
+        let x = Arc::new(vec![101.0, 103.0, 105.0]);
+        let y = Arc::new(vec![100.0, 300.0, 500.0]);
+
+        let projections = projected_selected_family_series(&x, &y, Some(&selection)).unwrap();
+
+        assert_eq!(projections.len(), 3);
+        assert!(projections.iter().all(|projection| projection.x.len() == 1));
+        let tt = projections
+            .iter()
+            .find(|projection| projection.group.unwrap().label.contains("TT"))
+            .unwrap();
+        assert_eq!(tt.x.as_slice(), &[3.0]);
+        assert_eq!(tt.y.as_slice(), &[300.0]);
+        let styled = apply_family_trace_style(
+            Trace::new(&tt.x, &tt.y, egui::Color32::WHITE),
+            Some(tt.group.unwrap().style),
+        );
+        assert!(styled.show_single_point);
     }
 
     fn ac_result(
@@ -1962,6 +2735,7 @@ mod tests {
             false,
             ComplexNumberDisplay::MagnitudePhaseDegrees,
             None,
+            &HashSet::new(),
         );
 
         assert_eq!(models.len(), 2);
@@ -1993,6 +2767,7 @@ mod tests {
             false,
             ComplexNumberDisplay::RealImaginary,
             None,
+            &HashSet::new(),
         );
         assert_eq!(cartesian[0].signal_trace_count, 2);
         assert_eq!(cartesian[0].y_unit, "");
@@ -2008,6 +2783,7 @@ mod tests {
             false,
             ComplexNumberDisplay::MagnitudePhaseRadians,
             None,
+            &HashSet::new(),
         );
         assert!(matches!(radians[0].traces[0].kind, TraceKind::MagnitudeDb));
         assert_eq!(radians[0].traces[0].y.as_slice(), &[0.0, 20.0]);

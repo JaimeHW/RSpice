@@ -5,6 +5,7 @@ mod design;
 mod models;
 mod netlist;
 mod project;
+pub(crate) mod report_authoring;
 mod results;
 mod simulate;
 mod verify;
@@ -19,6 +20,10 @@ use super::state::Workspace;
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.workbench.current_route().surface_id() == super::SurfaceId::VisualizationStudio {
         super::visualization_studio::show(ui, app);
+        return;
+    }
+    if app.state.workbench.current_route().surface_id() == super::SurfaceId::ReportAuthoring {
+        report_authoring::show(ui, app);
         return;
     }
     match app.state.workbench.workspace {

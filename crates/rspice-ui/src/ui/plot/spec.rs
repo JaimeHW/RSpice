@@ -17,7 +17,11 @@ pub struct Axis {
     /// Tick positions with preformatted labels.
     pub ticks: Vec<(f64, String)>,
     /// Unit label drawn once at the axis end ("V", "dB", "Hz", "UI").
-    pub unit: &'static str,
+    pub unit: String,
+    /// Semantic quantity label (for example `RGAIN` or `Temperature`).
+    /// Ordinary viewers may omit it; family projections retain the exact
+    /// manifest label independently from the engineering unit.
+    pub label: Option<String>,
     /// Affine presentation transform applied only to labels/accessibility.
     /// Geometry and stored samples remain in the axis' canonical data space.
     pub display_scale: f64,
@@ -26,48 +30,52 @@ pub struct Axis {
 
 impl Axis {
     /// Linear axis with nice 1–2–5 ticks.
-    pub fn linear(min: f64, max: f64, unit: &'static str) -> Self {
+    pub fn linear(min: f64, max: f64, unit: impl Into<String>) -> Self {
         Self {
             min,
             max,
             ticks: linear_ticks(min, max, 6),
-            unit,
+            unit: unit.into(),
+            label: None,
             display_scale: 1.0,
             display_offset: 0.0,
         }
     }
 
     /// Linear axis with a target tick count.
-    pub fn linear_with(min: f64, max: f64, unit: &'static str, target: usize) -> Self {
+    pub fn linear_with(min: f64, max: f64, unit: impl Into<String>, target: usize) -> Self {
         Self {
             min,
             max,
             ticks: linear_ticks(min, max, target),
-            unit,
+            unit: unit.into(),
+            label: None,
             display_scale: 1.0,
             display_offset: 0.0,
         }
     }
 
     /// Log-frequency axis with decade ticks.
-    pub fn log_decades(min: f64, max: f64, unit: &'static str) -> Self {
+    pub fn log_decades(min: f64, max: f64, unit: impl Into<String>) -> Self {
         Self {
             min,
             max,
             ticks: decade_ticks(min, max),
-            unit,
+            unit: unit.into(),
+            label: None,
             display_scale: 1.0,
             display_offset: 0.0,
         }
     }
 
     /// Axis with explicit tick positions (labels generated).
-    pub fn with_ticks(min: f64, max: f64, unit: &'static str, ticks: &[f64]) -> Self {
+    pub fn with_ticks(min: f64, max: f64, unit: impl Into<String>, ticks: &[f64]) -> Self {
         Self {
             min,
             max,
             ticks: ticks.iter().map(|&v| (v, tick_label(v))).collect(),
-            unit,
+            unit: unit.into(),
+            label: None,
             display_scale: 1.0,
             display_offset: 0.0,
         }
@@ -77,17 +85,40 @@ impl Axis {
     /// the plot geometry. This keeps zoom/cursor coordinates and stored data
     /// exact while allowing Hz→rad/s, °C→K/°F, and degree→radian labels.
     #[must_use]
-    pub fn with_display_transform(mut self, scale: f64, offset: f64, unit: &'static str) -> Self {
+    pub fn with_display_transform(
+        mut self,
+        scale: f64,
+        offset: f64,
+        unit: impl Into<String>,
+    ) -> Self {
         debug_assert!(scale.is_finite() && scale != 0.0);
         debug_assert!(offset.is_finite());
         self.display_scale = scale;
         self.display_offset = offset;
-        self.unit = unit;
+        self.unit = unit.into();
         let display = |value: f64| value.mul_add(scale, offset);
         for (value, label) in &mut self.ticks {
             *label = tick_label(display(*value));
         }
         self
+    }
+
+    /// Attach the exact semantic quantity label rendered with the unit and
+    /// included in plot accessibility text.
+    #[must_use]
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        let label = label.into();
+        self.label = (!label.trim().is_empty()).then_some(label);
+        self
+    }
+
+    #[must_use]
+    pub fn end_label(&self) -> String {
+        match (self.label.as_deref(), self.unit.as_str()) {
+            (Some(label), "") => label.to_owned(),
+            (Some(label), unit) => format!("{label} · {unit}"),
+            (None, unit) => unit.to_owned(),
+        }
     }
 
     #[must_use]
@@ -129,6 +160,15 @@ pub struct Trace<'a> {
     pub side: YSide,
     /// Dashed stroke (secondary quantities — phase, fit overlays).
     pub dashed: bool,
+    /// Explicit categorical dash cue. Unlike the global color-safe display
+    /// preference, this is part of a persisted family presentation policy.
+    pub dash_style: Option<usize>,
+    /// Explicit categorical marker cue from a family presentation policy.
+    pub marker_style: Option<usize>,
+    /// Paint a neutral point primitive when this trace contains one sample.
+    /// This preserves exact isolated family points without assigning a
+    /// categorical marker meaning that the policy did not request.
+    pub show_single_point: bool,
     /// Stroke width in points (design: 1.8 primary, 1.4 thin).
     pub width: f32,
     /// Stable identity for the decimation cache. Must be globally unique
@@ -146,6 +186,9 @@ impl<'a> Trace<'a> {
             color,
             side: YSide::Left,
             dashed: false,
+            dash_style: None,
+            marker_style: None,
+            show_single_point: false,
             width: 1.8,
             cache_key: None,
         }
@@ -160,6 +203,30 @@ impl<'a> Trace<'a> {
     /// Dashed stroke.
     pub fn dashed(mut self) -> Self {
         self.dashed = true;
+        self
+    }
+
+    /// Apply one deterministic categorical dash pattern.
+    pub fn dash_style(mut self, ordinal: usize) -> Self {
+        self.dash_style = Some(ordinal);
+        self
+    }
+
+    /// Apply one deterministic categorical point-marker shape.
+    pub fn marker_style(mut self, ordinal: usize) -> Self {
+        self.marker_style = Some(ordinal);
+        self
+    }
+
+    /// Keep a one-sample trace visible using a neutral circle marker.
+    pub fn show_single_point(mut self) -> Self {
+        self.show_single_point = true;
+        self
+    }
+
+    /// Set an explicit policy-controlled stroke width.
+    pub fn width(mut self, points: f32) -> Self {
+        self.width = points;
         self
     }
 

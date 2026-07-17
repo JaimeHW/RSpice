@@ -920,6 +920,34 @@ pub struct JobsManagerState {
     pub scroll_offset: f32,
 }
 
+/// Report-composer selection and transactional editor presentation. The
+/// canonical report documents live in `ProjectWorkspace`; only stable
+/// selection identity is restored with the application session. Dialog drafts
+/// never persist until their domain transaction commits.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReportAuthoringState {
+    #[serde(default)]
+    pub selected_document: Option<crate::product::ResultDocumentId>,
+    #[serde(default)]
+    pub selected_page: Option<crate::results::report_document::ReportPageId>,
+    #[serde(skip)]
+    pub add_page_open: bool,
+    #[serde(skip)]
+    pub add_page_title: String,
+    #[serde(skip)]
+    pub page_properties_open: bool,
+    #[serde(skip)]
+    pub page_properties_page: Option<crate::results::report_document::ReportPageId>,
+    #[serde(skip)]
+    pub page_title_draft: String,
+    #[serde(skip)]
+    pub report_template_draft: usize,
+    #[serde(skip)]
+    pub page_update_policy_draft: usize,
+    #[serde(skip)]
+    pub transaction_error: Option<String>,
+}
+
 /// Canonical discovery projection used by the mockup's specialist-tool
 /// browser. Pins and favorites are personal application preferences, while
 /// recent tools are bounded device-local history. None of these collections
@@ -1436,6 +1464,10 @@ pub struct WorkbenchState {
     /// result samples remain owned by the result datasets.
     #[serde(default)]
     pub visualization_studio: super::visualization_studio::VisualizationStudioState,
+    /// Session-local selection and editor drafts for the project-owned report
+    /// documents.
+    #[serde(default)]
+    pub report_authoring: ReportAuthoringState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -1526,6 +1558,7 @@ impl Default for WorkbenchState {
             jobs_manager: JobsManagerState::default(),
             specialist_tool_browser: SpecialistToolBrowserState::default(),
             visualization_studio: super::visualization_studio::VisualizationStudioState::default(),
+            report_authoring: ReportAuthoringState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             capability_matrix: CapabilityMatrixState::default(),

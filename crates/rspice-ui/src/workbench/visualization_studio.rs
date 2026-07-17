@@ -5766,7 +5766,7 @@ fn family_slice_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             );
             ui.label("Filter");
             ui.text_edit_singleline(&mut app.state.workbench.visualization_studio.family_query);
-            family_preview(ui, app, manifest).is_ok()
+            family_policy_preview_is_valid(ui, app, manifest)
         }
         Err(error) => {
             empty_note(ui, error);
@@ -5832,7 +5832,7 @@ fn family_encoding_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
                 false,
                 true,
             );
-            family_preview(ui, app, manifest).is_ok()
+            family_policy_preview_is_valid(ui, app, manifest)
         }
         Err(error) => {
             empty_note(ui, error);
@@ -5879,7 +5879,7 @@ fn family_filter_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     );
     let manifest = active_family_manifest(app);
     let valid = match manifest.as_ref() {
-        Ok(manifest) => family_preview(ui, app, manifest).is_ok(),
+        Ok(manifest) => family_policy_preview_is_valid(ui, app, manifest),
         Err(error) => {
             empty_note(ui, error);
             false
@@ -5939,11 +5939,7 @@ fn active_family_sample_selection(
     }
     let manifest = FamilyManifest::from_analysis(analysis)?
         .ok_or_else(|| "The pane's source no longer contains family metadata.".to_owned())?;
-    let query = policy
-        .filter
-        .as_ref()
-        .map_or("", |filter| filter.source.as_str());
-    let indices = manifest.matching_source_indices(query)?;
+    let indices = manifest.matching_source_indices_for_filter(policy.filter.as_ref())?;
     for waveform in &analysis.waveforms {
         manifest.compatible_waveform_len(waveform.x.len())?;
         if waveform.x.len() != waveform.y.len() {
@@ -5953,7 +5949,9 @@ fn active_family_sample_selection(
             ));
         }
     }
-    SourceSampleSelection::new(run.dataset_id, analysis.id, indices).map(Some)
+    SourceSampleSelection::new(run.dataset_id, analysis.id, indices)
+        .and_then(|selection| selection.with_family_presentation(&manifest, policy))
+        .map(Some)
 }
 
 fn family_dimension_combo(
@@ -6031,6 +6029,30 @@ fn family_preview(
         manifest.points.len()
     ));
     Ok(indices)
+}
+
+fn family_policy_preview_is_valid(ui: &mut Ui, app: &RSpiceApp, manifest: &FamilyManifest) -> bool {
+    let result = (|| {
+        let indices = family_preview(ui, app, manifest)?;
+        if indices.is_empty() {
+            return Err("The current filter selects no retained family points.".to_owned());
+        }
+        let policy = build_family_policy_draft(app, manifest)?;
+        SourceSampleSelection::new(DatasetId::new(), 0, indices)?
+            .with_family_presentation(manifest, &policy)?;
+        Ok::<_, String>(())
+    })();
+    if let Err(error) = result {
+        empty_note(
+            ui,
+            &format!(
+                "This draft cannot be applied to the waveform renderer: {error} Choose an X dimension that is finite, losslessly numeric, and strictly increasing within every selected family group."
+            ),
+        );
+        false
+    } else {
+        true
+    }
 }
 
 fn document_family_dimension(
@@ -6186,8 +6208,6 @@ fn build_family_policy_draft(
 fn apply_family_policy_draft(app: &mut RSpiceApp) {
     let result = (|| {
         let manifest = active_family_manifest(app)?;
-        let indices = manifest
-            .matching_source_indices(&app.state.workbench.visualization_studio.family_query)?;
         let analysis = app
             .state
             .simulation
@@ -6203,6 +6223,12 @@ fn apply_family_policy_draft(app: &mut RSpiceApp) {
             }
         }
         let policy = build_family_policy_draft(app, &manifest)?;
+        let indices = manifest.matching_source_indices_for_filter(policy.filter.as_ref())?;
+        if indices.is_empty() {
+            return Err("The current filter selects no retained family points.".to_owned());
+        }
+        SourceSampleSelection::new(DatasetId::new(), analysis.id, indices.clone())?
+            .with_family_presentation(&manifest, &policy)?;
         let pane_id = app
             .state
             .workbench

@@ -396,6 +396,7 @@ impl Command {
                 | Self::Save
                 | Self::SaveAs
                 | Self::SaveAll
+                | Self::SaveReportDocument
                 | Self::RevertActiveDocument
                 | Self::CloseActiveDocument
                 | Self::CloseProject
@@ -416,6 +417,10 @@ impl Command {
                 | Self::NextWorkspace
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
+                | Self::ReportAuthoring
+                | Self::SaveReportDocument
+                | Self::AddReportPage
+                | Self::ReportPageProperties
         )
     }
 
@@ -460,6 +465,9 @@ impl Command {
             | Self::VisualizationCursorManager
             | Self::VisualizationDocumentProperties
             | Self::ExportVisualizationDocument => ShortcutContext::ResultsWorkspace,
+            Self::SaveReportDocument | Self::AddReportPage | Self::ReportPageProperties => {
+                ShortcutContext::ResultsWorkspace
+            }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolCircleTool

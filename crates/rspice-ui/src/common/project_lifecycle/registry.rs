@@ -160,7 +160,10 @@ fn document_digests(
     );
     documents.insert(
         ProjectDocumentId::ResultHistory,
-        digest(&project.simulation_results)?,
+        digest(&(
+            &project.simulation_results,
+            &project.workspace.report_documents,
+        ))?,
     );
     documents.insert(
         ProjectDocumentId::VerificationSpecifications,
@@ -489,6 +492,36 @@ mod tests {
             .remove(&ProjectDocumentId::SimulationPlan)
             .unwrap();
         assert_eq!(first_digest, second_digest);
+    }
+
+    #[test]
+    fn report_documents_participate_in_the_result_history_digest() {
+        let state = AppState::default();
+        let baseline = super::super::snapshot(&state).expect("baseline snapshot");
+        let mut edited = baseline.clone();
+        let mut report =
+            crate::results::report_document::ReportDocument::new("Verification report")
+                .expect("report document");
+        report
+            .transact(
+                report.revision(),
+                vec![crate::results::report_document::ReportEdit::AddPage {
+                    title: "Executive summary".to_owned(),
+                }],
+                1,
+            )
+            .expect("report page transaction");
+        edited.workspace.report_documents.push(report);
+
+        let baseline_digest = document_digests(&baseline)
+            .unwrap()
+            .remove(&ProjectDocumentId::ResultHistory)
+            .unwrap();
+        let edited_digest = document_digests(&edited)
+            .unwrap()
+            .remove(&ProjectDocumentId::ResultHistory)
+            .unwrap();
+        assert_ne!(baseline_digest, edited_digest);
     }
 
     #[test]

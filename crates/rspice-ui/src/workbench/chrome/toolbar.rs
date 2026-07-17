@@ -281,6 +281,11 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         visualization_tools(ui, app, layout);
         return;
     }
+    if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::ReportAuthoring
+    {
+        report_authoring_tools(ui, app, layout);
+        return;
+    }
     match workspace {
         Workspace::Project => project_tools(ui, app, layout),
         Workspace::Design => design_tools(ui, app, layout),
@@ -479,6 +484,36 @@ fn visualization_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpe
         "Export document",
         layout,
     );
+}
+
+fn report_authoring_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    toolbar_text_command(
+        ui,
+        app,
+        Command::SaveReportDocument,
+        WorkbenchIcon::Save,
+        "Save report document",
+        layout,
+    );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::AddReportPage,
+        WorkbenchIcon::Add,
+        "Add report page",
+        layout,
+    );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::ReportPageProperties,
+        WorkbenchIcon::Sliders,
+        "Page properties",
+        layout,
+    );
+    // The mockup's Build review draft action remains absent until exact plot
+    // artwork publication and the release-handoff executor complete the full
+    // contract. Report authoring never advertises a non-executable artifact.
 }
 
 fn verification_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {

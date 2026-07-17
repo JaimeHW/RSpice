@@ -123,6 +123,10 @@ pub enum Command {
     License,
     SpecialistToolBrowser,
     VisualizationStudio,
+    ReportAuthoring,
+    SaveReportDocument,
+    AddReportPage,
+    ReportPageProperties,
     AddVisualizationPane,
     VisualizationTraceManager,
     VisualizationCursorManager,
@@ -436,6 +440,14 @@ impl Command {
                 "Open Visualization Studio",
                 "Navigate",
             ),
+            Self::ReportAuthoring => spec("report-authoring", "Open report authoring", "Navigate"),
+            Self::SaveReportDocument => {
+                spec("report-save-document", "Save report document", "Results")
+            }
+            Self::AddReportPage => spec("report-add-page", "Add report page", "Results"),
+            Self::ReportPageProperties => {
+                spec("report-page-properties", "Page properties", "Results")
+            }
             Self::AddVisualizationPane => spec(
                 "visualization-add-pane",
                 "Add visualization pane",
@@ -617,6 +629,13 @@ impl Command {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
             }
             Self::VisualizationStudio => state.project_lifecycle.project_open,
+            // The source-authoring executor is intentionally dormant until
+            // exact plot-artwork publication and release handoff complete the
+            // mockup's full Report Authoring contract.
+            Self::ReportAuthoring
+            | Self::SaveReportDocument
+            | Self::AddReportPage
+            | Self::ReportPageProperties => false,
             Self::AddVisualizationPane
             | Self::VisualizationTraceManager
             | Self::VisualizationCursorManager
@@ -1147,6 +1166,12 @@ impl Command {
             Self::License => app.open_license_dialog(),
             Self::SpecialistToolBrowser => super::specialist_tool_browser::open(app),
             Self::VisualizationStudio => super::visualization_studio::open(app),
+            Self::ReportAuthoring => super::surfaces::report_authoring::open(app),
+            Self::SaveReportDocument => super::surfaces::report_authoring::save_document(app),
+            Self::AddReportPage => super::surfaces::report_authoring::open_add_page(app),
+            Self::ReportPageProperties => {
+                super::surfaces::report_authoring::open_page_properties(app);
+            }
             Self::AddVisualizationPane => super::visualization_studio::open_add_pane(app),
             Self::VisualizationTraceManager => {
                 super::visualization_studio::open_trace_manager(app);
@@ -1490,6 +1515,50 @@ mod tests {
             crate::workbench::ResultViewer::Specs
         );
         assert!(app.state.ui.results.spec_drafts.is_some());
+    }
+
+    #[test]
+    fn every_exposed_result_viewer_command_activates_its_real_viewer() {
+        for viewer in [
+            crate::workbench::ResultViewer::Waves,
+            crate::workbench::ResultViewer::Bode,
+            crate::workbench::ResultViewer::Fft,
+            crate::workbench::ResultViewer::Eye,
+            crate::workbench::ResultViewer::Hist,
+            crate::workbench::ResultViewer::Op,
+            crate::workbench::ResultViewer::NoiseContrib,
+            crate::workbench::ResultViewer::Specs,
+            crate::workbench::ResultViewer::Nyquist,
+            crate::workbench::ResultViewer::Smith,
+            crate::workbench::ResultViewer::PoleZero,
+        ] {
+            let mut app = RSpiceApp::test_instance();
+
+            Command::ResultViewer(viewer).execute(&mut app);
+
+            assert_eq!(app.state.workbench.workspace, Workspace::Results);
+            assert_eq!(app.state.ui.results.viewer, viewer);
+        }
+    }
+
+    #[test]
+    fn exposed_results_calculator_opens_the_real_editor_dialog() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(!app.state.dialogs.waveform_calculator_dialog);
+
+        Command::WaveformCalculator.execute(&mut app);
+
+        assert!(app.state.dialogs.waveform_calculator_dialog);
+    }
+
+    #[test]
+    fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
+        assert_eq!(
+            Command::ResultViewer(crate::workbench::ResultViewer::Waves).stable_id(),
+            "waveforms"
+        );
+        assert_eq!(Command::WaveformCalculator.stable_id(), "calculator");
+        assert_eq!(Command::ExportWaveformsCsv.stable_id(), "export-waveforms");
     }
 
     #[test]

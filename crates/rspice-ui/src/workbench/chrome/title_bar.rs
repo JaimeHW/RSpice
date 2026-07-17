@@ -2003,6 +2003,42 @@ mod tests {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rendered_results_menu_labels() -> Vec<String> {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = title_test_app();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(MENU_OUTER_WIDTH, 720.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ctx, |ui| results_menu(ui, &mut app));
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit results-menu tree")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| {
+                if node.role() == egui::accesskit::Role::MenuItem {
+                    node.label().map(str::to_owned)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     #[test]
     fn menu_projection_matches_mockup_breakpoints() {
         assert_eq!(MenuProjection::for_width(820.0), MenuProjection::Hidden);
@@ -2287,6 +2323,59 @@ mod tests {
             Command::AutomationConsole,
         ];
         assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn results_menu_exposes_only_truthful_completed_result_workflows() {
+        let labels = rendered_results_menu_labels();
+        for expected in [
+            "Open results workspace",
+            "Bode / stability",
+            "FFT / spectrum",
+            "Eye diagram",
+            "Distribution",
+            "Operating point",
+            "Noise contributors",
+            "Measurements & specifications",
+            "Nyquist",
+            "Smith chart",
+            "Pole-zero",
+            "Calculator…",
+            "Export waveform data…",
+        ] {
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "missing completed Results route: {expected}"
+            );
+        }
+
+        // These are specified by the mockup, but their complete product
+        // contracts are broader than the currently retained executors. Keep
+        // them absent rather than advertising a partial or differently scoped
+        // action under the production label.
+        for incomplete in [
+            "Dataset and manifest browser…",
+            "Create result document…",
+            "Add result comparison…",
+            "Report page and datasheet editor…",
+            "Trace and family manager…",
+            "Cursor and linked-probe manager…",
+            "Plot markers and annotations…",
+            "Review notes…",
+            "Expression and unit diagnostics…",
+            "Measurement library…",
+            "Family slicing and pivot…",
+            "Plot document properties…",
+            "Measurement and calibration hub…",
+            "Import result dataset…",
+            "Export dataset…",
+        ] {
+            assert!(
+                labels.iter().all(|label| label != incomplete),
+                "partial mockup route was exposed: {incomplete}"
+            );
+        }
     }
 
     #[test]

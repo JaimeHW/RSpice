@@ -210,6 +210,9 @@ pub struct ResultsState {
     /// Presentation-only exact family rows selected by Visualization Studio.
     /// Source datasets are never modified by this projection.
     pub(crate) sample_selection: Option<SourceSampleSelection>,
+    /// Session-only visibility overrides for exact family group traces. These
+    /// are presentation state and never alter source WaveformData visibility.
+    hidden_family_traces: HashSet<waves::FamilyTraceVisibilityKey>,
     /// Strips hidden via the strip-close action.
     pub hidden_strips: HashSet<usize>,
     /// Strip currently maximized via the strip action, if any.
@@ -317,8 +320,19 @@ impl ResultsState {
             self.cache = DecimationCache::default();
             self.derived = DerivedSeries::default();
             self.clear_cursors();
+            self.hidden_family_traces.clear();
         }
         self.sample_selection = selection;
+    }
+
+    fn toggle_family_trace_visibility(&mut self, key: waves::FamilyTraceVisibilityKey) {
+        if !self.hidden_family_traces.insert(key) {
+            self.hidden_family_traces.remove(&key);
+        }
+        self.models = waves::ModelsCache::default();
+        self.cache = DecimationCache::default();
+        self.derived = DerivedSeries::default();
+        self.clear_cursors();
     }
 
     /// Clear result UI state that is tied to the active project/design data.

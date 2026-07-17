@@ -603,16 +603,29 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
     let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
     let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let title_right = if meta.is_some() {
-        rect.left() + rect.width() * 0.58
-    } else {
-        rect.right()
-    };
+    let title = title.to_uppercase();
+    let content_left = rect.left() + 10.0;
+    let content_right = rect.right() - 10.0;
+    let content_width = (content_right - content_left).max(0.0);
+    let title_width = ui
+        .painter()
+        .layout_no_wrap(title.clone(), title_font.clone(), t.color.text_dim)
+        .size()
+        .x;
+    let meta_width = meta.map_or(0.0, |meta| {
+        ui.painter()
+            .layout_no_wrap(meta.to_owned(), meta_font.clone(), t.color.text_faint)
+            .size()
+            .x
+    });
+    let (title_region_width, meta_region_width) =
+        section_header_column_widths(content_width, title_width, meta_width, meta.is_some());
+    let title_right = content_left + title_region_width;
     let title_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + 10.0, rect.top()),
-        Pos2::new((title_right - 6.0).max(rect.left() + 10.0), rect.bottom()),
+        Pos2::new(content_left, rect.top()),
+        Pos2::new(title_right.max(content_left), rect.bottom()),
     );
-    let title = elide_text(ui, &title.to_uppercase(), &title_font, title_rect.width());
+    let title = elide_text(ui, &title, &title_font, title_rect.width());
     ui.painter().with_clip_rect(title_rect).text(
         title_rect.left_center(),
         Align2::LEFT_CENTER,
@@ -622,8 +635,8 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     );
     if let Some(meta) = meta {
         let meta_rect = Rect::from_min_max(
-            Pos2::new(title_right, rect.top()),
-            Pos2::new(rect.right() - 10.0, rect.bottom()),
+            Pos2::new(content_right - meta_region_width, rect.top()),
+            Pos2::new(content_right, rect.bottom()),
         );
         let meta = elide_text(ui, meta, &meta_font, meta_rect.width());
         ui.painter().with_clip_rect(meta_rect).text(
@@ -634,6 +647,39 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
             t.color.text_faint,
         );
     }
+}
+
+const SECTION_HEADER_COLUMN_GAP: f32 = 8.0;
+
+/// Allocate a section header from the measured copy instead of a fixed ratio.
+///
+/// Short title/metadata pairs remain complete at the mockup's 228 px navigator
+/// width. Only genuinely over-constrained pairs are elided, with the title
+/// retaining the slightly larger share because it identifies the section.
+fn section_header_column_widths(
+    available_width: f32,
+    desired_title_width: f32,
+    desired_meta_width: f32,
+    has_meta: bool,
+) -> (f32, f32) {
+    let available_width = available_width.max(0.0);
+    if !has_meta {
+        return (available_width, 0.0);
+    }
+
+    let columns_width = (available_width - SECTION_HEADER_COLUMN_GAP).max(0.0);
+    if desired_title_width + desired_meta_width <= columns_width {
+        return (
+            (columns_width - desired_meta_width).max(0.0),
+            desired_meta_width.max(0.0),
+        );
+    }
+
+    let meta_region_width = desired_meta_width.max(0.0).min(columns_width * 0.45);
+    (
+        (columns_width - meta_region_width).max(0.0),
+        meta_region_width,
+    )
 }
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
@@ -967,6 +1013,27 @@ pub fn empty_state(ui: &mut Ui, icon: WorkbenchIcon, title: &str, description: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn section_header_uses_measured_copy_before_eliding() {
+        let (title, meta) = section_header_column_widths(210.0, 47.0, 91.0, true);
+        assert_eq!(meta, 91.0);
+        assert!((title + SECTION_HEADER_COLUMN_GAP + meta - 210.0).abs() <= 0.001);
+        assert!(title >= 47.0);
+    }
+
+    #[test]
+    fn overconstrained_section_header_preserves_both_columns() {
+        let (title, meta) = section_header_column_widths(100.0, 80.0, 80.0, true);
+        assert!((title - 50.6).abs() <= 0.001);
+        assert!((meta - 41.4).abs() <= 0.001);
+        assert!((title + SECTION_HEADER_COLUMN_GAP + meta - 100.0).abs() <= 0.001);
+
+        assert_eq!(
+            section_header_column_widths(100.0, 180.0, 0.0, false),
+            (100.0, 0.0)
+        );
+    }
 
     #[test]
     fn card_content_remains_vertical_inside_a_horizontal_parent() {

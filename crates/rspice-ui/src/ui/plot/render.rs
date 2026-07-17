@@ -143,6 +143,18 @@ fn color_safe_trace_style(index: usize, semantic_dashed: bool) -> TraceRedundanc
     style
 }
 
+fn resolved_trace_marker(
+    marker_style: Option<usize>,
+    redundancy: Option<TraceRedundancy>,
+    show_single_point: bool,
+    point_count: usize,
+) -> Option<TraceMarkerShape> {
+    marker_style
+        .map(|ordinal| color_safe_trace_style(ordinal, false).marker)
+        .or_else(|| redundancy.map(|style| style.marker))
+        .or_else(|| (show_single_point && point_count == 1).then_some(TraceMarkerShape::Circle))
+}
+
 fn paint_trace_marker(
     painter: &egui::Painter,
     center: Pos2,
@@ -271,8 +283,12 @@ fn axis_accessibility_range(axis: &super::spec::Axis) -> String {
     } else {
         format!(" {}", axis.unit)
     };
+    let label = axis
+        .label
+        .as_deref()
+        .map_or_else(String::new, |label| format!("{label}, "));
     format!(
-        "{} to {}{}",
+        "{label}{} to {}{}",
         axis.format_display_value(axis.min),
         axis.format_display_value(axis.max),
         unit
@@ -419,10 +435,11 @@ pub fn show(
     // ---- grid + ticks
     // The x-axis unit owns the right end of the tick row; a tick label that
     // would run into it is dropped (its gridline stays).
-    let x_unit_left = if spec.x.unit.is_empty() {
+    let x_end_label = spec.x.end_label();
+    let x_unit_left = if x_end_label.is_empty() {
         f32::INFINITY
     } else {
-        let unit = painter.layout_no_wrap(spec.x.unit.to_owned(), tick_font.clone(), c.text_dim);
+        let unit = painter.layout_no_wrap(x_end_label.clone(), tick_font.clone(), c.text_dim);
         plot_rect.right() - unit.size().x - 8.0
     };
     // Labels skip when they would collide with the previous label (dense
@@ -528,35 +545,58 @@ pub fn show(
                     .map(|(&x, &y)| pos2(mx(x), map_y(y, trace.side)))
                     .collect(),
             };
-            if points.len() < 2 {
-                continue;
-            }
             let redundancy = t
                 .color_safe_traces
                 .then(|| color_safe_trace_style(trace_index, trace.dashed));
-            let dash = redundancy
-                .and_then(|style| style.dash)
+            let dash = trace
+                .dash_style
+                .and_then(|ordinal| color_safe_trace_style(ordinal, false).dash)
+                .or_else(|| redundancy.and_then(|style| style.dash))
                 .or_else(|| trace.dashed.then_some((5.0, 4.0)));
             // Dashing a dense min/max envelope would emit one shape per
             // dash along a path that zig-zags every column — thousands of
             // segments reading as noise. Sparse curves dash normally.
-            if let Some((dash_length, gap_length)) = dash.filter(|_| points.len() < columns) {
-                clipped.extend(Shape::dashed_line(&points, stroke, dash_length, gap_length));
-            } else if redundancy.is_some() {
-                clipped.add(Shape::line(points.clone(), stroke));
-            } else {
-                clipped.add(Shape::line(points, stroke));
-                continue;
+            if points.len() >= 2 {
+                if let Some((dash_length, gap_length)) = dash.filter(|_| points.len() < columns) {
+                    clipped.extend(Shape::dashed_line(&points, stroke, dash_length, gap_length));
+                } else {
+                    clipped.add(Shape::line(points.clone(), stroke));
+                }
             }
-            if let Some(redundancy) = redundancy {
-                paint_trace_markers(
-                    &clipped,
-                    &points,
-                    plot_rect,
-                    redundancy.marker,
-                    trace.color,
-                    c.canvas_bg,
-                );
+            let marker = resolved_trace_marker(
+                trace.marker_style,
+                redundancy,
+                trace.show_single_point,
+                points.len(),
+            );
+            if let Some(marker) = marker {
+                if points.len() == 1 {
+                    let source_point = points[0];
+                    if source_point.x.is_finite()
+                        && source_point.y.is_finite()
+                        && plot_rect.contains(source_point)
+                    {
+                        let marker_bounds = plot_rect.shrink(4.0);
+                        let point = pos2(
+                            source_point
+                                .x
+                                .clamp(marker_bounds.left(), marker_bounds.right()),
+                            source_point
+                                .y
+                                .clamp(marker_bounds.top(), marker_bounds.bottom()),
+                        );
+                        paint_trace_marker(&clipped, point, marker, trace.color, c.canvas_bg);
+                    }
+                } else {
+                    paint_trace_markers(
+                        &clipped,
+                        &points,
+                        plot_rect,
+                        marker,
+                        trace.color,
+                        c.canvas_bg,
+                    );
+                }
             }
         }
     }
@@ -571,7 +611,7 @@ pub fn show(
         painter.text(
             pos2(plot_rect.left() - 7.0, rect.top() + 8.0),
             Align2::RIGHT_CENTER,
-            spec.y.unit,
+            spec.y.unit.as_str(),
             tick_font.clone(),
             c.text_dim,
         );
@@ -582,16 +622,16 @@ pub fn show(
         painter.text(
             pos2(plot_rect.right() + 8.0, rect.top() + 8.0),
             Align2::LEFT_CENTER,
-            axis.unit,
+            axis.unit.as_str(),
             tick_font.clone(),
             *tint,
         );
     }
-    if !spec.x.unit.is_empty() {
+    if !x_end_label.is_empty() {
         painter.text(
             pos2(plot_rect.right(), rect.bottom() - 9.0),
             Align2::RIGHT_CENTER,
-            spec.x.unit,
+            x_end_label,
             tick_font.clone(),
             c.text_dim,
         );
@@ -924,6 +964,19 @@ mod tests {
         assert!(styles[1..].iter().all(|style| style.dash.is_some()));
         assert!(color_safe_trace_style(0, true).dash.is_some());
         assert_eq!(color_safe_trace_style(6, false), styles[0]);
+    }
+
+    #[test]
+    fn isolated_family_point_uses_neutral_marker_without_category_invention() {
+        assert_eq!(
+            resolved_trace_marker(None, None, true, 1),
+            Some(TraceMarkerShape::Circle)
+        );
+        assert_eq!(resolved_trace_marker(None, None, true, 2), None);
+        assert_eq!(
+            resolved_trace_marker(Some(2), None, true, 1),
+            Some(TraceMarkerShape::Diamond)
+        );
     }
 
     #[test]
