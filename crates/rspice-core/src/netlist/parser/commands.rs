@@ -806,10 +806,7 @@ pub(super) fn parse_save_command(
 
                 if first_token
                     && skip_analysis_type
-                    && matches!(
-                        upper.as_str(),
-                        "TRAN" | "AC" | "DC" | "NOISE" | "DISTO" | "OP" | "TF" | "SP" | "PSS"
-                    )
+                    && OutputAnalysisKind::from_keyword(&upper).is_some()
                 {
                     first_token = false;
                     continue;

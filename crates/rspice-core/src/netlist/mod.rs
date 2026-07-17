@@ -57,8 +57,8 @@ pub use initcond::{
 pub use mutual_inductor::validate_mutual_inductor_references;
 pub(crate) use output_symbols::collect_output_node_namespace_from_elements_with_abort;
 pub use output_symbols::{
-    OutputDirectiveKind, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
-    OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_symbols,
+    OutputAnalysisKind, OutputDirectiveKind, OutputRequest, OutputSymbolDependency,
+    OutputSymbolKind, OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_symbols,
     validate_output_symbols_with_abort,
 };
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};

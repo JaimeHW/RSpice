@@ -8,7 +8,7 @@
 //! topology reduction or device stamping occurs.
 
 use super::{
-    Element, ElementKind, Flattener, FlattenerConfig, MeasureStatement, Netlist,
+    AnalysisCommand, Element, ElementKind, Flattener, FlattenerConfig, MeasureStatement, Netlist,
     NetlistSourceLocation, ParseError, ParseWithAbortError, ensure_parse_not_aborted,
     poll_parse_abort, poll_parse_text,
 };
@@ -42,6 +42,50 @@ impl std::fmt::Display for OutputDirectiveKind {
             Self::Measure => ".MEASURE",
             Self::Four => ".FOUR",
         })
+    }
+}
+
+/// Analysis domain selected by a direct output request.
+///
+/// `.PRINT` and `.PLOT` carry this qualifier explicitly. Measurement
+/// requests retain it from their parsed statement, while analysis-agnostic
+/// `.SAVE` and `.PROBE` requests leave it unset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OutputAnalysisKind {
+    /// Transient analysis.
+    Tran,
+    /// Small-signal AC analysis.
+    Ac,
+    /// DC sweep analysis.
+    Dc,
+    /// Noise spectral-density analysis.
+    Noise,
+    /// Small-signal distortion analysis.
+    Disto,
+    /// DC operating-point analysis.
+    Op,
+    /// Small-signal transfer-function analysis.
+    Tf,
+    /// Scattering-parameter analysis.
+    Sp,
+    /// Periodic steady-state analysis.
+    Pss,
+}
+
+impl OutputAnalysisKind {
+    pub(crate) fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword.trim().to_ascii_uppercase().as_str() {
+            "TRAN" => Some(Self::Tran),
+            "AC" => Some(Self::Ac),
+            "DC" => Some(Self::Dc),
+            "NOISE" => Some(Self::Noise),
+            "DISTO" => Some(Self::Disto),
+            "OP" => Some(Self::Op),
+            "TF" => Some(Self::Tf),
+            "SP" => Some(Self::Sp),
+            "PSS" => Some(Self::Pss),
+            _ => None,
+        }
     }
 }
 
@@ -79,6 +123,8 @@ pub struct OutputSymbolDependency {
 pub struct OutputRequest {
     pub directive: OutputDirectiveKind,
     pub origin: NetlistSourceLocation,
+    /// Explicit analysis qualifier, when the directive carries one.
+    pub analysis: Option<OutputAnalysisKind>,
     /// Optional semantic name used to replace redefined measurements.
     pub name: Option<String>,
     /// Dependencies in their original occurrence order. Repetitions are
@@ -92,9 +138,21 @@ impl OutputRequest {
         origin: NetlistSourceLocation,
         source: &str,
     ) -> Self {
+        let analysis = if matches!(
+            directive,
+            OutputDirectiveKind::Print | OutputDirectiveKind::Plot
+        ) {
+            source
+                .split_whitespace()
+                .next()
+                .and_then(OutputAnalysisKind::from_keyword)
+        } else {
+            None
+        };
         Self {
             directive,
             origin,
+            analysis,
             name: None,
             dependencies: extract_output_dependencies(source),
         }
@@ -121,6 +179,7 @@ impl OutputRequest {
         Self {
             directive: OutputDirectiveKind::Save,
             origin,
+            analysis: None,
             name: None,
             dependencies,
         }
@@ -144,6 +203,7 @@ impl OutputRequest {
         Self {
             directive: OutputDirectiveKind::Measure,
             origin,
+            analysis: OutputAnalysisKind::from_keyword(&statement.analysis),
             name: Some(statement.name.clone()),
             dependencies,
         }
@@ -165,6 +225,7 @@ impl OutputRequest {
         Self {
             directive: OutputDirectiveKind::Four,
             origin,
+            analysis: None,
             name: None,
             dependencies,
         }
@@ -304,23 +365,28 @@ pub fn validate_output_symbols_with_abort(
             {
                 continue;
             }
-            let namespace = match dependency.kind {
-                OutputSymbolKind::Node => &nodes,
-                OutputSymbolKind::Device => &devices,
-            };
-            let matched = if dependency.kind == OutputSymbolKind::Node {
-                let node_match =
-                    namespace_matches_with_aliases(namespace, &node_aliases, &canonical);
-                if node_match {
+            let matched =
+                if analysis_owned_output_vector_exists(netlist, request, dependency, &canonical) {
                     true
-                } else if dependency.operator.eq_ignore_ascii_case("N") {
-                    n_operator_device_vector_exists(&devices, &canonical)
                 } else {
-                    false
-                }
-            } else {
-                namespace_matches(namespace, &canonical)
-            };
+                    let namespace = match dependency.kind {
+                        OutputSymbolKind::Node => &nodes,
+                        OutputSymbolKind::Device => &devices,
+                    };
+                    if dependency.kind == OutputSymbolKind::Node {
+                        let node_match =
+                            namespace_matches_with_aliases(namespace, &node_aliases, &canonical);
+                        if node_match {
+                            true
+                        } else if dependency.operator.eq_ignore_ascii_case("N") {
+                            n_operator_device_vector_exists(&devices, &canonical)
+                        } else {
+                            false
+                        }
+                    } else {
+                        namespace_matches(namespace, &canonical)
+                    }
+                };
             if !matched {
                 unresolved.push(UnresolvedOutputSymbol {
                     directive: request.directive,
@@ -342,6 +408,34 @@ pub fn validate_output_symbols_with_abort(
             }))
             .into(),
         )
+    }
+}
+
+fn analysis_owned_output_vector_exists(
+    netlist: &Netlist,
+    request: &OutputRequest,
+    dependency: &OutputSymbolDependency,
+    canonical: &str,
+) -> bool {
+    if dependency.kind != OutputSymbolKind::Node
+        || !matches!(
+            canonical,
+            "INOISE_SPECTRUM" | "ONOISE_SPECTRUM" | "INOISE" | "ONOISE"
+        )
+        || !netlist
+            .analyses
+            .iter()
+            .any(|analysis| matches!(analysis, AnalysisCommand::Noise { .. }))
+    {
+        return false;
+    }
+
+    match request.directive {
+        OutputDirectiveKind::Print | OutputDirectiveKind::Plot | OutputDirectiveKind::Measure => {
+            request.analysis == Some(OutputAnalysisKind::Noise)
+        }
+        OutputDirectiveKind::Save | OutputDirectiveKind::Probe => true,
+        OutputDirectiveKind::Four => false,
     }
 }
 
@@ -913,6 +1007,51 @@ mod tests {
             Netlist::parse_validated(source),
             Err(ParseError::OutputSymbolValidation(_))
         ));
+    }
+
+    #[test]
+    fn noise_analysis_owned_vectors_validate_only_in_the_noise_domain() {
+        let source = "noise-owned output vectors\n\
+                      V1 in 0 AC 1\n\
+                      R1 in out 1k\n\
+                      R2 out 0 1k\n\
+                      .NOISE V(out) V1 DEC 1 1 10\n\
+                      .PRINT NOISE V(inoise_spectrum) V(onoise)\n\
+                      .SAVE V(inoise) V(onoise_spectrum)\n\
+                      .END\n";
+        let netlist = Netlist::parse_validated(source)
+            .expect("noise-generated vectors are valid noise outputs");
+        let print = netlist
+            .output_requests
+            .iter()
+            .find(|request| request.directive == OutputDirectiveKind::Print)
+            .expect("typed PRINT provenance exists");
+        assert_eq!(print.analysis, Some(OutputAnalysisKind::Noise));
+
+        let wrong_domain = source.replace(
+            ".PRINT NOISE V(inoise_spectrum) V(onoise)",
+            ".PRINT OP V(inoise_spectrum)",
+        );
+        let error = Netlist::parse_validated(&wrong_domain)
+            .expect_err("noise-generated vectors are not OP topology nodes");
+        assert!(matches!(error, ParseError::OutputSymbolValidation(_)));
+
+        let wrong_namespace = source.replace(
+            ".PRINT NOISE V(inoise_spectrum) V(onoise)",
+            ".PRINT NOISE I(inoise)",
+        );
+        let error = Netlist::parse_validated(&wrong_namespace)
+            .expect_err("noise-generated vectors are not circuit devices");
+        assert!(matches!(error, ParseError::OutputSymbolValidation(_)));
+
+        let no_noise_analysis = "missing noise producer\n\
+                                 V1 in 0 1\n\
+                                 R1 in 0 1k\n\
+                                 .PRINT NOISE V(inoise_spectrum)\n\
+                                 .END\n";
+        let error = Netlist::parse_validated(no_noise_analysis)
+            .expect_err("a qualifier alone does not create noise vectors");
+        assert!(matches!(error, ParseError::OutputSymbolValidation(_)));
     }
 
     #[test]
