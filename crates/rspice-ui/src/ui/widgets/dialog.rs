@@ -36,6 +36,9 @@ pub enum DialogSize {
     /// content-height, with the two-column workflow retained through tablet
     /// widths and the full-viewport shell applied at 560 pt.
     SimulationWorkflow,
+    /// Mockup-owned specialist workspace discovery manager: 760 pt wide on
+    /// desktop and full-viewport at the 820 pt one-column breakpoint.
+    SpecialistToolBrowser,
     /// Browsers and settings managers: 760 × 530 pt, with the mockup's
     /// 28/34 pt viewport gutters and 8 pt phone inset.
     Manager,
@@ -97,6 +100,22 @@ impl DialogSize {
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 560.0,
+                narrow_inset: 0.0,
+                narrow_vertical_inset: 0.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
+            Self::SpecialistToolBrowser => DialogSurfaceSpec {
+                width: 760.0,
+                max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 820.0,
                 narrow_inset: 0.0,
                 narrow_vertical_inset: 0.0,
                 cap_narrow_height: false,
@@ -264,7 +283,7 @@ impl DialogLayout {
 
         Self {
             surface_rect,
-            fill_height: spec.fill_height,
+            fill_height: spec.fill_height || (size == DialogSize::SpecialistToolBrowser && narrow),
             app_background: spec.app_background,
             radius: if narrow && spec.edge_to_edge_narrow {
                 0.0
@@ -1442,6 +1461,26 @@ mod tests {
 
         assert_eq!(layout.surface_rect, screen);
         assert_eq!(layout.radius, 0.0);
+    }
+
+    #[test]
+    fn specialist_browser_uses_desktop_cap_and_full_tablet_phone_viewport() {
+        let desktop_screen = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_440.0, 900.0));
+        let desktop =
+            DialogLayout::resolve(DialogSize::SpecialistToolBrowser, desktop_screen, None);
+        assert_eq!(desktop.surface_rect.size(), vec2(760.0, 760.0));
+        assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
+        assert_eq!(desktop.radius, 4.0);
+        assert!(!desktop.fill_height);
+
+        for size in [vec2(820.0, 900.0), vec2(390.0, 844.0)] {
+            let screen = Rect::from_min_size(egui::pos2(7.0, 11.0), size);
+            let compact = DialogLayout::resolve(DialogSize::SpecialistToolBrowser, screen, None);
+            assert_eq!(compact.surface_rect, screen);
+            assert_eq!(compact.radius, 0.0);
+            assert!(compact.narrow);
+            assert!(compact.fill_height);
+        }
     }
 
     #[test]

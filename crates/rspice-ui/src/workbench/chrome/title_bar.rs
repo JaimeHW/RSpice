@@ -1174,6 +1174,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::AccountOrganization | Command::License => WorkbenchIcon::User,
         Command::KeyboardShortcuts => WorkbenchIcon::Search,
         Command::InteroperabilityMatrix => WorkbenchIcon::Compare,
+        Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
         Command::FeatureAvailability | Command::About => WorkbenchIcon::Info,
         Command::Exit => WorkbenchIcon::Stop,
         Command::CloseActiveDocument => WorkbenchIcon::File,

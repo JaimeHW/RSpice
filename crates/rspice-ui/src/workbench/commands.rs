@@ -121,6 +121,7 @@ pub enum Command {
     KeyboardShortcuts,
     AccountOrganization,
     License,
+    SpecialistToolBrowser,
     FeatureAvailability,
     InteroperabilityMatrix,
     About,
@@ -419,6 +420,11 @@ impl Command {
                 "Account",
             ),
             Self::License => spec("license-activation", "License and activation…", "Help"),
+            Self::SpecialistToolBrowser => spec(
+                "specialist-tool-browser",
+                "Specialist tool browser…",
+                "Navigate",
+            ),
             Self::FeatureAvailability => spec(
                 "feature-availability",
                 "Product capability and platform matrix…",
@@ -1092,6 +1098,7 @@ impl Command {
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
             Self::AccountOrganization => super::account_organization::open(app),
             Self::License => app.open_license_dialog(),
+            Self::SpecialistToolBrowser => super::specialist_tool_browser::open(app),
             Self::FeatureAvailability => {
                 let route = super::SurfaceRoute::surface(super::SurfaceId::FeatureAvailability);
                 if let Err(error) = app
@@ -1384,6 +1391,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::KeyboardShortcuts,
     Command::AccountOrganization,
     Command::License,
+    Command::SpecialistToolBrowser,
     Command::FeatureAvailability,
     Command::InteroperabilityMatrix,
     Command::About,

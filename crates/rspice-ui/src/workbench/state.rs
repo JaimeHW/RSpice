@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceId, SurfaceNavigation,
-    SurfaceRoute, WorkspacePreset,
+    BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceArchetype, SurfaceId,
+    SurfaceNavigation, SurfaceRoute, WorkspacePreset,
 };
 
 const NAVIGATION_SCHEMA_VERSION: u8 = 1;
@@ -920,6 +920,158 @@ pub struct JobsManagerState {
     pub scroll_offset: f32,
 }
 
+/// Canonical discovery projection used by the mockup's specialist-tool
+/// browser. Pins and favorites are personal application preferences, while
+/// recent tools are bounded device-local history. None of these collections
+/// creates, copies, or changes the owner of an engineering document.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpecialistToolBrowserState {
+    /// Search and filter are task-local review state. They deliberately reset
+    /// when a new application session starts instead of becoming project data.
+    #[serde(skip)]
+    pub query: String,
+    #[serde(skip)]
+    pub filter: SpecialistToolFilter,
+    #[serde(skip)]
+    pub focus_search: bool,
+    /// Personal discovery preferences retained by the application session.
+    #[serde(default, deserialize_with = "deserialize_specialist_surfaces")]
+    pub favorites: Vec<SurfaceId>,
+    #[serde(default, deserialize_with = "deserialize_specialist_surfaces")]
+    pub pinned: Vec<SurfaceId>,
+    /// Newest-first, bounded device-local navigation history.
+    #[serde(default, deserialize_with = "deserialize_specialist_surfaces")]
+    pub recents: Vec<SurfaceId>,
+}
+
+impl Default for SpecialistToolBrowserState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            filter: SpecialistToolFilter::All,
+            focus_search: false,
+            favorites: Vec::new(),
+            pinned: Vec::new(),
+            recents: Vec::new(),
+        }
+    }
+}
+
+impl SpecialistToolBrowserState {
+    const RECENT_LIMIT: usize = 12;
+
+    #[must_use]
+    pub fn is_favorite(&self, surface: SurfaceId) -> bool {
+        self.favorites.contains(&surface)
+    }
+
+    #[must_use]
+    pub fn is_pinned(&self, surface: SurfaceId) -> bool {
+        self.pinned.contains(&surface)
+    }
+
+    #[must_use]
+    pub fn is_recent(&self, surface: SurfaceId) -> bool {
+        self.recents.contains(&surface)
+    }
+
+    pub fn toggle_favorite(&mut self, surface: SurfaceId) {
+        toggle_surface_membership(&mut self.favorites, surface);
+    }
+
+    pub fn toggle_pin(&mut self, surface: SurfaceId) {
+        toggle_surface_membership(&mut self.pinned, surface);
+    }
+
+    pub fn record_recent(&mut self, surface: SurfaceId) {
+        if surface.archetype() != SurfaceArchetype::SpecialistWorkspace {
+            return;
+        }
+        self.recents.retain(|candidate| *candidate != surface);
+        self.recents.insert(0, surface);
+        self.recents.truncate(Self::RECENT_LIMIT);
+    }
+
+    /// Remove non-specialist and duplicate identities from restored personal
+    /// metadata. This is intentionally lossless for every still-canonical
+    /// specialist identity and never guesses replacements for removed IDs.
+    pub fn normalize(&mut self) {
+        normalize_specialist_list(&mut self.favorites, None);
+        normalize_specialist_list(&mut self.pinned, None);
+        normalize_specialist_list(&mut self.recents, Some(Self::RECENT_LIMIT));
+    }
+}
+
+fn toggle_surface_membership(surfaces: &mut Vec<SurfaceId>, surface: SurfaceId) {
+    if let Some(index) = surfaces.iter().position(|candidate| *candidate == surface) {
+        surfaces.remove(index);
+    } else if surface.archetype() == SurfaceArchetype::SpecialistWorkspace {
+        surfaces.push(surface);
+    }
+}
+
+fn normalize_specialist_list(surfaces: &mut Vec<SurfaceId>, limit: Option<usize>) {
+    let mut normalized = Vec::with_capacity(surfaces.len());
+    for surface in surfaces.drain(..) {
+        if surface.archetype() == SurfaceArchetype::SpecialistWorkspace
+            && !normalized.contains(&surface)
+        {
+            normalized.push(surface);
+        }
+    }
+    if let Some(limit) = limit {
+        normalized.truncate(limit);
+    }
+    *surfaces = normalized;
+}
+
+fn deserialize_specialist_surfaces<'de, D>(deserializer: D) -> Result<Vec<SurfaceId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let Some(stable_ids) = value.as_array() else {
+        return Ok(Vec::new());
+    };
+    Ok(stable_ids
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter_map(|stable_id| stable_id.parse().ok())
+        .collect())
+}
+
+/// Mockup-authored specialist discovery projections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpecialistToolFilter {
+    #[default]
+    All,
+    ActiveProfile,
+    Pinned,
+    Favorites,
+    Recent,
+}
+
+impl SpecialistToolFilter {
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::ActiveProfile,
+        Self::Pinned,
+        Self::Favorites,
+        Self::Recent,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::ActiveProfile => "Active profile",
+            Self::Pinned => "Pinned",
+            Self::Favorites => "Favorites",
+            Self::Recent => "Recent",
+        }
+    }
+}
+
 /// Domain projection selected in the mockup-specified notification center.
 /// The underlying activity stream is never discarded when this changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1275,6 +1427,10 @@ pub struct WorkbenchState {
     /// `SimulationState`; this state owns presentation only.
     #[serde(skip)]
     pub jobs_manager: JobsManagerState,
+    /// Personal specialist discovery metadata plus task-local browser state.
+    /// The owned engineering documents remain in their canonical surfaces.
+    #[serde(default)]
+    pub specialist_tool_browser: SpecialistToolBrowserState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -1363,6 +1519,7 @@ impl Default for WorkbenchState {
             focus_placement_search: false,
             preflight: PreflightDialogState::default(),
             jobs_manager: JobsManagerState::default(),
+            specialist_tool_browser: SpecialistToolBrowserState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             capability_matrix: CapabilityMatrixState::default(),
@@ -1384,6 +1541,7 @@ impl WorkbenchState {
                 SurfaceId::Preferences
                     | SurfaceId::AccountOrganization
                     | SurfaceId::JobsManager
+                    | SurfaceId::SpecialistToolBrowser
                     | SurfaceId::FeatureAvailability
             )
     }
@@ -1430,6 +1588,7 @@ impl WorkbenchState {
         self.reconcile_workspace_layout(previous, route);
         let transition = self.navigation.navigate(route, source);
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = route.surface_id().workspace() {
             self.workspace = workspace;
         }
@@ -1450,6 +1609,7 @@ impl WorkbenchState {
         self.reconcile_workspace_layout(previous, route);
         self.navigation.replace(route, source);
         self.reconcile_capability_matrix_route(previous, route);
+        self.reconcile_specialist_tool_browser_route(previous, route);
         if let Some(workspace) = route.surface_id().workspace() {
             self.workspace = workspace;
         }
@@ -1505,6 +1665,7 @@ impl WorkbenchState {
                     .to_owned(),
             );
         }
+        self.specialist_tool_browser.normalize();
     }
 
     pub fn record_route_diagnostic(&mut self, diagnostic: impl Into<String>) {
@@ -1545,6 +1706,7 @@ impl WorkbenchState {
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back(source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().workspace() {
             self.workspace = workspace;
         }
@@ -1570,6 +1732,7 @@ impl WorkbenchState {
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back_steps(count, source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().workspace() {
             self.workspace = workspace;
         }
@@ -1599,6 +1762,7 @@ impl WorkbenchState {
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_forward_steps(count, source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
+        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().workspace() {
             self.workspace = workspace;
         }
@@ -1626,6 +1790,18 @@ impl WorkbenchState {
         self.capability_matrix.interoperability_domain = InteroperabilityDomain::default();
         self.capability_matrix.interoperability_support_level =
             InteroperabilitySupportLevel::default();
+    }
+
+    fn reconcile_specialist_tool_browser_route(
+        &mut self,
+        previous: SurfaceRoute,
+        current: SurfaceRoute,
+    ) {
+        let browser = SurfaceId::SpecialistToolBrowser;
+        if previous.surface_id() != browser && current.surface_id() == browser {
+            self.specialist_tool_browser.normalize();
+            self.specialist_tool_browser.focus_search = true;
+        }
     }
 
     pub fn take_browser_history_effect(&mut self) -> Option<BrowserHistoryEffect> {
@@ -1863,6 +2039,84 @@ mod tests {
     #[test]
     fn canonical_workspace_order_is_stable() {
         assert_eq!(Workspace::ALL.len(), 7);
+    }
+
+    #[test]
+    fn specialist_preferences_restore_known_ids_and_ignore_corrupt_entries() {
+        let restored: SpecialistToolBrowserState = serde_json::from_value(serde_json::json!({
+            "favorites": ["rf-workbench", "removed-workspace", 42, null],
+            "pinned": "not-an-array",
+            "recents": ["photonics-workbench", {}, "model-editor"]
+        }))
+        .expect("future and malformed preference entries are isolated");
+
+        assert_eq!(restored.favorites, [SurfaceId::RfWorkbench]);
+        assert!(restored.pinned.is_empty());
+        assert_eq!(
+            restored.recents,
+            [SurfaceId::PhotonicsWorkbench, SurfaceId::ModelEditor]
+        );
+    }
+
+    #[test]
+    fn specialist_preferences_normalize_identity_and_bound_recent_history() {
+        let specialist_ids = SurfaceId::ALL
+            .into_iter()
+            .filter(|surface| surface.archetype() == SurfaceArchetype::SpecialistWorkspace)
+            .take(SpecialistToolBrowserState::RECENT_LIMIT + 3)
+            .collect::<Vec<_>>();
+        let mut browser = SpecialistToolBrowserState {
+            favorites: vec![
+                SurfaceId::RfWorkbench,
+                SurfaceId::Project,
+                SurfaceId::RfWorkbench,
+            ],
+            pinned: vec![SurfaceId::ModelEditor, SurfaceId::ModelEditor],
+            recents: specialist_ids.clone(),
+            ..SpecialistToolBrowserState::default()
+        };
+
+        browser.normalize();
+        assert_eq!(browser.favorites, [SurfaceId::RfWorkbench]);
+        assert_eq!(browser.pinned, [SurfaceId::ModelEditor]);
+        assert_eq!(
+            browser.recents,
+            specialist_ids[..SpecialistToolBrowserState::RECENT_LIMIT]
+        );
+
+        browser.record_recent(SurfaceId::Project);
+        assert_eq!(
+            browser.recents,
+            specialist_ids[..SpecialistToolBrowserState::RECENT_LIMIT]
+        );
+        browser.record_recent(SurfaceId::RfWorkbench);
+        assert_eq!(browser.recents.first(), Some(&SurfaceId::RfWorkbench));
+        assert_eq!(
+            browser.recents.len(),
+            SpecialistToolBrowserState::RECENT_LIMIT
+        );
+    }
+
+    #[test]
+    fn specialist_session_round_trip_retains_preferences_not_transient_review_state() {
+        let browser = SpecialistToolBrowserState {
+            query: "rf gain".to_owned(),
+            filter: SpecialistToolFilter::Favorites,
+            focus_search: true,
+            favorites: vec![SurfaceId::RfWorkbench],
+            pinned: vec![SurfaceId::ModelEditor],
+            recents: vec![SurfaceId::PhotonicsWorkbench],
+        };
+
+        let encoded = serde_json::to_string(&browser).expect("browser preferences serialize");
+        let restored: SpecialistToolBrowserState =
+            serde_json::from_str(&encoded).expect("browser preferences restore");
+        assert_eq!(restored.query, "");
+        assert_eq!(restored.filter, SpecialistToolFilter::All);
+        assert!(!restored.focus_search);
+        assert_eq!(restored.favorites, browser.favorites);
+        assert_eq!(restored.pinned, browser.pinned);
+        assert_eq!(restored.recents, browser.recents);
     }
 
     #[test]

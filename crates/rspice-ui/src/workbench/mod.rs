@@ -33,6 +33,7 @@ mod project_launcher;
 mod recovery;
 mod session;
 pub mod shortcuts;
+mod specialist_tool_browser;
 mod surfaces;
 
 pub use crate::quantity::{
@@ -206,6 +207,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
     account_organization::show(ctx, app);
     jobs_manager::show(ctx, app);
+    specialist_tool_browser::show(ctx, app);
     feature_availability::show(ctx, app);
 }
 

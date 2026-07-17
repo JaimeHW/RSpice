@@ -282,7 +282,7 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 7] = [
 ];
 
 const SPECIALIST_ACTIONS: [MobileNavigationAction; 1] = [MobileNavigationAction {
-    command: Command::FeatureAvailability,
+    command: Command::SpecialistToolBrowser,
     icon: WorkbenchIcon::More,
     label: "Specialist tool browser",
     detail: "AMS, RF, physical, SI/PI, models, automation and emerging domains",
