@@ -706,8 +706,14 @@ impl<'a> Parser<'a> {
         if upper == "FREQ" || upper == "FREQUENCY" || upper == "F" || upper == "HERTZ" {
             return Expr::Frequency;
         }
-        if upper == "TEMPER" {
+        if upper == "TEMP" || upper == "TEMPER" {
             return Expr::Temperature;
+        }
+        if upper == "VT" {
+            return Expr::ThermalVoltage;
+        }
+        if upper == "GMIN" {
+            return Expr::Gmin;
         }
 
         // Check for function call

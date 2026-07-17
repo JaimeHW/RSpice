@@ -61,6 +61,23 @@ mod tests {
         assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 0.0);
     }
 
+    #[test]
+    fn behavioral_gmin_does_not_follow_junction_continuation() {
+        let mut source = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "GMIN")
+            .expect("GMIN behavioral expression parses");
+        source.set_gmin(2.5e-8);
+
+        let mut circuit = CircuitData::new();
+        circuit.behavioral_sources.add_voltage(source);
+        circuit.set_semiconductor_junction_gmin(1.0e-3);
+
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].evaluate(&[], 0.0),
+            2.5e-8,
+            "expression-visible GMIN is the fixed resolved device option, not the active continuation conductance"
+        );
+    }
+
     #[cfg(feature = "veriloga-builtins")]
     #[test]
     fn generated_simparam_gmin_is_solver_controlled_and_not_rolled_back() {

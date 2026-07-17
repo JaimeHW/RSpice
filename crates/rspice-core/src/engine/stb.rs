@@ -170,6 +170,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * freq;
+            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
             let mut ac_matrix =
                 Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
 
@@ -215,5 +216,46 @@ impl Engine {
             result,
             probe_name,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::advanced::stb::StbSweepType;
+
+    #[test]
+    fn stb_refreshes_frequency_dependent_behavioral_conductance() {
+        let netlist = Netlist::parse_with_options(
+            "live FREQ STB operator\n\
+             .PARAM RUNTIME_R={FREQ}\n\
+             EAMP out 0 in 0 10\n\
+             VPROBE out fb 0\n\
+             RF fb in {RUNTIME_R}\n\
+             RIN in 0 1k\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("frequency-dependent STB deck parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let config = StbConfig::new()
+            .with_sweep(10.0, 100.0, 2)
+            .with_sweep_type(StbSweepType::Linear)
+            .with_probe("VPROBE");
+        let result = engine
+            .run_stb(&netlist, config)
+            .expect("frequency-dependent STB operators solve");
+        assert_eq!(result.loop_gains.len(), 2);
+        assert!(
+            (result.loop_gains[0] - result.loop_gains[1]).norm() > 1.0e-3,
+            "STB operator retained a stale FREQ conductance: {:?}",
+            result.loop_gains
+        );
     }
 }

@@ -2403,6 +2403,83 @@ fn add_planned_xspice_auto_bridge(
 mod tests {
     use super::*;
 
+    struct DiscardingStamper;
+
+    impl crate::device::MatrixStamper for DiscardingStamper {
+        fn stamp(
+            &mut self,
+            _row: crate::circuit::NodeId,
+            _col: crate::circuit::NodeId,
+            _value: crate::Value,
+        ) {
+        }
+
+        fn stamp_rhs(&mut self, _index: crate::circuit::NodeId, _value: crate::Value) {}
+    }
+
+    #[test]
+    fn behavioral_gmin_uses_resolved_engine_device_option() {
+        let netlist = Netlist::parse_with_options(
+            "resolved behavioral GMIN\nB1 out 0 V={GMIN}\n.END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce behavioral deck parses");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.junction_gmin_target = 7.5e-9;
+
+        let mut circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("behavioral circuit builds");
+
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].evaluate(&[], 0.0),
+            7.5e-9
+        );
+    }
+
+    #[test]
+    fn generic_switch_retains_scoped_runtime_params_and_resolved_context() {
+        let netlist = Netlist::parse_with_options(
+            "scoped runtime switch control\n\
+             .OPTIONS GMIN=2.5E-8\n\
+             .MODEL SM SWITCH(RON=2 ROFF=1MEG ON=150 OFF=140)\n\
+             X1 out CELL SCALE=2\n\
+             .SUBCKT CELL P SCALE=1\n\
+             .PARAM CONTROL_VALUE={SCALE*(TEMP+VT+GMIN)}\n\
+             S1 P 0 SM CONTROL={CONTROL_VALUE}\n\
+             .ENDS\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce scoped generic-switch deck parses");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.temperature = crate::analysis::temperature::celsius_to_kelvin(80.0);
+        config.convergence_config.junction_gmin_target = 9.0e-7;
+        let engine = Engine::new(config).resolved_for_netlist(&netlist);
+        assert_eq!(
+            engine.config.convergence_config.junction_gmin_target, 2.5e-8,
+            ".OPTIONS GMIN must override the base engine device-option value"
+        );
+
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("scoped generic-switch circuit builds");
+        assert_eq!(circuit.generic_switches.len(), 1);
+
+        circuit.generic_switches[0].stamp_time_dependent(0.0, &mut DiscardingStamper);
+        assert_eq!(
+            circuit.generic_switches[0].conductance(),
+            0.5,
+            "resolved SCALE, TEMP, VT, and GMIN should drive the switch fully on"
+        );
+    }
+
     fn xspice_model_count(circuit: &CircuitData, model_name: &str) -> usize {
         circuit
             .xspice_instances
@@ -3230,6 +3307,7 @@ impl Engine {
                             model.as_deref(),
                             instance_params,
                             self.config.temperature,
+                            self.config.convergence_config.junction_gmin_target,
                         )?;
                         continue;
                     }
@@ -4779,6 +4857,7 @@ impl Engine {
                     bvs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
                         self.config.temperature,
                     ));
+                    bvs.set_gmin(self.config.convergence_config.junction_gmin_target);
                     bvs.set_expression_dialect(netlist.params.expression_dialect());
                     circuit.behavioral_sources.add_voltage(bvs);
                 }
@@ -4815,6 +4894,7 @@ impl Engine {
                     bcs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
                         self.config.temperature,
                     ));
+                    bcs.set_gmin(self.config.convergence_config.junction_gmin_target);
                     bcs.set_expression_dialect(netlist.params.expression_dialect());
                     circuit.behavioral_sources.add_current(bcs);
                 }
@@ -5173,9 +5253,14 @@ impl Engine {
                     )
                     .map_err(SimulationError::Circuit)?
                     .with_params(&params_map);
+                    sw.set_expression_context(
+                        crate::analysis::temperature::kelvin_to_celsius(self.config.temperature),
+                        self.config.convergence_config.junction_gmin_target,
+                        netlist.params.expression_dialect(),
+                    );
                     if sw.has_solution_references() {
                         return Err(SimulationError::Circuit(format!(
-                            "Generic switch '{}' CONTROL expression references circuit nodes or branch currents; native SWITCH CONTROL currently supports time/constant expressions only",
+                            "Generic switch '{}' CONTROL expression references circuit nodes or branch currents; native SWITCH CONTROL currently requires expressions independent of solution unknowns",
                             element.name
                         )));
                     }

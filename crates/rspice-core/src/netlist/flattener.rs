@@ -17,6 +17,7 @@
 #![allow(clippy::too_many_arguments)]
 use super::expr::{
     behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
+    prepare_behavioral_expression_preserving_spelling,
 };
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
@@ -24,11 +25,11 @@ use super::parser::parse_source_spec_text;
 use super::remove_unused::filter_elements_with_abort as filter_removeunused_elements_with_abort;
 use super::{
     DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
-    DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
-    InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
-    ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceSpec,
-    StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, SubcircuitDef,
-    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
+    DuplicateSubcircuitPortBindingError, Element, ElementKind, ExpressionDialect,
+    GlobalSubcircuitPortBindingError, InitialCondition, ModelDef, Netlist, NodeSet, ParamContext,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, ParseWithAbortError, RandomState,
+    SourceSpec, StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope,
+    SubcircuitDef, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
     validate_mutual_inductor_references,
 };
 use crate::Value;
@@ -1367,6 +1368,25 @@ impl<'a> Flattener<'a> {
                 for (name, value) in instance_params {
                     let resolved = if parametric_value_is_string(value) {
                         ParametricValue::String(resolve_string_parametric_value(value, scope)?)
+                    } else if let ParametricValue::Expression(expression) = value
+                        && scope.expression_dialect() == ExpressionDialect::Xyce
+                    {
+                        let prepared =
+                            prepare_behavioral_expression(expression, scope).map_err(|error| {
+                                ParseError::InvalidValue(format!(
+                                    "nested subcircuit parameter '{}' could not be prepared: {}",
+                                    name, error
+                                ))
+                            })?;
+                        if behavioral_expression_references_runtime_quantity(&prepared) {
+                            ParametricValue::Expression(prepared)
+                        } else {
+                            ParametricValue::Resolved(resolve_parametric_value(
+                                &ParametricValue::Expression(prepared),
+                                scope,
+                                &self.random,
+                            )?)
+                        }
                     } else {
                         ParametricValue::Resolved(resolve_parametric_value(
                             value,
@@ -1548,7 +1568,16 @@ impl<'a> Flattener<'a> {
                     element_path,
                     model_scope_path,
                 )?,
-                control_expression: control_expression.clone(),
+                control_expression: prepare_behavioral_expression_preserving_spelling(
+                    control_expression,
+                    scope,
+                )
+                .map_err(|err| {
+                    ParseError::InvalidValue(format!(
+                        "behavioral expression for element '{}' could not be prepared: {}",
+                        element_path, err
+                    ))
+                })?,
                 initial_state: *initial_state,
             },
             ElementKind::TransmissionLine {
@@ -1654,8 +1683,20 @@ impl<'a> Flattener<'a> {
         }
         let mut merged = instance_params.to_vec();
         for (name, expr) in deferred_params {
+            let prepared = prepare_behavioral_expression(expr, scope).map_err(|error| {
+                ParseError::InvalidValue(format!(
+                    "instance parameter '{}' could not be prepared: {}",
+                    name, error
+                ))
+            })?;
+            if behavioral_expression_references_runtime_quantity(&prepared) {
+                return Err(ParseError::InvalidValue(format!(
+                    "runtime-dependent instance/model parameter '{}' is not supported by this device target",
+                    name
+                )));
+            }
             let value = resolve_parametric_value(
-                &ParametricValue::Expression(expr.clone()),
+                &ParametricValue::Expression(prepared),
                 scope,
                 &self.random,
             )?;
@@ -2419,7 +2460,7 @@ fn build_subcircuit_param_scope(
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
 ) -> Result<ParamContext, ParseError> {
-    let (instance_numeric, instance_strings) =
+    let (instance_numeric, instance_strings, instance_expressions) =
         resolve_subcircuit_instance_params(subckt, caller_scope, instance_params, random)?;
     let instance_names = instance_params
         .iter()
@@ -2478,6 +2519,9 @@ fn build_subcircuit_param_scope(
     for (name, value) in instance_numeric {
         scope.set(&name, value);
     }
+    for (name, expression) in instance_expressions {
+        scope.define_parameter_expression(&name, expression, None);
+    }
     let formal_expr_params = subckt
         .expr_params
         .iter()
@@ -2518,6 +2562,28 @@ fn resolve_deferred_param_expressions(
         let mut first_error = None;
 
         for (name, expr) in pending {
+            if scope.expression_dialect() == ExpressionDialect::Xyce {
+                match prepare_behavioral_expression(&expr, scope) {
+                    Ok(prepared)
+                        if behavioral_expression_references_runtime_quantity(&prepared) =>
+                    {
+                        scope.define_parameter_expression(&name, expr, None);
+                        progress = true;
+                        continue;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        first_error.get_or_insert_with(|| {
+                            ParseError::InvalidValue(format!(
+                                "parameter expression '{}' could not be prepared: {}",
+                                name, error
+                            ))
+                        });
+                        unresolved.push((name, expr));
+                        continue;
+                    }
+                }
+            }
             match resolve_parametric_value(
                 &ParametricValue::Expression(expr.clone()),
                 scope,
@@ -2552,12 +2618,20 @@ fn resolve_subcircuit_instance_params(
     caller_scope: &ParamContext,
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
-) -> Result<(Vec<(String, Value)>, Vec<(String, String)>), ParseError> {
+) -> Result<
+    (
+        Vec<(String, Value)>,
+        Vec<(String, String)>,
+        Vec<(String, String)>,
+    ),
+    ParseError,
+> {
     let mut instance_scope = caller_scope.clone();
     instance_scope.adopt_random(random);
     let mut pending = instance_params.to_vec();
     let mut numeric = Vec::<(String, Value)>::new();
     let mut strings = Vec::<(String, String)>::new();
+    let mut expressions = Vec::<(String, String)>::new();
 
     while !pending.is_empty() {
         let mut progress = false;
@@ -2578,6 +2652,35 @@ fn resolve_subcircuit_instance_params(
                     }
                 }
             } else {
+                if instance_scope.expression_dialect() == ExpressionDialect::Xyce
+                    && let ParametricValue::Expression(expression) = &value
+                {
+                    match prepare_behavioral_expression(expression, &instance_scope) {
+                        Ok(prepared)
+                            if behavioral_expression_references_runtime_quantity(&prepared) =>
+                        {
+                            instance_scope.define_parameter_expression(
+                                &name,
+                                prepared.clone(),
+                                None,
+                            );
+                            upsert_expression_param_value(&mut expressions, name, prepared);
+                            progress = true;
+                            continue;
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            first_error.get_or_insert_with(|| {
+                                ParseError::InvalidValue(format!(
+                                    "subcircuit instance parameter '{}' could not be prepared: {}",
+                                    name, error
+                                ))
+                            });
+                            unresolved.push((name, value));
+                            continue;
+                        }
+                    }
+                }
                 match resolve_parametric_value(&value, &instance_scope, random) {
                     Ok(resolved) => {
                         instance_scope.set(&name, resolved);
@@ -2602,7 +2705,7 @@ fn resolve_subcircuit_instance_params(
         pending = unresolved;
     }
 
-    Ok((numeric, strings))
+    Ok((numeric, strings, expressions))
 }
 
 fn subcircuit_instance_param_is_string(
@@ -2625,6 +2728,21 @@ fn upsert_numeric_param_value(items: &mut Vec<(String, Value)>, name: String, va
         *existing_value = value;
     } else {
         items.push((name, value));
+    }
+}
+
+fn upsert_expression_param_value(
+    items: &mut Vec<(String, String)>,
+    name: String,
+    expression: String,
+) {
+    if let Some((_, existing)) = items
+        .iter_mut()
+        .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+    {
+        *existing = expression;
+    } else {
+        items.push((name, expression));
     }
 }
 

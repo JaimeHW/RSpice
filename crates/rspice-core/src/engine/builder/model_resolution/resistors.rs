@@ -87,6 +87,7 @@ fn resolve_resistor_eval_context(
     let Some(model_def) = model_def else {
         let mut ctx = base_eval_context(netlist);
         set_temperature_scalars(&mut ctx, current_temp_c, base_tnom_c);
+        crate::netlist::expr::materialize_available_parameter_expressions(&mut ctx);
         return Ok((ctx, current_temp_c, base_tnom_c));
     };
 

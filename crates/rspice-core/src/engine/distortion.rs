@@ -94,8 +94,8 @@ impl Engine {
 
         for (index, &f1) in frequencies.iter().enumerate() {
             check_abort(abort)?;
-            let context = VolterraContext {
-                circuit: &circuit,
+            let mut context = VolterraContext {
+                circuit: &mut circuit,
                 matrix: &matrix,
                 operating_state: &dc_solution,
                 num_nodes,
@@ -103,7 +103,7 @@ impl Engine {
             };
             let h1 = context.solve(f1, &rhs_f1)?;
             let fundamental_f1 = make_ac_result(
-                &circuit,
+                context.circuit,
                 f1,
                 &h1,
                 2.0,
@@ -200,7 +200,7 @@ fn validate_source_tone(
 }
 
 struct VolterraContext<'a> {
-    circuit: &'a CircuitData,
+    circuit: &'a mut CircuitData,
     matrix: &'a StaticMatrix,
     operating_state: &'a [Value],
     num_nodes: usize,
@@ -209,11 +209,13 @@ struct VolterraContext<'a> {
 
 impl VolterraContext<'_> {
     fn solve(
-        &self,
+        &mut self,
         frequency: Value,
         rhs: &[Complex64],
     ) -> Result<Vec<Complex64>, SimulationError> {
         check_abort(self.abort)?;
+        self.circuit
+            .prepare_behavioral_small_signal_at_frequency(self.operating_state, frequency);
         let mut operator = Engine::try_build_small_signal_ac_matrix(
             self.circuit,
             self.matrix,
@@ -227,7 +229,7 @@ impl VolterraContext<'_> {
     }
 
     fn solve_forcing(
-        &self,
+        &mut self,
         frequency: Value,
         forcing: &[Complex64],
     ) -> Result<Vec<Complex64>, SimulationError> {
@@ -236,7 +238,7 @@ impl VolterraContext<'_> {
     }
 
     fn harmonic_point(
-        &self,
+        &mut self,
         f1: Value,
         h1: &[Complex64],
         fundamental_f1: AcResult,
@@ -282,7 +284,7 @@ impl VolterraContext<'_> {
 
     #[allow(clippy::too_many_arguments)]
     fn two_tone_point(
-        &self,
+        &mut self,
         f1: Value,
         f2: Value,
         h1: &[Complex64],
@@ -362,7 +364,7 @@ impl VolterraContext<'_> {
     /// Taylor coefficient `(F'' + jw*Q'')/2` contracted with two complex
     /// Volterra state vectors.
     fn second_order_forcing(
-        &self,
+        &mut self,
         output_frequency: Value,
         left: &[Complex64],
         right: &[Complex64],
@@ -381,7 +383,7 @@ impl VolterraContext<'_> {
     /// Taylor coefficient `(F''' + jw*Q''')/6` contracted with three complex
     /// Volterra state vectors.
     fn third_order_forcing(
-        &self,
+        &mut self,
         output_frequency: Value,
         first: &[Complex64],
         second: &[Complex64],
@@ -424,7 +426,7 @@ impl VolterraContext<'_> {
     }
 
     fn real_first_operator_derivative(
-        &self,
+        &mut self,
         output_frequency: Value,
         direction: &[Value],
         vector: &[Complex64],
@@ -445,7 +447,7 @@ impl VolterraContext<'_> {
     }
 
     fn central_first_difference(
-        &self,
+        &mut self,
         output_frequency: Value,
         direction: &[Value],
         vector: &[Complex64],
@@ -462,7 +464,7 @@ impl VolterraContext<'_> {
     }
 
     fn real_second_operator_derivative(
-        &self,
+        &mut self,
         output_frequency: Value,
         first: &[Value],
         second: &[Value],
@@ -506,7 +508,7 @@ impl VolterraContext<'_> {
     }
 
     fn operator_product_at_offset(
-        &self,
+        &mut self,
         output_frequency: Value,
         offsets: &[(&[Value], Value)],
         vector: &[Complex64],
@@ -745,6 +747,36 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
 mod tests {
     use super::*;
     use crate::abort_signal::ImmediateAbort;
+
+    #[test]
+    fn distortion_refreshes_frequency_dependent_behavioral_conductance() {
+        let netlist = Netlist::parse_with_options(
+            "live FREQ distortion operator\n\
+             .PARAM RUNTIME_R={FREQ}\n\
+             I1 out 0 DISTOF1 1 0\n\
+             R1 out 0 {RUNTIME_R}\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("frequency-dependent distortion deck parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let results = engine
+            .run_distortion(&netlist, &[10.0, 100.0], None)
+            .expect("frequency-dependent distortion operators solve");
+        for (point, expected) in results.points.iter().zip([10.0, 100.0]) {
+            let actual = point.fundamental_f1.voltages[0].norm();
+            assert!(
+                (actual - expected).abs() <= 1.0e-10 * expected,
+                "distortion operator retained stale FREQ conductance: actual={actual:e}, expected={expected:e}"
+            );
+        }
+    }
 
     #[test]
     fn request_validation_rejects_invalid_frequencies_and_ratio() {

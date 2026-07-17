@@ -1098,7 +1098,7 @@ impl NonlinearDevice for CurrentSwitch {
 /// Xyce generic two-terminal switch:
 /// `SW1 p n MODEL [ON|OFF] CONTROL={expr}`.
 ///
-/// This first native slice supports time/constant control expressions. Control
+/// Native evaluation supports time and fixed analysis-context scalars. Control
 /// expressions that reference circuit unknowns require Jacobian coupling and are
 /// rejected by the builder until that path is implemented.
 #[derive(Debug, Clone)]
@@ -1114,6 +1114,9 @@ pub struct GenericSwitch {
     pub program: CompiledExpr,
     vm: Vm,
     time_breakpoints: Vec<Value>,
+    temperature: Value,
+    gmin: Value,
+    expression_dialect: crate::netlist::ExpressionDialect,
 
     /// On resistance
     pub ron: Value,
@@ -1161,6 +1164,11 @@ impl GenericSwitch {
             program,
             vm: Vm::new(),
             time_breakpoints,
+            temperature: crate::analysis::temperature::kelvin_to_celsius(
+                crate::constants::TEMP_REFERENCE,
+            ),
+            gmin: crate::constants::GMIN,
+            expression_dialect: crate::netlist::ExpressionDialect::Ngspice,
             ron: 1.0,
             roff: 1.0e6,
             on: 1.0,
@@ -1365,7 +1373,9 @@ impl GenericSwitch {
             | Expr::StringLiteral(_)
             | Expr::Time
             | Expr::Frequency
-            | Expr::Temperature => {}
+            | Expr::Temperature
+            | Expr::ThermalVoltage
+            | Expr::Gmin => {}
             Expr::LookupTable(table) => {
                 if table.transient_breakpoints {
                     breakpoints.extend(table.points.iter().map(|(time, _)| *time));
@@ -1443,6 +1453,8 @@ impl GenericSwitch {
             | Expr::LookupTable(_)
             | Expr::Frequency
             | Expr::Temperature
+            | Expr::ThermalVoltage
+            | Expr::Gmin
             | Expr::Function { .. } => None,
         }
     }
@@ -1487,19 +1499,41 @@ impl GenericSwitch {
         self
     }
 
+    /// Set the fixed analysis context used by the retained CONTROL expression.
+    ///
+    /// `gmin` is the resolved device-option floor. It intentionally does not
+    /// follow nonlinear continuation, whose temporary junction conductance is
+    /// a solver aid rather than Xyce's expression-visible `GMIN` option.
+    pub fn set_expression_context(
+        &mut self,
+        temperature: Value,
+        gmin: Value,
+        expression_dialect: crate::netlist::ExpressionDialect,
+    ) {
+        self.temperature = temperature;
+        self.gmin = gmin;
+        self.expression_dialect = expression_dialect;
+    }
+
     /// Current small-signal conductance.
     pub fn conductance(&self) -> Value {
         self.current_conductance
     }
 
     fn evaluate_control_at(&self, time: Value, vm: &mut Vm) -> Value {
-        let ctx = Context::transient(&[], &[], time);
+        let ctx = Context::transient(&[], &[], time)
+            .with_temperature(self.temperature)
+            .with_gmin(self.gmin)
+            .with_expression_dialect(self.expression_dialect);
         let value = vm.execute(&self.program, &ctx);
         if value.is_finite() { value } else { self.off }
     }
 
     fn evaluate_control(&mut self, time: Value) -> Value {
-        let ctx = Context::transient(&[], &[], time);
+        let ctx = Context::transient(&[], &[], time)
+            .with_temperature(self.temperature)
+            .with_gmin(self.gmin)
+            .with_expression_dialect(self.expression_dialect);
         let value = self.vm.execute(&self.program, &ctx);
         if value.is_finite() { value } else { self.off }
     }
@@ -1619,6 +1653,7 @@ impl GenericSwitch {
 #[cfg(test)]
 mod tests {
     use crate::device::traits::NonlinearDevice;
+    use crate::netlist::ExpressionDialect;
 
     use super::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 
@@ -1630,6 +1665,23 @@ mod tests {
         assert_eq!(switch.time_breakpoints().len(), 2);
         assert!((switch.time_breakpoints()[0] - 2.0e-6).abs() < 1.0e-18);
         assert!((switch.time_breakpoints()[1] - 3.0e-6).abs() < 1.0e-18);
+    }
+
+    #[test]
+    fn generic_switch_evaluates_runtime_specials_in_resolved_context() {
+        let mut switch = GenericSwitch::new("sw1".to_string(), 1, 0, "TEMP + VT + GMIN")
+            .expect("runtime-special CONTROL expression parses");
+        switch.set_expression_context(80.0, 2.5e-8, ExpressionDialect::Xyce);
+
+        let expected =
+            80.0 + crate::constants::thermal_voltage(
+                crate::analysis::temperature::celsius_to_kelvin(80.0),
+            ) + 2.5e-8;
+        let actual = switch.evaluate_control(0.0);
+        assert!(
+            (actual - expected).abs() < 1.0e-14,
+            "{actual} != {expected}"
+        );
     }
 
     #[test]

@@ -3377,7 +3377,7 @@ pub(super) fn parse_param_statement(
         if retain_global_expression
             && matches!(
                 name.to_ascii_uppercase().as_str(),
-                "TIME" | "TEMP" | "TEMPER" | "VT" | "GMIN" | "FREQ" | "FREQUENCY"
+                "TIME" | "TEMP" | "TEMPER" | "VT" | "GMIN" | "FREQ" | "HERTZ"
             )
         {
             return Err(ParseError::Syntax {
@@ -3449,7 +3449,11 @@ fn parse_param_assignment_value(
         TokenKind::StringLit(value) => {
             let value = value.clone();
             stream.advance();
-            params.set_string(&name, value);
+            if retain_global_expression {
+                params.set_global_string(&name, value);
+            } else {
+                params.set_string(&name, value);
+            }
             clear_deferred_param_expression(deferred_params.as_deref_mut(), &name);
         }
         TokenKind::Expression(expr)
@@ -3460,31 +3464,47 @@ fn parse_param_assignment_value(
                 .expect("string parameter presence checked")
                 .to_string();
             stream.advance();
-            params.set_string(&name, value);
+            if retain_global_expression {
+                params.set_global_string(&name, value);
+            } else {
+                params.set_string(&name, value);
+            }
             clear_deferred_param_expression(deferred_params.as_deref_mut(), &name);
         }
         _ if param_rhs_continues(stream) => {
             let expr = collect_param_rhs_expression(stream, line_num, &name)?;
             reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
-            match eval_expression_complex(&expr, params) {
-                Ok(value) => {
-                    if retain_global_expression {
-                        params.define_global_expression(&name, &expr, Some(value));
-                    } else {
-                        params.set_complex(&name, value);
+            if !retain_runtime_param_expression(
+                params,
+                deferred_params.as_deref_mut(),
+                retain_global_expression,
+                &name,
+                &expr,
+            ) {
+                match eval_expression_complex(&expr, params) {
+                    Ok(value) => {
+                        if retain_global_expression {
+                            params.define_global_expression(&name, &expr, Some(value));
+                        } else {
+                            params.set_complex(&name, value);
+                        }
+                        upsert_deferred_param_expression(
+                            deferred_params.as_deref_mut(),
+                            &name,
+                            &expr,
+                        );
                     }
-                    upsert_deferred_param_expression(deferred_params.as_deref_mut(), &name, &expr);
-                }
-                Err(err) => {
-                    let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
-                    defer_param_expression_or_error(
-                        deferred_params.as_deref_mut(),
-                        params,
-                        retain_global_expression,
-                        name,
-                        expr,
-                        err,
-                    )?;
+                    Err(err) => {
+                        let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
+                        defer_param_expression_or_error(
+                            deferred_params.as_deref_mut(),
+                            params,
+                            retain_global_expression,
+                            name,
+                            expr,
+                            err,
+                        )?;
+                    }
                 }
             }
         }
@@ -3494,34 +3514,64 @@ fn parse_param_assignment_value(
                 .expect("string parameter presence checked")
                 .to_string();
             stream.advance();
-            params.set_string(&name, value);
+            if retain_global_expression {
+                params.set_global_string(&name, value);
+            } else {
+                params.set_string(&name, value);
+            }
             clear_deferred_param_expression(deferred_params.as_deref_mut(), &name);
         }
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
             stream.advance();
             reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
-            match eval_expression_complex(&expr, params) {
-                Ok(value) => {
-                    if retain_global_expression {
-                        params.define_global_expression(&name, &expr, Some(value));
-                    } else {
-                        params.set_complex(&name, value);
+            if !retain_runtime_param_expression(
+                params,
+                deferred_params.as_deref_mut(),
+                retain_global_expression,
+                &name,
+                &expr,
+            ) {
+                match eval_expression_complex(&expr, params) {
+                    Ok(value) => {
+                        if retain_global_expression {
+                            params.define_global_expression(&name, &expr, Some(value));
+                        } else {
+                            params.set_complex(&name, value);
+                        }
+                        upsert_deferred_param_expression(
+                            deferred_params.as_deref_mut(),
+                            &name,
+                            &expr,
+                        );
                     }
-                    upsert_deferred_param_expression(deferred_params.as_deref_mut(), &name, &expr);
-                }
-                Err(err) => {
-                    let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
-                    defer_param_expression_or_error(
-                        deferred_params.as_deref_mut(),
-                        params,
-                        retain_global_expression,
-                        name,
-                        expr,
-                        err,
-                    )?;
+                    Err(err) => {
+                        let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
+                        defer_param_expression_or_error(
+                            deferred_params.as_deref_mut(),
+                            params,
+                            retain_global_expression,
+                            name,
+                            expr,
+                            err,
+                        )?;
+                    }
                 }
             }
+        }
+        TokenKind::Ident(param_name)
+            if params.expression_dialect() == ExpressionDialect::Xyce
+                && crate::netlist::expr::runtime_special_quantity(param_name).is_some() =>
+        {
+            let expr = param_name.clone();
+            stream.advance();
+            retain_runtime_param_expression(
+                params,
+                deferred_params.as_deref_mut(),
+                retain_global_expression,
+                &name,
+                &expr,
+            );
         }
         TokenKind::Ident(param_name) if params.get_complex(param_name).is_some() => {
             let value = params
@@ -3558,7 +3608,11 @@ fn parse_param_assignment_value(
                             &expr,
                         );
                     } else {
-                        params.set(&name, value);
+                        if retain_global_expression {
+                            params.set_global(&name, value);
+                        } else {
+                            params.set(&name, value);
+                        }
                         clear_deferred_param_expression(deferred_params.as_deref_mut(), &name);
                     }
                 }
@@ -3629,17 +3683,45 @@ fn defer_param_expression_or_error(
     expr: String,
     err: ParseError,
 ) -> Result<(), ParseError> {
-    if let Some(deferred_params) = deferred_params
-        && parameter_error_can_defer(&err)
-    {
-        upsert_param_expression(deferred_params, name, expr);
-        return Ok(());
-    }
-    if retain_global_expression && parameter_error_can_defer(&err) {
-        params.define_global_expression(&name, expr, None);
-        return Ok(());
+    if parameter_error_can_defer(&err) {
+        if retain_global_expression {
+            params.define_global_expression(&name, &expr, None);
+        } else if params.expression_dialect() == ExpressionDialect::Xyce {
+            params.define_parameter_expression(&name, &expr, None);
+        }
+        if let Some(deferred_params) = deferred_params {
+            upsert_param_expression(deferred_params, name, expr);
+            return Ok(());
+        }
+        if retain_global_expression || params.expression_dialect() == ExpressionDialect::Xyce {
+            return Ok(());
+        }
     }
     Err(err)
+}
+
+fn retain_runtime_param_expression(
+    params: &mut ParamContext,
+    deferred_params: Option<&mut Vec<(String, String)>>,
+    global: bool,
+    name: &str,
+    expression: &str,
+) -> bool {
+    if params.expression_dialect() != ExpressionDialect::Xyce {
+        return false;
+    }
+    let prepared = crate::netlist::expr::prepare_behavioral_expression(expression, params)
+        .unwrap_or_else(|_| expression.to_string());
+    if !crate::netlist::expr::behavioral_expression_references_runtime_quantity(&prepared) {
+        return false;
+    }
+    if global {
+        params.define_global_expression(name, expression, None);
+    } else {
+        params.define_parameter_expression(name, expression, None);
+    }
+    upsert_deferred_param_expression(deferred_params, name, expression);
+    true
 }
 
 fn parse_param_function_definition(
