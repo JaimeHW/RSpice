@@ -222,8 +222,13 @@ pub(super) fn parse_command(
             analyses.push(AnalysisCommand::Temp { temperatures });
         }
         ".FOUR" | ".FOURIER" => {
+            let authored_source = remaining_command_source(stream);
             let (fundamental, outputs) = parse_four_command(stream, line_num, params)?;
-            output_requests.push(OutputRequest::from_four(outputs.as_slice(), origin.clone()));
+            output_requests.push(OutputRequest::from_four(
+                outputs.as_slice(),
+                origin.clone(),
+                &authored_source,
+            ));
             analyses.push(AnalysisCommand::Four {
                 fundamental,
                 outputs,
@@ -313,6 +318,7 @@ pub(super) fn parse_command(
         )?,
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
+            let authored_source = remaining_command_source(stream);
             let statement = parse_meas_command(stream, line_num, params)?;
             if let Some(previous) = measurements
                 .iter()
@@ -338,7 +344,11 @@ pub(super) fn parse_command(
                     message,
                 ));
             }
-            output_requests.push(OutputRequest::from_measure(&statement, origin.clone()));
+            output_requests.push(OutputRequest::from_measure(
+                &statement,
+                origin.clone(),
+                &authored_source,
+            ));
             measurements.push(statement);
         }
         ".SAVE" | ".PROBE" => {
@@ -875,6 +885,10 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
         return None;
     }
     let lower = trimmed.to_ascii_lowercase();
+
+    if lower == "all" {
+        return Some(SaveSignal::All);
+    }
 
     if let Some(inner) = lower.strip_prefix("v(").and_then(|s| s.strip_suffix(')')) {
         let inner = inner.trim();

@@ -536,7 +536,14 @@ impl SaveSet {
         self.signals.is_empty()
     }
 
-    pub(crate) fn apply_ground_policy(&mut self, policy: super::GroundPolicy) {
+    /// Canonicalize node-zero aliases in every selected voltage probe.
+    ///
+    /// Frontends that replace the parsed output selection (for example a CLI
+    /// `--save` override) must apply the netlist's effective
+    /// [`GroundPolicy`](super::GroundPolicy)
+    /// before execution so their synthetic selection has the same semantics
+    /// as source-authored `.SAVE`/`.PRINT` cards.
+    pub fn apply_ground_policy(&mut self, policy: super::GroundPolicy) {
         fn replace(node: &mut String, policy: super::GroundPolicy) {
             let canonical = policy.canonical_node(node);
             if canonical != node {
@@ -736,6 +743,26 @@ mod save_set_tests {
     fn hierarchical_wildcard_does_not_cross_colon_separator() {
         assert!(pattern_selects("x1:*", "x1:out"));
         assert!(!pattern_selects("x1:*", "x1:inner:out"));
+    }
+
+    #[test]
+    fn frontend_save_overrides_apply_the_selected_ground_policy() {
+        let mut saves = SaveSet {
+            signals: vec![
+                SaveSignal::Voltage("GND!".into()),
+                SaveSignal::VoltageDiff("out".into(), "GROUND".into()),
+                SaveSignal::Raw("V(GND)+V(GROUND)".into()),
+            ],
+        };
+
+        saves.apply_ground_policy(super::super::GroundPolicy::XyceReplace);
+
+        assert_eq!(saves.signals[0], SaveSignal::Voltage("0".into()));
+        assert_eq!(
+            saves.signals[1],
+            SaveSignal::VoltageDiff("out".into(), "0".into())
+        );
+        assert_eq!(saves.signals[2], SaveSignal::Raw("V(0)+V(0)".into()));
     }
 }
 

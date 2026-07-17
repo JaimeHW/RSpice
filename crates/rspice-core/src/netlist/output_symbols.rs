@@ -99,9 +99,36 @@ impl OutputRequest {
         }
     }
 
+    /// Build the semantic request corresponding to one frontend output
+    /// override, such as a command-line `--save` value.
+    ///
+    /// The same accessor extractor used for source-authored output cards owns
+    /// dependency recognition here. Bare vector names follow
+    /// [`parse_save_probe`](super::parse_save_probe) semantics and are treated
+    /// as node-voltage shorthand. Device-parameter probes remain outside
+    /// symbol-existence validation because their validity belongs to device
+    /// metadata validation.
+    pub fn from_save_override(origin: NetlistSourceLocation, source: &str) -> Self {
+        let mut dependencies = extract_output_dependencies(source);
+        if dependencies.is_empty()
+            && !source.trim_start().starts_with('@')
+            && let Some(super::SaveSignal::Raw(node)) = super::parse_save_probe(source)
+            && !node.eq_ignore_ascii_case("all")
+        {
+            dependencies = extract_output_dependencies(&format!("V({})", source.trim()));
+        }
+        Self {
+            directive: OutputDirectiveKind::Save,
+            origin,
+            name: None,
+            dependencies,
+        }
+    }
+
     pub(crate) fn from_measure(
         statement: &MeasureStatement,
         origin: NetlistSourceLocation,
+        authored_source: &str,
     ) -> Self {
         let mut sources = Vec::<&str>::new();
         collect_measure_sources(statement, &mut sources);
@@ -109,6 +136,10 @@ impl OutputRequest {
         for source in sources {
             dependencies.extend(extract_output_dependencies(source));
         }
+        let dependencies = retain_authored_dependency_spelling(
+            dependencies,
+            extract_output_dependencies(authored_source),
+        );
         Self {
             directive: OutputDirectiveKind::Measure,
             origin,
@@ -117,11 +148,19 @@ impl OutputRequest {
         }
     }
 
-    pub(crate) fn from_four(outputs: &[String], origin: NetlistSourceLocation) -> Self {
+    pub(crate) fn from_four(
+        outputs: &[String],
+        origin: NetlistSourceLocation,
+        authored_source: &str,
+    ) -> Self {
         let dependencies = outputs
             .iter()
             .flat_map(|output| extract_output_dependencies(output))
             .collect();
+        let dependencies = retain_authored_dependency_spelling(
+            dependencies,
+            extract_output_dependencies(authored_source),
+        );
         Self {
             directive: OutputDirectiveKind::Four,
             origin,
@@ -129,6 +168,40 @@ impl OutputRequest {
             dependencies,
         }
     }
+}
+
+fn retain_authored_dependency_spelling(
+    semantic: Vec<OutputSymbolDependency>,
+    authored: Vec<OutputSymbolDependency>,
+) -> Vec<OutputSymbolDependency> {
+    let mut authored_index = 0;
+    semantic
+        .into_iter()
+        .map(|dependency| {
+            let matched = authored[authored_index..]
+                .iter()
+                .position(|candidate| {
+                    candidate.kind == dependency.kind
+                        && candidate
+                            .operator
+                            .eq_ignore_ascii_case(&dependency.operator)
+                        && canonical_symbol(&candidate.symbol)
+                            == canonical_symbol(&dependency.symbol)
+                })
+                .map(|offset| authored_index + offset);
+            let Some(index) = matched else {
+                return dependency;
+            };
+            authored_index = index + 1;
+            let authored = &authored[index];
+            OutputSymbolDependency {
+                operator: authored.operator.clone(),
+                symbol: authored.symbol.clone(),
+                kind: dependency.kind,
+                expression: dependency.expression,
+            }
+        })
+        .collect()
 }
 
 /// One unresolved occurrence in a validated output request.
@@ -236,9 +309,7 @@ pub fn validate_output_symbols_with_abort(
                 if node_match {
                     true
                 } else if dependency.operator.eq_ignore_ascii_case("N") {
-                    canonical
-                        .rsplit_once('.')
-                        .is_some_and(|(device, _)| namespace_matches(&devices, device))
+                    n_operator_device_vector_exists(&devices, &canonical)
                 } else {
                     false
                 }
@@ -267,6 +338,23 @@ pub fn validate_output_symbols_with_abort(
             .into(),
         )
     }
+}
+
+fn n_operator_device_vector_exists(devices: &HashSet<String>, canonical: &str) -> bool {
+    if canonical
+        .rsplit_once('.')
+        .is_some_and(|(device, _)| namespace_matches(devices, device))
+    {
+        return true;
+    }
+    // Xyce exposes model-owned internal-node and branch solution vectors as
+    // N(<device>_<vector>). Device names may themselves contain underscores,
+    // so test every separator and accept only a prefix in the actual flattened
+    // device namespace; the generated model remains the authority for whether
+    // that vector is present at execution time.
+    canonical
+        .match_indices('_')
+        .any(|(separator, _)| separator != 0 && namespace_matches(devices, &canonical[..separator]))
 }
 
 /// Validate output dependencies without cancellation.
@@ -810,6 +898,60 @@ mod tests {
     }
 
     #[test]
+    fn measure_and_four_requests_retain_authored_dependency_spelling() {
+        let netlist = Netlist::parse(
+            "authored output spelling\n\
+             V1 1 0 1\n\
+             .TRAN 0.1 1\n\
+             .MEASURE TRAN mixedCase MAX V(bogoNode)\n\
+             .FOUR 1k I(BogoDevice1) V(MixedNode)\n\
+             .END\n",
+        )
+        .expect("syntactic parse accepts unresolved output dependencies");
+        let authored = netlist
+            .output_requests
+            .iter()
+            .flat_map(|request| request.dependencies.iter())
+            .map(|dependency| (dependency.operator.as_str(), dependency.symbol.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            authored,
+            vec![("V", "bogoNode"), ("I", "BogoDevice1"), ("V", "MixedNode")]
+        );
+    }
+
+    #[test]
+    fn save_override_requests_reuse_accessor_and_bare_vector_semantics() {
+        let origin = NetlistSourceLocation::in_file("<command line --save>", 2);
+        let current = OutputRequest::from_save_override(origin.clone(), "I(MissingDevice)");
+        assert_eq!(current.directive, OutputDirectiveKind::Save);
+        assert_eq!(current.origin, origin);
+        assert_eq!(current.dependencies.len(), 1);
+        assert_eq!(current.dependencies[0].operator, "I");
+        assert_eq!(current.dependencies[0].symbol, "MissingDevice");
+        assert_eq!(current.dependencies[0].kind, OutputSymbolKind::Device);
+
+        let bare = OutputRequest::from_save_override(
+            NetlistSourceLocation::in_file("<command line --save>", 3),
+            "MissingNode",
+        );
+        assert_eq!(bare.dependencies.len(), 1);
+        assert_eq!(bare.dependencies[0].operator, "V");
+        assert_eq!(bare.dependencies[0].symbol, "MissingNode");
+        assert_eq!(bare.dependencies[0].kind, OutputSymbolKind::Node);
+
+        let parameter = OutputRequest::from_save_override(
+            NetlistSourceLocation::in_file("<command line --save>", 4),
+            "@m1[id]",
+        );
+        assert!(parameter.dependencies.is_empty());
+        assert!(matches!(
+            super::super::parse_save_probe("ALL"),
+            Some(super::super::SaveSignal::All)
+        ));
+    }
+
+    #[test]
     fn xyce_wildcards_cross_hierarchy_and_question_matches_one_character() {
         assert!(hierarchy_pattern_matches("X1.*", "X1.N1"));
         assert!(hierarchy_pattern_matches("X1.*", "X1.X2.N1"));
@@ -914,6 +1056,30 @@ mod tests {
              .END\n",
         )
         .expect("formal node aliases resolve while hierarchical device parameters are excluded");
+    }
+
+    #[test]
+    fn n_operator_defers_existing_device_internal_and_branch_vectors_to_execution() {
+        Netlist::parse_validated(
+            "device-owned vectors\n\
+             VSRC_1 1 0 1\n\
+             M1 1 1 0 0 NM\n\
+             .MODEL NM NMOS LEVEL=1\n\
+             .PRINT OP N(M1_t) N(VSRC_1_BRANCH)\n\
+             .OP\n\
+             .END\n",
+        )
+        .expect("generated internal-node and branch-vector metadata remains execution-owned");
+
+        let error = Netlist::parse_validated(
+            "unknown device vector\n\
+             V1 1 0 1\n\
+             .PRINT OP N(BOGO_BRANCH)\n\
+             .OP\n\
+             .END\n",
+        )
+        .expect_err("unknown device prefixes remain unresolved");
+        assert!(matches!(error, ParseError::OutputSymbolValidation(_)));
     }
 
     #[test]
