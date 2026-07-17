@@ -1,5 +1,89 @@
 use super::*;
-use crate::product::{AnalysisInstanceId, DatasetId, RunId};
+use crate::product::{AnalysisInstanceId, DatasetId, JobId, RunId};
+
+/// Qualified execution runtime that owns a simulation job.
+///
+/// The target is retained with the run so Jobs, exported manifests, and
+/// project reloads never infer execution provenance from the machine that is
+/// currently viewing a historical result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExecutionTarget {
+    LocalDesktop,
+    NativeMobile,
+    BrowserWorker,
+}
+
+/// Authoritative lifecycle retained with a simulation run.
+///
+/// `LegacyUnknown` is deliberately distinct from every current lifecycle:
+/// older project files did not retain enough evidence to reconstruct whether
+/// a run completed, failed, or was cancelled. New runs never use that value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SimulationRunLifecycle {
+    LegacyUnknown,
+    Preparing,
+    Running,
+    Cancelling,
+    Completed,
+    Failed,
+    Aborted,
+    /// The executor ownership boundary was lost before a terminal engine
+    /// acknowledgement could be retained (for example, project reload or
+    /// design-context replacement). This is terminal and never resumable.
+    Interrupted,
+}
+
+impl SimulationRunLifecycle {
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Aborted | Self::Interrupted
+        )
+    }
+}
+
+/// Stable identity for the exact execution currently owned by the runner.
+/// Cancellation requests carry this pair so a delayed UI action cannot abort
+/// a newer run that happens to be active when the request is processed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SimulationExecutionIdentity {
+    pub job_id: JobId,
+    pub run_id: RunId,
+}
+
+impl ExecutionTarget {
+    #[must_use]
+    pub const fn current() -> Self {
+        if cfg!(target_arch = "wasm32") {
+            Self::BrowserWorker
+        } else if cfg!(any(target_os = "android", target_os = "ios")) {
+            Self::NativeMobile
+        } else {
+            Self::LocalDesktop
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LocalDesktop => "Local desktop engine",
+            Self::NativeMobile => "Native mobile engine",
+            Self::BrowserWorker => "Browser simulation worker",
+        }
+    }
+
+    #[must_use]
+    pub const fn runtime(self) -> &'static str {
+        match self {
+            Self::LocalDesktop => "native",
+            Self::NativeMobile => "native-mobile",
+            Self::BrowserWorker => "wasm-worker",
+        }
+    }
+}
 
 /// A simulation run containing multiple analysis results.
 ///
@@ -12,6 +96,9 @@ use crate::product::{AnalysisInstanceId, DatasetId, RunId};
 /// - Retained in history for comparison
 #[derive(Debug, Clone)]
 pub struct SimulationRun {
+    /// Stable execution-job identity. Historical projects that predate job
+    /// identity retain `None`; current dispatches always allocate one.
+    pub job_id: Option<JobId>,
     /// Stable product identity. This survives project moves, history reorder,
     /// and save/reload; it is the authoritative reference for selections and
     /// dataset provenance.
@@ -21,6 +108,13 @@ pub struct SimulationRun {
     /// addressed by result documents, comparisons, and overlays after
     /// completion.
     pub dataset_id: DatasetId,
+    /// Runtime that executed this run. `None` is an explicit legacy state,
+    /// never permission to infer the target from the current platform.
+    pub execution_target: Option<ExecutionTarget>,
+    /// Persisted lifecycle evidence for this exact run. Current dispatches
+    /// transition this value monotonically; migrated history is explicitly
+    /// `LegacyUnknown` rather than inferred from incomplete result vectors.
+    pub lifecycle: SimulationRunLifecycle,
     /// Human-facing run sequence (monotonically increasing within a project).
     /// It is a label/order value, not persistent object identity.
     pub id: u64,
@@ -45,8 +139,11 @@ impl SimulationRun {
         let timestamp = Self::current_timestamp();
         let time_str = Self::format_time(timestamp);
         Self {
+            job_id: Some(JobId::new()),
             run_id: RunId::new(),
             dataset_id: DatasetId::new(),
+            execution_target: Some(ExecutionTarget::current()),
+            lifecycle: SimulationRunLifecycle::Preparing,
             id: run_number,
             label: format!("Run {} ({})", run_number, time_str),
             timestamp,
@@ -55,6 +152,79 @@ impl SimulationRun {
             elapsed_time: 0.0,
             success: true,
         }
+    }
+
+    /// Stable execution identity, available for current runs and absent for
+    /// legacy records that predate job identity.
+    #[must_use]
+    pub fn execution_identity(&self) -> Option<SimulationExecutionIdentity> {
+        self.job_id.map(|job_id| SimulationExecutionIdentity {
+            job_id,
+            run_id: self.run_id,
+        })
+    }
+
+    /// Advance the non-terminal lifecycle after the execution engine accepts
+    /// the first prepared task.
+    pub(crate) fn mark_running(&mut self) -> Result<(), String> {
+        self.transition_lifecycle(SimulationRunLifecycle::Running)
+    }
+
+    /// Record an identity-bound cancellation request while the engine
+    /// acknowledges it.
+    pub(crate) fn mark_cancelling(&mut self) -> Result<(), String> {
+        self.transition_lifecycle(SimulationRunLifecycle::Cancelling)
+    }
+
+    /// Seal a terminal lifecycle and its wall-clock duration together.
+    pub(crate) fn finish_lifecycle(
+        &mut self,
+        terminal: SimulationRunLifecycle,
+    ) -> Result<(), String> {
+        if !terminal.is_terminal() {
+            return Err(format!("{terminal:?} is not a terminal run lifecycle"));
+        }
+        self.transition_lifecycle(terminal)?;
+        self.elapsed_time = (Self::current_timestamp() - self.timestamp).max(0.0);
+        Ok(())
+    }
+
+    fn transition_lifecycle(&mut self, next: SimulationRunLifecycle) -> Result<(), String> {
+        use SimulationRunLifecycle as Lifecycle;
+
+        let valid = self.lifecycle == next
+            || matches!(
+                (self.lifecycle, next),
+                (
+                    Lifecycle::Preparing,
+                    Lifecycle::Running
+                        | Lifecycle::Cancelling
+                        | Lifecycle::Failed
+                        | Lifecycle::Aborted
+                        | Lifecycle::Interrupted
+                ) | (
+                    Lifecycle::Running,
+                    Lifecycle::Cancelling
+                        | Lifecycle::Completed
+                        | Lifecycle::Failed
+                        | Lifecycle::Aborted
+                        | Lifecycle::Interrupted
+                ) | (
+                    Lifecycle::Cancelling,
+                    Lifecycle::Completed
+                        | Lifecycle::Failed
+                        | Lifecycle::Aborted
+                        | Lifecycle::Interrupted
+                )
+            );
+        if !valid {
+            return Err(format!(
+                "simulation run {} cannot transition from {:?} to {:?}",
+                self.id, self.lifecycle, next
+            ));
+        }
+        self.lifecycle = next;
+        Ok(())
     }
 
     pub(crate) fn new_prepared(run_number: u64, receipt: PreparedRunReceipt) -> Self {
@@ -247,6 +417,7 @@ mod tests {
         let mut run = SimulationRun::new(7);
         let stable_id = run.run_id;
         let dataset_id = run.dataset_id;
+        let job_id = run.job_id;
 
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
@@ -255,6 +426,41 @@ mod tests {
         assert_eq!(ids, vec![1, 2]);
         assert_eq!(run.run_id, stable_id);
         assert_eq!(run.dataset_id, dataset_id);
+        assert!(job_id.is_some());
+        assert_eq!(run.job_id, job_id);
+        assert_eq!(run.execution_target, Some(ExecutionTarget::current()));
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::Preparing);
+    }
+
+    #[test]
+    fn current_run_lifecycle_is_monotonic_and_seals_duration() {
+        let mut run = SimulationRun::new(9);
+        run.timestamp -= 0.001;
+
+        run.mark_running().expect("engine accepts the prepared run");
+        run.mark_cancelling().expect("cancel request is retained");
+        run.finish_lifecycle(SimulationRunLifecycle::Aborted)
+            .expect("controller seals abort acknowledgement");
+
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::Aborted);
+        assert!(run.elapsed_time > 0.0);
+        assert!(
+            run.mark_running().is_err(),
+            "terminal lifecycle cannot be reopened"
+        );
+    }
+
+    #[test]
+    fn legacy_unknown_cannot_be_relabelled_without_execution_evidence() {
+        let mut run = SimulationRun::new(10);
+        run.lifecycle = SimulationRunLifecycle::LegacyUnknown;
+
+        assert!(run.mark_running().is_err());
+        assert!(
+            run.finish_lifecycle(SimulationRunLifecycle::Completed)
+                .is_err()
+        );
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
     }
 
     #[test]

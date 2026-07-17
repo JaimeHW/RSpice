@@ -1016,6 +1016,12 @@ fn command_item_as(
             ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click())
         })
         .inner;
+    let response = match availability {
+        CommandAvailability::Disabled(reason) => {
+            response.on_hover_text(format!("Unavailable: {reason}"))
+        }
+        CommandAvailability::Available | CommandAvailability::Hidden => response,
+    };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::MenuItem);
@@ -1321,6 +1327,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::RunSimulation);
     command_item(ui, app, Command::StopSimulation);
+    command_item(ui, app, Command::JobsManager);
     command_item(ui, app, Command::PreflightChecks);
     menu_separator(ui);
     command_item_as(

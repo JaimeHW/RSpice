@@ -247,6 +247,9 @@ impl AppState {
 
     /// Clear user-visible simulation result history and derived result viewers.
     pub(crate) fn clear_simulation_results(&mut self) {
+        if self.simulation.active_execution.is_some() || self.simulation.is_running {
+            return;
+        }
         self.simulation.clear_runs();
         self.clear_specialized_viewer_data();
     }

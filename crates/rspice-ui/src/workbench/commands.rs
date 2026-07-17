@@ -98,6 +98,7 @@ pub enum Command {
     PreviousViolation,
     RunSimulation,
     StopSimulation,
+    JobsManager,
     PreflightChecks,
     SimulationOptions,
     GenerateNetlist,
@@ -293,6 +294,7 @@ impl Command {
             Self::PreviousViolation => spec("previous-violation", "Previous violation", "Verify"),
             Self::RunSimulation => spec("start-run", "Run active plan", "Simulate"),
             Self::StopSimulation => spec("stop-run", "Stop active run", "Simulate"),
+            Self::JobsManager => spec("jobs-manager", "Jobs, targets and run history…", "Simulate"),
             Self::PreflightChecks => spec("check", "Preflight checks", "Simulate"),
             Self::SimulationOptions => spec("solver", "Global solver & convergence", "Simulate"),
             Self::GenerateNetlist => {
@@ -371,7 +373,7 @@ impl Command {
                 spec("regression", "Regression plan", "Verify")
             }
             Self::VerificationPage(VerificationPage::Drc) => {
-                spec("open-drc", "Physical DRC", "Verify")
+                spec("open-drc", "Physical DRC unavailable", "Verify")
             }
             Self::ProjectPage(ProjectPage::Dashboard) => {
                 spec("project-overview", "Open project overview", "Project")
@@ -568,12 +570,16 @@ impl Command {
                     && state.ui.netlist.generated_document.is_some()
             }
             Self::StopSimulation => stop_simulation_enabled(state.simulation.is_running),
-            Self::ClearResults => state.simulation.has_results(),
+            Self::ClearResults => {
+                state.simulation.has_results()
+                    && state.simulation.active_execution.is_none()
+                    && !state.simulation.is_running
+            }
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
             }
             Self::ExportWaveformsCsv => state.simulation.has_results(),
-            Self::VerificationPage(VerificationPage::Tuning) => false,
+            Self::VerificationPage(page) if !page.is_operational() => false,
             Self::ClearConsole => {
                 !state.log_buffer.is_empty() || !state.script_console.history.is_empty()
             }
@@ -978,7 +984,10 @@ impl Command {
             }
             Self::StopSimulation => {
                 if stop_simulation_enabled(app.state.simulation.is_running) {
-                    app.state.simulation.trigger_abort = true;
+                    if let Err(error) = app.state.simulation.request_abort_active_run() {
+                        app.state
+                            .push_sim_message(crate::common::app::ConsoleMessage::warning(error));
+                    }
                 } else if app.state.simulation.is_running {
                     app.state.push_sim_message(
                         crate::common::app::ConsoleMessage::warning(
@@ -987,6 +996,7 @@ impl Command {
                     );
                 }
             }
+            Self::JobsManager => super::jobs_manager::open(app),
             Self::PreflightChecks => super::preflight::run(app),
             Self::SimulationOptions => {
                 crate::common::menu_bar::open_simulation_options(&mut app.state)
@@ -1013,7 +1023,19 @@ impl Command {
                     .len()
                     .saturating_sub(1);
             }
-            Self::ClearResults => app.state.clear_simulation_results(),
+            Self::ClearResults => {
+                if app.state.simulation.active_execution.is_some()
+                    || app.state.simulation.is_running
+                {
+                    app.state
+                        .push_sim_message(crate::common::app::ConsoleMessage::warning(
+                        "Result history cannot be cleared while a simulation execution owns a run"
+                            .to_owned(),
+                    ));
+                } else {
+                    app.state.clear_simulation_results();
+                }
+            }
             Self::ToggleLinkedCursors => app.state.ui.results.toggle_linked_cursors(),
             Self::WaveformCalculator => app.state.dialogs.waveform_calculator_dialog = true,
             Self::ResultViewer(viewer) => {
@@ -1029,6 +1051,13 @@ impl Command {
                 app.state.push_user_message(
                     crate::common::app::ConsoleMessage::warning(
                         "Parameter tuning is unavailable until real design-parameter discovery and transactional simulation integration are implemented.",
+                    ),
+                );
+            }
+            Self::VerificationPage(VerificationPage::Drc) => {
+                app.state.push_user_message(
+                    crate::common::app::ConsoleMessage::warning(
+                        "Physical DRC is unavailable until a retained layout source, qualified rule deck, and immutable marker database are integrated.",
                     ),
                 );
             }
@@ -1317,6 +1346,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PreviousViolation,
     Command::RunSimulation,
     Command::StopSimulation,
+    Command::JobsManager,
     Command::PreflightChecks,
     Command::SimulationOptions,
     Command::GenerateNetlist,
@@ -1342,7 +1372,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::VerificationPage(VerificationPage::Optimization),
     Command::VerificationPage(VerificationPage::Reliability),
     Command::VerificationPage(VerificationPage::Regression),
-    Command::VerificationPage(VerificationPage::Drc),
     Command::ModelsPage(ModelsPage::Symbols),
     Command::ModelsPage(ModelsPage::Corners),
     Command::ModelsPage(ModelsPage::Include),
@@ -1396,12 +1425,74 @@ mod tests {
         let command = Command::VerificationPage(VerificationPage::Tuning);
 
         assert!(!command.is_enabled(&app));
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled(
+                "design-parameter discovery and transactional tuning are not implemented"
+            )
+        );
         command.execute(&mut app);
 
         assert_eq!(app.state.workbench.workspace, Workspace::Project);
         assert_eq!(
             app.state.workbench.verification_page,
             VerificationPage::Yield
+        );
+    }
+
+    #[test]
+    fn physical_drc_command_is_inaccessible_without_physical_evidence_pipeline() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Project;
+        app.state.workbench.verification_page = VerificationPage::Yield;
+        let command = Command::VerificationPage(VerificationPage::Drc);
+
+        assert!(!command.is_enabled(&app));
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled(
+                "no retained layout, qualified rule deck, or immutable marker database is available"
+            )
+        );
+        command.execute(&mut app);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Project);
+        assert_eq!(
+            app.state.workbench.verification_page,
+            VerificationPage::Yield
+        );
+        assert!(
+            app.state
+                .log_buffer
+                .entries()
+                .any(|message| message.message.contains("Physical DRC is unavailable"))
+        );
+    }
+
+    #[test]
+    fn clear_results_cannot_remove_the_executor_owned_run() {
+        let mut app = RSpiceApp::test_instance();
+        let run = app.state.simulation.start_run();
+        run.mark_running().unwrap();
+        let identity = run.execution_identity().unwrap();
+        app.state.simulation.active_execution = Some(identity);
+        app.state.simulation.is_running = true;
+
+        assert!(!Command::ClearResults.is_enabled(&app));
+        assert_eq!(
+            Command::ClearResults.availability(&app),
+            CommandAvailability::Disabled(
+                "an active simulation execution still owns result history"
+            )
+        );
+
+        Command::ClearResults.execute(&mut app);
+
+        assert!(
+            app.state
+                .simulation
+                .run_by_stable_id(identity.run_id)
+                .is_some()
         );
     }
 

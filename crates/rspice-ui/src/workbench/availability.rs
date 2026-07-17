@@ -104,6 +104,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui local account, organization, and licensing boundary manager",
             evidence_boundary: "The verified on-device license and current local application process are executable data owners; account identity, organization policy, remote sessions, server licensing, and external administration remain explicitly unconfigured and expose no speculative actions.",
         },
+        SurfaceId::JobsManager => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui jobs, targets, and retained run history manager",
+            evidence_boundary: "Stable local job/run selection, current controller progress and cancellation, retained target/provenance inspection, and versioned manifest export are executable. Unconfigured remote schedulers, quotas, and checkpoints are not represented as live capabilities.",
+        },
         SurfaceId::FeatureAvailability => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui capability and platform matrix manager",
             evidence_boundary: "Read-only disclosure executor present; bundled design fixtures are not product readiness evidence.",
@@ -155,6 +159,7 @@ mod tests {
                 SurfaceId::Netlist,
                 SurfaceId::Preferences,
                 SurfaceId::AccountOrganization,
+                SurfaceId::JobsManager,
                 SurfaceId::FeatureAvailability,
             ]
         );

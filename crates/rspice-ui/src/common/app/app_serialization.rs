@@ -802,6 +802,9 @@ mod tests {
             .expect("persisted run object");
         persisted_run.remove("run_id");
         persisted_run.remove("dataset_id");
+        persisted_run.remove("job_id");
+        persisted_run.remove("execution_target");
+        persisted_run.remove("lifecycle");
         persisted_run.remove("provenance_mode");
 
         let restored: AppState = serde_json::from_value(value).expect("legacy session migrates");

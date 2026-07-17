@@ -26,6 +26,14 @@ pub struct SimulationState {
     /// When set to true, SimulationController will call runner.abort() and reset to false
     pub trigger_abort: bool,
 
+    /// Stable identity of the run currently owned by the execution engine.
+    /// Runtime-only; project history persists identity on the run itself.
+    pub active_execution: Option<SimulationExecutionIdentity>,
+
+    /// Identity-bound cancellation request awaiting controller processing.
+    /// This prevents a delayed stop action from cancelling a replacement run.
+    pub abort_request: Option<SimulationExecutionIdentity>,
+
     /// Which workflow requested the next simulation start.
     pub run_intent: SimulationRunIntent,
 

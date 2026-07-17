@@ -20,6 +20,12 @@ const VERIFY_STACKED_CHART_HEIGHT: f32 = 250.0;
 const VERIFY_PHONE_CHART_HEIGHT: f32 = 230.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    // Persisted legacy pages can outlive their retired prototype surfaces.
+    // Fail closed before rendering so no unavailable workflow is exposed as
+    // an interactive verification page.
+    if !app.state.workbench.verification_page.is_operational() {
+        app.state.workbench.verification_page = VerificationPage::Yield;
+    }
     let ctx = ui.ctx().clone();
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {

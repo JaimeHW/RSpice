@@ -16,17 +16,17 @@ use sha2::{Digest as _, Sha256};
 
 use crate::io::project_execution::ProjectExecutionContext;
 use crate::product::{
-    AnalysisInstanceId, ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId,
+    AnalysisInstanceId, ContentDigest, DatasetId, JobId, ObjectRevision, ProjectId, RunId,
     SimulationPlanId,
 };
 use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
-    CellViewRef, DcOpResult, LibraryManager, NoiseContributorRow, NoiseSummary,
+    CellViewRef, DcOpResult, ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary,
     OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
     ProjectWorkspace, SavedOutputMaterializationStatus, SavedOutputReceipt, SimulationRun,
-    SimulationRunProvenance, SimulationState, ViewType, WaveformData,
+    SimulationRunLifecycle, SimulationRunProvenance, SimulationState, ViewType, WaveformData,
 };
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -858,7 +858,8 @@ const LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 1;
 const STABLE_DATASET_RESULTS_SCHEMA_VERSION: u32 = 2;
 const PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION: u32 = 3;
 const EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION: u32 = 4;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 5;
+const SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION: u32 = 5;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 6;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
@@ -1109,7 +1110,9 @@ impl ProjectSimulationResults {
     /// identity. V1 display-sequence references are converted to stable run and
     /// dataset IDs. V1/v2 analyses retain `provenance: None`; schema v5 records
     /// that fact explicitly per run so provenance cannot disappear from a
-    /// current prepared-task result history without validation failing.
+    /// current prepared-task result history without validation failing. Runs
+    /// written before v6 become explicitly `LegacyUnknown`: execution identity
+    /// and lifecycle are never inferred from historical result payloads.
     pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
@@ -1127,7 +1130,8 @@ impl ProjectSimulationResults {
             LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION => true,
             STABLE_DATASET_RESULTS_SCHEMA_VERSION
             | PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION
-            | EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION => false,
+            | EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION
+            | SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION => false,
             unsupported => {
                 return Err(format!(
                     "unsupported simulation results schema version {unsupported}"
@@ -1297,9 +1301,20 @@ impl ProjectSimulationResults {
                         }
                     }
                 }
+                SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION => run
+                    .provenance_mode
+                    .as_ref()
+                    .copied()
+                    .ok_or_else(|| {
+                        format!(
+                            "runs[{run_idx}].provenance_mode is missing from schema-v5 simulation results"
+                        )
+                    })?,
                 _ => unreachable!("supported legacy result schema matched above"),
             };
             run.provenance_mode = PersistedField::Value(migrated_mode);
+            run.lifecycle = Some(SimulationRunLifecycle::LegacyUnknown);
+            run.validate(run_idx)?;
         }
         self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
         Ok(())
@@ -1330,7 +1345,14 @@ impl ProjectSimulationResults {
         }
 
         for (run_idx, run) in self.runs.iter().enumerate() {
-            if run.prepared_receipt.is_present() {
+            if run.job_id.is_some() || run.execution_target.is_some() || run.lifecycle.is_some() {
+                return Err(format!(
+                    "runs[{run_idx}] contains execution identity or lifecycle introduced after schema v{source_schema}"
+                ));
+            }
+            if source_schema < SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION
+                && run.prepared_receipt.is_present()
+            {
                 return Err(format!(
                     "runs[{run_idx}] contains a prepared run receipt introduced after schema v{source_schema}"
                 ));
@@ -1379,16 +1401,32 @@ impl ProjectSimulationResults {
                         ));
                     }
                 }
+                SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION => {
+                    if run.provenance_mode.as_ref().is_none() {
+                        return Err(format!(
+                            "runs[{run_idx}].provenance_mode is required by schema v5"
+                        ));
+                    }
+                }
                 _ => unreachable!("supported legacy result schema matched above"),
             }
 
             for (analysis_idx, analysis) in run.analyses.iter().enumerate() {
-                if let Some(provenance) = &analysis.provenance
-                    && provenance.source_domain.is_present()
-                {
-                    return Err(format!(
-                        "runs[{run_idx}].analyses[{analysis_idx}].provenance.source_domain was introduced after schema v{source_schema}"
-                    ));
+                if let Some(provenance) = &analysis.provenance {
+                    if source_schema < SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION
+                        && provenance.source_domain.is_present()
+                    {
+                        return Err(format!(
+                            "runs[{run_idx}].analyses[{analysis_idx}].provenance.source_domain was introduced after schema v{source_schema}"
+                        ));
+                    }
+                    if source_schema == SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION
+                        && provenance.source_domain.as_ref().is_none()
+                    {
+                        return Err(format!(
+                            "runs[{run_idx}].analyses[{analysis_idx}].provenance.source_domain is required by schema v5"
+                        ));
+                    }
                 }
             }
         }
@@ -1410,6 +1448,7 @@ impl ProjectSimulationResults {
         }
 
         let mut run_sequences = HashSet::new();
+        let mut job_ids = HashSet::new();
         let mut run_ids = HashSet::new();
         let mut dataset_ids = HashSet::new();
         for (run_idx, run) in self.runs.iter().enumerate() {
@@ -1418,6 +1457,11 @@ impl ProjectSimulationResults {
             }
             if !run_sequences.insert(run.id) {
                 return Err(format!("duplicate simulation run id {}", run.id));
+            }
+            if let Some(job_id) = run.job_id
+                && !job_ids.insert(job_id)
+            {
+                return Err(format!("duplicate stable simulation job id {job_id}"));
             }
             let run_id = run.run_id.ok_or_else(|| {
                 format!("runs[{run_idx}].run_id is required by simulation results schema v2")
@@ -1657,10 +1701,18 @@ impl From<&PreparedRunReceipt> for ProjectPreparedRunReceipt {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSimulationRun {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<JobId>,
     #[serde(default)]
     pub run_id: Option<RunId>,
     #[serde(default)]
     pub dataset_id: Option<DatasetId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_target: Option<ExecutionTarget>,
+    /// Required by schema v6. Historical schemas are migrated to an explicit
+    /// `LegacyUnknown` value without outcome inference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<SimulationRunLifecycle>,
     /// Display sequence retained for labels and v1 migration.
     pub id: u64,
     pub label: String,
@@ -1740,13 +1792,33 @@ impl ProjectSimulationRun {
             }
         };
         let mut run = SimulationRun::new(self.id);
+        run.job_id = self.job_id;
         run.run_id = run_id;
         run.dataset_id = dataset_id;
+        run.execution_target = self.execution_target;
+        let restored_lifecycle = self
+            .lifecycle
+            .unwrap_or(SimulationRunLifecycle::LegacyUnknown);
+        run.lifecycle = match restored_lifecycle {
+            SimulationRunLifecycle::Preparing
+            | SimulationRunLifecycle::Running
+            | SimulationRunLifecycle::Cancelling => SimulationRunLifecycle::Interrupted,
+            lifecycle => lifecycle,
+        };
         run.label = self.label;
         run.timestamp = self.timestamp;
         run.analyses = analyses;
         run.elapsed_time = self.elapsed_time;
-        run.success = self.success;
+        run.success = if matches!(
+            restored_lifecycle,
+            SimulationRunLifecycle::Preparing
+                | SimulationRunLifecycle::Running
+                | SimulationRunLifecycle::Cancelling
+        ) {
+            false
+        } else {
+            self.success
+        };
         run.restore_provenance(provenance)?;
         Ok(run)
     }
@@ -1754,6 +1826,57 @@ impl ProjectSimulationRun {
     fn validate(&self, run_idx: usize) -> Result<(), String> {
         require_finite(self.timestamp, &format!("runs[{run_idx}].timestamp"))?;
         require_finite(self.elapsed_time, &format!("runs[{run_idx}].elapsed_time"))?;
+        let lifecycle = self.lifecycle.ok_or_else(|| {
+            format!("runs[{run_idx}].lifecycle is required by simulation results schema v6")
+        })?;
+        match lifecycle {
+            SimulationRunLifecycle::LegacyUnknown => {
+                if self.job_id.is_some() || self.execution_target.is_some() {
+                    return Err(format!(
+                        "runs[{run_idx}] is legacy_unknown but carries current execution job/target identity"
+                    ));
+                }
+            }
+            _ => {
+                if self.job_id.is_none() {
+                    return Err(format!(
+                        "runs[{run_idx}].job_id is required for a non-legacy lifecycle"
+                    ));
+                }
+                if self.execution_target.is_none() {
+                    return Err(format!(
+                        "runs[{run_idx}].execution_target is required for a non-legacy lifecycle"
+                    ));
+                }
+            }
+        }
+        match lifecycle {
+            SimulationRunLifecycle::Completed if !self.success => {
+                return Err(format!(
+                    "runs[{run_idx}] is completed but its success outcome is false"
+                ));
+            }
+            SimulationRunLifecycle::Preparing
+            | SimulationRunLifecycle::Running
+            | SimulationRunLifecycle::Cancelling
+            | SimulationRunLifecycle::Failed
+            | SimulationRunLifecycle::Aborted
+            | SimulationRunLifecycle::Interrupted
+                if self.success =>
+            {
+                return Err(format!(
+                    "runs[{run_idx}] lifecycle {lifecycle:?} cannot carry a successful outcome"
+                ));
+            }
+            SimulationRunLifecycle::LegacyUnknown
+            | SimulationRunLifecycle::Preparing
+            | SimulationRunLifecycle::Running
+            | SimulationRunLifecycle::Cancelling
+            | SimulationRunLifecycle::Completed
+            | SimulationRunLifecycle::Failed
+            | SimulationRunLifecycle::Aborted
+            | SimulationRunLifecycle::Interrupted => {}
+        }
         let mut analysis_ids = HashSet::new();
         let provenance_count = self
             .analyses
@@ -1935,9 +2058,22 @@ impl From<&SimulationRun> for ProjectSimulationRun {
                 PersistedField::Value(ProjectPreparedRunReceipt::from(receipt)),
             ),
         };
+        let success = if matches!(
+            run.lifecycle,
+            SimulationRunLifecycle::Preparing
+                | SimulationRunLifecycle::Running
+                | SimulationRunLifecycle::Cancelling
+        ) {
+            false
+        } else {
+            run.success
+        };
         Self {
+            job_id: run.job_id,
             run_id: Some(run.run_id),
             dataset_id: Some(run.dataset_id),
+            execution_target: run.execution_target,
+            lifecycle: Some(run.lifecycle),
             id: run.id,
             label: run.label.clone(),
             timestamp: run.timestamp,
@@ -1949,7 +2085,7 @@ impl From<&SimulationRun> for ProjectSimulationRun {
             provenance_mode,
             prepared_receipt,
             elapsed_time: run.elapsed_time,
-            success: run.success,
+            success,
         }
     }
 }
@@ -3084,6 +3220,26 @@ mod tests {
             .expect("legacy fixture seals explicitly");
     }
 
+    fn clear_v6_execution_fields(results: &mut ProjectSimulationResults) {
+        for run in &mut results.runs {
+            run.job_id = None;
+            run.execution_target = None;
+            run.lifecycle = None;
+        }
+    }
+
+    fn clear_v6_execution_fields_json(results: &mut serde_json::Value) {
+        for run in results["runs"]
+            .as_array_mut()
+            .expect("simulation result run array")
+        {
+            let run = run.as_object_mut().expect("simulation result run object");
+            run.remove("job_id");
+            run.remove("execution_target");
+            run.remove("lifecycle");
+        }
+    }
+
     fn seal_prepared_run(
         run: &mut SimulationRun,
         source_domain: AnalysisResultSourceDomain,
@@ -3565,6 +3721,9 @@ mod tests {
         let mut run = SimulationRun::new(12);
         run.timestamp = 1234.5;
         run.label = "Run 12 (fixture)".to_string();
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
         run.set_elapsed_time(0.125);
         run.add_analysis(
             AnalysisResult::new(7, AnalysisType::Ac, "AC fixture")
@@ -3615,6 +3774,13 @@ mod tests {
             restored.active_run().expect("active run").label,
             "Run 12 (fixture)"
         );
+        let restored_run = restored.active_run().expect("active run");
+        assert!(restored_run.job_id.is_some());
+        assert_eq!(
+            restored_run.execution_target,
+            Some(ExecutionTarget::current())
+        );
+        assert_eq!(restored_run.lifecycle, SimulationRunLifecycle::Completed);
         let analysis = restored.active_analysis().expect("active analysis");
         assert_eq!(analysis.id, 7);
         assert_eq!(analysis.analysis_type, AnalysisType::Ac);
@@ -3638,6 +3804,9 @@ mod tests {
             .expect("legacy run object");
         legacy_run.remove("run_id");
         legacy_run.remove("dataset_id");
+        legacy_run.remove("job_id");
+        legacy_run.remove("execution_target");
+        legacy_run.remove("lifecycle");
         legacy_run.remove("provenance_mode");
         let unversioned_json =
             serde_json::to_string(&unversioned_value).expect("unversioned project serializes");
@@ -3658,6 +3827,142 @@ mod tests {
             unversioned.simulation_results.active_analysis_sequence,
             Some(7)
         );
+        assert_eq!(
+            migrated_run.lifecycle,
+            Some(SimulationRunLifecycle::LegacyUnknown)
+        );
+    }
+
+    #[test]
+    fn missing_persisted_lifecycle_restores_as_explicit_legacy_unknown() {
+        let mut run = SimulationRun::new(13);
+        seal_legacy_unattributed(&mut run);
+        let expected_run_id = run.run_id;
+        let mut persisted = ProjectSimulationRun::from(&run);
+        persisted.job_id = None;
+        persisted.execution_target = None;
+        persisted.lifecycle = None;
+
+        let restored = persisted.into_run().expect("legacy run restores");
+
+        assert_eq!(restored.run_id, expected_run_id);
+        assert_eq!(restored.job_id, None);
+        assert_eq!(restored.execution_target, None);
+        assert_eq!(restored.lifecycle, SimulationRunLifecycle::LegacyUnknown);
+    }
+
+    #[test]
+    fn schema_v5_migrates_to_explicit_legacy_execution_state() {
+        let mut run = SimulationRun::new(14);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 14;
+        let mut persisted = ProjectSimulationResults::from_state(&simulation);
+        persisted.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
+        clear_v6_execution_fields(&mut persisted);
+
+        persisted
+            .migrate_to_current(ProjectId::new())
+            .expect("schema v5 migrates without inventing execution evidence");
+        persisted.validate().expect("migrated schema validates");
+
+        assert_eq!(
+            persisted.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        let migrated = &persisted.runs[0];
+        assert_eq!(
+            migrated.lifecycle,
+            Some(SimulationRunLifecycle::LegacyUnknown)
+        );
+        assert_eq!(migrated.job_id, None);
+        assert_eq!(migrated.execution_target, None);
+        assert!(migrated.success, "legacy outcome evidence is preserved");
+    }
+
+    #[test]
+    fn schema_v6_requires_coherent_lifecycle_and_execution_identity() {
+        let mut run = SimulationRun::new(15);
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 15;
+        let current = ProjectSimulationResults::from_state(&simulation);
+        current
+            .validate()
+            .expect("current preparing snapshot is explicit");
+
+        let mut missing_lifecycle = current.clone();
+        missing_lifecycle.runs[0].lifecycle = None;
+        assert!(
+            missing_lifecycle
+                .validate()
+                .expect_err("schema v6 requires lifecycle evidence")
+                .contains("lifecycle is required by simulation results schema v6")
+        );
+
+        let mut missing_job = current.clone();
+        missing_job.runs[0].job_id = None;
+        assert!(
+            missing_job
+                .validate()
+                .expect_err("current execution requires job identity")
+                .contains("job_id is required for a non-legacy lifecycle")
+        );
+
+        let mut legacy_with_target = current.clone();
+        legacy_with_target.runs[0].lifecycle = Some(SimulationRunLifecycle::LegacyUnknown);
+        assert!(
+            legacy_with_target
+                .validate()
+                .expect_err("legacy execution cannot claim current identity")
+                .contains("legacy_unknown but carries current execution job/target identity")
+        );
+
+        let mut false_completion = current;
+        false_completion.runs[0].lifecycle = Some(SimulationRunLifecycle::Completed);
+        assert!(
+            false_completion
+                .validate()
+                .expect_err("completed outcome must be successful")
+                .contains("completed but its success outcome is false")
+        );
+    }
+
+    #[test]
+    fn persisted_running_and_cancelling_runs_restore_as_interrupted() {
+        for (sequence, cancelling) in [(16, false), (17, true)] {
+            let mut run = SimulationRun::new(sequence);
+            run.mark_running().expect("fixture run starts");
+            if cancelling {
+                run.mark_cancelling().expect("fixture cancellation starts");
+            }
+            seal_legacy_unattributed(&mut run);
+            let expected_job_id = run.job_id;
+            let expected_target = run.execution_target;
+            let mut simulation = SimulationState::default();
+            simulation.runs = vec![run];
+            simulation.next_run_id = sequence;
+
+            let persisted = ProjectSimulationResults::from_state(&simulation);
+            assert!(!persisted.runs[0].success);
+            persisted
+                .validate()
+                .expect("nonterminal snapshot validates");
+            let restored = persisted
+                .into_simulation_state()
+                .expect("nonterminal snapshot restores fail-closed");
+            let restored = &restored.runs[0];
+
+            assert_eq!(restored.lifecycle, SimulationRunLifecycle::Interrupted);
+            assert!(!restored.success);
+            assert_eq!(restored.job_id, expected_job_id);
+            assert_eq!(restored.execution_target, expected_target);
+        }
     }
 
     #[test]
@@ -3811,6 +4116,7 @@ mod tests {
         simulation.next_run_id = 30;
         let mut persisted = ProjectSimulationResults::from_state(&simulation);
         persisted.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+        clear_v6_execution_fields(&mut persisted);
         persisted.runs[0].prepared_receipt = PersistedField::Missing;
         for provenance in persisted.runs[0]
             .analyses
@@ -3872,6 +4178,7 @@ mod tests {
         simulation.next_run_id = 33;
         let mut v4 = ProjectSimulationResults::from_state(&simulation);
         v4.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+        clear_v6_execution_fields(&mut v4);
         v4.runs[0].prepared_receipt = PersistedField::Missing;
         v4.runs[0].provenance_mode =
             PersistedField::Value(ProjectRunProvenanceMode::PreparedTaskBound);
@@ -3988,6 +4295,7 @@ mod tests {
         ] {
             let mut with_receipt = current.clone();
             with_receipt.schema_version = schema_version;
+            clear_v6_execution_fields(&mut with_receipt);
             assert!(
                 with_receipt
                     .migrate_to_current(ProjectId::new())
@@ -3998,6 +4306,7 @@ mod tests {
             let mut null_receipt_json =
                 serde_json::to_value(&current).expect("current result document serializes");
             null_receipt_json["schema_version"] = serde_json::json!(schema_version);
+            clear_v6_execution_fields_json(&mut null_receipt_json);
             null_receipt_json["runs"][0]["prepared_receipt"] = serde_json::Value::Null;
             let mut with_null_receipt: ProjectSimulationResults =
                 serde_json::from_value(null_receipt_json)
@@ -4015,6 +4324,7 @@ mod tests {
             serde_json::to_value(&current).expect("current result document serializes");
         null_v3_mode_json["schema_version"] =
             serde_json::json!(PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION);
+        clear_v6_execution_fields_json(&mut null_v3_mode_json);
         null_v3_mode_json["runs"][0]["provenance_mode"] = serde_json::Value::Null;
         let mut null_v3_mode: ProjectSimulationResults =
             serde_json::from_value(null_v3_mode_json).expect("null mode evidence deserializes");
@@ -4034,6 +4344,7 @@ mod tests {
 
         let mut null_v4_mode = current.clone();
         null_v4_mode.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+        clear_v6_execution_fields(&mut null_v4_mode);
         null_v4_mode.runs[0].prepared_receipt = PersistedField::Missing;
         null_v4_mode.runs[0].provenance_mode = PersistedField::Null;
         null_v4_mode.runs[0].analyses[0]
@@ -4052,6 +4363,7 @@ mod tests {
             serde_json::to_value(&current).expect("current result document serializes");
         null_v4_source_json["schema_version"] =
             serde_json::json!(EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION);
+        clear_v6_execution_fields_json(&mut null_v4_source_json);
         null_v4_source_json["runs"][0]["analyses"][0]["provenance"]["source_domain"] =
             serde_json::Value::Null;
         let mut null_v4_source_domain: ProjectSimulationResults =
@@ -4088,6 +4400,7 @@ mod tests {
         simulation.next_run_id = 35;
         let mut legacy = ProjectSimulationResults::from_state(&simulation);
         legacy.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
+        clear_v6_execution_fields(&mut legacy);
         legacy.runs[0].run_id = None;
         legacy.runs[0].dataset_id = None;
         legacy.runs[0].provenance_mode = PersistedField::Missing;
@@ -4120,6 +4433,7 @@ mod tests {
         simulation.next_run_id = 18;
         let mut first = ProjectSimulationResults::from_state(&simulation);
         first.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
+        clear_v6_execution_fields(&mut first);
         first.runs[0].provenance_mode = PersistedField::Missing;
         first.runs[0].run_id = None;
         first.runs[0].dataset_id = None;
@@ -4357,6 +4671,7 @@ mod tests {
         simulation.next_run_id = 22;
         let mut persisted = ProjectSimulationResults::from_state(&simulation);
         persisted.schema_version = STABLE_DATASET_RESULTS_SCHEMA_VERSION;
+        clear_v6_execution_fields(&mut persisted);
         persisted.runs[0].provenance_mode = PersistedField::Missing;
 
         persisted
@@ -4816,6 +5131,9 @@ mod tests {
             let run = run.as_object_mut().expect("legacy run object");
             run.remove("run_id");
             run.remove("dataset_id");
+            run.remove("job_id");
+            run.remove("execution_target");
+            run.remove("lifecycle");
             run.remove("provenance_mode");
         }
 
@@ -4905,8 +5223,11 @@ mod tests {
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![ProjectSimulationRun {
+                job_id: None,
                 run_id: Some(run_id),
                 dataset_id: Some(dataset_id),
+                execution_target: None,
+                lifecycle: Some(SimulationRunLifecycle::LegacyUnknown),
                 id: 1,
                 label: "Run 1".to_string(),
                 timestamp: 1.0,
@@ -4974,8 +5295,11 @@ mod tests {
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![ProjectSimulationRun {
+                job_id: None,
                 run_id: Some(run_id),
                 dataset_id: Some(dataset_id),
+                execution_target: None,
+                lifecycle: Some(SimulationRunLifecycle::LegacyUnknown),
                 id: 1,
                 label: "Run 1".to_string(),
                 timestamp: 1.0,
@@ -5033,8 +5357,11 @@ mod tests {
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![ProjectSimulationRun {
+                job_id: None,
                 run_id: Some(run_id),
                 dataset_id: Some(dataset_id),
+                execution_target: None,
+                lifecycle: Some(SimulationRunLifecycle::LegacyUnknown),
                 id: 1,
                 label: "Run 1".to_string(),
                 timestamp: 1.0,

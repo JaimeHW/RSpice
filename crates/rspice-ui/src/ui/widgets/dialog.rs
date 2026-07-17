@@ -49,6 +49,9 @@ pub enum DialogSize {
     /// Governed capability matrices: 1040 pt wide, content-height capped at
     /// 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
     CapabilityReview,
+    /// Execution queue, target, and retained-run manager: 1120 × 680 pt with
+    /// the mockup's 12 pt desktop perimeter and 4 pt phone perimeter.
+    JobsManager,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -164,6 +167,22 @@ impl DialogSize {
                 edge_to_edge_narrow: true,
                 fill_narrow_viewport: true,
                 fill_height: false,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
+            Self::JobsManager => DialogSurfaceSpec {
+                width: 1_120.0,
+                max_height: 680.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 560.0,
+                narrow_inset: 8.0,
+                narrow_vertical_inset: 8.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: true,
+                fill_height: true,
                 app_background: true,
                 radius: 4.0,
                 top_anchored: false,
@@ -1378,6 +1397,24 @@ mod tests {
         assert_eq!(workflow.surface_rect.center(), screen.center());
         assert_eq!(workflow.radius, 4.0);
         assert!(!workflow.fill_height);
+    }
+
+    #[test]
+    fn jobs_manager_geometry_matches_the_mockup_on_desktop_and_phone() {
+        let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
+        let desktop = DialogLayout::resolve(DialogSize::JobsManager, desktop_screen, None);
+        assert_eq!(desktop.surface_rect.size(), vec2(1_120.0, 680.0));
+        assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
+        assert_eq!(desktop.radius, 4.0);
+        assert!(desktop.fill_height);
+        assert!(desktop.app_background);
+
+        let phone_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0));
+        let phone = DialogLayout::resolve(DialogSize::JobsManager, phone_screen, None);
+        assert_eq!(phone.surface_rect.min, egui::pos2(4.0, 4.0));
+        assert_eq!(phone.surface_rect.size(), vec2(382.0, 836.0));
+        assert_eq!(phone.radius, 4.0);
+        assert!(phone.narrow);
     }
 
     #[test]

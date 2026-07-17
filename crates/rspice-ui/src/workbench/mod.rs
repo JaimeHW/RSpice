@@ -24,6 +24,7 @@ pub mod surface_route;
 
 mod chrome;
 mod docks;
+mod jobs_manager;
 mod layout;
 mod notification_center;
 mod preferences;
@@ -204,6 +205,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 /// retained underneath and can be restored on Close.
 pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
     account_organization::show(ctx, app);
+    jobs_manager::show(ctx, app);
     feature_availability::show(ctx, app);
 }
 

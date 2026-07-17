@@ -24,11 +24,12 @@ pub use schematic::*;
 pub use simulation::{
     AcBodeMetrics, AcBodeSummary, AnalysisResult, AnalysisResultProvenance,
     AnalysisResultSourceDomain, AnalysisType, CrossProbeMapping,
-    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DisplayWaveformCache, NoiseContributorRow,
-    NoiseSummary, OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SharedWaveformValues, SimulationRun, SimulationRunIntent, SimulationRunProvenance,
-    SimulationState, WaveformData, ac_bode_summary_for_run, ac_bode_summary_for_selection,
+    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DisplayWaveformCache, ExecutionTarget,
+    NoiseContributorRow, NoiseSummary, OperatingPointValue, PreparedRunReceipt,
+    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SharedWaveformValues, SimulationExecutionIdentity, SimulationRun,
+    SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance, SimulationState,
+    WaveformData, ac_bode_summary_for_run, ac_bode_summary_for_selection,
     ac_bode_summary_for_source_instance,
 };
 pub use symbol::{

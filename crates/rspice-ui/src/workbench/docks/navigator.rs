@@ -864,7 +864,12 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
         {
             continue;
         }
-        if flow_row(ui, &flow, app.state.workbench.verification_page == page) {
+        if flow_row(
+            ui,
+            &flow,
+            app.state.workbench.verification_page == page,
+            page.is_operational(),
+        ) {
             app.state.workbench.verification_page = page;
         }
     }
@@ -1150,8 +1155,9 @@ fn verification_flow_presentation(
         }
         VerificationPage::Drc => VerificationFlowPresentation {
             label: verification_flow_label(page).to_owned(),
-            detail: "Geometry rules · markers · waivers · sign-off".to_owned(),
-            status: "no physical evidence".to_owned(),
+            detail: "Unavailable until layout, rule-deck, and marker evidence are retained"
+                .to_owned(),
+            status: "not selectable".to_owned(),
             glyph: "·",
             icon_tone: FlowTone::Neutral,
             status_tone: FlowTone::Error,
@@ -1275,7 +1281,12 @@ fn flow_row_geometry(detail_lines: usize) -> (f32, f32) {
     )
 }
 
-fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selected: bool) -> bool {
+fn flow_row(
+    ui: &mut Ui,
+    flow: &VerificationFlowPresentation,
+    selected: bool,
+    enabled: bool,
+) -> bool {
     let VerificationFlowPresentation {
         label,
         detail,
@@ -1295,17 +1306,21 @@ fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selected: bool) ->
     let (row_height, status_top) = flow_row_geometry(detail_galley.rows.len().max(1));
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), row_height),
-        egui::Sense::click(),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
     );
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
+            enabled,
             selected,
             format!("{label}. {detail}. {status}"),
         )
     });
-    if selected || response.hovered() {
+    if selected || (enabled && response.hovered()) {
         ui.painter().rect_filled(
             rect,
             0.0,
@@ -1409,7 +1424,13 @@ fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selected: bool) ->
         status_ink,
     );
     theme::paint_focus_ring(ui, &response, rect);
-    response.clicked()
+    let clicked = enabled && response.clicked();
+    if !enabled {
+        response.on_hover_text(
+            "Unavailable: this flow has no qualified execution and retained-evidence pipeline.",
+        );
+    }
+    clicked
 }
 
 fn models(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2286,7 +2307,7 @@ mod tests {
 
     #[test]
     fn verification_navigation_omits_unimplemented_tuning_route() {
-        assert_eq!(VerificationPage::NAVIGATION.len(), 6);
+        assert_eq!(VerificationPage::NAVIGATION.len(), 5);
         let labels = VerificationPage::NAVIGATION.map(verification_flow_label);
         assert_eq!(
             labels,
@@ -2296,9 +2317,10 @@ mod tests {
                 "Optimization",
                 "Electrical reliability & SOA",
                 "Regression · main",
-                "Physical DRC",
             ]
         );
+        assert!(!VerificationPage::NAVIGATION.contains(&VerificationPage::Drc));
+        assert!(!VerificationPage::Drc.is_operational());
     }
 
     #[test]
@@ -2368,8 +2390,9 @@ mod tests {
 
     #[test]
     fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
-        assert!(verification_navigator_requires_scroll(500.0));
+        assert!(verification_navigator_requires_scroll(440.0));
         assert!(verification_navigator_requires_scroll(390.0));
+        assert!(!verification_navigator_requires_scroll(441.0));
         assert!(!verification_navigator_requires_scroll(560.0));
         assert!(!verification_navigator_requires_scroll(700.0));
     }

@@ -33,7 +33,9 @@ pub use analysis_result::{
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;
-pub use run::SimulationRun;
+pub use run::{
+    ExecutionTarget, SimulationExecutionIdentity, SimulationRun, SimulationRunLifecycle,
+};
 pub use run_receipt::{
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunProvenance,
 };

@@ -41,6 +41,39 @@ impl SimulationState {
         self.trigger_simulation = true;
     }
 
+    /// Request cancellation of the exact execution active at this instant.
+    /// Returns the bound identity on success; no unbound abort request is
+    /// emitted when the controller has no authoritative active execution.
+    pub fn request_abort_active_run(&mut self) -> Result<SimulationExecutionIdentity, String> {
+        let identity = self
+            .active_execution
+            .ok_or_else(|| "there is no active simulation execution to cancel".to_owned())?;
+        let run = self
+            .runs
+            .iter()
+            .find(|run| run.execution_identity() == Some(identity))
+            .ok_or_else(|| {
+                format!(
+                    "active simulation execution {} / {} has no retained run",
+                    identity.job_id, identity.run_id
+                )
+            })?;
+        if !matches!(
+            run.lifecycle,
+            SimulationRunLifecycle::Preparing
+                | SimulationRunLifecycle::Running
+                | SimulationRunLifecycle::Cancelling
+        ) {
+            return Err(format!(
+                "simulation run {} is {:?} and cannot be cancelled",
+                run.id, run.lifecycle
+            ));
+        }
+        self.abort_request = Some(identity);
+        self.trigger_abort = true;
+        Ok(identity)
+    }
+
     /// Clear waveforms and increment version
     pub fn clear_waveforms(&mut self) {
         self.replace_waveforms(Vec::new());
@@ -331,6 +364,11 @@ impl SimulationState {
         self.runs.iter().find(|run| run.run_id == run_id)
     }
 
+    /// Mutably look up a run by its stable product identity.
+    pub fn run_by_stable_id_mut(&mut self, run_id: RunId) -> Option<&mut SimulationRun> {
+        self.runs.iter_mut().find(|run| run.run_id == run_id)
+    }
+
     /// Look up the run that owns an immutable result dataset.
     pub fn run_by_dataset_id(&self, dataset_id: DatasetId) -> Option<&SimulationRun> {
         self.runs.iter().find(|run| run.dataset_id == dataset_id)
@@ -452,6 +490,9 @@ impl SimulationState {
 
     /// Clear all runs history
     pub fn clear_runs(&mut self) {
+        if self.active_execution.is_some() || self.is_running {
+            return;
+        }
         self.runs.clear();
         self.active_run_idx = None;
         self.active_analysis_idx = None;
@@ -588,6 +629,55 @@ impl SimulationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abort_request_is_bound_to_exact_active_execution_identity() {
+        let mut state = SimulationState::default();
+        let run = state.start_run();
+        run.mark_running().expect("fixture enters running state");
+        let identity = run
+            .execution_identity()
+            .expect("current run has job identity");
+        state.active_execution = Some(identity);
+
+        let requested = state
+            .request_abort_active_run()
+            .expect("active execution can be cancelled");
+
+        assert_eq!(requested, identity);
+        assert_eq!(state.abort_request, Some(identity));
+        assert!(state.trigger_abort);
+        assert_eq!(
+            state.run_by_stable_id(identity.run_id).unwrap().lifecycle,
+            SimulationRunLifecycle::Running,
+            "the controller owns the authoritative transition to Cancelling"
+        );
+    }
+
+    #[test]
+    fn abort_request_fails_closed_without_active_execution_identity() {
+        let mut state = SimulationState::default();
+        state.start_run().mark_running().unwrap();
+
+        assert!(state.request_abort_active_run().is_err());
+        assert!(!state.trigger_abort);
+        assert!(state.abort_request.is_none());
+    }
+
+    #[test]
+    fn active_execution_history_cannot_be_cleared() {
+        let mut state = SimulationState::default();
+        let run = state.start_run();
+        run.mark_running().unwrap();
+        let identity = run.execution_identity().unwrap();
+        state.active_execution = Some(identity);
+        state.is_running = true;
+
+        state.clear_runs();
+
+        assert_eq!(state.runs.len(), 1);
+        assert_eq!(state.active_execution, Some(identity));
+    }
 
     #[test]
     fn stable_restore_rebuilds_selection_overlays_and_waveform_cache() {

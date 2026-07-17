@@ -27,9 +27,20 @@ use super::super::design_system::{
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
-const SIMULATION_SPLIT_MIN_WIDTH: f32 = 506.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
+const ANALYSIS_INDEX_DIAMETER: f32 = 22.0;
+const ANALYSIS_ROW_LEFT_PADDING: f32 = 9.0;
+const ANALYSIS_INDEX_LABEL_GAP: f32 = 8.0;
+const ANALYSIS_ROW_TRAILING_PADDING: f32 = 9.0;
+const ANALYSIS_LABEL_MIN_WIDTH: f32 = 64.0;
+const ANALYSIS_SWITCH_WIDTH: f32 = 30.0;
+const ANALYSIS_SWITCH_MAX_HIT_WIDTH: f32 = 44.0;
+const ANALYSIS_SWITCH_LABEL_GAP: f32 = 7.0;
+const ANALYSIS_STACK_TABLET_MIN_WIDTH: f32 = 175.0;
+const ANALYSIS_STACK_DESKTOP_MIN_WIDTH: f32 = 190.0;
+const ANALYSIS_EDITOR_TABLET_MIN_WIDTH: f32 = 330.0;
+const ANALYSIS_EDITOR_DESKTOP_MIN_WIDTH: f32 = 360.0;
 const PREFLIGHT_CELL_HEIGHT: f32 = 42.0;
 const STACKED_WORKSPACE_GAP: f32 = 9.0;
 const SETUP_CARD_HEADER_HEIGHT: f32 = 37.0;
@@ -166,20 +177,48 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
 }
 
 fn analysis_workspace_is_split(viewport_width: f32, surface_width: f32) -> bool {
-    viewport_width > SIMULATION_STACK_BREAKPOINT && surface_width >= SIMULATION_SPLIT_MIN_WIDTH
+    viewport_width > SIMULATION_STACK_BREAKPOINT
+        && surface_width >= analysis_split_min_width(viewport_width)
 }
 
 fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
     let usable = (available - 1.0).max(1.0);
-    let (left_fraction, left_min, right_min) = if viewport_width <= 1_020.0 {
-        (0.29, 175.0, 330.0)
-    } else {
-        (0.34, 190.0, 360.0)
-    };
+    let (left_fraction, left_min, right_min) = analysis_column_constraints(viewport_width);
     let left = (usable * left_fraction)
         .max(left_min)
         .min((usable - right_min).max(left_min));
     (left, (usable - left).max(1.0))
+}
+
+fn analysis_column_constraints(viewport_width: f32) -> (f32, f32, f32) {
+    if viewport_width <= 1_020.0 {
+        (
+            0.29,
+            ANALYSIS_STACK_TABLET_MIN_WIDTH.max(analysis_row_content_min_width()),
+            ANALYSIS_EDITOR_TABLET_MIN_WIDTH,
+        )
+    } else {
+        (
+            0.34,
+            ANALYSIS_STACK_DESKTOP_MIN_WIDTH.max(analysis_row_content_min_width()),
+            ANALYSIS_EDITOR_DESKTOP_MIN_WIDTH,
+        )
+    }
+}
+
+fn analysis_split_min_width(viewport_width: f32) -> f32 {
+    let (_, rail_min, editor_min) = analysis_column_constraints(viewport_width);
+    rail_min + 1.0 + editor_min
+}
+
+const fn analysis_row_content_min_width() -> f32 {
+    ANALYSIS_ROW_LEFT_PADDING
+        + ANALYSIS_INDEX_DIAMETER
+        + ANALYSIS_INDEX_LABEL_GAP
+        + ANALYSIS_LABEL_MIN_WIDTH
+        + ANALYSIS_SWITCH_LABEL_GAP
+        + ANALYSIS_SWITCH_MAX_HIT_WIDTH
+        + ANALYSIS_ROW_TRAILING_PADDING
 }
 
 fn analysis_column_min_height(clip_bottom: f32, content_top: f32) -> f32 {
@@ -343,10 +382,13 @@ fn analysis_stack_row(
     }
 
     let opacity = if row.enabled { 1.0 } else { 0.72 };
-    let index_center = egui::pos2(rect.left() + 20.0, rect.top() + 20.0);
+    let index_center = egui::pos2(
+        rect.left() + ANALYSIS_ROW_LEFT_PADDING + ANALYSIS_INDEX_DIAMETER * 0.5,
+        rect.top() + 20.0,
+    );
     painter.circle_filled(
         index_center,
-        11.0,
+        ANALYSIS_INDEX_DIAMETER * 0.5,
         if selected {
             t.color.accent_dim
         } else {
@@ -355,7 +397,7 @@ fn analysis_stack_row(
     );
     painter.circle_stroke(
         index_center,
-        11.0,
+        ANALYSIS_INDEX_DIAMETER * 0.5,
         Stroke::new(
             1.0,
             if selected {
@@ -377,9 +419,16 @@ fn analysis_stack_row(
         },
     );
 
-    let switch_hit_size = if t.metrics.ctl_h >= 44.0 { 44.0 } else { 30.0 };
+    let switch_hit_size = if t.metrics.ctl_h >= ANALYSIS_SWITCH_MAX_HIT_WIDTH {
+        ANALYSIS_SWITCH_MAX_HIT_WIDTH
+    } else {
+        ANALYSIS_SWITCH_WIDTH
+    };
     let switch_hit = Rect::from_center_size(
-        egui::pos2(rect.right() - 9.0 - switch_hit_size * 0.5, rect.center().y),
+        egui::pos2(
+            rect.right() - ANALYSIS_ROW_TRAILING_PADDING - switch_hit_size * 0.5,
+            rect.center().y,
+        ),
         Vec2::splat(switch_hit_size),
     );
     let toggle = ui.interact(switch_hit, response.id.with("enabled"), Sense::click());
@@ -391,10 +440,13 @@ fn analysis_stack_row(
             format!("Enable {} instance {}", row.kind.label(), row.id),
         )
     });
-    paint_switch(ui, switch_hit.center(), row.enabled, toggle.hovered());
+    paint_switch(ui, switch_hit.center(), row.enabled, toggle.hovered(), rect);
 
-    let text_left = rect.left() + 41.0;
-    let text_right = switch_hit.left() - 7.0;
+    let text_left = rect.left()
+        + ANALYSIS_ROW_LEFT_PADDING
+        + ANALYSIS_INDEX_DIAMETER
+        + ANALYSIS_INDEX_LABEL_GAP;
+    let text_right = switch_hit.left() - ANALYSIS_SWITCH_LABEL_GAP;
     let first_line = format!(
         "{} · {}",
         row.kind.stable_id().to_uppercase(),
@@ -442,8 +494,11 @@ fn analysis_stack_row(
         theme::sans(tokens::FS_0, FontWeight::Regular),
         status_color.gamma_multiply(opacity),
     );
-    theme::paint_focus_ring_outset(ui, &response, rect);
-    theme::paint_focus_ring_outset(ui, &toggle, switch_hit);
+    // The canonical rail hides horizontal overflow. Keep keyboard focus
+    // indicators inside the row as well, so they cannot bleed through the
+    // one-point pane divider into the analysis editor.
+    theme::paint_focus_ring(ui, &response, rect);
+    theme::paint_focus_ring(ui, &toggle, switch_hit.intersect(rect));
 
     if toggle.clicked() {
         Some(StackAction::SetEnabled(row.id, !row.enabled))
@@ -454,9 +509,9 @@ fn analysis_stack_row(
     }
 }
 
-fn paint_switch(ui: &Ui, center: egui::Pos2, enabled: bool, hovered: bool) {
+fn paint_switch(ui: &Ui, center: egui::Pos2, enabled: bool, hovered: bool, row_rect: Rect) {
     let t = Tokens::get(ui.ctx());
-    let rect = Rect::from_center_size(center, vec2(30.0, 17.0));
+    let rect = Rect::from_center_size(center, vec2(ANALYSIS_SWITCH_WIDTH, 17.0));
     let fill = if enabled {
         t.color.accent
     } else if hovered {
@@ -464,7 +519,10 @@ fn paint_switch(ui: &Ui, center: egui::Pos2, enabled: bool, hovered: bool) {
     } else {
         t.color.bg_inset
     };
-    ui.painter().rect(
+    let painter = ui
+        .painter()
+        .with_clip_rect(row_rect.intersect(ui.clip_rect()));
+    painter.rect(
         rect,
         8.5,
         fill,
@@ -483,7 +541,7 @@ fn paint_switch(ui: &Ui, center: egui::Pos2, enabled: bool, hovered: bool) {
     } else {
         rect.left() + 7.5
     };
-    ui.painter().circle_filled(
+    painter.circle_filled(
         egui::pos2(knob_x, rect.center().y),
         5.5,
         if enabled {
@@ -495,8 +553,12 @@ fn paint_switch(ui: &Ui, center: egui::Pos2, enabled: bool, hovered: bool) {
 }
 
 fn paint_clipped_text(ui: &Ui, rect: Rect, text: &str, font: egui::FontId, color: Color32) {
-    ui.painter().with_clip_rect(rect).text(
-        rect.left_center(),
+    let clipped = rect.intersect(ui.clip_rect());
+    if !clipped.is_positive() {
+        return;
+    }
+    ui.painter().with_clip_rect(clipped).text(
+        clipped.left_center(),
         Align2::LEFT_CENTER,
         text,
         font,
@@ -3081,7 +3143,7 @@ fn design_variables_card(
     height: f32,
     border: SetupCardBorder,
 ) -> bool {
-    setup_table_card(ui, "design-variables", height, border, |ui| {
+    setup_table_card(ui, height, border, |ui| {
         let add = setup_card_header(ui, "Design variables", "Add design variable");
         setup_table_row(
             ui,
@@ -3126,7 +3188,7 @@ fn outputs_specifications_card(
     height: f32,
     border: SetupCardBorder,
 ) -> bool {
-    setup_table_card(ui, "outputs-specifications", height, border, |ui| {
+    setup_table_card(ui, height, border, |ui| {
         let add = setup_card_header(ui, "Outputs & specifications", "Add saved output");
         setup_table_row(
             ui,
@@ -3200,7 +3262,6 @@ fn outputs_specifications_card(
 
 fn setup_table_card(
     ui: &mut Ui,
-    scroll_id: &'static str,
     height: f32,
     border: SetupCardBorder,
     body: impl FnOnce(&mut Ui) -> bool,
@@ -3211,22 +3272,11 @@ fn setup_table_card(
         ui.set_width(width);
         ui.set_min_height(height);
         ui.spacing_mut().item_spacing.y = 0.0;
-        if width <= SIMULATION_STACK_BREAKPOINT {
-            ScrollArea::horizontal()
-                // Sibling setup tables share the same parent Ui. Give each
-                // scroll state an explicit stable identity so egui never
-                // aliases their state or emits a duplicate-id diagnostic.
-                .id_salt(("simulation-setup-card", scroll_id))
-                .auto_shrink([false, true])
-                .min_scrolled_width(540.0)
-                .show(ui, |ui| {
-                    ui.set_width(540.0);
-                    body(ui)
-                })
-                .inner
-        } else {
-            body(ui)
-        }
+        // The mockup keeps all three columns in the card at narrow widths.
+        // A fixed-width nested ScrollArea both hid the trailing column and
+        // allowed sibling cards to alias egui scroll state; proportional rows
+        // already provide the intended responsive behavior without state.
+        body(ui)
     });
     let rect = response.response.rect;
     match border {
@@ -3323,8 +3373,9 @@ fn setup_table_row(
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    let first = rect.left() + rect.width() * fractions[0];
-    let second = first + rect.width() * fractions[1];
+    let rects = setup_table_column_rects(rect, fractions);
+    let first = rects[0].right();
+    let second = rects[1].right();
     for x in [first, second] {
         ui.painter()
             .vline(x, rect.y_range(), Stroke::new(1.0, t.color.border));
@@ -3339,14 +3390,6 @@ fn setup_table_row(
     } else {
         t.color.text_dim
     };
-    let rects = [
-        Rect::from_min_max(rect.min, egui::pos2(first, rect.bottom())),
-        Rect::from_min_max(
-            egui::pos2(first, rect.top()),
-            egui::pos2(second, rect.bottom()),
-        ),
-        Rect::from_min_max(egui::pos2(second, rect.top()), rect.max),
-    ];
     for index in 0..3 {
         paint_clipped_text(
             ui,
@@ -3356,6 +3399,19 @@ fn setup_table_row(
             cell_colors[index].unwrap_or(default_color),
         );
     }
+}
+
+fn setup_table_column_rects(rect: Rect, fractions: [f32; 3]) -> [Rect; 3] {
+    let first = rect.left() + rect.width() * fractions[0];
+    let second = first + rect.width() * fractions[1];
+    [
+        Rect::from_min_max(rect.min, egui::pos2(first, rect.bottom())),
+        Rect::from_min_max(
+            egui::pos2(first, rect.top()),
+            egui::pos2(second, rect.bottom()),
+        ),
+        Rect::from_min_max(egui::pos2(second, rect.top()), rect.max),
+    ]
 }
 
 fn specification_limit(spec: &crate::state::SpecEntry) -> String {
@@ -3957,11 +4013,20 @@ mod tests {
         assert!(!analysis_workspace_is_split(820.0, 700.0));
         assert!(analysis_workspace_is_split(821.0, 506.0));
         assert!(!analysis_workspace_is_split(1_440.0, 505.0));
+        assert!(!analysis_workspace_is_split(1_440.0, 550.0));
+        assert!(analysis_workspace_is_split(1_440.0, 551.0));
+        assert_eq!(analysis_split_min_width(1_020.0), 506.0);
+        assert_eq!(analysis_split_min_width(1_021.0), 551.0);
     }
 
     #[test]
     fn responsive_surface_geometry_matches_mockup_contract() {
         assert_eq!(ANALYSIS_ROW_HEIGHT, 53.0);
+        assert_eq!(ANALYSIS_INDEX_DIAMETER, 22.0);
+        assert_eq!(ANALYSIS_ROW_LEFT_PADDING, 9.0);
+        assert_eq!(ANALYSIS_STACK_TABLET_MIN_WIDTH, 175.0);
+        assert_eq!(ANALYSIS_STACK_DESKTOP_MIN_WIDTH, 190.0);
+        assert!(ANALYSIS_STACK_TABLET_MIN_WIDTH >= analysis_row_content_min_width());
         assert_eq!(PREFLIGHT_CELL_HEIGHT, 42.0);
         assert_eq!(STACKED_WORKSPACE_GAP, 9.0);
         assert_eq!(SETUP_CARD_HEADER_HEIGHT, 37.0);
@@ -3975,6 +4040,22 @@ mod tests {
         assert_eq!(background.min, row_rect.min);
         assert_eq!(background.width(), 340.0);
         assert_eq!(background.height(), row_rect.height());
+    }
+
+    #[test]
+    fn narrow_setup_tables_keep_every_column_inside_the_card() {
+        let card = Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 28.0));
+        for fractions in [[0.36, 0.32, 0.32], [0.42, 0.29, 0.29]] {
+            let columns = setup_table_column_rects(card, fractions);
+            assert_eq!(columns[0].left(), card.left());
+            assert_eq!(columns[2].right(), card.right());
+            assert!(columns.iter().all(|column| column.is_positive()));
+            assert!(
+                columns
+                    .windows(2)
+                    .all(|pair| pair[0].right() == pair[1].left())
+            );
+        }
     }
 
     #[test]

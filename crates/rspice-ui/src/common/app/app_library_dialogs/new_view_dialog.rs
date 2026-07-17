@@ -7,6 +7,26 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, chip, input_row, kv_row};
 
+/// Cell-view kinds backed by a complete, editable production surface.
+///
+/// Other persisted `ViewType` variants remain valid for project interchange,
+/// but must not be offered by the creation workflow until their editor and
+/// storage contract are implemented end to end.
+const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 3] = [
+    crate::state::ViewType::Schematic,
+    crate::state::ViewType::Testbench,
+    crate::state::ViewType::Symbol,
+];
+
+const fn is_creatable_view_type(view_type: crate::state::ViewType) -> bool {
+    matches!(
+        view_type,
+        crate::state::ViewType::Schematic
+            | crate::state::ViewType::Testbench
+            | crate::state::ViewType::Symbol
+    )
+}
+
 impl RSpiceApp {
     pub(in crate::common::app) fn process_new_view_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.new_view_dialog {
@@ -20,7 +40,8 @@ impl RSpiceApp {
         let dialogs = &mut self.state.dialogs;
         let can_create = !dialogs.new_view_name.trim().is_empty()
             && !dialogs.new_view_library.is_empty()
-            && !dialogs.new_view_cell.is_empty();
+            && !dialogs.new_view_cell.is_empty()
+            && is_creatable_view_type(dialogs.new_view_type);
 
         let choice = Dialog::new("Library", "New view", "Create")
             .description("Create a named view of the selected type in this library cell.")
@@ -54,16 +75,15 @@ impl RSpiceApp {
                             theme::sans(tokens::FS_1, FontWeight::Regular),
                             c.text_dim,
                         );
-                        use crate::state::ViewType;
-                        for view_type in ViewType::ALL.iter() {
+                        for view_type in CREATABLE_VIEW_TYPES {
                             if chip(
                                 ui,
                                 view_type.display_name(),
-                                dialogs.new_view_type == *view_type,
+                                dialogs.new_view_type == view_type,
                             )
                             .clicked()
                             {
-                                dialogs.new_view_type = *view_type;
+                                dialogs.new_view_type = view_type;
                             }
                         }
                     },
@@ -120,6 +140,14 @@ impl RSpiceApp {
             self.state.dialogs.new_view_error = Some("Cell cannot be empty".to_string());
             return outcome;
         }
+        let view_type = self.state.dialogs.new_view_type;
+        if !is_creatable_view_type(view_type) {
+            self.state.dialogs.new_view_error = Some(format!(
+                "{} views cannot be created until their production editor and storage workflow are available",
+                view_type.display_name()
+            ));
+            return outcome;
+        }
 
         let Some(lib_ro) = self.state.library_manager.get_library(&library) else {
             self.state.dialogs.new_view_error = Some(format!("Library '{}' not found", library));
@@ -145,7 +173,6 @@ impl RSpiceApp {
         let seeded_schematic = self.state.new_schematic_document();
         if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
             if let Some(cell_ref) = lib.get_cell_mut(&cell) {
-                let view_type = self.state.dialogs.new_view_type;
                 cell_ref.add_view(View::new(&view_name, view_type));
                 if matches!(
                     view_type,
@@ -226,6 +253,55 @@ mod tests {
         assert_eq!(
             document.document_policy.property_commit,
             PropertyCommitPolicy::ApplyValidFields
+        );
+    }
+
+    #[test]
+    fn creation_catalog_contains_only_views_with_production_editors() {
+        assert_eq!(
+            CREATABLE_VIEW_TYPES,
+            [
+                crate::state::ViewType::Schematic,
+                crate::state::ViewType::Testbench,
+                crate::state::ViewType::Symbol,
+            ]
+        );
+        assert!(CREATABLE_VIEW_TYPES.into_iter().all(is_creatable_view_type));
+        assert!(
+            crate::state::ViewType::ALL
+                .into_iter()
+                .filter(|view_type| !is_creatable_view_type(*view_type))
+                .all(|view_type| !CREATABLE_VIEW_TYPES.contains(&view_type))
+        );
+    }
+
+    #[test]
+    fn unsupported_view_type_is_rejected_before_project_mutation() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("view_policy_test");
+        library.add_cell(Cell::new("filter"));
+        app.state.library_manager.add_library(library);
+        app.state.dialogs.new_view_library = "view_policy_test".to_owned();
+        app.state.dialogs.new_view_cell = "filter".to_owned();
+        app.state.dialogs.new_view_name = "layout".to_owned();
+        app.state.dialogs.new_view_type = crate::state::ViewType::Layout;
+
+        let outcome = app.handle_new_view_create_action();
+
+        assert!(!outcome.close);
+        assert!(
+            app.state
+                .library_manager
+                .get_library("view_policy_test")
+                .and_then(|library| library.get_cell("filter"))
+                .is_some_and(|cell| cell.get_view("layout").is_none())
+        );
+        assert!(
+            app.state
+                .dialogs
+                .new_view_error
+                .as_deref()
+                .is_some_and(|error| error.contains("production editor"))
         );
     }
 }

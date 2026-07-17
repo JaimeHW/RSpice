@@ -264,8 +264,9 @@ impl RSpiceApp {
             ShortcutCommand::StopSimulation => {
                 if self.state.simulation.is_running
                     && crate::simulation::execution::execution_target_supports_cancellation()
+                    && let Err(error) = self.state.simulation.request_abort_active_run()
                 {
-                    self.state.simulation.trigger_abort = true;
+                    self.state.push_sim_message(ConsoleMessage::warning(error));
                 }
             }
             ShortcutCommand::RunChecks => {

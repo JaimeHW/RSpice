@@ -674,14 +674,21 @@ impl VerificationPage {
         Self::Drc,
     ];
 
-    pub const NAVIGATION: [Self; 6] = [
+    pub const NAVIGATION: [Self; 5] = [
         Self::Yield,
         Self::Corners,
         Self::Optimization,
         Self::Reliability,
         Self::Regression,
-        Self::Drc,
     ];
+
+    /// Whether this route is backed by an executable, retained-evidence
+    /// workflow. Unavailable routes remain decodable for old sessions and may
+    /// remain visible where the mockup requires a capability boundary, but are
+    /// never selectable.
+    pub const fn is_operational(self) -> bool {
+        !matches!(self, Self::Tuning | Self::Drc)
+    }
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -902,6 +909,15 @@ pub struct PreflightDialogState {
     pub open: bool,
     pub report: Option<PreflightReport>,
     pub pending_toast: Option<PreflightToast>,
+}
+
+/// Local presentation state for the canonical Jobs manager. Selection uses
+/// stable run identity so history insertion, pruning, and reload cannot
+/// silently retarget the inspector or exported manifest.
+#[derive(Debug, Clone, Default)]
+pub struct JobsManagerState {
+    pub selected_run_id: Option<crate::product::RunId>,
+    pub scroll_offset: f32,
 }
 
 /// Domain projection selected in the mockup-specified notification center.
@@ -1255,6 +1271,10 @@ pub struct WorkbenchState {
     /// revision-bound runtime evidence and therefore never serialized.
     #[serde(skip)]
     pub preflight: PreflightDialogState,
+    /// Runtime-only Jobs manager review context. Job and run records live in
+    /// `SimulationState`; this state owns presentation only.
+    #[serde(skip)]
+    pub jobs_manager: JobsManagerState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -1342,6 +1362,7 @@ impl Default for WorkbenchState {
             placement_query: String::new(),
             focus_placement_search: false,
             preflight: PreflightDialogState::default(),
+            jobs_manager: JobsManagerState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             capability_matrix: CapabilityMatrixState::default(),
@@ -1362,6 +1383,7 @@ impl WorkbenchState {
                 self.current_route().surface_id(),
                 SurfaceId::Preferences
                     | SurfaceId::AccountOrganization
+                    | SurfaceId::JobsManager
                     | SurfaceId::FeatureAvailability
             )
     }
@@ -1440,6 +1462,13 @@ impl WorkbenchState {
     /// persisted workspace; current sessions treat the canonical route as the
     /// source of truth and keep the workspace only as a render projection.
     pub fn reconcile_restored_navigation(&mut self) {
+        if !self.verification_page.is_operational() {
+            self.route_diagnostic = Some(format!(
+                "The restored {} verification page was not opened because its executable evidence pipeline is unavailable.",
+                self.verification_page.label()
+            ));
+            self.verification_page = VerificationPage::Yield;
+        }
         if self.navigation.recovered_invalid_routes() {
             self.route_diagnostic = Some(
                 "Malformed routes were removed from restored task history; project and document state were preserved."
@@ -1991,6 +2020,21 @@ mod tests {
     }
 
     #[test]
+    fn restored_unavailable_verification_page_fails_closed_to_cockpit() {
+        let mut state = WorkbenchState::default();
+        state.verification_page = VerificationPage::Drc;
+
+        state.reconcile_restored_navigation();
+
+        assert_eq!(state.verification_page, VerificationPage::Yield);
+        assert!(
+            state
+                .take_route_diagnostic()
+                .is_some_and(|message| message.contains("executable evidence pipeline"))
+        );
+    }
+
+    #[test]
     fn toggling_the_active_drawer_closes_it_deterministically() {
         let mut state = WorkbenchState::default();
 
@@ -2280,6 +2324,14 @@ mod tests {
                 VerificationPage::Drc,
             ]
         );
+        assert!(
+            VerificationPage::ALL
+                .into_iter()
+                .filter(|page| page.is_operational())
+                .all(|page| !matches!(page, VerificationPage::Tuning | VerificationPage::Drc))
+        );
+        assert!(!VerificationPage::Tuning.is_operational());
+        assert!(!VerificationPage::Drc.is_operational());
     }
 
     #[test]

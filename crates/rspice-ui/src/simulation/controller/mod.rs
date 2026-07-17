@@ -36,7 +36,7 @@ use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType, DcOpResult,
-    OperatingPointValue, SimulationRunIntent,
+    OperatingPointValue, SimulationRunIntent, SimulationRunLifecycle,
 };
 
 mod analysis_commands;
@@ -176,25 +176,48 @@ impl SimulationController {
         if state.simulation.trigger_abort {
             log::info!("Simulation abort triggered!");
             state.simulation.trigger_abort = false;
-            self.runner.abort();
-            // Clear pending analyses since we're stopping
-            self.pending_analyses.clear();
-            self.successful_analysis_instances.clear();
-            self.cached_netlist = None;
-            self.clear_prepared_run();
-            self.current_config = None;
-            self.current_spec = None;
-            self.current_provenance = None;
-            self.current_saved_output_contracts.clear();
-            self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
-            self.current_run_id = None;
-            self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
-            state.ui.netlist.pending_manual_run_id = None;
-            state.ui.netlist.pending_run_buffer = None;
-            state.simulation.status = "Aborted".to_string();
-            state.push_sim_message(crate::common::app::ConsoleMessage::warning(
-                "Simulation aborted by user",
-            ));
+            let requested_execution = state.simulation.abort_request.take();
+            let controller_execution = self.current_run_id.and_then(|run_sequence| {
+                state
+                    .simulation
+                    .run_by_sequence(run_sequence)
+                    .and_then(|run| run.execution_identity())
+            });
+            let bound_request = requested_execution.filter(|requested| {
+                Some(*requested) == controller_execution
+                    && Some(*requested) == state.simulation.active_execution
+            });
+            if let Some(requested_execution) = bound_request {
+                let cancellation_result = state
+                    .simulation
+                    .run_by_stable_id_mut(requested_execution.run_id)
+                    .ok_or_else(|| {
+                        "The active simulation run disappeared before cancellation could be acknowledged"
+                            .to_owned()
+                    })
+                    .and_then(|run| run.mark_cancelling());
+                if let Err(error) = cancellation_result {
+                    state.push_sim_message(ConsoleMessage::error(format!(
+                        "Simulation cancellation was rejected: {error}"
+                    )));
+                } else {
+                    self.runner.abort();
+                    // Stop the batch from dispatching any additional task, but
+                    // retain the active task metadata until the runner returns
+                    // its abort acknowledgement. That acknowledgement is the
+                    // authority for the terminal lifecycle and duration.
+                    self.pending_analyses.clear();
+                    state.simulation.status = "Cancelling".to_owned();
+                    state.push_sim_message(ConsoleMessage::warning(
+                        "Simulation cancellation requested".to_owned(),
+                    ));
+                }
+            } else {
+                state.push_sim_message(ConsoleMessage::warning(
+                    "Ignored a stale or unbound simulation cancellation request; the active execution was left intact"
+                        .to_owned(),
+                ));
+            }
         }
 
         // Poll for completion
@@ -281,8 +304,14 @@ impl SimulationController {
             queued_names
         );
 
-        let run_id = state.simulation.start_prepared_run(run_receipt).id;
+        let run = state.simulation.start_prepared_run(run_receipt);
+        let run_id = run.id;
+        let execution_identity = run
+            .execution_identity()
+            .expect("current simulation runs always allocate job identity");
         self.current_run_id = Some(run_id);
+        state.simulation.active_execution = Some(execution_identity);
+        state.simulation.abort_request = None;
         if dispatch.intent() == SimulationRunIntent::ManualDeck {
             let manual_source = dispatch.manual_source().unwrap_or_default().to_owned();
             state.ui.netlist.pending_manual_run_id = Some(run_id);
@@ -331,7 +360,29 @@ impl SimulationController {
             return;
         }
 
+        let interrupted = self.current_run_id.and_then(|run_sequence| {
+            state
+                .simulation
+                .run_by_sequence_mut(run_sequence)
+                .filter(|run| !run.lifecycle.is_terminal())
+        });
+        if let Some(run) = interrupted {
+            run.success = false;
+            if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Interrupted) {
+                log::error!("Failed to seal interrupted simulation run lifecycle: {error}");
+            } else {
+                state.push_sim_message(ConsoleMessage::warning(
+                    "Simulation execution was interrupted because its design context changed"
+                        .to_owned(),
+                ));
+            }
+        }
         self.reset_for_design_replacement();
+        state.simulation.active_execution = None;
+        state.simulation.abort_request = None;
+        state.simulation.trigger_abort = false;
+        state.ui.netlist.pending_manual_run_id = None;
+        state.ui.netlist.pending_run_buffer = None;
         self.design_execution_epoch = state.design_execution_epoch;
     }
 
@@ -552,11 +603,20 @@ impl SimulationController {
         // Start the simulation
         let start_result = self.runner.start_prepared(next_analysis);
         match start_result {
-            Ok(()) => log::info!(
-                "Analysis {}/{} started successfully",
-                self.current_analysis_idx,
-                self.total_analyses
-            ),
+            Ok(()) => {
+                if let Some(run_id) = self.target_run_id(state)
+                    && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+                    && let Err(error) = run.mark_running()
+                {
+                    log::error!("Failed to advance simulation run lifecycle: {error}");
+                    state.push_sim_message(ConsoleMessage::error(error));
+                }
+                log::info!(
+                    "Analysis {}/{} started successfully",
+                    self.current_analysis_idx,
+                    self.total_analyses
+                );
+            }
             Err(e) => {
                 log::error!("Failed to start simulation: {}", e);
                 let error_message = format!("Failed to start simulation: {e}");
@@ -616,6 +676,20 @@ impl SimulationController {
             .or_else(|| state.simulation.active_run().map(|run| run.success))
             .unwrap_or(true);
 
+        if let Some(run_id) = completed_run_id
+            && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+        {
+            let terminal = if run_success {
+                SimulationRunLifecycle::Completed
+            } else {
+                SimulationRunLifecycle::Failed
+            };
+            if let Err(error) = run.finish_lifecycle(terminal) {
+                log::error!("Failed to seal completed run lifecycle: {error}");
+                state.push_sim_message(ConsoleMessage::error(error));
+            }
+        }
+
         // Complete the run (syncs waveforms and selects first analysis)
         if let Some(run_id) = completed_run_id {
             state.simulation.select_run_by_sequence(run_id);
@@ -637,6 +711,8 @@ impl SimulationController {
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;
         self.total_analyses = 0;
+        state.simulation.active_execution = None;
+        state.simulation.abort_request = None;
 
         state.simulation.status = if run_success {
             "Complete".to_string()
@@ -865,7 +941,14 @@ impl SimulationController {
     ) {
         // Update status display with multi-analysis progress
         let status = self.runner.status();
-        if !matches!(status, SimulationStatus::Idle)
+        let cancellation_pending = state
+            .simulation
+            .active_execution
+            .and_then(|identity| state.simulation.run_by_stable_id(identity.run_id))
+            .is_some_and(|run| run.lifecycle == SimulationRunLifecycle::Cancelling);
+        if cancellation_pending {
+            state.simulation.status = "Cancelling".to_owned();
+        } else if !matches!(status, SimulationStatus::Idle)
             && !matches!(status, SimulationStatus::Completed { .. })
         {
             // Show progress-aware status
@@ -1043,6 +1126,15 @@ impl SimulationController {
                 }
                 Err(SimulationError::Aborted) => {
                     log::info!("Analysis aborted; discarding cancellation completion result");
+                    if let Some(run_sequence) = self.current_run_id
+                        && let Some(run) = state.simulation.run_by_sequence_mut(run_sequence)
+                    {
+                        run.success = false;
+                        if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Aborted) {
+                            log::error!("Failed to seal aborted run lifecycle: {error}");
+                            state.push_sim_message(ConsoleMessage::error(error));
+                        }
+                    }
                     self.pending_analyses.clear();
                     self.successful_analysis_instances.clear();
                     self.cached_netlist = None;
@@ -1053,9 +1145,14 @@ impl SimulationController {
                     self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
                     self.current_run_id = None;
                     self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
+                    state.simulation.active_execution = None;
+                    state.simulation.abort_request = None;
                     state.ui.netlist.pending_manual_run_id = None;
                     state.ui.netlist.pending_run_buffer = None;
                     state.simulation.status = "Aborted".to_string();
+                    state.push_sim_message(ConsoleMessage::warning(
+                        "Simulation aborted by user".to_owned(),
+                    ));
                 }
                 Err(e) => {
                     state
@@ -1220,6 +1317,34 @@ mod tests {
         state.dialogs.drc_results = Some(result);
         state.dialogs.drc_checked_version = state.schematic.topology_version();
         state
+    }
+
+    fn bind_test_run_running(
+        state: &mut AppState,
+        controller: &mut SimulationController,
+        run_sequence: u64,
+    ) {
+        let run = state
+            .simulation
+            .run_by_sequence_mut(run_sequence)
+            .expect("test execution has a retained run");
+        run.mark_running().expect("test run enters running state");
+        let identity = run.execution_identity();
+        controller.current_run_id = Some(run_sequence);
+        state.simulation.active_execution = identity;
+    }
+
+    fn bind_and_request_test_abort(state: &mut AppState, controller: &mut SimulationController) {
+        let run_sequence = state
+            .simulation
+            .active_run()
+            .expect("test abort has an active run")
+            .id;
+        bind_test_run_running(state, controller, run_sequence);
+        state
+            .simulation
+            .request_abort_active_run()
+            .expect("test abort binds to the active execution");
     }
 
     fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
@@ -1432,13 +1557,65 @@ mod tests {
     }
 
     #[test]
+    fn design_epoch_reset_terminalizes_executor_owned_history() {
+        let mut state = AppState::default();
+        let mut controller = SimulationController::new();
+        let export_io = MockExportWorkflowIo::default();
+        let run_sequence = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, run_sequence);
+
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+        controller.update(&mut state, &export_io);
+
+        let run = state
+            .simulation
+            .run_by_sequence(run_sequence)
+            .expect("interrupted history remains retained");
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::Interrupted);
+        assert!(!run.success);
+        assert!(state.simulation.active_execution.is_none());
+        assert!(state.simulation.abort_request.is_none());
+    }
+
+    #[test]
+    fn stale_cancellation_request_never_mutates_run_lifecycle() {
+        let mut state = AppState::default();
+        let mut controller = SimulationController::new();
+        let export_io = MockExportWorkflowIo::default();
+        let run_sequence = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, run_sequence);
+        state
+            .simulation
+            .request_abort_active_run()
+            .expect("request is initially bound");
+        state.simulation.active_execution = None;
+
+        controller.update(&mut state, &export_io);
+
+        assert_eq!(
+            state
+                .simulation
+                .run_by_sequence(run_sequence)
+                .unwrap()
+                .lifecycle,
+            SimulationRunLifecycle::Running
+        );
+        assert!(state.simulation.abort_request.is_none());
+        assert!(
+            state
+                .log_buffer
+                .entries()
+                .any(|entry| entry.message.contains("stale or unbound"))
+        );
+    }
+
+    #[test]
     fn abort_trigger_discards_worker_aborted_result_without_failed_analysis() {
         let mut state = AppState::default();
         let mut controller = SimulationController::new();
         let export_io = MockExportWorkflowIo::default();
         state.simulation.start_run();
         state.simulation.status = "Running".to_string();
-        state.simulation.trigger_abort = true;
         controller.current_spec = Some(AnalysisSpec::DcOp);
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
@@ -1446,6 +1623,7 @@ mod tests {
             .runner
             .store_pending_result(Err(crate::simulation::runner::SimulationError::Aborted))
             .expect("seed worker abort result");
+        bind_and_request_test_abort(&mut state, &mut controller);
 
         controller.update(&mut state, &export_io);
 
@@ -1456,7 +1634,8 @@ mod tests {
             "aborted worker result must not be recorded as a failed analysis: {:?}",
             run.analyses
         );
-        assert!(run.success);
+        assert!(!run.success);
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::Aborted);
     }
 
     #[test]
@@ -1466,7 +1645,6 @@ mod tests {
         let export_io = MockExportWorkflowIo::default();
         state.simulation.start_run();
         state.simulation.status = "Running".to_string();
-        state.simulation.trigger_abort = true;
         controller.current_spec = Some(AnalysisSpec::DcOp);
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
@@ -1474,6 +1652,7 @@ mod tests {
             .runner
             .store_pending_result(Ok(synthetic_dc_op_result()))
             .expect("seed unpolled success result");
+        bind_and_request_test_abort(&mut state, &mut controller);
 
         controller.update(&mut state, &export_io);
 
@@ -1484,7 +1663,8 @@ mod tests {
             "success result that arrived before abort poll must not be recorded: {:?}",
             run.analyses
         );
-        assert!(run.success);
+        assert!(!run.success);
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::Aborted);
     }
 
     #[test]
@@ -1494,6 +1674,7 @@ mod tests {
         let export_io = MockExportWorkflowIo::default();
         let older_run_id = state.simulation.start_run().id;
         let started_run_id = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, started_run_id);
         assert!(
             state.simulation.select_run(1),
             "user can inspect an older run while a newer run is in flight"
@@ -1536,6 +1717,7 @@ mod tests {
             state.simulation.active_run().map(|run| run.id),
             Some(started_run_id)
         );
+        assert_eq!(started_run.lifecycle, SimulationRunLifecycle::Completed);
     }
 
     #[test]
@@ -1543,7 +1725,8 @@ mod tests {
         let mut state = AppState::default();
         let mut controller = SimulationController::new();
         let export_io = MockExportWorkflowIo::default();
-        state.simulation.start_run();
+        let run_sequence = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, run_sequence);
         controller.current_spec = Some(AnalysisSpec::Transient {
             stop_time: 2.0e-9,
             step_time: 1.0e-9,
@@ -1611,7 +1794,8 @@ mod tests {
         let mut state = AppState::default();
         let mut controller = SimulationController::new();
         let export_io = MockExportWorkflowIo::default();
-        state.simulation.start_run();
+        let run_sequence = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, run_sequence);
         controller.current_spec = Some(AnalysisSpec::DcSweep {
             source_name: "V1".to_string(),
             start: 0.0,
@@ -1683,7 +1867,8 @@ mod tests {
         let mut state = AppState::default();
         let mut controller = SimulationController::new();
         let export_io = MockExportWorkflowIo::default();
-        state.simulation.start_run();
+        let run_sequence = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, run_sequence);
         controller.current_spec = Some(AnalysisSpec::DcOp);
         let provenance = synthetic_result_provenance();
         let expected_source_id = provenance.source_instance_id();
@@ -1708,6 +1893,10 @@ mod tests {
         assert!(!analysis.success);
         assert_eq!(restored.source_instance_id(), expected_source_id);
         assert_eq!(restored.prepared_snapshot_digest(), expected_snapshot);
+        assert_eq!(
+            state.simulation.active_run().expect("failed run").lifecycle,
+            SimulationRunLifecycle::Failed
+        );
     }
 
     #[test]
@@ -2286,6 +2475,7 @@ mod tests {
         state.simulation.netlist_content =
             "deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string();
         let run_id = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, run_id);
         state.ui.netlist.pending_manual_run_id = Some(run_id);
         state.ui.netlist.pending_run_buffer =
             Some("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string());
@@ -2313,6 +2503,7 @@ mod tests {
         let run = state.simulation.start_run();
         let run_id = run.id;
         run.success = false;
+        bind_test_run_running(&mut state, &mut controller, run_id);
         state.ui.netlist.pending_manual_run_id = Some(run_id);
         state.ui.netlist.pending_run_buffer = Some("new\n.op\n.end\n".to_string());
 
@@ -2332,6 +2523,7 @@ mod tests {
         let mut controller = SimulationController::new();
         state.simulation.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
         let run_id = state.simulation.start_run().id;
+        bind_test_run_running(&mut state, &mut controller, run_id);
         state.ui.netlist.pending_manual_run_id = Some(run_id);
         state.ui.netlist.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".to_string());
 
