@@ -857,6 +857,7 @@ pub fn evaluate_noise_continuous_measurements(
                 name: statement.name.clone(),
                 records: Vec::new(),
                 failure: Some("noise sweep produced no points".to_string()),
+                failure_metadata: None,
             })
             .collect();
     };
@@ -1261,7 +1262,12 @@ pub fn evaluate_tran_measurements(
     if statements.is_empty() {
         return Vec::new();
     }
-    let signals = transient_signal_map(result);
+    let mut signals = transient_signal_map(result);
+    let differential_signals =
+        materialize_differential_voltage_signals(&statements, result.time.len(), &signals);
+    for (name, waveform) in &differential_signals {
+        insert_case_variants(&mut signals, name, waveform);
+    }
     let mut results = evaluate_statements(&statements, &result.time, &signals, &netlist.params);
     overlay_continuous_equation_results(
         &statements,
@@ -1270,6 +1276,39 @@ pub fn evaluate_tran_measurements(
         "TRAN",
     );
     results
+}
+
+/// Evaluate vector-valued `.MEASURE TRAN_CONT` point-event statements.
+///
+/// Every qualifying WHEN, FIND, DERIV, or TRIG/TARG event is retained with
+/// its interpolated event metadata. A single transient run has one continuous
+/// axis segment; stepped runs invoke this adapter independently per step.
+pub fn evaluate_tran_continuous_measurements(
+    netlist: &Netlist,
+    result: &TransientResult,
+) -> Vec<ContinuousMeasureResult> {
+    let statements = measurements_for_analysis(netlist, "TRAN_CONT");
+    if statements.is_empty() {
+        return Vec::new();
+    }
+    if result.time.is_empty() {
+        return statements
+            .iter()
+            .map(|statement| ContinuousMeasureResult {
+                name: statement.name.clone(),
+                records: Vec::new(),
+                failure: Some("transient analysis produced no accepted points".to_string()),
+                failure_metadata: None,
+            })
+            .collect();
+    }
+    let mut signals = transient_signal_map(result);
+    let differential_signals =
+        materialize_differential_voltage_signals(&statements, result.time.len(), &signals);
+    for (name, waveform) in &differential_signals {
+        insert_case_variants(&mut signals, name, waveform);
+    }
+    evaluate_continuous_statements(&statements, &result.time, signals, &netlist.params, &[])
 }
 
 /// Evaluate vector-valued `.MEASURE DC_CONT` point-event statements.
@@ -1311,6 +1350,7 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts(
                 name: statement.name.clone(),
                 records: Vec::new(),
                 failure: Some("DC sweep produced no points".to_string()),
+                failure_metadata: None,
             })
             .collect();
     };
@@ -1326,6 +1366,7 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts(
                 failure: Some(
                     "DC point-parameter context count does not match sweep length".to_string(),
                 ),
+                failure_metadata: None,
             })
             .collect();
     } else {
@@ -1552,6 +1593,7 @@ pub fn evaluate_ac_continuous_measurements(
                 name: statement.name.clone(),
                 records: Vec::new(),
                 failure: Some("AC sweep produced no points".to_string()),
+                failure_metadata: None,
             })
             .collect();
     };
@@ -1665,6 +1707,59 @@ mod tests {
         assert!(results[0].passed);
         assert_eq!(results[1].value, None);
         assert!(!results[1].passed);
+    }
+
+    #[test]
+    fn transient_continuous_adapter_retains_interpolated_events() {
+        let netlist = Netlist::parse(
+            "* continuous transient events\n\
+             V1 out 0 0\n\
+             .tran 1 3\n\
+             .meas tran_cont crossing WHEN V(out)=1.5\n\
+             .meas tran_cont slope DERIV V(out) AT=1.5\n\
+             .end\n",
+        )
+        .expect("continuous transient measures parse");
+
+        let results = evaluate_tran_continuous_measurements(&netlist, &tran_result());
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| result.failure.is_none()));
+        assert_eq!(results[0].records.len(), 1);
+        assert_eq!(results[0].records[0].value, 1.5);
+        assert_eq!(results[0].records[0].event_axis, Some(1.5));
+        assert_eq!(results[1].records.len(), 1);
+        assert_eq!(results[1].records[0].value, 1.0);
+        assert_eq!(results[1].records[0].event_axis, Some(1.5));
+    }
+
+    #[test]
+    fn transient_measurements_materialize_direct_differential_voltage_operands() {
+        let netlist = Netlist::parse(
+            "* differential transient measurements\n\
+             V1 out 0 0\n\
+             V2 reference 0 0\n\
+             .tran 1 3\n\
+             .meas tran scalar WHEN V(out,reference)=1.5\n\
+             .meas tran_cont continuous FIND V(out,0) WHEN V(out,reference)=1.5\n\
+             .end\n",
+        )
+        .expect("differential transient measures parse");
+        let mut result = tran_result();
+        result.voltages.push(vec![0.0, 0.0, 0.0, 0.0]);
+        result.node_names.push("reference".to_string());
+        result.num_nodes = 2;
+
+        let scalar = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(scalar.len(), 1);
+        assert!(scalar[0].passed, "{:?}", scalar[0].error);
+        assert_eq!(scalar[0].value, Some(1.5));
+
+        let continuous = evaluate_tran_continuous_measurements(&netlist, &result);
+        assert_eq!(continuous.len(), 1);
+        assert!(continuous[0].failure.is_none());
+        assert_eq!(continuous[0].records.len(), 1);
+        assert_eq!(continuous[0].records[0].value, 1.5);
+        assert_eq!(continuous[0].records[0].event_axis, Some(1.5));
     }
 
     #[test]

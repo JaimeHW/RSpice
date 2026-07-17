@@ -58,10 +58,19 @@ impl SimulationResult {
             SimulationResult::Transient { time, .. } => !time.is_empty(),
             SimulationResult::Ac { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::Noise { frequencies, .. } => !frequencies.is_empty(),
-            SimulationResult::PoleZero { poles, zeros, .. } => {
-                !poles.is_empty() || !zeros.is_empty()
+            SimulationResult::PoleZero { gain, .. } => gain.is_finite(),
+            SimulationResult::Sensitivity {
+                output,
+                sensitivities,
+                normalized,
+                ..
+            } => {
+                !output.trim().is_empty()
+                    && sensitivities.len() == normalized.len()
+                    && sensitivities
+                        .keys()
+                        .all(|parameter| normalized.contains_key(parameter))
             }
-            SimulationResult::Sensitivity { sensitivities, .. } => !sensitivities.is_empty(),
             SimulationResult::MonteCarlo {
                 runs_completed,
                 variables,
@@ -80,7 +89,7 @@ impl SimulationResult {
             SimulationResult::Soa {
                 time, waveforms, ..
             } => !time.is_empty() && !waveforms.is_empty(),
-            SimulationResult::MeasurementsOnly { .. } => false,
+            SimulationResult::MeasurementsOnly { measurements } => !measurements.is_empty(),
         }
     }
 

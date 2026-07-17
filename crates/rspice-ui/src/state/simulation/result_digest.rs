@@ -15,7 +15,8 @@ use crate::state::{
 };
 
 const RESULT_DIGEST_MAGIC: &[u8] = b"RSPICE-RESULT-DATA";
-const RESULT_DIGEST_ENCODING_VERSION: u16 = 1;
+const RESULT_DIGEST_ENCODING_VERSION_V1: u16 = 1;
+const RESULT_DIGEST_ENCODING_VERSION_V2: u16 = 2;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -23,12 +24,12 @@ struct ResultDigestWriter {
 }
 
 impl ResultDigestWriter {
-    fn new(domain: &str) -> Self {
+    fn new(domain: &str, encoding_version: u16) -> Self {
         let mut writer = Self {
             hasher: Sha256::new(),
         };
         writer.raw(RESULT_DIGEST_MAGIC);
-        writer.raw(&RESULT_DIGEST_ENCODING_VERSION.to_be_bytes());
+        writer.raw(&encoding_version.to_be_bytes());
         writer.string(domain);
         writer
     }
@@ -115,7 +116,29 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        let mut writer = ResultDigestWriter::new("rspice.analysis-result-data/v1");
+        self.result_data_digest_with_payload(true)
+    }
+
+    /// Schema-v8 digest retained solely for authenticated migration. New
+    /// result documents must use [`Self::result_data_digest`].
+    #[must_use]
+    pub(crate) fn legacy_v1_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_payload(false)
+    }
+
+    fn result_data_digest_with_payload(&self, include_payload: bool) -> ContentDigest {
+        let (domain, version) = if include_payload {
+            (
+                "rspice.analysis-result-data/v2",
+                RESULT_DIGEST_ENCODING_VERSION_V2,
+            )
+        } else {
+            (
+                "rspice.analysis-result-data/v1",
+                RESULT_DIGEST_ENCODING_VERSION_V1,
+            )
+        };
+        let mut writer = ResultDigestWriter::new(domain, version);
         writer.u8(analysis_type_tag(self.analysis_type));
         writer.bool(self.success);
         writer.option(self.error_message.as_deref(), |writer, value| {
@@ -138,6 +161,9 @@ impl AnalysisResult {
         writer.option(self.device_op.as_ref(), encode_device_op);
         writer.option(self.noise_summary.as_ref(), encode_noise_summary);
         writer.option(self.family_metadata.as_ref(), encode_family_metadata);
+        if include_payload {
+            writer.option(self.result_payload.as_ref(), encode_result_payload);
+        }
 
         writer.sequence(self.measurements.len());
         for measurement in &self.measurements {
@@ -182,13 +208,86 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        let mut writer = ResultDigestWriter::new("rspice.simulation-dataset-data/v1");
+        self.dataset_content_digest_with_payload(true)
+    }
+
+    /// Schema-v8 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v1_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_payload(false)
+    }
+
+    fn dataset_content_digest_with_payload(&self, include_payload: bool) -> ContentDigest {
+        let (domain, version) = if include_payload {
+            (
+                "rspice.simulation-dataset-data/v2",
+                RESULT_DIGEST_ENCODING_VERSION_V2,
+            )
+        } else {
+            (
+                "rspice.simulation-dataset-data/v1",
+                RESULT_DIGEST_ENCODING_VERSION_V1,
+            )
+        };
+        let mut writer = ResultDigestWriter::new(domain, version);
         writer.sequence(self.analyses.len());
         for analysis in &self.analyses {
             writer.u64(analysis.id);
-            writer.digest(analysis.result_data_digest());
+            writer.digest(if include_payload {
+                analysis.result_data_digest()
+            } else {
+                analysis.legacy_v1_result_data_digest()
+            });
         }
         writer.finish()
+    }
+}
+
+fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResultPayload) {
+    match payload {
+        AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
+            writer.u8(0);
+            encode_complex_result_values(writer, poles);
+            encode_complex_result_values(writer, zeros);
+            writer.f64(*gain);
+        }
+        AnalysisResultPayload::Sensitivity {
+            output,
+            result_mode,
+            rows,
+        } => {
+            writer.u8(1);
+            writer.string(output);
+            match result_mode {
+                SensitivityResultMode::Dc => writer.u8(0),
+                SensitivityResultMode::Ac { frequency_hz } => {
+                    writer.u8(1);
+                    writer.f64(*frequency_hz);
+                }
+            }
+            writer.sequence(rows.len());
+            for row in rows {
+                writer.string(&row.parameter);
+                writer.f64(row.raw);
+                writer.f64(row.normalized);
+            }
+        }
+        AnalysisResultPayload::ScalarMeasurements { values } => {
+            writer.u8(2);
+            writer.sequence(values.len());
+            for (name, value) in values {
+                writer.string(name);
+                writer.f64(*value);
+            }
+        }
+    }
+}
+
+fn encode_complex_result_values(writer: &mut ResultDigestWriter, values: &[ComplexResultValue]) {
+    writer.sequence(values.len());
+    for value in values {
+        writer.f64(value.real);
+        writer.f64(value.imaginary);
     }
 }
 
@@ -419,6 +518,7 @@ const fn saved_output_streaming_tag(streaming: SavedOutputStreaming) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     fn analysis(kind: AnalysisType) -> AnalysisResult {
@@ -548,5 +648,114 @@ mod tests {
         assert_ne!(digest, run.dataset_content_digest());
         run.analyses = vec![first, changed_family];
         assert_ne!(digest, run.dataset_content_digest());
+    }
+
+    #[test]
+    fn typed_payload_is_v2_content_identity_without_rewriting_v1_history() {
+        let pole_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+            AnalysisResultPayload::PoleZero {
+                poles: vec![ComplexResultValue {
+                    real: -1.0,
+                    imaginary: 2.0,
+                }],
+                zeros: vec![ComplexResultValue {
+                    real: -3.0,
+                    imaginary: 0.0,
+                }],
+                gain: 4.0,
+            },
+        );
+        let mut changed_root = pole_zero.clone();
+        let Some(AnalysisResultPayload::PoleZero { poles, .. }) =
+            changed_root.result_payload.as_mut()
+        else {
+            panic!("pole-zero payload")
+        };
+        poles[0].imaginary = 2.5;
+
+        assert_ne!(
+            pole_zero.result_data_digest(),
+            changed_root.result_data_digest()
+        );
+        assert_eq!(
+            pole_zero.legacy_v1_result_data_digest(),
+            changed_root.legacy_v1_result_data_digest(),
+            "schema-v8 never contained typed payload bytes"
+        );
+
+        let mut first_run = SimulationRun::new(1);
+        first_run.analyses = vec![pole_zero];
+        let mut second_run = first_run.clone();
+        second_run.analyses = vec![changed_root];
+        assert_ne!(
+            first_run.dataset_content_digest(),
+            second_run.dataset_content_digest()
+        );
+        assert_eq!(
+            first_run.legacy_v1_dataset_content_digest(),
+            second_run.legacy_v1_dataset_content_digest()
+        );
+    }
+
+    #[test]
+    fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive() {
+        let sensitivity = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
+            .with_result_payload(AnalysisResultPayload::Sensitivity {
+                output: "V(out)".to_owned(),
+                result_mode: SensitivityResultMode::Ac {
+                    frequency_hz: 1_000.0,
+                },
+                rows: vec![SensitivityResultRow {
+                    parameter: "gain".to_owned(),
+                    raw: 2.0,
+                    normalized: 0.5,
+                }],
+            });
+        let mut changed = sensitivity.clone();
+        let Some(AnalysisResultPayload::Sensitivity { rows, .. }) = changed.result_payload.as_mut()
+        else {
+            panic!("sensitivity payload")
+        };
+        rows[0].normalized = 0.500_000_000_000_000_1;
+        assert_ne!(
+            sensitivity.result_data_digest(),
+            changed.result_data_digest()
+        );
+
+        let scalar = AnalysisResult::new(1, AnalysisType::Tf, "TF").with_result_payload(
+            AnalysisResultPayload::ScalarMeasurements {
+                values: BTreeMap::from([
+                    ("gain".to_owned(), 10.0),
+                    ("resistance".to_owned(), 50.0),
+                ]),
+            },
+        );
+        assert_eq!(
+            scalar.result_data_digest(),
+            scalar.clone().result_data_digest()
+        );
+
+        let positive_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
+            .with_result_payload(AnalysisResultPayload::PoleZero {
+                poles: vec![ComplexResultValue {
+                    real: 0.0,
+                    imaginary: 0.0,
+                }],
+                zeros: Vec::new(),
+                gain: 1.0,
+            });
+        let negative_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
+            .with_result_payload(AnalysisResultPayload::PoleZero {
+                poles: vec![ComplexResultValue {
+                    real: -0.0,
+                    imaginary: -0.0,
+                }],
+                zeros: Vec::new(),
+                gain: 1.0,
+            });
+        assert_eq!(
+            positive_zero.result_data_digest(),
+            negative_zero.result_data_digest()
+        );
     }
 }

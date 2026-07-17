@@ -132,6 +132,29 @@ const XYCE_ABM_TRANSIENT_CANDIDATE_CONTENT_BLAKE3: &str =
     "72f62e2db60be24d51f72b1efecba72f07479ec6d95c43a1f49b43e471a83142";
 const XYCE_ABM_TRANSIENT_MANIFEST_BLAKE3: &str =
     "01fa5d35bc700b26933db5f1bfdc7b69a12d7f7eafa7e3b687fbc705f54aa81d";
+const XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_COUNT: usize = 66;
+const XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_NAMES_BLAKE3: &str =
+    "1fe7b4af298d44520dc978c3e56a434ece02ab895a09d5d873a4f577adfc8bc2";
+const XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_CONTENT_BLAKE3: &str =
+    "b0ea7515be7217d05cd09983da9a4b1a515c8cfce45c4cc78864c8047bef0c0c";
+const XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_COUNT: usize = 60;
+const XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_NAMES_BLAKE3: &str =
+    "fb8fc66f3a69a66991c8c9a2373329b6ebb302d7ad57630e4356972984ba30fd";
+const XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_CONTENT_BLAKE3: &str =
+    "ba1d604fd57372ef8e990419b201300cb07d80fbf24c3bd9c732d597e6291fd1";
+const XYCE_MEASURE_CONT_TRAN_CANDIDATE_BLAKE3: &str =
+    "6c1be110ea8bd3607fb739190fb7e4c6328737c10324e8a32952d25daaaab7f0";
+const XYCE_MEASURE_CONT_TRAN_CANDIDATE_CONTENT_BLAKE3: &str =
+    "5ebcdae90f486952f5b32f8298ffcac675b19ff14982456dc9c85fd9acfd7799";
+const XYCE_MEASURE_CONT_TRAN_MANIFEST_BLAKE3: &str =
+    "6c1be110ea8bd3607fb739190fb7e4c6328737c10324e8a32952d25daaaab7f0";
+const XYCE_MEASURE_CONT_TRAN_ARTIFACT_CONTENT_BLAKE3: &str =
+    "5c75dece6ec6a985871ec7a44ba04f474e23b9b73ef9786e27507f45c9bfefd0";
+const XYCE_MEASURE_CONT_MANIFEST_FAMILY_COUNT: usize = 31;
+const XYCE_MEASURE_CONT_MANIFEST_FAMILY_PATHS_BLAKE3: &str =
+    "9cbd9d8d4874de203ab21ef5ef301d5f75b92cb4d9208bc6f6d81e785159990d";
+const XYCE_MEASURE_CONT_MANIFEST_FAMILY_LINES_BLAKE3: &str =
+    "9d1bfca8151e9c3c16239558b9a34b1ad067d6b236c00d8c334e1703d0ec0a22";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
@@ -2854,6 +2877,180 @@ impl XyceAbmTransientKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceMeasureContTranKind {
+    Derivative,
+    FindWhen,
+    TriggerTarget,
+}
+
+impl XyceMeasureContTranKind {
+    const ALL: [Self; 3] = [Self::Derivative, Self::FindWhen, Self::TriggerTarget];
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL.into_iter().find(|kind| kind.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::Derivative => "netlists/measure_cont/derivtesttran.cir",
+            Self::FindWhen => "netlists/measure_cont/findwhentesttran.cir",
+            Self::TriggerTarget => "netlists/measure_cont/trigtargtesttran.cir",
+        }
+    }
+
+    fn source_relative_path(self) -> &'static str {
+        match self {
+            Self::Derivative => "Netlists/MEASURE_CONT/DerivTestTran.cir",
+            Self::FindWhen => "Netlists/MEASURE_CONT/FindWhenTestTran.cir",
+            Self::TriggerTarget => "Netlists/MEASURE_CONT/TrigTargTestTran.cir",
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::Derivative => (
+                5130,
+                "004473ef36c30a6a553d095c6355c6a4dd8c2f7c91f06c08edba31a4c27332ea",
+            ),
+            Self::FindWhen => (
+                5571,
+                "4eb1bb52057c9a82891b5ddf2606fed743d97cf949a993ec341d3415f75a5fe6",
+            ),
+            Self::TriggerTarget => (
+                2290,
+                "d400ebddf0b080039ef8905a0c31e12050d45912449d0922c703edc0682be7de",
+            ),
+        }
+    }
+
+    fn gs_relative_path(self) -> &'static str {
+        match self {
+            Self::Derivative => "Netlists/MEASURE_CONT/DerivTestTranGSfile",
+            Self::FindWhen => "Netlists/MEASURE_CONT/FindWhenTestTranGSfile",
+            Self::TriggerTarget => "Netlists/MEASURE_CONT/TrigTargTestTranGSfile",
+        }
+    }
+
+    fn gs_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::Derivative => (
+                7253,
+                "acd7911ebd8f8a1468b29cf5784e4b09595bfc77519ec2659e991b670a379b54",
+            ),
+            Self::FindWhen => (
+                8318,
+                "df50283caa48e7c9c7d5ee10596c0391066ed7ee5797a6abe1f4910e71b9dcde",
+            ),
+            Self::TriggerTarget => (
+                2298,
+                "30aa8eedae1aac04089df40d584262f0d1131f0a4c3db7da7bea06a3c9a79c64",
+            ),
+        }
+    }
+
+    fn mt0_relative_path(self) -> &'static str {
+        match self {
+            Self::Derivative => "OutputData/MEASURE_CONT/DerivTestTran.cir.mt0",
+            Self::FindWhen => "OutputData/MEASURE_CONT/FindWhenTestTran.cir.mt0",
+            Self::TriggerTarget => "OutputData/MEASURE_CONT/TrigTargTestTran.cir.mt0",
+        }
+    }
+
+    fn mt0_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::Derivative => (
+                2120,
+                "8a7748dd3530a93a72a4293216ab37d92542821c38a99c910f438a1b410eb6ce",
+            ),
+            Self::FindWhen => (
+                2824,
+                "563d8958716dea4b2e32ddbb39895546bd329b43455bea1a2154e39c8b4b9567",
+            ),
+            Self::TriggerTarget => (
+                3053,
+                "bd021857acf3848c2cb1ba0135182d1e7aea13d0e1b63b3befd804628b859241",
+            ),
+        }
+    }
+
+    fn prn(self) -> Option<(&'static str, (usize, &'static str))> {
+        match self {
+            Self::Derivative => Some((
+                "OutputData/MEASURE_CONT/DerivTestTran.cir.prn",
+                (
+                    11461,
+                    "ea8e721952ec7a338fcae39dd8e642b9eeb4092a5fd69f92829d7318834e6127",
+                ),
+            )),
+            Self::FindWhen => Some((
+                "OutputData/MEASURE_CONT/FindWhenTestTran.cir.prn",
+                (
+                    11047,
+                    "ba38099177433ebc963d2e7c72e27f682d52244caa38530d4fdecd67157c380b",
+                ),
+            )),
+            Self::TriggerTarget => None,
+        }
+    }
+
+    fn expected_measurement_counts(self) -> (usize, usize) {
+        match self {
+            Self::Derivative => (18, 32),
+            Self::FindWhen => (22, 42),
+            Self::TriggerTarget => (0, 18),
+        }
+    }
+
+    fn expected_print_probes(self) -> &'static [&'static str] {
+        match self {
+            Self::Derivative => &[
+                "v(1)",
+                "v(2)",
+                "derivcrossconttest2",
+                "derivcrossconttest2",
+                "derivcrossconttest3",
+                "derivcrossconttest4",
+                "derivcrossneg2",
+                "derivcrosscontneg2",
+                "derivcrossneg5",
+                "derivcrosscontneg5",
+            ],
+            Self::FindWhen => &[
+                "v(1)",
+                "v(2)",
+                "whencrossconttest2",
+                "whencrossconttest2",
+                "whencrossconttest3",
+                "whencrossconttest4",
+                "whencrossneg2",
+                "whencrosscontneg2",
+                "whencrossneg5",
+                "whencrosscontneg5",
+            ],
+            Self::TriggerTarget => &["v(1)", "v(2)"],
+        }
+    }
+
+    fn historical_wrapper_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::Derivative => (
+                5548,
+                "0fdf11b63034827f7cf28932d0fc3b10f9e13b9d2dbb71e5d0ff11b3bbd970b3",
+            ),
+            Self::FindWhen => (
+                5554,
+                "049425724c3a99978314ea8f6f6f195284ddee5035559faece1311e5f4218911",
+            ),
+            Self::TriggerTarget => (
+                5173,
+                "10dfe7487e5c7b0519644326465be4ecc5143f76661822a0ad8f3f08ce463ee6",
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceRemoveUnusedKind {
     ReplaceGround,
     LiteralGroundNames,
@@ -3585,6 +3782,12 @@ struct XyceMixedMeasurementReferenceRow {
     value: XyceMeasurementReferenceValue,
     trigger_axis: Option<XyceMeasurementReferenceValue>,
     target_axis: Option<XyceMeasurementReferenceValue>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct XyceMeasureContGsRow {
+    mixed: XyceMixedMeasurementReferenceRow,
+    event_axis: Option<XyceMeasurementReferenceValue>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -5660,6 +5863,23 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(kind) = XyceMeasureContTranKind::for_record(&deck.relative_path) {
+            let contract = "measure_cont_tran_removed_wrapper";
+            let result = match self.validate_measure_cont_tran_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(kind) = XyceAbmTransientKind::for_record(&deck.relative_path) {
             let contract = "abm_generated_gold_transient_wrapper";
             let result = match self.validate_abm_transient_oracle(deck, kind, start) {
@@ -6217,6 +6437,1284 @@ impl XyceTestRunner {
             mismatches: Vec::new(),
             duration_ms: start.elapsed().as_millis(),
             contract: contract.to_string(),
+        }
+    }
+
+    fn validate_measure_cont_tran_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceMeasureContTranKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        let source_bytes = self.validate_measure_cont_tran_provenance(deck, kind)?;
+        self.check_measure_cont_tran_deadline(start, "provenance")?;
+        let source = std::str::from_utf8(&source_bytes)
+            .map_err(|error| format!("MEASURE_CONT source is not UTF-8: {error}"))?
+            .to_string();
+        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+            .map_err(|error| format!("MEASURE_CONT parse failed: {error}"))?;
+        let print_output = Self::single_tran_print_output_request(&source)?;
+        if print_output.file.is_some()
+            || print_output
+                .format
+                .as_deref()
+                .is_some_and(|format| !Self::tran_print_format_is_prn_compatible(format))
+        {
+            return Err("MEASURE_CONT requires one ordinary default-format .PRINT TRAN".into());
+        }
+        let print = XycePrintRequest {
+            probes: print_output.probes,
+        };
+        let tran = Self::single_tran_analysis(&netlist)?;
+        Self::validate_measure_cont_tran_plan(&netlist, &print, &tran, kind)?;
+
+        let reference_path = kind
+            .prn()
+            .map(|(path, _)| self.root.join(path))
+            .unwrap_or_else(|| self.root.join(kind.mt0_relative_path()));
+        let plan = XyceStaticTranPlan {
+            deck_path: deck.path.clone(),
+            reference_path,
+            source,
+            print,
+            output_override: false,
+            timeint_conststep: false,
+            tran,
+            steps: Vec::new(),
+            wrapper_tolerance: None,
+            contract: XyceStaticTranContract::WrapperStatic,
+            comparison_mode: XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            },
+        };
+        let result = self
+            .run_transient_family_netlist(&plan, &netlist, start, None)
+            .map_err(|error| match error {
+                SimulationError::Aborted => format!(
+                    "MEASURE_CONT native execution exceeded timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                other => format!("MEASURE_CONT native execution failed: {other}"),
+            })?;
+        self.check_measure_cont_tran_deadline(start, "native execution")?;
+
+        let scalar = crate::analysis::advanced::evaluate_tran_measurements(&netlist, &result);
+        let continuous =
+            crate::analysis::advanced::evaluate_tran_continuous_measurements(&netlist, &result);
+        let mt0_path = self.root.join(kind.mt0_relative_path());
+        let mismatches = self.compare_analysis_measurement_outputs(
+            std::slice::from_ref(&mt0_path),
+            &[],
+            &scalar,
+            &continuous,
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            netlist.options.measure_fail_output,
+            netlist.options.measure_default_value,
+            false,
+            &netlist.measurements,
+            "TRAN",
+            "TRAN_CONT",
+        )?;
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "MEASURE_CONT aggregate mt0 comparison produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ));
+        }
+
+        self.validate_measure_cont_gs_semantics(kind, &netlist, &continuous)?;
+        self.validate_measure_cont_counterfactual(kind, &netlist, &scalar, &continuous, &mt0_path)?;
+
+        if let Some((relative, _)) = kind.prn() {
+            let reference = Self::parse_xyce_verify_tran_reference_file(&self.root.join(relative))?;
+            let actual = Self::measure_cont_prn_table_on_reference_grid(
+                &plan, &netlist, &result, &reference,
+            )?;
+            let mismatches = self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+                &reference,
+                &actual,
+                XyceVerifyTransientTolerance::release_7_10_default(),
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+            if !mismatches.is_empty() {
+                return Err(format!(
+                    "MEASURE_CONT Release 7.10 PRN comparison produced {} mismatch(es): {mismatches:?}",
+                    mismatches.len()
+                ));
+            }
+            self.validate_measure_cont_prn_counterfactual(&reference, &actual, &plan, &netlist)?;
+            Self::validate_measure_cont_remeasure(&netlist, &result, Some(&actual))?;
+        } else {
+            Self::validate_measure_cont_remeasure(&netlist, &result, None)?;
+        }
+        self.check_measure_cont_tran_deadline(
+            start,
+            "measurement, PRN, remeasure, and counterfactual validation",
+        )
+    }
+
+    fn measure_cont_prn_table_on_reference_grid(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+        reference: &XycePrnTable,
+    ) -> Result<XycePrnTable, String> {
+        let layout = Self::transient_reference_layout(reference)?;
+        let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
+        let measurement_traces = Self::measurement_output_traces(
+            netlist,
+            &result.time,
+            plan.print.probes.iter().map(String::as_str),
+            "TRAN",
+            "TRAN_CONT",
+            &[],
+            |trace_netlist| {
+                crate::analysis::advanced::evaluate_tran_continuous_measurements(
+                    trace_netlist,
+                    result,
+                )
+            },
+        )?;
+        let mut stateful = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::stateful_tran_print_expression(probe, netlist))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut rows = Vec::with_capacity(reference.rows.len());
+        for (row_index, reference_row) in reference.rows.iter().enumerate() {
+            let printed_time = *reference_row.get(layout.time_column).ok_or_else(|| {
+                format!("MEASURE_CONT PRN reference row {row_index} has no TIME value")
+            })?;
+            let time = printed_time / time_scale;
+            let mut row = vec![row_index as Value, printed_time];
+            for (probe, stateful) in plan.print.probes.iter().zip(&mut stateful) {
+                let value = if let Some(trace) = measurement_traces.get(&probe.to_ascii_uppercase())
+                {
+                    let tolerance = Self::default_prn_time_quantization_tolerance(time);
+                    trace
+                        .iter()
+                        .filter(|(activation_index, _)| {
+                            result
+                                .time
+                                .get(*activation_index)
+                                .is_some_and(|activation_time| *activation_time <= time + tolerance)
+                        })
+                        .map(|(_, value)| *value)
+                        .next_back()
+                        .unwrap_or(0.0)
+                } else {
+                    match stateful {
+                        Some(runtime) => Self::evaluate_stateful_tran_print_expression(
+                            runtime, netlist, result, time,
+                        )?,
+                        None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
+                    }
+                };
+                if !value.is_finite() {
+                    return Err(format!(
+                        "MEASURE_CONT PRN probe '{probe}' is non-finite at time {time}"
+                    ));
+                }
+                row.push(value);
+            }
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "MEASURE_CONT PRN row width {} does not match reference width {}",
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            rows.push(row);
+        }
+        Ok(XycePrnTable {
+            columns: reference.columns.clone(),
+            rows,
+        })
+    }
+
+    fn check_measure_cont_tran_deadline(&self, start: Instant, phase: &str) -> Result<(), String> {
+        if DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1)).is_aborted() {
+            Err(format!(
+                "MEASURE_CONT shared deadline expired during {phase} ({}ms)",
+                self.config.max_time_per_test_ms
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_measure_cont_tran_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceMeasureContTranKind,
+    ) -> Result<Vec<u8>, String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err(format!(
+                "MEASURE_CONT record '{}' lost exact removed-wrapper ownership",
+                kind.record()
+            ));
+        }
+        let canonical_deck = deck
+            .path
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize MEASURE_CONT record: {error}"))?;
+        let canonical_expected = self
+            .root
+            .join(kind.source_relative_path())
+            .canonicalize()
+            .map_err(|error| format!("canonical MEASURE_CONT record is missing: {error}"))?;
+        if canonical_deck != canonical_expected {
+            return Err("MEASURE_CONT record resolved outside its canonical corpus path".into());
+        }
+
+        self.validate_measure_cont_manifest_family()?;
+        self.validate_measure_cont_family_census(
+            "Netlists/MEASURE_CONT",
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_COUNT,
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_NAMES_BLAKE3,
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_CONTENT_BLAKE3,
+        )?;
+        self.validate_measure_cont_family_census(
+            "OutputData/MEASURE_CONT",
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_COUNT,
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_NAMES_BLAKE3,
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_CONTENT_BLAKE3,
+        )?;
+
+        let mut candidates = Vec::new();
+        let mut candidate_content = Vec::new();
+        let mut artifacts = Vec::new();
+        let mut owner_bytes = None;
+        for candidate in XyceMeasureContTranKind::ALL {
+            let source_path = self.root.join(candidate.source_relative_path());
+            let canonical = Self::validate_measure_cont_regular_text_identity(
+                &source_path,
+                candidate.source_identity(),
+                "MEASURE_CONT source",
+            )?;
+            candidates.push(candidate.record().to_string());
+            candidate_content.push(format!(
+                "{}\t{}",
+                candidate.record(),
+                blake3::hash(&canonical).to_hex()
+            ));
+            if candidate == kind {
+                owner_bytes = Some(canonical.clone());
+            }
+            for (relative, identity, label) in [
+                (candidate.gs_relative_path(), candidate.gs_identity(), "GS"),
+                (
+                    candidate.mt0_relative_path(),
+                    candidate.mt0_identity(),
+                    "mt0",
+                ),
+            ] {
+                let bytes = Self::validate_measure_cont_regular_text_identity(
+                    &self.root.join(relative),
+                    identity,
+                    label,
+                )?;
+                artifacts.push(format!("{relative}\t{}", blake3::hash(&bytes).to_hex()));
+            }
+            if let Some((relative, identity)) = candidate.prn() {
+                let bytes = Self::validate_measure_cont_regular_text_identity(
+                    &self.root.join(relative),
+                    identity,
+                    "PRN",
+                )?;
+                artifacts.push(format!("{relative}\t{}", blake3::hash(&bytes).to_hex()));
+            }
+        }
+        candidates.sort();
+        candidate_content.sort();
+        artifacts.sort();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let candidate_content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let artifact_hash = blake3::hash(artifacts.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let manifest = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| candidates.binary_search(record).is_ok())
+            .cloned()
+            .collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XyceMeasureContTranKind::ALL.len()
+            || candidate_hash != XYCE_MEASURE_CONT_TRAN_CANDIDATE_BLAKE3
+            || candidate_content_hash != XYCE_MEASURE_CONT_TRAN_CANDIDATE_CONTENT_BLAKE3
+            || artifact_hash != XYCE_MEASURE_CONT_TRAN_ARTIFACT_CONTENT_BLAKE3
+            || manifest != candidates
+            || manifest_hash != XYCE_MEASURE_CONT_TRAN_MANIFEST_BLAKE3
+        {
+            return Err(format!(
+                "MEASURE_CONT candidate/artifact/manifest provenance changed: candidates={}/{candidate_hash}/{candidate_content_hash}, artifacts={}/{artifact_hash}, manifest={}/{manifest_hash}",
+                candidates.len(),
+                artifacts.len(),
+                manifest.len()
+            ));
+        }
+        Self::validate_measure_cont_historical_identities()?;
+        owner_bytes.ok_or_else(|| "MEASURE_CONT owner was not covered by provenance".to_string())
+    }
+
+    fn validate_measure_cont_manifest_family(&self) -> Result<(), String> {
+        let path = self.root.join(HARNESS_MANIFEST_FILE);
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            format!(
+                "failed to inspect MEASURE_CONT harness manifest {}: {error}",
+                path.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(format!(
+                "MEASURE_CONT harness manifest {} must be a regular non-symlink file",
+                path.display()
+            ));
+        }
+        let bytes = fs::read(&path).map_err(|error| {
+            format!(
+                "failed to read MEASURE_CONT harness manifest {}: {error}",
+                path.display()
+            )
+        })?;
+        let canonical = Self::canonical_lf_text_identity("MEASURE_CONT harness manifest", &bytes)?;
+        let source = std::str::from_utf8(&canonical)
+            .map_err(|error| format!("MEASURE_CONT harness manifest is not UTF-8: {error}"))?;
+        let mut paths = Vec::new();
+        let mut lines = Vec::new();
+        for (line_index, line) in source.lines().enumerate() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((raw_path, raw_contract)) = line.split_once('\t') else {
+                if line.to_ascii_lowercase().contains("measure_cont") {
+                    return Err(format!(
+                        "MEASURE_CONT harness manifest line {} has no tab-delimited contract",
+                        line_index + 1
+                    ));
+                }
+                continue;
+            };
+            let normalized_path = raw_path.trim().replace('\\', "/");
+            if !normalized_path
+                .to_ascii_lowercase()
+                .starts_with("netlists/measure_cont/")
+            {
+                continue;
+            }
+            if raw_path != normalized_path.as_str()
+                || raw_contract != REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+                || line != format!("{normalized_path}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}")
+            {
+                return Err(format!(
+                    "MEASURE_CONT harness manifest line {} is not in canonical path-tab-contract form",
+                    line_index + 1
+                ));
+            }
+            paths.push(normalized_path);
+            lines.push(line.to_string());
+        }
+        paths.sort();
+        lines.sort();
+        let path_hash = blake3::hash(paths.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let line_hash = blake3::hash(lines.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if paths.len() != XYCE_MEASURE_CONT_MANIFEST_FAMILY_COUNT
+            || path_hash != XYCE_MEASURE_CONT_MANIFEST_FAMILY_PATHS_BLAKE3
+            || lines.len() != XYCE_MEASURE_CONT_MANIFEST_FAMILY_COUNT
+            || line_hash != XYCE_MEASURE_CONT_MANIFEST_FAMILY_LINES_BLAKE3
+        {
+            return Err(format!(
+                "MEASURE_CONT harness manifest family changed: paths={}/{path_hash}, lines={}/{line_hash}",
+                paths.len(),
+                lines.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_regular_text_identity(
+        path: &Path,
+        expected: (usize, &str),
+        label: &str,
+    ) -> Result<Vec<u8>, String> {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| format!("failed to inspect {label} {}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(format!(
+                "{label} {} must be a regular non-symlink file",
+                path.display()
+            ));
+        }
+        let bytes = fs::read(path)
+            .map_err(|error| format!("failed to read {label} {}: {error}", path.display()))?;
+        let canonical = Self::canonical_lf_text_identity(label, &bytes)?;
+        Self::validate_xdm_replaceground_identity(
+            label,
+            &path.display().to_string(),
+            &canonical,
+            expected,
+        )?;
+        Ok(canonical)
+    }
+
+    fn validate_measure_cont_family_census(
+        &self,
+        relative: &str,
+        expected_count: usize,
+        expected_names_hash: &str,
+        expected_content_hash: &str,
+    ) -> Result<(), String> {
+        fn visit(
+            base: &Path,
+            directory: &Path,
+            names: &mut Vec<String>,
+            content: &mut Vec<String>,
+        ) -> Result<(), String> {
+            let metadata = fs::symlink_metadata(directory).map_err(|error| {
+                format!(
+                    "failed to inspect MEASURE_CONT family {}: {error}",
+                    directory.display()
+                )
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+                return Err(format!(
+                    "MEASURE_CONT family {} must contain only regular directories",
+                    directory.display()
+                ));
+            }
+            for entry in fs::read_dir(directory)
+                .map_err(|error| format!("failed to read {}: {error}", directory.display()))?
+            {
+                let entry = entry.map_err(|error| {
+                    format!(
+                        "failed to inspect member of {}: {error}",
+                        directory.display()
+                    )
+                })?;
+                let path = entry.path();
+                let metadata = fs::symlink_metadata(&path)
+                    .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "MEASURE_CONT family member {} is a symlink",
+                        path.display()
+                    ));
+                }
+                if metadata.file_type().is_dir() {
+                    visit(base, &path, names, content)?;
+                    continue;
+                }
+                if !metadata.file_type().is_file() {
+                    return Err(format!(
+                        "MEASURE_CONT family member {} is not a regular file",
+                        path.display()
+                    ));
+                }
+                let name = path
+                    .strip_prefix(base)
+                    .map_err(|_| "MEASURE_CONT family member escaped its base".to_string())?
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .to_ascii_lowercase();
+                let bytes = fs::read(&path)
+                    .map_err(|error| format!("failed to hash {}: {error}", path.display()))?;
+                let canonical = XyceTestRunner::canonical_lf_text_identity(
+                    &format!("MEASURE_CONT family member {}", path.display()),
+                    &bytes,
+                )?;
+                names.push(name.clone());
+                content.push(format!("{name}\0{}", blake3::hash(&canonical).to_hex()));
+            }
+            Ok(())
+        }
+
+        let base = self.root.join(relative);
+        let mut names = Vec::new();
+        let mut content = Vec::new();
+        visit(&base, &base, &mut names, &mut content)?;
+        names.sort();
+        content.sort();
+        let names_hash = blake3::hash(names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if names.len() != expected_count
+            || names_hash != expected_names_hash
+            || content.len() != expected_count
+            || content_hash != expected_content_hash
+        {
+            return Err(format!(
+                "MEASURE_CONT family census changed for {relative}: names={}/{names_hash}, content={}/{content_hash}",
+                names.len(),
+                content.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_historical_identities() -> Result<(), String> {
+        const TOOLS: [(usize, &str); 3] = [
+            (
+                44922,
+                "a8f47987c43ac63e7954b8a89cfaddb7edc8fbff50d5bbab43a57f417dde7c0d",
+            ),
+            (
+                7465,
+                "a700143baddab265ca2e74d69541432fb27ae66600c3fee71968797fc78efcb0",
+            ),
+            (
+                59566,
+                "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
+            ),
+        ];
+        let wrappers = XyceMeasureContTranKind::ALL
+            .into_iter()
+            .map(XyceMeasureContTranKind::historical_wrapper_identity)
+            .collect::<BTreeSet<_>>();
+        if wrappers.len() != 3
+            || wrappers.iter().chain(TOOLS.iter()).any(|(bytes, sha256)| {
+                *bytes == 0
+                    || sha256.len() != 64
+                    || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        {
+            return Err("MEASURE_CONT Release-7.10 wrapper/tool provenance is malformed".into());
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_tran_plan(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        tran: &XyceTranAnalysis,
+        kind: XyceMeasureContTranKind,
+    ) -> Result<(), String> {
+        let probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if tran.step.to_bits() != 0.0f64.to_bits()
+            || tran.stop.to_bits() != 0.01f64.to_bits()
+            || tran.start.is_some()
+            || tran.max_step.is_some()
+            || tran.uic
+            || probes != kind.expected_print_probes()
+            || netlist.analyses.len() != 1
+            || netlist.output_requests.len() != netlist.measurements.len() + 1
+            || !netlist.diagnostics.is_empty()
+            || netlist.options.measure_use_cont_files != Some(false)
+        {
+            return Err(format!(
+                "MEASURE_CONT exact TRAN/PRINT/options contract changed: tran={tran:?}, probes={probes:?}, analyses={}, outputs={}, diagnostics={}, USE_CONT_FILES={:?}",
+                netlist.analyses.len(),
+                netlist.output_requests.len(),
+                netlist.diagnostics.len(),
+                netlist.options.measure_use_cont_files
+            ));
+        }
+        if !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !Self::step_commands(netlist)?.is_empty()
+            || netlist.elements.len() != 4
+        {
+            return Err(
+                "MEASURE_CONT acquired unrelated topology, hierarchy, data, or steps".into(),
+            );
+        }
+
+        let (expected_scalar, expected_continuous) = kind.expected_measurement_counts();
+        let scalar = netlist
+            .measurements
+            .iter()
+            .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"))
+            .count();
+        let continuous = netlist
+            .measurements
+            .iter()
+            .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
+            .count();
+        if scalar != expected_scalar
+            || continuous != expected_continuous
+            || scalar + continuous != netlist.measurements.len()
+        {
+            return Err(format!(
+                "MEASURE_CONT declaration census changed: TRAN={scalar}/{expected_scalar}, TRAN_CONT={continuous}/{expected_continuous}, total={}",
+                netlist.measurements.len()
+            ));
+        }
+        for statement in &netlist.measurements {
+            let valid = match kind {
+                XyceMeasureContTranKind::Derivative => matches!(
+                    statement.measure_type,
+                    crate::analysis::MeasureType::Derivative { .. }
+                ),
+                XyceMeasureContTranKind::FindWhen => matches!(
+                    statement.measure_type,
+                    crate::analysis::MeasureType::Find { .. }
+                        | crate::analysis::MeasureType::When { .. }
+                ),
+                XyceMeasureContTranKind::TriggerTarget => {
+                    matches!(
+                        statement.measure_type,
+                        crate::analysis::MeasureType::Delay { .. }
+                    )
+                }
+            };
+            if !valid || statement.print_policy != crate::analysis::MeasurePrintPolicy::All {
+                return Err(format!(
+                    "MEASURE_CONT declaration '{}' changed type or print policy",
+                    statement.name
+                ));
+            }
+        }
+
+        let expected_vpwl1 = if kind == XyceMeasureContTranKind::Derivative {
+            &[
+                (0.0, 0.1),
+                (0.0025, 0.5),
+                (0.005, 0.0),
+                (0.0074, 0.4),
+                (0.01, 0.0),
+            ][..]
+        } else {
+            &[
+                (0.0, 0.1),
+                (0.0025, 0.5),
+                (0.005, 0.0),
+                (0.0075, 0.4),
+                (0.01, 0.0),
+            ][..]
+        };
+        Self::validate_measure_cont_pwl(netlist, "VPWL1", ["1", "0"], expected_vpwl1)?;
+        Self::validate_measure_cont_pwl(netlist, "VPWL2", ["2", "0"], &[(0.0, 0.5), (0.01, 0.0)])?;
+        for (name, nodes) in [("R1", ["1", "0"]), ("R2", ["2", "0"])] {
+            let resistor = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("MEASURE_CONT is missing {name}"))?;
+            if resistor.nodes != nodes
+                || !matches!(&resistor.kind, ElementKind::Resistor { value, value_expr: None, model: None, instance_params, deferred_params } if value.to_bits() == 100.0f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+            {
+                return Err(format!(
+                    "MEASURE_CONT resistor {name} changed exact topology/value"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_pwl(
+        netlist: &Netlist,
+        name: &str,
+        nodes: [&str; 2],
+        expected: &[(Value, Value)],
+    ) -> Result<(), String> {
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .ok_or_else(|| format!("MEASURE_CONT is missing {name}"))?;
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Pwl {
+            points,
+            delay,
+            repeat_from,
+        }) = &source.kind
+        else {
+            return Err(format!("MEASURE_CONT {name} is not a PWL voltage source"));
+        };
+        if source.nodes != nodes
+            || delay.to_bits() != 0.0f64.to_bits()
+            || repeat_from.is_some()
+            || points.len() != expected.len()
+            || points.iter().zip(expected).any(|(actual, expected)| {
+                actual.0.to_bits() != expected.0.to_bits()
+                    || actual.1.to_bits() != expected.1.to_bits()
+            })
+        {
+            return Err(format!("MEASURE_CONT {name} PWL topology changed"));
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_remeasure(
+        netlist: &Netlist,
+        result: &TransientResult,
+        serialized_table: Option<&XycePrnTable>,
+    ) -> Result<(), String> {
+        // Release 7.10's wrapper serializes the native waveform to default
+        // scientific PRN text, reads that data back, and compares the newly
+        // produced mt0 stream to the original measure run. Reconstruct the
+        // same data boundary (including printed precision and duplicate-time
+        // suppression) before the independent second measurement pass.
+        let serialized = Self::measure_cont_serialized_remeasure_result(result, serialized_table)?;
+        let original_scalar =
+            crate::analysis::advanced::evaluate_tran_measurements(netlist, result);
+        let original_continuous =
+            crate::analysis::advanced::evaluate_tran_continuous_measurements(netlist, result);
+        let remeasured_scalar =
+            crate::analysis::advanced::evaluate_tran_measurements(netlist, &serialized);
+        let remeasured_continuous =
+            crate::analysis::advanced::evaluate_tran_continuous_measurements(netlist, &serialized);
+        let original = Self::mixed_measurement_rows(
+            &original_scalar,
+            &original_continuous,
+            &netlist.measurements,
+            "TRAN",
+            "TRAN_CONT",
+        )?;
+        let remeasured = Self::mixed_measurement_rows(
+            &remeasured_scalar,
+            &remeasured_continuous,
+            &netlist.measurements,
+            "TRAN",
+            "TRAN_CONT",
+        )?;
+        if original.len() != remeasured.len() {
+            return Err(format!(
+                "MEASURE_CONT serialized remeasure emitted {} row(s), original run emitted {}",
+                remeasured.len(),
+                original.len()
+            ));
+        }
+        let mut mismatches = Vec::new();
+        for (row, (expected, actual)) in original.iter().zip(&remeasured).enumerate() {
+            if !expected.name.eq_ignore_ascii_case(&actual.name) {
+                return Err(format!(
+                    "MEASURE_CONT serialized remeasure row {row} is '{}' but original row is '{}'",
+                    actual.name, expected.name
+                ));
+            }
+            Self::compare_mixed_measurement_value(
+                &mut mismatches,
+                row,
+                &expected.name,
+                expected.value,
+                actual.value,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:trig", expected.name),
+                expected.trigger_axis,
+                actual.trigger_axis,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:targ", expected.name),
+                expected.target_axis,
+                actual.target_axis,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            )?;
+        }
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "MEASURE_CONT serialized remeasure comparison produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn measure_cont_serialized_remeasure_result(
+        result: &TransientResult,
+        serialized_table: Option<&XycePrnTable>,
+    ) -> Result<TransientResult, String> {
+        Self::validate_transient_result_time_grid(result)?;
+        let (source_time, source_voltages) = if let Some(table) = serialized_table {
+            if table.columns.len() < 2
+                || !table.columns[0].eq_ignore_ascii_case("INDEX")
+                || !table.columns[1].eq_ignore_ascii_case("TIME")
+                || table
+                    .rows
+                    .iter()
+                    .any(|row| row.len() != table.columns.len())
+            {
+                return Err("MEASURE_CONT serialized PRN table has an invalid shape".into());
+            }
+            let time = table.rows.iter().map(|row| row[1]).collect::<Vec<_>>();
+            let mut voltages = Vec::with_capacity(result.node_names.len());
+            for name in &result.node_names {
+                let probe = format!("V({name})");
+                let column = table
+                    .columns
+                    .iter()
+                    .position(|candidate| candidate.eq_ignore_ascii_case(&probe))
+                    .ok_or_else(|| {
+                        format!("MEASURE_CONT serialized PRN table omitted physical probe {probe}")
+                    })?;
+                voltages.push(table.rows.iter().map(|row| row[column]).collect::<Vec<_>>());
+            }
+            (time, voltages)
+        } else {
+            (result.time.clone(), result.voltages.clone())
+        };
+        let mut indices = Vec::with_capacity(source_time.len());
+        let mut time = Vec::with_capacity(source_time.len());
+        for (index, value) in source_time.iter().copied().enumerate() {
+            let printed = Self::xyce_default_prn_roundtrip(value)?;
+            if time.last().is_some_and(|previous| *previous > printed) {
+                return Err(format!(
+                    "MEASURE_CONT serialized PRN time regressed at accepted point {index}"
+                ));
+            }
+            if time.last() == Some(&printed) {
+                continue;
+            }
+            indices.push(index);
+            time.push(printed);
+        }
+        let serialize_waveforms = |role: &str,
+                                   waveforms: &[Vec<Value>],
+                                   source_len: usize|
+         -> Result<Vec<Vec<Value>>, String> {
+            waveforms
+                .iter()
+                .enumerate()
+                .map(|(waveform_index, waveform)| {
+                    if waveform.len() != source_len {
+                        return Err(format!(
+                            "MEASURE_CONT {role} waveform {waveform_index} has {} samples for {source_len} serialized times",
+                            waveform.len(),
+                        ));
+                    }
+                    indices
+                        .iter()
+                        .map(|index| Self::xyce_default_prn_roundtrip(waveform[*index]))
+                        .collect()
+                })
+                .collect()
+        };
+        let (branch_currents, branch_names) = if serialized_table.is_some() {
+            (Vec::new(), Vec::new())
+        } else {
+            (
+                serialize_waveforms("branch-current", &result.branch_currents, result.time.len())?,
+                result.branch_names.clone(),
+            )
+        };
+        Ok(TransientResult {
+            time,
+            voltages: serialize_waveforms("voltage", &source_voltages, source_time.len())?,
+            branch_currents,
+            num_nodes: result.num_nodes,
+            node_names: result.node_names.clone(),
+            branch_names,
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+        })
+    }
+
+    fn validate_measure_cont_counterfactual(
+        &self,
+        kind: XyceMeasureContTranKind,
+        netlist: &Netlist,
+        scalar: &[crate::analysis::MeasureResult],
+        continuous: &[crate::analysis::ContinuousMeasureResult],
+        mt0_path: &Path,
+    ) -> Result<(), String> {
+        let compare = |label: &str,
+                       counterfactual: &[crate::analysis::ContinuousMeasureResult]|
+         -> Result<(), String> {
+            let mismatches = self.compare_analysis_measurement_outputs(
+                &[mt0_path.to_path_buf()],
+                &[],
+                scalar,
+                counterfactual,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                netlist.options.measure_fail_output,
+                netlist.options.measure_default_value,
+                false,
+                &netlist.measurements,
+                "TRAN",
+                "TRAN_CONT",
+            )?;
+            if mismatches.is_empty() {
+                Err(format!(
+                    "MEASURE_CONT {label} counterfactual unexpectedly reproduced the aggregate oracle"
+                ))
+            } else {
+                Ok(())
+            }
+        };
+
+        let mut numeric = continuous.to_vec();
+        let record = numeric
+            .iter_mut()
+            .find_map(|result| result.records.first_mut())
+            .ok_or_else(|| {
+                "MEASURE_CONT produced no successful event to test causality".to_string()
+            })?;
+        record.value += record.value.abs().max(1.0);
+        compare("numeric-value", &numeric)?;
+
+        let mut reordered = continuous.to_vec();
+        let pair = reordered.iter_mut().find_map(|result| {
+            result
+                .records
+                .windows(2)
+                .position(|window| window[0] != window[1])
+                .map(|index| (&mut result.records, index))
+        });
+        let Some((records, index)) = pair else {
+            return Err(
+                "MEASURE_CONT produced no distinct adjacent events to test ordering".into(),
+            );
+        };
+        records.swap(index, index + 1);
+        compare("event-order", &reordered)?;
+
+        if kind == XyceMeasureContTranKind::TriggerTarget {
+            let mut metadata = continuous.to_vec();
+            let partial = metadata.iter_mut().find(|result| {
+                result.failure_metadata.is_some_and(|metadata| {
+                    metadata.trigger_axis.is_some() || metadata.target_axis.is_some()
+                })
+            });
+            let Some(partial) = partial else {
+                return Err(
+                    "MEASURE_CONT TRIG/TARG produced no partial failed endpoint metadata".into(),
+                );
+            };
+            partial.failure_metadata = None;
+            let comparison = self.compare_analysis_measurement_outputs(
+                &[mt0_path.to_path_buf()],
+                &[],
+                scalar,
+                &metadata,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                netlist.options.measure_fail_output,
+                netlist.options.measure_default_value,
+                false,
+                &netlist.measurements,
+                "TRAN",
+                "TRAN_CONT",
+            );
+            match comparison {
+                Err(error) if error.contains("expects") && error.contains("omitted") => {}
+                Ok(mismatches) if !mismatches.is_empty() => {}
+                Err(error) => {
+                    return Err(format!(
+                        "MEASURE_CONT partial-metadata counterfactual failed outside the expected comparator: {error}"
+                    ));
+                }
+                Ok(_) => {
+                    return Err(
+                        "MEASURE_CONT partial-metadata counterfactual reproduced the aggregate oracle"
+                            .into(),
+                    );
+                }
+            }
+        } else {
+            let mut detected = false;
+            'candidate: for (result_index, result) in continuous.iter().enumerate() {
+                for (record_index, record) in result.records.iter().enumerate() {
+                    let Some(axis) = record.event_axis else {
+                        continue;
+                    };
+                    let mut event_axis = continuous.to_vec();
+                    event_axis[result_index].records[record_index].event_axis =
+                        Some(axis + axis.abs().max(1.0));
+                    match self.validate_measure_cont_gs_semantics(kind, netlist, &event_axis) {
+                        Err(error) if error.contains("GS event metadata produced") => {
+                            detected = true;
+                            break 'candidate;
+                        }
+                        Err(error) => {
+                            return Err(format!(
+                                "MEASURE_CONT event-axis counterfactual failed outside the expected comparator: {error}"
+                            ));
+                        }
+                        Ok(()) => {}
+                    }
+                }
+            }
+            if !detected {
+                return Err(
+                    "MEASURE_CONT event-axis counterfactual reproduced every GS row".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_prn_counterfactual(
+        &self,
+        reference: &XycePrnTable,
+        actual: &XycePrnTable,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        let measurement_names = netlist
+            .measurements
+            .iter()
+            .map(|statement| statement.name.to_ascii_uppercase())
+            .collect::<BTreeSet<_>>();
+        let column = plan
+            .print
+            .probes
+            .iter()
+            .position(|probe| measurement_names.contains(&probe.to_ascii_uppercase()))
+            .map(|index| index + 2)
+            .ok_or_else(|| "MEASURE_CONT PRN contains no live measurement column".to_string())?;
+        let mut counterfactual = actual.clone();
+        let row = counterfactual
+            .rows
+            .iter_mut()
+            .find(|row| row.get(column).is_some_and(|value| *value != 0.0))
+            .ok_or_else(|| {
+                "MEASURE_CONT PRN contains no initialized live measurement value".to_string()
+            })?;
+        row[column] = 0.0;
+        let mismatches = self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+            reference,
+            &counterfactual,
+            XyceVerifyTransientTolerance::release_7_10_default(),
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        )?;
+        if mismatches.is_empty() {
+            Err(
+                "MEASURE_CONT live-trace activation counterfactual reproduced the PRN oracle"
+                    .into(),
+            )
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_measure_cont_gs_semantics(
+        &self,
+        kind: XyceMeasureContTranKind,
+        netlist: &Netlist,
+        continuous: &[crate::analysis::ContinuousMeasureResult],
+    ) -> Result<(), String> {
+        let gs_path = self.root.join(kind.gs_relative_path());
+        let mt0_path = self.root.join(kind.mt0_relative_path());
+        let gs = Self::parse_measure_cont_gs_file(&gs_path)?;
+        let mt0 = Self::parse_mixed_measurement_reference_file(&mt0_path)?;
+        if gs.len() != mt0.len() {
+            return Err(format!(
+                "MEASURE_CONT GS contains {} result row(s), but mt0 contains {}",
+                gs.len(),
+                mt0.len()
+            ));
+        }
+        let mut mismatches = Vec::new();
+        for (row, (gs_row, mt0_row)) in gs.iter().zip(&mt0).enumerate() {
+            if !gs_row.mixed.name.eq_ignore_ascii_case(&mt0_row.name) {
+                return Err(format!(
+                    "MEASURE_CONT GS row {row} is '{}' but mt0 row is '{}'",
+                    gs_row.mixed.name, mt0_row.name
+                ));
+            }
+            Self::compare_mixed_measurement_value(
+                &mut mismatches,
+                row,
+                &gs_row.mixed.name,
+                mt0_row.value,
+                gs_row.mixed.value,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:trig", gs_row.mixed.name),
+                mt0_row.trigger_axis,
+                gs_row.mixed.trigger_axis,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:targ", gs_row.mixed.name),
+                mt0_row.target_axis,
+                gs_row.mixed.target_axis,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            )?;
+        }
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "MEASURE_CONT GS/mt0 semantic relation produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ));
+        }
+
+        let mut gs_index = 0usize;
+        let mut continuous_index = 0usize;
+        for declaration in &netlist.measurements {
+            if declaration.analysis.eq_ignore_ascii_case("TRAN") {
+                gs_index += 1;
+                continue;
+            }
+            let actual = continuous.get(continuous_index).ok_or_else(|| {
+                format!(
+                    "TRAN_CONT evaluator omitted declaration '{}'",
+                    declaration.name
+                )
+            })?;
+            continuous_index += 1;
+            let row_count = if actual.failure.is_some() {
+                1
+            } else {
+                actual.records.len()
+            };
+            for record_index in 0..row_count {
+                let expected = gs
+                    .get(gs_index)
+                    .ok_or_else(|| format!("GS ended before declaration '{}'", declaration.name))?;
+                if !expected.mixed.name.eq_ignore_ascii_case(&declaration.name) {
+                    return Err(format!(
+                        "GS row {gs_index} is '{}' but declaration order requires '{}'",
+                        expected.mixed.name, declaration.name
+                    ));
+                }
+                if let Some(record) = actual.records.get(record_index) {
+                    if let Some(expected_event_axis) = expected.event_axis {
+                        Self::compare_continuous_measurement_value(
+                            &mut mismatches,
+                            gs_index,
+                            &format!("{}:event", declaration.name),
+                            expected_event_axis,
+                            record.event_axis,
+                            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                        )?;
+                    }
+                }
+                gs_index += 1;
+            }
+        }
+        if continuous_index != continuous.len() || gs_index != gs.len() {
+            return Err(format!(
+                "MEASURE_CONT GS declaration projection left rows/results unclaimed: gs={gs_index}/{}, continuous={continuous_index}/{}",
+                gs.len(),
+                continuous.len()
+            ));
+        }
+        if mismatches.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "MEASURE_CONT GS event metadata produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ))
+        }
+    }
+
+    fn parse_measure_cont_gs_file(path: &Path) -> Result<Vec<XyceMeasureContGsRow>, String> {
+        let source = fs::read_to_string(path)
+            .map_err(|error| format!("failed to read GS {}: {error}", path.display()))?;
+        let mut rows = Vec::new();
+        for (line_index, raw_line) in source.lines().enumerate() {
+            let line_number = line_index + 1;
+            let line = raw_line.trim();
+            let Some((raw_name, raw_fields)) = line.split_once('=') else {
+                continue;
+            };
+            let name = raw_name.trim();
+            if name.is_empty()
+                || name.chars().any(char::is_whitespace)
+                || name.eq_ignore_ascii_case("targ")
+                || name.eq_ignore_ascii_case("trig")
+            {
+                continue;
+            }
+            let fields = raw_fields.split_whitespace().collect::<Vec<_>>();
+            if fields.is_empty() {
+                return Err(format!(
+                    "{}:{line_number}: empty GS measurement row",
+                    path.display()
+                ));
+            }
+            let failed = fields.iter().any(|field| *field == "FAILED");
+            let value = if failed {
+                XyceMeasurementReferenceValue::Failed
+            } else {
+                Self::parse_measurement_reference_token(path, line_number, fields[0])?
+            };
+            let metadata = |label: &str| -> Result<Option<XyceMeasurementReferenceValue>, String> {
+                let Some(index) = fields
+                    .iter()
+                    .position(|field| field.eq_ignore_ascii_case(label))
+                else {
+                    return Ok(None);
+                };
+                if fields.get(index + 1) != Some(&"=") {
+                    return Err(format!(
+                        "{}:{line_number}: GS {label} metadata has no '='",
+                        path.display()
+                    ));
+                }
+                let Some(raw) = fields.get(index + 2) else {
+                    return Err(format!(
+                        "{}:{line_number}: GS {label} metadata has no value",
+                        path.display()
+                    ));
+                };
+                if raw.eq_ignore_ascii_case("not")
+                    && fields
+                        .get(index + 3)
+                        .is_some_and(|field| field.eq_ignore_ascii_case("found"))
+                {
+                    return Ok(Some(XyceMeasurementReferenceValue::Failed));
+                }
+                Self::parse_measurement_reference_token(path, line_number, raw).map(Some)
+            };
+            let trigger_axis = metadata("trig")?;
+            let target_axis = metadata("targ")?;
+            if trigger_axis.is_some() != target_axis.is_some() {
+                return Err(format!(
+                    "{}:{line_number}: GS trigger/target metadata is incomplete",
+                    path.display()
+                ));
+            }
+            let event_axis = fields
+                .windows(3)
+                .find(|window| {
+                    (window[0].eq_ignore_ascii_case("time") || window[0].eq_ignore_ascii_case("AT"))
+                        && window[1] == "="
+                })
+                .map(|window| Self::parse_measurement_reference_token(path, line_number, window[2]))
+                .transpose()?;
+            rows.push(XyceMeasureContGsRow {
+                mixed: XyceMixedMeasurementReferenceRow {
+                    name: name.to_string(),
+                    value,
+                    trigger_axis,
+                    target_axis,
+                },
+                event_axis,
+            });
+        }
+        if rows.is_empty() {
+            Err(format!(
+                "{} contains no GS measurement rows",
+                path.display()
+            ))
+        } else {
+            Ok(rows)
         }
     }
 
@@ -28896,6 +30394,20 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .iter()
             .map(|probe| Self::stateful_tran_print_expression(probe, netlist))
             .collect::<Result<Vec<_>, _>>()?;
+        let measurement_output_traces = Self::measurement_output_traces(
+            netlist,
+            &result.time,
+            plan.print.probes.iter().map(String::as_str),
+            "TRAN",
+            "TRAN_CONT",
+            &[],
+            |trace_netlist| {
+                crate::analysis::advanced::evaluate_tran_continuous_measurements(
+                    trace_netlist,
+                    result,
+                )
+            },
+        )?;
 
         let mut rows = Vec::with_capacity(output_times.len());
         for (index, time) in output_times.into_iter().enumerate() {
@@ -28903,11 +30415,28 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             row.push(index as Value);
             row.push(time * time_scale);
             for (probe, stateful) in plan.print.probes.iter().zip(&mut stateful_expressions) {
-                let value = match stateful {
-                    Some(runtime) => Self::evaluate_stateful_tran_print_expression(
-                        runtime, netlist, result, time,
-                    )?,
-                    None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
+                let value = if let Some(trace) =
+                    measurement_output_traces.get(&probe.to_ascii_uppercase())
+                {
+                    let tolerance = Self::default_prn_time_quantization_tolerance(time);
+                    trace
+                        .iter()
+                        .filter(|(activation_index, _)| {
+                            result
+                                .time
+                                .get(*activation_index)
+                                .is_some_and(|activation_time| *activation_time <= time + tolerance)
+                        })
+                        .map(|(_, value)| *value)
+                        .next_back()
+                        .unwrap_or(0.0)
+                } else {
+                    match stateful {
+                        Some(runtime) => Self::evaluate_stateful_tran_print_expression(
+                            runtime, netlist, result, time,
+                        )?,
+                        None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
+                    }
                 };
                 if !value.is_finite() {
                     return Err(format!(
@@ -40654,6 +42183,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             {
                 continue;
             }
+            // Equation measures have a dedicated point-by-point evaluator
+            // whose ordered state can depend on earlier equations. They must
+            // not be coerced through the point-event evaluator below.
+            if matches!(
+                statement.measure_type,
+                crate::analysis::MeasureType::Equation { .. }
+            ) {
+                continue;
+            }
             let mut trace_netlist = netlist.clone();
             let trace_statement = &mut trace_netlist.measurements[statement_index];
             trace_statement.analysis = "NOISE_CONT".to_string();
@@ -40694,15 +42232,24 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     statement.name
                 )
             })?;
+            measurement.validate_invariants().map_err(|error| {
+                format!(
+                    "NOISE measurement trace '{}' violates its result invariant: {error}",
+                    statement.name
+                )
+            })?;
             if let Some(failure) = &measurement.failure {
-                // Failed Xyce measures remain printable and retain their
-                // initialized zero value throughout the analysis.
-                if measurement.records.is_empty() {
+                if measurement.records.is_empty()
+                    && Self::continuous_measurement_failure_is_uninitialized(
+                        &statement.measure_type,
+                        failure,
+                    )
+                {
                     traces.insert(normalized_name, Vec::new());
                     continue;
                 }
                 return Err(format!(
-                    "NOISE measurement trace '{}' failed after producing records: {failure}",
+                    "NOISE measurement trace '{}' failed: {failure}",
                     statement.name
                 ));
             }
@@ -40781,6 +42328,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             {
                 continue;
             }
+            // Equation measures are projected by the caller's dedicated
+            // ordered equation-trace evaluator. Coercing them to *_CONT here
+            // would manufacture a point-event semantic failure.
+            if matches!(
+                statement.measure_type,
+                crate::analysis::MeasureType::Equation { .. }
+            ) {
+                continue;
+            }
 
             let mut trace_netlist = netlist.clone();
             let trace_statement = &mut trace_netlist.measurements[statement_index];
@@ -40819,15 +42375,28 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     statement.name
                 )
             })?;
+            measurement.validate_invariants().map_err(|error| {
+                format!(
+                    "{scalar_analysis} measurement trace '{}' violates its result invariant: {error}",
+                    statement.name
+                )
+            })?;
             if let Some(failure) = &measurement.failure {
-                // A failed measure remains a valid printed column initialized
-                // to zero until and unless it produces an event.
-                if measurement.records.is_empty() {
+                // A valid point-event measure that never initializes remains
+                // printable as zero. Semantic failures (unsupported measure
+                // types, missing signals, malformed qualifiers, invalid data)
+                // must fail closed instead of becoming an all-zero trace.
+                if measurement.records.is_empty()
+                    && Self::continuous_measurement_failure_is_uninitialized(
+                        &statement.measure_type,
+                        failure,
+                    )
+                {
                     traces.insert(normalized_name, Vec::new());
                     continue;
                 }
                 return Err(format!(
-                    "{scalar_analysis} measurement trace '{}' failed after producing records: {failure}",
+                    "{scalar_analysis} measurement trace '{}' failed: {failure}",
                     statement.name
                 ));
             }
@@ -40877,6 +42446,32 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         Ok(traces)
+    }
+
+    fn continuous_measurement_failure_is_uninitialized(
+        measure_type: &crate::analysis::MeasureType,
+        failure: &str,
+    ) -> bool {
+        match measure_type {
+            crate::analysis::MeasureType::When { .. } => {
+                failure == "WHEN condition not found in measurement window"
+            }
+            crate::analysis::MeasureType::Find { .. } => matches!(
+                failure,
+                "Time point not in simulation range"
+                    | "WHEN condition not found in the measurement window"
+            ),
+            crate::analysis::MeasureType::Derivative { .. } => matches!(
+                failure,
+                "Time point not in simulation range"
+                    | "AT point is outside the measurement window"
+                    | "WHEN condition never met in the measurement window"
+            ),
+            crate::analysis::MeasureType::Delay { .. } => {
+                failure == "trigger/target event pair not found"
+            }
+            _ => false,
+        }
     }
 
     fn continuous_record_activation_index(
@@ -41364,6 +42959,20 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .iter()
             .map(|probe| Self::derived_tran_probe_waveform(probe, netlist, result))
             .collect::<Result<Vec<_>, _>>()?;
+        let measurement_output_traces = Self::measurement_output_traces(
+            netlist,
+            &result.time,
+            data_columns.iter().map(String::as_str),
+            "TRAN",
+            "TRAN_CONT",
+            &[],
+            |trace_netlist| {
+                crate::analysis::advanced::evaluate_tran_continuous_measurements(
+                    trace_netlist,
+                    result,
+                )
+            },
+        )?;
 
         let mut mismatches = Vec::new();
         for (row_index, row) in reference.rows.iter().enumerate() {
@@ -41402,11 +43011,30 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
             for (column_index, probe) in data_columns.iter().enumerate() {
                 let expected = row[column_index + layout.data_column_offset];
-                let actual = match &stateful_waveforms[column_index] {
-                    Some(values) => {
-                        Self::interpolate_transient_waveform_at(&result.time, values, time)?
+                let actual = if let Some(trace) =
+                    measurement_output_traces.get(&probe.to_ascii_uppercase())
+                {
+                    let time_tolerance = Self::default_prn_time_quantization_tolerance(time);
+                    trace
+                        .iter()
+                        .filter(|(activation_index, _)| {
+                            result
+                                .time
+                                .get(*activation_index)
+                                .is_some_and(|activation_time| {
+                                    *activation_time <= time + time_tolerance
+                                })
+                        })
+                        .map(|(_, value)| *value)
+                        .next_back()
+                        .unwrap_or(0.0)
+                } else {
+                    match &stateful_waveforms[column_index] {
+                        Some(values) => {
+                            Self::interpolate_transient_waveform_at(&result.time, values, time)?
+                        }
+                        None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
                     }
-                    None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
                 };
                 let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
@@ -51493,6 +53121,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         actual: &[crate::analysis::ContinuousMeasureResult],
         tolerance: XyceFileCompareTolerance,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        for result in actual {
+            result.validate_invariants().map_err(|error| {
+                format!(
+                    "continuous measurement '{}' violates its result invariant: {error}",
+                    result.name
+                )
+            })?;
+        }
         if paths.len() != actual.len() {
             return Err(format!(
                 "continuous measurement oracle contains {} artifact(s) but the netlist evaluated {} statement(s)",
@@ -51663,6 +53299,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         base_analysis: &str,
         continuous_analysis: &str,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        for result in continuous {
+            result.validate_invariants().map_err(|error| {
+                format!(
+                    "continuous measurement '{}' violates its result invariant: {error}",
+                    result.name
+                )
+            })?;
+        }
         if paths.len() != 1 {
             return Err(format!(
                 "one mixed measurement run requires exactly one aggregate artifact, found {}",
@@ -51670,6 +53314,72 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         }
         let expected = Self::parse_mixed_measurement_reference_file(&paths[0])?;
+        let actual = Self::mixed_measurement_rows(
+            scalar,
+            continuous,
+            declarations,
+            base_analysis,
+            continuous_analysis,
+        )?;
+        if expected.len() != actual.len() {
+            return Err(format!(
+                "mixed measurement artifact contains {} row(s) but evaluation emitted {} row(s)",
+                expected.len(),
+                actual.len()
+            ));
+        }
+
+        let mut mismatches = Vec::new();
+        for (row, (reference, result)) in expected.iter().zip(&actual).enumerate() {
+            if !reference.name.eq_ignore_ascii_case(&result.name) {
+                return Err(format!(
+                    "mixed measurement row {row} is '{}' in the artifact but '{}' in declaration-ordered evaluation",
+                    reference.name, result.name
+                ));
+            }
+            Self::compare_mixed_measurement_value(
+                &mut mismatches,
+                row,
+                &reference.name,
+                reference.value,
+                result.value,
+                tolerance,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:trig", reference.name),
+                reference.trigger_axis,
+                result.trigger_axis,
+                tolerance,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:targ", reference.name),
+                reference.target_axis,
+                result.target_axis,
+                tolerance,
+            )?;
+        }
+        Ok(mismatches)
+    }
+
+    fn mixed_measurement_rows(
+        scalar: &[crate::analysis::MeasureResult],
+        continuous: &[crate::analysis::ContinuousMeasureResult],
+        declarations: &[crate::analysis::MeasureStatement],
+        base_analysis: &str,
+        continuous_analysis: &str,
+    ) -> Result<Vec<XyceMixedMeasurementReferenceRow>, String> {
+        for result in continuous {
+            result.validate_invariants().map_err(|error| {
+                format!(
+                    "continuous measurement '{}' violates its result invariant: {error}",
+                    result.name
+                )
+            })?;
+        }
         let mut actual = Vec::new();
         let mut scalar_index = 0usize;
         let mut continuous_index = 0usize;
@@ -51728,8 +53438,22 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     actual.push(XyceMixedMeasurementReferenceRow {
                         name: result.name.clone(),
                         value: XyceMeasurementReferenceValue::Failed,
-                        trigger_axis: None,
-                        target_axis: None,
+                        trigger_axis: result.failure_metadata.and_then(|metadata| {
+                            metadata.trigger_axis.map(|value| {
+                                XyceMeasurementReferenceValue::Numeric {
+                                    value,
+                                    quantization: None,
+                                }
+                            })
+                        }),
+                        target_axis: result.failure_metadata.and_then(|metadata| {
+                            metadata.target_axis.map(|value| {
+                                XyceMeasurementReferenceValue::Numeric {
+                                    value,
+                                    quantization: None,
+                                }
+                            })
+                        }),
                     });
                 } else {
                     actual.extend(result.records.iter().map(|record| {
@@ -51763,54 +53487,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 continuous.len()
             ));
         }
-        if expected.len() != actual.len() {
-            return Err(format!(
-                "mixed measurement artifact contains {} row(s) but evaluation emitted {} row(s)",
-                expected.len(),
-                actual.len()
-            ));
-        }
-
-        let mut mismatches = Vec::new();
-        for (row, (reference, result)) in expected.iter().zip(&actual).enumerate() {
-            if !reference.name.eq_ignore_ascii_case(&result.name) {
-                return Err(format!(
-                    "mixed measurement row {row} is '{}' in the artifact but '{}' in declaration-ordered evaluation",
-                    reference.name, result.name
-                ));
-            }
-            Self::compare_mixed_measurement_value(
-                &mut mismatches,
-                row,
-                &reference.name,
-                reference.value,
-                result.value,
-                tolerance,
-            )?;
-            // A FAILED TRIG/TARG row may include Xyce's partial diagnostic
-            // event locations. ContinuousMeasureResult intentionally models
-            // failure atomically, so the primary FAILED contract is compared
-            // while those non-result diagnostics are not synthesized.
-            if !matches!(reference.value, XyceMeasurementReferenceValue::Failed) {
-                Self::compare_mixed_measurement_metadata(
-                    &mut mismatches,
-                    row,
-                    &format!("{}:trig", reference.name),
-                    reference.trigger_axis,
-                    result.trigger_axis,
-                    tolerance,
-                )?;
-                Self::compare_mixed_measurement_metadata(
-                    &mut mismatches,
-                    row,
-                    &format!("{}:targ", reference.name),
-                    reference.target_axis,
-                    result.target_axis,
-                    tolerance,
-                )?;
-            }
-        }
-        Ok(mismatches)
+        Ok(actual)
     }
 
     fn compare_mixed_measurement_value(
@@ -63078,6 +64755,7 @@ mod tests {
                         name: statement.name.clone(),
                         records: records.clone(),
                         failure: None,
+                        failure_metadata: None,
                     })
                     .collect()
             },
@@ -63087,6 +64765,93 @@ mod tests {
         assert_eq!(traces["SCALAR"], vec![(1, 10.0)]);
         assert_eq!(traces["CONTINUOUS"], vec![(1, 10.0), (2, 30.0), (3, 50.0)]);
         assert_eq!(traces["ROLLING"], vec![(2, 10.0), (3, 30.0)]);
+    }
+
+    #[test]
+    fn generic_live_measurement_projection_rejects_semantic_failures() {
+        let run = |source: &str, requested: &str, failure: &str| {
+            let netlist = XyceTestRunner::parse_xyce_netlist(
+                source,
+                Path::new("invalid-live-measurement.cir"),
+            )
+            .expect("parse invalid live-measurement fixture");
+            XyceTestRunner::measurement_output_traces(
+                &netlist,
+                &[0.0, 1.0],
+                [requested],
+                "TRAN",
+                "TRAN_CONT",
+                &[],
+                |trace_netlist| {
+                    trace_netlist
+                        .measurements
+                        .iter()
+                        .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
+                        .map(|statement| crate::analysis::ContinuousMeasureResult {
+                            name: statement.name.clone(),
+                            records: Vec::new(),
+                            failure: Some(failure.to_string()),
+                            failure_metadata: None,
+                        })
+                        .collect()
+                },
+            )
+        };
+
+        let unsupported = run(
+            "unsupported live measurement\n\
+             .MEASURE TRAN aggregate AVG V(out)\n\
+             .END\n",
+            "aggregate",
+            "continuous measures support only WHEN, FIND, DERIV, and TRIG/TARG",
+        );
+        assert!(
+            unsupported
+                .expect_err("aggregate measure must not become a zero trace")
+                .contains("support only")
+        );
+
+        let missing_signal = run(
+            "missing-signal live measurement\n\
+             .MEASURE TRAN crossing WHEN V(missing)=1\n\
+             .END\n",
+            "crossing",
+            "When signal 'V(missing)' not found",
+        );
+        assert!(
+            missing_signal
+                .expect_err("missing signal must not become a zero trace")
+                .contains("not found")
+        );
+
+        let uninitialized = run(
+            "valid uninitialized live measurement\n\
+             .MEASURE TRAN crossing WHEN V(out)=1\n\
+             .END\n",
+            "crossing",
+            "WHEN condition not found in measurement window",
+        )
+        .expect("a valid no-event measure remains an initialized-zero column");
+        assert!(uninitialized["CROSSING"].is_empty());
+
+        let equation_netlist = XyceTestRunner::parse_xyce_netlist(
+            "dedicated equation trace\n\
+             .MEASURE TRAN value EQN {TIME+1}\n\
+             .END\n",
+            Path::new("equation-live-measurement.cir"),
+        )
+        .expect("parse equation live-measurement fixture");
+        let equation_projection = XyceTestRunner::measurement_output_traces(
+            &equation_netlist,
+            &[0.0, 1.0],
+            ["value"],
+            "TRAN",
+            "TRAN_CONT",
+            &[],
+            |_| panic!("equation measure must use its dedicated trace evaluator"),
+        )
+        .expect("equation measure is excluded from point-event projection");
+        assert!(equation_projection.is_empty());
     }
 
     #[test]
@@ -63195,6 +64960,7 @@ mod tests {
                 target_axis: Some(0.25),
             }],
             failure: None,
+            failure_metadata: None,
         };
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
 
@@ -63264,11 +65030,13 @@ mod tests {
                     },
                 ],
                 failure: None,
+                failure_metadata: None,
             },
             crate::analysis::ContinuousMeasureResult {
                 name: "hidden".to_string(),
                 records: Vec::new(),
                 failure: Some("event not found".to_string()),
+                failure_metadata: None,
             },
         ];
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
@@ -63319,6 +65087,50 @@ mod tests {
             Some(XyceMeasurementReferenceValue::Numeric { value, .. })
                 if (value - 63.75267).abs() <= f64::EPSILON
         ));
+
+        let netlist = Netlist::parse(
+            "failed mixed delay fixture\n\
+             V1 out 0 0\n\
+             .TRAN 1 2\n\
+             .MEASURE TRAN_CONT missing TRIG AT=1 TARG AT=2\n\
+             .MEASURE TRAN_CONT partial TRIG AT=1 TARG AT=2\n\
+             .END\n",
+        )
+        .expect("parse failed mixed delay declarations");
+        let actual = [
+            crate::analysis::ContinuousMeasureResult {
+                name: "missing".to_string(),
+                records: Vec::new(),
+                failure: Some("both endpoints missing".to_string()),
+                failure_metadata: Some(crate::analysis::ContinuousMeasureFailureMetadata {
+                    trigger_axis: None,
+                    target_axis: None,
+                }),
+            },
+            crate::analysis::ContinuousMeasureResult {
+                name: "partial".to_string(),
+                records: Vec::new(),
+                failure: Some("trigger missing".to_string()),
+                failure_metadata: Some(crate::analysis::ContinuousMeasureFailureMetadata {
+                    trigger_axis: None,
+                    target_axis: Some(63.75267),
+                }),
+            },
+        ];
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let mismatches = runner
+            .compare_mixed_measurement_references(
+                std::slice::from_ref(&path),
+                &[],
+                &actual,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                &netlist.measurements,
+                "TRAN",
+                "TRAN_CONT",
+            )
+            .expect("compare FAILED rows with partial endpoint provenance");
+        assert!(mismatches.is_empty());
+
         fs::remove_file(path).expect("remove failed mixed measurement reference");
     }
 
@@ -63352,11 +65164,13 @@ mod tests {
                     target_axis: None,
                 }],
                 failure: None,
+                failure_metadata: None,
             },
             crate::analysis::ContinuousMeasureResult {
                 name: "hidden".to_string(),
                 records: Vec::new(),
                 failure: Some("event not found".to_string()),
+                failure_metadata: None,
             },
         ];
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());

@@ -96,6 +96,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui canonical primary workspace router",
             evidence_boundary: "Rust route and interaction executor present; no platform, numerical, release, or sign-off qualification is implied.",
         },
+        SurfaceId::ProjectLauncher => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui canonical local project launcher",
+            evidence_boundary: "Canonical route, browser history, local create/open/recent-project selection, pinning, recovery comparison and discard, and local safe-mode controls are executable. Remote collaboration, repository cloning, sharing, and archival services are not exposed as available actions.",
+        },
         SurfaceId::Preferences => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui canonical Preferences manager",
             evidence_boundary: "Only the currently visible runtime-backed appearance, workspace, autosave, accessibility, capability, and local account/licensing controls are executable; incomplete mockup categories and actions remain omitted rather than inert.",
@@ -170,6 +174,7 @@ mod tests {
                 SurfaceId::Models,
                 SurfaceId::Netlist,
                 SurfaceId::VisualizationStudio,
+                SurfaceId::ProjectLauncher,
                 SurfaceId::Preferences,
                 SurfaceId::AccountOrganization,
                 SurfaceId::JobsManager,

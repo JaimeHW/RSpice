@@ -22,7 +22,7 @@ use crate::product::{
 use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, AnalysisType, CellViewRef, DcOpResult, ExecutionTarget,
     LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue, PreparedRunReceipt,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, ProjectWorkspace,
@@ -862,7 +862,8 @@ const EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION: u32 = 4;
 const SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION: u32 = 5;
 const EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION: u32 = 6;
 const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 8;
+const CONTENT_DIGEST_RESULTS_SCHEMA_VERSION: u32 = 8;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 9;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
@@ -1120,7 +1121,9 @@ impl ProjectSimulationResults {
     /// historical payload is never reconstructed from display waveforms.
     /// Result schemas through v7 acquire canonical result-data and dataset
     /// digests from the exact retained values during migration; no samples or
-    /// analysis evidence are reconstructed.
+    /// analysis evidence are reconstructed. Schema v8 digests are verified
+    /// with their original encoding before payload absence is migrated and the
+    /// result is resealed with the current encoding.
     pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
@@ -1133,6 +1136,24 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema == CONTENT_DIGEST_RESULTS_SCHEMA_VERSION {
+            for run in &mut self.runs {
+                validate_v8_result_digests(run)?;
+                if let Some(analysis) = run
+                    .analyses
+                    .iter()
+                    .find(|analysis| analysis.result_payload.is_present())
+                {
+                    return Err(format!(
+                        "schema-v8 analysis {} contains a typed result payload introduced by schema v9",
+                        analysis.id
+                    ));
+                }
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if matches!(
             source_schema,
             EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION | FAMILY_METADATA_RESULTS_SCHEMA_VERSION
@@ -1593,6 +1614,58 @@ fn require_legacy_result_digest_absence(
         return Err(format!(
             "schema-v{source_schema} analysis {} contains a result data digest introduced by schema v8",
             analysis.id
+        ));
+    }
+    Ok(())
+}
+
+/// Authenticate a schema-v8 run with the exact digest encoding that wrote it.
+/// This must run before any v9 fields are introduced or digests are resealed.
+fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    for analysis in &run.analyses {
+        if analysis.result_payload.is_present() {
+            return Err(format!(
+                "schema-v8 analysis {} contains a typed result payload introduced by schema v9",
+                analysis.id
+            ));
+        }
+        let retained = analysis
+            .result_data_digest
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "schema-v8 analysis {} is missing its result data digest",
+                    analysis.id
+                )
+            })?;
+        let computed = analysis
+            .clone()
+            .into_analysis()?
+            .legacy_v1_result_data_digest();
+        if retained != computed {
+            return Err(format!(
+                "schema-v8 analysis {} result data digest does not match retained content",
+                analysis.id
+            ));
+        }
+    }
+
+    let retained = run
+        .dataset_content_digest
+        .as_ref()
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "schema-v8 simulation run {} is missing its dataset content digest",
+                run.id
+            )
+        })?;
+    let computed = run.clone().into_run()?.legacy_v1_dataset_content_digest();
+    if retained != computed {
+        return Err(format!(
+            "schema-v8 simulation run {} dataset content digest does not match retained content",
+            run.id
         ));
     }
     Ok(())
@@ -2102,7 +2175,7 @@ impl ProjectSimulationRun {
             receipt.validate_result_prefix(&analyses)?;
         }
         let retained_digest = self.dataset_content_digest.as_ref().copied().ok_or_else(|| {
-            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v8")
+            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v9")
         })?;
         let computed_digest = self
             .clone()
@@ -2193,6 +2266,11 @@ pub struct ProjectAnalysisResult {
     /// Result schemas through v6 omitted this field and migrate to `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub family_metadata: Option<AnalysisResultFamilyMetadata>,
+    /// Exact analysis-native result evidence. Schemas through v8 omitted this
+    /// field; presence-aware persistence prevents a relabeled legacy document
+    /// from injecting current-schema evidence.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub result_payload: PersistedField<AnalysisResultPayload>,
     #[serde(default)]
     pub measurements: Vec<ProjectMeasurement>,
     /// Authenticated outcomes for the immutable saved-output contracts that
@@ -2270,6 +2348,12 @@ impl ProjectAnalysisResult {
                 self.id
             ));
         }
+        if self.result_payload.is_null() {
+            return Err(format!(
+                "analysis sequence {} has an explicitly null result payload",
+                self.id
+            ));
+        }
         let analysis_type = analysis_type_from_key(&self.analysis_type)
             .ok_or_else(|| format!("unknown persisted analysis type '{}'", self.analysis_type))?;
         let provenance = self
@@ -2292,6 +2376,7 @@ impl ProjectAnalysisResult {
                 .noise_summary
                 .map(ProjectNoiseSummary::into_noise_summary),
             family_metadata: self.family_metadata,
+            result_payload: self.result_payload.into_value(),
             measurements: self
                 .measurements
                 .into_iter()
@@ -2359,6 +2444,22 @@ impl ProjectAnalysisResult {
                         .expect("analysis type was checked above"),
                 )
                 .map_err(|error| format!("{prefix}.family_metadata is invalid: {error}"))?;
+        }
+        if self.result_payload.is_null() {
+            return Err(format!("{prefix}.result_payload must not be null"));
+        }
+        if let Some(payload) = self.result_payload.as_ref() {
+            payload
+                .validate_for(
+                    analysis_type_from_key(&self.analysis_type)
+                        .expect("analysis type was checked above"),
+                )
+                .map_err(|error| format!("{prefix}.result_payload is invalid: {error}"))?;
+            if !self.success {
+                return Err(format!(
+                    "{prefix}.result_payload is not permitted on a failed analysis"
+                ));
+            }
         }
         for (measurement_idx, measurement) in self.measurements.iter().enumerate() {
             measurement.validate(&format!("{prefix}.measurements[{measurement_idx}]"))?;
@@ -2458,7 +2559,7 @@ impl ProjectAnalysisResult {
                 .map_err(|error| format!("{prefix}.provenance is invalid: {error}"))?;
         }
         let retained_digest = self.result_data_digest.as_ref().copied().ok_or_else(|| {
-            format!("{prefix}.result_data_digest is required by simulation results schema v8")
+            format!("{prefix}.result_data_digest is required by simulation results schema v9")
         })?;
         let computed_digest = self
             .clone()
@@ -2494,6 +2595,10 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
                 .as_ref()
                 .map(ProjectNoiseSummary::from),
             family_metadata: analysis.family_metadata.clone(),
+            result_payload: analysis
+                .result_payload
+                .clone()
+                .map_or(PersistedField::Missing, PersistedField::Value),
             measurements: analysis
                 .measurements
                 .iter()
@@ -4170,6 +4275,182 @@ mod tests {
     }
 
     #[test]
+    fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
+        let mut run = SimulationRun::new(31);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+                AnalysisResultPayload::PoleZero {
+                    poles: vec![crate::state::ComplexResultValue {
+                        real: -1.0,
+                        imaginary: 2.0,
+                    }],
+                    zeros: vec![crate::state::ComplexResultValue {
+                        real: -3.0,
+                        imaginary: 0.0,
+                    }],
+                    gain: 4.0,
+                },
+            ),
+        );
+        run.add_analysis(
+            AnalysisResult::new(2, AnalysisType::Sensitivity, "SENS").with_result_payload(
+                AnalysisResultPayload::Sensitivity {
+                    output: "V(out)".to_owned(),
+                    result_mode: crate::state::SensitivityResultMode::Ac {
+                        frequency_hz: 10_000.0,
+                    },
+                    rows: vec![crate::state::SensitivityResultRow {
+                        parameter: "width".to_owned(),
+                        raw: 2.0,
+                        normalized: 0.5,
+                    }],
+                },
+            ),
+        );
+        run.add_analysis(
+            AnalysisResult::new(3, AnalysisType::Tf, "TF").with_result_payload(
+                AnalysisResultPayload::ScalarMeasurements {
+                    values: std::collections::BTreeMap::from([("gain".to_owned(), 10.0)]),
+                },
+            ),
+        );
+        seal_legacy_unattributed(&mut run);
+        let dataset_id = run.dataset_id;
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 31;
+        simulation.active_run_idx = Some(0);
+        simulation.active_analysis_idx = Some(1);
+
+        let persisted = ProjectSimulationResults::from_state(&simulation);
+        let json = serde_json::to_string(&persisted).expect("typed payloads serialize");
+        let decoded: ProjectSimulationResults =
+            serde_json::from_str(&json).expect("typed payloads deserialize");
+        decoded.validate().expect("typed payload digests validate");
+        let restored = decoded
+            .into_simulation_state()
+            .expect("typed payloads restore");
+        assert_eq!(
+            restored.active_run().map(|run| run.dataset_id),
+            Some(dataset_id)
+        );
+        assert_eq!(
+            restored.active_analysis().map(|analysis| analysis.id),
+            Some(2)
+        );
+        assert_eq!(
+            restored.runs[0].analyses[0].result_payload,
+            simulation.runs[0].analyses[0].result_payload
+        );
+        assert_eq!(
+            restored.runs[0].analyses[1].result_payload,
+            simulation.runs[0].analyses[1].result_payload
+        );
+        assert_eq!(
+            restored.runs[0].analyses[2].result_payload,
+            simulation.runs[0].analyses[2].result_payload
+        );
+
+        let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
+        tampered["runs"][0]["analyses"][0]["result_payload"]["gain"] =
+            serde_json::json!(4.000_000_000_000_001_f64);
+        let tampered: ProjectSimulationResults =
+            serde_json::from_value(tampered).expect("tampered payload remains structural");
+        assert!(
+            tampered
+                .validate()
+                .expect_err("payload tampering invalidates the result digest")
+                .contains("result_data_digest does not match retained analysis content")
+        );
+
+        let mut null_payload: serde_json::Value =
+            serde_json::from_str(&json).expect("project JSON");
+        null_payload["runs"][0]["analyses"][0]["result_payload"] = serde_json::Value::Null;
+        let null_payload: ProjectSimulationResults =
+            serde_json::from_value(null_payload).expect("null remains presence-aware");
+        assert!(
+            null_payload
+                .validate()
+                .expect_err("current payload cannot be explicitly null")
+                .contains("result_payload must not be null")
+        );
+    }
+
+    #[test]
+    fn schema_v8_digests_are_authenticated_before_v9_resealing() {
+        let mut run = SimulationRun::new(32);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            ]),
+        );
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 32;
+        let mut v8 = ProjectSimulationResults::from_state(&simulation);
+        v8.schema_version = CONTENT_DIGEST_RESULTS_SCHEMA_VERSION;
+        for analysis in &mut v8.runs[0].analyses {
+            analysis.result_payload = PersistedField::Missing;
+            analysis.result_data_digest = PersistedField::Value(
+                analysis
+                    .clone()
+                    .into_analysis()
+                    .expect("v8 analysis fixture")
+                    .legacy_v1_result_data_digest(),
+            );
+        }
+        v8.runs[0].dataset_content_digest = PersistedField::Value(
+            v8.runs[0]
+                .clone()
+                .into_run()
+                .expect("v8 run fixture")
+                .legacy_v1_dataset_content_digest(),
+        );
+
+        let mut migrated = v8.clone();
+        migrated
+            .migrate_to_current(ProjectId::new())
+            .expect("authentic v8 results migrate");
+        assert_eq!(
+            migrated.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        migrated.validate().expect("resealed v9 results validate");
+        assert_ne!(
+            migrated.runs[0].dataset_content_digest, v8.runs[0].dataset_content_digest,
+            "v9 uses the new canonical digest domain"
+        );
+
+        let mut tampered = v8.clone();
+        tampered.runs[0].analyses[0].waveforms[0].y[1] = 1.000_000_000_000_000_2;
+        assert!(
+            tampered
+                .migrate_to_current(ProjectId::new())
+                .expect_err("v8 tampering is rejected before resealing")
+                .contains("schema-v8 analysis 1 result data digest")
+        );
+
+        let mut injected = v8;
+        injected.runs[0].analyses[0].result_payload =
+            PersistedField::Value(AnalysisResultPayload::ScalarMeasurements {
+                values: std::collections::BTreeMap::from([("gain".to_owned(), 1.0)]),
+            });
+        assert!(
+            injected
+                .migrate_to_current(ProjectId::new())
+                .expect_err("schema-v8 cannot inject a v9 payload")
+                .contains("typed result payload introduced by schema v9")
+        );
+    }
+
+    #[test]
     fn schema_v7_digest_migration_is_deterministic_and_rejects_anachronistic_fields() {
         let mut run = SimulationRun::new(3);
         run.mark_running().expect("fixture run starts");
@@ -5656,6 +5937,7 @@ mod tests {
                     device_op: None,
                     noise_summary: None,
                     family_metadata: None,
+                    result_payload: PersistedField::Missing,
                     measurements: Vec::new(),
                     saved_output_receipts: Vec::new(),
                     success: true,
@@ -5721,6 +6003,7 @@ mod tests {
                     device_op: None,
                     noise_summary: None,
                     family_metadata: None,
+                    result_payload: PersistedField::Missing,
                     measurements: Vec::new(),
                     saved_output_receipts: Vec::new(),
                     success: true,
@@ -5796,6 +6079,7 @@ mod tests {
                         band: (1.0, 1.0e6),
                     }),
                     family_metadata: None,
+                    result_payload: PersistedField::Missing,
                     measurements: Vec::new(),
                     saved_output_receipts: Vec::new(),
                     success: true,

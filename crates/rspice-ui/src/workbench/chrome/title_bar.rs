@@ -1369,6 +1369,10 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
             "Noise contributors",
         ),
         (
+            crate::workbench::ResultViewer::Contribution,
+            "Sensitivity contributions",
+        ),
+        (
             crate::workbench::ResultViewer::Specs,
             "Measurements & specifications",
         ),
@@ -2342,7 +2346,7 @@ mod tests {
             "Smith chart",
             "Pole-zero",
             "Calculator…",
-            "Export waveform data…",
+            "Export result data…",
         ] {
             assert!(
                 labels.iter().any(|label| label == expected),

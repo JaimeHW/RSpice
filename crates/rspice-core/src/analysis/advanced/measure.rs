@@ -516,6 +516,16 @@ pub struct ContinuousMeasureResult {
     pub name: String,
     pub records: Vec<ContinuousMeasureRecord>,
     pub failure: Option<String>,
+    /// Xyce retains a successfully located TRIG or TARG endpoint even when
+    /// its counterpart is absent and the delay measure is FAILED.
+    pub failure_metadata: Option<ContinuousMeasureFailureMetadata>,
+}
+
+/// Partial event provenance retained for a failed continuous delay measure.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContinuousMeasureFailureMetadata {
+    pub trigger_axis: Option<Value>,
+    pub target_axis: Option<Value>,
 }
 
 impl ContinuousMeasureResult {
@@ -524,6 +534,7 @@ impl ContinuousMeasureResult {
             name: name.to_string(),
             records,
             failure: None,
+            failure_metadata: None,
         }
     }
 
@@ -532,7 +543,68 @@ impl ContinuousMeasureResult {
             name: name.to_string(),
             records: Vec::new(),
             failure: Some(failure.into()),
+            failure_metadata: None,
         }
+    }
+
+    fn failed_delay(
+        name: &str,
+        trigger_axis: Option<Value>,
+        target_axis: Option<Value>,
+        failure: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            records: Vec::new(),
+            failure: Some(failure.into()),
+            failure_metadata: Some(ContinuousMeasureFailureMetadata {
+                trigger_axis,
+                target_axis,
+            }),
+        }
+    }
+
+    /// Validate the mutually exclusive success/failure representation and
+    /// the finiteness of all published numeric metadata.
+    pub fn validate_invariants(&self) -> Result<(), &'static str> {
+        if self.name.trim().is_empty() {
+            return Err("continuous measurement name is empty");
+        }
+        match self.failure.as_ref() {
+            Some(failure) => {
+                if failure.trim().is_empty() {
+                    return Err("continuous measurement failure reason is empty");
+                }
+                if !self.records.is_empty() {
+                    return Err("failed continuous measurement contains successful records");
+                }
+            }
+            None => {
+                if self.records.is_empty() {
+                    return Err("successful continuous measurement contains no records");
+                }
+                if self.failure_metadata.is_some() {
+                    return Err("successful continuous measurement contains failure metadata");
+                }
+            }
+        }
+        if self.records.iter().any(|record| {
+            !record.value.is_finite()
+                || record.event_axis.is_some_and(|value| !value.is_finite())
+                || record.trigger_axis.is_some_and(|value| !value.is_finite())
+                || record.target_axis.is_some_and(|value| !value.is_finite())
+        }) {
+            return Err("continuous measurement record contains a non-finite value");
+        }
+        if self.failure_metadata.is_some_and(|metadata| {
+            metadata
+                .trigger_axis
+                .is_some_and(|value| !value.is_finite())
+                || metadata.target_axis.is_some_and(|value| !value.is_finite())
+        }) {
+            return Err("continuous measurement failure metadata contains a non-finite value");
+        }
+        Ok(())
     }
 }
 
@@ -2402,13 +2474,20 @@ fn continuous_delay(
             Ok(events) => events,
             Err(error) => return ContinuousMeasureResult::failed(name, error),
         };
+    let partial_trigger = triggers.first().copied();
+    let partial_target = targets.first().copied();
     let records = triggers
         .into_iter()
         .zip(targets)
         .map(|(trigger, target)| ContinuousMeasureRecord::delay(trigger, target))
         .collect::<Vec<_>>();
     if records.is_empty() {
-        ContinuousMeasureResult::failed(name, "trigger/target event pair not found")
+        ContinuousMeasureResult::failed_delay(
+            name,
+            partial_trigger,
+            partial_target,
+            "trigger/target event pair not found",
+        )
     } else {
         ContinuousMeasureResult::success(name, records)
     }
@@ -3490,6 +3569,69 @@ mod tests {
         assert_eq!(results[0].records[0].trigger_axis, Some(1.5));
         assert_eq!(results[0].records[0].target_axis, Some(0.75));
         assert_eq!(results[0].records[0].value, -0.75);
+    }
+
+    #[test]
+    fn failed_continuous_delay_retains_the_endpoint_that_was_found() {
+        let axis = [0.0, 1.0, 2.0];
+        let alternating = [-1.0, 1.0, -1.0];
+        let mut signals = HashMap::new();
+        signals.insert("ALT".to_string(), alternating.as_slice());
+        let found = TrigSpec {
+            event: TriggerEvent::When(alternating_condition(1)),
+            td: None,
+        };
+        let missing = TrigSpec {
+            event: TriggerEvent::At(10.0),
+            td: None,
+        };
+        let mut engine = MeasureEngine::new();
+        engine.add(continuous_statement(
+            "missing_target",
+            MeasureType::Delay {
+                trig: found.clone(),
+                targ: missing.clone(),
+            },
+        ));
+        engine.add(continuous_statement(
+            "missing_trigger",
+            MeasureType::Delay {
+                trig: missing,
+                targ: found,
+            },
+        ));
+
+        let results = engine.evaluate_continuous(&axis, &signals, &[]);
+
+        assert!(results.iter().all(|result| result.failure.is_some()));
+        assert!(
+            results
+                .iter()
+                .all(|result| result.validate_invariants().is_ok())
+        );
+        assert_eq!(
+            results[0].failure_metadata,
+            Some(ContinuousMeasureFailureMetadata {
+                trigger_axis: Some(0.5),
+                target_axis: None,
+            })
+        );
+        assert_eq!(
+            results[1].failure_metadata,
+            Some(ContinuousMeasureFailureMetadata {
+                trigger_axis: None,
+                target_axis: Some(0.5),
+            })
+        );
+
+        let mut inconsistent = results[0].clone();
+        inconsistent
+            .records
+            .push(ContinuousMeasureRecord::point(1.0, 0.5));
+        assert_eq!(
+            inconsistent.validate_invariants(),
+            Err("failed continuous measurement contains successful records")
+        );
     }
 
     #[test]

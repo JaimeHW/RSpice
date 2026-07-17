@@ -3,8 +3,9 @@
 
 use egui::Ui;
 
-use crate::analysis::pole_zero::PoleZeroData;
+use crate::analysis::pole_zero::{ComplexRoot, PoleZeroData};
 use crate::common::AppState;
+use crate::state::{AnalysisResultPayload, AnalysisType};
 use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
@@ -12,12 +13,32 @@ use crate::ui::widgets::section_header;
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
-fn active_data(state: &AppState) -> Option<&PoleZeroData> {
-    let pz = &state.analysis.pole_zero_state;
-    pz.datasets
-        .get(pz.selected)
-        .or_else(|| pz.datasets.first())
-        .filter(|data| !data.is_empty())
+fn active_data(state: &AppState) -> Option<PoleZeroData> {
+    let analysis = state.simulation.active_analysis()?;
+    if !analysis.success || analysis.analysis_type != AnalysisType::PoleZero {
+        return None;
+    }
+    let payload = analysis.result_payload.as_ref()?;
+    let AnalysisResultPayload::PoleZero { poles, zeros, gain } = payload else {
+        return None;
+    };
+    if payload.validate_for(analysis.analysis_type).is_err() {
+        return None;
+    }
+
+    let mut data = PoleZeroData::new(&analysis.label);
+    data.gain = *gain;
+    data.roots.extend(
+        poles
+            .iter()
+            .map(|root| ComplexRoot::pole(root.real, root.imaginary)),
+    );
+    data.roots.extend(
+        zeros
+            .iter()
+            .map(|root| ComplexRoot::zero(root.real, root.imaginary)),
+    );
+    Some(data)
 }
 
 // ---------------------------------------------------------------------------
@@ -120,9 +141,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Nearest root on hover, click to pin: σ, jω, natural frequency, and Q
     // turn the s-plane picture into numbers.
     let ranges = ((-extent, extent), (-extent, extent));
-    let Some(data) = active_data(state) else {
-        return;
-    };
     let mut hovered: Option<(usize, usize)> = None;
     if let Some(pointer) = response.response.hover_pos()
         && response.plot_rect.contains(pointer)
@@ -158,9 +176,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
-    let Some(data) = active_data(state) else {
-        return;
-    };
     let pinned = state
         .ui
         .results
@@ -269,4 +284,58 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ui,
         "Crosses are poles, circles are zeros; the shaded half-plane is stable.",
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{
+        AnalysisResult, AnalysisResultPayload, AnalysisType, ComplexResultValue, SimulationRun,
+    };
+
+    #[test]
+    fn retained_payload_is_the_only_pole_zero_viewer_authority() {
+        let mut state = AppState::default();
+        let mut stale = PoleZeroData::new("stale");
+        stale.add_real_pole(-99.0);
+        state.analysis.pole_zero_state.load_data(stale);
+
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7"));
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        assert!(active_data(&state).is_none());
+
+        state.simulation.runs[0].analyses[0] =
+            AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7").with_result_payload(
+                AnalysisResultPayload::PoleZero {
+                    poles: vec![
+                        ComplexResultValue {
+                            real: -10.0,
+                            imaginary: 20.0,
+                        },
+                        ComplexResultValue {
+                            real: -10.0,
+                            imaginary: -20.0,
+                        },
+                    ],
+                    zeros: vec![ComplexResultValue {
+                        real: -3.0,
+                        imaginary: 0.0,
+                    }],
+                    gain: 4.25,
+                },
+            );
+
+        let data = active_data(&state).expect("retained PZ payload");
+        assert_eq!(data.name, "PZ 7");
+        assert_eq!(data.gain, 4.25);
+        assert_eq!(data.roots.len(), 3);
+        assert!(data.roots[0].is_pole());
+        assert_eq!((data.roots[0].real, data.roots[0].imag), (-10.0, 20.0));
+        assert!(data.roots[1].is_pole());
+        assert_eq!((data.roots[1].real, data.roots[1].imag), (-10.0, -20.0));
+        assert!(data.roots[2].is_zero());
+        assert_eq!((data.roots[2].real, data.roots[2].imag), (-3.0, 0.0));
+    }
 }

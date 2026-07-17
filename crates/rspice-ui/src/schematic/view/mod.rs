@@ -19,6 +19,7 @@ mod coordinates;
 mod drawing;
 mod grid;
 mod interaction;
+mod mobile_controls;
 mod navigation;
 mod preview;
 pub(crate) mod resolved_symbol_render;
@@ -33,6 +34,8 @@ use self::navigation::handle_viewport_navigation;
 use self::preview::draw_interaction_previews;
 use self::resolved_symbol_render::resolved_symbol_world_bounds;
 use self::scene::draw_scene;
+
+pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 
 #[derive(Default)]
 pub(crate) struct SchematicSymbolContext {

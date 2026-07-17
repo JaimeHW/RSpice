@@ -202,7 +202,7 @@ impl Command {
             Self::ExportSchematicSvg => {
                 spec("export-schematic-svg", "Export schematic SVG…", "File")
             }
-            Self::ExportWaveformsCsv => spec("export-waveforms", "Export waveform data…", "File"),
+            Self::ExportWaveformsCsv => spec("export-waveforms", "Export result data…", "File"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
                 spec("export-netlist-spectre", "Export Spectre netlist…", "File")
             }
@@ -348,6 +348,11 @@ impl Command {
             Self::ResultViewer(crate::workbench::ResultViewer::NoiseContrib) => {
                 spec("result-noise", "Open noise-contribution viewer", "Results")
             }
+            Self::ResultViewer(crate::workbench::ResultViewer::Contribution) => spec(
+                "result-sensitivity-contribution",
+                "Open sensitivity-contribution viewer",
+                "Results",
+            ),
             Self::ResultViewer(crate::workbench::ResultViewer::Specs) => spec(
                 "result-specifications",
                 "Open specification results",
@@ -1456,6 +1461,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Hist),
     Command::ResultViewer(crate::workbench::ResultViewer::Op),
     Command::ResultViewer(crate::workbench::ResultViewer::NoiseContrib),
+    Command::ResultViewer(crate::workbench::ResultViewer::Contribution),
     Command::ResultViewer(crate::workbench::ResultViewer::Specs),
     Command::ResultViewer(crate::workbench::ResultViewer::Nyquist),
     Command::ResultViewer(crate::workbench::ResultViewer::Smith),
@@ -1527,6 +1533,7 @@ mod tests {
             crate::workbench::ResultViewer::Hist,
             crate::workbench::ResultViewer::Op,
             crate::workbench::ResultViewer::NoiseContrib,
+            crate::workbench::ResultViewer::Contribution,
             crate::workbench::ResultViewer::Specs,
             crate::workbench::ResultViewer::Nyquist,
             crate::workbench::ResultViewer::Smith,

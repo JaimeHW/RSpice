@@ -35,9 +35,10 @@ use crate::simulation::runner::SimulationError;
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, AnalysisType, DcOpResult, MonteCarloVariableMetadata,
-    OperatingPointValue, SimulationRunIntent, SimulationRunLifecycle,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
+    AnalysisResultSourceDomain, AnalysisType, ComplexResultValue, DcOpResult,
+    MonteCarloVariableMetadata, OperatingPointValue, SensitivityResultMode, SensitivityResultRow,
+    SimulationRunIntent, SimulationRunLifecycle,
 };
 
 mod analysis_commands;
@@ -2356,6 +2357,129 @@ mod tests {
             Some(AnalysisResultFamilyMetadata::Soa {
                 time: vec![0.0, 1.0e-9],
             })
+        );
+    }
+
+    #[test]
+    fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
+        use crate::state::{
+            AnalysisResultPayload, ComplexResultValue, SensitivityResultMode, SensitivityResultRow,
+        };
+
+        let controller = SimulationController::new();
+        let pole_zero = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::PoleZero {
+                poles: vec![(-1.0, 2.0), (-1.0, -2.0)],
+                zeros: vec![(-3.0, 0.0)],
+                gain: 4.0,
+            },
+            AnalysisType::PoleZero,
+            "PZ",
+        );
+        assert_eq!(
+            pole_zero.result_payload,
+            Some(AnalysisResultPayload::PoleZero {
+                poles: vec![
+                    ComplexResultValue {
+                        real: -1.0,
+                        imaginary: 2.0,
+                    },
+                    ComplexResultValue {
+                        real: -1.0,
+                        imaginary: -2.0,
+                    },
+                ],
+                zeros: vec![ComplexResultValue {
+                    real: -3.0,
+                    imaginary: 0.0,
+                }],
+                gain: 4.0,
+            })
+        );
+        assert!(pole_zero.has_data());
+
+        let sensitivity = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Sensitivity {
+                output: "V(out)".to_owned(),
+                ac_mode: true,
+                frequency_hz: Some(10_000.0),
+                sensitivities: std::collections::HashMap::from([
+                    ("width".to_owned(), 2.0),
+                    ("length".to_owned(), -1.0),
+                ]),
+                normalized: std::collections::HashMap::from([
+                    ("width".to_owned(), 0.5),
+                    ("length".to_owned(), -0.25),
+                ]),
+            },
+            AnalysisType::Sensitivity,
+            "SENS",
+        );
+        assert_eq!(
+            sensitivity.result_payload,
+            Some(AnalysisResultPayload::Sensitivity {
+                output: "V(out)".to_owned(),
+                result_mode: SensitivityResultMode::Ac {
+                    frequency_hz: 10_000.0,
+                },
+                rows: vec![
+                    SensitivityResultRow {
+                        parameter: "length".to_owned(),
+                        raw: -1.0,
+                        normalized: -0.25,
+                    },
+                    SensitivityResultRow {
+                        parameter: "width".to_owned(),
+                        raw: 2.0,
+                        normalized: 0.5,
+                    },
+                ],
+            })
+        );
+
+        let scalar = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::MeasurementsOnly {
+                measurements: std::collections::HashMap::from([
+                    ("zeta".to_owned(), 0.7),
+                    ("gain".to_owned(), 10.0),
+                ]),
+            },
+            AnalysisType::Tf,
+            "TF",
+        );
+        assert_eq!(
+            scalar.result_payload,
+            Some(AnalysisResultPayload::ScalarMeasurements {
+                values: std::collections::BTreeMap::from([
+                    ("gain".to_owned(), 10.0),
+                    ("zeta".to_owned(), 0.7),
+                ]),
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_sensitivity_result_contract_fails_closed() {
+        let controller = SimulationController::new();
+        let analysis = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Sensitivity {
+                output: "V(out)".to_owned(),
+                ac_mode: false,
+                frequency_hz: None,
+                sensitivities: std::collections::HashMap::from([("width".to_owned(), 2.0)]),
+                normalized: std::collections::HashMap::new(),
+            },
+            AnalysisType::Sensitivity,
+            "SENS",
+        );
+
+        assert!(!analysis.success);
+        assert!(analysis.result_payload.is_none());
+        assert!(
+            analysis
+                .error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("misaligned"))
         );
     }
 

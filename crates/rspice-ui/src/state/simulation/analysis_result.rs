@@ -174,6 +174,149 @@ pub struct MonteCarloVariableMetadata {
     pub max: f64,
 }
 
+/// One exact complex value retained from an analysis result.
+///
+/// This is deliberately independent of the pole-zero viewer's presentation
+/// model. Root classification is owned by [`AnalysisResultPayload`], while
+/// this value preserves the solver's ordered real/imaginary evidence.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComplexResultValue {
+    pub real: f64,
+    pub imaginary: f64,
+}
+
+/// Analysis basis used to produce a retained sensitivity result.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SensitivityResultMode {
+    Dc,
+    Ac { frequency_hz: f64 },
+}
+
+/// One parameter's exact raw and normalized sensitivity.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensitivityResultRow {
+    pub parameter: String,
+    pub raw: f64,
+    pub normalized: f64,
+}
+
+/// Immutable, analysis-native result evidence that is neither waveform data
+/// nor presentation state.
+///
+/// The payload is persisted, content-digested, and selected with its owning
+/// [`AnalysisResult`]. Viewers must derive from this value instead of keeping
+/// a second mutable copy of engineering data.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnalysisResultPayload {
+    PoleZero {
+        poles: Vec<ComplexResultValue>,
+        zeros: Vec<ComplexResultValue>,
+        gain: f64,
+    },
+    Sensitivity {
+        output: String,
+        result_mode: SensitivityResultMode,
+        rows: Vec<SensitivityResultRow>,
+    },
+    ScalarMeasurements {
+        values: BTreeMap<String, f64>,
+    },
+}
+
+impl AnalysisResultPayload {
+    /// Validate exact retained evidence against the analysis that owns it.
+    pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
+        match self {
+            Self::PoleZero { poles, zeros, gain } => {
+                if analysis_type != AnalysisType::PoleZero {
+                    return Err(format!(
+                        "pole-zero payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                validate_complex_values(poles, "pole")?;
+                validate_complex_values(zeros, "zero")?;
+                if !gain.is_finite() {
+                    return Err("pole-zero gain is non-finite".to_owned());
+                }
+            }
+            Self::Sensitivity {
+                output,
+                result_mode,
+                rows,
+            } => {
+                if analysis_type != AnalysisType::Sensitivity {
+                    return Err(format!(
+                        "sensitivity payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                require_non_empty(output, "sensitivity output")?;
+                if let SensitivityResultMode::Ac { frequency_hz } = result_mode
+                    && (!frequency_hz.is_finite() || *frequency_hz <= 0.0)
+                {
+                    return Err(
+                        "sensitivity AC frequency must be finite and greater than zero".to_owned(),
+                    );
+                }
+                let mut previous_name: Option<&str> = None;
+                for row in rows {
+                    require_non_empty(&row.parameter, "sensitivity parameter")?;
+                    if previous_name.is_some_and(|previous| previous >= row.parameter.as_str()) {
+                        return Err(
+                            "sensitivity rows must have unique, strictly sorted parameter names"
+                                .to_owned(),
+                        );
+                    }
+                    previous_name = Some(&row.parameter);
+                    if !row.raw.is_finite() || !row.normalized.is_finite() {
+                        return Err(format!(
+                            "sensitivity parameter '{}' has a non-finite value",
+                            row.parameter
+                        ));
+                    }
+                }
+            }
+            Self::ScalarMeasurements { values } => {
+                if matches!(
+                    analysis_type,
+                    AnalysisType::PoleZero | AnalysisType::Sensitivity
+                ) {
+                    return Err(format!(
+                        "scalar result payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                for (name, value) in values {
+                    require_non_empty(name, "scalar result name")?;
+                    if !value.is_finite() {
+                        return Err(format!("scalar result '{name}' is non-finite"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn has_data(&self) -> bool {
+        match self {
+            Self::PoleZero { .. } | Self::Sensitivity { .. } => true,
+            Self::ScalarMeasurements { values } => !values.is_empty(),
+        }
+    }
+}
+
+fn validate_complex_values(values: &[ComplexResultValue], label: &str) -> Result<(), String> {
+    for (index, value) in values.iter().enumerate() {
+        if !value.real.is_finite() || !value.imaginary.is_finite() {
+            return Err(format!("{label} {index} has a non-finite component"));
+        }
+    }
+    Ok(())
+}
+
 /// Typed, lossless metadata for result families whose execution contract is
 /// richer than a collection of plotted waveforms.
 ///
@@ -387,6 +530,10 @@ pub struct AnalysisResult {
     /// is source evidence, not presentation state, and must survive project
     /// and session persistence unchanged.
     pub family_metadata: Option<AnalysisResultFamilyMetadata>,
+    /// Exact analysis-native evidence such as pole/zero roots, sensitivity
+    /// rows, or scalar-only results. This is immutable retained data, not a
+    /// viewer cache.
+    pub result_payload: Option<AnalysisResultPayload>,
     /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
     pub measurements: Vec<rspice_core::MeasureResult>,
     /// Authenticated application receipts for plan-owned saved-output
@@ -415,6 +562,7 @@ impl AnalysisResult {
             device_op: None,
             noise_summary: None,
             family_metadata: None,
+            result_payload: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: true,
@@ -440,6 +588,7 @@ impl AnalysisResult {
             device_op: None,
             noise_summary: None,
             family_metadata: None,
+            result_payload: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: false,
@@ -484,6 +633,14 @@ impl AnalysisResult {
         self
     }
 
+    /// Attach exact analysis-native result evidence.
+    #[must_use]
+    pub fn with_result_payload(mut self, payload: AnalysisResultPayload) -> Self {
+        debug_assert!(payload.validate_for(self.analysis_type).is_ok());
+        self.result_payload = Some(payload);
+        self
+    }
+
     /// Attach evaluated `.MEAS` results.
     pub fn with_measurements(mut self, measurements: Vec<rspice_core::MeasureResult>) -> Self {
         self.measurements = measurements;
@@ -511,6 +668,92 @@ impl AnalysisResult {
 
     /// Check if this analysis has any viewable data
     pub fn has_data(&self) -> bool {
-        !self.waveforms.is_empty() || self.dc_op.is_some()
+        !self.waveforms.is_empty()
+            || self.dc_op.is_some()
+            || self
+                .result_payload
+                .as_ref()
+                .is_some_and(AnalysisResultPayload::has_data)
+    }
+}
+
+#[cfg(test)]
+mod retained_payload_tests {
+    use super::*;
+
+    #[test]
+    fn pole_zero_payload_requires_matching_type_and_finite_values() {
+        let payload = AnalysisResultPayload::PoleZero {
+            poles: vec![ComplexResultValue {
+                real: -1.0,
+                imaginary: 2.0,
+            }],
+            zeros: Vec::new(),
+            gain: 1.0,
+        };
+        assert!(payload.validate_for(AnalysisType::PoleZero).is_ok());
+        assert!(payload.validate_for(AnalysisType::Ac).is_err());
+
+        let invalid = AnalysisResultPayload::PoleZero {
+            poles: vec![ComplexResultValue {
+                real: f64::INFINITY,
+                imaginary: 0.0,
+            }],
+            zeros: Vec::new(),
+            gain: 1.0,
+        };
+        assert!(invalid.validate_for(AnalysisType::PoleZero).is_err());
+    }
+
+    #[test]
+    fn sensitivity_payload_requires_canonical_unique_rows_and_valid_basis() {
+        let valid = AnalysisResultPayload::Sensitivity {
+            output: "V(out)".to_owned(),
+            result_mode: SensitivityResultMode::Ac {
+                frequency_hz: 1_000.0,
+            },
+            rows: vec![
+                SensitivityResultRow {
+                    parameter: "length".to_owned(),
+                    raw: -1.0,
+                    normalized: -0.25,
+                },
+                SensitivityResultRow {
+                    parameter: "width".to_owned(),
+                    raw: 2.0,
+                    normalized: 0.5,
+                },
+            ],
+        };
+        assert!(valid.validate_for(AnalysisType::Sensitivity).is_ok());
+
+        let duplicate = AnalysisResultPayload::Sensitivity {
+            output: "V(out)".to_owned(),
+            result_mode: SensitivityResultMode::Dc,
+            rows: vec![
+                SensitivityResultRow {
+                    parameter: "width".to_owned(),
+                    raw: 1.0,
+                    normalized: 1.0,
+                },
+                SensitivityResultRow {
+                    parameter: "width".to_owned(),
+                    raw: 2.0,
+                    normalized: 2.0,
+                },
+            ],
+        };
+        assert!(duplicate.validate_for(AnalysisType::Sensitivity).is_err());
+
+        let invalid_frequency = AnalysisResultPayload::Sensitivity {
+            output: "V(out)".to_owned(),
+            result_mode: SensitivityResultMode::Ac { frequency_hz: 0.0 },
+            rows: Vec::new(),
+        };
+        assert!(
+            invalid_frequency
+                .validate_for(AnalysisType::Sensitivity)
+                .is_err()
+        );
     }
 }
