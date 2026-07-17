@@ -4369,6 +4369,33 @@ fn test_xyce_xdm_hspice_replaceground_cases_run_relationally() {
 }
 
 #[test]
+fn test_xyce_removeunused_dynamic_gold_cases_run_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/REDUND_REMOVE/gnd_and_redund.cir",
+        "Netlists/REDUND_REMOVE/just_redund.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should execute its native REMOVEUNUSED dynamic-gold oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(
+            result.contract, "removeunused_dynamic_gold_dc_wrapper",
+            "{relative} should report the native REMOVEUNUSED wrapper contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_model_binning_static_dc_wrapper_case_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

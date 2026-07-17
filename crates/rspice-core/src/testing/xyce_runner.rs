@@ -21,14 +21,14 @@ use crate::netlist::expr::{
     behavioral_expression_references_unbound_frequency, prepare_behavioral_expression,
 };
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, DeviceInitialConditionError, DeviceInitialConditionSource,
-    DuplicateSubcircuitPortBindingError, ElementKind, ExpressionDialect,
-    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist, NetlistParseOptions,
-    OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy, ParametricValue,
-    ParseError, StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind,
-    StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
-    TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist,
-    validate_output_symbols,
+    AnalysisCommand, DcSecondSweep, DcSweepMode, DeviceInitialConditionError,
+    DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
+    ExpressionDialect, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist,
+    NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy,
+    ParametricValue, ParseError, StartupDiagnosticCode, StartupDiagnosticStage,
+    StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
+    StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    flatten_netlist, flatten_netlist_with_models, validate_output_symbols,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -158,6 +158,23 @@ const XYCE_XDM_REPLACEGROUND_CANDIDATE_BLAKE3: &str =
 const XYCE_XDM_REPLACEGROUND_MANIFEST_COUNT: usize = 13;
 const XYCE_XDM_REPLACEGROUND_MANIFEST_BLAKE3: &str =
     "d9ef24c15d50f61735c7b136c407c5b0ba026ba3831537da5f088b178f726c75";
+const XYCE_REMOVEUNUSED_FAMILY_PREFIX: &str = "netlists/redund_remove/";
+const XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_COUNT: usize = 7;
+const XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_BLAKE3: &str =
+    "8b0bde42d563d5c43d66bd4d1b3b4b111181b7f77030a06b69793a098e3e6f48";
+const XYCE_REMOVEUNUSED_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
+    "3529baaa4c9d889777a7cd2f5d7557d7ac681be90bf1f02a93af8f9503c26fcc";
+const XYCE_REMOVEUNUSED_PHYSICAL_COUNT: usize = 5;
+const XYCE_REMOVEUNUSED_PHYSICAL_BLAKE3: &str =
+    "99ecb313048fdf1faec719760e6ebe979b7220728fdb82ad2d107997315ee8e7";
+const XYCE_REMOVEUNUSED_CANDIDATE_COUNT: usize = 2;
+const XYCE_REMOVEUNUSED_CANDIDATE_BLAKE3: &str =
+    "364ae7c5079dc42ed8516abd4c73da3d0001ecde999c6775fa02b97721b3f5e6";
+const XYCE_REMOVEUNUSED_CANDIDATE_CONTENT_BLAKE3: &str =
+    "a42d2e75acf718215247b712fcd4212efde2cdff5e64b41c1143eceda05be6ad";
+const XYCE_REMOVEUNUSED_MANIFEST_COUNT: usize = 3;
+const XYCE_REMOVEUNUSED_MANIFEST_BLAKE3: &str =
+    "a9410dae3a65ce0cfe54cbe24524596a121a03f0dad5b4c7419d797352823f64";
 
 // The four removed XDM wrappers declare abs=1e-5, rel=1e-3, and zero=1e-10,
 // but `verifyXDMtranslation` never forwards those variables for HSPICE.  It
@@ -2594,6 +2611,219 @@ struct XyceXdmReplaceGroundElementSnapshot {
     nodes: Vec<String>,
     kind: String,
     value_bits: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceRemoveUnusedKind {
+    ReplaceGround,
+    LiteralGroundNames,
+}
+
+impl XyceRemoveUnusedKind {
+    const ALL: [Self; 2] = [Self::ReplaceGround, Self::LiteralGroundNames];
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL.into_iter().find(|kind| kind.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::ReplaceGround => "netlists/redund_remove/gnd_and_redund.cir",
+            Self::LiteralGroundNames => "netlists/redund_remove/just_redund.cir",
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::ReplaceGround => (
+                3846,
+                "d717c5eeb4c47ae3ab8e6a857c7af052f9c2233cd223b104042c2616ba55c44b",
+            ),
+            Self::LiteralGroundNames => (
+                1870,
+                "99a6eef49614bf18b8414a3d47435dfaf76b8b528705f2ee9dbcd3c04f8d34b2",
+            ),
+        }
+    }
+
+    fn replace_ground(self) -> bool {
+        self == Self::ReplaceGround
+    }
+
+    fn expected_divider_ratio(self) -> Value {
+        if self.replace_ground() { 0.5 } else { 1.0 }
+    }
+
+    fn expected_flattened_element_count(self) -> usize {
+        if self.replace_ground() { 6 } else { 12 }
+    }
+
+    fn expected_flattened_snapshot(self, policy_off: bool) -> Vec<XyceRemoveUnusedElementSnapshot> {
+        let element =
+            |name: &str, nodes: &[&str], kind: &str, value: Option<Value>, model: Option<&str>| {
+                XyceRemoveUnusedElementSnapshot {
+                    name: name.to_ascii_lowercase(),
+                    nodes: nodes.iter().map(|node| node.to_ascii_lowercase()).collect(),
+                    kind: kind.to_string(),
+                    value_bits: value.map(Value::to_bits),
+                    model: model.map(str::to_ascii_lowercase),
+                }
+            };
+        let ground = if self.replace_ground() { "0" } else { "gnd" };
+        let ground_word = if self.replace_ground() { "0" } else { "ground" };
+        let mut expected = vec![
+            element("V1", &["1", "0"], "V", Some(1.0), None),
+            element("R1", &["1", "2"], "R", Some(1.0), None),
+            element("R2", &["2", ground], "R", Some(2.0), None),
+            element("C1", &["2", ground], "C", Some(1.0), None),
+            element("X1.R1", &["2", ground_word], "R", Some(2.0), None),
+            element("X1.X2.C1", &["2", ground_word], "C", Some(1.0), None),
+        ];
+        if policy_off || !self.replace_ground() {
+            for (prefix, port1, port2, local3) in [
+                ("", "1", "2", "3"),
+                ("X1.", "2", ground_word, "X1.3"),
+                ("X1.X2.", "2", ground_word, "X1.X2.3"),
+            ] {
+                let (alias_gnd, alias_gnd_bang, alias_ground) = if self.replace_ground() {
+                    ("0".to_string(), "0".to_string(), "0".to_string())
+                } else {
+                    (
+                        format!("{prefix}gnd"),
+                        format!("{prefix}gnd!"),
+                        format!("{prefix}ground"),
+                    )
+                };
+                let junk = [
+                    element(
+                        &format!("{prefix}C11"),
+                        &[&alias_gnd_bang, &alias_ground],
+                        "C",
+                        Some(1.0),
+                        None,
+                    ),
+                    element(
+                        &format!("{prefix}D11"),
+                        &[port1, port1],
+                        "D",
+                        None,
+                        Some("Dmod"),
+                    ),
+                    element(&format!("{prefix}I11"), &["0", "0"], "I", Some(4.0), None),
+                    element(
+                        &format!("{prefix}L11"),
+                        &[port2, port2],
+                        "L",
+                        Some(3.0),
+                        None,
+                    ),
+                    element(
+                        &format!("{prefix}M11"),
+                        &[&alias_gnd, &alias_ground, &alias_gnd_bang, port2],
+                        "M",
+                        None,
+                        Some("Nmod"),
+                    ),
+                    element(
+                        &format!("{prefix}Q11"),
+                        &[port2, port2, port2, local3],
+                        "Q",
+                        None,
+                        Some("Qmod"),
+                    ),
+                    element(
+                        &format!("{prefix}R11"),
+                        &[port1, port1],
+                        "R",
+                        Some(1.0),
+                        None,
+                    ),
+                    element(
+                        &format!("{prefix}V11"),
+                        &[local3, local3],
+                        "V",
+                        Some(4.0),
+                        None,
+                    ),
+                ];
+                if policy_off {
+                    expected.extend(junk);
+                } else {
+                    expected.extend(
+                        junk.into_iter()
+                            .filter(|snapshot| matches!(snapshot.kind.as_str(), "C" | "M")),
+                    );
+                }
+            }
+        }
+        expected.sort_by(|left, right| left.name.cmp(&right.name));
+        expected
+    }
+
+    fn expected_authored_snapshots(
+        self,
+    ) -> (
+        Vec<XyceRemoveUnusedElementSnapshot>,
+        Vec<(String, Vec<XyceRemoveUnusedElementSnapshot>)>,
+    ) {
+        let element =
+            |name: &str, nodes: &[&str], kind: &str, value: Option<Value>, model: Option<&str>| {
+                XyceRemoveUnusedElementSnapshot {
+                    name: name.to_ascii_lowercase(),
+                    nodes: nodes.iter().map(|node| node.to_ascii_lowercase()).collect(),
+                    kind: kind.to_string(),
+                    value_bits: value.map(Value::to_bits),
+                    model: model.map(str::to_ascii_lowercase),
+                }
+            };
+        let ground = if self.replace_ground() { "0" } else { "gnd" };
+        let ground_word = if self.replace_ground() { "0" } else { "ground" };
+        let mut top = vec![
+            element("V1", &["1", "0"], "V", Some(1.0), None),
+            element("R1", &["1", "2"], "R", Some(1.0), None),
+            element("R2", &["2", ground], "R", Some(2.0), None),
+            element("X1", &["2", ground_word], "X", None, Some("resistor")),
+            element("C1", &["2", ground], "C", Some(1.0), None),
+        ];
+        let mut resistor = vec![
+            element("R1", &["1", "2"], "R", Some(2.0), None),
+            element("X2", &["1", "2"], "X", None, Some("capacitor")),
+        ];
+        let mut capacitor = vec![element("C1", &["1", "2"], "C", Some(1.0), None)];
+        if !self.replace_ground() {
+            let c11 = element("C11", &["gnd!", "ground"], "C", Some(1.0), None);
+            let m11 = element(
+                "M11",
+                &["gnd", "ground", "gnd!", "2"],
+                "M",
+                None,
+                Some("Nmod"),
+            );
+            top.extend([c11.clone(), m11.clone()]);
+            resistor.extend([c11.clone(), m11.clone()]);
+            capacitor.extend([c11, m11]);
+        }
+        for snapshot in [&mut top, &mut resistor, &mut capacitor] {
+            snapshot.sort_by(|left, right| left.name.cmp(&right.name));
+        }
+        (
+            top,
+            vec![
+                ("capacitor".to_string(), capacitor),
+                ("resistor".to_string(), resistor),
+            ],
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceRemoveUnusedElementSnapshot {
+    name: String,
+    nodes: Vec<String>,
+    kind: String,
+    value_bits: Option<u64>,
+    model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -5133,6 +5363,23 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(kind) = XyceRemoveUnusedKind::for_record(&deck.relative_path) {
+            let contract = "removeunused_dynamic_gold_dc_wrapper";
+            let result = match self.validate_removeunused_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(result) = self.run_expected_error_contract(deck, start) {
             if self.config.verbose {
                 println!(
@@ -5902,6 +6149,7 @@ impl XyceTestRunner {
     ) -> Result<(), String> {
         let expected_replace_ground = replace_ground.then_some(true);
         if options.replace_ground != expected_replace_ground
+            || options.remove_unused.is_some()
             || options.tnom.map(Value::to_bits) != Some(25.0f64.to_bits())
             || options.measure_fail_output.is_some()
             || options.measure_default_value.is_some()
@@ -6872,6 +7120,802 @@ impl XyceTestRunner {
             ));
         }
         Ok(())
+    }
+
+    fn validate_removeunused_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceRemoveUnusedKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        self.validate_removeunused_provenance(deck, kind)?;
+        self.check_removeunused_deadline(start, "provenance")?;
+
+        let source_bytes = fs::read(&deck.path).map_err(|error| {
+            format!(
+                "failed to read REMOVEUNUSED record {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        Self::validate_xdm_replaceground_identity(
+            "REMOVEUNUSED source",
+            kind.record(),
+            &source_bytes,
+            kind.source_identity(),
+        )?;
+        let source = std::str::from_utf8(&source_bytes).map_err(|error| {
+            format!(
+                "REMOVEUNUSED record '{}' is not UTF-8: {error}",
+                kind.record()
+            )
+        })?;
+        let plan = self.static_dc_plan_for_source_with_execution_dir(
+            &deck.path,
+            source.to_string(),
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        Self::validate_removeunused_plan(&plan, kind)?;
+        self.check_removeunused_deadline(start, "plan validation")?;
+
+        let (netlist, results) =
+            self.run_static_dc_results(&plan, start)
+                .map_err(|error| match error {
+                    SimulationError::Aborted => format!(
+                        "REMOVEUNUSED active execution exceeded shared timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    other => format!("REMOVEUNUSED active DC execution failed: {other}"),
+                })?;
+        Self::validate_removeunused_netlist(&netlist, kind)?;
+        Self::validate_removeunused_flattened_topology(&netlist, kind, false)?;
+        if results.len() != 21 {
+            return Err(format!(
+                "REMOVEUNUSED DC execution produced {} points instead of 21",
+                results.len()
+            ));
+        }
+        let actual = self.dc_results_to_prn_table(&plan, &netlist, &results)?;
+        Self::validate_removeunused_analytic_table(&actual, &results, kind)?;
+        let dynamic_gold = Self::removeunused_dynamic_gold_table(&actual, kind)?;
+        let mismatches =
+            self.compare_xdm_replaceground_tables(&dynamic_gold, &actual, &results, &results)?;
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "REMOVEUNUSED dynamic-gold wrapper comparison produced {} mismatch(es): {:?}",
+                mismatches.len(),
+                mismatches
+            ));
+        }
+        self.check_removeunused_deadline(start, "active execution and dynamic gold")?;
+
+        // The removed wrapper's dynamic gold derives V(2) from the same run's
+        // V(1), so execution alone is common-mode vulnerable.  Disable the
+        // preprocessing card and require both the exact pre-removal topology
+        // and a failure or numerical distinction from the active run.
+        let control = ".PREPROCESS removeunused c,d,i,l,m,q,r,v";
+        if source.matches(control).count() != 1 {
+            return Err(
+                "REMOVEUNUSED source no longer owns exactly one canonical control card".to_string(),
+            );
+        }
+        let policy_off_source = source.replacen(control, &format!("*{control}"), 1);
+        let policy_off_plan = self.static_dc_plan_for_source_with_execution_dir(
+            &deck.path,
+            policy_off_source,
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        let policy_off_netlist =
+            Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+                &policy_off_plan.source,
+                &deck.path,
+                ExpressionDialect::Xyce,
+                ParameterRedefinitionPolicy::UseLast,
+                None,
+            )
+            .map_err(|error| format!("REMOVEUNUSED policy-off parse failed: {error}"))?;
+        Self::validate_removeunused_flattened_topology(&policy_off_netlist, kind, true)?;
+        match self.run_static_dc_results(&policy_off_plan, start) {
+            Err(SimulationError::Aborted) => {
+                return Err(format!(
+                    "REMOVEUNUSED policy-off execution exceeded shared timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ));
+            }
+            Err(_) => {}
+            Ok((policy_off_run_netlist, policy_off_results)) => {
+                let policy_off_table = self.dc_results_to_prn_table(
+                    &policy_off_plan,
+                    &policy_off_run_netlist,
+                    &policy_off_results,
+                )?;
+                if self
+                    .compare_xdm_replaceground_tables(
+                        &dynamic_gold,
+                        &policy_off_table,
+                        &results,
+                        &policy_off_results,
+                    )
+                    .is_ok_and(|mismatches| mismatches.is_empty())
+                {
+                    return Err(
+                        "REMOVEUNUSED policy-off circuit unexpectedly reproduced the active output"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        self.check_removeunused_deadline(start, "policy-off causality")
+    }
+
+    fn check_removeunused_deadline(&self, start: Instant, phase: &str) -> Result<(), String> {
+        if DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1)).is_aborted() {
+            return Err(format!(
+                "REMOVEUNUSED shared deadline expired during {phase} ({}ms)",
+                self.config.max_time_per_test_ms
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_removeunused_plan(
+        plan: &XyceStaticDcPlan,
+        kind: XyceRemoveUnusedKind,
+    ) -> Result<(), String> {
+        if !plan.steps.is_empty() || plan.dc_data.is_some() || !plan.diagnostics.is_empty() {
+            return Err(format!(
+                "REMOVEUNUSED plan contains STEP/DATA/diagnostic state outside the wrapper contract: steps={:?}, data={}, diagnostics={:?}",
+                plan.steps,
+                plan.dc_data.is_some(),
+                plan.diagnostics
+            ));
+        }
+        if plan.print_format.is_some()
+            || plan.print.probes != ["V(1)".to_string(), "V(2)".to_string()]
+        {
+            return Err(format!(
+                "REMOVEUNUSED wrapper requires one default .PRINT DC V(1) V(2), got format={:?}, probes={:?}",
+                plan.print_format, plan.print.probes
+            ));
+        }
+        if !plan.dc.source.eq_ignore_ascii_case("V1")
+            || plan.dc.start.to_bits() != (-1.0f64).to_bits()
+            || plan.dc.stop.to_bits() != 1.0f64.to_bits()
+            || plan.dc.step.to_bits() != 0.1f64.to_bits()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, DcSweepMode::Linear)
+        {
+            return Err(format!(
+                "REMOVEUNUSED wrapper has an unexpected DC sweep: {:?}",
+                plan.dc
+            ));
+        }
+        let replace_count = plan
+            .source
+            .lines()
+            .filter(|line| {
+                line.trim()
+                    .eq_ignore_ascii_case(".PREPROCESS replaceground true")
+            })
+            .count();
+        if replace_count != usize::from(kind.replace_ground()) {
+            return Err(format!(
+                "REMOVEUNUSED record '{}' has {replace_count} REPLACEGROUND controls",
+                kind.record()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_removeunused_netlist(
+        netlist: &Netlist,
+        kind: XyceRemoveUnusedKind,
+    ) -> Result<(), String> {
+        let expected_types = [
+            crate::netlist::RemoveUnusedDeviceType::Capacitor,
+            crate::netlist::RemoveUnusedDeviceType::Diode,
+            crate::netlist::RemoveUnusedDeviceType::CurrentSource,
+            crate::netlist::RemoveUnusedDeviceType::Inductor,
+            crate::netlist::RemoveUnusedDeviceType::Mosfet,
+            crate::netlist::RemoveUnusedDeviceType::Bjt,
+            crate::netlist::RemoveUnusedDeviceType::Resistor,
+            crate::netlist::RemoveUnusedDeviceType::VoltageSource,
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        let options = &netlist.options;
+        if options.replace_ground != kind.replace_ground().then_some(true)
+            || options
+                .remove_unused
+                .as_ref()
+                .map(|policy| &policy.device_types)
+                != Some(&expected_types)
+            || options.measure_fail_output.is_some()
+            || options.measure_default_value.is_some()
+            || options.measure_use_cont_files.is_some()
+            || !options.hb_num_frequencies.is_empty()
+            || options.nonlinear_continuation.is_some()
+            || options.reltol.is_some()
+            || options.abstol.is_some()
+            || options.vntol.is_some()
+            || options.iabstol.is_some()
+            || options.residual_reltol.is_some()
+            || options.gmin.is_some()
+            || options.method.is_some()
+            || options.trtol.is_some()
+            || options.timeint_reltol.is_some()
+            || options.timeint_abstol.is_some()
+            || options.transient_lte_reference.is_some()
+            || options.transient_new_bp_stepping.is_some()
+            || options.ramptime.is_some()
+            || options.digital_delay_type.is_some()
+            || options.xspice_event_trace_save.is_some()
+            || options.itl1.is_some()
+            || options.itl2.is_some()
+            || options.itl4.is_some()
+            || options.itl6.is_some()
+            || options.chgtol.is_some()
+            || options.pivtol.is_some()
+            || options.temp.is_some()
+            || options.tnom.is_some()
+            || options.seed.is_some()
+            || options.allow_simplified_mos.is_some()
+            || options.auto_bridge.is_some()
+            || options.auto_bridge_show_generated.is_some()
+            || options.auto_bridge_family.is_some()
+            || !options.auto_bridge_templates.is_empty()
+            || !options.auto_bridge_param_names.is_empty()
+            || options.topology_supernode.is_some()
+            || options.device_zero_resistance_tol.is_some()
+            || options.b3soi_gmin_scaling.is_some()
+        {
+            return Err(format!(
+                "REMOVEUNUSED record '{}' has unexpected exact preprocessing/options state {:?}",
+                kind.record(),
+                netlist.options
+            ));
+        }
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "REMOVEUNUSED record '{}' produced diagnostics: {:?}",
+                kind.record(),
+                netlist.diagnostics
+            ));
+        }
+        Self::validate_removeunused_authored_hierarchy(netlist, kind)?;
+        Ok(())
+    }
+
+    fn validate_removeunused_authored_hierarchy(
+        netlist: &Netlist,
+        kind: XyceRemoveUnusedKind,
+    ) -> Result<(), String> {
+        let mut models = netlist
+            .models
+            .iter()
+            .map(|model| {
+                if !model.params.is_empty()
+                    || !model.expr_params.is_empty()
+                    || !model.string_params.is_empty()
+                    || !model.string_vector_params.is_empty()
+                    || !model.real_vector_params.is_empty()
+                    || !model.real_vector_expr_params.is_empty()
+                    || !model.integer_vector_params.is_empty()
+                {
+                    return Err(format!(
+                        "REMOVEUNUSED model '{}' unexpectedly owns parameters: {model:?}",
+                        model.name
+                    ));
+                }
+                Ok((
+                    model.name.to_ascii_lowercase(),
+                    model.model_type.to_ascii_lowercase(),
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        models.sort();
+        let expected_models = vec![
+            ("dmod".to_string(), "d".to_string()),
+            ("nmod".to_string(), "nmos".to_string()),
+            ("qmod".to_string(), "npn".to_string()),
+        ];
+        if models != expected_models {
+            return Err(format!(
+                "REMOVEUNUSED authored model census changed: expected={expected_models:?}, actual={models:?}"
+            ));
+        }
+        let mut top = netlist
+            .elements
+            .iter()
+            .map(Self::removeunused_element_snapshot)
+            .collect::<Result<Vec<_>, _>>()?;
+        top.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut definitions = netlist
+            .subcircuits
+            .iter()
+            .map(|definition| {
+                if definition.ports != ["1".to_string(), "2".to_string()]
+                    || !definition.initial_conditions.is_empty()
+                    || !definition.node_sets.is_empty()
+                    || !definition.params.is_empty()
+                    || !definition.expr_params.is_empty()
+                    || !definition.string_params.is_empty()
+                    || !definition.body_params.is_empty()
+                    || !definition.body_expr_params.is_empty()
+                    || !definition.body_string_params.is_empty()
+                    || !definition.body_functions.is_empty()
+                    || !definition.local_options.is_empty()
+                    || definition.library_ref.is_some()
+                    || !definition.nested_subcircuits.is_empty()
+                {
+                    return Err(format!(
+                        "REMOVEUNUSED authored definition '{}' has unexpected ports/parameters/local state: {definition:?}",
+                        definition.name,
+                    ));
+                }
+                let mut elements = definition
+                    .elements
+                    .iter()
+                    .map(Self::removeunused_element_snapshot)
+                    .collect::<Result<Vec<_>, _>>()?;
+                elements.sort_by(|left, right| left.name.cmp(&right.name));
+                Ok((definition.name.to_ascii_lowercase(), elements))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        definitions.sort_by(|left, right| left.0.cmp(&right.0));
+        let (expected_top, expected_definitions) = kind.expected_authored_snapshots();
+        if top != expected_top || definitions != expected_definitions {
+            return Err(format!(
+                "REMOVEUNUSED authored hierarchy changed: expected top={expected_top:#?}, definitions={expected_definitions:#?}; actual top={top:#?}, definitions={definitions:#?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_removeunused_flattened_topology(
+        netlist: &Netlist,
+        kind: XyceRemoveUnusedKind,
+        policy_off: bool,
+    ) -> Result<(), String> {
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|error| format!("REMOVEUNUSED flattening failed: {error}"))?;
+        let mut snapshot = flattened
+            .elements
+            .iter()
+            .map(Self::removeunused_element_snapshot)
+            .collect::<Result<Vec<_>, _>>()?;
+        snapshot.sort_by(|left, right| left.name.cmp(&right.name));
+        let expected_snapshot = kind.expected_flattened_snapshot(policy_off);
+        if snapshot != expected_snapshot {
+            return Err(format!(
+                "REMOVEUNUSED {} exact flattened snapshot changed: expected={expected_snapshot:#?}, actual={snapshot:#?}",
+                if policy_off { "policy-off" } else { "active" }
+            ));
+        }
+        let expected_total = if policy_off {
+            30
+        } else {
+            kind.expected_flattened_element_count()
+        };
+        if flattened.elements.len() != expected_total {
+            return Err(format!(
+                "REMOVEUNUSED {} topology contains {} flattened elements instead of {expected_total}",
+                if policy_off { "policy-off" } else { "active" },
+                flattened.elements.len()
+            ));
+        }
+        let mut counts = BTreeMap::<char, usize>::new();
+        let mut redundant_selected = Vec::new();
+        for element in &flattened.elements {
+            let device = match &element.kind {
+                ElementKind::Capacitor { .. } => 'C',
+                ElementKind::Diode { .. } => 'D',
+                ElementKind::CurrentSource(_) => 'I',
+                ElementKind::Inductor { .. } | ElementKind::JilesAthertonInductor { .. } => 'L',
+                ElementKind::Mosfet { .. } => 'M',
+                ElementKind::Bjt { .. } => 'Q',
+                ElementKind::Resistor { .. } => 'R',
+                ElementKind::VoltageSource(_) => 'V',
+                _ => {
+                    return Err(format!(
+                        "REMOVEUNUSED bounded topology contains unsupported element {} {:?}",
+                        element.name, element.kind
+                    ));
+                }
+            };
+            *counts.entry(device).or_default() += 1;
+            let redundant = if matches!(device, 'M' | 'Q') {
+                element.nodes.len() >= 3
+                    && element.nodes[0].eq_ignore_ascii_case(&element.nodes[1])
+                    && element.nodes[1].eq_ignore_ascii_case(&element.nodes[2])
+            } else {
+                element.nodes.len() >= 2 && element.nodes[0].eq_ignore_ascii_case(&element.nodes[1])
+            };
+            if redundant {
+                redundant_selected.push(element.name.clone());
+            }
+        }
+        let expected_counts = if policy_off {
+            BTreeMap::from([
+                ('C', 5),
+                ('D', 3),
+                ('I', 3),
+                ('L', 3),
+                ('M', 3),
+                ('Q', 3),
+                ('R', 6),
+                ('V', 4),
+            ])
+        } else if kind.replace_ground() {
+            BTreeMap::from([('C', 2), ('R', 3), ('V', 1)])
+        } else {
+            BTreeMap::from([('C', 5), ('M', 3), ('R', 3), ('V', 1)])
+        };
+        if counts != expected_counts {
+            return Err(format!(
+                "REMOVEUNUSED {} device census changed: expected={expected_counts:?}, actual={counts:?}",
+                if policy_off { "policy-off" } else { "active" }
+            ));
+        }
+        if policy_off {
+            let expected_redundant = if kind.replace_ground() { 24 } else { 18 };
+            if redundant_selected.len() != expected_redundant {
+                return Err(format!(
+                    "REMOVEUNUSED policy-off topology exposes {} redundant selected devices instead of {expected_redundant}: {redundant_selected:?}",
+                    redundant_selected.len(),
+                ));
+            }
+        } else if !redundant_selected.is_empty() {
+            return Err(format!(
+                "REMOVEUNUSED active topology retained redundant selected devices: {redundant_selected:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn removeunused_element_snapshot(
+        element: &crate::netlist::Element,
+    ) -> Result<XyceRemoveUnusedElementSnapshot, String> {
+        let (kind, value, model) = match &element.kind {
+            ElementKind::Resistor { value, model, .. } => ("R", Some(*value), model.as_deref()),
+            ElementKind::Capacitor { value, model, .. } => ("C", Some(*value), model.as_deref()),
+            ElementKind::Inductor { value, model, .. } => ("L", Some(*value), model.as_deref()),
+            ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) => {
+                ("V", Some(*value), None)
+            }
+            ElementKind::CurrentSource(crate::netlist::SourceSpec::Dc(value)) => {
+                ("I", Some(*value), None)
+            }
+            ElementKind::Diode { model, .. } => ("D", None, Some(model.as_str())),
+            ElementKind::Mosfet { model, .. } => ("M", None, Some(model.as_str())),
+            ElementKind::Bjt { model, .. } => ("Q", None, Some(model.as_str())),
+            ElementKind::Subcircuit { subckt_name, .. } => ("X", None, Some(subckt_name.as_str())),
+            other => {
+                return Err(format!(
+                    "REMOVEUNUSED bounded snapshot cannot represent {} {other:?}",
+                    element.name
+                ));
+            }
+        };
+        if value.is_some_and(|value| !value.is_finite()) {
+            return Err(format!(
+                "REMOVEUNUSED element {} has a non-finite primary value",
+                element.name
+            ));
+        }
+        Ok(XyceRemoveUnusedElementSnapshot {
+            name: element.name.to_ascii_lowercase(),
+            nodes: element
+                .nodes
+                .iter()
+                .map(|node| node.to_ascii_lowercase())
+                .collect(),
+            kind: kind.to_string(),
+            value_bits: value.map(Value::to_bits),
+            model: model.map(str::to_ascii_lowercase),
+        })
+    }
+
+    fn validate_removeunused_analytic_table(
+        table: &XycePrnTable,
+        results: &[DcSweepPointResult],
+        kind: XyceRemoveUnusedKind,
+    ) -> Result<(), String> {
+        if table.columns != ["Index", "V(1)", "V(2)"] || table.rows.len() != 21 {
+            return Err(format!(
+                "REMOVEUNUSED table requires Index/V(1)/V(2) and 21 rows, got {:?}/{}",
+                table.columns,
+                table.rows.len()
+            ));
+        }
+        if results.len() != table.rows.len() {
+            return Err(format!(
+                "REMOVEUNUSED execution returned {} sweep points for {} table rows",
+                results.len(),
+                table.rows.len()
+            ));
+        }
+        let ratio = kind.expected_divider_ratio();
+        for (row_index, (row, point)) in table.rows.iter().zip(results).enumerate() {
+            if row.len() != 3 || row.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "REMOVEUNUSED row {row_index} is not a finite three-column row: {row:?}"
+                ));
+            }
+            let sweep = point.sweep_value;
+            let v1_error = (row[1] - sweep).abs();
+            let v2_error = (row[2] - ratio * sweep).abs();
+            if v1_error > 1.0e-10 || v2_error > 1.0e-9 {
+                return Err(format!(
+                    "REMOVEUNUSED analytic invariant failed at row {row_index}: sweep={sweep}, V1={}, V2={}, expected ratio={ratio}",
+                    row[1], row[2]
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn removeunused_dynamic_gold_table(
+        actual: &XycePrnTable,
+        kind: XyceRemoveUnusedKind,
+    ) -> Result<XycePrnTable, String> {
+        let ratio = kind.expected_divider_ratio();
+        let mut rows = Vec::with_capacity(actual.rows.len());
+        for (row_index, row) in actual.rows.iter().enumerate() {
+            if row.len() != 3 {
+                return Err(format!(
+                    "REMOVEUNUSED dynamic gold row {row_index} has width {}",
+                    row.len()
+                ));
+            }
+            // The Perl gold script reads the already serialized V(1), applies
+            // the analytic ratio, then writes the result with %14.8e.
+            let serialized_v1 = Self::xyce_default_prn_roundtrip(row[1])?;
+            let expected_v2 = Self::xyce_default_prn_roundtrip(ratio * serialized_v1)?;
+            rows.push(vec![row[0], serialized_v1, expected_v2]);
+        }
+        Ok(XycePrnTable {
+            columns: actual.columns.clone(),
+            rows,
+        })
+    }
+
+    fn validate_removeunused_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceRemoveUnusedKind,
+    ) -> Result<(), String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
+        {
+            return Err(format!(
+                "REMOVEUNUSED deck path does not match its recognized record: {}",
+                deck.relative_path
+            ));
+        }
+        let canonical_deck = deck.path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize REMOVEUNUSED deck {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        let canonical_expected = self
+            .root
+            .join(Path::new(&deck.relative_path))
+            .canonicalize()
+            .map_err(|error| {
+                format!(
+                    "canonical REMOVEUNUSED record '{}' is missing: {error}",
+                    kind.record()
+                )
+            })?;
+        if canonical_deck != canonical_expected
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err(format!(
+                "REMOVEUNUSED record '{}' lost canonical removed-wrapper provenance",
+                kind.record()
+            ));
+        }
+        let metadata = fs::symlink_metadata(&deck.path)
+            .map_err(|error| format!("failed to inspect REMOVEUNUSED source: {error}"))?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err("REMOVEUNUSED source must be a regular non-symlink file".to_string());
+        }
+        let family_dir = deck
+            .path
+            .parent()
+            .ok_or_else(|| "REMOVEUNUSED record has no family directory".to_string())?;
+        let expected_family = self
+            .root
+            .join("Netlists/REDUND_REMOVE")
+            .canonicalize()
+            .map_err(|error| format!("REMOVEUNUSED family is missing: {error}"))?;
+        if family_dir.canonicalize().ok() != Some(expected_family) {
+            return Err(format!(
+                "REMOVEUNUSED family resolved outside canonical REDUND_REMOVE: {}",
+                family_dir.display()
+            ));
+        }
+
+        let mut complete = BTreeSet::new();
+        let mut content = BTreeSet::new();
+        let mut physical = BTreeSet::new();
+        for entry in fs::read_dir(family_dir)
+            .map_err(|error| format!("failed to inspect REMOVEUNUSED family: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("failed to inspect REMOVEUNUSED member: {error}"))?;
+            let member_metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect REMOVEUNUSED member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            if !member_metadata.file_type().is_file() || member_metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "REMOVEUNUSED family member {} must be a regular non-symlink file",
+                    entry.path().display()
+                ));
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| "REMOVEUNUSED family filename is not UTF-8".to_string())?
+                .to_ascii_lowercase();
+            if !complete.insert(name.clone()) {
+                return Err(format!(
+                    "REMOVEUNUSED family contains case-colliding name {name:?}"
+                ));
+            }
+            let bytes = fs::read(entry.path()).map_err(|error| {
+                format!(
+                    "failed to hash REMOVEUNUSED member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            content.insert(format!("{name}\0{}", blake3::hash(&bytes).to_hex()));
+            if name.ends_with(".cir") {
+                physical.insert(name);
+            }
+        }
+        let complete = complete.into_iter().collect::<Vec<_>>();
+        let content = content.into_iter().collect::<Vec<_>>();
+        let physical = physical.into_iter().collect::<Vec<_>>();
+        let complete_hash = blake3::hash(complete.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let physical_hash = blake3::hash(physical.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if complete.len() != XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_COUNT
+            || complete_hash != XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_BLAKE3
+            || content.len() != XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_COUNT
+            || content_hash != XYCE_REMOVEUNUSED_SOURCE_CONTENT_CENSUS_BLAKE3
+            || physical.len() != XYCE_REMOVEUNUSED_PHYSICAL_COUNT
+            || physical_hash != XYCE_REMOVEUNUSED_PHYSICAL_BLAKE3
+        {
+            return Err(format!(
+                "REMOVEUNUSED family census changed: complete={}/{complete_hash}, content={}/{content_hash}, physical={}/{physical_hash}",
+                complete.len(),
+                content.len(),
+                physical.len()
+            ));
+        }
+
+        let mut candidates = BTreeSet::new();
+        let mut candidate_content = BTreeSet::new();
+        for candidate in XyceRemoveUnusedKind::ALL {
+            let name = candidate
+                .record()
+                .rsplit_once('/')
+                .expect("REMOVEUNUSED records have a family")
+                .1;
+            let path = family_dir.join(name);
+            let bytes = fs::read(&path).map_err(|error| {
+                format!(
+                    "REMOVEUNUSED candidate {} is missing: {error}",
+                    path.display()
+                )
+            })?;
+            candidates.insert(candidate.record().to_string());
+            candidate_content.insert(format!(
+                "{}\t{}",
+                candidate.record(),
+                blake3::hash(&bytes).to_hex()
+            ));
+        }
+        let candidates = candidates.into_iter().collect::<Vec<_>>();
+        let candidate_content = candidate_content.into_iter().collect::<Vec<_>>();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let candidate_content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_REMOVEUNUSED_CANDIDATE_COUNT
+            || candidate_hash != XYCE_REMOVEUNUSED_CANDIDATE_BLAKE3
+            || candidate_content_hash != XYCE_REMOVEUNUSED_CANDIDATE_CONTENT_BLAKE3
+        {
+            return Err(format!(
+                "REMOVEUNUSED candidate census changed: names={}/{candidate_hash}, content={candidate_content_hash}",
+                candidates.len()
+            ));
+        }
+
+        let manifest = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(XYCE_REMOVEUNUSED_FAMILY_PREFIX))
+            .cloned()
+            .collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if manifest.len() != XYCE_REMOVEUNUSED_MANIFEST_COUNT
+            || manifest_hash != XYCE_REMOVEUNUSED_MANIFEST_BLAKE3
+            || !manifest.iter().any(|record| record == kind.record())
+        {
+            return Err(format!(
+                "REMOVEUNUSED manifest census changed: expected {XYCE_REMOVEUNUSED_MANIFEST_COUNT}/{XYCE_REMOVEUNUSED_MANIFEST_BLAKE3}, got {}/{manifest_hash}",
+                manifest.len()
+            ));
+        }
+        if family_dir.join("options").exists() {
+            return Err("REMOVEUNUSED family unexpectedly contains an options sidecar".to_string());
+        }
+        self.reject_removeunused_output_artifacts(&deck.path)
+    }
+
+    fn reject_removeunused_output_artifacts(&self, deck_path: &Path) -> Result<(), String> {
+        let anchor = self
+            .static_output_reference_path(deck_path, "anchor")
+            .ok_or_else(|| "REMOVEUNUSED deck cannot be mapped into OutputData".to_string())?;
+        let Some(output_dir) = anchor.parent() else {
+            return Err("REMOVEUNUSED OutputData anchor has no parent".to_string());
+        };
+        if !output_dir.exists() {
+            return Ok(());
+        }
+        let metadata = fs::symlink_metadata(output_dir)
+            .map_err(|error| format!("failed to inspect REMOVEUNUSED OutputData: {error}"))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "REMOVEUNUSED OutputData path {} must be a regular non-symlink directory",
+                output_dir.display()
+            ));
+        }
+        let deck_name = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "REMOVEUNUSED deck filename is not UTF-8".to_string())?;
+        let prefix = format!("{deck_name}.").to_ascii_lowercase();
+        let mut artifacts = Vec::new();
+        for entry in fs::read_dir(output_dir)
+            .map_err(|error| format!("failed to inspect REMOVEUNUSED OutputData: {error}"))?
+        {
+            let entry = entry
+                .map_err(|error| format!("failed to inspect REMOVEUNUSED artifact: {error}"))?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&prefix))
+            {
+                artifacts.push(entry.path());
+            }
+        }
+        artifacts.sort();
+        if artifacts.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "REMOVEUNUSED candidate must not own checked-in OutputData artifacts: {artifacts:?}"
+            ))
+        }
     }
 
     fn validate_startup_diagnostic_oracle(
@@ -25689,6 +26733,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     ) -> bool {
         let crate::netlist::SimulationOptions {
             replace_ground: _,
+            remove_unused: _,
             measure_fail_output: _,
             measure_default_value: _,
             measure_use_cont_files: _,
@@ -57598,6 +58643,50 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
 mod tests {
     use super::*;
 
+    fn removeunused_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
+        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+        let source_family = source_root.join("Netlists/REDUND_REMOVE");
+        let root = std::env::temp_dir().join(format!(
+            "rspice-removeunused-oracle-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        let family = root.join("Netlists/REDUND_REMOVE");
+        fs::create_dir_all(&family).expect("create REMOVEUNUSED fixture family");
+        for entry in fs::read_dir(&source_family).expect("read canonical REDUND_REMOVE family") {
+            let entry = entry.expect("read canonical REDUND_REMOVE member");
+            fs::copy(entry.path(), family.join(entry.file_name()))
+                .expect("copy canonical REDUND_REMOVE member");
+        }
+        let manifest = fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE))
+            .expect("read canonical harness manifest")
+            .lines()
+            .filter(|line| {
+                line.split('\t').next().is_some_and(|record| {
+                    XyceTestRunner::normalize_manifest_key(record)
+                        .starts_with(XYCE_REMOVEUNUSED_FAMILY_PREFIX)
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(root.join(HARNESS_MANIFEST_FILE), format!("{manifest}\n"))
+            .expect("write REMOVEUNUSED fixture manifest");
+        (root, family)
+    }
+
+    fn assert_removeunused_fixture_fails(root: &Path, family: &Path, context: &str) {
+        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+        let result = runner.run_test(family.join("gnd_and_redund.cir"));
+        assert!(
+            !result.passed && !result.expected_unsupported,
+            "{context} must fail closed: {result:?}"
+        );
+        assert_eq!(result.contract, "removeunused_dynamic_gold_dc_wrapper");
+    }
+
     fn xdm_replaceground_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
         let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
         let source_family = source_root.join("Netlists/XDM/HSPICE/OTHER_PARSING");
@@ -57674,6 +58763,194 @@ mod tests {
                 .map(|index| vec![index as Value, index as Value + axis_offset, dependent])
                 .collect(),
         }
+    }
+
+    #[test]
+    fn removeunused_source_family_and_manifest_mutations_fail_closed() {
+        for (label, target, needle, replacement) in [
+            (
+                "candidate-content",
+                "gnd_and_redund.cir",
+                "R1 1 2 1",
+                "R1 1 2 2",
+            ),
+            (
+                "unrelated-content",
+                "gnd_subckt.cir",
+                "Test",
+                "Mutated test",
+            ),
+        ] {
+            let (root, family) = removeunused_mutation_fixture(label);
+            let path = family.join(target);
+            let source = fs::read_to_string(&path).expect("read REMOVEUNUSED mutation target");
+            assert!(source.contains(needle));
+            fs::write(&path, source.replacen(needle, replacement, 1))
+                .expect("write REMOVEUNUSED content mutation");
+            assert_removeunused_fixture_fails(&root, &family, label);
+            fs::remove_dir_all(root).expect("remove REMOVEUNUSED content fixture");
+        }
+
+        for (label, replacement) in [
+            ("manifest-owner-removed", ""),
+            (
+                "manifest-contract-changed",
+                "Netlists/REDUND_REMOVE/gnd_and_redund.cir\tchanged_contract\n",
+            ),
+        ] {
+            let (root, family) = removeunused_mutation_fixture(label);
+            let manifest_path = root.join(HARNESS_MANIFEST_FILE);
+            let manifest = fs::read_to_string(&manifest_path).expect("read fixture manifest");
+            let owner = "Netlists/REDUND_REMOVE/gnd_and_redund.cir\trequires_upstream_wrapper\n";
+            assert!(manifest.contains(owner));
+            fs::write(&manifest_path, manifest.replacen(owner, replacement, 1))
+                .expect("write REMOVEUNUSED manifest mutation");
+            assert_removeunused_fixture_fails(&root, &family, label);
+            fs::remove_dir_all(root).expect("remove REMOVEUNUSED manifest fixture");
+        }
+    }
+
+    #[test]
+    fn removeunused_family_shape_symlink_and_output_artifacts_fail_closed() {
+        let (root, family) = removeunused_mutation_fixture("extra-family-member");
+        fs::write(family.join("unexpected.txt"), "unexpected\n")
+            .expect("write extra family member");
+        assert_removeunused_fixture_fails(&root, &family, "extra family member");
+        fs::remove_dir_all(root).expect("remove extra-member fixture");
+
+        let (root, family) = removeunused_mutation_fixture("output-artifact");
+        let output = root.join("OutputData/REDUND_REMOVE");
+        fs::create_dir_all(&output).expect("create REMOVEUNUSED OutputData family");
+        fs::write(output.join("gnd_and_redund.cir.prn"), "forbidden oracle\n")
+            .expect("write forbidden REMOVEUNUSED artifact");
+        assert_removeunused_fixture_fails(&root, &family, "candidate OutputData artifact");
+        fs::remove_dir_all(root).expect("remove output-artifact fixture");
+
+        let (root, family) = removeunused_mutation_fixture("symlink-source");
+        let owner = family.join("gnd_and_redund.cir");
+        let target = family.join("just_redund.cir");
+        fs::remove_file(&owner).expect("remove regular owner before symlink mutation");
+        #[cfg(unix)]
+        let symlink_result = std::os::unix::fs::symlink(&target, &owner);
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_file(&target, &owner);
+        if symlink_result.is_ok() {
+            assert_removeunused_fixture_fails(&root, &family, "symlinked source");
+        }
+        fs::remove_dir_all(root).expect("remove symlink fixture");
+    }
+
+    #[test]
+    fn removeunused_plan_topology_analytic_and_deadline_mutations_fail_closed() {
+        let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/xyce/Netlists/REDUND_REMOVE/gnd_and_redund.cir");
+        let source = fs::read_to_string(&corpus).expect("read REMOVEUNUSED corpus source");
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let plan = runner
+            .static_dc_plan_for_source_with_execution_dir(
+                &corpus,
+                source,
+                ExpressionDialect::Xyce,
+                None,
+            )
+            .expect("construct valid REMOVEUNUSED plan");
+        XyceTestRunner::validate_removeunused_plan(&plan, XyceRemoveUnusedKind::ReplaceGround)
+            .expect("baseline REMOVEUNUSED plan qualifies");
+
+        let mut sweep = plan.clone();
+        sweep.dc.stop = 0.9;
+        assert!(
+            XyceTestRunner::validate_removeunused_plan(&sweep, XyceRemoveUnusedKind::ReplaceGround)
+                .is_err()
+        );
+        let mut probe = plan.clone();
+        probe.print.probes[1] = "V(3)".to_string();
+        assert!(
+            XyceTestRunner::validate_removeunused_plan(&probe, XyceRemoveUnusedKind::ReplaceGround)
+                .is_err()
+        );
+
+        let (netlist, results) = runner
+            .run_static_dc_results(&plan, Instant::now())
+            .expect("baseline REMOVEUNUSED DC run succeeds");
+        XyceTestRunner::validate_removeunused_flattened_topology(
+            &netlist,
+            XyceRemoveUnusedKind::ReplaceGround,
+            false,
+        )
+        .expect("baseline topology qualifies");
+        for mutation in ["missing", "name", "node", "value"] {
+            let mut topology = netlist.clone();
+            match mutation {
+                "missing" => {
+                    topology.elements.pop();
+                }
+                "name" => topology.elements[0].name = "V_COMMON_MODE".to_string(),
+                "node" => topology.elements[1].nodes[1] = "3".to_string(),
+                "value" => {
+                    let ElementKind::Resistor { value, .. } = &mut topology.elements[1].kind else {
+                        panic!("REMOVEUNUSED fixture element 1 remains R1")
+                    };
+                    *value = 2.0;
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                XyceTestRunner::validate_removeunused_flattened_topology(
+                    &topology,
+                    XyceRemoveUnusedKind::ReplaceGround,
+                    false,
+                )
+                .is_err(),
+                "exact topology must reject a {mutation} mutation"
+            );
+        }
+        let mut option_mutation = netlist.clone();
+        option_mutation.options.gmin = Some(1.0e-9);
+        assert!(
+            XyceTestRunner::validate_removeunused_netlist(
+                &option_mutation,
+                XyceRemoveUnusedKind::ReplaceGround,
+            )
+            .is_err(),
+            "unexpected effective options must fail closed"
+        );
+        let mut table = runner
+            .dc_results_to_prn_table(&plan, &netlist, &results)
+            .expect("build baseline REMOVEUNUSED table");
+        XyceTestRunner::validate_removeunused_analytic_table(
+            &table,
+            &results,
+            XyceRemoveUnusedKind::ReplaceGround,
+        )
+        .expect("baseline analytic table qualifies");
+        table.rows[10][2] += 0.1;
+        assert!(
+            XyceTestRunner::validate_removeunused_analytic_table(
+                &table,
+                &results,
+                XyceRemoveUnusedKind::ReplaceGround,
+            )
+            .is_err()
+        );
+
+        let (root, family) = removeunused_mutation_fixture("expired-deadline");
+        let timed_runner = XyceTestRunner::new(
+            &root,
+            XyceRunnerConfig {
+                max_time_per_test_ms: 0,
+                ..XyceRunnerConfig::default()
+            },
+        );
+        let result = timed_runner.run_test(family.join("gnd_and_redund.cir"));
+        assert!(!result.passed);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("shared deadline expired"))
+        );
+        fs::remove_dir_all(root).expect("remove deadline fixture");
     }
 
     #[test]
