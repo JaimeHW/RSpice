@@ -59,20 +59,20 @@ pub use core::{
 
 // Re-export key types from advanced
 pub use advanced::{
-    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ContinuousMeasureRecord,
-    ContinuousMeasureResult, DistortionAnalysisResult, DistortionPointResult, DistortionProduct,
-    DistortionProductResult, Distribution, EdgeType, ElementDesc, ElementType, ErrorFunctionNorm,
-    EventOccurrence, ExtremaOutput, FileErrorNorm, FourierAnalysis, FourierConfig, FourierResult,
-    FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise, MeasureEngine,
-    MeasureOperand, MeasurePrintPolicy, MeasureResult, MeasureStatement, MeasureType,
-    MonteCarloConfig, MonteCarloResult, MonteCarloRunner, NoiseAnalysis, NoiseContributionKind,
-    NoiseContributionProbe, NoiseContributionProbeError, NoiseResult, NoiseSource,
-    NoiseSourceIdentity, NoiseSourceType, ParametricResults, ParametricSweep, PoleZeroAnalyzer,
-    PoleZeroConfig, PoleZeroResult, Port, PortNoiseCorrelationResult, PzMatrix, SMatrix,
-    SParameterAnalyzer, SParameterConfig, SParameterResult, Sensitivity, SensitivityAnalyzer,
-    SensitivityResult, StepSpec, StepTarget, StepType, Tolerance, TransferAnalyzer,
-    TransferFunctionConfig, TransferFunctionResult, TrigSpec, TriggerEvent, VariableStatistics,
-    VariationSet, WhenCondition,
+    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ContinuousMeasureFailureMetadata,
+    ContinuousMeasureRecord, ContinuousMeasureResult, DistortionAnalysisResult,
+    DistortionPointResult, DistortionProduct, DistortionProductResult, Distribution, EdgeType,
+    ElementDesc, ElementType, ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm,
+    FourierAnalysis, FourierConfig, FourierResult, FrequencySweep, HarmonicComponent,
+    IntegratedContribution, IntegratedNoise, MeasureEngine, MeasureOperand, MeasurePrintPolicy,
+    MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult,
+    MonteCarloRunner, NoiseAnalysis, NoiseContributionKind, NoiseContributionProbe,
+    NoiseContributionProbeError, NoiseResult, NoiseSource, NoiseSourceIdentity, NoiseSourceType,
+    ParametricResults, ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port,
+    PortNoiseCorrelationResult, PzMatrix, SMatrix, SParameterAnalyzer, SParameterConfig,
+    SParameterResult, Sensitivity, SensitivityAnalyzer, SensitivityResult, StepSpec, StepTarget,
+    StepType, Tolerance, TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult,
+    TrigSpec, TriggerEvent, VariableStatistics, VariationSet, WhenCondition,
 };
 
 // Re-export PSS types
