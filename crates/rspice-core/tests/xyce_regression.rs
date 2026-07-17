@@ -4396,6 +4396,34 @@ fn test_xyce_removeunused_dynamic_gold_cases_run_natively() {
 }
 
 #[test]
+fn test_xyce_addresistors_generated_netlist_cases_run_relationally() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/PREPROC_ADDRES/nodcpath.cir",
+        "Netlists/PREPROC_ADDRES/oneterm.cir",
+        "Netlists/REDUND_REMOVE/gnd_and_redund_addres.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed ADDRESISTORS wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should execute its native ADDRESISTORS generated-netlist oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(
+            result.contract,
+            "addresistors_generated_netlist_relational_wrapper"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_model_binning_static_dc_wrapper_case_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

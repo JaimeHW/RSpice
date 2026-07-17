@@ -23,12 +23,13 @@ use crate::netlist::expr::{
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DeviceInitialConditionError,
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
-    ExpressionDialect, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist,
-    NetlistParseOptions, OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy,
-    ParametricValue, ParseError, StartupDiagnosticCode, StartupDiagnosticStage,
-    StartupDirectiveKind, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
-    StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
-    flatten_netlist, flatten_netlist_with_models, validate_output_symbols,
+    ElementProvenance, ExpressionDialect, MissingSubcircuitEndsBoundary,
+    MissingSubcircuitEndsError, Netlist, NetlistParseOptions, OutputDirectiveKind,
+    OutputSymbolKind, ParameterRedefinitionPolicy, ParametricValue, ParseError,
+    StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist, flatten_netlist_with_models,
+    validate_output_symbols,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -175,6 +176,23 @@ const XYCE_REMOVEUNUSED_CANDIDATE_CONTENT_BLAKE3: &str =
 const XYCE_REMOVEUNUSED_MANIFEST_COUNT: usize = 3;
 const XYCE_REMOVEUNUSED_MANIFEST_BLAKE3: &str =
     "a9410dae3a65ce0cfe54cbe24524596a121a03f0dad5b4c7419d797352823f64";
+const XYCE_ADDRESISTORS_PREPROC_FAMILY_PREFIX: &str = "netlists/preproc_addres/";
+const XYCE_ADDRESISTORS_PREPROC_SOURCE_DIRECTORY_COUNT: usize = 2;
+const XYCE_ADDRESISTORS_PREPROC_SOURCE_DIRECTORY_BLAKE3: &str =
+    "f6ddcc255042ea0fea56657278cf9a6d2860cdaa986449592e71813f3d2c335d";
+const XYCE_ADDRESISTORS_PREPROC_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
+    "b0f1a0ca3eef8151ed9c31563bac68e6994bb1a5554d8c39276555006febae2e";
+const XYCE_ADDRESISTORS_PREPROC_PHYSICAL_COUNT: usize = 2;
+const XYCE_ADDRESISTORS_PREPROC_PHYSICAL_BLAKE3: &str =
+    "f6ddcc255042ea0fea56657278cf9a6d2860cdaa986449592e71813f3d2c335d";
+const XYCE_ADDRESISTORS_PREPROC_MANIFEST_COUNT: usize = 2;
+const XYCE_ADDRESISTORS_PREPROC_MANIFEST_BLAKE3: &str =
+    "db332ee1914f3484bdbfa150096708888c5122d3adca58ac0e7eefb642f9d60e";
+const XYCE_ADDRESISTORS_CANDIDATE_COUNT: usize = 3;
+const XYCE_ADDRESISTORS_CANDIDATE_BLAKE3: &str =
+    "cd3f76a92f623c439dbdedeb952482596a7528b1df04eae958f796a7d9bcd532";
+const XYCE_ADDRESISTORS_CANDIDATE_CONTENT_BLAKE3: &str =
+    "84c0a3e97435d373c8d94b678ab8650b04ad599900e13a58368424847d0c5a5e";
 
 // The four removed XDM wrappers declare abs=1e-5, rel=1e-3, and zero=1e-10,
 // but `verifyXDMtranslation` never forwards those variables for HSPICE.  It
@@ -2826,6 +2844,62 @@ struct XyceRemoveUnusedElementSnapshot {
     model: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAddResistorsKind {
+    NoDcPath,
+    OneTerminal,
+    RedundantBridge,
+}
+
+impl XyceAddResistorsKind {
+    const ALL: [Self; 3] = [Self::NoDcPath, Self::OneTerminal, Self::RedundantBridge];
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL.into_iter().find(|kind| kind.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::NoDcPath => "netlists/preproc_addres/nodcpath.cir",
+            Self::OneTerminal => "netlists/preproc_addres/oneterm.cir",
+            Self::RedundantBridge => "netlists/redund_remove/gnd_and_redund_addres.cir",
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::NoDcPath => (
+                3423,
+                "45b3c95d6a31422b19b0db8fdf81ef4dbcde42bf9d0d5418b25cbf0a40fd6a74",
+            ),
+            Self::OneTerminal => (
+                3439,
+                "81be55762a70572c0c5af4cc4f90cc3934069819010d45016dd6afd02f9901ea",
+            ),
+            Self::RedundantBridge => (
+                4131,
+                "1aa527ead8cfa0888d74186ee07881c128141782b4843d330dd672cad54933e6",
+            ),
+        }
+    }
+
+    fn is_transient(self) -> bool {
+        !matches!(self, Self::RedundantBridge)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceAddResistorsElementSnapshot {
+    name: String,
+    nodes: Vec<String>,
+    kind: String,
+    value_bits: Option<u64>,
+    initial_value_bits: Option<u64>,
+    model: Option<String>,
+    provenance: String,
+}
+
 #[derive(Debug, Clone)]
 struct XyceStaticTranPlan {
     deck_path: PathBuf,
@@ -5363,6 +5437,23 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(kind) = XyceAddResistorsKind::for_record(&deck.relative_path) {
+            let contract = "addresistors_generated_netlist_relational_wrapper";
+            let result = match self.validate_addresistors_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(kind) = XyceRemoveUnusedKind::for_record(&deck.relative_path) {
             let contract = "removeunused_dynamic_gold_dc_wrapper";
             let result = match self.validate_removeunused_oracle(deck, kind, start) {
@@ -7122,6 +7213,1244 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn validate_addresistors_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceAddResistorsKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        let source_bytes = self.validate_addresistors_provenance(deck, kind)?;
+        self.check_addresistors_deadline(start, "provenance")?;
+        let source = std::str::from_utf8(&source_bytes).map_err(|error| {
+            format!(
+                "ADDRESISTORS record '{}' is not UTF-8: {error}",
+                kind.record()
+            )
+        })?;
+        let original = Self::parse_xyce_netlist(source, &deck.path)
+            .map_err(|error| format!("ADDRESISTORS original parse failed: {error}"))?;
+        Self::validate_addresistors_original_netlist(&original, kind)?;
+        self.check_addresistors_deadline(start, "original parse and snapshot")?;
+
+        if kind.is_transient() {
+            self.validate_addresistors_transient_oracle(deck, source, &original, kind, start)
+        } else {
+            self.validate_addresistors_bridge_oracle(deck, source, &original, kind, start)
+        }
+    }
+
+    fn validate_addresistors_transient_oracle(
+        &self,
+        deck: &XyceDeck,
+        source: &str,
+        original: &Netlist,
+        kind: XyceAddResistorsKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        let plan = Self::addresistors_transient_plan(deck, source, original)?;
+        Self::validate_addresistors_transient_plan(&plan, original)?;
+        Self::validate_addresistors_flattened_topology(original, kind, false)?;
+
+        let original_result = self
+            .run_transient_family_netlist(&plan, original, start, None)
+            .map_err(|error| match error {
+                SimulationError::Aborted => format!(
+                    "ADDRESISTORS original transient exceeded shared timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                other => format!("ADDRESISTORS original transient failed: {other}"),
+            })?;
+        let original_table =
+            Self::transient_family_result_to_prn_table(&plan, original, &original_result)?;
+        Self::validate_addresistors_original_transient_table(&original_table)?;
+        self.check_addresistors_deadline(start, "unchanged original transient")?;
+
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let materialized = original
+            .materialize_xyce_add_resistors_with_abort(&abort)
+            .map_err(|error| format!("ADDRESISTORS materialization failed: {error}"))?;
+        Self::validate_addresistors_report(&materialized.report, kind)?;
+        Self::validate_addresistors_materialized_netlist(&materialized.netlist, kind)?;
+        Self::validate_addresistors_flattened_topology(&materialized.netlist, kind, true)?;
+        let replayed = Self::parse_xyce_netlist(&materialized.derived_source, &deck.path)
+            .map_err(|error| format!("ADDRESISTORS derived artifact parse failed: {error}"))?;
+        Self::validate_addresistors_replayed_artifact(&replayed, &materialized.report, kind)?;
+        self.check_addresistors_deadline(start, "materialization and generated topology")?;
+
+        let generated_result = self
+            .run_transient_family_netlist(&plan, &replayed, start, None)
+            .map_err(|error| match error {
+                SimulationError::Aborted => format!(
+                    "ADDRESISTORS generated transient exceeded shared timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                other => format!("ADDRESISTORS generated transient failed: {other}"),
+            })?;
+        let generated_table =
+            Self::transient_family_result_to_prn_table(&plan, &replayed, &generated_result)?;
+        Self::validate_addresistors_transient_schedule(&generated_table)?;
+        Self::validate_addresistors_exp_invariant(&generated_table)?;
+        let dynamic_gold = Self::addresistors_dynamic_gold_table(&generated_table)?;
+        let mismatches = self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+            &dynamic_gold,
+            &generated_table,
+            XyceVerifyTransientTolerance::release_7_10_default(),
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        )?;
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "ADDRESISTORS Release 7.10 dynamic-gold comparison produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ));
+        }
+        if self
+            .compare_xyce_verify_transient_tables(&dynamic_gold, &original_table)
+            .is_ok_and(|mismatches| mismatches.is_empty())
+        {
+            return Err(
+                "ADDRESISTORS policy-off/original waveform unexpectedly matches generated RC decay"
+                    .to_string(),
+            );
+        }
+        self.check_addresistors_deadline(start, "generated transient and dynamic gold")
+    }
+
+    fn validate_addresistors_bridge_oracle(
+        &self,
+        deck: &XyceDeck,
+        source: &str,
+        original: &Netlist,
+        kind: XyceAddResistorsKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        if kind != XyceAddResistorsKind::RedundantBridge {
+            return Err("ADDRESISTORS bridge oracle received a transient record".to_string());
+        }
+        let plan = self.static_dc_plan_for_source_with_execution_dir(
+            &deck.path,
+            source.to_string(),
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        Self::validate_removeunused_plan(&plan, XyceRemoveUnusedKind::ReplaceGround)?;
+        Self::validate_removeunused_authored_hierarchy(
+            original,
+            XyceRemoveUnusedKind::ReplaceGround,
+        )?;
+        Self::validate_removeunused_flattened_topology(
+            original,
+            XyceRemoveUnusedKind::ReplaceGround,
+            false,
+        )?;
+        let original_results = self.run_addresistors_dc_netlist(&plan, original, start)?;
+        let original_table = self.dc_results_to_prn_table(&plan, original, &original_results)?;
+        Self::validate_removeunused_analytic_table(
+            &original_table,
+            &original_results,
+            XyceRemoveUnusedKind::ReplaceGround,
+        )?;
+
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let materialized = original
+            .materialize_xyce_add_resistors_with_abort(&abort)
+            .map_err(|error| format!("ADDRESISTORS bridge materialization failed: {error}"))?;
+        Self::validate_addresistors_report(&materialized.report, kind)?;
+        Self::validate_addresistors_materialized_netlist(&materialized.netlist, kind)?;
+        Self::validate_removeunused_authored_hierarchy(
+            &materialized.netlist,
+            XyceRemoveUnusedKind::ReplaceGround,
+        )?;
+        Self::validate_removeunused_flattened_topology(
+            &materialized.netlist,
+            XyceRemoveUnusedKind::ReplaceGround,
+            false,
+        )?;
+        let replayed = Self::parse_xyce_netlist(&materialized.derived_source, &deck.path)
+            .map_err(|error| format!("ADDRESISTORS bridge artifact parse failed: {error}"))?;
+        Self::validate_addresistors_replayed_artifact(&replayed, &materialized.report, kind)?;
+        let generated_results = self.run_addresistors_dc_netlist(&plan, &replayed, start)?;
+        let generated_table = self.dc_results_to_prn_table(&plan, &replayed, &generated_results)?;
+        Self::validate_removeunused_analytic_table(
+            &generated_table,
+            &generated_results,
+            XyceRemoveUnusedKind::ReplaceGround,
+        )?;
+        let mismatches = self.compare_xdm_replaceground_tables(
+            &original_table,
+            &generated_table,
+            &original_results,
+            &generated_results,
+        )?;
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "ADDRESISTORS bridge original/generated comparison produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ));
+        }
+        self.check_addresistors_deadline(start, "bridge original/generated comparison")
+    }
+
+    fn run_addresistors_dc_netlist(
+        &self,
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        start: Instant,
+    ) -> Result<Vec<DcSweepPointResult>, String> {
+        if !plan.steps.is_empty() || plan.dc_data.is_some() {
+            return Err("ADDRESISTORS bridge does not admit STEP/DATA state".to_string());
+        }
+        let engine = self.create_dc_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        engine
+            .run_dc_sweep2_spec_with_report_and_abort(
+                netlist,
+                &plan.dc.source,
+                &plan.dc.primary_spec(),
+                plan.dc.sweep2.as_ref(),
+                &abort,
+            )
+            .map_err(|error| match error {
+                SimulationError::Aborted => format!(
+                    "ADDRESISTORS bridge execution exceeded shared timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                other => format!("ADDRESISTORS bridge execution failed: {other}"),
+            })
+    }
+
+    fn check_addresistors_deadline(&self, start: Instant, phase: &str) -> Result<(), String> {
+        if DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1)).is_aborted() {
+            return Err(format!(
+                "ADDRESISTORS shared deadline expired during {phase} ({}ms)",
+                self.config.max_time_per_test_ms
+            ));
+        }
+        Ok(())
+    }
+
+    fn addresistors_transient_plan(
+        deck: &XyceDeck,
+        source: &str,
+        netlist: &Netlist,
+    ) -> Result<XyceStaticTranPlan, String> {
+        let output = Self::single_tran_print_output_request(source)?;
+        if output.format.is_some()
+            || output.file.is_some()
+            || output.probes != ["V(2)".to_string(), "V(X1:2)".to_string()]
+        {
+            return Err(format!(
+                "ADDRESISTORS transient requires default .PRINT TRAN V(2) V(X1:2), got {output:?}"
+            ));
+        }
+        let tran = Self::single_tran_analysis(netlist)?;
+        let steps = Self::step_commands(netlist)?;
+        Ok(XyceStaticTranPlan {
+            deck_path: deck.path.clone(),
+            reference_path: deck.path.clone(),
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: output.probes,
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran,
+            steps,
+            contract: XyceStaticTranContract::WrapperStatic,
+            wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            },
+        })
+    }
+
+    fn validate_addresistors_transient_plan(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        if !plan.steps.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.measurements.is_empty()
+            || netlist.analyses.len() != 1
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+            || plan.print.probes != ["V(2)".to_string(), "V(X1:2)".to_string()]
+            || !matches!(
+                plan.comparison_mode,
+                XyceStaticTranComparisonMode::Release710IntegratedRms {
+                    scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION
+                }
+            )
+        {
+            return Err(format!(
+                "ADDRESISTORS transient plan has state outside the removed wrapper contract: {plan:?}"
+            ));
+        }
+        let tran = plan.tran;
+        if tran.step.to_bits() != 0.0f64.to_bits()
+            || tran.stop.to_bits() != 2.0f64.to_bits()
+            || tran.start.map(Value::to_bits) != Some(1.0e-3f64.to_bits())
+            || tran.max_step.is_some()
+            || tran.uic
+        {
+            return Err(format!(
+                "ADDRESISTORS transient requires exact .TRAN 0 2 1m schedule, got {tran:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_addresistors_original_netlist(
+        netlist: &Netlist,
+        kind: XyceAddResistorsKind,
+    ) -> Result<(), String> {
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "ADDRESISTORS original parse produced diagnostics: {:?}",
+                netlist.diagnostics
+            ));
+        }
+        Self::validate_addresistors_options(netlist, kind, false)?;
+        if kind == XyceAddResistorsKind::RedundantBridge {
+            Self::validate_removeunused_authored_hierarchy(
+                netlist,
+                XyceRemoveUnusedKind::ReplaceGround,
+            )
+        } else {
+            Self::validate_addresistors_authored_hierarchy(netlist, kind)
+        }
+    }
+
+    fn validate_addresistors_materialized_netlist(
+        netlist: &Netlist,
+        kind: XyceAddResistorsKind,
+    ) -> Result<(), String> {
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "ADDRESISTORS materialized copy produced diagnostics: {:?}",
+                netlist.diagnostics
+            ));
+        }
+        Self::validate_addresistors_options(netlist, kind, true)?;
+        if kind != XyceAddResistorsKind::RedundantBridge {
+            Self::validate_addresistors_authored_hierarchy(netlist, kind)?;
+        }
+        Ok(())
+    }
+
+    fn validate_addresistors_replayed_artifact(
+        netlist: &Netlist,
+        report: &crate::netlist::XyceAddResistorsReport,
+        kind: XyceAddResistorsKind,
+    ) -> Result<(), String> {
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "ADDRESISTORS replayed artifact produced diagnostics: {:?}",
+                netlist.diagnostics
+            ));
+        }
+        Self::validate_addresistors_options(netlist, kind, true)?;
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|error| format!("ADDRESISTORS artifact did not replay: {error}"))?;
+        let artifact_cards = flattened
+            .elements
+            .iter()
+            .filter(|element| {
+                let name = element.name.to_ascii_uppercase();
+                name.starts_with("RONETERM") || name.starts_with("RNODCPATH")
+            })
+            .collect::<Vec<_>>();
+        if artifact_cards.len() != report.generated.len() {
+            return Err(format!(
+                "ADDRESISTORS replayed artifact has {} generated card(s), expected {}: {artifact_cards:?}",
+                artifact_cards.len(),
+                report.generated.len()
+            ));
+        }
+        for generated in &report.generated {
+            let element = artifact_cards
+                .iter()
+                .copied()
+                .find(|element| element.name.eq_ignore_ascii_case(&generated.name))
+                .ok_or_else(|| {
+                    format!(
+                        "ADDRESISTORS replayed artifact is missing '{}'",
+                        generated.name
+                    )
+                })?;
+            let value = match &element.kind {
+                ElementKind::Resistor { value, .. } => *value,
+                other => {
+                    return Err(format!(
+                        "ADDRESISTORS artifact card '{}' replayed as {other:?}",
+                        generated.name
+                    ));
+                }
+            };
+            if element.nodes != [generated.node.as_str(), "0"]
+                || value.to_bits() != generated.resistance.to_bits()
+                || !matches!(element.provenance, ElementProvenance::Authored)
+            {
+                return Err(format!(
+                    "ADDRESISTORS artifact card '{}' did not replay canonically: expected node {}/{}, value {}, authored provenance; got {element:?}",
+                    generated.name, generated.node, generated.artifact_node, generated.resistance
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_addresistors_options(
+        netlist: &Netlist,
+        kind: XyceAddResistorsKind,
+        materialized: bool,
+    ) -> Result<(), String> {
+        let options = &netlist.options;
+        let policy = options.add_resistors.as_ref();
+        if materialized {
+            if policy.is_some() {
+                return Err(
+                    "ADDRESISTORS materialized copy retained an active generation policy"
+                        .to_string(),
+                );
+            }
+        } else {
+            let policy = policy.ok_or_else(|| {
+                "ADDRESISTORS original netlist has no typed generation policy".to_string()
+            })?;
+            let (one_raw, one_line, nodc_raw, nodc_line) = match kind {
+                XyceAddResistorsKind::NoDcPath => ("0.0001", 71, "1", 70),
+                XyceAddResistorsKind::OneTerminal => ("1", 69, "0.0001", 68),
+                XyceAddResistorsKind::RedundantBridge => ("1G", 108, "1G", 107),
+            };
+            let one = policy.one_terminal.as_ref();
+            let nodc = policy.no_dc_path.as_ref();
+            if one.is_none_or(|spec| spec.raw_resistance != one_raw || spec.source_line != one_line)
+                || nodc.is_none_or(|spec| {
+                    spec.raw_resistance != nodc_raw || spec.source_line != nodc_line
+                })
+            {
+                return Err(format!(
+                    "ADDRESISTORS typed policy changed: expected ONE={one_raw}@{one_line}, NODC={nodc_raw}@{nodc_line}; got {policy:?}"
+                ));
+            }
+        }
+
+        let expects_timeint = kind.is_transient();
+        let expects_remove = kind == XyceAddResistorsKind::RedundantBridge;
+        let expected_types = [
+            crate::netlist::RemoveUnusedDeviceType::Capacitor,
+            crate::netlist::RemoveUnusedDeviceType::Diode,
+            crate::netlist::RemoveUnusedDeviceType::CurrentSource,
+            crate::netlist::RemoveUnusedDeviceType::Inductor,
+            crate::netlist::RemoveUnusedDeviceType::Mosfet,
+            crate::netlist::RemoveUnusedDeviceType::Bjt,
+            crate::netlist::RemoveUnusedDeviceType::Resistor,
+            crate::netlist::RemoveUnusedDeviceType::VoltageSource,
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        if options.replace_ground != expects_remove.then_some(true)
+            || options
+                .remove_unused
+                .as_ref()
+                .map(|policy| &policy.device_types)
+                != expects_remove.then_some(&expected_types)
+            || options.timeint_reltol.map(Value::to_bits)
+                != expects_timeint.then_some(1.0e-6f64.to_bits())
+            || options.timeint_abstol.map(Value::to_bits)
+                != expects_timeint.then_some(1.0e-12f64.to_bits())
+            || options.measure_fail_output.is_some()
+            || options.measure_default_value.is_some()
+            || options.measure_use_cont_files.is_some()
+            || !options.hb_num_frequencies.is_empty()
+            || options.nonlinear_continuation.is_some()
+            || options.reltol.is_some()
+            || options.abstol.is_some()
+            || options.vntol.is_some()
+            || options.iabstol.is_some()
+            || options.residual_reltol.is_some()
+            || options.gmin.is_some()
+            || options.method.is_some()
+            || options.trtol.is_some()
+            || options.transient_lte_reference.is_some()
+            || options.transient_new_bp_stepping.is_some()
+            || options.ramptime.is_some()
+            || options.digital_delay_type.is_some()
+            || options.xspice_event_trace_save.is_some()
+            || options.itl1.is_some()
+            || options.itl2.is_some()
+            || options.itl4.is_some()
+            || options.itl6.is_some()
+            || options.chgtol.is_some()
+            || options.pivtol.is_some()
+            || options.temp.is_some()
+            || options.tnom.is_some()
+            || options.seed.is_some()
+            || options.allow_simplified_mos.is_some()
+            || options.auto_bridge.is_some()
+            || options.auto_bridge_show_generated.is_some()
+            || options.auto_bridge_family.is_some()
+            || !options.auto_bridge_templates.is_empty()
+            || !options.auto_bridge_param_names.is_empty()
+            || options.topology_supernode.is_some()
+            || options.device_zero_resistance_tol.is_some()
+            || options.b3soi_gmin_scaling.is_some()
+        {
+            return Err(format!(
+                "ADDRESISTORS record '{}' has unexpected exact options state: {options:?}",
+                kind.record()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_addresistors_authored_hierarchy(
+        netlist: &Netlist,
+        kind: XyceAddResistorsKind,
+    ) -> Result<(), String> {
+        if !netlist.models.is_empty() || netlist.subcircuits.len() != 1 {
+            return Err(format!(
+                "ADDRESISTORS transient authored model/subcircuit census changed: models={:?}, subcircuits={:?}",
+                netlist.models, netlist.subcircuits
+            ));
+        }
+        let mut top = netlist
+            .elements
+            .iter()
+            .filter(|element| {
+                matches!(
+                    element.provenance,
+                    crate::netlist::ElementProvenance::Authored
+                )
+            })
+            .map(Self::addresistors_element_snapshot)
+            .collect::<Result<Vec<_>, _>>()?;
+        top.sort_by(|left, right| left.name.cmp(&right.name));
+        let definition = &netlist.subcircuits[0];
+        if !definition.name.eq_ignore_ascii_case("capacitor")
+            || definition.ports != ["1".to_string()]
+            || !definition.initial_conditions.is_empty()
+            || !definition.node_sets.is_empty()
+            || !definition.params.is_empty()
+            || !definition.expr_params.is_empty()
+            || !definition.string_params.is_empty()
+            || !definition.body_params.is_empty()
+            || !definition.body_expr_params.is_empty()
+            || !definition.body_string_params.is_empty()
+            || !definition.body_functions.is_empty()
+            || !definition.local_options.is_empty()
+            || definition.library_ref.is_some()
+            || !definition.nested_subcircuits.is_empty()
+        {
+            return Err(format!(
+                "ADDRESISTORS capacitor definition changed: {definition:?}"
+            ));
+        }
+        let mut body = definition
+            .elements
+            .iter()
+            .map(Self::addresistors_element_snapshot)
+            .collect::<Result<Vec<_>, _>>()?;
+        body.sort_by(|left, right| left.name.cmp(&right.name));
+        let (expected_top, expected_body) = Self::expected_addresistors_authored(kind);
+        if top != expected_top || body != expected_body {
+            return Err(format!(
+                "ADDRESISTORS exact authored hierarchy changed: expected top={expected_top:#?}, body={expected_body:#?}; actual top={top:#?}, body={body:#?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn expected_addresistors_authored(
+        kind: XyceAddResistorsKind,
+    ) -> (
+        Vec<XyceAddResistorsElementSnapshot>,
+        Vec<XyceAddResistorsElementSnapshot>,
+    ) {
+        let authored = |name: &str,
+                        nodes: &[&str],
+                        device: &str,
+                        value: Option<Value>,
+                        initial: Option<Value>,
+                        model: Option<&str>| {
+            XyceAddResistorsElementSnapshot {
+                name: name.to_ascii_lowercase(),
+                nodes: nodes.iter().map(|node| node.to_ascii_lowercase()).collect(),
+                kind: device.to_string(),
+                value_bits: value.map(Value::to_bits),
+                initial_value_bits: initial.map(Value::to_bits),
+                model: model.map(str::to_ascii_lowercase),
+                provenance: "authored".to_string(),
+            }
+        };
+        let (mut top, mut body) = match kind {
+            XyceAddResistorsKind::NoDcPath => (
+                vec![
+                    authored("Vin", &["1", "0"], "V", Some(1.0), None, None),
+                    authored("C1", &["1", "2"], "C", Some(0.5), Some(0.0), None),
+                    authored("C2", &["1", "2"], "C", Some(0.5), None, None),
+                    authored("X1", &["1"], "X", None, None, Some("capacitor")),
+                ],
+                vec![
+                    authored("C1", &["1", "2"], "C", Some(0.5), None, None),
+                    authored("C2", &["1", "2"], "C", Some(0.5), Some(0.0), None),
+                ],
+            ),
+            XyceAddResistorsKind::OneTerminal => (
+                vec![
+                    authored("Vin", &["1", "0"], "V", Some(1.0), None, None),
+                    authored("C1", &["1", "2"], "C", Some(1.0), Some(0.0), None),
+                    authored("X1", &["1"], "X", None, None, Some("capacitor")),
+                ],
+                vec![authored("C2", &["1", "2"], "C", Some(1.0), Some(0.0), None)],
+            ),
+            XyceAddResistorsKind::RedundantBridge => unreachable!("bridge has its own snapshot"),
+        };
+        top.sort_by(|left, right| left.name.cmp(&right.name));
+        body.sort_by(|left, right| left.name.cmp(&right.name));
+        (top, body)
+    }
+
+    fn addresistors_element_snapshot(
+        element: &crate::netlist::Element,
+    ) -> Result<XyceAddResistorsElementSnapshot, String> {
+        let (kind, value, initial, model) = match &element.kind {
+            ElementKind::Resistor { value, model, .. } => {
+                ("R", Some(*value), None, model.as_deref())
+            }
+            ElementKind::Capacitor {
+                value,
+                initial_voltage,
+                model,
+                ..
+            } => ("C", Some(*value), *initial_voltage, model.as_deref()),
+            ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) => {
+                ("V", Some(*value), None, None)
+            }
+            ElementKind::Subcircuit { subckt_name, .. } => {
+                ("X", None, None, Some(subckt_name.as_str()))
+            }
+            other => {
+                return Err(format!(
+                    "ADDRESISTORS bounded snapshot cannot represent {} {other:?}",
+                    element.name
+                ));
+            }
+        };
+        if value.is_some_and(|value| !value.is_finite())
+            || initial.is_some_and(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "ADDRESISTORS element {} contains a non-finite primary value",
+                element.name
+            ));
+        }
+        let provenance = match element.provenance {
+            crate::netlist::ElementProvenance::Authored => "authored".to_string(),
+            crate::netlist::ElementProvenance::GeneratedXyceAddResistor { mode } => {
+                format!("generated:{mode:?}")
+            }
+            ref other => format!("unexpected:{other:?}"),
+        };
+        Ok(XyceAddResistorsElementSnapshot {
+            name: element.name.to_ascii_lowercase(),
+            nodes: element
+                .nodes
+                .iter()
+                .map(|node| node.to_ascii_lowercase())
+                .collect(),
+            kind: kind.to_string(),
+            value_bits: value.map(Value::to_bits),
+            initial_value_bits: initial.map(Value::to_bits),
+            model: model.map(str::to_ascii_lowercase),
+            provenance,
+        })
+    }
+
+    fn validate_addresistors_flattened_topology(
+        netlist: &Netlist,
+        kind: XyceAddResistorsKind,
+        materialized: bool,
+    ) -> Result<(), String> {
+        if kind == XyceAddResistorsKind::RedundantBridge {
+            return Self::validate_removeunused_flattened_topology(
+                netlist,
+                XyceRemoveUnusedKind::ReplaceGround,
+                false,
+            );
+        }
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|error| format!("ADDRESISTORS flattening failed: {error}"))?;
+        let mut actual = flattened
+            .elements
+            .iter()
+            .map(Self::addresistors_element_snapshot)
+            .collect::<Result<Vec<_>, _>>()?;
+        actual.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut expected = Self::expected_addresistors_flattened(kind, materialized);
+        expected.sort_by(|left, right| left.name.cmp(&right.name));
+        if actual != expected {
+            return Err(format!(
+                "ADDRESISTORS {} exact flattened topology changed: expected={expected:#?}, actual={actual:#?}",
+                if materialized {
+                    "generated"
+                } else {
+                    "original"
+                }
+            ));
+        }
+        Ok(())
+    }
+
+    fn expected_addresistors_flattened(
+        kind: XyceAddResistorsKind,
+        materialized: bool,
+    ) -> Vec<XyceAddResistorsElementSnapshot> {
+        let element = |name: &str,
+                       nodes: &[&str],
+                       device: &str,
+                       value: Value,
+                       initial: Option<Value>,
+                       provenance: &str| {
+            XyceAddResistorsElementSnapshot {
+                name: name.to_ascii_lowercase(),
+                nodes: nodes.iter().map(|node| node.to_ascii_lowercase()).collect(),
+                kind: device.to_string(),
+                value_bits: Some(value.to_bits()),
+                initial_value_bits: initial.map(Value::to_bits),
+                model: None,
+                provenance: provenance.to_string(),
+            }
+        };
+        let mut expected = match kind {
+            XyceAddResistorsKind::NoDcPath => vec![
+                element("Vin", &["1", "0"], "V", 1.0, None, "authored"),
+                element("C1", &["1", "2"], "C", 0.5, Some(0.0), "authored"),
+                element("C2", &["1", "2"], "C", 0.5, None, "authored"),
+                element("X1.C1", &["1", "X1.2"], "C", 0.5, None, "authored"),
+                element("X1.C2", &["1", "X1.2"], "C", 0.5, Some(0.0), "authored"),
+            ],
+            XyceAddResistorsKind::OneTerminal => vec![
+                element("Vin", &["1", "0"], "V", 1.0, None, "authored"),
+                element("C1", &["1", "2"], "C", 1.0, Some(0.0), "authored"),
+                element("X1.C2", &["1", "X1.2"], "C", 1.0, Some(0.0), "authored"),
+            ],
+            XyceAddResistorsKind::RedundantBridge => unreachable!("bridge uses REMOVEUNUSED"),
+        };
+        if materialized {
+            let (prefix, provenance) = match kind {
+                XyceAddResistorsKind::NoDcPath => ("RNODCPATH", "generated:NoDcPath"),
+                XyceAddResistorsKind::OneTerminal => ("RONETERM", "generated:OneTerminal"),
+                XyceAddResistorsKind::RedundantBridge => unreachable!(),
+            };
+            expected.extend([
+                element(
+                    &format!("{prefix}1"),
+                    &["2", "0"],
+                    "R",
+                    1.0,
+                    None,
+                    provenance,
+                ),
+                element(
+                    &format!("{prefix}2"),
+                    &["X1.2", "0"],
+                    "R",
+                    1.0,
+                    None,
+                    provenance,
+                ),
+            ]);
+        }
+        expected
+    }
+
+    fn validate_addresistors_report(
+        report: &crate::netlist::XyceAddResistorsReport,
+        kind: XyceAddResistorsKind,
+    ) -> Result<(), String> {
+        use crate::netlist::XyceAddResistorMode::{NoDcPath, OneTerminal};
+        let expected_configured: Vec<(crate::netlist::XyceAddResistorMode, &'static str, usize)> =
+            match kind {
+                XyceAddResistorsKind::NoDcPath => {
+                    vec![(OneTerminal, "0.0001", 71), (NoDcPath, "1", 70)]
+                }
+                XyceAddResistorsKind::OneTerminal => {
+                    vec![(OneTerminal, "1", 69), (NoDcPath, "0.0001", 68)]
+                }
+                XyceAddResistorsKind::RedundantBridge => {
+                    vec![(OneTerminal, "1G", 108), (NoDcPath, "1G", 107)]
+                }
+            };
+        if report.configured_modes.len() != expected_configured.len() {
+            return Err(format!(
+                "ADDRESISTORS configured-mode provenance changed: expected {expected_configured:?}, got {report:?}"
+            ));
+        }
+        for (actual, (mode, raw, line)) in report.configured_modes.iter().zip(expected_configured) {
+            if actual.mode != mode || actual.raw_resistance != raw || actual.source_line != line {
+                return Err(format!(
+                    "ADDRESISTORS configured mode changed: expected {mode:?}/{raw}@{line}, got {actual:?}"
+                ));
+            }
+        }
+        let expected_resolved: Vec<(
+            crate::netlist::XyceAddResistorMode,
+            &'static str,
+            Value,
+            usize,
+        )> = match kind {
+            XyceAddResistorsKind::NoDcPath => vec![(NoDcPath, "1", 1.0, 70)],
+            XyceAddResistorsKind::OneTerminal => vec![(OneTerminal, "1", 1.0, 69)],
+            XyceAddResistorsKind::RedundantBridge => Vec::new(),
+        };
+        if report.resolved_modes.len() != expected_resolved.len() {
+            return Err(format!(
+                "ADDRESISTORS emitted-mode resolution changed: expected {expected_resolved:?}, got {report:?}"
+            ));
+        }
+        for (actual, (mode, raw, value, line)) in
+            report.resolved_modes.iter().zip(expected_resolved)
+        {
+            if actual.mode != mode
+                || actual.raw_resistance != raw
+                || actual.resistance.to_bits() != value.to_bits()
+                || actual.source_line != line
+            {
+                return Err(format!(
+                    "ADDRESISTORS resolved-mode provenance changed: expected {mode:?}/{raw}/{value}@{line}, got {actual:?}"
+                ));
+            }
+        }
+        let expected_nodes = vec!["2".to_string(), "X1.2".to_string()];
+        let (expected_one, expected_nodc) = match kind {
+            XyceAddResistorsKind::NoDcPath => (Vec::new(), expected_nodes.clone()),
+            XyceAddResistorsKind::OneTerminal => (expected_nodes.clone(), Vec::new()),
+            XyceAddResistorsKind::RedundantBridge => (Vec::new(), Vec::new()),
+        };
+        if report.one_terminal_candidates != expected_one
+            || report.no_dc_path_candidates != expected_nodc
+        {
+            return Err(format!(
+                "ADDRESISTORS exact connectivity classification changed: expected ONE={expected_one:?}, NODC={expected_nodc:?}; got ONE={:?}, NODC={:?}",
+                report.one_terminal_candidates, report.no_dc_path_candidates
+            ));
+        }
+        let expected_generated: Vec<(
+            &'static str,
+            &'static str,
+            &'static str,
+            crate::netlist::XyceAddResistorMode,
+            &'static str,
+            Value,
+        )> = match kind {
+            XyceAddResistorsKind::NoDcPath => vec![
+                ("RNODCPATH1", "2", "2", NoDcPath, "1", 1.0),
+                ("RNODCPATH2", "X1.2", "X1:2", NoDcPath, "1", 1.0),
+            ],
+            XyceAddResistorsKind::OneTerminal => vec![
+                ("RONETERM1", "2", "2", OneTerminal, "1", 1.0),
+                ("RONETERM2", "X1.2", "X1:2", OneTerminal, "1", 1.0),
+            ],
+            XyceAddResistorsKind::RedundantBridge => Vec::new(),
+        };
+        if report.generated.len() != expected_generated.len() {
+            return Err(format!(
+                "ADDRESISTORS generated-resistor count changed: expected {}, got {:?}",
+                expected_generated.len(),
+                report.generated
+            ));
+        }
+        for (actual, (name, node, artifact_node, mode, raw, value)) in
+            report.generated.iter().zip(expected_generated)
+        {
+            if actual.name != name
+                || actual.node != node
+                || actual.artifact_node != artifact_node
+                || actual.mode != mode
+                || actual.raw_resistance != raw
+                || actual.resistance.to_bits() != value.to_bits()
+            {
+                return Err(format!(
+                    "ADDRESISTORS generated report changed: expected {name}/{node}/{artifact_node}/{mode:?}/{raw}/{value}, got {actual:?}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_addresistors_original_transient_table(table: &XycePrnTable) -> Result<(), String> {
+        Self::validate_addresistors_transient_schedule(table)?;
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if (row[2] - 1.0).abs() > 1.0e-8 || (row[3] - 1.0).abs() > 1.0e-8 {
+                return Err(format!(
+                    "ADDRESISTORS unchanged original waveform is not unity at row {row_index}: {row:?}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_addresistors_transient_schedule(table: &XycePrnTable) -> Result<(), String> {
+        if table.columns
+            != [
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(2)".to_string(),
+                "V(X1:2)".to_string(),
+            ]
+            || table.rows.len() < 2
+        {
+            return Err(format!(
+                "ADDRESISTORS transient output layout changed: columns={:?}, rows={}",
+                table.columns,
+                table.rows.len()
+            ));
+        }
+        let mut previous = None;
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != 4 || row.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "ADDRESISTORS transient row {row_index} is not a finite four-column row: {row:?}"
+                ));
+            }
+            if row[0].to_bits() != (row_index as Value).to_bits()
+                || previous.is_some_and(|time| time >= row[1])
+                || row[1] < 1.0e-3 - 1.0e-12
+                || row[1] > 2.0 + 1.0e-12
+            {
+                return Err(format!(
+                    "ADDRESISTORS transient Index/TIME ordering changed at row {row_index}: {row:?}"
+                ));
+            }
+            previous = Some(row[1]);
+        }
+        let first = table.rows.first().expect("rows checked")[1];
+        let last = table.rows.last().expect("rows checked")[1];
+        // Xyce deliberately disables interpolation for the first output when
+        // TSTART is present (N_ANP_Transient.C `doNotInterpolate`). Therefore
+        // the first serialized row is the first accepted point at or after
+        // 1 ms, not necessarily an interpolated row at exactly 1 ms.
+        if first < 1.0e-3 - 1.0e-12 || (last - 2.0).abs() > 1.0e-12 {
+            return Err(format!(
+                "ADDRESISTORS output schedule requires first TIME >= 1m and final TIME = 2, got [{first},{last}]"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_addresistors_exp_invariant(table: &XycePrnTable) -> Result<(), String> {
+        for (row_index, row) in table.rows.iter().enumerate() {
+            let expected = (-row[1]).exp();
+            for (column, actual) in [("V(2)", row[2]), ("V(X1:2)", row[3])] {
+                let error = (actual - expected).abs();
+                if error > 2.0e-4 * expected.abs().max(1.0e-6) + 1.0e-9 {
+                    return Err(format!(
+                        "ADDRESISTORS analytic exp(-t) invariant failed for {column} at row {row_index}: time={}, expected={expected}, actual={actual}",
+                        row[1]
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn addresistors_dynamic_gold_table(actual: &XycePrnTable) -> Result<XycePrnTable, String> {
+        Self::validate_addresistors_transient_schedule(actual)?;
+        let mut rows = Vec::with_capacity(actual.rows.len());
+        for (row_index, row) in actual.rows.iter().enumerate() {
+            let serialized_time = Self::xyce_default_prn_roundtrip(row[1])?;
+            let expected = Self::xyce_default_prn_roundtrip((-serialized_time).exp())?;
+            rows.push(vec![row[0], serialized_time, expected, expected]);
+            if rows[row_index].iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "ADDRESISTORS dynamic gold produced a non-finite row {row_index}"
+                ));
+            }
+        }
+        Ok(XycePrnTable {
+            columns: actual.columns.clone(),
+            rows,
+        })
+    }
+
+    fn validate_addresistors_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceAddResistorsKind,
+    ) -> Result<Vec<u8>, String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err(format!(
+                "ADDRESISTORS record '{}' lost canonical removed-wrapper ownership",
+                kind.record()
+            ));
+        }
+        let canonical_deck = deck.path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize ADDRESISTORS record {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        let canonical_expected = self
+            .root
+            .join(Path::new(&deck.relative_path))
+            .canonicalize()
+            .map_err(|error| {
+                format!(
+                    "canonical ADDRESISTORS record '{}' is missing: {error}",
+                    kind.record()
+                )
+            })?;
+        if canonical_deck != canonical_expected {
+            return Err(format!(
+                "ADDRESISTORS record resolved outside its canonical corpus path: {}",
+                deck.path.display()
+            ));
+        }
+        let metadata = fs::symlink_metadata(&deck.path)
+            .map_err(|error| format!("failed to inspect ADDRESISTORS source: {error}"))?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err("ADDRESISTORS source must be a regular non-symlink file".to_string());
+        }
+        let source_bytes = fs::read(&deck.path).map_err(|error| {
+            format!(
+                "failed to read ADDRESISTORS record {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        Self::validate_xdm_replaceground_identity(
+            "ADDRESISTORS source",
+            kind.record(),
+            &source_bytes,
+            kind.source_identity(),
+        )?;
+
+        self.validate_addresistors_family_census(
+            "PREPROC_ADDRES",
+            XYCE_ADDRESISTORS_PREPROC_SOURCE_DIRECTORY_COUNT,
+            XYCE_ADDRESISTORS_PREPROC_SOURCE_DIRECTORY_BLAKE3,
+            XYCE_ADDRESISTORS_PREPROC_SOURCE_CONTENT_CENSUS_BLAKE3,
+            XYCE_ADDRESISTORS_PREPROC_PHYSICAL_COUNT,
+            XYCE_ADDRESISTORS_PREPROC_PHYSICAL_BLAKE3,
+            XYCE_ADDRESISTORS_PREPROC_FAMILY_PREFIX,
+            XYCE_ADDRESISTORS_PREPROC_MANIFEST_COUNT,
+            XYCE_ADDRESISTORS_PREPROC_MANIFEST_BLAKE3,
+        )?;
+        self.validate_addresistors_family_census(
+            "REDUND_REMOVE",
+            XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_COUNT,
+            XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_BLAKE3,
+            XYCE_REMOVEUNUSED_SOURCE_CONTENT_CENSUS_BLAKE3,
+            XYCE_REMOVEUNUSED_PHYSICAL_COUNT,
+            XYCE_REMOVEUNUSED_PHYSICAL_BLAKE3,
+            XYCE_REMOVEUNUSED_FAMILY_PREFIX,
+            XYCE_REMOVEUNUSED_MANIFEST_COUNT,
+            XYCE_REMOVEUNUSED_MANIFEST_BLAKE3,
+        )?;
+
+        let mut candidates = BTreeSet::new();
+        let mut candidate_content = BTreeSet::new();
+        for candidate in XyceAddResistorsKind::ALL {
+            let record = candidate.record();
+            let path = self.root.join(Path::new(record));
+            let bytes = fs::read(&path).map_err(|error| {
+                format!(
+                    "ADDRESISTORS candidate {} is missing: {error}",
+                    path.display()
+                )
+            })?;
+            Self::validate_xdm_replaceground_identity(
+                "ADDRESISTORS candidate",
+                record,
+                &bytes,
+                candidate.source_identity(),
+            )?;
+            candidates.insert(record.to_string());
+            candidate_content.insert(format!("{record}\t{}", blake3::hash(&bytes).to_hex()));
+            self.reject_addresistors_output_artifacts(&path)?;
+        }
+        let candidates = candidates.into_iter().collect::<Vec<_>>();
+        let candidate_content = candidate_content.into_iter().collect::<Vec<_>>();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let candidate_content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XYCE_ADDRESISTORS_CANDIDATE_COUNT
+            || candidate_hash != XYCE_ADDRESISTORS_CANDIDATE_BLAKE3
+            || candidate_content_hash != XYCE_ADDRESISTORS_CANDIDATE_CONTENT_BLAKE3
+        {
+            return Err(format!(
+                "ADDRESISTORS candidate census changed: names={}/{candidate_hash}, content={candidate_content_hash}",
+                candidates.len()
+            ));
+        }
+        Ok(source_bytes)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn validate_addresistors_family_census(
+        &self,
+        family_name: &str,
+        expected_complete_count: usize,
+        expected_complete_hash: &str,
+        expected_content_hash: &str,
+        expected_physical_count: usize,
+        expected_physical_hash: &str,
+        manifest_prefix: &str,
+        expected_manifest_count: usize,
+        expected_manifest_hash: &str,
+    ) -> Result<(), String> {
+        let family_dir = self.root.join("Netlists").join(family_name);
+        let metadata = fs::symlink_metadata(&family_dir)
+            .map_err(|error| format!("ADDRESISTORS family {family_name} is missing: {error}"))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "ADDRESISTORS family {} must be a regular non-symlink directory",
+                family_dir.display()
+            ));
+        }
+        let mut complete = BTreeSet::new();
+        let mut content = BTreeSet::new();
+        let mut physical = BTreeSet::new();
+        for entry in fs::read_dir(&family_dir)
+            .map_err(|error| format!("failed to inspect {family_name}: {error}"))?
+        {
+            let entry = entry.map_err(|error| {
+                format!("failed to inspect ADDRESISTORS family member: {error}")
+            })?;
+            let member_metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect ADDRESISTORS family member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            if !member_metadata.file_type().is_file() || member_metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "ADDRESISTORS family member {} must be a regular non-symlink file",
+                    entry.path().display()
+                ));
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| "ADDRESISTORS family filename is not UTF-8".to_string())?
+                .to_ascii_lowercase();
+            if !complete.insert(name.clone()) {
+                return Err(format!(
+                    "ADDRESISTORS family contains case-colliding name {name:?}"
+                ));
+            }
+            let bytes = fs::read(entry.path()).map_err(|error| {
+                format!(
+                    "failed to hash ADDRESISTORS family member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            content.insert(format!("{name}\0{}", blake3::hash(&bytes).to_hex()));
+            if name.ends_with(".cir") {
+                physical.insert(name);
+            }
+        }
+        let complete = complete.into_iter().collect::<Vec<_>>();
+        let content = content.into_iter().collect::<Vec<_>>();
+        let physical = physical.into_iter().collect::<Vec<_>>();
+        let complete_hash = blake3::hash(complete.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let physical_hash = blake3::hash(physical.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let manifest = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(manifest_prefix))
+            .cloned()
+            .collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if complete.len() != expected_complete_count
+            || complete_hash != expected_complete_hash
+            || content.len() != expected_complete_count
+            || content_hash != expected_content_hash
+            || physical.len() != expected_physical_count
+            || physical_hash != expected_physical_hash
+            || manifest.len() != expected_manifest_count
+            || manifest_hash != expected_manifest_hash
+        {
+            return Err(format!(
+                "ADDRESISTORS {family_name} census changed: complete={}/{complete_hash}, content={}/{content_hash}, physical={}/{physical_hash}, manifest={}/{manifest_hash}",
+                complete.len(),
+                content.len(),
+                physical.len(),
+                manifest.len()
+            ));
+        }
+        if family_dir.join("options").exists() {
+            return Err(format!(
+                "ADDRESISTORS {family_name} unexpectedly contains an options sidecar"
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_addresistors_output_artifacts(&self, deck_path: &Path) -> Result<(), String> {
+        let anchor = self
+            .static_output_reference_path(deck_path, "anchor")
+            .ok_or_else(|| "ADDRESISTORS deck cannot be mapped into OutputData".to_string())?;
+        let Some(output_dir) = anchor.parent() else {
+            return Err("ADDRESISTORS OutputData anchor has no parent".to_string());
+        };
+        if !output_dir.exists() {
+            return Ok(());
+        }
+        let metadata = fs::symlink_metadata(output_dir)
+            .map_err(|error| format!("failed to inspect ADDRESISTORS OutputData: {error}"))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "ADDRESISTORS OutputData path {} must be a regular non-symlink directory",
+                output_dir.display()
+            ));
+        }
+        let deck_name = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "ADDRESISTORS deck filename is not UTF-8".to_string())?;
+        let prefix = format!("{deck_name}.").to_ascii_lowercase();
+        let mut artifacts = Vec::new();
+        for entry in fs::read_dir(output_dir)
+            .map_err(|error| format!("failed to inspect ADDRESISTORS OutputData: {error}"))?
+        {
+            let entry = entry
+                .map_err(|error| format!("failed to inspect ADDRESISTORS artifact: {error}"))?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&prefix))
+            {
+                artifacts.push(entry.path());
+            }
+        }
+        artifacts.sort();
+        if artifacts.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "ADDRESISTORS candidate must not own checked-in OutputData artifacts: {artifacts:?}"
+            ))
+        }
+    }
+
     fn validate_removeunused_oracle(
         &self,
         deck: &XyceDeck,
@@ -7326,6 +8655,7 @@ impl XyceTestRunner {
         .collect::<BTreeSet<_>>();
         let options = &netlist.options;
         if options.replace_ground != kind.replace_ground().then_some(true)
+            || options.add_resistors.is_some()
             || options
                 .remove_unused
                 .as_ref()
@@ -26734,6 +28064,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let crate::netlist::SimulationOptions {
             replace_ground: _,
             remove_unused: _,
+            add_resistors: _,
             measure_fail_output: _,
             measure_default_value: _,
             measure_use_cont_files: _,
@@ -58643,6 +59974,59 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
 mod tests {
     use super::*;
 
+    fn addresistors_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
+        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+        let root = std::env::temp_dir().join(format!(
+            "rspice-addresistors-oracle-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos()
+        ));
+        for family_name in ["PREPROC_ADDRES", "REDUND_REMOVE"] {
+            let source_family = source_root.join("Netlists").join(family_name);
+            let family = root.join("Netlists").join(family_name);
+            fs::create_dir_all(&family).expect("create ADDRESISTORS fixture family");
+            for entry in fs::read_dir(&source_family).expect("read canonical family") {
+                let entry = entry.expect("read canonical family member");
+                fs::copy(entry.path(), family.join(entry.file_name()))
+                    .expect("copy canonical family member");
+            }
+        }
+        let manifest = fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE))
+            .expect("read canonical harness manifest")
+            .lines()
+            .filter(|line| {
+                line.split('\t').next().is_some_and(|record| {
+                    let record = XyceTestRunner::normalize_manifest_key(record);
+                    record.starts_with(XYCE_ADDRESISTORS_PREPROC_FAMILY_PREFIX)
+                        || record.starts_with(XYCE_REMOVEUNUSED_FAMILY_PREFIX)
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(root.join(HARNESS_MANIFEST_FILE), format!("{manifest}\n"))
+            .expect("write ADDRESISTORS fixture manifest");
+        let owner = root.join("Netlists/PREPROC_ADDRES/nodcpath.cir");
+        (root, owner)
+    }
+
+    fn assert_addresistors_provenance_fails(root: &Path, owner: &Path, context: &str) {
+        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+        let deck = XyceDeck {
+            path: owner.to_path_buf(),
+            relative_path: "Netlists/PREPROC_ADDRES/nodcpath.cir".to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        assert!(
+            runner
+                .validate_addresistors_provenance(&deck, XyceAddResistorsKind::NoDcPath)
+                .is_err(),
+            "{context} must fail ADDRESISTORS provenance"
+        );
+    }
+
     fn removeunused_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
         let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
         let source_family = source_root.join("Netlists/REDUND_REMOVE");
@@ -58811,6 +60195,60 @@ mod tests {
     }
 
     #[test]
+    fn addresistors_source_family_manifest_and_artifact_mutations_fail_closed() {
+        for (label, relative, needle, replacement) in [
+            (
+                "candidate-source",
+                "Netlists/PREPROC_ADDRES/nodcpath.cir",
+                "C1 1 2 0.5 IC=0",
+                "C1 1 2 0.6 IC=0",
+            ),
+            (
+                "other-family-source",
+                "Netlists/REDUND_REMOVE/gnd_subckt.cir",
+                "Test",
+                "Mutated test",
+            ),
+        ] {
+            let (root, owner) = addresistors_mutation_fixture(label);
+            let path = root.join(relative);
+            let source = fs::read_to_string(&path).expect("read ADDRESISTORS mutation target");
+            assert!(source.contains(needle));
+            fs::write(&path, source.replacen(needle, replacement, 1))
+                .expect("write ADDRESISTORS mutation");
+            assert_addresistors_provenance_fails(&root, &owner, label);
+            fs::remove_dir_all(root).expect("remove ADDRESISTORS fixture");
+        }
+
+        let (root, owner) = addresistors_mutation_fixture("manifest-owner");
+        let manifest_path = root.join(HARNESS_MANIFEST_FILE);
+        let manifest = fs::read_to_string(&manifest_path).expect("read fixture manifest");
+        let record = "Netlists/PREPROC_ADDRES/nodcpath.cir\trequires_upstream_wrapper\n";
+        assert!(manifest.contains(record));
+        fs::write(&manifest_path, manifest.replacen(record, "", 1))
+            .expect("remove ADDRESISTORS manifest owner");
+        assert_addresistors_provenance_fails(&root, &owner, "manifest owner removed");
+        fs::remove_dir_all(root).expect("remove manifest fixture");
+
+        let (root, owner) = addresistors_mutation_fixture("extra-family-member");
+        fs::write(
+            root.join("Netlists/PREPROC_ADDRES/unexpected.txt"),
+            "unexpected\n",
+        )
+        .expect("write extra ADDRESISTORS family member");
+        assert_addresistors_provenance_fails(&root, &owner, "extra family member");
+        fs::remove_dir_all(root).expect("remove family-shape fixture");
+
+        let (root, owner) = addresistors_mutation_fixture("output-artifact");
+        let output = root.join("OutputData/PREPROC_ADDRES");
+        fs::create_dir_all(&output).expect("create ADDRESISTORS OutputData family");
+        fs::write(output.join("nodcpath.cir.prn"), "forbidden\n")
+            .expect("write forbidden ADDRESISTORS artifact");
+        assert_addresistors_provenance_fails(&root, &owner, "candidate output artifact");
+        fs::remove_dir_all(root).expect("remove output fixture");
+    }
+
+    #[test]
     fn removeunused_family_shape_symlink_and_output_artifacts_fail_closed() {
         let (root, family) = removeunused_mutation_fixture("extra-family-member");
         fs::write(family.join("unexpected.txt"), "unexpected\n")
@@ -58951,6 +60389,208 @@ mod tests {
                 .is_some_and(|error| error.contains("shared deadline expired"))
         );
         fs::remove_dir_all(root).expect("remove deadline fixture");
+    }
+
+    #[test]
+    fn addresistors_policy_resistance_and_precedence_mutations_are_causal() {
+        let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/xyce/Netlists/PREPROC_ADDRES/nodcpath.cir");
+        let source = fs::read_to_string(&corpus).expect("read ADDRESISTORS corpus source");
+        let original = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
+            .expect("canonical ADDRESISTORS source parses");
+        let materialized = original
+            .materialize_xyce_add_resistors()
+            .expect("canonical ADDRESISTORS source materializes");
+        XyceTestRunner::validate_addresistors_report(
+            &materialized.report,
+            XyceAddResistorsKind::NoDcPath,
+        )
+        .expect("canonical report qualifies");
+        XyceTestRunner::validate_addresistors_materialized_netlist(
+            &materialized.netlist,
+            XyceAddResistorsKind::NoDcPath,
+        )
+        .expect("canonical copy clears policy and preserves options");
+        XyceTestRunner::validate_addresistors_flattened_topology(
+            &materialized.netlist,
+            XyceAddResistorsKind::NoDcPath,
+            true,
+        )
+        .expect("canonical generated topology qualifies");
+
+        let policy_off = source
+            .replace(
+                ".preprocess addresistors nodcpath 1",
+                "*.preprocess addresistors nodcpath 1",
+            )
+            .replace(
+                ".preprocess addresistors oneterminal 0.0001",
+                "*.preprocess addresistors oneterminal 0.0001",
+            );
+        let policy_off = XyceTestRunner::parse_xyce_netlist(&policy_off, &corpus)
+            .expect("policy-off source parses");
+        assert!(
+            matches!(
+                policy_off.materialize_xyce_add_resistors(),
+                Err(crate::netlist::XyceAddResistorsMaterializationError::MissingPolicy)
+            ),
+            "disabling both cards must causally prevent generation"
+        );
+
+        let wrong_resistance = source.replacen(
+            ".preprocess addresistors nodcpath 1",
+            ".preprocess addresistors nodcpath 2",
+            1,
+        );
+        let wrong_resistance = XyceTestRunner::parse_xyce_netlist(&wrong_resistance, &corpus)
+            .expect("wrong-resistance mutation parses")
+            .materialize_xyce_add_resistors()
+            .expect("wrong-resistance mutation materializes");
+        assert!(
+            XyceTestRunner::validate_addresistors_report(
+                &wrong_resistance.report,
+                XyceAddResistorsKind::NoDcPath,
+            )
+            .is_err(),
+            "changing the active resistance must fail the exact report"
+        );
+        assert!(
+            wrong_resistance
+                .report
+                .generated
+                .iter()
+                .all(|resistor| resistor.resistance.to_bits() == 2.0f64.to_bits())
+        );
+
+        let overlap_source = "ADDRESISTORS overlap precedence\n\
+                              V1 1 0 DC 1\n\
+                              C1 1 2 1 IC=0\n\
+                              .PREPROCESS ADDRESISTORS NODCPATH 2\n\
+                              .PREPROCESS ADDRESISTORS ONETERMINAL 3\n\
+                              .TRAN 1m 2\n\
+                              .PRINT TRAN V(2)\n\
+                              .END\n";
+        let overlap = XyceTestRunner::parse_xyce_netlist(overlap_source, Path::new("overlap.cir"))
+            .expect("overlap fixture parses")
+            .materialize_xyce_add_resistors()
+            .expect("overlap fixture materializes");
+        assert_eq!(overlap.report.one_terminal_candidates, ["2".to_string()]);
+        assert!(overlap.report.no_dc_path_candidates.is_empty());
+        assert_eq!(overlap.report.generated.len(), 1);
+        assert_eq!(overlap.report.generated[0].name, "RONETERM1");
+        assert_eq!(
+            overlap.report.generated[0].mode,
+            crate::netlist::XyceAddResistorMode::OneTerminal
+        );
+        assert_eq!(overlap.report.generated[0].raw_resistance, "3");
+        assert_eq!(overlap.report.resolved_modes.len(), 1);
+        assert_eq!(
+            overlap.report.resolved_modes[0].mode,
+            crate::netlist::XyceAddResistorMode::OneTerminal
+        );
+    }
+
+    #[test]
+    fn addresistors_snapshot_layout_serialization_and_deadline_mutations_fail_closed() {
+        let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/xyce/Netlists/PREPROC_ADDRES/oneterm.cir");
+        let source = fs::read_to_string(&corpus).expect("read ADDRESISTORS corpus source");
+        let original = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
+            .expect("canonical ADDRESISTORS source parses");
+        let materialized = original
+            .materialize_xyce_add_resistors()
+            .expect("canonical ADDRESISTORS source materializes");
+
+        let mut value_mutation = materialized.netlist.clone();
+        let generated = value_mutation
+            .elements
+            .iter_mut()
+            .find(|element| {
+                matches!(
+                    element.provenance,
+                    crate::netlist::ElementProvenance::GeneratedXyceAddResistor { .. }
+                )
+            })
+            .expect("generated resistor exists");
+        let ElementKind::Resistor { value, .. } = &mut generated.kind else {
+            panic!("generated element remains a resistor")
+        };
+        *value = 2.0;
+        assert!(
+            XyceTestRunner::validate_addresistors_flattened_topology(
+                &value_mutation,
+                XyceAddResistorsKind::OneTerminal,
+                true,
+            )
+            .is_err()
+        );
+
+        let mut provenance_mutation = materialized.netlist.clone();
+        provenance_mutation
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("RONETERM1"))
+            .expect("generated resistor exists")
+            .provenance = crate::netlist::ElementProvenance::Authored;
+        assert!(
+            XyceTestRunner::validate_addresistors_flattened_topology(
+                &provenance_mutation,
+                XyceAddResistorsKind::OneTerminal,
+                true,
+            )
+            .is_err()
+        );
+
+        let mut option_mutation = materialized.netlist.clone();
+        option_mutation.options.gmin = Some(1.0e-9);
+        assert!(
+            XyceTestRunner::validate_addresistors_materialized_netlist(
+                &option_mutation,
+                XyceAddResistorsKind::OneTerminal,
+            )
+            .is_err()
+        );
+
+        let mut table = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(2)".to_string(),
+                "V(X1:2)".to_string(),
+            ],
+            rows: [1.0e-3, 1.0, 2.0]
+                .into_iter()
+                .enumerate()
+                .map(|(index, time)| vec![index as Value, time, (-time).exp(), (-time).exp()])
+                .collect(),
+        };
+        XyceTestRunner::validate_addresistors_transient_schedule(&table)
+            .expect("baseline layout qualifies");
+        XyceTestRunner::validate_addresistors_exp_invariant(&table)
+            .expect("baseline exponential qualifies");
+        let gold = XyceTestRunner::addresistors_dynamic_gold_table(&table)
+            .expect("baseline dynamic gold serializes");
+        assert_eq!(
+            gold.rows[1][2].to_bits(),
+            XyceTestRunner::xyce_default_prn_roundtrip(
+                (-XyceTestRunner::xyce_default_prn_roundtrip(table.rows[1][1])
+                    .expect("time serializes"))
+                .exp()
+            )
+            .expect("gold serializes")
+            .to_bits()
+        );
+        table.columns[3] = "V(WRONG)".to_string();
+        assert!(XyceTestRunner::validate_addresistors_transient_schedule(&table).is_err());
+        table.columns[3] = "V(X1:2)".to_string();
+        table.rows[1][2] = Value::NAN;
+        assert!(XyceTestRunner::validate_addresistors_transient_schedule(&table).is_err());
+
+        let expired = DeadlineAbort::new(Instant::now(), 0);
+        assert!(matches!(
+            original.materialize_xyce_add_resistors_with_abort(&expired),
+            Err(crate::netlist::XyceAddResistorsMaterializationError::Aborted)
+        ));
     }
 
     #[test]
