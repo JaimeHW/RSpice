@@ -3,7 +3,9 @@ use super::{
     is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort,
     run_transient_analysis_with_source_path_and_abort,
 };
-use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
+use crate::services::safety::{
+    SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation,
+};
 use rspice_core::Value;
 use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::netlist::{Element, ElementKind};
@@ -92,6 +94,8 @@ pub struct SoaData {
     pub violation_count: Vec<Value>,
     /// Collected violations.
     pub violations: Vec<SoAViolation>,
+    /// Complete worst-point evidence for every evaluated device rule.
+    pub evaluations: Vec<SoAEvaluation>,
 }
 
 /// Run SOA analysis using default configuration.
@@ -206,7 +210,8 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         ));
     }
 
-    let node_waveforms = build_transient_node_lookup(&transient.voltages, abort)?;
+    let node_waveforms =
+        build_transient_node_lookup(&transient.voltages, transient.time.len(), abort)?;
     let mut violation_count = Vec::with_capacity(transient.time.len());
 
     for (idx, &time) in transient.time.iter().enumerate() {
@@ -222,9 +227,9 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                     if element.nodes.len() < 3 {
                         continue;
                     }
-                    let vd = sample_node_waveform(&node_waveforms, &element.nodes[0], idx);
-                    let vg = sample_node_waveform(&node_waveforms, &element.nodes[1], idx);
-                    let vs = sample_node_waveform(&node_waveforms, &element.nodes[2], idx);
+                    let vd = sample_node_waveform(&node_waveforms, &element.nodes[0], idx)?;
+                    let vg = sample_node_waveform(&node_waveforms, &element.nodes[1], idx)?;
+                    let vs = sample_node_waveform(&node_waveforms, &element.nodes[2], idx)?;
                     let mut device_values = HashMap::new();
                     if config.check_vgs_max {
                         device_values.insert(SoAParameter::Vgs, (vg - vs).abs());
@@ -240,9 +245,9 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                     if element.nodes.len() < 3 {
                         continue;
                     }
-                    let vc = sample_node_waveform(&node_waveforms, &element.nodes[0], idx);
-                    let vb = sample_node_waveform(&node_waveforms, &element.nodes[1], idx);
-                    let ve = sample_node_waveform(&node_waveforms, &element.nodes[2], idx);
+                    let vc = sample_node_waveform(&node_waveforms, &element.nodes[0], idx)?;
+                    let vb = sample_node_waveform(&node_waveforms, &element.nodes[1], idx)?;
+                    let ve = sample_node_waveform(&node_waveforms, &element.nodes[2], idx)?;
                     let mut device_values = HashMap::new();
                     if config.check_vbe_max {
                         device_values.insert(SoAParameter::Vbe, (vb - ve).abs());
@@ -258,7 +263,9 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             }
         }
 
-        manager.check_point(time, &values);
+        manager
+            .check_point(time, &values)
+            .map_err(ServiceRunError::Failure)?;
         violation_count.push(manager.violations().len() as Value);
     }
 
@@ -267,11 +274,18 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         poll_periodically(abort, violation_index)?;
         violations.push(violation.clone());
     }
+    let mut evaluations = manager.evaluations().cloned().collect::<Vec<_>>();
+    evaluations.sort_by(|left, right| {
+        left.device_id
+            .cmp(&right.device_id)
+            .then_with(|| left.parameter.cmp(&right.parameter))
+    });
     ensure_not_aborted(abort)?;
     Ok(SoaData {
         time: transient.time,
         violation_count,
         violations,
+        evaluations,
     })
 }
 
@@ -300,8 +314,6 @@ fn register_soa_limits_for_netlist(
                     def.add_limit(SoALimit {
                         parameter: SoAParameter::Vgs,
                         max_value: config.max_vgs,
-                        min_value: None,
-                        max_duration: None,
                         unit: "V".to_string(),
                         description: "Maximum gate-source voltage".to_string(),
                     });
@@ -310,8 +322,6 @@ fn register_soa_limits_for_netlist(
                     def.add_limit(SoALimit {
                         parameter: SoAParameter::Vds,
                         max_value: config.max_vds,
-                        min_value: None,
-                        max_duration: None,
                         unit: "V".to_string(),
                         description: "Maximum drain-source voltage".to_string(),
                     });
@@ -322,8 +332,6 @@ fn register_soa_limits_for_netlist(
                     def.add_limit(SoALimit {
                         parameter: SoAParameter::Vbe,
                         max_value: config.max_vbe,
-                        min_value: None,
-                        max_duration: None,
                         unit: "V".to_string(),
                         description: "Maximum base-emitter voltage".to_string(),
                     });
@@ -332,8 +340,6 @@ fn register_soa_limits_for_netlist(
                     def.add_limit(SoALimit {
                         parameter: SoAParameter::Vce,
                         max_value: config.max_vce,
-                        min_value: None,
-                        max_duration: None,
                         unit: "V".to_string(),
                         description: "Maximum collector-emitter voltage".to_string(),
                     });
@@ -342,7 +348,9 @@ fn register_soa_limits_for_netlist(
             _ => continue,
         }
         if !def.limits.is_empty() {
-            manager.register_device(element.name.clone(), def);
+            manager
+                .register_device(element.name.clone(), def)
+                .map_err(ServiceRunError::Failure)?;
         }
     }
     ensure_not_aborted(abort)
@@ -350,17 +358,35 @@ fn register_soa_limits_for_netlist(
 
 fn build_transient_node_lookup(
     voltages: &[(String, Vec<Value>)],
+    expected_samples: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HashMap<String, Vec<Value>>> {
     let mut map = HashMap::with_capacity(voltages.len() + 2);
     for (trace_index, (name, values)) in voltages.iter().enumerate() {
         poll_periodically(abort, trace_index)?;
+        if values.len() != expected_samples {
+            return Err(ServiceRunError::Failure(format!(
+                "SOA voltage trace '{}' has {} samples; expected {expected_samples}",
+                name,
+                values.len()
+            )));
+        }
         let mut copied_values = Vec::with_capacity(values.len());
         for (sample_index, value) in values.iter().copied().enumerate() {
             poll_periodically(abort, sample_index)?;
+            if !value.is_finite() {
+                return Err(ServiceRunError::Failure(format!(
+                    "SOA voltage trace '{name}' contains a non-finite sample at index {sample_index}"
+                )));
+            }
             copied_values.push(value);
         }
-        map.insert(normalize_voltage_signal_name(name), copied_values);
+        let key = normalize_voltage_signal_name(name);
+        if map.insert(key.clone(), copied_values).is_some() {
+            return Err(ServiceRunError::Failure(format!(
+                "SOA solver returned duplicate voltage trace '{key}'"
+            )));
+        }
     }
     map.insert("0".to_string(), Vec::new());
     map.insert("GND".to_string(), Vec::new());
@@ -372,15 +398,19 @@ fn sample_node_waveform(
     waveforms: &HashMap<String, Vec<Value>>,
     node_name: &str,
     idx: usize,
-) -> Value {
+) -> ServiceRunResult<Value> {
     if is_ground_like(node_name) {
-        return 0.0;
+        return Ok(0.0);
     }
     let key = node_name.trim().to_ascii_uppercase();
     waveforms
         .get(&key)
         .and_then(|values| values.get(idx).copied())
-        .unwrap_or(0.0)
+        .ok_or_else(|| {
+            ServiceRunError::Failure(format!(
+                "SOA solver did not retain required node '{node_name}' sample {idx}"
+            ))
+        })
 }
 
 #[cfg(test)]
@@ -421,9 +451,35 @@ mod tests {
     fn soa_honors_abort_inside_waveform_sample_conversion() {
         let voltages = vec![("V(out)".to_string(), vec![1.0; 512])];
         let abort = AbortOnPoll::new(3);
-        let result = build_transient_node_lookup(&voltages, &abort);
+        let result = build_transient_node_lookup(&voltages, 512, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 3);
+    }
+
+    #[test]
+    fn soa_rejects_missing_and_short_required_voltage_traces() {
+        let abort = NoAbort;
+        let short = vec![("V(out)".to_owned(), vec![0.0])];
+        assert!(
+            build_transient_node_lookup(&short, 2, &abort)
+                .expect_err("short trace must fail closed")
+                .to_string()
+                .contains("expected 2")
+        );
+
+        let traces = HashMap::from([("OUT".to_owned(), vec![0.0, 1.0])]);
+        assert!(
+            sample_node_waveform(&traces, "missing", 0)
+                .expect_err("missing node must fail closed")
+                .to_string()
+                .contains("required node")
+        );
+        assert!(
+            sample_node_waveform(&traces, "out", 2)
+                .expect_err("missing sample must fail closed")
+                .to_string()
+                .contains("sample 2")
+        );
     }
 }

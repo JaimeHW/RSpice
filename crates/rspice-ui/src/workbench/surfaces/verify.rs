@@ -1338,6 +1338,127 @@ fn render_data_table(
         });
 }
 
+fn render_virtual_data_table(
+    ui: &mut Ui,
+    id: &str,
+    headers: &[(String, f32)],
+    row_count: usize,
+    rows_are_actionable: bool,
+    mut row_at: impl FnMut(usize) -> Vec<TableCell>,
+) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let mut clicked_row = None;
+    let viewport_width = ui.available_width().max(1.0);
+    let responsive_width = ui.ctx().content_rect().width().min(viewport_width);
+    let row_height = verification_table_row_height(responsive_width);
+    egui::ScrollArea::horizontal()
+        .id_salt(id)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+        .show(ui, |ui| {
+            let width = verification_table_width(responsive_width, viewport_width, None);
+            ui.set_min_width(width);
+            let (head, head_response) =
+                ui.allocate_exact_size(egui::vec2(width, 27.0), egui::Sense::hover());
+            head_response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Label,
+                    ui.is_enabled(),
+                    format!(
+                        "Table columns: {}",
+                        headers
+                            .iter()
+                            .map(|(label, _)| label.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                )
+            });
+            ui.painter().rect_filled(head, 0.0, t.color.bg_panel_2);
+            paint_table_cells(ui, head, headers, true, |label| {
+                TableCell::text(label.to_uppercase())
+            });
+            ui.painter().hline(
+                head.x_range(),
+                head.bottom(),
+                egui::Stroke::new(1.0, t.color.border),
+            );
+
+            if row_count == 0 {
+                let empty_message = verification_table_empty_message(id);
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        ui.is_enabled(),
+                        empty_message,
+                    )
+                });
+                ui.painter().text(
+                    rect.left_center() + egui::vec2(8.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    empty_message,
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.text_dim,
+                );
+                return;
+            }
+
+            let visible_rows = row_count.min(12);
+            egui::ScrollArea::vertical()
+                .id_salt(format!("{id}.rows"))
+                .max_height(row_height * visible_rows as f32)
+                .auto_shrink([false, true])
+                .show_rows(ui, row_height, row_count, |ui, range| {
+                    for row_index in range {
+                        let cells = row_at(row_index);
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(width, row_height),
+                            if rows_are_actionable {
+                                egui::Sense::click()
+                            } else {
+                                egui::Sense::hover()
+                            },
+                        );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Label,
+                                ui.is_enabled(),
+                                headers
+                                    .iter()
+                                    .zip(&cells)
+                                    .map(|((header, _), cell)| format!("{header}: {}", cell.text))
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            )
+                        });
+                        if response.hovered() {
+                            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+                        }
+                        if rows_are_actionable && response.clicked() {
+                            clicked_row = Some(row_index);
+                        }
+                        paint_table_cells(ui, rect, headers, false, |label| {
+                            let index = headers
+                                .iter()
+                                .position(|(header, _)| header == label)
+                                .unwrap_or(0);
+                            cells
+                                .get(index)
+                                .cloned()
+                                .unwrap_or_else(|| TableCell::text("\u{2014}"))
+                        });
+                        ui.painter().hline(
+                            rect.x_range(),
+                            rect.bottom(),
+                            egui::Stroke::new(1.0, t.color.border),
+                        );
+                    }
+                });
+        });
+    clicked_row
+}
+
 fn verification_table_width(
     viewport_width: f32,
     surface_width: f32,
@@ -1368,6 +1489,8 @@ fn verification_table_empty_message(id: &str) -> &'static str {
         "verify-corner-matrix" => "No retained corner-signal evidence",
         "verify-corner-worst-points" => "No point-attributed corner verdicts",
         "verify-optimization-results" => "No retained optimization traces",
+        "verify-soa-rule-results" => "No evaluated SOA rules",
+        "verify-reliability-device-results" => "No retained device-aging projections",
         "verify-regression-checks" => "No aligned regression checks",
         _ => "No retained evidence",
     }
@@ -2037,10 +2160,8 @@ fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
-    let has_soa_evidence = latest_analysis(app, crate::state::AnalysisType::Soa).is_some();
-    let has_reliability_evidence =
-        latest_analysis(app, crate::state::AnalysisType::Reliability).is_some();
     card(ui, "Reliability execution", |ui| {
+        ui.spacing_mut().item_spacing.y = 8.0;
         ui.horizontal_wrapped(|ui| {
             if Button::new("Run preview plan").accent().show(ui).clicked() {
                 let result = request_analysis_run(
@@ -2070,74 +2191,263 @@ fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         });
         ui.label("Electrical reliability evaluates operating stress and mission aging. Physical geometry checks remain owned by the Physical DRC flow.");
     });
-    card(ui, "Safe operating area", |ui| {
-        status_dot(
-            ui,
-            Tokens::get(ui.ctx()).color.warn,
-            "Dataset-owned SOA payload unavailable",
-        );
-        ui.label(if has_soa_evidence {
-            "A successful source-attributed SOA execution receipt exists for the active dataset, but violation records are not yet stored inside that immutable dataset. No pass/fail verdict is issued."
-        } else {
-            "No successful source-attributed SOA execution receipt exists for the active dataset. No pass/fail verdict is issued."
+
+    let soa_payload = latest_analysis(app, crate::state::AnalysisType::Soa)
+        .filter(|analysis| analysis.validate_retained_evidence().is_ok())
+        .and_then(|analysis| match &analysis.result_payload {
+            Some(crate::state::AnalysisResultPayload::Soa {
+                evaluations,
+                violations,
+            }) => Some((evaluations.as_slice(), violations.as_slice())),
+            _ => None,
         });
-    });
-    ui.add_space(1.0);
-    card(ui, "Aging and reliability", |ui| {
-        status_dot(
-            ui,
-            Tokens::get(ui.ctx()).color.warn,
-            "Dataset-owned aging payload unavailable",
-        );
-        ui.label(if has_reliability_evidence {
-            "A successful source-attributed reliability execution receipt exists for the active dataset, but device-aging records are not yet stored inside that immutable dataset. No reliability claim is issued."
+    let t = Tokens::get(ui.ctx());
+    let soa_headers = vec![
+        ("Rule".to_owned(), 0.27),
+        ("Device / net".to_owned(), 0.16),
+        ("Observed".to_owned(), 0.15),
+        ("Limit".to_owned(), 0.14),
+        ("Margin".to_owned(), 0.13),
+        ("Cross-probe".to_owned(), 0.15),
+    ];
+    let mut cross_probe_device = None;
+    if let Some((evaluations, _violations)) = soa_payload {
+        let pass_count = evaluations
+            .iter()
+            .filter(|evaluation| evaluation.verdict == crate::state::SoaRuleVerdictEvidence::Pass)
+            .count();
+        let warning_count = evaluations
+            .iter()
+            .filter(|evaluation| {
+                evaluation.verdict == crate::state::SoaRuleVerdictEvidence::Warning
+            })
+            .count();
+        let blocking_count = evaluations
+            .len()
+            .saturating_sub(pass_count)
+            .saturating_sub(warning_count);
+        let status = if blocking_count > 0 {
+            format!("{blocking_count} blocking · {warning_count} warning")
+        } else if warning_count > 0 {
+            format!("{pass_count} pass · {warning_count} near limit")
         } else {
-            "No successful source-attributed reliability execution receipt exists for the active dataset. No reliability claim is issued."
-        });
-        if Button::new("Configure reliability analysis…")
-            .show(ui)
-            .clicked()
-        {
-            app.state
-                .workbench
-                .activate(super::super::state::Workspace::Simulate);
-            let kind = crate::simulation::plan::AnalysisKind::Reliability;
-            let existing = app
-                .state
-                .sim_setup
-                .stable_analysis_plan()
-                .ok()
-                .and_then(|plan| {
-                    plan.instances()
-                        .iter()
-                        .find(|instance| instance.kind() == kind)
-                        .map(|instance| instance.id())
-                });
-            let selected = if let Some(id) = existing {
-                Some(id)
-            } else {
-                match app
-                    .state
-                    .sim_setup
-                    .stable_analysis_plan_mut()
-                    .and_then(|plan| plan.insert(kind).map_err(|error| error.to_string()))
-                {
-                    Ok((id, receipt)) => {
-                        app.state.workbench.analysis_lifecycle_status = receipt.detail().to_owned();
-                        app.state.sim_setup.refresh_legacy_analysis_projections();
-                        Some(id)
-                    }
-                    Err(error) => {
-                        app.state.workbench.analysis_lifecycle_status = error;
-                        None
-                    }
-                }
-            };
-            app.state.workbench.active_analysis = kind.legacy_index();
-            app.state.workbench.active_analysis_instance = selected;
-        }
-    });
+            format!("{pass_count} / {} pass", evaluations.len())
+        };
+        table_section_header(ui, "Electrical-stress rule results", Some(&status), None);
+        let clicked_rule = render_virtual_data_table(
+            ui,
+            "verify-soa-rule-results",
+            &soa_headers,
+            evaluations.len(),
+            true,
+            |index| {
+                let evaluation = &evaluations[index];
+                let margin = (evaluation.limit_value - evaluation.worst_actual_value)
+                    / evaluation.limit_value.abs();
+                let (_, color) = soa_rule_verdict_display(evaluation.verdict, &t);
+                vec![
+                    TableCell::mono(format!(
+                        "{} · {}",
+                        soa_parameter_display(evaluation.parameter),
+                        evaluation.description
+                    )),
+                    TableCell::mono(&evaluation.device_id),
+                    TableCell::mono(format_value(
+                        evaluation.worst_actual_value,
+                        &evaluation.unit,
+                    )),
+                    TableCell::mono(format_value(evaluation.limit_value, &evaluation.unit)),
+                    TableCell::tone(format!("{:+.2}%", margin * 100.0), color),
+                    TableCell::tone(format!("Open {}", evaluation.device_id), t.color.accent),
+                ]
+            },
+        );
+        cross_probe_device = clicked_rule.map(|index| evaluations[index].device_id.clone());
+    } else {
+        table_section_header(
+            ui,
+            "Electrical-stress rule results",
+            Some("no validated active-dataset evidence"),
+            None,
+        );
+        let _ = render_virtual_data_table(
+            ui,
+            "verify-soa-rule-results",
+            &soa_headers,
+            0,
+            false,
+            |_| Vec::new(),
+        );
+    }
+    if let Some(device_id) = cross_probe_device {
+        let result = cross_probe_reliability_device(app, &device_id);
+        record_verification_action(
+            app,
+            result,
+            &format!("Cross-probed SOA evidence to schematic device '{device_id}'."),
+        );
+    }
+
+    let reliability_payload = latest_analysis(app, crate::state::AnalysisType::Reliability)
+        .filter(|analysis| analysis.validate_retained_evidence().is_ok())
+        .and_then(
+            |analysis| match (&analysis.family_metadata, &analysis.result_payload) {
+                (
+                    Some(crate::state::AnalysisResultFamilyMetadata::Reliability { years }),
+                    Some(crate::state::AnalysisResultPayload::Reliability { devices }),
+                ) => Some((years.as_slice(), devices.as_slice())),
+                _ => None,
+            },
+        );
+    if let Some((years, devices)) = reliability_payload {
+        let mut headers = vec![
+            ("Device / metric".to_owned(), 0.24),
+            ("Run stress".to_owned(), 0.18),
+        ];
+        let checkpoint_width = 0.58 / years.len() as f32;
+        headers.extend(
+            years
+                .iter()
+                .map(|years| (format!("{} years", format_scalar(*years)), checkpoint_width)),
+        );
+        table_section_header(
+            ui,
+            "Aging projection",
+            Some("engineering preview · not sign-off eligible"),
+            None,
+        );
+        let _ = render_virtual_data_table(
+            ui,
+            "verify-reliability-device-results",
+            &headers,
+            devices.len().saturating_mul(7),
+            false,
+            |row_index| reliability_projection_row(&devices[row_index / 7], row_index % 7),
+        );
+    } else {
+        let headers = vec![
+            ("Device / metric".to_owned(), 0.45),
+            ("Run stress".to_owned(), 0.25),
+            ("Lifetime projection".to_owned(), 0.30),
+        ];
+        table_section_header(
+            ui,
+            "Aging projection",
+            Some("no validated active-dataset evidence"),
+            None,
+        );
+        let _ = render_virtual_data_table(
+            ui,
+            "verify-reliability-device-results",
+            &headers,
+            0,
+            false,
+            |_| Vec::new(),
+        );
+    }
     action_receipt(ui, app);
+}
+
+fn reliability_projection_row(
+    device: &crate::state::ReliabilityDeviceEvidence,
+    metric: usize,
+) -> Vec<TableCell> {
+    let dash = || TableCell::mono("\u{2014}");
+    let mut row = match metric {
+        0 => vec![
+            TableCell::mono(format!("{} · VGS stress", device.device_id)),
+            TableCell::mono(format_value(device.stress.average_gate_stress_v, "V")),
+        ],
+        1 => vec![
+            TableCell::mono(format!("{} · VDS stress", device.device_id)),
+            TableCell::mono(format_value(device.stress.average_drain_stress_v, "V")),
+        ],
+        2 => vec![
+            TableCell::mono(format!("{} · temperature", device.device_id)),
+            TableCell::mono(format_value(device.stress.average_temperature_k, "K")),
+        ],
+        3 => vec![
+            TableCell::mono(format!("{} · duration", device.device_id)),
+            TableCell::mono(format_value(device.stress.duration_s, "s")),
+        ],
+        4 => vec![
+            TableCell::mono(format!("{} · \u{0394}Vth", device.device_id)),
+            dash(),
+        ],
+        5 => vec![
+            TableCell::mono(format!("{} · \u{0394} mobility", device.device_id)),
+            dash(),
+        ],
+        _ => vec![
+            TableCell::mono(format!("{} · \u{0394}Rds", device.device_id)),
+            dash(),
+        ],
+    };
+    for checkpoint in &device.checkpoints {
+        row.push(match metric {
+            0..=3 => dash(),
+            4 => TableCell::mono(format_value(
+                checkpoint.shift.threshold_voltage_shift_v,
+                "V",
+            )),
+            5 => TableCell::mono(format!("{:+.4}%", checkpoint.shift.mobility_shift * 100.0)),
+            _ => TableCell::mono(format!(
+                "{:+.4}%",
+                checkpoint.shift.drain_source_resistance_shift * 100.0
+            )),
+        });
+    }
+    row
+}
+
+fn cross_probe_reliability_device(app: &mut RSpiceApp, device_id: &str) -> Result<(), String> {
+    let component_id = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.name.eq_ignore_ascii_case(device_id))
+        .map(|component| component.id)
+        .ok_or_else(|| {
+            format!("SOA device '{device_id}' is not present in the active schematic revision")
+        })?;
+    app.state
+        .schematic
+        .selection
+        .select_only_component(component_id);
+    app.state
+        .workbench
+        .activate(super::super::state::Workspace::Design);
+    Ok(())
+}
+
+fn soa_parameter_display(parameter: crate::state::SoaParameterEvidence) -> &'static str {
+    use crate::state::SoaParameterEvidence;
+    match parameter {
+        SoaParameterEvidence::GateSourceVoltage => "VGS max",
+        SoaParameterEvidence::DrainSourceVoltage => "VDS max",
+        SoaParameterEvidence::GateDrainVoltage => "VGD max",
+        SoaParameterEvidence::BaseEmitterVoltage => "VBE max",
+        SoaParameterEvidence::CollectorEmitterVoltage => "VCE max",
+        SoaParameterEvidence::BaseCollectorVoltage => "VBC max",
+        SoaParameterEvidence::DrainCurrent => "ID max",
+        SoaParameterEvidence::CollectorCurrent => "IC max",
+        SoaParameterEvidence::PowerDissipation => "Power max",
+        SoaParameterEvidence::Temperature => "Temperature max",
+    }
+}
+
+fn soa_rule_verdict_display(
+    verdict: crate::state::SoaRuleVerdictEvidence,
+    tokens: &Tokens,
+) -> (&'static str, egui::Color32) {
+    use crate::state::SoaRuleVerdictEvidence;
+    match verdict {
+        SoaRuleVerdictEvidence::Pass => ("PASS", tokens.color.ok),
+        SoaRuleVerdictEvidence::Warning => ("WARNING", tokens.color.warn),
+        SoaRuleVerdictEvidence::Violation => ("VIOLATION", tokens.color.err),
+        SoaRuleVerdictEvidence::Critical => ("CRITICAL", tokens.color.err),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -4850,6 +5160,73 @@ mod tests {
             verification_table_width(1_280.0, 718.0, Some(1_450.0)),
             1_450.0
         );
+    }
+
+    #[test]
+    fn reliability_projection_rows_preserve_numeric_axis_and_every_retained_metric() {
+        let device = crate::state::ReliabilityDeviceEvidence {
+            device_id: "M1".to_owned(),
+            stress: crate::state::ReliabilityStressEvidence {
+                average_gate_stress_v: 1.2,
+                average_drain_stress_v: 1.8,
+                average_temperature_k: 350.0,
+                duration_s: 3_600.0,
+            },
+            checkpoints: vec![
+                crate::state::ReliabilityCheckpointEvidence {
+                    years: 1.0,
+                    shift: crate::state::ReliabilityShiftEvidence {
+                        threshold_voltage_shift_v: 0.01,
+                        mobility_shift: -0.001,
+                        drain_source_resistance_shift: 0.0005,
+                    },
+                },
+                crate::state::ReliabilityCheckpointEvidence {
+                    years: 10.0,
+                    shift: crate::state::ReliabilityShiftEvidence {
+                        threshold_voltage_shift_v: 0.03,
+                        mobility_shift: -0.004,
+                        drain_source_resistance_shift: 0.0015,
+                    },
+                },
+            ],
+        };
+
+        let duration = reliability_projection_row(&device, 3);
+        assert!(duration[0].text.contains("duration"));
+        assert!(duration[1].text.contains("3600"));
+        let vth = reliability_projection_row(&device, 4);
+        assert!(vth[2].text.contains("0.010000"));
+        assert!(vth[3].text.contains("0.030000"));
+        let mobility = reliability_projection_row(&device, 5);
+        assert_eq!(mobility[2].text, "-0.1000%");
+        assert_eq!(mobility[3].text, "-0.4000%");
+        let rds = reliability_projection_row(&device, 6);
+        assert_eq!(rds[2].text, "+0.0500%");
+        assert_eq!(rds[3].text, "+0.1500%");
+    }
+
+    #[test]
+    fn soa_cross_probe_selects_the_exact_schematic_device() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.schematic.components.push(
+            crate::state::Component::new(
+                42,
+                crate::state::ComponentType::Nmos,
+                crate::state::Point::new(10, 20),
+            )
+            .with_name_value("M1", "NMOS"),
+        );
+
+        cross_probe_reliability_device(&mut app, "m1")
+            .expect("device identity cross-probes case-insensitively");
+
+        assert!(app.state.schematic.selection.has_component(42));
+        assert_eq!(
+            app.state.workbench.workspace,
+            super::super::super::state::Workspace::Design
+        );
+        assert!(cross_probe_reliability_device(&mut app, "M404").is_err());
     }
 
     #[test]

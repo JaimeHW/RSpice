@@ -75,12 +75,6 @@ pub struct SimulationState {
     /// Current optimizer state (if running)
     pub optimizer_state: Option<OptimizerState>,
 
-    /// Safety Operating Area violations
-    pub soa_violations: Vec<SoAViolation>,
-
-    /// Long-term reliability results
-    pub reliability_results: Vec<ReliabilityResult>,
-
     // =========================================================================
     // Multi-Run Results History (Cadence Spectre PSF-style)
     // =========================================================================

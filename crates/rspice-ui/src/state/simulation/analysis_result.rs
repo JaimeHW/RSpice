@@ -203,6 +203,110 @@ pub struct SensitivityResultRow {
     pub normalized: f64,
 }
 
+/// Exact stress metrics retained for one device in a reliability run.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReliabilityStressEvidence {
+    pub average_gate_stress_v: f64,
+    pub average_drain_stress_v: f64,
+    pub average_temperature_k: f64,
+    pub duration_s: f64,
+}
+
+/// Exact parameter shifts retained at one lifetime checkpoint.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReliabilityShiftEvidence {
+    pub threshold_voltage_shift_v: f64,
+    pub mobility_shift: f64,
+    pub drain_source_resistance_shift: f64,
+}
+
+/// One numerically ordered lifetime checkpoint and its exact parameter shifts.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReliabilityCheckpointEvidence {
+    pub years: f64,
+    pub shift: ReliabilityShiftEvidence,
+}
+
+/// Immutable reliability evidence for one analyzed device.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReliabilityDeviceEvidence {
+    pub device_id: String,
+    pub stress: ReliabilityStressEvidence,
+    pub checkpoints: Vec<ReliabilityCheckpointEvidence>,
+}
+
+/// Electrical quantity governed by a retained safe-operating-area rule.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SoaParameterEvidence {
+    GateSourceVoltage,
+    DrainSourceVoltage,
+    GateDrainVoltage,
+    BaseEmitterVoltage,
+    CollectorEmitterVoltage,
+    BaseCollectorVoltage,
+    DrainCurrent,
+    CollectorCurrent,
+    PowerDissipation,
+    Temperature,
+}
+
+/// Severity assigned by the SOA rule evaluator.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SoaViolationSeverityEvidence {
+    Warning,
+    Violation,
+    Critical,
+}
+
+/// Verdict for one fully evaluated safe-operating-area rule.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SoaRuleVerdictEvidence {
+    Pass,
+    Warning,
+    Violation,
+    Critical,
+}
+
+/// Complete worst-point and sampling evidence for one SOA rule.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoaEvaluationEvidence {
+    pub device_id: String,
+    pub parameter: SoaParameterEvidence,
+    pub limit_value: f64,
+    pub worst_actual_value: f64,
+    pub worst_time_s: f64,
+    pub sample_count: u64,
+    pub unit: String,
+    pub description: String,
+    pub verdict: SoaRuleVerdictEvidence,
+}
+
+/// One exact, source-attributed safe-operating-area violation.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoaViolationEvidence {
+    pub device_id: String,
+    pub parameter: SoaParameterEvidence,
+    pub limit_value: f64,
+    pub actual_value: f64,
+    pub time_s: f64,
+    pub severity: SoaViolationSeverityEvidence,
+}
+
 /// Immutable, analysis-native result evidence that is neither waveform data
 /// nor presentation state.
 ///
@@ -224,6 +328,13 @@ pub enum AnalysisResultPayload {
     },
     ScalarMeasurements {
         values: BTreeMap<String, f64>,
+    },
+    Reliability {
+        devices: Vec<ReliabilityDeviceEvidence>,
+    },
+    Soa {
+        evaluations: Vec<SoaEvaluationEvidence>,
+        violations: Vec<SoaViolationEvidence>,
     },
 }
 
@@ -295,6 +406,202 @@ impl AnalysisResultPayload {
                     }
                 }
             }
+            Self::Reliability { devices } => {
+                if analysis_type != AnalysisType::Reliability {
+                    return Err(format!(
+                        "reliability payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                if devices.is_empty() {
+                    return Err("reliability payload contains no device evidence".to_owned());
+                }
+                let mut previous_device: Option<&str> = None;
+                for device in devices {
+                    require_non_empty(&device.device_id, "reliability device identity")?;
+                    if previous_device.is_some_and(|previous| previous >= device.device_id.as_str())
+                    {
+                        return Err(
+                            "reliability devices must have unique, strictly sorted identities"
+                                .to_owned(),
+                        );
+                    }
+                    previous_device = Some(&device.device_id);
+                    for (label, value) in [
+                        ("average gate stress", device.stress.average_gate_stress_v),
+                        ("average drain stress", device.stress.average_drain_stress_v),
+                        ("average temperature", device.stress.average_temperature_k),
+                        ("stress duration", device.stress.duration_s),
+                    ] {
+                        if !value.is_finite() {
+                            return Err(format!(
+                                "reliability device '{}' has non-finite {label}",
+                                device.device_id
+                            ));
+                        }
+                    }
+                    if device.stress.average_temperature_k <= 0.0 {
+                        return Err(format!(
+                            "reliability device '{}' has a non-positive absolute temperature",
+                            device.device_id
+                        ));
+                    }
+                    if device.stress.duration_s < 0.0 {
+                        return Err(format!(
+                            "reliability device '{}' has a negative stress duration",
+                            device.device_id
+                        ));
+                    }
+                    if device.checkpoints.is_empty() {
+                        return Err(format!(
+                            "reliability device '{}' has no lifetime checkpoints",
+                            device.device_id
+                        ));
+                    }
+                    let mut previous_years = None;
+                    for checkpoint in &device.checkpoints {
+                        if !checkpoint.years.is_finite() || checkpoint.years <= 0.0 {
+                            return Err(format!(
+                                "reliability device '{}' has an invalid lifetime checkpoint",
+                                device.device_id
+                            ));
+                        }
+                        if previous_years.is_some_and(|previous| previous >= checkpoint.years) {
+                            return Err(format!(
+                                "reliability device '{}' checkpoints must be unique and strictly increasing",
+                                device.device_id
+                            ));
+                        }
+                        previous_years = Some(checkpoint.years);
+                        let shift = &checkpoint.shift;
+                        if [
+                            shift.threshold_voltage_shift_v,
+                            shift.mobility_shift,
+                            shift.drain_source_resistance_shift,
+                        ]
+                        .into_iter()
+                        .any(|value| !value.is_finite())
+                        {
+                            return Err(format!(
+                                "reliability device '{}' checkpoint '{}' years has a non-finite shift",
+                                device.device_id, checkpoint.years
+                            ));
+                        }
+                    }
+                }
+            }
+            Self::Soa {
+                evaluations,
+                violations,
+            } => {
+                if analysis_type != AnalysisType::Soa {
+                    return Err(format!(
+                        "SOA payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                if evaluations.is_empty() {
+                    return Err("SOA payload contains no evaluated-rule evidence".to_owned());
+                }
+                let mut previous_evaluation: Option<&SoaEvaluationEvidence> = None;
+                for evaluation in evaluations {
+                    require_non_empty(&evaluation.device_id, "SOA device identity")?;
+                    require_non_empty(&evaluation.unit, "SOA rule unit")?;
+                    require_non_empty(&evaluation.description, "SOA rule description")?;
+                    for (label, value) in [
+                        ("limit", evaluation.limit_value),
+                        ("worst observed value", evaluation.worst_actual_value),
+                        ("worst-point time", evaluation.worst_time_s),
+                    ] {
+                        if !value.is_finite() {
+                            return Err(format!(
+                                "SOA evaluation for '{}' has non-finite {label}",
+                                evaluation.device_id
+                            ));
+                        }
+                    }
+                    if evaluation.limit_value <= 0.0 {
+                        return Err(format!(
+                            "SOA evaluation for '{}' has a non-positive limit",
+                            evaluation.device_id
+                        ));
+                    }
+                    if evaluation.worst_actual_value < 0.0
+                        || evaluation.worst_time_s < 0.0
+                        || evaluation.sample_count == 0
+                    {
+                        return Err(format!(
+                            "SOA evaluation for '{}' has invalid sampling evidence",
+                            evaluation.device_id
+                        ));
+                    }
+                    let expected_verdict =
+                        soa_rule_verdict(evaluation.worst_actual_value, evaluation.limit_value);
+                    if evaluation.verdict != expected_verdict {
+                        return Err(format!(
+                            "SOA evaluation for '{}' has a verdict inconsistent with its worst value",
+                            evaluation.device_id
+                        ));
+                    }
+                    if previous_evaluation
+                        .is_some_and(|previous| soa_evaluation_order(previous, evaluation).is_ge())
+                    {
+                        return Err(
+                            "SOA evaluations must have unique canonical rule identities".to_owned()
+                        );
+                    }
+                    previous_evaluation = Some(evaluation);
+                }
+                let mut previous: Option<&SoaViolationEvidence> = None;
+                for violation in violations {
+                    require_non_empty(&violation.device_id, "SOA device identity")?;
+                    for (label, value) in [
+                        ("limit", violation.limit_value),
+                        ("observed value", violation.actual_value),
+                        ("time", violation.time_s),
+                    ] {
+                        if !value.is_finite() {
+                            return Err(format!(
+                                "SOA violation for '{}' has non-finite {label}",
+                                violation.device_id
+                            ));
+                        }
+                    }
+                    if violation.time_s < 0.0 {
+                        return Err(format!(
+                            "SOA violation for '{}' has a negative time",
+                            violation.device_id
+                        ));
+                    }
+                    if violation.limit_value <= 0.0 || violation.actual_value < 0.0 {
+                        return Err(format!(
+                            "SOA violation for '{}' has invalid magnitude evidence",
+                            violation.device_id
+                        ));
+                    }
+                    let expected_severity =
+                        soa_violation_severity(violation.actual_value, violation.limit_value)
+                            .ok_or_else(|| {
+                                format!(
+                                    "SOA event for '{}' does not meet the warning threshold",
+                                    violation.device_id
+                                )
+                            })?;
+                    if violation.severity != expected_severity {
+                        return Err(format!(
+                            "SOA event for '{}' has a severity inconsistent with its value",
+                            violation.device_id
+                        ));
+                    }
+                    if previous
+                        .is_some_and(|previous| soa_violation_order(previous, violation).is_ge())
+                    {
+                        return Err(
+                            "SOA violations must use unique canonical deterministic order"
+                                .to_owned(),
+                        );
+                    }
+                    previous = Some(violation);
+                }
+            }
         }
         Ok(())
     }
@@ -304,8 +611,56 @@ impl AnalysisResultPayload {
         match self {
             Self::PoleZero { .. } | Self::Sensitivity { .. } => true,
             Self::ScalarMeasurements { values } => !values.is_empty(),
+            Self::Reliability { devices } => !devices.is_empty(),
+            Self::Soa { evaluations, .. } => !evaluations.is_empty(),
         }
     }
+}
+
+fn soa_rule_verdict(actual: f64, limit: f64) -> SoaRuleVerdictEvidence {
+    if actual > limit * 1.2 {
+        SoaRuleVerdictEvidence::Critical
+    } else if actual > limit {
+        SoaRuleVerdictEvidence::Violation
+    } else if actual > limit * 0.9 {
+        SoaRuleVerdictEvidence::Warning
+    } else {
+        SoaRuleVerdictEvidence::Pass
+    }
+}
+
+fn soa_violation_severity(actual: f64, limit: f64) -> Option<SoaViolationSeverityEvidence> {
+    if actual > limit * 1.2 {
+        Some(SoaViolationSeverityEvidence::Critical)
+    } else if actual > limit {
+        Some(SoaViolationSeverityEvidence::Violation)
+    } else if actual > limit * 0.9 {
+        Some(SoaViolationSeverityEvidence::Warning)
+    } else {
+        None
+    }
+}
+
+fn soa_evaluation_order(
+    left: &SoaEvaluationEvidence,
+    right: &SoaEvaluationEvidence,
+) -> std::cmp::Ordering {
+    left.device_id
+        .cmp(&right.device_id)
+        .then_with(|| left.parameter.cmp(&right.parameter))
+}
+
+fn soa_violation_order(
+    left: &SoaViolationEvidence,
+    right: &SoaViolationEvidence,
+) -> std::cmp::Ordering {
+    left.device_id
+        .cmp(&right.device_id)
+        .then_with(|| left.time_s.total_cmp(&right.time_s))
+        .then_with(|| left.parameter.cmp(&right.parameter))
+        .then_with(|| left.severity.cmp(&right.severity))
+        .then_with(|| left.limit_value.total_cmp(&right.limit_value))
+        .then_with(|| left.actual_value.total_cmp(&right.actual_value))
 }
 
 fn validate_complex_values(values: &[ComplexResultValue], label: &str) -> Result<(), String> {
@@ -459,6 +814,15 @@ impl AnalysisResultFamilyMetadata {
             }
             Self::Reliability { years } => {
                 require_finite_values(years, "reliability years")?;
+                if years.is_empty()
+                    || years.iter().any(|years| *years <= 0.0)
+                    || !strictly_increasing(years)
+                {
+                    return Err(
+                        "reliability years must be non-empty, positive, unique, and strictly increasing"
+                            .to_owned(),
+                    );
+                }
             }
             Self::Optimization {
                 iterations,
@@ -481,6 +845,15 @@ impl AnalysisResultFamilyMetadata {
             }
             Self::Soa { time } => {
                 require_finite_values(time, "SOA time")?;
+                if time.is_empty()
+                    || time.iter().any(|time| *time < 0.0)
+                    || !strictly_increasing(time)
+                {
+                    return Err(
+                        "SOA time must be non-empty, nonnegative, unique, and strictly increasing"
+                            .to_owned(),
+                    );
+                }
             }
         }
         Ok(())
@@ -501,6 +874,27 @@ fn require_finite_values(values: &[f64], label: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn strictly_increasing(values: &[f64]) -> bool {
+    values
+        .windows(2)
+        .all(|pair| normalized_f64(pair[0]) < normalized_f64(pair[1]))
+}
+
+fn normalized_f64(value: f64) -> f64 {
+    if value == 0.0 { 0.0 } else { value }
+}
+
+fn same_retained_float(left: f64, right: f64) -> bool {
+    normalized_f64(left).to_bits() == normalized_f64(right).to_bits()
+}
+
+fn contains_retained_coordinate(sorted: &[f64], target: f64) -> bool {
+    let target = normalized_f64(target);
+    sorted
+        .binary_search_by(|probe| normalized_f64(*probe).total_cmp(&target))
+        .is_ok()
 }
 
 /// Single analysis result with metadata and waveforms.
@@ -675,6 +1069,153 @@ impl AnalysisResult {
                 .as_ref()
                 .is_some_and(AnalysisResultPayload::has_data)
     }
+
+    /// Validate relationships between independently versioned retained fields.
+    /// Historical analyses may legitimately lack a newer payload; when both
+    /// fields exist they must describe one coherent execution.
+    pub fn validate_retained_evidence(&self) -> Result<(), String> {
+        if let Some(metadata) = &self.family_metadata {
+            metadata.validate_for(self.analysis_type)?;
+        }
+        if let Some(payload) = &self.result_payload {
+            payload.validate_for(self.analysis_type)?;
+        }
+
+        match (&self.family_metadata, &self.result_payload) {
+            (None, Some(AnalysisResultPayload::Reliability { .. })) => {
+                return Err("reliability payload is missing its retained lifetime axis".to_owned());
+            }
+            (None, Some(AnalysisResultPayload::Soa { .. })) => {
+                return Err("SOA payload is missing its retained time axis".to_owned());
+            }
+            (
+                Some(AnalysisResultFamilyMetadata::Reliability { years }),
+                Some(AnalysisResultPayload::Reliability { devices }),
+            ) => {
+                for device in devices {
+                    if device.checkpoints.len() != years.len()
+                        || !device
+                            .checkpoints
+                            .iter()
+                            .zip(years)
+                            .all(|(checkpoint, years)| {
+                                same_retained_float(checkpoint.years, *years)
+                            })
+                    {
+                        return Err(format!(
+                            "reliability device '{}' checkpoints do not match the retained lifetime axis",
+                            device.device_id
+                        ));
+                    }
+                }
+            }
+            (
+                Some(AnalysisResultFamilyMetadata::Soa { time }),
+                Some(AnalysisResultPayload::Soa {
+                    evaluations,
+                    violations,
+                }),
+            ) => {
+                let rules = evaluations
+                    .iter()
+                    .map(|evaluation| {
+                        (
+                            (evaluation.device_id.as_str(), evaluation.parameter),
+                            evaluation,
+                        )
+                    })
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                let mut exact_worst_events = std::collections::BTreeSet::new();
+                for violation in violations {
+                    let key = (violation.device_id.as_str(), violation.parameter);
+                    let evaluation = rules.get(&key).ok_or_else(|| {
+                        format!(
+                            "SOA event for '{}' has no matching evaluated rule",
+                            violation.device_id
+                        )
+                    })?;
+                    if !same_retained_float(violation.limit_value, evaluation.limit_value) {
+                        return Err(format!(
+                            "SOA event for '{}' contradicts its evaluated rule limit",
+                            violation.device_id
+                        ));
+                    }
+                    if violation.actual_value > evaluation.worst_actual_value {
+                        return Err(format!(
+                            "SOA event for '{}' exceeds its retained worst point",
+                            violation.device_id
+                        ));
+                    }
+                    if !contains_retained_coordinate(time, violation.time_s) {
+                        return Err(format!(
+                            "SOA event for '{}' does not reference an exact retained sample",
+                            violation.device_id
+                        ));
+                    }
+                    let expected_severity = match evaluation.verdict {
+                        SoaRuleVerdictEvidence::Pass => None,
+                        SoaRuleVerdictEvidence::Warning => {
+                            Some(SoaViolationSeverityEvidence::Warning)
+                        }
+                        SoaRuleVerdictEvidence::Violation => {
+                            Some(SoaViolationSeverityEvidence::Violation)
+                        }
+                        SoaRuleVerdictEvidence::Critical => {
+                            Some(SoaViolationSeverityEvidence::Critical)
+                        }
+                    };
+                    if expected_severity == Some(violation.severity)
+                        && same_retained_float(
+                            violation.actual_value,
+                            evaluation.worst_actual_value,
+                        )
+                        && same_retained_float(violation.time_s, evaluation.worst_time_s)
+                    {
+                        exact_worst_events.insert(key);
+                    }
+                }
+                for evaluation in evaluations {
+                    let retained_sample_count = u64::try_from(time.len())
+                        .map_err(|_| "SOA time axis exceeds the retained count range".to_owned())?;
+                    if evaluation.sample_count != retained_sample_count {
+                        return Err(format!(
+                            "SOA evaluation for '{}' covers {} samples but the retained run has {}",
+                            evaluation.device_id,
+                            evaluation.sample_count,
+                            time.len()
+                        ));
+                    }
+                    if !contains_retained_coordinate(time, evaluation.worst_time_s) {
+                        return Err(format!(
+                            "SOA evaluation for '{}' does not reference an exact retained sample",
+                            evaluation.device_id
+                        ));
+                    }
+                    let key = (evaluation.device_id.as_str(), evaluation.parameter);
+                    if evaluation.verdict != SoaRuleVerdictEvidence::Pass
+                        && !exact_worst_events.contains(&key)
+                    {
+                        return Err(format!(
+                            "SOA evaluation for '{}' has no exact event at its worst point",
+                            evaluation.device_id
+                        ));
+                    }
+                }
+            }
+            (Some(AnalysisResultFamilyMetadata::Reliability { .. }), Some(payload))
+                if !matches!(payload, AnalysisResultPayload::Reliability { .. }) =>
+            {
+                return Err("reliability metadata has a mismatched retained payload".to_owned());
+            }
+            (Some(AnalysisResultFamilyMetadata::Soa { .. }), Some(payload))
+                if !matches!(payload, AnalysisResultPayload::Soa { .. }) =>
+            {
+                return Err("SOA metadata has a mismatched retained payload".to_owned());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -754,6 +1295,206 @@ mod retained_payload_tests {
             invalid_frequency
                 .validate_for(AnalysisType::Sensitivity)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn reliability_payload_requires_canonical_devices_and_exact_lifetime_coverage() {
+        let device = ReliabilityDeviceEvidence {
+            device_id: "M1".to_owned(),
+            stress: ReliabilityStressEvidence {
+                average_gate_stress_v: 1.2,
+                average_drain_stress_v: 1.8,
+                average_temperature_k: 358.15,
+                duration_s: 3_600.0,
+            },
+            checkpoints: vec![
+                ReliabilityCheckpointEvidence {
+                    years: 1.0,
+                    shift: ReliabilityShiftEvidence {
+                        threshold_voltage_shift_v: 0.01,
+                        mobility_shift: -0.001,
+                        drain_source_resistance_shift: 0.0005,
+                    },
+                },
+                ReliabilityCheckpointEvidence {
+                    years: 10.0,
+                    shift: ReliabilityShiftEvidence {
+                        threshold_voltage_shift_v: 0.03,
+                        mobility_shift: -0.004,
+                        drain_source_resistance_shift: 0.0015,
+                    },
+                },
+            ],
+        };
+        let valid = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
+                years: vec![1.0, 10.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Reliability {
+                devices: vec![device.clone()],
+            });
+        assert!(valid.validate_retained_evidence().is_ok());
+
+        let payload_without_axis = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+            .with_result_payload(AnalysisResultPayload::Reliability {
+                devices: vec![device.clone()],
+            });
+        assert!(
+            payload_without_axis
+                .validate_retained_evidence()
+                .expect_err("reliability payload requires its lifetime axis")
+                .contains("missing its retained lifetime axis")
+        );
+
+        let incomplete = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
+                years: vec![1.0, 5.0, 10.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Reliability {
+                devices: vec![device],
+            });
+        assert!(
+            incomplete
+                .validate_retained_evidence()
+                .expect_err("missing lifetime evidence is rejected")
+                .contains("do not match")
+        );
+    }
+
+    #[test]
+    fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
+        let evaluation = SoaEvaluationEvidence {
+            device_id: "M1".to_owned(),
+            parameter: SoaParameterEvidence::DrainSourceVoltage,
+            limit_value: 3.3,
+            worst_actual_value: 3.2,
+            worst_time_s: 1.0,
+            sample_count: 2,
+            unit: "V".to_owned(),
+            description: "Maximum drain-source voltage".to_owned(),
+            verdict: SoaRuleVerdictEvidence::Warning,
+        };
+        let event = SoaViolationEvidence {
+            device_id: "M1".to_owned(),
+            parameter: SoaParameterEvidence::DrainSourceVoltage,
+            limit_value: 3.3,
+            actual_value: 3.2,
+            time_s: 1.0,
+            severity: SoaViolationSeverityEvidence::Warning,
+        };
+        let valid = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 1.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![evaluation.clone()],
+                violations: vec![event.clone()],
+            });
+        assert!(valid.validate_retained_evidence().is_ok());
+
+        let payload_without_axis = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![evaluation.clone()],
+                violations: vec![event.clone()],
+            });
+        assert!(
+            payload_without_axis
+                .validate_retained_evidence()
+                .expect_err("SOA payload requires its time axis")
+                .contains("missing its retained time axis")
+        );
+
+        let mut invalid_event = event.clone();
+        invalid_event.severity = SoaViolationSeverityEvidence::Critical;
+        assert!(
+            AnalysisResultPayload::Soa {
+                evaluations: vec![evaluation.clone()],
+                violations: vec![invalid_event],
+            }
+            .validate_for(AnalysisType::Soa)
+            .expect_err("contradictory event severity is rejected")
+            .contains("severity")
+        );
+
+        let contradictory_limit = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 1.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![evaluation.clone()],
+                violations: vec![SoaViolationEvidence {
+                    limit_value: 3.4,
+                    ..event.clone()
+                }],
+            });
+        assert!(
+            contradictory_limit
+                .validate_retained_evidence()
+                .expect_err("event rule limit must be exact")
+                .contains("contradicts its evaluated rule limit")
+        );
+
+        let missing_worst_event = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 1.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![evaluation.clone()],
+                violations: Vec::new(),
+            });
+        assert!(
+            missing_worst_event
+                .validate_retained_evidence()
+                .expect_err("non-pass verdict requires exact worst event")
+                .contains("no exact event at its worst point")
+        );
+
+        let incomplete = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 0.5, 1.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![evaluation],
+                violations: Vec::new(),
+            });
+        assert!(
+            incomplete
+                .validate_retained_evidence()
+                .expect_err("incomplete sample coverage is rejected")
+                .contains("covers 2 samples")
+        );
+    }
+
+    #[test]
+    fn reliability_and_soa_axes_are_canonical_engineering_coordinates() {
+        for years in [Vec::new(), vec![0.0], vec![10.0, 1.0], vec![1.0, 1.0]] {
+            assert!(
+                AnalysisResultFamilyMetadata::Reliability { years }
+                    .validate_for(AnalysisType::Reliability)
+                    .is_err()
+            );
+        }
+        for time in [Vec::new(), vec![-1.0, 0.0], vec![0.0, 0.0], vec![1.0, 0.0]] {
+            assert!(
+                AnalysisResultFamilyMetadata::Soa { time }
+                    .validate_for(AnalysisType::Soa)
+                    .is_err()
+            );
+        }
+        assert!(
+            AnalysisResultFamilyMetadata::Reliability {
+                years: vec![1.0, 5.0, 10.0],
+            }
+            .validate_for(AnalysisType::Reliability)
+            .is_ok()
+        );
+        assert!(
+            AnalysisResultFamilyMetadata::Soa {
+                time: vec![-0.0, 1.0e-9, 2.0e-9],
+            }
+            .validate_for(AnalysisType::Soa)
+            .is_ok()
         );
     }
 }

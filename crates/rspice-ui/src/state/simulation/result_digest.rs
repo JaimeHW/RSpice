@@ -17,6 +17,7 @@ use crate::state::{
 const RESULT_DIGEST_MAGIC: &[u8] = b"RSPICE-RESULT-DATA";
 const RESULT_DIGEST_ENCODING_VERSION_V1: u16 = 1;
 const RESULT_DIGEST_ENCODING_VERSION_V2: u16 = 2;
+const RESULT_DIGEST_ENCODING_VERSION_V3: u16 = 3;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -116,27 +117,28 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_payload(true)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
     }
 
     /// Schema-v8 digest retained solely for authenticated migration. New
     /// result documents must use [`Self::result_data_digest`].
     #[must_use]
     pub(crate) fn legacy_v1_result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_payload(false)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V1)
     }
 
-    fn result_data_digest_with_payload(&self, include_payload: bool) -> ContentDigest {
-        let (domain, version) = if include_payload {
-            (
-                "rspice.analysis-result-data/v2",
-                RESULT_DIGEST_ENCODING_VERSION_V2,
-            )
-        } else {
-            (
-                "rspice.analysis-result-data/v1",
-                RESULT_DIGEST_ENCODING_VERSION_V1,
-            )
+    /// Schema-v9 digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v2_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V2)
+    }
+
+    fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
+        let domain = match version {
+            RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
+            RESULT_DIGEST_ENCODING_VERSION_V2 => "rspice.analysis-result-data/v2",
+            RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.analysis-result-data/v3",
+            _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
         writer.u8(analysis_type_tag(self.analysis_type));
@@ -161,7 +163,7 @@ impl AnalysisResult {
         writer.option(self.device_op.as_ref(), encode_device_op);
         writer.option(self.noise_summary.as_ref(), encode_noise_summary);
         writer.option(self.family_metadata.as_ref(), encode_family_metadata);
-        if include_payload {
+        if version >= RESULT_DIGEST_ENCODING_VERSION_V2 {
             writer.option(self.result_payload.as_ref(), encode_result_payload);
         }
 
@@ -208,35 +210,37 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_payload(true)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
     #[must_use]
     pub(crate) fn legacy_v1_dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_payload(false)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V1)
     }
 
-    fn dataset_content_digest_with_payload(&self, include_payload: bool) -> ContentDigest {
-        let (domain, version) = if include_payload {
-            (
-                "rspice.simulation-dataset-data/v2",
-                RESULT_DIGEST_ENCODING_VERSION_V2,
-            )
-        } else {
-            (
-                "rspice.simulation-dataset-data/v1",
-                RESULT_DIGEST_ENCODING_VERSION_V1,
-            )
+    /// Schema-v9 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v2_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V2)
+    }
+
+    fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
+        let domain = match version {
+            RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
+            RESULT_DIGEST_ENCODING_VERSION_V2 => "rspice.simulation-dataset-data/v2",
+            RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.simulation-dataset-data/v3",
+            _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
         writer.sequence(self.analyses.len());
         for analysis in &self.analyses {
             writer.u64(analysis.id);
-            writer.digest(if include_payload {
-                analysis.result_data_digest()
-            } else {
-                analysis.legacy_v1_result_data_digest()
+            writer.digest(match version {
+                RESULT_DIGEST_ENCODING_VERSION_V1 => analysis.legacy_v1_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V2 => analysis.legacy_v2_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V3 => analysis.result_data_digest(),
+                _ => unreachable!("supported dataset digest encoding"),
             });
         }
         writer.finish()
@@ -280,6 +284,84 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
                 writer.f64(*value);
             }
         }
+        AnalysisResultPayload::Reliability { devices } => {
+            writer.u8(3);
+            writer.sequence(devices.len());
+            for device in devices {
+                writer.string(&device.device_id);
+                writer.f64(device.stress.average_gate_stress_v);
+                writer.f64(device.stress.average_drain_stress_v);
+                writer.f64(device.stress.average_temperature_k);
+                writer.f64(device.stress.duration_s);
+                writer.sequence(device.checkpoints.len());
+                for checkpoint in &device.checkpoints {
+                    writer.f64(checkpoint.years);
+                    let shift = &checkpoint.shift;
+                    writer.f64(shift.threshold_voltage_shift_v);
+                    writer.f64(shift.mobility_shift);
+                    writer.f64(shift.drain_source_resistance_shift);
+                }
+            }
+        }
+        AnalysisResultPayload::Soa {
+            evaluations,
+            violations,
+        } => {
+            writer.u8(4);
+            writer.sequence(evaluations.len());
+            for evaluation in evaluations {
+                writer.string(&evaluation.device_id);
+                writer.u8(soa_parameter_tag(evaluation.parameter));
+                writer.f64(evaluation.limit_value);
+                writer.f64(evaluation.worst_actual_value);
+                writer.f64(evaluation.worst_time_s);
+                writer.u64(evaluation.sample_count);
+                writer.string(&evaluation.unit);
+                writer.string(&evaluation.description);
+                writer.u8(soa_rule_verdict_tag(evaluation.verdict));
+            }
+            writer.sequence(violations.len());
+            for violation in violations {
+                writer.string(&violation.device_id);
+                writer.u8(soa_parameter_tag(violation.parameter));
+                writer.f64(violation.limit_value);
+                writer.f64(violation.actual_value);
+                writer.f64(violation.time_s);
+                writer.u8(soa_violation_severity_tag(violation.severity));
+            }
+        }
+    }
+}
+
+const fn soa_parameter_tag(parameter: SoaParameterEvidence) -> u8 {
+    match parameter {
+        SoaParameterEvidence::GateSourceVoltage => 0,
+        SoaParameterEvidence::DrainSourceVoltage => 1,
+        SoaParameterEvidence::GateDrainVoltage => 2,
+        SoaParameterEvidence::BaseEmitterVoltage => 3,
+        SoaParameterEvidence::CollectorEmitterVoltage => 4,
+        SoaParameterEvidence::BaseCollectorVoltage => 5,
+        SoaParameterEvidence::DrainCurrent => 6,
+        SoaParameterEvidence::CollectorCurrent => 7,
+        SoaParameterEvidence::PowerDissipation => 8,
+        SoaParameterEvidence::Temperature => 9,
+    }
+}
+
+const fn soa_rule_verdict_tag(verdict: SoaRuleVerdictEvidence) -> u8 {
+    match verdict {
+        SoaRuleVerdictEvidence::Pass => 0,
+        SoaRuleVerdictEvidence::Warning => 1,
+        SoaRuleVerdictEvidence::Violation => 2,
+        SoaRuleVerdictEvidence::Critical => 3,
+    }
+}
+
+const fn soa_violation_severity_tag(severity: SoaViolationSeverityEvidence) -> u8 {
+    match severity {
+        SoaViolationSeverityEvidence::Warning => 0,
+        SoaViolationSeverityEvidence::Violation => 1,
+        SoaViolationSeverityEvidence::Critical => 2,
     }
 }
 
@@ -651,7 +733,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_payload_is_v2_content_identity_without_rewriting_v1_history() {
+    fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
         let pole_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
             AnalysisResultPayload::PoleZero {
                 poles: vec![ComplexResultValue {
@@ -757,5 +839,73 @@ mod tests {
             positive_zero.result_data_digest(),
             negative_zero.result_data_digest()
         );
+    }
+
+    #[test]
+    fn reliability_and_soa_evidence_are_field_sensitive_v3_content_identity() {
+        let reliability = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+            .with_result_payload(AnalysisResultPayload::Reliability {
+                devices: vec![ReliabilityDeviceEvidence {
+                    device_id: "M1".to_owned(),
+                    stress: ReliabilityStressEvidence {
+                        average_gate_stress_v: 1.2,
+                        average_drain_stress_v: 1.8,
+                        average_temperature_k: 358.15,
+                        duration_s: 3_600.0,
+                    },
+                    checkpoints: vec![ReliabilityCheckpointEvidence {
+                        years: 10.0,
+                        shift: ReliabilityShiftEvidence {
+                            threshold_voltage_shift_v: 0.03,
+                            mobility_shift: -0.004,
+                            drain_source_resistance_shift: 0.0015,
+                        },
+                    }],
+                }],
+            });
+        let mut changed_reliability = reliability.clone();
+        let Some(AnalysisResultPayload::Reliability { devices }) =
+            changed_reliability.result_payload.as_mut()
+        else {
+            panic!("reliability payload")
+        };
+        devices[0].stress.duration_s = 3_601.0;
+        assert_ne!(
+            reliability.result_data_digest(),
+            changed_reliability.result_data_digest()
+        );
+
+        let soa = AnalysisResult::new(1, AnalysisType::Soa, "SOA").with_result_payload(
+            AnalysisResultPayload::Soa {
+                evaluations: vec![SoaEvaluationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    worst_actual_value: 3.2,
+                    worst_time_s: 1.0e-6,
+                    sample_count: 1_001,
+                    unit: "V".to_owned(),
+                    description: "Maximum drain-source voltage".to_owned(),
+                    verdict: SoaRuleVerdictEvidence::Warning,
+                }],
+                violations: vec![SoaViolationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    actual_value: 3.2,
+                    time_s: 1.0e-6,
+                    severity: SoaViolationSeverityEvidence::Warning,
+                }],
+            },
+        );
+        let mut changed_soa = soa.clone();
+        let Some(AnalysisResultPayload::Soa { evaluations, .. }) =
+            changed_soa.result_payload.as_mut()
+        else {
+            panic!("SOA payload")
+        };
+        evaluations[0].sample_count = 1_002;
+        assert_ne!(soa.result_data_digest(), changed_soa.result_data_digest());
+        assert_eq!(soa.result_data_digest(), soa.clone().result_data_digest());
     }
 }

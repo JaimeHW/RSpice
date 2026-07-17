@@ -155,6 +155,19 @@ const XYCE_MEASURE_CONT_MANIFEST_FAMILY_PATHS_BLAKE3: &str =
     "9cbd9d8d4874de203ab21ef5ef301d5f75b92cb4d9208bc6f6d81e785159990d";
 const XYCE_MEASURE_CONT_MANIFEST_FAMILY_LINES_BLAKE3: &str =
     "9d1bfca8151e9c3c16239558b9a34b1ad067d6b236c00d8c334e1703d0ec0a22";
+const XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_COUNT: usize = 27;
+const XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_NAMES_BLAKE3: &str =
+    "66a4a04b46f70bfe859d2f2861e27d1fdcc9072c41f7c084d9ea88c406dc1b63";
+const XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_CONTENT_BLAKE3: &str =
+    "da58c73c916b4fd6d1968d4d9ee52985079834e8877d911522a9982e7a777315";
+const XYCE_MEASURE_CONT_STEP_TRAN_CANDIDATE_BLAKE3: &str =
+    "ab99e7673941a6438c75ecf2ef41fae83aa2d3ef20bbdb4c36e73d8065c3d70d";
+const XYCE_MEASURE_CONT_STEP_TRAN_CANDIDATE_CONTENT_BLAKE3: &str =
+    "b7af2ae67cbc7a334d38db3a888779684218cf18bd53a0228cbabaa5f95c77da";
+const XYCE_MEASURE_CONT_STEP_TRAN_MANIFEST_BLAKE3: &str =
+    "cf8c3b451cb13d00e97e4e2057eb0502fdcebdf435b44b186bcb450eca539378";
+const XYCE_MEASURE_CONT_STEP_HISTORICAL_PROVENANCE_BLAKE3: &str =
+    "d5665d4a8d8ecedf36e5ffb47c53b94a0d9fc867af1afc66076b500d645bd0b5";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
@@ -3051,6 +3064,221 @@ impl XyceMeasureContTranKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceMeasureContStepTranKind {
+    Derivative,
+    FindWhen,
+    TriggerTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceMeasureContStepTranRole {
+    Main,
+    Control0,
+    Control1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceMeasureContStepTranMember {
+    kind: XyceMeasureContStepTranKind,
+    role: XyceMeasureContStepTranRole,
+}
+
+impl XyceMeasureContStepTranMember {
+    const ALL: [Self; 9] = [
+        Self::new(
+            XyceMeasureContStepTranKind::Derivative,
+            XyceMeasureContStepTranRole::Main,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::Derivative,
+            XyceMeasureContStepTranRole::Control0,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::Derivative,
+            XyceMeasureContStepTranRole::Control1,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::FindWhen,
+            XyceMeasureContStepTranRole::Main,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::FindWhen,
+            XyceMeasureContStepTranRole::Control0,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::FindWhen,
+            XyceMeasureContStepTranRole::Control1,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::TriggerTarget,
+            XyceMeasureContStepTranRole::Main,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::TriggerTarget,
+            XyceMeasureContStepTranRole::Control0,
+        ),
+        Self::new(
+            XyceMeasureContStepTranKind::TriggerTarget,
+            XyceMeasureContStepTranRole::Control1,
+        ),
+    ];
+
+    const fn new(kind: XyceMeasureContStepTranKind, role: XyceMeasureContStepTranRole) -> Self {
+        Self { kind, role }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL
+            .into_iter()
+            .find(|member| member.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match (self.kind, self.role) {
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Main) => {
+                "netlists/measure_cont/step/derivtesttran.cir"
+            }
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control0) => {
+                "netlists/measure_cont/step/derivtesttran.s0.cir"
+            }
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control1) => {
+                "netlists/measure_cont/step/derivtesttran.s1.cir"
+            }
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Main) => {
+                "netlists/measure_cont/step/findwhentesttran.cir"
+            }
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control0) => {
+                "netlists/measure_cont/step/findwhentesttran.s0.cir"
+            }
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control1) => {
+                "netlists/measure_cont/step/findwhentesttran.s1.cir"
+            }
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Main) => {
+                "netlists/measure_cont/step/trigtargtesttran.cir"
+            }
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control0) => {
+                "netlists/measure_cont/step/trigtargtesttran.s0.cir"
+            }
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control1) => {
+                "netlists/measure_cont/step/trigtargtesttran.s1.cir"
+            }
+        }
+    }
+
+    fn source_relative_path(self) -> &'static str {
+        match (self.kind, self.role) {
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Main) => {
+                "Netlists/MEASURE_CONT/STEP/DerivTestTran.cir"
+            }
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control0) => {
+                "Netlists/MEASURE_CONT/STEP/DerivTestTran.s0.cir"
+            }
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control1) => {
+                "Netlists/MEASURE_CONT/STEP/DerivTestTran.s1.cir"
+            }
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Main) => {
+                "Netlists/MEASURE_CONT/STEP/FindWhenTestTran.cir"
+            }
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control0) => {
+                "Netlists/MEASURE_CONT/STEP/FindWhenTestTran.s0.cir"
+            }
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control1) => {
+                "Netlists/MEASURE_CONT/STEP/FindWhenTestTran.s1.cir"
+            }
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Main) => {
+                "Netlists/MEASURE_CONT/STEP/TrigTargTestTran.cir"
+            }
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control0) => {
+                "Netlists/MEASURE_CONT/STEP/TrigTargTestTran.s0.cir"
+            }
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control1) => {
+                "Netlists/MEASURE_CONT/STEP/TrigTargTestTran.s1.cir"
+            }
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match (self.kind, self.role) {
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Main) => (
+                4664,
+                "d0b8736c42b745cc7a6fb9211c7c590d0edd1419e1536c0a95a8d7bf077108e0",
+            ),
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control0) => (
+                4634,
+                "db7840ef9561211757089de8e3a613e75912adb1e30d93cdc445117ea940f22c",
+            ),
+            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control1) => (
+                4624,
+                "c81ffd44d57f368e3d6f91428ce5fd08a884b5a93fdf462e58f4f06e6271a59f",
+            ),
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Main) => (
+                5163,
+                "e8e70a2b74f3447115820a91889a71e83e6d52777efce9b0bc4aec226c604204",
+            ),
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control0) => (
+                5143,
+                "c6913f3e20e2cea5863569bb3fecce42cdc34663d63f1507a514e70717f93a99",
+            ),
+            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control1) => (
+                5143,
+                "22148f040cb4fcc39198377735ce768fa06412d6fda552f5403847ef8b929329",
+            ),
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Main) => (
+                1230,
+                "3fc469a02df27f52125f87c8e67cf770df7a3577865e4ff563d16d2c6e783f1c",
+            ),
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control0) => {
+                (
+                    1066,
+                    "88ceb4d1da165bbf42262c0fbbe319bcaff9688cb3f47973ff048f5a4cf40737",
+                )
+            }
+            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control1) => {
+                (
+                    1042,
+                    "e7a6d985ed8ded5775f568f754a9dc3862767671fd4946dd9564bc4fdba3757e",
+                )
+            }
+        }
+    }
+
+    fn historical_wrapper_identity(self) -> Option<(usize, &'static str)> {
+        (self.role == XyceMeasureContStepTranRole::Main).then_some(match self.kind {
+            XyceMeasureContStepTranKind::Derivative | XyceMeasureContStepTranKind::FindWhen => (
+                1675,
+                "ed6d34830f91743b7811803fd5cf17ce3423026735ee419026b023066045d148",
+            ),
+            XyceMeasureContStepTranKind::TriggerTarget => (
+                1673,
+                "1f8e950b16a78f30b4895dda83d7a47a91ae7fc1a731cdb8ab008827506fc0fb",
+            ),
+        })
+    }
+
+    fn main(kind: XyceMeasureContStepTranKind) -> Self {
+        Self::new(kind, XyceMeasureContStepTranRole::Main)
+    }
+
+    fn control(kind: XyceMeasureContStepTranKind, index: usize) -> Option<Self> {
+        let role = match index {
+            0 => XyceMeasureContStepTranRole::Control0,
+            1 => XyceMeasureContStepTranRole::Control1,
+            _ => return None,
+        };
+        Some(Self::new(kind, role))
+    }
+
+    fn expected_measurement_counts(self) -> (usize, usize) {
+        match self.kind {
+            XyceMeasureContStepTranKind::Derivative => (12, 32),
+            XyceMeasureContStepTranKind::FindWhen => (16, 42),
+            XyceMeasureContStepTranKind::TriggerTarget => (0, 7),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceRemoveUnusedKind {
     ReplaceGround,
     LiteralGroundNames,
@@ -3802,6 +4030,12 @@ impl XyceFileCompareTolerance {
         absolute: 1.0e-5,
         relative: 1.0e-3,
         zero: 1.0e-10,
+    };
+
+    const MEASURE_CONT_STEP_REMEASURE: Self = Self {
+        absolute: 3.0e-3,
+        relative: 2.0e-2,
+        zero: 1.0e-5,
     };
 
     const MEASURE_COMMON_AC_INTEGRATION: Self = Self {
@@ -5154,6 +5388,15 @@ struct XyceStepRun {
 }
 
 #[derive(Debug, Clone)]
+struct XyceStepTranEvaluation {
+    step_values: Vec<Value>,
+    netlist: Netlist,
+    transient: TransientResult,
+    scalar: Vec<crate::analysis::MeasureResult>,
+    continuous: Vec<crate::analysis::ContinuousMeasureResult>,
+}
+
+#[derive(Debug, Clone)]
 enum XyceReferenceColumn {
     PrimarySweep { name: String },
     Probe { name: String },
@@ -5863,6 +6106,28 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(member) = XyceMeasureContStepTranMember::for_record(&deck.relative_path) {
+            let contract = match member.role {
+                XyceMeasureContStepTranRole::Main => "measure_cont_step_tran_relational_wrapper",
+                XyceMeasureContStepTranRole::Control0 | XyceMeasureContStepTranRole::Control1 => {
+                    "measure_cont_step_tran_relational_control"
+                }
+            };
+            let result = match self.validate_measure_cont_step_tran_oracle(deck, member, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(kind) = XyceMeasureContTranKind::for_record(&deck.relative_path) {
             let contract = "measure_cont_tran_removed_wrapper";
             let result = match self.validate_measure_cont_tran_oracle(deck, kind, start) {
@@ -6440,6 +6705,623 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_measure_cont_step_tran_oracle(
+        &self,
+        deck: &XyceDeck,
+        member: XyceMeasureContStepTranMember,
+        start: Instant,
+    ) -> Result<(), String> {
+        let sources = self.validate_measure_cont_step_tran_provenance(deck, member)?;
+        self.check_measure_cont_tran_deadline(start, "stepped provenance")?;
+
+        let mut parsed = Vec::with_capacity(sources.len());
+        for (candidate, bytes) in sources {
+            let source = std::str::from_utf8(&bytes)
+                .map_err(|error| format!("MEASURE_CONT STEP source is not UTF-8: {error}"))?
+                .to_string();
+            let path = self.root.join(candidate.source_relative_path());
+            let netlist = Self::parse_xyce_netlist(&source, &path).map_err(|error| {
+                format!(
+                    "MEASURE_CONT STEP parse failed for {}: {error}",
+                    candidate.source_relative_path()
+                )
+            })?;
+            let output = Self::single_tran_print_output_request(&source)?;
+            if output.file.is_some()
+                || output
+                    .format
+                    .as_deref()
+                    .is_some_and(|format| !Self::tran_print_format_is_prn_compatible(format))
+            {
+                return Err(format!(
+                    "{} requires one ordinary default-format .PRINT TRAN",
+                    candidate.source_relative_path()
+                ));
+            }
+            let print = XycePrintRequest {
+                probes: output.probes,
+            };
+            let tran = Self::single_tran_analysis(&netlist)?;
+            Self::validate_measure_cont_step_tran_plan(&netlist, &print, &tran, candidate)?;
+            parsed.push((candidate, netlist, tran));
+        }
+
+        let main_member = XyceMeasureContStepTranMember::main(member.kind);
+        let main_index = parsed
+            .iter()
+            .position(|(candidate, ..)| *candidate == main_member)
+            .ok_or_else(|| "MEASURE_CONT STEP family omitted its owner".to_string())?;
+        let main_measurements = format!("{:#?}", parsed[main_index].1.measurements);
+        for index in 0..2 {
+            let control = XyceMeasureContStepTranMember::control(member.kind, index)
+                .ok_or_else(|| "invalid MEASURE_CONT STEP control index".to_string())?;
+            let control_netlist = &parsed
+                .iter()
+                .find(|(candidate, ..)| *candidate == control)
+                .ok_or_else(|| format!("MEASURE_CONT STEP family omitted control {index}"))?
+                .1;
+            if format!("{:#?}", control_netlist.measurements) != main_measurements {
+                return Err(format!(
+                    "MEASURE_CONT STEP control {index} measurement AST/order differs from its owner"
+                ));
+            }
+        }
+
+        let (_, main_netlist, main_tran) = &parsed[main_index];
+        let engine = self
+            .create_xyce_static_tran_engine(None, Self::xyce_initial_timestep_for_tran(main_tran));
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let steps = Self::step_commands(main_netlist)?;
+        let materialized = Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &engine,
+            main_netlist,
+            &steps,
+            xyce_step_plan_limits(),
+            &abort,
+        )
+        .map_err(|error| format!("MEASURE_CONT STEP expansion failed: {error}"))?;
+        if materialized.len() != 2
+            || materialized[0].step_values != [150.0]
+            || materialized[1].step_values != [200.0]
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP owner produced unexpected ordered step values: {:?}",
+                materialized
+                    .iter()
+                    .map(|run| &run.step_values)
+                    .collect::<Vec<_>>()
+            ));
+        }
+
+        let mut owner_runs = Vec::with_capacity(2);
+        for run in materialized {
+            let tran = Self::single_tran_analysis(&run.netlist)?;
+            owner_runs.push(self.evaluate_measure_cont_step_tran_run(
+                run.netlist,
+                run.step_values,
+                &tran,
+                start,
+            )?);
+        }
+
+        for (index, owner) in owner_runs.iter().enumerate() {
+            let control_member = XyceMeasureContStepTranMember::control(member.kind, index)
+                .ok_or_else(|| "invalid MEASURE_CONT STEP control index".to_string())?;
+            let (_, control_netlist, control_tran) = parsed
+                .iter()
+                .find(|(candidate, ..)| *candidate == control_member)
+                .ok_or_else(|| format!("MEASURE_CONT STEP family omitted control {index}"))?;
+            let control = self.evaluate_measure_cont_step_tran_run(
+                control_netlist.clone(),
+                vec![150.0 + 50.0 * index as Value],
+                control_tran,
+                start,
+            )?;
+            Self::compare_measure_cont_step_waveforms(index, owner, &control)?;
+            Self::compare_measure_cont_step_measurements(index, owner, &control)?;
+            Self::validate_measure_cont_remeasure(
+                &owner.netlist,
+                &owner.transient,
+                None,
+                XyceFileCompareTolerance::MEASURE_CONT_STEP_REMEASURE,
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+        }
+
+        self.check_measure_cont_tran_deadline(
+            start,
+            "stepped execution, relational comparison, and remeasure",
+        )
+    }
+
+    fn validate_measure_cont_step_tran_provenance(
+        &self,
+        deck: &XyceDeck,
+        member: XyceMeasureContStepTranMember,
+    ) -> Result<Vec<(XyceMeasureContStepTranMember, Vec<u8>)>, String> {
+        let expected_record = member.record();
+        let owns_wrapper = member.role == XyceMeasureContStepTranRole::Main;
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != expected_record
+            || self.requires_upstream_wrapper(&deck.relative_path) != owns_wrapper
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP record '{expected_record}' lost exact owner/control ownership"
+            ));
+        }
+        let canonical_deck = deck
+            .path
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize MEASURE_CONT STEP record: {error}"))?;
+        let canonical_expected = self
+            .root
+            .join(member.source_relative_path())
+            .canonicalize()
+            .map_err(|error| format!("canonical MEASURE_CONT STEP record is missing: {error}"))?;
+        if canonical_deck != canonical_expected {
+            return Err(
+                "MEASURE_CONT STEP record resolved outside its canonical corpus path".into(),
+            );
+        }
+
+        self.validate_measure_cont_manifest_family()?;
+        self.validate_measure_cont_family_census(
+            "Netlists/MEASURE_CONT",
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_COUNT,
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_NAMES_BLAKE3,
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_CONTENT_BLAKE3,
+        )?;
+        self.validate_measure_cont_family_census(
+            "OutputData/MEASURE_CONT",
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_COUNT,
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_NAMES_BLAKE3,
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_CONTENT_BLAKE3,
+        )?;
+        self.validate_measure_cont_step_case_sensitive_census()?;
+
+        let mut paths = Vec::new();
+        let mut content = Vec::new();
+        let mut sources = Vec::new();
+        for candidate in XyceMeasureContStepTranMember::ALL {
+            let bytes = Self::validate_measure_cont_regular_text_identity(
+                &self.root.join(candidate.source_relative_path()),
+                candidate.source_identity(),
+                "MEASURE_CONT STEP source",
+            )?;
+            paths.push(candidate.source_relative_path().to_string());
+            content.push(format!(
+                "{}\t{}",
+                candidate.source_relative_path(),
+                blake3::hash(&bytes).to_hex()
+            ));
+            sources.push((candidate, bytes));
+        }
+        paths.sort();
+        content.sort();
+        let path_hash = blake3::hash(paths.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+
+        let manifest_path = self.root.join(HARNESS_MANIFEST_FILE);
+        let manifest_bytes = fs::read(&manifest_path)
+            .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+        let canonical_manifest =
+            Self::canonical_lf_text_identity("MEASURE_CONT STEP manifest", &manifest_bytes)?;
+        let manifest_text = std::str::from_utf8(&canonical_manifest)
+            .map_err(|error| format!("MEASURE_CONT STEP manifest is not UTF-8: {error}"))?;
+        let mut manifest_rows = manifest_text
+            .lines()
+            .filter(|line| {
+                line.starts_with("Netlists/MEASURE_CONT/STEP/DerivTestTran")
+                    || line.starts_with("Netlists/MEASURE_CONT/STEP/FindWhenTestTran")
+                    || line.starts_with("Netlists/MEASURE_CONT/STEP/TrigTargTestTran")
+            })
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        manifest_rows.sort();
+        let manifest_hash = blake3::hash(manifest_rows.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if paths.len() != XyceMeasureContStepTranMember::ALL.len()
+            || path_hash != XYCE_MEASURE_CONT_STEP_TRAN_CANDIDATE_BLAKE3
+            || content_hash != XYCE_MEASURE_CONT_STEP_TRAN_CANDIDATE_CONTENT_BLAKE3
+            || manifest_rows.len() != 3
+            || manifest_rows
+                .iter()
+                .any(|line| line.contains(".s0.") || line.contains(".s1."))
+            || manifest_hash != XYCE_MEASURE_CONT_STEP_TRAN_MANIFEST_BLAKE3
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP candidate/manifest provenance changed: paths={}/{path_hash}/{content_hash}, manifest={}/{manifest_hash}",
+                paths.len(),
+                manifest_rows.len()
+            ));
+        }
+
+        Self::validate_measure_cont_step_historical_provenance()?;
+        Ok(sources)
+    }
+
+    fn validate_measure_cont_step_historical_provenance() -> Result<(), String> {
+        let mut records = Vec::new();
+        for (kind, path, content_blake3) in [
+            (
+                XyceMeasureContStepTranKind::Derivative,
+                "Netlists/MEASURE_CONT/STEP/DerivTestTran.cir.sh",
+                "7aab6d2e80f805d2509a7e33c673abc1fcee09aaae69d2b3f0e03a152f8bcaf6",
+            ),
+            (
+                XyceMeasureContStepTranKind::FindWhen,
+                "Netlists/MEASURE_CONT/STEP/FindWhenTestTran.cir.sh",
+                "7aab6d2e80f805d2509a7e33c673abc1fcee09aaae69d2b3f0e03a152f8bcaf6",
+            ),
+            (
+                XyceMeasureContStepTranKind::TriggerTarget,
+                "Netlists/MEASURE_CONT/STEP/TrigTargTestTran.cir.sh",
+                "b01705bf8909d2698b1569d99e621510f40cf3dab5d6702ab8f967fef21d5f79",
+            ),
+        ] {
+            let (bytes, sha256) = XyceMeasureContStepTranMember::main(kind)
+                .historical_wrapper_identity()
+                .ok_or_else(|| "MEASURE_CONT STEP owner lost its wrapper identity".to_string())?;
+            records.push(format!("{path}\t{bytes}\t{sha256}\t{content_blake3}"));
+        }
+        for (path, bytes, sha256, content_blake3) in [
+            (
+                "TestScripts/MeasureCommon.pm",
+                44_922,
+                "a8f47987c43ac63e7954b8a89cfaddb7edc8fbff50d5bbab43a57f417dde7c0d",
+                "399e6580a8a17656d85913accc466d7f452a56f00507ff085e8696a5bca5aa83",
+            ),
+            (
+                "TestScripts/file_compare.pl",
+                7_465,
+                "a700143baddab265ca2e74d69541432fb27ae66600c3fee71968797fc78efcbf0",
+                "04dd69b4e4cfe543a39f663966229be877fa595a7c6c885dadf2173814f85895",
+            ),
+            (
+                "XyceRegression/Tools.pm",
+                68_108,
+                "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+                "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+            ),
+            (
+                "TestScripts/xyce_verify.pl",
+                59_566,
+                "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
+                "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
+            ),
+        ] {
+            records.push(format!("{path}\t{bytes}\t{sha256}\t{content_blake3}"));
+        }
+        records.sort();
+        let provenance_hash = blake3::hash(records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if records.len() != 7
+            || provenance_hash != XYCE_MEASURE_CONT_STEP_HISTORICAL_PROVENANCE_BLAKE3
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP Release-7.10 wrapper/tool provenance changed: records={}/{provenance_hash}",
+                records.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_step_case_sensitive_census(&self) -> Result<(), String> {
+        let base = self.root.join("Netlists/MEASURE_CONT/STEP");
+        let mut names = Vec::new();
+        let mut content = Vec::new();
+        for entry in fs::read_dir(&base)
+            .map_err(|error| format!("failed to read {}: {error}", base.display()))?
+        {
+            let path = entry
+                .map_err(|error| format!("failed to inspect {}: {error}", base.display()))?
+                .path();
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(format!(
+                    "MEASURE_CONT STEP member {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| "MEASURE_CONT STEP member name is not UTF-8".to_string())?
+                .to_string();
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let canonical = Self::canonical_lf_text_identity(
+                &format!("MEASURE_CONT STEP member {}", path.display()),
+                &bytes,
+            )?;
+            names.push(name.clone());
+            content.push(format!("{name}\0{}", blake3::hash(&canonical).to_hex()));
+        }
+        names.sort();
+        content.sort();
+        let names_hash = blake3::hash(names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if names.len() != XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_COUNT
+            || names_hash != XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_NAMES_BLAKE3
+            || content_hash != XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_CONTENT_BLAKE3
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP case-sensitive census changed: names={}/{names_hash}, content={content_hash}",
+                names.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_measure_cont_step_tran_plan(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        tran: &XyceTranAnalysis,
+        member: XyceMeasureContStepTranMember,
+    ) -> Result<(), String> {
+        let probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let steps = Self::step_commands(netlist)?;
+        let exact_step = matches!(steps.as_slice(), [StepCommand {
+            target: StepTarget::Device,
+            name,
+            param_name: None,
+            sweep: StepSweep::Linear { start, stop, step },
+        }] if name.eq_ignore_ascii_case("R1b")
+            && start.to_bits() == 150.0f64.to_bits()
+            && stop.to_bits() == 200.0f64.to_bits()
+            && step.to_bits() == 50.0f64.to_bits());
+        if (member.role == XyceMeasureContStepTranRole::Main) != exact_step
+            || (member.role != XyceMeasureContStepTranRole::Main && !steps.is_empty())
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP exact owner/control .STEP contract changed: {steps:?}"
+            ));
+        }
+        let expected_analyses = if member.role == XyceMeasureContStepTranRole::Main {
+            2
+        } else {
+            1
+        };
+        if tran.step.to_bits() != 0.0f64.to_bits()
+            || tran.stop.to_bits() != 0.01f64.to_bits()
+            || tran.start.is_some()
+            || tran.max_step.is_some()
+            || tran.uic
+            || probes != ["v(1)", "v(1a)", "v(2)"]
+            || netlist.analyses.len() != expected_analyses
+            || netlist.output_requests.len() != netlist.measurements.len() + 1
+            || !netlist.diagnostics.is_empty()
+            || netlist.options.measure_use_cont_files != Some(false)
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || netlist.elements.len() != 5
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP exact TRAN/PRINT/topology contract changed for {}",
+                member.source_relative_path()
+            ));
+        }
+        let (expected_scalar, expected_continuous) = member.expected_measurement_counts();
+        let scalar = netlist
+            .measurements
+            .iter()
+            .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"))
+            .count();
+        let continuous = netlist
+            .measurements
+            .iter()
+            .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
+            .count();
+        if scalar != expected_scalar
+            || continuous != expected_continuous
+            || scalar + continuous != netlist.measurements.len()
+            || netlist
+                .measurements
+                .iter()
+                .any(|statement| statement.print_policy != crate::analysis::MeasurePrintPolicy::All)
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP measurement census changed: TRAN={scalar}/{expected_scalar}, TRAN_CONT={continuous}/{expected_continuous}"
+            ));
+        }
+        let expected_vpwl1 = if member.kind == XyceMeasureContStepTranKind::Derivative {
+            &[
+                (0.0, 0.1),
+                (0.0025, 0.5),
+                (0.005, 0.0),
+                (0.0074, 0.4),
+                (0.01, 0.0),
+            ][..]
+        } else {
+            &[
+                (0.0, 0.1),
+                (0.0025, 0.5),
+                (0.005, 0.0),
+                (0.0075, 0.4),
+                (0.01, 0.0),
+            ][..]
+        };
+        Self::validate_measure_cont_pwl(netlist, "VPWL1", ["1", "0"], expected_vpwl1)?;
+        Self::validate_measure_cont_pwl(netlist, "VPWL2", ["2", "0"], &[(0.0, 0.5), (0.01, 0.0)])?;
+        let r1b = match member.role {
+            XyceMeasureContStepTranRole::Main => 100.0,
+            XyceMeasureContStepTranRole::Control0 => 150.0,
+            XyceMeasureContStepTranRole::Control1 => 200.0,
+        };
+        for (name, nodes, expected) in [
+            ("R1a", ["1", "1a"], 100.0),
+            ("R1b", ["1a", "0"], r1b),
+            ("R2", ["2", "0"], 100.0),
+        ] as [(&str, [&str; 2], Value); 3]
+        {
+            let resistor = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("MEASURE_CONT STEP is missing {name}"))?;
+            if resistor.nodes.len() != nodes.len()
+                || resistor
+                    .nodes
+                    .iter()
+                    .zip(nodes)
+                    .any(|(actual, expected)| !actual.eq_ignore_ascii_case(expected))
+                || !matches!(&resistor.kind, ElementKind::Resistor { value, value_expr: None, model: None, instance_params, deferred_params }
+                    if value.to_bits() == expected.to_bits()
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty())
+            {
+                return Err(format!(
+                    "MEASURE_CONT STEP resistor {name} changed: {resistor:?}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn evaluate_measure_cont_step_tran_run(
+        &self,
+        netlist: Netlist,
+        step_values: Vec<Value>,
+        tran: &XyceTranAnalysis,
+        start: Instant,
+    ) -> Result<XyceStepTranEvaluation, String> {
+        let max_step = Self::transient_family_max_step(&netlist, tran)?;
+        let engine =
+            self.create_xyce_static_tran_engine(None, Self::xyce_initial_timestep_for_tran(tran));
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let transient = engine
+            .run_tran_with_abort(&netlist, tran.stop, max_step, &abort)
+            .map_err(|error| format!("MEASURE_CONT STEP transient execution failed: {error}"))?;
+        Self::validate_transient_result_time_grid(&transient)?;
+        let scalar = crate::analysis::advanced::evaluate_tran_measurements(&netlist, &transient);
+        let continuous =
+            crate::analysis::advanced::evaluate_tran_continuous_measurements(&netlist, &transient);
+        for result in &continuous {
+            result.validate_invariants().map_err(|error| {
+                format!(
+                    "MEASURE_CONT STEP continuous result '{}' is invalid: {error}",
+                    result.name
+                )
+            })?;
+        }
+        Ok(XyceStepTranEvaluation {
+            step_values,
+            netlist,
+            transient,
+            scalar,
+            continuous,
+        })
+    }
+
+    fn compare_measure_cont_step_waveforms(
+        index: usize,
+        owner: &XyceStepTranEvaluation,
+        control: &XyceStepTranEvaluation,
+    ) -> Result<(), String> {
+        let exact_values = |left: &[Value], right: &[Value]| {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| left.to_bits() == right.to_bits())
+        };
+        if owner.step_values != control.step_values
+            || owner.transient.node_names != control.transient.node_names
+            || owner.transient.branch_names != control.transient.branch_names
+            || !exact_values(&owner.transient.time, &control.transient.time)
+            || owner.transient.voltages.len() != control.transient.voltages.len()
+            || owner
+                .transient
+                .voltages
+                .iter()
+                .zip(&control.transient.voltages)
+                .any(|(left, right)| !exact_values(left, right))
+            || owner.transient.branch_currents.len() != control.transient.branch_currents.len()
+            || owner
+                .transient
+                .branch_currents
+                .iter()
+                .zip(&control.transient.branch_currents)
+                .any(|(left, right)| !exact_values(left, right))
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP owner waveform does not exactly equal control {index}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn compare_measure_cont_step_measurements(
+        index: usize,
+        owner: &XyceStepTranEvaluation,
+        control: &XyceStepTranEvaluation,
+    ) -> Result<(), String> {
+        let owner_rows = Self::mixed_measurement_rows(
+            &owner.scalar,
+            &owner.continuous,
+            &owner.netlist.measurements,
+            "TRAN",
+            "TRAN_CONT",
+        )?;
+        let control_rows = Self::mixed_measurement_rows(
+            &control.scalar,
+            &control.continuous,
+            &control.netlist.measurements,
+            "TRAN",
+            "TRAN_CONT",
+        )?;
+        let owner_stream = Self::measure_cont_step_mt_stream(&owner_rows)?;
+        let control_stream = Self::measure_cont_step_mt_stream(&control_rows)?;
+        if owner_stream != control_stream {
+            return Err(format!(
+                "MEASURE_CONT STEP owner mt{} stream differs from control mt0",
+                index
+            ));
+        }
+        Ok(())
+    }
+
+    fn measure_cont_step_mt_stream(
+        rows: &[XyceMixedMeasurementReferenceRow],
+    ) -> Result<Vec<String>, String> {
+        fn field(value: Option<XyceMeasurementReferenceValue>) -> Result<String, String> {
+            match value {
+                None => Ok("NONE".to_string()),
+                Some(XyceMeasurementReferenceValue::Failed) => Ok("FAILED".to_string()),
+                Some(XyceMeasurementReferenceValue::Numeric { value, .. }) => {
+                    XyceTestRunner::xyce_prn_scientific_text(value, 6)
+                }
+            }
+        }
+        rows.iter()
+            .map(|row| {
+                Ok(format!(
+                    "{}\t{}\t{}\t{}",
+                    row.name.to_ascii_uppercase(),
+                    field(Some(row.value))?,
+                    field(row.trigger_axis)?,
+                    field(row.target_axis)?
+                ))
+            })
+            .collect()
+    }
+
     fn validate_measure_cont_tran_oracle(
         &self,
         deck: &XyceDeck,
@@ -6543,9 +7425,21 @@ impl XyceTestRunner {
                 ));
             }
             self.validate_measure_cont_prn_counterfactual(&reference, &actual, &plan, &netlist)?;
-            Self::validate_measure_cont_remeasure(&netlist, &result, Some(&actual))?;
+            Self::validate_measure_cont_remeasure(
+                &netlist,
+                &result,
+                Some(&actual),
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
         } else {
-            Self::validate_measure_cont_remeasure(&netlist, &result, None)?;
+            Self::validate_measure_cont_remeasure(
+                &netlist,
+                &result,
+                None,
+                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
         }
         self.check_measure_cont_tran_deadline(
             start,
@@ -7160,13 +8054,19 @@ impl XyceTestRunner {
         netlist: &Netlist,
         result: &TransientResult,
         serialized_table: Option<&XycePrnTable>,
+        tolerance: XyceFileCompareTolerance,
+        scientific_precision: usize,
     ) -> Result<(), String> {
         // Release 7.10's wrapper serializes the native waveform to default
         // scientific PRN text, reads that data back, and compares the newly
         // produced mt0 stream to the original measure run. Reconstruct the
         // same data boundary (including printed precision and duplicate-time
         // suppression) before the independent second measurement pass.
-        let serialized = Self::measure_cont_serialized_remeasure_result(result, serialized_table)?;
+        let serialized = Self::measure_cont_serialized_remeasure_result(
+            result,
+            serialized_table,
+            scientific_precision,
+        )?;
         let original_scalar =
             crate::analysis::advanced::evaluate_tran_measurements(netlist, result);
         let original_continuous =
@@ -7210,7 +8110,7 @@ impl XyceTestRunner {
                 &expected.name,
                 expected.value,
                 actual.value,
-                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                tolerance,
             )?;
             Self::compare_mixed_measurement_metadata(
                 &mut mismatches,
@@ -7218,7 +8118,7 @@ impl XyceTestRunner {
                 &format!("{}:trig", expected.name),
                 expected.trigger_axis,
                 actual.trigger_axis,
-                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                tolerance,
             )?;
             Self::compare_mixed_measurement_metadata(
                 &mut mismatches,
@@ -7226,7 +8126,7 @@ impl XyceTestRunner {
                 &format!("{}:targ", expected.name),
                 expected.target_axis,
                 actual.target_axis,
-                XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                tolerance,
             )?;
         }
         if !mismatches.is_empty() {
@@ -7241,6 +8141,7 @@ impl XyceTestRunner {
     fn measure_cont_serialized_remeasure_result(
         result: &TransientResult,
         serialized_table: Option<&XycePrnTable>,
+        scientific_precision: usize,
     ) -> Result<TransientResult, String> {
         Self::validate_transient_result_time_grid(result)?;
         let (source_time, source_voltages) = if let Some(table) = serialized_table {
@@ -7274,7 +8175,7 @@ impl XyceTestRunner {
         let mut indices = Vec::with_capacity(source_time.len());
         let mut time = Vec::with_capacity(source_time.len());
         for (index, value) in source_time.iter().copied().enumerate() {
-            let printed = Self::xyce_default_prn_roundtrip(value)?;
+            let printed = Self::xyce_prn_scientific_roundtrip(value, scientific_precision)?;
             if time.last().is_some_and(|previous| *previous > printed) {
                 return Err(format!(
                     "MEASURE_CONT serialized PRN time regressed at accepted point {index}"
@@ -7302,7 +8203,12 @@ impl XyceTestRunner {
                     }
                     indices
                         .iter()
-                        .map(|index| Self::xyce_default_prn_roundtrip(waveform[*index]))
+                        .map(|index| {
+                            Self::xyce_prn_scientific_roundtrip(
+                                waveform[*index],
+                                scientific_precision,
+                            )
+                        })
                         .collect()
                 })
                 .collect()
@@ -83060,5 +83966,46 @@ R2 2 0 1
             XyceTestRunner::observe_startup_conflict(&reversed, &path).is_err(),
             "reversing the ordered conflict origins must fail closed"
         );
+    }
+
+    #[test]
+    fn measure_cont_step_stream_detects_value_order_status_and_metadata_changes() {
+        let numeric = |value| XyceMeasurementReferenceValue::Numeric {
+            value,
+            quantization: None,
+        };
+        let rows = vec![
+            XyceMixedMeasurementReferenceRow {
+                name: "first".to_string(),
+                value: numeric(1.25),
+                trigger_axis: Some(numeric(0.1)),
+                target_axis: Some(numeric(0.2)),
+            },
+            XyceMixedMeasurementReferenceRow {
+                name: "second".to_string(),
+                value: XyceMeasurementReferenceValue::Failed,
+                trigger_axis: Some(numeric(0.3)),
+                target_axis: None,
+            },
+        ];
+        let canonical = XyceTestRunner::measure_cont_step_mt_stream(&rows)
+            .expect("serialize canonical stepped measurement stream");
+
+        let mut value = rows.clone();
+        value[0].value = numeric(2.25);
+        let mut order = rows.clone();
+        order.swap(0, 1);
+        let mut status = rows.clone();
+        status[1].value = numeric(0.0);
+        let mut metadata = rows.clone();
+        metadata[0].target_axis = Some(numeric(0.25));
+
+        for counterfactual in [value, order, status, metadata] {
+            assert_ne!(
+                XyceTestRunner::measure_cont_step_mt_stream(&counterfactual)
+                    .expect("serialize counterfactual stepped stream"),
+                canonical
+            );
+        }
     }
 }

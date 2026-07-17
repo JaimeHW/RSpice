@@ -37,8 +37,11 @@ use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, AnalysisType, ComplexResultValue, DcOpResult,
-    MonteCarloVariableMetadata, OperatingPointValue, SensitivityResultMode, SensitivityResultRow,
-    SimulationRunIntent, SimulationRunLifecycle,
+    MonteCarloVariableMetadata, OperatingPointValue, ReliabilityCheckpointEvidence,
+    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
+    SensitivityResultMode, SensitivityResultRow, SimulationRunIntent, SimulationRunLifecycle,
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence,
 };
 
 mod analysis_commands;
@@ -322,8 +325,6 @@ impl SimulationController {
                 "Running sealed manually edited netlist source".to_owned(),
             ));
         }
-        state.simulation.reliability_results.clear();
-        state.simulation.soa_violations.clear();
 
         if self.total_analyses > 1 {
             state.push_sim_message(ConsoleMessage::info(format!(
@@ -669,8 +670,37 @@ impl SimulationController {
         materialize_saved_outputs(analysis, &contracts);
     }
 
+    fn retain_completed_analysis(
+        &mut self,
+        state: &mut AppState,
+        target_run_id: Option<u64>,
+        analysis: AnalysisResult,
+        provenance: AnalysisResultProvenance,
+    ) -> Result<bool, String> {
+        let run_id = target_run_id
+            .ok_or_else(|| "completed analysis has no target simulation run".to_owned())?;
+        let completed_instance = provenance.source_instance_id();
+        let succeeded = analysis.success;
+        let run = state
+            .simulation
+            .run_by_sequence_mut(run_id)
+            .ok_or_else(|| format!("completed analysis target run {run_id} does not exist"))?;
+        run.add_analysis(analysis.with_provenance(provenance));
+        if succeeded {
+            self.successful_analysis_instances
+                .insert(completed_instance);
+        }
+        log::info!(
+            "Added analysis to run {} (now has {} analyses)",
+            run.id,
+            run.analyses.len()
+        );
+        Ok(succeeded)
+    }
+
     /// Finish the simulation batch and clean up state
     fn finish_simulation_batch(&mut self, state: &mut AppState) {
+        let completed_analysis_count = self.total_analyses;
         let completed_run_id = self.target_run_id(state);
         let run_success = completed_run_id
             .and_then(|run_id| state.simulation.run_by_sequence(run_id))
@@ -721,6 +751,22 @@ impl SimulationController {
         } else {
             "Completed with errors".to_string()
         };
+        let summary = if run_success {
+            if completed_analysis_count > 1 {
+                ConsoleMessage::info(format!(
+                    "All {completed_analysis_count} analyses completed successfully"
+                ))
+            } else {
+                ConsoleMessage::info("Simulation completed successfully".to_owned())
+            }
+        } else if completed_analysis_count > 1 {
+            ConsoleMessage::error(format!(
+                "Analysis batch completed with errors ({completed_analysis_count} planned)"
+            ))
+        } else {
+            ConsoleMessage::error("Simulation completed with errors".to_owned())
+        };
+        state.push_sim_message(summary);
 
         log::info!("Simulation batch completed");
     }
@@ -983,16 +1029,8 @@ impl SimulationController {
                         .as_ref()
                         .map(|spec| self.analysis_name_for_spec(spec))
                         .or_else(|| self.current_config.as_ref().map(|c| self.analysis_name(c)))
-                        .unwrap_or("Analysis");
-                    let completion_msg = if self.total_analyses > 1 {
-                        format!(
-                            "{} completed ({}/{})",
-                            current_label, self.current_analysis_idx, self.total_analyses
-                        )
-                    } else {
-                        "Simulation completed successfully".to_string()
-                    };
-                    state.push_sim_message(ConsoleMessage::info(completion_msg));
+                        .unwrap_or("Analysis")
+                        .to_owned();
 
                     // Convert SimulationResult to AnalysisResult and add to run
                     let analysis_type = self
@@ -1046,42 +1084,51 @@ impl SimulationController {
                         );
                     }
 
-                    // Reliability results are populated by dedicated reliability analysis runs.
-                    if let crate::simulation::SimulationResult::Reliability {
-                        device_results, ..
-                    } = &sim_result
-                    {
-                        state.simulation.reliability_results = device_results.clone();
-                    }
-                    if let crate::simulation::SimulationResult::Soa { violations, .. } = &sim_result
-                    {
-                        state.simulation.soa_violations = violations.clone();
-                    }
-
                     let mut analysis_result = if let Some(config) = &self.current_config {
                         self.convert_to_analysis_result_owned(sim_result, config)
                     } else {
                         self.convert_to_analysis_result_with_metadata_owned(
                             sim_result,
                             analysis_type,
-                            current_label,
+                            &current_label,
                         )
                     };
                     self.materialize_current_saved_outputs(&mut analysis_result);
+                    let retention_error = analysis_result.error_message.clone();
                     if let Some(provenance) = self.current_provenance.take() {
-                        let completed_instance = provenance.source_instance_id();
-                        let analysis_result = analysis_result.with_provenance(provenance);
-                        if let Some(run_id) = target_run_id
-                            && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
-                        {
-                            run.add_analysis(analysis_result);
-                            self.successful_analysis_instances
-                                .insert(completed_instance);
-                            log::info!(
-                                "Added analysis to run {} (now has {} analyses)",
-                                run.id,
-                                run.analyses.len()
-                            );
+                        match self.retain_completed_analysis(
+                            state,
+                            target_run_id,
+                            analysis_result,
+                            provenance,
+                        ) {
+                            Ok(true) => {
+                                if self.total_analyses > 1 {
+                                    state.push_sim_message(ConsoleMessage::info(format!(
+                                        "{} completed ({}/{})",
+                                        current_label,
+                                        self.current_analysis_idx,
+                                        self.total_analyses
+                                    )));
+                                }
+                            }
+                            Ok(false) => {
+                                state.push_sim_message(ConsoleMessage::error(format!(
+                                    "{} result retention failed: {}",
+                                    current_label,
+                                    retention_error
+                                        .as_deref()
+                                        .unwrap_or("unknown retention error")
+                                )));
+                            }
+                            Err(error) => {
+                                log::error!("{error}");
+                                state.push_sim_message(ConsoleMessage::error(error));
+                                if let Some(run) = state.simulation.active_run_mut() {
+                                    run.success = false;
+                                }
+                                self.pending_analyses.clear();
+                            }
                         }
                     } else {
                         let message = format!(
@@ -1116,13 +1163,7 @@ impl SimulationController {
                         );
                         self.start_next_analysis(state);
                     } else {
-                        // All analyses complete - finalize the batch
-                        if self.total_analyses > 1 {
-                            state.push_sim_message(ConsoleMessage::info(format!(
-                                "All {} analyses completed successfully",
-                                self.total_analyses
-                            )));
-                        }
+                        // All analyses complete - finalize the batch.
                         self.finish_simulation_batch(state);
                     }
                 }
@@ -1390,6 +1431,35 @@ mod tests {
             Vec::new(),
         )
         .expect("synthetic prepared-task provenance is valid")
+    }
+
+    #[test]
+    fn failed_result_retention_never_satisfies_prepared_dependencies() {
+        let mut state = AppState::default();
+        let run_sequence = state.simulation.start_run().id;
+        let provenance = synthetic_result_provenance();
+        let instance = provenance.source_instance_id();
+        let failed = AnalysisResult::failed(
+            1,
+            AnalysisType::Reliability,
+            "Reliability",
+            "invalid retained evidence",
+        );
+        let mut controller = SimulationController::new();
+
+        assert!(
+            !controller
+                .retain_completed_analysis(&mut state, Some(run_sequence), failed, provenance)
+                .expect("failed result is retained as failure evidence")
+        );
+        assert!(!controller.successful_analysis_instances.contains(&instance));
+        let run = state
+            .simulation
+            .run_by_sequence(run_sequence)
+            .expect("target run remains");
+        assert!(!run.success);
+        assert_eq!(run.analyses.len(), 1);
+        assert!(!run.analyses[0].success);
     }
 
     fn exact_vec(values: &[f64]) -> Vec<f64> {
@@ -2302,9 +2372,22 @@ mod tests {
 
         let reliability = controller.convert_to_analysis_result_with_metadata_owned(
             crate::simulation::SimulationResult::Reliability {
-                years: vec![0.0, 1.0, 10.0],
+                years: vec![1.0, 5.0, 10.0],
                 waveforms: empty_waveforms(),
-                device_results: Vec::new(),
+                device_results: vec![crate::simulation::ReliabilityResult {
+                    device_id: "M1".to_owned(),
+                    stress: crate::simulation::StressMetrics {
+                        avg_vgs_stress: 1.2,
+                        avg_vds_stress: 1.8,
+                        avg_temp: 358.15,
+                        duration: 3_600.0,
+                    },
+                    shifts: std::collections::HashMap::from([
+                        ("1y".to_owned(), crate::simulation::ParamShift::default()),
+                        ("5y".to_owned(), crate::simulation::ParamShift::default()),
+                        ("10y".to_owned(), crate::simulation::ParamShift::default()),
+                    ]),
+                }],
             },
             AnalysisType::Reliability,
             "Reliability",
@@ -2312,9 +2395,13 @@ mod tests {
         assert_eq!(
             reliability.family_metadata,
             Some(AnalysisResultFamilyMetadata::Reliability {
-                years: vec![0.0, 1.0, 10.0],
+                years: vec![1.0, 5.0, 10.0],
             })
         );
+        assert!(matches!(
+            reliability.result_payload,
+            Some(AnalysisResultPayload::Reliability { ref devices }) if devices.len() == 1
+        ));
 
         let optimization = controller.convert_to_analysis_result_with_metadata_owned(
             crate::simulation::SimulationResult::Optimization {
@@ -2348,6 +2435,17 @@ mod tests {
                 time: vec![0.0, 1.0e-9],
                 waveforms: empty_waveforms(),
                 violations: Vec::new(),
+                evaluations: vec![crate::services::safety::SoAEvaluation {
+                    device_id: "M1".to_owned(),
+                    parameter: crate::services::safety::SoAParameter::Vgs,
+                    limit_value: 1.8,
+                    worst_actual_value: 1.0,
+                    worst_time: 1.0e-9,
+                    sample_count: 2,
+                    unit: "V".to_owned(),
+                    description: "Maximum gate-source voltage".to_owned(),
+                    verdict: crate::services::safety::SoARuleVerdict::Pass,
+                }],
             },
             AnalysisType::Soa,
             "SOA",
@@ -2358,6 +2456,13 @@ mod tests {
                 time: vec![0.0, 1.0e-9],
             })
         );
+        assert!(matches!(
+            soa.result_payload,
+            Some(AnalysisResultPayload::Soa {
+                ref evaluations,
+                ref violations,
+            }) if evaluations.len() == 1 && violations.is_empty()
+        ));
     }
 
     #[test]
@@ -2455,6 +2560,46 @@ mod tests {
                     ("zeta".to_owned(), 0.7),
                 ]),
             })
+        );
+    }
+
+    #[test]
+    fn incomplete_reliability_and_soa_results_fail_closed_without_retained_payloads() {
+        let controller = SimulationController::new();
+        let reliability = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Reliability {
+                years: vec![1.0, 10.0],
+                waveforms: std::collections::HashMap::new(),
+                device_results: Vec::new(),
+            },
+            AnalysisType::Reliability,
+            "Reliability",
+        );
+        assert!(!reliability.success);
+        assert!(reliability.result_payload.is_none());
+        assert!(
+            reliability
+                .error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("no device evidence"))
+        );
+
+        let soa = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Soa {
+                time: vec![0.0, 1.0],
+                waveforms: std::collections::HashMap::new(),
+                violations: Vec::new(),
+                evaluations: Vec::new(),
+            },
+            AnalysisType::Soa,
+            "SOA",
+        );
+        assert!(!soa.success);
+        assert!(soa.result_payload.is_none());
+        assert!(
+            soa.error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("no evaluated-rule evidence"))
         );
     }
 

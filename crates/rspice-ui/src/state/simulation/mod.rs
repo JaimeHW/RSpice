@@ -3,10 +3,8 @@
 //! Manages simulation execution state and results.
 
 use super::schematic::Point;
-use crate::services::safety::SoAViolation;
 use crate::services::yield_manager::{YieldAnalysisProvenance, YieldResult};
 use crate::simulation::optimizer::OptimizerState;
-use crate::simulation::reliability_engine::ReliabilityResult;
 use rspice_core::Value;
 use std::collections::HashMap;
 
@@ -31,8 +29,10 @@ pub use ac_bode::{
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, ComplexResultValue, DcOpResult, MonteCarloVariableMetadata,
-    NoiseContributorRow, NoiseSummary, OperatingPointValue, SensitivityResultMode,
-    SensitivityResultRow,
+    NoiseContributorRow, NoiseSummary, OperatingPointValue, ReliabilityCheckpointEvidence,
+    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
+    SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence,
+    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;

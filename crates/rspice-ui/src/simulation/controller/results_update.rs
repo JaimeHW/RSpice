@@ -261,7 +261,6 @@ impl SimulationController {
                 waveforms: _,
                 device_results,
             } => {
-                state.simulation.reliability_results = device_results.clone();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Reliability: {} lifetime points, {} devices analyzed",
                     years.len(),
@@ -294,8 +293,8 @@ impl SimulationController {
                 time,
                 waveforms: _,
                 violations,
+                ..
             } => {
-                state.simulation.soa_violations = violations.clone();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "SOA: {} sampled points, {} violations",
                     time.len(),

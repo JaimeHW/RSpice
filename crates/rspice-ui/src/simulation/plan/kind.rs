@@ -428,7 +428,7 @@ impl AnalysisKind {
             Self::Reliability => {
                 "Mission-profile stress, degradation models, and lifetime margins."
             }
-            Self::Soa => "Electrical terminal, current, power, and temperature-aware stress rules.",
+            Self::Soa => "Sampled MOS/JFET/MESFET and BJT terminal-voltage magnitude limit checks.",
             Self::Optimization => {
                 "Bounded variables, objectives, hard constraints, algorithms, and candidate history."
             }

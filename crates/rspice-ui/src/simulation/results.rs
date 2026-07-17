@@ -3,7 +3,7 @@
 //! Containers for simulation results that bridge rspice-core outputs
 //! to the waveform viewer and other UI components.
 
-use crate::services::safety::SoAViolation;
+use crate::services::safety::{SoAEvaluation, SoAViolation};
 use crate::simulation::reliability_engine::ReliabilityResult;
 use std::collections::HashMap;
 
@@ -175,6 +175,8 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         /// Collected SOA violations.
         violations: Vec<SoAViolation>,
+        /// Complete evaluated-rule evidence, including passing rules.
+        evaluations: Vec<SoAEvaluation>,
     },
 
     /// Scalar-only result payload for analyses that report measurements

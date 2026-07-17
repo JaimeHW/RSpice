@@ -5,5 +5,6 @@
 pub mod soa_manager;
 
 pub use soa_manager::{
-    SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation, ViolationSeverity,
+    SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoARuleVerdict, SoAViolation,
+    ViolationSeverity,
 };

@@ -3780,7 +3780,9 @@ fn retained_pole_zero_payload(
             Some((poles.as_slice(), zeros.as_slice(), *gain))
         }
         AnalysisResultPayload::Sensitivity { .. }
-        | AnalysisResultPayload::ScalarMeasurements { .. } => None,
+        | AnalysisResultPayload::ScalarMeasurements { .. }
+        | AnalysisResultPayload::Reliability { .. }
+        | AnalysisResultPayload::Soa { .. } => None,
     }
 }
 
@@ -3801,7 +3803,9 @@ fn retained_sensitivity_payload(
             rows,
         } => Some((output.as_str(), *result_mode, rows.as_slice())),
         AnalysisResultPayload::PoleZero { .. }
-        | AnalysisResultPayload::ScalarMeasurements { .. } => None,
+        | AnalysisResultPayload::ScalarMeasurements { .. }
+        | AnalysisResultPayload::Reliability { .. }
+        | AnalysisResultPayload::Soa { .. } => None,
     }
 }
 

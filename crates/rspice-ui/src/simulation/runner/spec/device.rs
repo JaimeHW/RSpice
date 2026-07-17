@@ -326,6 +326,7 @@ fn run_soa(
         time: data.time,
         waveforms,
         violations: data.violations,
+        evaluations: data.evaluations,
     })
 }
 

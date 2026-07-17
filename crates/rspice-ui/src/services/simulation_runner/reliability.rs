@@ -239,10 +239,18 @@ fn build_node_voltage_lookup(
     let mut lookup = HashMap::new();
     for (idx, node_name) in dc_result.node_names.iter().enumerate() {
         poll_periodically(abort, idx)?;
-        if let Some(voltage) = dc_result.node_voltages.get(idx) {
-            lookup.insert(node_name.clone(), *voltage);
-            lookup.insert(node_name.to_ascii_uppercase(), *voltage);
+        let voltage = dc_result.node_voltages.get(idx).copied().ok_or_else(|| {
+            ServiceRunError::Failure(format!(
+                "Reliability DC operating point omitted voltage for node '{node_name}'"
+            ))
+        })?;
+        if !voltage.is_finite() {
+            return Err(ServiceRunError::Failure(format!(
+                "Reliability DC operating point returned a non-finite voltage for node '{node_name}'"
+            )));
         }
+        lookup.insert(node_name.clone(), voltage);
+        lookup.insert(node_name.to_ascii_uppercase(), voltage);
     }
     lookup.insert("0".to_string(), 0.0);
     lookup.insert("GND".to_string(), 0.0);
@@ -250,19 +258,28 @@ fn build_node_voltage_lookup(
     Ok(lookup)
 }
 
-fn resolve_node_voltage(node_voltages: &HashMap<String, Value>, node_name: &str) -> Value {
+fn resolve_node_voltage(
+    node_voltages: &HashMap<String, Value>,
+    node_name: &str,
+) -> ServiceRunResult<Value> {
     let trimmed = node_name.trim();
     if trimmed.is_empty() {
-        return 0.0;
+        return Err(ServiceRunError::Failure(
+            "Reliability device contains an empty node name".to_owned(),
+        ));
     }
     if trimmed == "0" || trimmed.eq_ignore_ascii_case("gnd") {
-        return 0.0;
+        return Ok(0.0);
     }
     node_voltages
         .get(trimmed)
         .copied()
         .or_else(|| node_voltages.get(&trimmed.to_ascii_uppercase()).copied())
-        .unwrap_or(0.0)
+        .ok_or_else(|| {
+            ServiceRunError::Failure(format!(
+                "Reliability DC operating point omitted required node '{trimmed}'"
+            ))
+        })
 }
 
 fn extract_reliability_stress_data(
@@ -282,9 +299,9 @@ fn extract_reliability_stress_data(
                 if element.nodes.len() < 3 {
                     None
                 } else {
-                    let vd = resolve_node_voltage(node_voltages, &element.nodes[0]);
-                    let vg = resolve_node_voltage(node_voltages, &element.nodes[1]);
-                    let vs = resolve_node_voltage(node_voltages, &element.nodes[2]);
+                    let vd = resolve_node_voltage(node_voltages, &element.nodes[0])?;
+                    let vg = resolve_node_voltage(node_voltages, &element.nodes[1])?;
+                    let vs = resolve_node_voltage(node_voltages, &element.nodes[2])?;
                     Some(((vg - vs).abs(), (vd - vs).abs()))
                 }
             }
@@ -292,9 +309,9 @@ fn extract_reliability_stress_data(
                 if element.nodes.len() < 3 {
                     None
                 } else {
-                    let vc = resolve_node_voltage(node_voltages, &element.nodes[0]);
-                    let vb = resolve_node_voltage(node_voltages, &element.nodes[1]);
-                    let ve = resolve_node_voltage(node_voltages, &element.nodes[2]);
+                    let vc = resolve_node_voltage(node_voltages, &element.nodes[0])?;
+                    let vb = resolve_node_voltage(node_voltages, &element.nodes[1])?;
+                    let ve = resolve_node_voltage(node_voltages, &element.nodes[2])?;
                     Some(((vb - ve).abs(), (vc - ve).abs()))
                 }
             }
@@ -302,8 +319,8 @@ fn extract_reliability_stress_data(
                 if element.nodes.len() < 2 {
                     None
                 } else {
-                    let va = resolve_node_voltage(node_voltages, &element.nodes[0]);
-                    let vk = resolve_node_voltage(node_voltages, &element.nodes[1]);
+                    let va = resolve_node_voltage(node_voltages, &element.nodes[0])?;
+                    let vk = resolve_node_voltage(node_voltages, &element.nodes[1])?;
                     let vak = (va - vk).abs();
                     Some((vak, vak))
                 }
@@ -459,5 +476,24 @@ mod tests {
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 3);
+    }
+
+    #[test]
+    fn reliability_rejects_missing_required_node_voltage() {
+        let voltages = HashMap::from([("OUT".to_owned(), 1.0)]);
+        assert_eq!(
+            resolve_node_voltage(&voltages, "out").expect("case-insensitive node exists"),
+            1.0
+        );
+        assert_eq!(
+            resolve_node_voltage(&voltages, "0").expect("ground is canonical"),
+            0.0
+        );
+        assert!(
+            resolve_node_voltage(&voltages, "missing")
+                .expect_err("missing node must fail closed")
+                .to_string()
+                .contains("omitted required node")
+        );
     }
 }
