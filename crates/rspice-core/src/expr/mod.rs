@@ -16,7 +16,7 @@ mod vm;
 
 pub use ast::{BinaryOp, Expr, Function, LookupInterpolation, LookupTable, UnaryOp};
 pub use compiler::compile;
-pub use file_table::resolve_file_lookup_functions;
+pub use file_table::{resolve_file_lookup_functions, resolve_file_lookup_functions_with_limits};
 pub use parser::{ParseError, parse_expression, parse_expression_strict};
 pub(crate) use power::{normalize_expression_boundary, real_pow, real_pow_with_derivative};
 pub use vm::{CompiledExpr, Context, Instruction, Vm};

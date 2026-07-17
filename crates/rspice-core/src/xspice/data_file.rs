@@ -22,14 +22,20 @@ struct VirtualDataFile {
     stamp: DataFileStamp,
 }
 
-static VIRTUAL_DATA_FILE_EPOCH: AtomicU64 = AtomicU64::new(0);
-
-fn virtual_files() -> &'static Mutex<HashMap<String, VirtualDataFile>> {
-    static FILES: OnceLock<Mutex<HashMap<String, VirtualDataFile>>> = OnceLock::new();
-    FILES.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Debug, Default)]
+struct VirtualDataFileRegistry {
+    retained_bytes: usize,
+    files: HashMap<String, VirtualDataFile>,
 }
 
-fn lock_virtual_files() -> MutexGuard<'static, HashMap<String, VirtualDataFile>> {
+static VIRTUAL_DATA_FILE_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+fn virtual_files() -> &'static Mutex<VirtualDataFileRegistry> {
+    static FILES: OnceLock<Mutex<VirtualDataFileRegistry>> = OnceLock::new();
+    FILES.get_or_init(|| Mutex::new(VirtualDataFileRegistry::default()))
+}
+
+fn lock_virtual_files() -> MutexGuard<'static, VirtualDataFileRegistry> {
     virtual_files()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -212,9 +218,9 @@ fn ngspice_input_dir_path(path: &Path) -> Option<PathBuf> {
 
 fn native_path_error(
     preferred: &Path,
-    preferred_err: &std::io::Error,
+    preferred_err: &str,
     fallback: &Path,
-    fallback_err: &std::io::Error,
+    fallback_err: &str,
 ) -> String {
     format!(
         "'{}' failed: {}; fallback '{}' failed: {}",
@@ -226,32 +232,46 @@ fn native_path_error(
 }
 
 fn read_native_to_string_with_stamp(path: &str) -> Result<(Arc<str>, DataFileStamp), String> {
-    fn read_path(path: &Path) -> Result<(Arc<str>, DataFileStamp), std::io::Error> {
-        let contents = std::fs::read_to_string(path)?;
-        let metadata = std::fs::metadata(path)?;
+    read_native_to_string_with_stamp_limited(
+        path,
+        crate::resource::ResourceLimits::default().max_external_data_bytes,
+    )
+}
+
+fn read_native_to_string_with_stamp_limited(
+    path: &str,
+    limit: usize,
+) -> Result<(Arc<str>, DataFileStamp), String> {
+    fn read_path(path: &Path, limit: usize) -> Result<(Arc<str>, DataFileStamp), String> {
+        let (contents, metadata) = crate::resource::read_utf8_file_limited_with_metadata(
+            path,
+            crate::resource::ResourceKind::ExternalDataBytes,
+            limit,
+        )
+        .map_err(|error| error.to_string())?;
         let stamp = stamp_from_metadata(metadata, content_hash(contents.as_bytes()));
         Ok((Arc::<str>::from(contents), stamp))
     }
 
     let path_ref = Path::new(path);
     if let Some(preferred) = ngspice_input_dir_path(path_ref) {
-        match read_path(&preferred) {
+        match read_path(&preferred, limit) {
             Ok(file) => return Ok(file),
-            Err(preferred_err) => match read_path(path_ref) {
+            Err(preferred_err) => match read_path(path_ref, limit) {
                 Ok(file) => return Ok(file),
                 Err(fallback_err) => {
                     return Err(native_path_error(
                         &preferred,
-                        &preferred_err,
+                        preferred_err.as_str(),
                         path_ref,
-                        &fallback_err,
+                        fallback_err.as_str(),
                     ));
                 }
             },
         }
     }
 
-    read_path(path_ref).map_err(|err| err.to_string())
+    read_path(path_ref, limit)
 }
 
 fn native_stamp(path: &str) -> Result<DataFileStamp, String> {
@@ -260,7 +280,7 @@ fn native_stamp(path: &str) -> Result<DataFileStamp, String> {
 
 fn registered(path: &str) -> Result<Option<VirtualDataFile>, String> {
     let files = lock_virtual_files();
-    Ok(files.get(path).cloned())
+    Ok(files.files.get(path).cloned())
 }
 
 /// Register or replace a virtual XSPICE data file.
@@ -272,8 +292,23 @@ pub fn register_data_file(
     path: impl Into<String>,
     contents: impl Into<String>,
 ) -> Result<(), String> {
+    register_data_file_with_limits(path, contents, crate::resource::ResourceLimits::default())
+}
+
+/// Register or replace a virtual XSPICE data file under an explicit resource policy.
+pub fn register_data_file_with_limits(
+    path: impl Into<String>,
+    contents: impl Into<String>,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Result<(), String> {
     let path = path.into();
     let contents = contents.into();
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataBytes,
+        contents.len(),
+        resource_limits.max_external_data_bytes,
+    )
+    .map_err(|error| error.to_string())?;
     let stamp = virtual_stamp(&contents);
     let file = VirtualDataFile {
         stamp,
@@ -281,13 +316,28 @@ pub fn register_data_file(
     };
     {
         let mut files = lock_virtual_files();
-        if let Some(existing) = files.get(&path)
+        let replaced_bytes = files
+            .files
+            .get(&path)
+            .map_or(0, |existing| existing.contents.len());
+        let retained_bytes = files
+            .retained_bytes
+            .saturating_sub(replaced_bytes)
+            .saturating_add(file.contents.len());
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::SharedCacheBytes,
+            retained_bytes,
+            resource_limits.max_shared_cache_bytes,
+        )
+        .map_err(|error| error.to_string())?;
+        if let Some(existing) = files.files.get(&path)
             && existing.stamp == file.stamp
             && existing.contents == file.contents
         {
             return Ok(());
         }
-        files.insert(path, file);
+        files.files.insert(path, file);
+        files.retained_bytes = retained_bytes;
     }
     bump_virtual_data_file_epoch();
     Ok(())
@@ -297,7 +347,11 @@ pub fn register_data_file(
 pub fn unregister_data_file(path: &str) -> Result<(), String> {
     let removed = {
         let mut files = lock_virtual_files();
-        files.remove(path).is_some()
+        let Some(removed) = files.files.remove(path) else {
+            return Ok(());
+        };
+        files.retained_bytes = files.retained_bytes.saturating_sub(removed.contents.len());
+        true
     };
     if removed {
         bump_virtual_data_file_epoch();
@@ -309,8 +363,9 @@ pub fn unregister_data_file(path: &str) -> Result<(), String> {
 pub fn clear_registered_data_files() -> Result<(), String> {
     let cleared = {
         let mut files = lock_virtual_files();
-        let cleared = !files.is_empty();
-        files.clear();
+        let cleared = !files.files.is_empty();
+        files.files.clear();
+        files.retained_bytes = 0;
         cleared
     };
     if cleared {
@@ -337,7 +392,7 @@ pub(crate) fn data_file_stamp(path: &str) -> Result<DataFileStamp, String> {
 
 pub(crate) fn virtual_data_file_stamp(path: &str) -> Option<DataFileStamp> {
     let files = lock_virtual_files();
-    files.get(path).map(|file| file.stamp)
+    files.files.get(path).map(|file| file.stamp)
 }
 
 pub(crate) fn loaded_virtual_data_file_stamp(stamp: DataFileStamp) -> Option<DataFileStamp> {
@@ -345,14 +400,34 @@ pub(crate) fn loaded_virtual_data_file_stamp(stamp: DataFileStamp) -> Option<Dat
 }
 
 pub(crate) fn read_to_string_with_stamp(path: &str) -> Result<(Arc<str>, DataFileStamp), String> {
+    read_to_string_with_stamp_limited(
+        path,
+        crate::resource::ResourceLimits::default().max_external_data_bytes,
+    )
+}
+
+pub(crate) fn read_to_string_with_stamp_limited(
+    path: &str,
+    limit: usize,
+) -> Result<(Arc<str>, DataFileStamp), String> {
     if let Some(file) = registered(path)? {
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataBytes,
+            file.contents.len(),
+            limit,
+        )
+        .map_err(|error| error.to_string())?;
         return Ok((file.contents, file.stamp));
     }
-    read_native_to_string_with_stamp(path)
+    read_native_to_string_with_stamp_limited(path, limit)
 }
 
 pub(crate) fn read_to_string(path: &str) -> Result<Arc<str>, String> {
     read_to_string_with_stamp(path).map(|(contents, _)| contents)
+}
+
+pub(crate) fn read_to_string_limited(path: &str, limit: usize) -> Result<Arc<str>, String> {
+    read_to_string_with_stamp_limited(path, limit).map(|(contents, _)| contents)
 }
 
 #[cfg(test)]
@@ -417,6 +492,46 @@ mod tests {
         assert!(!Arc::ptr_eq(&second_contents, &third_contents));
 
         unregister_data_file(&path).expect("unregister virtual data file");
+    }
+
+    #[test]
+    fn virtual_data_files_enforce_per_file_and_reader_limits() {
+        let _guard = test_registry_guard();
+        clear_registered_data_files().expect("clear registry before limit test");
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_external_data_bytes = 3;
+
+        let error = register_data_file_with_limits("virtual://limited/register", "1234", limits)
+            .expect_err("oversized registration must fail");
+        assert!(error.contains("external_data_bytes limit exceeded"));
+
+        register_data_file("virtual://limited/read", "1234").expect("register default-sized file");
+        let error = read_to_string_limited("virtual://limited/read", 3)
+            .expect_err("stricter reader policy must reject cached contents");
+        assert!(error.contains("external_data_bytes limit exceeded"));
+        clear_registered_data_files().expect("clear registry after limit test");
+    }
+
+    #[test]
+    fn virtual_data_file_registry_enforces_aggregate_retention() {
+        let _guard = test_registry_guard();
+        clear_registered_data_files().expect("clear registry before aggregate test");
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_shared_cache_bytes = 7;
+
+        register_data_file_with_limits("virtual://limited/first", "1234", limits)
+            .expect("first file fits aggregate limit");
+        let mut stricter_limits = limits;
+        stricter_limits.max_shared_cache_bytes = 3;
+        let error =
+            register_data_file_with_limits("virtual://limited/first", "1234", stricter_limits)
+                .expect_err("idempotent registration must honor the caller's stricter policy");
+        assert!(error.contains("shared_cache_bytes limit exceeded"));
+        let error = register_data_file_with_limits("virtual://limited/second", "5678", limits)
+            .expect_err("second file must exceed aggregate limit");
+        assert!(error.contains("shared_cache_bytes limit exceeded"));
+        assert!(virtual_data_file_stamp("virtual://limited/second").is_none());
+        clear_registered_data_files().expect("clear registry after aggregate test");
     }
 
     #[test]

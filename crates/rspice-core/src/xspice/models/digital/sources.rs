@@ -132,8 +132,14 @@ fn reserve_d_source_tokens(
     input_file: &str,
     width: usize,
     tokens: &mut Vec<&str>,
-) -> CmResult<usize> {
+    value_limit: usize,
+) -> Result<usize, DSourceParseError> {
     let expected = d_source_expected_tokens(input_file, width)?;
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        expected,
+        value_limit,
+    )?;
     tokens.try_reserve_exact(expected).map_err(|err| {
         d_source_width_error(
             input_file,
@@ -186,14 +192,30 @@ fn is_digital_table_data_line(line: &str) -> bool {
         && !trimmed.starts_with('$')
 }
 
+fn digital_table_tokens(line: &str) -> impl Iterator<Item = &str> {
+    let uncommented = line.split(['#', ';', '$']).next().unwrap_or(line);
+    uncommented
+        .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
+        .filter(|token| !token.is_empty())
+}
+
+fn tokenize_digital_table_line_bounded<'line>(
+    line: &'line str,
+    tokens: &mut Vec<&'line str>,
+    maximum: usize,
+) -> Result<(), std::collections::TryReserveError> {
+    tokens.clear();
+    for token in digital_table_tokens(line).take(maximum.saturating_add(1)) {
+        tokens.try_reserve(1)?;
+        tokens.push(token);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 fn tokenize_digital_table_line<'line>(line: &'line str, tokens: &mut Vec<&'line str>) {
     tokens.clear();
-    let uncommented = line.split(['#', ';', '$']).next().unwrap_or(line);
-    tokens.extend(
-        uncommented
-            .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
-            .filter(|token| !token.is_empty()),
-    );
+    tokens.extend(digital_table_tokens(line));
 }
 
 fn digital_table_output_code(token: &str) -> Option<i64> {
@@ -289,11 +311,53 @@ fn parse_d_source_contents(
     width: usize,
     contents: &str,
 ) -> CmResult<DSourceRows> {
+    parse_d_source_contents_limited(
+        input_file,
+        width,
+        contents,
+        crate::resource::ResourceLimits::default().max_external_data_values,
+    )
+    .map_err(|error| error.into_cm_error(input_file))
+}
+
+#[derive(Debug)]
+enum DSourceParseError {
+    Model(CmError),
+    Resource(crate::resource::ResourceLimitError),
+}
+
+impl DSourceParseError {
+    fn into_cm_error(self, input_file: &str) -> CmError {
+        match self {
+            Self::Model(error) => error,
+            Self::Resource(error) => d_source_file_error(input_file, error.to_string()),
+        }
+    }
+}
+
+impl From<CmError> for DSourceParseError {
+    fn from(error: CmError) -> Self {
+        Self::Model(error)
+    }
+}
+
+impl From<crate::resource::ResourceLimitError> for DSourceParseError {
+    fn from(error: crate::resource::ResourceLimitError) -> Self {
+        Self::Resource(error)
+    }
+}
+
+fn parse_d_source_contents_limited(
+    input_file: &str,
+    width: usize,
+    contents: &str,
+    value_limit: usize,
+) -> Result<DSourceRows, DSourceParseError> {
     let mut rows = Vec::new();
     let mut values = Vec::new();
     let mut previous_time = None;
     let mut tokens = Vec::new();
-    let expected = reserve_d_source_tokens(input_file, width, &mut tokens)?;
+    let expected = reserve_d_source_tokens(input_file, width, &mut tokens, value_limit)?;
 
     for (line_idx, line) in contents.lines().enumerate() {
         let line_no = line_idx + 1;
@@ -301,7 +365,13 @@ fn parse_d_source_contents(
             continue;
         }
 
-        tokenize_digital_table_line(line, &mut tokens);
+        tokenize_digital_table_line_bounded(line, &mut tokens, expected).map_err(|error| {
+            d_source_error(
+                input_file,
+                line_no,
+                format!("unable to reserve row token: {error}"),
+            )
+        })?;
         if tokens.len() != expected {
             return Err(d_source_error(
                 input_file,
@@ -312,7 +382,8 @@ fn parse_d_source_contents(
                     width,
                     tokens.len()
                 ),
-            ));
+            )
+            .into());
         }
 
         let time = data_file::parse_ngspice_spice_value(tokens[0]);
@@ -321,7 +392,8 @@ fn parse_d_source_contents(
                 input_file,
                 line_no,
                 format!("time must be finite, got {}", tokens[0]),
-            ));
+            )
+            .into());
         }
         if let Some(previous_time) = previous_time
             && time <= previous_time
@@ -330,10 +402,21 @@ fn parse_d_source_contents(
                 input_file,
                 line_no,
                 "time values must increase monotonically",
-            ));
+            )
+            .into());
         }
         previous_time = Some(time);
 
+        let requested_values = rows
+            .len()
+            .saturating_add(1)
+            .saturating_add(values.len())
+            .saturating_add(width);
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            requested_values,
+            value_limit,
+        )?;
         reserve_d_source_row(input_file, line_no, width, &mut rows, &mut values)?;
         for token in &tokens[1..] {
             values.push(parse_d_source_token(input_file, line_no, token)?);
@@ -342,7 +425,7 @@ fn parse_d_source_contents(
     }
 
     if rows.is_empty() {
-        return Err(d_source_file_error(input_file, "contains no stimulus rows"));
+        return Err(d_source_file_error(input_file, "contains no stimulus rows").into());
     }
 
     Ok(DSourceRows {
@@ -365,7 +448,25 @@ fn load_d_source_rows(
     Option<data_file::DataFileStamp>,
     CmResult<Option<Arc<DSourceRows>>>,
 ) {
-    let (contents, stamp) = match data_file::read_to_string_with_stamp(input_file) {
+    load_d_source_rows_limited(
+        input_file,
+        width,
+        crate::resource::ResourceLimits::default(),
+    )
+}
+
+fn load_d_source_rows_limited(
+    input_file: &str,
+    width: usize,
+    resource_limits: crate::resource::ResourceLimits,
+) -> (
+    Option<data_file::DataFileStamp>,
+    CmResult<Option<Arc<DSourceRows>>>,
+) {
+    let (contents, stamp) = match data_file::read_to_string_with_stamp_limited(
+        input_file,
+        resource_limits.max_external_data_bytes,
+    ) {
         Ok(file) => file,
         Err(err) => return (None, Err(d_source_file_error(input_file, err))),
     };
@@ -376,15 +477,37 @@ fn load_d_source_rows(
         let mut guard = lock_d_source_cache();
         guard.sync_virtual_epoch();
         if let Some(rows) = guard.entries.get(&key) {
+            let retained_values = rows.rows.len().saturating_add(rows.values.len());
+            if let Err(error) = crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                retained_values,
+                resource_limits.max_external_data_values,
+            ) {
+                return (
+                    virtual_stamp,
+                    Err(d_source_file_error(input_file, error.to_string())),
+                );
+            }
             return (virtual_stamp, Ok(Some(Arc::clone(rows))));
         }
     }
 
-    let rows = match parse_d_source_contents(input_file, width, &contents) {
+    let rows = match parse_d_source_contents_limited(
+        input_file,
+        width,
+        &contents,
+        resource_limits.max_external_data_values,
+    ) {
         Ok(rows) => Arc::new(rows),
-        Err(err) => {
+        Err(DSourceParseError::Model(err)) => {
             log::warn!("{err}; disabling d_source instance");
             return (virtual_stamp, Ok(None));
+        }
+        Err(DSourceParseError::Resource(error)) => {
+            return (
+                virtual_stamp,
+                Err(d_source_file_error(input_file, error.to_string())),
+            );
         }
     };
     let mut guard = lock_d_source_cache();
@@ -406,7 +529,8 @@ fn load_d_source_rows_for_context(
         return Ok(resource.rows.clone());
     }
 
-    let (virtual_stamp, load_result) = load_d_source_rows(input_file, width);
+    let (virtual_stamp, load_result) =
+        load_d_source_rows_limited(input_file, width, ctx.resource_limits());
     let rows = load_result?;
     ctx.set_resource(
         D_SOURCE_ROWS_RESOURCE,
@@ -471,19 +595,33 @@ fn d_source_input_file(ctx: &CmContext) -> &str {
         .unwrap_or("source.txt")
 }
 
-fn d_source_breakpoint_times(input_file: &str) -> CmResult<Vec<Value>> {
-    let contents = data_file::read_to_string(input_file)
-        .map_err(|err| d_source_file_error(input_file, err))?;
-    let mut tokens = Vec::new();
+fn d_source_breakpoint_times(
+    input_file: &str,
+    resource_limits: crate::resource::ResourceLimits,
+) -> CmResult<Vec<Value>> {
+    let contents =
+        data_file::read_to_string_limited(input_file, resource_limits.max_external_data_bytes)
+            .map_err(|err| d_source_file_error(input_file, err))?;
     let mut times = Vec::new();
     for line in contents
         .lines()
         .filter(|line| is_digital_table_data_line(line))
     {
-        tokenize_digital_table_line(line, &mut tokens);
-        if let Some(time_token) = tokens.first() {
+        if let Some(time_token) = digital_table_tokens(line).next() {
             let time = data_file::parse_ngspice_spice_value(time_token);
             if time.is_finite() {
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ExternalDataValues,
+                    times.len().saturating_add(1),
+                    resource_limits.max_external_data_values,
+                )
+                .map_err(|error| d_source_file_error(input_file, error.to_string()))?;
+                times.try_reserve(1).map_err(|error| {
+                    d_source_file_error(
+                        input_file,
+                        format!("unable to reserve breakpoint time: {error}"),
+                    )
+                })?;
                 times.push(time);
             }
         }
@@ -565,7 +703,7 @@ impl CodeModel for DigitalSource {
     }
 
     fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
-        d_source_breakpoint_times(d_source_input_file(ctx))
+        d_source_breakpoint_times(d_source_input_file(ctx), ctx.resource_limits())
     }
 }
 
@@ -617,6 +755,28 @@ impl DStateTable {
         let start = index.checked_mul(self.output_width)?;
         let end = start.checked_add(self.output_width)?;
         self.output_values.get(start..end)
+    }
+
+    fn retained_value_count(&self) -> usize {
+        let wide_inputs = self
+            .transitions
+            .iter()
+            .filter_map(|transition| transition.wide_inputs.as_ref())
+            .map(Vec::len)
+            .fold(0usize, usize::saturating_add);
+        let packed_entries = self.packed_match_index.as_ref().map_or(0, |index| {
+            index
+                .state_entries
+                .values()
+                .map(|entries| entries.len())
+                .fold(index.missing_state_entries.len(), usize::saturating_add)
+        });
+        self.transitions
+            .len()
+            .saturating_add(self.output_values.len())
+            .saturating_add(self.state_ranges.len())
+            .saturating_add(wide_inputs)
+            .saturating_add(packed_entries)
     }
 }
 
@@ -866,17 +1026,43 @@ fn d_state_fill_packed_entries(
 }
 
 fn d_state_build_packed_match_index(
+    state_file: &str,
     transitions: &[DStateTransition],
     state_ranges: &HashMap<i64, DStateRange>,
     input_width: usize,
-) -> Option<DStatePackedMatchIndex> {
-    let entry_len = d_state_packed_entries_len(input_width)?;
+    base_retained_values: usize,
+    value_limit: usize,
+) -> CmResult<Option<DStatePackedMatchIndex>> {
+    let Some(entry_len) = d_state_packed_entries_len(input_width) else {
+        return Ok(None);
+    };
+    let mut retained_values = base_retained_values;
     let mut state_entries = HashMap::new();
     for (&state, range) in state_ranges {
         let DStateRange::Contiguous { start, end } = *range else {
             continue;
         };
-        let mut entries = vec![None; entry_len];
+        state_entries.try_reserve(1).map_err(|error| {
+            d_state_file_error(
+                state_file,
+                format!("unable to reserve packed state index entry: {error}"),
+            )
+        })?;
+        retained_values = retained_values.saturating_add(entry_len);
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            retained_values,
+            value_limit,
+        )
+        .map_err(|error| d_state_file_error(state_file, error.to_string()))?;
+        let mut entries = Vec::new();
+        entries.try_reserve_exact(entry_len).map_err(|error| {
+            d_state_file_error(
+                state_file,
+                format!("unable to reserve {entry_len} packed state entries: {error}"),
+            )
+        })?;
+        entries.resize(entry_len, None);
         for row_index in start..=end {
             let Some(row) = transitions.get(row_index) else {
                 continue;
@@ -886,16 +1072,32 @@ fn d_state_build_packed_match_index(
         state_entries.insert(state, entries.into_boxed_slice());
     }
 
-    let mut missing_state_entries = vec![None; entry_len];
+    retained_values = retained_values.saturating_add(entry_len);
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        retained_values,
+        value_limit,
+    )
+    .map_err(|error| d_state_file_error(state_file, error.to_string()))?;
+    let mut missing_state_entries = Vec::new();
+    missing_state_entries
+        .try_reserve_exact(entry_len)
+        .map_err(|error| {
+            d_state_file_error(
+                state_file,
+                format!("unable to reserve {entry_len} missing-state entries: {error}"),
+            )
+        })?;
+    missing_state_entries.resize(entry_len, None);
     if let Some(row) = transitions.first() {
         d_state_fill_packed_entries(&mut missing_state_entries, input_width, 0, row);
     }
 
-    Some(DStatePackedMatchIndex {
+    Ok(Some(DStatePackedMatchIndex {
         input_width,
         state_entries,
         missing_state_entries: missing_state_entries.into_boxed_slice(),
-    })
+    }))
 }
 
 fn parse_d_state_i64(state_file: &str, line: usize, token: &str) -> CmResult<i64> {
@@ -1053,12 +1255,35 @@ fn parse_d_state_contents(
     output_width: usize,
     contents: &str,
 ) -> CmResult<DStateTable> {
+    parse_d_state_contents_limited(
+        state_file,
+        input_width,
+        output_width,
+        contents,
+        crate::resource::ResourceLimits::default().max_external_data_values,
+    )
+}
+
+fn parse_d_state_contents_limited(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+    contents: &str,
+    value_limit: usize,
+) -> CmResult<DStateTable> {
     let mut transitions = Vec::new();
     let mut output_values = Vec::new();
     let mut last_state = None;
     let mut stale_bit_code = 0;
     let parse_shape = d_state_parse_shape(state_file, input_width, output_width)?;
     let mut tokens = Vec::new();
+    let maximum_row_values = parse_shape.header_len.max(parse_shape.continuation_len);
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        maximum_row_values,
+        value_limit,
+    )
+    .map_err(|error| d_state_file_error(state_file, error.to_string()))?;
     d_state_reserve_tokens(
         state_file,
         input_width,
@@ -1073,7 +1298,27 @@ fn parse_d_state_contents(
             continue;
         }
 
-        tokenize_digital_table_line(line, &mut tokens);
+        tokenize_digital_table_line_bounded(line, &mut tokens, maximum_row_values).map_err(
+            |error| {
+                d_state_error(
+                    state_file,
+                    line_no,
+                    format!("unable to reserve row token: {error}"),
+                )
+            },
+        )?;
+        let requested_values = transitions
+            .len()
+            .saturating_add(1)
+            .saturating_add(output_values.len())
+            .saturating_add(output_width)
+            .saturating_add(input_width);
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            requested_values,
+            value_limit,
+        )
+        .map_err(|error| d_state_file_error(state_file, error.to_string()))?;
         let (state, input_start, next_idx) = if tokens.len() == parse_shape.header_len {
             let state = parse_d_state_i64(state_file, line_no, tokens[0])?;
             d_state_reserve_row_outputs(state_file, line_no, output_width, &mut output_values)?;
@@ -1136,6 +1381,13 @@ fn parse_d_state_contents(
         let next_state = parse_d_state_i64(state_file, line_no, tokens[next_idx])?;
         let (input_mask, input_bits) = d_state_input_pattern_masks(&inputs);
         let wide_inputs = (input_width > 64).then_some(inputs);
+        transitions.try_reserve(1).map_err(|error| {
+            d_state_error(
+                state_file,
+                line_no,
+                format!("unable to reserve state transition: {error}"),
+            )
+        })?;
         transitions.push(DStateTransition {
             state,
             wide_inputs,
@@ -1149,9 +1401,32 @@ fn parse_d_state_contents(
         return Err(d_state_file_error(state_file, "contains no state rows"));
     }
 
-    let state_ranges = d_state_range_index(&transitions);
-    let packed_match_index =
-        d_state_build_packed_match_index(&transitions, &state_ranges, input_width);
+    let state_ranges = d_state_range_index(state_file, &transitions)?;
+    let retained_values = transitions
+        .len()
+        .saturating_add(output_values.len())
+        .saturating_add(
+            transitions
+                .iter()
+                .filter_map(|transition| transition.wide_inputs.as_ref())
+                .map(Vec::len)
+                .fold(0usize, usize::saturating_add),
+        )
+        .saturating_add(state_ranges.len());
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        retained_values,
+        value_limit,
+    )
+    .map_err(|error| d_state_file_error(state_file, error.to_string()))?;
+    let packed_match_index = d_state_build_packed_match_index(
+        state_file,
+        &transitions,
+        &state_ranges,
+        input_width,
+        retained_values,
+        value_limit,
+    )?;
 
     Ok(DStateTable {
         state_ranges,
@@ -1163,10 +1438,21 @@ fn parse_d_state_contents(
     })
 }
 
-fn d_state_range_index(transitions: &[DStateTransition]) -> HashMap<i64, DStateRange> {
+fn d_state_range_index(
+    state_file: &str,
+    transitions: &[DStateTransition],
+) -> CmResult<HashMap<i64, DStateRange>> {
     let mut ranges = HashMap::new();
 
     for (idx, row) in transitions.iter().enumerate() {
+        if !ranges.contains_key(&row.state) {
+            ranges.try_reserve(1).map_err(|error| {
+                d_state_file_error(
+                    state_file,
+                    format!("unable to reserve state index entry: {error}"),
+                )
+            })?;
+        }
         match ranges.get_mut(&row.state) {
             Some(DStateRange::Contiguous { end, .. }) if idx == *end + 1 => {
                 *end = idx;
@@ -1187,7 +1473,7 @@ fn d_state_range_index(transitions: &[DStateTransition]) -> HashMap<i64, DStateR
         }
     }
 
-    ranges
+    Ok(ranges)
 }
 
 fn load_d_state_table(
@@ -1198,7 +1484,27 @@ fn load_d_state_table(
     Option<data_file::DataFileStamp>,
     CmResult<Option<Arc<DStateTable>>>,
 ) {
-    let (contents, stamp) = match data_file::read_to_string_with_stamp(state_file) {
+    load_d_state_table_limited(
+        state_file,
+        input_width,
+        output_width,
+        crate::resource::ResourceLimits::default(),
+    )
+}
+
+fn load_d_state_table_limited(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+    resource_limits: crate::resource::ResourceLimits,
+) -> (
+    Option<data_file::DataFileStamp>,
+    CmResult<Option<Arc<DStateTable>>>,
+) {
+    let (contents, stamp) = match data_file::read_to_string_with_stamp_limited(
+        state_file,
+        resource_limits.max_external_data_bytes,
+    ) {
         Ok(file) => file,
         Err(err) => return (None, Err(d_state_file_error(state_file, err))),
     };
@@ -1209,11 +1515,28 @@ fn load_d_state_table(
         let mut guard = lock_d_state_cache();
         guard.sync_virtual_epoch();
         if let Some(table) = guard.entries.get(&key) {
+            let retained_values = table.retained_value_count();
+            if let Err(error) = crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                retained_values,
+                resource_limits.max_external_data_values,
+            ) {
+                return (
+                    virtual_stamp,
+                    Err(d_state_file_error(state_file, error.to_string())),
+                );
+            }
             return (virtual_stamp, Ok(Some(Arc::clone(table))));
         }
     }
 
-    let table = match parse_d_state_contents(state_file, input_width, output_width, &contents) {
+    let table = match parse_d_state_contents_limited(
+        state_file,
+        input_width,
+        output_width,
+        &contents,
+        resource_limits.max_external_data_values,
+    ) {
         Ok(table) => Arc::new(table),
         Err(err) => return (virtual_stamp, Err(err)),
     };
@@ -1238,7 +1561,8 @@ fn load_d_state_table_for_context(
         return Ok(resource.table.clone());
     }
 
-    let (virtual_stamp, table) = load_d_state_table(state_file, input_width, output_width);
+    let (virtual_stamp, table) =
+        load_d_state_table_limited(state_file, input_width, output_width, ctx.resource_limits());
     let table = table?;
     ctx.set_resource(
         D_STATE_TABLE_RESOURCE,
@@ -1709,6 +2033,31 @@ mod tests {
         assert_eq!(second.row_values(1), &[DigitalValue::zero()][..]);
 
         unregister_test_data_file(input_file);
+    }
+
+    #[test]
+    fn d_source_resource_limit_is_not_treated_as_a_compatibility_parse_failure() {
+        let _guard = data_file_test_guard();
+        let input_file = "virtual://d_source/resource-limit";
+        unregister_test_data_file(input_file);
+        lock_d_source_cache().clear();
+        data_file::register_data_file(input_file, "0 0s\n1n 1s\n")
+            .expect("register virtual d_source data");
+        let mut ctx = CmContext::new();
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_external_data_values = 3;
+        ctx.set_resource_limits(limits);
+
+        let error = load_d_source_rows_for_context(&mut ctx, input_file, 1)
+            .expect_err("resource exhaustion must fail instead of disabling the instance");
+        assert!(
+            error
+                .to_string()
+                .contains("external_data_values limit exceeded")
+        );
+
+        unregister_test_data_file(input_file);
+        lock_d_source_cache().clear();
     }
 
     #[test]

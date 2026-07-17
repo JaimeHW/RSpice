@@ -287,6 +287,42 @@ fn parse_filesource_contents(
     width: usize,
     contents: &str,
 ) -> CmResult<Vec<RawFileSourceField>> {
+    parse_filesource_contents_limited(
+        file,
+        width,
+        contents,
+        crate::resource::ResourceLimits::default().max_external_data_values,
+    )
+}
+
+fn push_filesource_field(
+    file: &str,
+    fields: &mut Vec<RawFileSourceField>,
+    field: RawFileSourceField,
+    limit: usize,
+) -> CmResult<()> {
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        fields.len().saturating_add(1),
+        limit,
+    )
+    .map_err(|error| filesource_error(file, error.to_string()))?;
+    fields.try_reserve(1).map_err(|error| {
+        filesource_error(
+            file,
+            format!("unable to reserve parsed data value: {error}"),
+        )
+    })?;
+    fields.push(field);
+    Ok(())
+}
+
+fn parse_filesource_contents_limited(
+    file: &str,
+    width: usize,
+    contents: &str,
+    value_limit: usize,
+) -> CmResult<Vec<RawFileSourceField>> {
     if width == 0 {
         return Err(filesource_error(
             file,
@@ -313,10 +349,15 @@ fn parse_filesource_contents(
             continue;
         };
 
-        fields.push(RawFileSourceField {
-            line: line_number,
-            value: time,
-        });
+        push_filesource_field(
+            file,
+            &mut fields,
+            RawFileSourceField {
+                line: line_number,
+                value: time,
+            },
+            value_limit,
+        )?;
 
         let mut offset = time_len;
         for value_index in 0..width {
@@ -333,10 +374,15 @@ fn parse_filesource_contents(
             else {
                 break;
             };
-            fields.push(RawFileSourceField {
-                line: line_number,
-                value,
-            });
+            push_filesource_field(
+                file,
+                &mut fields,
+                RawFileSourceField {
+                    line: line_number,
+                    value,
+                },
+                value_limit,
+            )?;
             offset += len;
         }
     }
@@ -360,19 +406,42 @@ fn load_filesource(
     Arc<Vec<RawFileSourceField>>,
     Option<data_file::DataFileStamp>,
 )> {
+    load_filesource_limited(file, width, crate::resource::ResourceLimits::default())
+}
+
+fn load_filesource_limited(
+    file: &str,
+    width: usize,
+    resource_limits: crate::resource::ResourceLimits,
+) -> CmResult<(
+    Arc<Vec<RawFileSourceField>>,
+    Option<data_file::DataFileStamp>,
+)> {
     let (contents, stamp) =
-        data_file::read_to_string_with_stamp(file).map_err(|err| filesource_error(file, err))?;
+        data_file::read_to_string_with_stamp_limited(file, resource_limits.max_external_data_bytes)
+            .map_err(|err| filesource_error(file, err))?;
     let virtual_stamp = data_file::loaded_virtual_data_file_stamp(stamp);
     let key = cache_key(file, width, stamp);
     {
         let mut guard = lock_filesource_cache();
         guard.sync_virtual_epoch();
         if let Some(fields) = guard.entries.get(&key) {
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                fields.len(),
+                resource_limits.max_external_data_values,
+            )
+            .map_err(|error| filesource_error(file, error.to_string()))?;
             return Ok((fields.clone(), virtual_stamp));
         }
     }
 
-    let fields = Arc::new(parse_filesource_contents(file, width, &contents)?);
+    let fields = Arc::new(parse_filesource_contents_limited(
+        file,
+        width,
+        &contents,
+        resource_limits.max_external_data_values,
+    )?);
     let mut guard = lock_filesource_cache();
     guard.sync_virtual_epoch();
     guard.entries.insert(key, fields.clone());
@@ -405,7 +474,7 @@ fn load_filesource_for_context(
         return Ok(fields);
     }
 
-    let (fields, virtual_stamp) = load_filesource(file, width)?;
+    let (fields, virtual_stamp) = load_filesource_limited(file, width, ctx.resource_limits())?;
     ctx.set_resource(
         FILESOURCE_ROWS_RESOURCE,
         Arc::new(FileSourceRowsResource {
@@ -426,7 +495,10 @@ fn load_filesource_from_context(
     Arc<Vec<RawFileSourceField>>,
     Option<data_file::DataFileStamp>,
 )> {
-    filesource_resource_fields(ctx, file, width).map_or_else(|| load_filesource(file, width), Ok)
+    filesource_resource_fields(ctx, file, width).map_or_else(
+        || load_filesource_limited(file, width, ctx.resource_limits()),
+        Ok,
+    )
 }
 
 fn transformed_rows_signature(
@@ -964,6 +1036,29 @@ mod tests {
     fn filesource_cache_lock_recovers_after_poison() {
         poison_filesource_cache_lock();
         lock_filesource_cache().clear();
+    }
+
+    #[test]
+    fn filesource_context_enforces_its_engine_resource_policy() {
+        let _guard = data_file_test_guard();
+        let file = "virtual://filesource/resource-policy";
+        let contents = "0 1\n1 2\n";
+        let _ = data_file::unregister_data_file(file);
+        data_file::register_data_file(file, contents).expect("register filesource data");
+        let mut ctx = filesource_context(file);
+        let mut limits = crate::resource::ResourceLimits::default();
+        limits.max_external_data_bytes = contents.len() - 1;
+        ctx.set_resource_limits(limits);
+
+        let error = FileSource
+            .init(&mut ctx)
+            .expect_err("filesource must inherit its context's byte limit");
+        assert!(
+            error
+                .to_string()
+                .contains("external_data_bytes limit exceeded")
+        );
+        data_file::unregister_data_file(file).expect("unregister filesource data");
     }
 
     #[test]

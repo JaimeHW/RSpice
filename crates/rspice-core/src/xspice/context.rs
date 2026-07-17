@@ -464,6 +464,8 @@ pub struct CmContext {
     evaluation_phase: EvaluationPhase,
     /// Current iteration count (for convergence tracking)
     pub iteration: usize,
+    /// Resource policy inherited from the owning simulation engine.
+    resource_limits: crate::resource::ResourceLimits,
 
     //-------------------------------------------------------------------------
     // Port Values
@@ -600,6 +602,7 @@ impl CmContext {
             call_type: CallType::Init,
             evaluation_phase: EvaluationPhase::DirectEvaluation,
             iteration: 0,
+            resource_limits: crate::resource::ResourceLimits::default(),
             inputs: HashMap::new(),
             input_event_times: HashMap::new(),
             input_vector_event_times: HashMap::new(),
@@ -640,6 +643,16 @@ impl CmContext {
     /// Return the rollback/commit phase for the current model evaluation.
     pub fn evaluation_phase(&self) -> EvaluationPhase {
         self.evaluation_phase
+    }
+
+    /// Resource policy for file-backed and allocation-heavy code models.
+    pub fn resource_limits(&self) -> crate::resource::ResourceLimits {
+        self.resource_limits
+    }
+
+    /// Apply the owning engine's resource policy to this model context.
+    pub(crate) fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
+        self.resource_limits = resource_limits;
     }
 
     /// Final transient stop time, when evaluation is running inside `.tran`.

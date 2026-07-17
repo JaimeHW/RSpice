@@ -109,11 +109,14 @@ fn check_circuit_resource_limits(
 fn validate_source_file_inputs(
     source_name: &str,
     spec: &crate::netlist::SourceSpec,
+    resource_limits: ResourceLimits,
 ) -> Result<(), SimulationError> {
     use crate::netlist::SourceSpec;
 
     match spec {
-        SourceSpec::RfPort { inner, .. } => validate_source_file_inputs(source_name, inner),
+        SourceSpec::RfPort { inner, .. } => {
+            validate_source_file_inputs(source_name, inner, resource_limits)
+        }
         SourceSpec::PwlFile {
             path,
             time_scale,
@@ -122,24 +125,34 @@ fn validate_source_file_inputs(
             value_offset,
             repeat_from,
             ..
-        } => crate::circuit::VoltageSources::load_pwl_waveform_cached(
-            path,
-            *time_scale,
-            *value_scale,
-            *time_offset,
-            *value_offset,
-        )
-        .and_then(|waveform| {
+        } => {
+            let waveform = crate::circuit::VoltageSources::load_pwl_waveform_cached_with_limits(
+                path,
+                *time_scale,
+                *value_scale,
+                *time_offset,
+                *value_offset,
+                resource_limits,
+            )
+            .map_err(|error| match error {
+                crate::device::pwl_file::PwlFileError::ResourceLimit(error) => {
+                    SimulationError::ResourceLimit(error)
+                }
+                error => SimulationError::Circuit(format!(
+                    "source '{source_name}': failed to load PWL file '{path}': {error}"
+                )),
+            })?;
             if let Some(repeat_from) = repeat_from
                 && *repeat_from >= waveform.last_source_time()
             {
-                return Err("PWL R must be less than the final PWL time".to_string());
+                return Err(SimulationError::Circuit(format!(
+                    "source '{source_name}': PWL R must be less than the final PWL time"
+                )));
             }
             Ok(())
-        })
-        .map_err(|error| SimulationError::Circuit(format!("source '{source_name}': {error}"))),
+        }
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
-            validate_source_file_inputs(source_name, transient)
+            validate_source_file_inputs(source_name, transient, resource_limits)
         }
         _ => Ok(()),
     }
@@ -1865,6 +1878,7 @@ fn add_generated_xspice_auto_bridge_instance(
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
+    resource_limits: ResourceLimits,
 ) -> Result<(), SimulationError> {
     let ElementKind::Xspice {
         model,
@@ -1935,6 +1949,7 @@ fn add_generated_xspice_auto_bridge_instance(
     instance.set_temperature(temperature);
     instance.set_ramptime(ramptime);
     instance.set_digital_delay_type(digital_delay_type);
+    instance.set_resource_limits(resource_limits);
     assign_xspice_output_branches(circuit, &mut instance, &element.name)?;
     instance.init().map_err(|e| {
         SimulationError::Circuit(format!(
@@ -1955,6 +1970,7 @@ fn add_generated_xspice_auto_bridge_subcircuit(
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
     spice_dialect: SpiceDialect,
+    resource_limits: ResourceLimits,
 ) -> Result<(), SimulationError> {
     let flattened = flatten_netlist_with_models(generated).map_err(|e| {
         SimulationError::Circuit(format!(
@@ -2016,6 +2032,7 @@ fn add_generated_xspice_auto_bridge_subcircuit(
                     temperature,
                     ramptime,
                     digital_delay_type,
+                    resource_limits,
                 )?;
                 added_xspice = true;
             }
@@ -2150,6 +2167,7 @@ fn add_template_xspice_auto_bridge(
             ramptime,
             digital_delay_type,
             spice_dialect,
+            resource_limits,
         )?;
         log::debug!(
             "Generated XSPICE subcircuit auto-bridge on nodes {} from template {}",
@@ -2178,6 +2196,7 @@ fn add_template_xspice_auto_bridge(
         temperature,
         ramptime,
         digital_delay_type,
+        resource_limits,
     )?;
 
     log::debug!(
@@ -2418,6 +2437,7 @@ fn add_planned_xspice_auto_bridge(
     instance.set_temperature(temperature);
     instance.set_ramptime(ramptime);
     instance.set_digital_delay_type(digital_delay_type);
+    instance.set_resource_limits(resource_limits);
 
     if let Some(output_branch) = output_branch {
         match output_branch {
@@ -3449,6 +3469,7 @@ impl Engine {
                             instance_params,
                             self.config.temperature,
                             self.config.convergence_config.junction_gmin_target,
+                            self.config.resource_limits,
                         )?;
                         continue;
                     }
@@ -3648,7 +3669,7 @@ impl Engine {
                     )?;
                 }
                 ElementKind::VoltageSource(spec) => {
-                    validate_source_file_inputs(&element.name, spec)?;
+                    validate_source_file_inputs(&element.name, spec, self.config.resource_limits)?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
@@ -3690,7 +3711,7 @@ impl Engine {
                     );
                 }
                 ElementKind::CurrentSource(spec) => {
-                    validate_source_file_inputs(&element.name, spec)?;
+                    validate_source_file_inputs(&element.name, spec, self.config.resource_limits)?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let dc_value = extract_dc_value(spec);
@@ -4986,15 +5007,17 @@ impl Engine {
                         ))
                     })?;
 
-                    let mut bvs = crate::device::BehavioralVoltageSource::new_with_source_path(
-                        element.name.clone(),
-                        np,
-                        nn,
-                        branch,
-                        &prepared_expression,
-                        netlist.source_path.as_deref(),
-                    )
-                    .map_err(SimulationError::Circuit)?;
+                    let mut bvs =
+                        crate::device::BehavioralVoltageSource::new_with_source_path_and_limits(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            branch,
+                            &prepared_expression,
+                            netlist.source_path.as_deref(),
+                            self.config.resource_limits,
+                        )
+                        .map_err(SimulationError::Circuit)?;
                     bvs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
                         self.config.temperature,
                     ));
@@ -5024,14 +5047,16 @@ impl Engine {
                         ))
                     })?;
 
-                    let mut bcs = crate::device::BehavioralCurrentSource::new_with_source_path(
-                        element.name.clone(),
-                        np,
-                        nn,
-                        &prepared_expression,
-                        netlist.source_path.as_deref(),
-                    )
-                    .map_err(SimulationError::Circuit)?;
+                    let mut bcs =
+                        crate::device::BehavioralCurrentSource::new_with_source_path_and_limits(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            &prepared_expression,
+                            netlist.source_path.as_deref(),
+                            self.config.resource_limits,
+                        )
+                        .map_err(SimulationError::Circuit)?;
                     bcs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
                         self.config.temperature,
                     ));
@@ -5845,6 +5870,7 @@ impl Engine {
                     instance.set_temperature(self.config.temperature);
                     instance.set_ramptime(self.config.ramptime);
                     instance.set_digital_delay_type(self.config.digital_delay_type);
+                    instance.set_resource_limits(self.config.resource_limits);
 
                     // Allocate MNA branch variables for voltage-driven XSPICE outputs.
                     // This allows stamping exact branch equations (like independent/controlled V sources)

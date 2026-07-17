@@ -29,6 +29,8 @@ struct TransientSourceContext {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PwlCacheKey {
     path: String,
+    file_len: Option<u64>,
+    modified_nanos: Option<u128>,
     time_scale_bits: u64,
     value_scale_bits: u64,
     time_offset_bits: u64,
@@ -43,8 +45,16 @@ impl PwlCacheKey {
         time_offset: Value,
         value_offset: Value,
     ) -> Self {
+        let metadata = std::fs::metadata(path).ok();
+        let file_len = metadata.as_ref().map(std::fs::Metadata::len);
+        let modified_nanos = metadata
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos());
         Self {
             path: path.to_string(),
+            file_len,
+            modified_nanos,
             time_scale_bits: time_scale.to_bits(),
             value_scale_bits: value_scale.to_bits(),
             time_offset_bits: time_offset.to_bits(),
@@ -324,16 +334,49 @@ impl VoltageSources {
         time_offset: Value,
         value_offset: Value,
     ) -> Result<Arc<crate::device::pwl_file::PwlWaveform>, String> {
+        Self::load_pwl_waveform_cached_with_limits(
+            path,
+            time_scale,
+            value_scale,
+            time_offset,
+            value_offset,
+            crate::resource::ResourceLimits::default(),
+        )
+        .map_err(|error| format!("failed to load PWL file '{path}': {error}"))
+    }
+
+    pub(crate) fn load_pwl_waveform_cached_with_limits(
+        path: &str,
+        time_scale: Value,
+        value_scale: Value,
+        time_offset: Value,
+        value_offset: Value,
+        resource_limits: crate::resource::ResourceLimits,
+    ) -> Result<Arc<crate::device::pwl_file::PwlWaveform>, crate::device::pwl_file::PwlFileError>
+    {
         let key = PwlCacheKey::new(path, time_scale, value_scale, time_offset, value_offset);
+
+        if let Some(file_len) = key.file_len {
+            let requested = usize::try_from(file_len).unwrap_or(usize::MAX);
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataBytes,
+                requested,
+                resource_limits.max_external_data_bytes,
+            )?;
+        }
 
         if let Ok(cache) = pwl_waveform_cache().read()
             && let Some(wf) = cache.get(&key)
         {
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                wf.len().saturating_mul(2),
+                resource_limits.max_external_data_values,
+            )?;
             return Ok(Arc::clone(wf));
         }
 
-        let waveform = crate::device::pwl_file::load_pwl_file(path)
-            .map_err(|e| format!("failed to load PWL file '{}': {}", path, e))?
+        let waveform = crate::device::pwl_file::load_pwl_file_with_limits(path, resource_limits)?
             .with_scaling(time_scale, value_scale, time_offset, value_offset);
         let waveform = Arc::new(waveform);
 

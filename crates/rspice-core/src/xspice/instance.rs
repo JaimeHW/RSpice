@@ -1391,6 +1391,11 @@ impl XspiceInstance {
         self.context.set_transient_run_context(tstep, tstop);
     }
 
+    /// Apply the owning engine's resource policy before model initialization.
+    pub(crate) fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
+        self.context.set_resource_limits(resource_limits);
+    }
+
     /// Initialize the instance
     ///
     /// Called once at simulation start.

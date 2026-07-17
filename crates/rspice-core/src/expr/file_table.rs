@@ -10,15 +10,32 @@ pub fn resolve_file_lookup_functions(
     expr: Expr,
     source_path: Option<&Path>,
 ) -> Result<Expr, String> {
-    resolve_expr(expr, source_path)
+    resolve_file_lookup_functions_with_limits(
+        expr,
+        source_path,
+        crate::resource::ResourceLimits::default(),
+    )
 }
 
-fn resolve_expr(expr: Expr, source_path: Option<&Path>) -> Result<Expr, String> {
+/// Resolve file-backed lookup functions under an explicit resource policy.
+pub fn resolve_file_lookup_functions_with_limits(
+    expr: Expr,
+    source_path: Option<&Path>,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Result<Expr, String> {
+    resolve_expr(expr, source_path, resource_limits)
+}
+
+fn resolve_expr(
+    expr: Expr,
+    source_path: Option<&Path>,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Result<Expr, String> {
     match expr {
         Expr::Function { func, args } => {
             let resolved_args = args
                 .into_iter()
-                .map(|arg| resolve_expr(arg, source_path))
+                .map(|arg| resolve_expr(arg, source_path, resource_limits))
                 .collect::<Result<Vec<_>, _>>()?;
 
             if let Some((transient_breakpoints, interpolation)) = table_file_mode(func) {
@@ -28,6 +45,7 @@ fn resolve_expr(expr: Expr, source_path: Option<&Path>) -> Result<Expr, String> 
                     source_path,
                     transient_breakpoints,
                     interpolation,
+                    resource_limits,
                 );
             }
 
@@ -38,12 +56,12 @@ fn resolve_expr(expr: Expr, source_path: Option<&Path>) -> Result<Expr, String> 
         }
         Expr::Unary { op, operand } => Ok(Expr::Unary {
             op,
-            operand: Box::new(resolve_expr(*operand, source_path)?),
+            operand: Box::new(resolve_expr(*operand, source_path, resource_limits)?),
         }),
         Expr::Binary { op, left, right } => Ok(Expr::Binary {
             op,
-            left: Box::new(resolve_expr(*left, source_path)?),
-            right: Box::new(resolve_expr(*right, source_path)?),
+            left: Box::new(resolve_expr(*left, source_path, resource_limits)?),
+            right: Box::new(resolve_expr(*right, source_path, resource_limits)?),
         }),
         Expr::Const(_)
         | Expr::NodeVoltage(_)
@@ -87,6 +105,7 @@ fn resolve_table_file_function(
     source_path: Option<&Path>,
     transient_breakpoints: bool,
     interpolation: FileInterpolation,
+    resource_limits: crate::resource::ResourceLimits,
 ) -> Result<Expr, String> {
     let Some(Expr::StringLiteral(path)) = args.first() else {
         if matches!(func, Function::Table) {
@@ -106,7 +125,7 @@ fn resolve_table_file_function(
     }
 
     let path = resolve_table_path(path, source_path);
-    let mut points = load_lookup_points(&path)?;
+    let mut points = load_lookup_points(&path, resource_limits)?;
     if let Some(sample_count) = args.get(1) {
         let Expr::Const(sample_count) = sample_count else {
             return Err(format!(
@@ -129,6 +148,32 @@ fn resolve_table_file_function(
             points = gradient_density_downsample(&points, sample_count, log_scale)?;
         }
     }
+    const MAX_BARYCENTRIC_POINTS: usize = 4_096;
+    if matches!(interpolation, FileInterpolation::Barycentric)
+        && points.len() > MAX_BARYCENTRIC_POINTS
+    {
+        return Err(format!(
+            "{} table has {} points; barycentric interpolation is limited to {MAX_BARYCENTRIC_POINTS} points to bound quadratic setup work (provide a sample count to downsample)",
+            function_name(func),
+            points.len()
+        ));
+    }
+    let retained_values = match interpolation {
+        FileInterpolation::Linear => points.len().saturating_mul(2),
+        FileInterpolation::NaturalCubic | FileInterpolation::Barycentric => {
+            points.len().saturating_mul(3)
+        }
+        FileInterpolation::Akima | FileInterpolation::Wodicka => points
+            .len()
+            .saturating_mul(2)
+            .saturating_add(points.len().saturating_sub(1).saturating_mul(3)),
+    };
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        retained_values,
+        resource_limits.max_external_data_values,
+    )
+    .map_err(|error| error.to_string())?;
     let interpolation = match interpolation {
         FileInterpolation::Linear => LookupInterpolation::Linear,
         FileInterpolation::NaturalCubic => LookupInterpolation::NaturalCubic {
@@ -430,8 +475,16 @@ fn resolve_table_path(path: &str, source_path: Option<&Path>) -> PathBuf {
         .join(raw)
 }
 
-fn load_lookup_points(path: &Path) -> Result<Vec<(Value, Value)>, String> {
-    let content = std::fs::read_to_string(path).map_err(|err| {
+fn load_lookup_points(
+    path: &Path,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Result<Vec<(Value, Value)>, String> {
+    let content = crate::resource::read_utf8_file_limited(
+        path,
+        crate::resource::ResourceKind::ExternalDataBytes,
+        resource_limits.max_external_data_bytes,
+    )
+    .map_err(|err| {
         format!(
             "failed to read behavioral table file '{}': {err}",
             path.display()
@@ -460,6 +513,19 @@ fn load_lookup_points(path: &Path) -> Result<Vec<(Value, Value)>, String> {
         })?;
         let x = parse_table_value(path, line_index + 1, "x", x_text)?;
         let y = parse_table_value(path, line_index + 1, "y", y_text)?;
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            points.len().saturating_add(1).saturating_mul(2),
+            resource_limits.max_external_data_values,
+        )
+        .map_err(|error| error.to_string())?;
+        points.try_reserve(1).map_err(|error| {
+            format!(
+                "unable to reserve behavioral table row {} from '{}': {error}",
+                line_index + 1,
+                path.display()
+            )
+        })?;
         points.push((x, y));
     }
 
@@ -538,6 +604,54 @@ mod tests {
     use super::*;
     use crate::expr::{Context, Vm, compile, parse_expression_strict};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn file_table_resolution_enforces_runtime_data_limits() {
+        let dir = unique_temp_dir("file-table-resource-limits");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        let contents = "0 0\n1 1\n";
+        std::fs::write(dir.join("wave.dat"), contents).expect("write table data");
+        let deck_path = dir.join("deck.cir");
+        let expression =
+            || parse_expression_strict("tablefile(\"wave.dat\")").expect("table expression parses");
+
+        let mut byte_limits = crate::resource::ResourceLimits::default();
+        byte_limits.max_external_data_bytes = contents.len() - 1;
+        let byte_error =
+            resolve_file_lookup_functions_with_limits(expression(), Some(&deck_path), byte_limits)
+                .expect_err("oversized table file must fail");
+        assert!(byte_error.contains("external_data_bytes limit exceeded"));
+
+        let mut value_limits = crate::resource::ResourceLimits::default();
+        value_limits.max_external_data_values = 3;
+        let value_error =
+            resolve_file_lookup_functions_with_limits(expression(), Some(&deck_path), value_limits)
+                .expect_err("oversized table value set must fail");
+        assert!(value_error.contains("external_data_values limit exceeded"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn barycentric_file_tables_bound_quadratic_setup_work() {
+        let dir = unique_temp_dir("barycentric-table-work-limit");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        let mut contents = String::new();
+        for index in 0..=4_096 {
+            use std::fmt::Write as _;
+            writeln!(&mut contents, "{index} {index}").expect("write table row");
+        }
+        std::fs::write(dir.join("wave.dat"), contents).expect("write table data");
+        let deck_path = dir.join("deck.cir");
+        let expression =
+            parse_expression_strict("blifile(\"wave.dat\")").expect("table expression parses");
+
+        let error = resolve_file_lookup_functions(expression, Some(&deck_path))
+            .expect_err("oversized barycentric setup must fail");
+        assert!(error.contains("barycentric interpolation is limited to 4096 points"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn file_table_resolution_accepts_xyce_comment_styles() {

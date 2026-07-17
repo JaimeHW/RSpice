@@ -151,6 +151,57 @@ fn repeated_include_reads_share_one_cached_dependency_source() {
 }
 
 #[test]
+fn circuit_build_rejects_oversized_pwl_files_with_a_typed_error() {
+    let directory = TestDirectory::new("pwl-bytes");
+    let root = directory.0.join("root.cir");
+    let waveform = "0 0\n1 1\n";
+    std::fs::write(directory.0.join("wave.csv"), waveform).expect("write PWL waveform");
+    let netlist = Netlist::parse_with_path(
+        "limited PWL\nV1 1 0 PWL FILE=\"wave.csv\"\nR1 1 0 1k\n.end\n",
+        &root,
+    )
+    .expect("PWL fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_external_data_bytes = waveform.len() - 1),
+        ..SimulationConfig::default()
+    };
+
+    assert!(matches!(
+        Engine::new(config).run_dc_op(&netlist),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ExternalDataBytes,
+            requested,
+            limit,
+        })) if requested == waveform.len() && limit == waveform.len() - 1
+    ));
+}
+
+#[test]
+fn circuit_build_rejects_excess_pwl_values_with_a_typed_error() {
+    let directory = TestDirectory::new("pwl-values");
+    let root = directory.0.join("root.cir");
+    std::fs::write(directory.0.join("wave.csv"), "0 0\n1 1\n").expect("write PWL waveform");
+    let netlist = Netlist::parse_with_path(
+        "limited PWL values\nV1 1 0 PWL FILE=\"wave.csv\"\nR1 1 0 1k\n.end\n",
+        &root,
+    )
+    .expect("PWL fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_external_data_values = 3),
+        ..SimulationConfig::default()
+    };
+
+    assert!(matches!(
+        Engine::new(config).run_dc_op(&netlist),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ExternalDataValues,
+            requested: 4,
+            limit: 3,
+        }))
+    ));
+}
+
+#[test]
 fn hierarchy_expansion_enforces_element_budget() {
     let netlist =
         Netlist::parse("limited hierarchy\nR1 1 0 1k\nR2 2 0 2k\n.end").expect("fixture parses");

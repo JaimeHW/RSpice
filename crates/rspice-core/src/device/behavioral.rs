@@ -8,7 +8,7 @@ use crate::Value;
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile,
     normalize_expression_boundary, parse_expression_strict, real_pow_with_derivative,
-    resolve_file_lookup_functions,
+    resolve_file_lookup_functions_with_limits,
 };
 use crate::netlist::ExpressionDialect;
 use crate::solver::StaticMatrix;
@@ -104,9 +104,30 @@ impl BehavioralVoltageSource {
         expression: &str,
         source_path: Option<&Path>,
     ) -> Result<Self, String> {
+        Self::new_with_source_path_and_limits(
+            name,
+            node_pos,
+            node_neg,
+            branch_ordinal,
+            expression,
+            source_path,
+            crate::resource::ResourceLimits::default(),
+        )
+    }
+
+    /// Create a behavioral voltage source with file lookups governed by an explicit policy.
+    pub fn new_with_source_path_and_limits(
+        name: String,
+        node_pos: usize,
+        node_neg: usize,
+        branch_ordinal: usize,
+        expression: &str,
+        source_path: Option<&Path>,
+        resource_limits: crate::resource::ResourceLimits,
+    ) -> Result<Self, String> {
         let ast = parse_expression_strict(expression)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
-        let ast = resolve_file_lookup_functions(ast, source_path)
+        let ast = resolve_file_lookup_functions_with_limits(ast, source_path, resource_limits)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let transient_voltage_lte_excluded =
             expression_excludes_voltage_output_from_transient_lte(&ast);
@@ -1482,9 +1503,28 @@ impl BehavioralCurrentSource {
         expression: &str,
         source_path: Option<&Path>,
     ) -> Result<Self, String> {
+        Self::new_with_source_path_and_limits(
+            name,
+            node_pos,
+            node_neg,
+            expression,
+            source_path,
+            crate::resource::ResourceLimits::default(),
+        )
+    }
+
+    /// Create a behavioral current source with file lookups governed by an explicit policy.
+    pub fn new_with_source_path_and_limits(
+        name: String,
+        node_pos: usize,
+        node_neg: usize,
+        expression: &str,
+        source_path: Option<&Path>,
+        resource_limits: crate::resource::ResourceLimits,
+    ) -> Result<Self, String> {
         let ast = parse_expression_strict(expression)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
-        let ast = resolve_file_lookup_functions(ast, source_path)
+        let ast = resolve_file_lookup_functions_with_limits(ast, source_path, resource_limits)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let frequency_dependent = expression_depends_on_frequency(&ast);
         let program = compile(&ast);

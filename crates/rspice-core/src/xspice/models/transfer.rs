@@ -349,8 +349,15 @@ fn parse_touchstone_numbers(line: &str) -> Vec<Value> {
     numbers
 }
 
-fn parse_touchstone_rows(contents: &str, span: usize, offset: usize) -> Vec<[Value; 3]> {
-    let mut selected = Vec::new();
+fn parse_touchstone_rows(
+    contents: &str,
+    span: usize,
+    offset: usize,
+    value_limit: usize,
+) -> CmResult<Vec<[Value; 3]>> {
+    let mut rows = Vec::new();
+    let mut current = [0.0; 3];
+    let mut current_len = 0usize;
     let mut skip = 0usize;
     let mut want = 0u8;
 
@@ -377,7 +384,26 @@ fn parse_touchstone_rows(contents: &str, span: usize, offset: usize) -> Vec<[Val
         };
 
         while index < numbers.len() {
-            selected.push(numbers[index]);
+            let requested_values = rows
+                .len()
+                .saturating_mul(3)
+                .saturating_add(current_len)
+                .saturating_add(1);
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                requested_values,
+                value_limit,
+            )
+            .map_err(|error| xfer_error(error.to_string()))?;
+            current[current_len] = numbers[index];
+            current_len += 1;
+            if current_len == current.len() {
+                rows.try_reserve(1).map_err(|error| {
+                    xfer_error(format!("unable to reserve Touchstone row: {error}"))
+                })?;
+                rows.push(current);
+                current_len = 0;
+            }
             match want {
                 0 => {
                     want = 2;
@@ -403,10 +429,7 @@ fn parse_touchstone_rows(contents: &str, span: usize, offset: usize) -> Vec<[Val
         }
     }
 
-    selected
-        .chunks_exact(3)
-        .map(|chunk| [chunk[0], chunk[1], chunk[2]])
-        .collect()
+    Ok(rows)
 }
 
 fn xfer_table_from_touchstone(
@@ -421,7 +444,10 @@ fn xfer_table_from_touchstone(
         return (None, Ok(Vec::new()));
     }
 
-    let (contents, stamp) = match data_file::read_to_string_with_stamp(file) {
+    let (contents, stamp) = match data_file::read_to_string_with_stamp_limited(
+        file,
+        ctx.resource_limits().max_external_data_bytes,
+    ) {
         Ok(file) => file,
         Err(err) => {
             return (
@@ -457,7 +483,15 @@ fn xfer_table_from_touchstone(
             Err(err) => return (file_virtual_stamp, Err(err)),
         };
     }
-    let rows = parse_touchstone_rows(&contents, span, offset);
+    let rows = match parse_touchstone_rows(
+        &contents,
+        span,
+        offset,
+        ctx.resource_limits().max_external_data_values,
+    ) {
+        Ok(rows) => rows,
+        Err(error) => return (file_virtual_stamp, Err(error)),
+    };
     let mut points = match reserve_xfer_points(file, rows.len()) {
         Ok(points) => points,
         Err(err) => return (file_virtual_stamp, Err(err)),

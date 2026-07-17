@@ -37,6 +37,8 @@ pub enum PwlFileError {
     NonMonotonic,
     /// Non-finite time/value data encountered
     NonFiniteData,
+    /// A configured runtime-data resource limit was exceeded.
+    ResourceLimit(crate::resource::ResourceLimitError),
 }
 
 impl std::fmt::Display for PwlFileError {
@@ -48,6 +50,7 @@ impl std::fmt::Display for PwlFileError {
             PwlFileError::EmptyData => write!(f, "No data points found"),
             PwlFileError::NonMonotonic => write!(f, "Time values must be monotonically increasing"),
             PwlFileError::NonFiniteData => write!(f, "Time/value data must be finite"),
+            PwlFileError::ResourceLimit(error) => error.fmt(f),
         }
     }
 }
@@ -57,6 +60,12 @@ impl std::error::Error for PwlFileError {}
 impl From<std::io::Error> for PwlFileError {
     fn from(e: std::io::Error) -> Self {
         PwlFileError::IoError(e)
+    }
+}
+
+impl From<crate::resource::ResourceLimitError> for PwlFileError {
+    fn from(error: crate::resource::ResourceLimitError) -> Self {
+        Self::ResourceLimit(error)
     }
 }
 
@@ -281,12 +290,43 @@ impl PwlWaveform {
 /// tab, or whitespace. Lines starting with '#' or containing non-numeric
 /// data are skipped (header lines).
 pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileError> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut points = Vec::new();
+    load_csv_with_limits(path, crate::resource::ResourceLimits::default())
+}
 
-    for (line_num, line_result) in reader.lines().enumerate() {
-        let line = line_result?;
+/// Load a CSV/whitespace PWL waveform under an explicit resource policy.
+pub fn load_csv_with_limits<P: AsRef<Path>>(
+    path: P,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Result<Vec<(Value, Value)>, PwlFileError> {
+    let file = File::open(path.as_ref())?;
+    let metadata_bytes = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataBytes,
+        metadata_bytes,
+        resource_limits.max_external_data_bytes,
+    )?;
+    let read_limit = u64::try_from(resource_limits.max_external_data_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut reader = BufReader::new(file.take(read_limit));
+    let mut points = Vec::new();
+    let mut line = String::new();
+    let mut consumed_bytes = 0usize;
+    let mut line_num = 0usize;
+
+    loop {
+        line.clear();
+        let read_bytes = reader.read_line(&mut line)?;
+        if read_bytes == 0 {
+            break;
+        }
+        line_num += 1;
+        consumed_bytes = consumed_bytes.saturating_add(read_bytes);
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataBytes,
+            consumed_bytes,
+            resource_limits.max_external_data_bytes,
+        )?;
         let trimmed = line.trim();
 
         // Skip empty lines and comments
@@ -295,28 +335,39 @@ pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
         }
 
         // Try to parse as two numeric values
-        let parts: Vec<&str> = trimmed
+        let mut parts = trimmed
             .split([',', ';', '\t', ' '])
-            .filter(|s| !s.is_empty())
-            .collect();
+            .filter(|part| !part.is_empty());
+        let first = parts.next();
+        let second = parts.next();
+        let column_count = usize::from(first.is_some()) + usize::from(second.is_some());
 
-        if parts.len() < 2 {
+        let (Some(first), Some(second)) = (first, second) else {
             if points.is_empty() {
                 continue;
             }
             return Err(PwlFileError::ParseError(format!(
                 "Invalid data at line {}: expected 2 columns, got {}: '{}'",
-                line_num + 1,
-                parts.len(),
-                trimmed
+                line_num, column_count, trimmed
             )));
-        }
+        };
 
-        match (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
+        match (first.parse::<f64>(), second.parse::<f64>()) {
             (Ok(time), Ok(value)) => {
                 if !time.is_finite() || !value.is_finite() {
                     return Err(PwlFileError::NonFiniteData);
                 }
+                let requested_values = points.len().saturating_add(1).saturating_mul(2);
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ExternalDataValues,
+                    requested_values,
+                    resource_limits.max_external_data_values,
+                )?;
+                points.try_reserve(1).map_err(|error| {
+                    PwlFileError::ParseError(format!(
+                        "unable to reserve PWL row {line_num}: {error}"
+                    ))
+                })?;
                 points.push((time, value));
             }
             _ => {
@@ -326,8 +377,7 @@ pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
                 }
                 return Err(PwlFileError::ParseError(format!(
                     "Invalid data at line {}: '{}'",
-                    line_num + 1,
-                    trimmed
+                    line_num, trimmed
                 )));
             }
         }
@@ -353,7 +403,21 @@ pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
 /// - Time is derived from sample rate
 /// - Values are normalized to -1.0 to +1.0 range
 pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileError> {
-    let mut file = File::open(path)?;
+    load_wav_with_limits(path, crate::resource::ResourceLimits::default())
+}
+
+/// Load a PCM WAV waveform under an explicit resource policy.
+pub fn load_wav_with_limits<P: AsRef<Path>>(
+    path: P,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Result<Vec<(Value, Value)>, PwlFileError> {
+    let mut file = File::open(path.as_ref())?;
+    let metadata_bytes = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataBytes,
+        metadata_bytes,
+        resource_limits.max_external_data_bytes,
+    )?;
     let mut riff_header = [0u8; 12];
 
     file.read_exact(&mut riff_header)
@@ -388,7 +452,21 @@ pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
                 if chunk_size < 16 {
                     return Err(PwlFileError::WavError("fmt chunk is too small".to_string()));
                 }
-                let mut fmt = vec![0u8; chunk_size as usize];
+                let chunk_size = usize::try_from(chunk_size).map_err(|_| {
+                    PwlFileError::WavError("fmt chunk does not fit in memory".to_string())
+                })?;
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ExternalDataBytes,
+                    chunk_size,
+                    resource_limits.max_external_data_bytes,
+                )?;
+                let mut fmt = Vec::new();
+                fmt.try_reserve_exact(chunk_size).map_err(|error| {
+                    PwlFileError::WavError(format!(
+                        "unable to reserve {chunk_size} fmt bytes: {error}"
+                    ))
+                })?;
+                fmt.resize(chunk_size, 0);
                 file.read_exact(&mut fmt)?;
                 if !chunk_size.is_multiple_of(2) {
                     file.seek(SeekFrom::Current(1))?;
@@ -399,7 +477,12 @@ pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
                 let format = format.ok_or_else(|| {
                     PwlFileError::WavError("data chunk appeared before fmt chunk".to_string())
                 })?;
-                break read_wav_data_chunk(&mut file, chunk_size, format)?;
+                break read_wav_data_chunk(
+                    &mut file,
+                    chunk_size,
+                    format,
+                    resource_limits.max_external_data_bytes,
+                )?;
             }
             _ => {
                 let skip = chunk_size + (chunk_size % 2);
@@ -424,18 +507,37 @@ pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
         )));
     }
 
-    let num_samples = (data_size / frame_bytes) as usize;
+    let num_samples = usize::try_from(data_size / frame_bytes)
+        .map_err(|_| PwlFileError::WavError("sample count does not fit in memory".to_string()))?;
     if num_samples == 0 {
         return Err(PwlFileError::EmptyData);
     }
 
     let max_val = format.normalization_scale;
 
-    // Convert to time-value pairs (use first channel only)
-    let mut points = Vec::with_capacity(num_samples);
+    // Match the historical one-million-point cap without first materializing
+    // every sample. This avoids a large transient allocation for long audio.
+    const MAX_WAV_POINTS: usize = 1_000_000;
+    let sample_stride = if num_samples > MAX_WAV_POINTS {
+        num_samples / MAX_WAV_POINTS + 1
+    } else {
+        1
+    };
+    let retained_points = num_samples.div_ceil(sample_stride);
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        retained_points.saturating_mul(2),
+        resource_limits.max_external_data_values,
+    )?;
+    let mut points = Vec::new();
+    points.try_reserve_exact(retained_points).map_err(|error| {
+        PwlFileError::WavError(format!(
+            "unable to reserve {retained_points} WAV points: {error}"
+        ))
+    })?;
     let sample_period = 1.0 / format.sample_rate as f64;
 
-    for i in 0..num_samples {
+    for i in (0..num_samples).step_by(sample_stride) {
         let time = i as f64 * sample_period;
         let offset = i * frame_bytes as usize;
 
@@ -475,12 +577,6 @@ pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
         };
 
         points.push((time, sample_value));
-    }
-
-    // Downsample if too many points (> 1M samples)
-    if points.len() > 1_000_000 {
-        let factor = points.len() / 1_000_000 + 1;
-        points = points.into_iter().step_by(factor).collect();
     }
 
     Ok(points)
@@ -562,6 +658,7 @@ fn read_wav_data_chunk(
     file: &mut File,
     data_size: u64,
     format: WavPcmFormat,
+    external_data_limit: usize,
 ) -> Result<WavAudioData, PwlFileError> {
     let data_start = file.stream_position()?;
     let file_len = file.metadata()?.len();
@@ -572,7 +669,18 @@ fn read_wav_data_chunk(
         )));
     }
 
-    let mut data = vec![0u8; data_size as usize];
+    let data_len = usize::try_from(data_size)
+        .map_err(|_| PwlFileError::WavError("data chunk does not fit in memory".to_string()))?;
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataBytes,
+        data_len,
+        external_data_limit,
+    )?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(data_len).map_err(|error| {
+        PwlFileError::WavError(format!("unable to reserve {data_len} audio bytes: {error}"))
+    })?;
+    data.resize(data_len, 0);
     file.read_exact(&mut data)?;
     if !data_size.is_multiple_of(2) {
         file.seek(SeekFrom::Current(1))?;
@@ -587,6 +695,14 @@ fn read_wav_data_chunk(
 
 /// Load PWL waveform from file (auto-detect format by extension)
 pub fn load_pwl_file<P: AsRef<Path>>(path: P) -> Result<PwlWaveform, PwlFileError> {
+    load_pwl_file_with_limits(path, crate::resource::ResourceLimits::default())
+}
+
+/// Load a PWL file under an explicit resource policy.
+pub fn load_pwl_file_with_limits<P: AsRef<Path>>(
+    path: P,
+    resource_limits: crate::resource::ResourceLimits,
+) -> Result<PwlWaveform, PwlFileError> {
     let path_ref = path.as_ref();
     let extension = path_ref
         .extension()
@@ -594,8 +710,8 @@ pub fn load_pwl_file<P: AsRef<Path>>(path: P) -> Result<PwlWaveform, PwlFileErro
         .map(|e| e.to_lowercase());
 
     let points = match extension.as_deref() {
-        Some("wav") => load_wav(path)?,
-        _ => load_csv(path)?, // Default to CSV
+        Some("wav") => load_wav_with_limits(path, resource_limits)?,
+        _ => load_csv_with_limits(path, resource_limits)?, // Default to CSV
     };
 
     PwlWaveform::new(points)

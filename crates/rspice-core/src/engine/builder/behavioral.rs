@@ -43,6 +43,7 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
     expression_gmin: Value,
+    resource_limits: ResourceLimits,
 ) -> Result<(), SimulationError> {
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -72,12 +73,13 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
         element.nodes[0], element.nodes[1], prepared, policy.scale
     );
 
-    let mut bcs = crate::device::BehavioralCurrentSource::new_with_source_path(
+    let mut bcs = crate::device::BehavioralCurrentSource::new_with_source_path_and_limits(
         element.name.clone(),
         np,
         nn,
         &current_expression,
         netlist.source_path.as_deref(),
+        resource_limits,
     )
     .map_err(SimulationError::Circuit)?;
     bcs.set_expression_dialect(netlist.params.expression_dialect());

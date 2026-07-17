@@ -431,9 +431,31 @@ fn tokenize_table_contents<'a>(
     file: &str,
     contents: &'a str,
 ) -> CmResult<Vec<TableLine<'a>>> {
+    tokenize_table_contents_limited(
+        model,
+        file,
+        contents,
+        crate::resource::ResourceLimits::default().max_external_data_values,
+    )
+}
+
+fn tokenize_table_contents_limited<'a>(
+    model: &str,
+    file: &str,
+    contents: &'a str,
+    item_limit: usize,
+) -> CmResult<Vec<TableLine<'a>>> {
     let mut lines = Vec::new();
+    let mut parsed_items = 0usize;
 
     for (line_idx, line) in contents.lines().enumerate() {
+        parsed_items = parsed_items.saturating_add(1);
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            parsed_items,
+            item_limit,
+        )
+        .map_err(|error| table_file_error(model, file, error.to_string()))?;
         let line_no = line_idx + 1;
         let (data, header_ignored, data_comment) = table_line_data(line);
         let mut tokens = Vec::new();
@@ -444,9 +466,30 @@ fn tokenize_table_contents<'a>(
                 if token.is_empty() {
                     continue;
                 }
+                parsed_items = parsed_items.saturating_add(1);
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ExternalDataValues,
+                    parsed_items,
+                    item_limit,
+                )
+                .map_err(|error| table_file_error(model, file, error.to_string()))?;
+                tokens.try_reserve(1).map_err(|error| {
+                    table_file_error(
+                        model,
+                        file,
+                        format!("unable to reserve token on line {line_no}: {error}"),
+                    )
+                })?;
                 tokens.push(token);
             }
         }
+        lines.try_reserve(1).map_err(|error| {
+            table_file_error(
+                model,
+                file,
+                format!("unable to reserve parsed line {line_no}: {error}"),
+            )
+        })?;
         lines.push(TableLine {
             line: line_no,
             header_ignored,
@@ -671,18 +714,45 @@ fn parse_table2d_file(file: &str) -> CmResult<Table2DData> {
 }
 
 fn parse_table2d_contents(file: &str, contents: &str) -> CmResult<Table2DData> {
+    parse_table2d_contents_limited(
+        file,
+        contents,
+        crate::resource::ResourceLimits::default().max_external_data_values,
+    )
+}
+
+fn parse_table2d_contents_limited(
+    file: &str,
+    contents: &str,
+    value_limit: usize,
+) -> CmResult<Table2DData> {
     let model = TableKind::Table2D.model_name();
-    let mut cursor = TokenCursor::new(tokenize_table_contents(model, file, contents)?);
-    parse_table2d_cursor(file, model, &mut cursor)
+    let mut cursor = TokenCursor::new(tokenize_table_contents_limited(
+        model,
+        file,
+        contents,
+        value_limit,
+    )?);
+    parse_table2d_cursor(file, model, &mut cursor, value_limit)
 }
 
 fn parse_table2d_cursor(
     file: &str,
     model: &str,
     cursor: &mut TokenCursor<'_>,
+    value_limit: usize,
 ) -> CmResult<Table2DData> {
     let x_len = cursor.next_dimension(file, model, "x dimension")?;
     let y_len = cursor.next_dimension(file, model, "y dimension")?;
+    let retained_values = checked_table_value_count(model, file, &[x_len, y_len])?
+        .saturating_add(x_len)
+        .saturating_add(y_len);
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        retained_values,
+        value_limit,
+    )
+    .map_err(|error| table_file_error(model, file, error.to_string()))?;
     let x = parse_axis(cursor, file, model, "x", x_len)?;
     let y = parse_axis(cursor, file, model, "y", y_len)?;
     let values = parse_table2d_values(cursor, file, model, x_len, y_len)?;
@@ -698,19 +768,47 @@ fn parse_table3d_file(file: &str) -> CmResult<Table3DData> {
 }
 
 fn parse_table3d_contents(file: &str, contents: &str) -> CmResult<Table3DData> {
+    parse_table3d_contents_limited(
+        file,
+        contents,
+        crate::resource::ResourceLimits::default().max_external_data_values,
+    )
+}
+
+fn parse_table3d_contents_limited(
+    file: &str,
+    contents: &str,
+    value_limit: usize,
+) -> CmResult<Table3DData> {
     let model = TableKind::Table3D.model_name();
-    let mut cursor = TokenCursor::new(tokenize_table_contents(model, file, contents)?);
-    parse_table3d_cursor(file, model, &mut cursor)
+    let mut cursor = TokenCursor::new(tokenize_table_contents_limited(
+        model,
+        file,
+        contents,
+        value_limit,
+    )?);
+    parse_table3d_cursor(file, model, &mut cursor, value_limit)
 }
 
 fn parse_table3d_cursor(
     file: &str,
     model: &str,
     cursor: &mut TokenCursor<'_>,
+    value_limit: usize,
 ) -> CmResult<Table3DData> {
     let x_len = cursor.next_dimension(file, model, "x dimension")?;
     let y_len = cursor.next_dimension(file, model, "y dimension")?;
     let z_len = cursor.next_dimension(file, model, "z dimension")?;
+    let retained_values = checked_table_value_count(model, file, &[x_len, y_len, z_len])?
+        .saturating_add(x_len)
+        .saturating_add(y_len)
+        .saturating_add(z_len);
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ExternalDataValues,
+        retained_values,
+        value_limit,
+    )
+    .map_err(|error| table_file_error(model, file, error.to_string()))?;
     let x = parse_axis(cursor, file, model, "x", x_len)?;
     let y = parse_axis(cursor, file, model, "y", y_len)?;
     let z = parse_axis(cursor, file, model, "z", z_len)?;
@@ -776,20 +874,43 @@ fn validate_table3d_order(table: &Table3DData, order: usize) -> CmResult<()> {
 }
 
 fn load_table2d(file: &str) -> CmResult<(Arc<Table2DData>, Option<data_file::DataFileStamp>)> {
+    load_table2d_limited(file, crate::resource::ResourceLimits::default())
+}
+
+fn load_table2d_limited(
+    file: &str,
+    resource_limits: crate::resource::ResourceLimits,
+) -> CmResult<(Arc<Table2DData>, Option<data_file::DataFileStamp>)> {
     let model = TableKind::Table2D.model_name();
-    let (contents, stamp) = data_file::read_to_string_with_stamp(file)
-        .map_err(|err| table_file_error(model, file, err))?;
+    let (contents, stamp) =
+        data_file::read_to_string_with_stamp_limited(file, resource_limits.max_external_data_bytes)
+            .map_err(|err| table_file_error(model, file, err))?;
     let virtual_stamp = data_file::loaded_virtual_data_file_stamp(stamp);
     let key = table_cache_key(file, stamp);
     {
         let mut guard = lock_table2d_cache();
         guard.sync_virtual_epoch();
         if let Some(table) = guard.entries.get(&key) {
+            let retained_values = table
+                .x
+                .len()
+                .saturating_add(table.y.len())
+                .saturating_add(table.values.len());
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                retained_values,
+                resource_limits.max_external_data_values,
+            )
+            .map_err(|error| table_file_error(model, file, error.to_string()))?;
             return Ok((Arc::clone(table), virtual_stamp));
         }
     }
 
-    let table = Arc::new(parse_table2d_contents(file, &contents)?);
+    let table = Arc::new(parse_table2d_contents_limited(
+        file,
+        &contents,
+        resource_limits.max_external_data_values,
+    )?);
     let mut guard = lock_table2d_cache();
     guard.sync_virtual_epoch();
     guard.entries.insert(key, Arc::clone(&table));
@@ -797,20 +918,44 @@ fn load_table2d(file: &str) -> CmResult<(Arc<Table2DData>, Option<data_file::Dat
 }
 
 fn load_table3d(file: &str) -> CmResult<(Arc<Table3DData>, Option<data_file::DataFileStamp>)> {
+    load_table3d_limited(file, crate::resource::ResourceLimits::default())
+}
+
+fn load_table3d_limited(
+    file: &str,
+    resource_limits: crate::resource::ResourceLimits,
+) -> CmResult<(Arc<Table3DData>, Option<data_file::DataFileStamp>)> {
     let model = TableKind::Table3D.model_name();
-    let (contents, stamp) = data_file::read_to_string_with_stamp(file)
-        .map_err(|err| table_file_error(model, file, err))?;
+    let (contents, stamp) =
+        data_file::read_to_string_with_stamp_limited(file, resource_limits.max_external_data_bytes)
+            .map_err(|err| table_file_error(model, file, err))?;
     let virtual_stamp = data_file::loaded_virtual_data_file_stamp(stamp);
     let key = table_cache_key(file, stamp);
     {
         let mut guard = lock_table3d_cache();
         guard.sync_virtual_epoch();
         if let Some(table) = guard.entries.get(&key) {
+            let retained_values = table
+                .x
+                .len()
+                .saturating_add(table.y.len())
+                .saturating_add(table.z.len())
+                .saturating_add(table.values.len());
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ExternalDataValues,
+                retained_values,
+                resource_limits.max_external_data_values,
+            )
+            .map_err(|error| table_file_error(model, file, error.to_string()))?;
             return Ok((Arc::clone(table), virtual_stamp));
         }
     }
 
-    let table = Arc::new(parse_table3d_contents(file, &contents)?);
+    let table = Arc::new(parse_table3d_contents_limited(
+        file,
+        &contents,
+        resource_limits.max_external_data_values,
+    )?);
     let mut guard = lock_table3d_cache();
     guard.sync_virtual_epoch();
     guard.entries.insert(key, Arc::clone(&table));
@@ -862,7 +1007,7 @@ fn load_table2d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Tab
         return Ok(table);
     }
 
-    let (table, virtual_stamp) = load_table2d(file)?;
+    let (table, virtual_stamp) = load_table2d_limited(file, ctx.resource_limits())?;
     ctx.set_resource(
         TABLE2D_RESOURCE,
         Arc::new(Table2DResource {
@@ -881,7 +1026,7 @@ fn load_table3d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Tab
         return Ok(table);
     }
 
-    let (table, virtual_stamp) = load_table3d(file)?;
+    let (table, virtual_stamp) = load_table3d_limited(file, ctx.resource_limits())?;
     ctx.set_resource(
         TABLE3D_RESOURCE,
         Arc::new(Table3DResource {
@@ -895,11 +1040,17 @@ fn load_table3d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Tab
 }
 
 fn load_table2d_from_context(ctx: &CmContext, file: &str) -> CmResult<Arc<Table2DData>> {
-    table2d_resource(ctx, file).map_or_else(|| load_table2d(file).map(|(table, _)| table), Ok)
+    table2d_resource(ctx, file).map_or_else(
+        || load_table2d_limited(file, ctx.resource_limits()).map(|(table, _)| table),
+        Ok,
+    )
 }
 
 fn load_table3d_from_context(ctx: &CmContext, file: &str) -> CmResult<Arc<Table3DData>> {
-    table3d_resource(ctx, file).map_or_else(|| load_table3d(file).map(|(table, _)| table), Ok)
+    table3d_resource(ctx, file).map_or_else(
+        || load_table3d_limited(file, ctx.resource_limits()).map(|(table, _)| table),
+        Ok,
+    )
 }
 
 fn axis_eno_contains(values: &[Value], index: usize, clamped: Value) -> bool {
