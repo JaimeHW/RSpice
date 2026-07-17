@@ -6,6 +6,7 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub(super) struct NodeResolver {
     pub(super) node_name_to_index: HashMap<String, usize>,
+    ground_policy: rspice_core::netlist::GroundPolicy,
 }
 
 impl NodeResolver {
@@ -21,7 +22,10 @@ impl NodeResolver {
             .map(|(idx, name)| (name.to_ascii_uppercase(), idx + 1))
             .collect();
 
-        Ok(Self { node_name_to_index })
+        Ok(Self {
+            node_name_to_index,
+            ground_policy: netlist.ground_policy(),
+        })
     }
 
     pub(super) fn resolve_node(&self, node: &str) -> Option<usize> {
@@ -29,7 +33,7 @@ impl NodeResolver {
         if node.is_empty() {
             return None;
         }
-        if node == "0" || node.eq_ignore_ascii_case("gnd") {
+        if self.ground_policy.is_ground(node) {
             return Some(0);
         }
         if let Ok(idx) = node.parse::<usize>() {
@@ -268,7 +272,25 @@ pub(super) fn ensure_finite_series<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::netlist::StepSweep;
+    use rspice_core::netlist::{GroundPolicy, StepSweep};
+
+    #[test]
+    fn node_resolver_uses_the_effective_ground_policy() {
+        let xyce_false = NodeResolver {
+            node_name_to_index: HashMap::new(),
+            ground_policy: GroundPolicy::OnlyZero,
+        };
+        assert_eq!(xyce_false.resolve_node("0"), Some(0));
+        assert_eq!(xyce_false.resolve_node("GND"), None);
+
+        let xyce_replace = NodeResolver {
+            node_name_to_index: HashMap::new(),
+            ground_policy: GroundPolicy::XyceReplace,
+        };
+        assert_eq!(xyce_replace.resolve_node("GND"), Some(0));
+        assert_eq!(xyce_replace.resolve_node("gnd!"), Some(0));
+        assert_eq!(xyce_replace.resolve_node("GROUND"), Some(0));
+    }
 
     fn assert_step_error_contains(sweep: StepSweep, expected: &str) {
         let err = generate_step_values(&sweep).expect_err("invalid step sweep must fail");

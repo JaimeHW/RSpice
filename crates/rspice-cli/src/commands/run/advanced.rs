@@ -1781,12 +1781,13 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
     let drive2 = drive(1)?;
 
     // Differential port voltage at one sweep point.
+    let ground_policy = ctx.netlist.ground_policy();
     let port_v = |result: &rspice_core::analysis::AcResult,
                   plus: &str,
                   minus: &str|
      -> Result<rspice_core::Complex64, CliError> {
         let lookup = |node: &str| -> Result<rspice_core::Complex64, CliError> {
-            if node == "0" || node.eq_ignore_ascii_case("gnd") {
+            if ground_policy.is_ground(node) {
                 return Ok(rspice_core::Complex64::new(0.0, 0.0));
             }
             result

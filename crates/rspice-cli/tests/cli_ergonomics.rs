@@ -102,6 +102,70 @@ fn save_flag_restricts_exported_signals() {
 }
 
 #[test]
+fn save_flag_validates_effective_node_and_device_requests() {
+    let dir = test_dir("save_validation");
+    let deck = dir.join("divider.sp");
+    std::fs::write(
+        &deck,
+        "* divider\nV1 in 0 5\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n",
+    )
+    .expect("write deck");
+
+    for probe in ["V(missing_node)", "I(missing_device)", "missing_bare_node"] {
+        let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap(), "--save", probe]);
+        assert_eq!(output.status.code(), Some(65), "probe {probe}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("undefined output symbols"), "{stderr}");
+        assert!(stderr.contains("<command line --save>:1"), "{stderr}");
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_flag_normalizes_nodes_with_the_decks_ground_policy() {
+    let dir = test_dir("save_ground_policy");
+    let deck = dir.join("xyce-divider.sp");
+    std::fs::write(
+        &deck,
+        "Xyce divider\n\
+         .OPTIONS PARSER EXPRESSION=XYCE\n\
+         .PREPROCESS REPLACEGROUND TRUE\n\
+         V1 in 0 5\n\
+         R1 in out 1k\n\
+         R2 out GROUND 1k\n\
+         .OP\n\
+         .END\n",
+    )
+    .expect("write deck");
+    let out = dir.join("ground.csv");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+        "--save",
+        "V(out,GROUND)",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let csv = std::fs::read_to_string(&out).expect("ground-normalized CSV");
+    assert!(
+        csv.lines().any(|line| line.starts_with("\"V(out,0)\",")),
+        "ground alias must be canonicalized in effective save selection: {csv}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn save_flag_exports_differential_voltage_waveform() {
     let dir = test_dir("save_diff");
     let deck = dir.join("divider.sp");

@@ -41,7 +41,12 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
         println!("Checking: {}", args.input.display());
     }
 
-    let netlist = match crate::commands::parse_netlist_input(&args.input) {
+    let parsed = crate::commands::parse_netlist_input(&args.input).and_then(|netlist| {
+        rspice_core::netlist::validate_output_symbols(&netlist)
+            .map_err(crate::commands::map_parse_error)?;
+        Ok(netlist)
+    });
+    let netlist = match parsed {
         Ok(n) => n,
         Err(e @ CliError::InputNotFound { .. } | e @ CliError::InputReadError { .. }) => {
             return Err(e);
@@ -246,14 +251,9 @@ impl rspice_core::xspice::DigitalCosimRuntime for CheckDigitalCosimRuntime {
 fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
     use rspice_core::netlist::ElementKind;
 
-    let canonical = |node: &str| -> String {
-        let lower = node.to_ascii_lowercase();
-        if lower == "gnd" {
-            "0".to_string()
-        } else {
-            lower
-        }
-    };
+    let ground_policy = netlist.ground_policy();
+    let canonical =
+        |node: &str| -> String { ground_policy.canonical_node(node).to_ascii_lowercase() };
 
     // Union-find over voltage-source/inductor edges: an edge that joins two
     // already-connected nodes closes a loop the DC matrix cannot solve.
@@ -381,10 +381,12 @@ fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
     let mut node_connections: HashMap<String, usize> = HashMap::new();
     let mut node_elements: HashMap<String, Vec<String>> = HashMap::new();
 
+    let ground_policy = netlist.ground_policy();
+
     // Element.nodes contains the node connections directly
     for elem in &netlist.elements {
         for node in &elem.nodes {
-            if node != "0" && node.to_lowercase() != "gnd" {
+            if !ground_policy.is_ground(node) {
                 *node_connections.entry(node.clone()).or_insert(0) += 1;
                 node_elements
                     .entry(node.clone())
@@ -529,5 +531,79 @@ mod tests {
             !message.contains("closes a loop"),
             "topology must not run before semantic validation: {message}"
         );
+    }
+
+    #[test]
+    fn undefined_output_symbols_fail_before_topology_checks() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-cli-output-symbols-{}-{}.cir",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            "CLI semantic ordering\n\
+             V1 1 0 1\n\
+             V2 1 0 2\n\
+             .PRINT OP V(missing)\n\
+             .END\n",
+        )
+        .expect("temporary deck writes");
+
+        let result = execute(
+            CheckArgs {
+                input: path.clone(),
+                connectivity: true,
+                models: true,
+                strict: false,
+                json: false,
+            },
+            false,
+            true,
+        );
+        let _ = std::fs::remove_file(path);
+
+        let message = result
+            .expect_err("undefined output symbols must reject check")
+            .to_string();
+        assert!(message.contains(".PRINT node 'missing' via V"), "{message}");
+        assert!(
+            !message.contains("closes a loop"),
+            "topology must not run before semantic validation: {message}"
+        );
+    }
+
+    #[test]
+    fn topology_checks_use_the_netlists_effective_ground_policy() {
+        let false_mode = Netlist::parse_with_options(
+            "Xyce false ground\n\
+             V1 GND 1 1\n\
+             V2 1 0 1\n\
+             .END\n",
+            rspice_core::netlist::NetlistParseOptions {
+                expression_dialect: rspice_core::netlist::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce false-mode deck parses");
+        let mut false_result = ValidationResult::default();
+        check_topology(&false_mode, &mut false_result);
+        assert!(false_result.errors.is_empty());
+
+        let replace_mode = Netlist::parse(
+            "Xyce replace ground\n\
+             .OPTIONS PARSER EXPRESSION=XYCE\n\
+             .PREPROCESS REPLACEGROUND TRUE\n\
+             V1 GND 1 1\n\
+             V2 1 0 1\n\
+             .END\n",
+        )
+        .expect("Xyce replacement deck parses");
+        let mut replace_result = ValidationResult::default();
+        check_topology(&replace_mode, &mut replace_result);
+        assert_eq!(replace_result.errors.len(), 1);
     }
 }

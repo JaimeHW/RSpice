@@ -903,12 +903,7 @@ fn load_netlist_from_source(
     } else {
         Netlist::parse_with_search_paths(source, &args.input, &search_paths)
     };
-    let map_parse_error = |e: rspice_core::error::ParseError| CliError::ParseError {
-        message: e.to_string(),
-        line: None,
-        suggestion: None,
-    };
-    let mut netlist = parsed.map_err(map_parse_error)?;
+    let mut netlist = parsed.map_err(crate::commands::map_parse_error)?;
 
     if !args.defines.is_empty() {
         let defines: Vec<(String, f64)> = args
@@ -928,7 +923,8 @@ fn load_netlist_from_source(
                 message: "netlist source unavailable for --define substitution".to_string(),
             })?;
         let rewritten = apply_defines_to_source(&source, &defines);
-        netlist = Netlist::parse_with_path(&rewritten, &args.input).map_err(map_parse_error)?;
+        netlist = Netlist::parse_with_path(&rewritten, &args.input)
+            .map_err(crate::commands::map_parse_error)?;
         for (name, value) in &defines {
             netlist.params.set(name, *value);
         }
@@ -939,7 +935,8 @@ fn load_netlist_from_source(
     // override always wins.
     if !args.saves.is_empty() {
         let mut saves = rspice_core::netlist::SaveSet::default();
-        for spec in &args.saves {
+        let mut override_requests = Vec::with_capacity(args.saves.len());
+        for (index, spec) in args.saves.iter().enumerate() {
             // The netlist parser falls back to a bare vector name for
             // anything unrecognized; a spec with parentheses that didn't
             // parse as V(...)/I(...) is a typo, not a vector name.
@@ -960,9 +957,30 @@ fn load_netlist_from_source(
                 });
             }
             saves.signals.push(parsed.expect("checked above"));
+            override_requests.push(rspice_core::netlist::OutputRequest::from_save_override(
+                rspice_core::netlist::NetlistSourceLocation::in_file(
+                    "<command line --save>",
+                    index + 1,
+                ),
+                spec,
+            ));
         }
+        saves.apply_ground_policy(netlist.ground_policy());
         netlist.saves = saves;
+        netlist.output_requests.retain(|request| {
+            !matches!(
+                request.directive,
+                rspice_core::netlist::OutputDirectiveKind::Save
+                    | rspice_core::netlist::OutputDirectiveKind::Probe
+                    | rspice_core::netlist::OutputDirectiveKind::Print
+                    | rspice_core::netlist::OutputDirectiveKind::Plot
+            )
+        });
+        netlist.output_requests.extend(override_requests);
     }
+
+    rspice_core::netlist::validate_output_symbols(&netlist)
+        .map_err(crate::commands::map_parse_error)?;
 
     if emit_diagnostics {
         crate::commands::emit_netlist_diagnostics(&netlist, false);

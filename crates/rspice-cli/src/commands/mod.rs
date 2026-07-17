@@ -49,16 +49,10 @@ pub(crate) fn parse_netlist_input(
 ) -> Result<rspice_core::Netlist, crate::cli::CliError> {
     use rspice_core::Netlist;
 
-    let map_err = |e: rspice_core::error::ParseError| crate::cli::CliError::ParseError {
-        message: e.to_string(),
-        line: None,
-        suggestion: None,
-    };
-
     if is_stdin(input) {
         let source = read_stdin_source()?;
         return Netlist::parse_with_path(&source, std::path::Path::new("stdin.sp"))
-            .map_err(map_err);
+            .map_err(map_parse_error);
     }
 
     if !input.exists() {
@@ -67,7 +61,40 @@ pub(crate) fn parse_netlist_input(
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
         });
     }
-    Netlist::parse_file(input).map_err(map_err)
+    Netlist::parse_file(input).map_err(map_parse_error)
+}
+
+/// Preserve typed semantic context when crossing the core/CLI boundary.
+pub(crate) fn map_parse_error(error: rspice_core::error::ParseError) -> crate::cli::CliError {
+    let (message, line) = match &error {
+        rspice_core::netlist::ParseError::OutputSymbolValidation(validation) => {
+            let mut message = String::from("undefined output symbols:");
+            for unresolved in &validation.unresolved {
+                use std::fmt::Write as _;
+                let _ = write!(
+                    message,
+                    "\n  {}: {} {} '{}' via {}",
+                    unresolved.origin,
+                    unresolved.directive,
+                    unresolved.kind,
+                    unresolved.symbol,
+                    unresolved.operator,
+                );
+            }
+            (
+                message,
+                validation.unresolved.first().and_then(|unresolved| {
+                    (unresolved.origin.line != 0).then_some(unresolved.origin.line)
+                }),
+            )
+        }
+        _ => (error.to_string(), None),
+    };
+    crate::cli::CliError::ParseError {
+        message,
+        line,
+        suggestion: None,
+    }
 }
 
 pub(crate) fn format_netlist_diagnostic(
@@ -92,5 +119,72 @@ pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bo
                 eprintln!("warning: {}", format_netlist_diagnostic(diagnostic));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_output_error_text_preserves_occurrence_order_and_locations() {
+        let core_error = rspice_core::netlist::ParseError::OutputSymbolValidation(Box::new(
+            rspice_core::netlist::OutputSymbolValidationError {
+                unresolved: vec![
+                    rspice_core::netlist::UnresolvedOutputSymbol {
+                        directive: rspice_core::netlist::OutputDirectiveKind::Print,
+                        origin: rspice_core::netlist::NetlistSourceLocation::in_file("deck.cir", 4),
+                        operator: "V".into(),
+                        symbol: "missing".into(),
+                        kind: rspice_core::netlist::OutputSymbolKind::Node,
+                    },
+                    rspice_core::netlist::UnresolvedOutputSymbol {
+                        directive: rspice_core::netlist::OutputDirectiveKind::Print,
+                        origin: rspice_core::netlist::NetlistSourceLocation::in_file(
+                            "included.cir",
+                            9,
+                        ),
+                        operator: "I".into(),
+                        symbol: "Rbogus".into(),
+                        kind: rspice_core::netlist::OutputSymbolKind::Device,
+                    },
+                    rspice_core::netlist::UnresolvedOutputSymbol {
+                        directive: rspice_core::netlist::OutputDirectiveKind::Print,
+                        origin: rspice_core::netlist::NetlistSourceLocation::in_file(
+                            "included.cir",
+                            9,
+                        ),
+                        operator: "I".into(),
+                        symbol: "Rbogus".into(),
+                        kind: rspice_core::netlist::OutputSymbolKind::Device,
+                    },
+                ],
+            },
+        ));
+
+        let text = map_parse_error(core_error).to_string();
+        let first = text
+            .find("deck.cir:4: .PRINT node 'missing' via V")
+            .unwrap();
+        let repeated = "included.cir:9: .PRINT device 'Rbogus' via I";
+        let second = text.find(repeated).unwrap();
+        let third = text.rfind(repeated).unwrap();
+        assert!(first < second && second < third, "{text}");
+
+        let mapped = map_parse_error(rspice_core::netlist::ParseError::OutputSymbolValidation(
+            Box::new(rspice_core::netlist::OutputSymbolValidationError {
+                unresolved: vec![rspice_core::netlist::UnresolvedOutputSymbol {
+                    directive: rspice_core::netlist::OutputDirectiveKind::Save,
+                    origin: rspice_core::netlist::NetlistSourceLocation::in_memory(17),
+                    operator: "V".into(),
+                    symbol: "missing".into(),
+                    kind: rspice_core::netlist::OutputSymbolKind::Node,
+                }],
+            }),
+        ));
+        let crate::cli::CliError::ParseError { line, .. } = mapped else {
+            panic!("typed output failure must map to a CLI parse error")
+        };
+        assert_eq!(line, Some(17));
     }
 }

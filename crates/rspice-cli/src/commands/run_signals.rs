@@ -149,7 +149,9 @@ fn digital_value_numeric(value: DigitalValue) -> Value {
 }
 
 fn is_ground_node(name: &str) -> bool {
-    matches!(name.trim().to_ascii_lowercase().as_str(), "0" | "gnd")
+    // Parsed selections and CLI overrides are normalized through the
+    // netlist's GroundPolicy before any export path reaches this module.
+    name.trim() == "0"
 }
 
 fn requested_voltage_diffs(saves: &SaveSet) -> impl Iterator<Item = (&str, &str)> {
