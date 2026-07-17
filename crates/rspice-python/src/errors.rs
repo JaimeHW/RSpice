@@ -116,6 +116,9 @@ struct ParseErrorAttributes {
     unresolved_output_symbols: Option<Vec<PyUnresolvedOutputSymbol>>,
     first_startup_kind: Option<String>,
     conflicting_startup_kind: Option<String>,
+    resource: Option<&'static str>,
+    requested: Option<usize>,
+    limit: Option<usize>,
 }
 
 impl ParseErrorAttributes {
@@ -301,6 +304,14 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
 
     let message = err.to_string();
     let mut attributes = match &err {
+        CoreParseError::ResourceLimit(error) => {
+            let mut attributes = ParseErrorAttributes::new("resource_limit");
+            attributes.category = Some("resource_limit");
+            attributes.resource = Some(error.resource.as_str());
+            attributes.requested = Some(error.requested);
+            attributes.limit = Some(error.limit);
+            attributes
+        }
         CoreParseError::Syntax { line, message } => {
             let mut attributes = ParseErrorAttributes::new("syntax");
             attributes.line = Some(*line);
@@ -548,6 +559,9 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             "conflicting_startup_kind",
             attributes.conflicting_startup_kind,
         )?;
+        value.setattr("resource", attributes.resource)?;
+        value.setattr("requested", attributes.requested)?;
+        value.setattr("limit", attributes.limit)?;
         Ok::<_, PyErr>(())
     });
     error
@@ -557,13 +571,25 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
 pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> PyErr {
     use rspice_core::engine::SimulationError as CoreSimulationError;
 
-    let (kind, iterations) = match &err {
-        CoreSimulationError::Configuration(_) => ("configuration", None),
-        CoreSimulationError::Circuit(_) => ("circuit", None),
-        CoreSimulationError::Solver(_) => ("solver", None),
-        CoreSimulationError::Netlist(_) => ("netlist", None),
-        CoreSimulationError::ConvergenceFailed(iterations) => ("convergence", Some(*iterations)),
-        CoreSimulationError::Aborted => ("aborted", None),
+    let (kind, iterations, resource, requested, limit) = match &err {
+        CoreSimulationError::Configuration(rspice_core::SimulationConfigError::ResourceLimit(
+            error,
+        ))
+        | CoreSimulationError::ResourceLimit(error) => (
+            "resource_limit",
+            None,
+            Some(error.resource.as_str()),
+            Some(error.requested),
+            Some(error.limit),
+        ),
+        CoreSimulationError::Configuration(_) => ("configuration", None, None, None, None),
+        CoreSimulationError::Circuit(_) => ("circuit", None, None, None, None),
+        CoreSimulationError::Solver(_) => ("solver", None, None, None, None),
+        CoreSimulationError::Netlist(_) => ("netlist", None, None, None, None),
+        CoreSimulationError::ConvergenceFailed(iterations) => {
+            ("convergence", Some(*iterations), None, None, None)
+        }
+        CoreSimulationError::Aborted => ("aborted", None, None, None, None),
     };
     let error = match &err {
         CoreSimulationError::ConvergenceFailed(_) => ConvergenceError::new_err(err.to_string()),
@@ -574,6 +600,9 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
         let value = error.value(py);
         value.setattr("kind", kind)?;
         value.setattr("iterations", iterations)?;
+        value.setattr("resource", resource)?;
+        value.setattr("requested", requested)?;
+        value.setattr("limit", limit)?;
         Ok::<_, PyErr>(())
     });
     error

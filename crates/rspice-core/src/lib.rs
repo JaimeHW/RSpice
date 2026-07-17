@@ -64,6 +64,7 @@ pub mod xspice;
 
 /// Abort signal for cancelling long-running simulations
 pub mod abort_signal;
+pub mod resource;
 
 /// SIMD-accelerated operations (optional, requires `simd` feature)
 #[cfg(feature = "simd")]
@@ -88,6 +89,7 @@ pub use engine::{
     register_project_veriloga_runtime_for_session, veriloga_cache_entries, veriloga_cache_stats,
 };
 pub use netlist::Netlist;
+pub use resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};
 pub use xspice::{CmContext, CodeModel, CodeModelRegistry, XspiceInstance};
 

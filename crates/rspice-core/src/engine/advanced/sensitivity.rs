@@ -317,6 +317,7 @@ impl Engine {
             statistical_mode: netlist.params.statistical_mode(),
             expression_dialect: netlist.params.expression_dialect(),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),
+            ..crate::netlist::NetlistParseOptions::default()
         };
         let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {
             Netlist::parse_with_path_and_options_and_abort(

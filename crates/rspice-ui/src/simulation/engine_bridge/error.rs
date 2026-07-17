@@ -5,6 +5,16 @@ impl EngineBridge {
     /// Translate core engine error to UI error.
     pub(super) fn translate_error(&self, err: rspice_core::SimulationError) -> SimulationError {
         match err {
+            rspice_core::SimulationError::Configuration(
+                rspice_core::SimulationConfigError::ResourceLimit(error),
+            )
+            | rspice_core::SimulationError::ResourceLimit(error) => {
+                SimulationError::ResourceLimit {
+                    resource: error.resource.as_str().to_string(),
+                    requested: error.requested,
+                    limit: error.limit,
+                }
+            }
             rspice_core::SimulationError::Configuration(error) => {
                 SimulationError::InvalidConfig(error.to_string())
             }

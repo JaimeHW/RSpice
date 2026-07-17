@@ -34,6 +34,7 @@ use super::{
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::resource::{ResourceKind, ResourceLimitError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -54,6 +55,8 @@ fn format_xspice_complex_component(value: Value) -> String {
 pub struct FlattenerConfig {
     /// Maximum recursion depth to prevent infinite loops
     pub max_depth: usize,
+    /// Maximum number of leaf device records emitted after expansion.
+    pub max_elements: usize,
     /// Preserve hierarchical node names for debugging (X1.X2.node format)
     /// When true, internal nodes keep the full hierarchical path
     /// When false, uses shorter hash-based names for efficiency
@@ -68,6 +71,7 @@ impl Default for FlattenerConfig {
     fn default() -> Self {
         Self {
             max_depth: 100,
+            max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
             preserve_hierarchy: true, // Default to full path for debugging
             hierarchy_separator: '.',
             collect_metadata: false,
@@ -80,6 +84,7 @@ impl FlattenerConfig {
     pub fn debug() -> Self {
         Self {
             max_depth: 100,
+            max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
             preserve_hierarchy: true,
             hierarchy_separator: '.',
             collect_metadata: true,
@@ -90,6 +95,7 @@ impl FlattenerConfig {
     pub fn production() -> Self {
         Self {
             max_depth: 100,
+            max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
             preserve_hierarchy: false,
             hierarchy_separator: '_',
             collect_metadata: false,
@@ -100,6 +106,7 @@ impl FlattenerConfig {
     pub fn spectre() -> Self {
         Self {
             max_depth: 256,
+            max_elements: crate::resource::ResourceLimits::default().max_flattened_elements,
             preserve_hierarchy: true,
             hierarchy_separator: '.',
             collect_metadata: true,
@@ -340,16 +347,8 @@ impl<'a> Flattener<'a> {
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        if depth > self.config.max_depth {
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!(
-                    "Subcircuit recursion depth exceeded (max {})",
-                    self.config.max_depth
-                ),
-            }
-            .into());
-        }
+        ResourceLimitError::ensure(ResourceKind::HierarchyDepth, depth, self.config.max_depth)
+            .map_err(ParseError::from)?;
 
         match &element.kind {
             ElementKind::Subcircuit {
@@ -374,7 +373,7 @@ impl<'a> Flattener<'a> {
                         self.remap_element(element, prefix, node_map),
                         scope,
                     )?;
-                    output.push(new_element);
+                    self.push_flattened_element(output, new_element)?;
                 } else {
                     return Err(ParseError::Syntax {
                         line: 0,
@@ -387,10 +386,26 @@ impl<'a> Flattener<'a> {
                 // Regular element - remap nodes and add to output
                 let new_element = self.remap_element(element, prefix, node_map);
                 self.record_xspice_auto_bridge_node_hints(&new_element, scope, depth);
-                output.push(new_element);
+                self.push_flattened_element(output, new_element)?;
             }
         }
 
+        Ok(())
+    }
+
+    fn push_flattened_element(
+        &self,
+        output: &mut Vec<Element>,
+        element: Element,
+    ) -> Result<(), ParseWithAbortError> {
+        let requested = output.len().saturating_add(1);
+        ResourceLimitError::ensure(
+            ResourceKind::FlattenedElements,
+            requested,
+            self.config.max_elements,
+        )
+        .map_err(ParseError::from)?;
+        output.push(element);
         Ok(())
     }
 

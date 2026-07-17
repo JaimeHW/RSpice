@@ -7,6 +7,9 @@ pub enum SimulationError {
     #[error("Invalid simulation configuration: {0}")]
     Configuration(#[from] super::SimulationConfigError),
 
+    #[error(transparent)]
+    ResourceLimit(#[from] crate::resource::ResourceLimitError),
+
     #[error("Circuit error: {0}")]
     Circuit(String),
 

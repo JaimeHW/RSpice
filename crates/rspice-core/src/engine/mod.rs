@@ -42,6 +42,7 @@ mod transient;
 
 // Re-export CompressionConfig for public API
 pub use crate::analysis::waveform::CompressionConfig;
+pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use advanced::{MaterializedStepRun, StepPlan, StepPlanLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{

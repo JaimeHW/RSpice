@@ -3798,11 +3798,19 @@ pub(crate) enum WorkerSimulationError {
     ParseError(String),
     CircuitError(String),
     SolverError(String),
-    ConvergenceFailed { iterations: usize, message: String },
+    ConvergenceFailed {
+        iterations: usize,
+        message: String,
+    },
     Aborted,
     AlreadyRunning,
     ThreadPanic,
     InvalidConfig(String),
+    ResourceLimit {
+        resource: String,
+        requested: usize,
+        limit: usize,
+    },
 }
 
 impl From<SimulationError> for WorkerSimulationError {
@@ -3822,6 +3830,15 @@ impl From<SimulationError> for WorkerSimulationError {
             SimulationError::AlreadyRunning => Self::AlreadyRunning,
             SimulationError::ThreadPanic => Self::ThreadPanic,
             SimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
+            SimulationError::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            } => Self::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            },
         }
     }
 }
@@ -3843,6 +3860,15 @@ impl From<WorkerSimulationError> for SimulationError {
             WorkerSimulationError::AlreadyRunning => Self::AlreadyRunning,
             WorkerSimulationError::ThreadPanic => Self::ThreadPanic,
             WorkerSimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
+            WorkerSimulationError::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            } => Self::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            },
         }
     }
 }

@@ -825,6 +825,13 @@ pub enum SimulationError {
 
     /// Invalid configuration
     InvalidConfig(String),
+
+    /// A configurable production resource budget was exceeded.
+    ResourceLimit {
+        resource: String,
+        requested: usize,
+        limit: usize,
+    },
 }
 
 impl std::fmt::Display for SimulationError {
@@ -847,6 +854,14 @@ impl std::fmt::Display for SimulationError {
             SimulationError::AlreadyRunning => write!(f, "A simulation is already running"),
             SimulationError::ThreadPanic => write!(f, "Simulation thread panicked"),
             SimulationError::InvalidConfig(msg) => write!(f, "Invalid configuration: {}", msg),
+            SimulationError::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            } => write!(
+                f,
+                "Resource limit exceeded for {resource}: requested {requested}, limit {limit}"
+            ),
         }
     }
 }

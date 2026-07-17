@@ -583,6 +583,7 @@ mod tests {
             statistical_mode: StatisticalParamMode::Sample,
             expression_dialect: ExpressionDialect::Xyce,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            ..NetlistParseOptions::default()
         }
     }
 

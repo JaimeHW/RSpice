@@ -9,10 +9,12 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::device::{JfetChannelModel, MosBodyJunctionModel};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
-    Element, ElementKind, ParseWithAbortError, SourceSpec, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
-    XspiceAutoBridgeNodeHint, XspiceAutoBridgeTemplate, XspicePort, flatten_netlist_with_models,
-    flatten_netlist_with_models_with_abort, reduce_supernode_topology,
+    Element, ElementKind, FlattenerConfig, ParseError, ParseWithAbortError, SourceSpec,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, XspiceAutoBridgeNodeHint, XspiceAutoBridgeTemplate,
+    XspicePort, flatten_netlist_with_models, flatten_netlist_with_models_config_with_abort,
+    reduce_supernode_topology,
 };
+use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
 use serde::{Deserialize, Serialize};
@@ -78,10 +80,30 @@ fn check_build_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
 fn map_build_parse_error(context: &str, error: ParseWithAbortError) -> SimulationError {
     match error {
         ParseWithAbortError::Aborted => SimulationError::Aborted,
+        ParseWithAbortError::Parse(ParseError::ResourceLimit(error)) => {
+            SimulationError::ResourceLimit(error)
+        }
         ParseWithAbortError::Parse(error) => {
             SimulationError::Netlist(format!("{context} error: {error}"))
         }
     }
+}
+
+fn check_circuit_resource_limits(
+    engine: &Engine,
+    circuit: &CircuitData,
+) -> Result<(), SimulationError> {
+    ResourceLimitError::ensure(
+        ResourceKind::CircuitNodes,
+        circuit.num_nodes(),
+        engine.config.resource_limits.max_circuit_nodes,
+    )?;
+    ResourceLimitError::ensure(
+        ResourceKind::MatrixUnknowns,
+        circuit.matrix_size(),
+        engine.config.resource_limits.max_matrix_unknowns,
+    )?;
+    Ok(())
 }
 
 fn validate_source_file_inputs(
@@ -3222,8 +3244,16 @@ impl Engine {
         };
 
         // Flatten subcircuit instances into top-level elements
-        let flattened = flatten_netlist_with_models_with_abort(netlist, abort)
-            .map_err(|error| map_build_parse_error("subcircuit flattening", error))?;
+        let flattened = flatten_netlist_with_models_config_with_abort(
+            netlist,
+            FlattenerConfig {
+                max_depth: self.config.resource_limits.max_hierarchy_depth,
+                max_elements: self.config.resource_limits.max_flattened_elements,
+                ..FlattenerConfig::default()
+            },
+            abort,
+        )
+        .map_err(|error| map_build_parse_error("subcircuit flattening", error))?;
         let mut effective_model_netlist;
         let netlist = if flattened.scoped_models.is_empty() {
             netlist
@@ -3308,6 +3338,7 @@ impl Engine {
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {
                 check_build_abort(abort)?;
+                check_circuit_resource_limits(self, &circuit)?;
             }
             match &element.kind {
                 ElementKind::Resistor {
@@ -5896,6 +5927,7 @@ impl Engine {
         }
 
         check_build_abort(abort)?;
+        check_circuit_resource_limits(self, &circuit)?;
 
         // Ensure ground reference exists
         // If no node "0" was specified, auto-select a reference node

@@ -2,6 +2,7 @@
 
 use crate::Value;
 use crate::netlist::{NonlinearContinuationMode, TransientLteReference};
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use thiserror::Error;
 
 /// A violated invariant in [`SimulationConfig`].
@@ -10,6 +11,10 @@ use thiserror::Error;
 /// can report invalid configuration without parsing display strings.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum SimulationConfigError {
+    /// A configured collection already exceeds its corresponding resource
+    /// policy before simulation begins.
+    #[error(transparent)]
+    ResourceLimit(#[from] ResourceLimitError),
     /// A floating-point field was not finite or did not satisfy its lower bound.
     #[error("{field} must be {requirement}, got {value}")]
     InvalidValue {
@@ -130,6 +135,9 @@ pub enum JfetLevel2Model {
 /// Simulation configuration
 #[derive(Debug, Clone)]
 pub struct SimulationConfig {
+    /// Resource policy applied to parsing-adjacent validation, hierarchy
+    /// expansion, circuit construction, analyses, and batch execution.
+    pub resource_limits: ResourceLimits,
     /// Convergence tolerance for Newton-Raphson
     pub tolerance: Value,
     /// Maximum Newton-Raphson iterations
@@ -257,6 +265,11 @@ impl SimulationConfig {
         self.convergence_config.validate()?;
         self.bypass_config.validate()?;
         if let Some(grid) = self.locked_time_grid.as_deref() {
+            ResourceLimitError::ensure(
+                ResourceKind::AnalysisPoints,
+                grid.len(),
+                self.resource_limits.max_analysis_points,
+            )?;
             validate_locked_time_grid(grid)?;
         }
         Ok(())
@@ -506,6 +519,7 @@ impl BypassConfig {
 impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
+            resource_limits: ResourceLimits::default(),
             tolerance: crate::constants::DEFAULT_TOLERANCE,
             max_iterations: crate::constants::MAX_NR_ITERATIONS,
             transient_max_iterations: crate::constants::MAX_TRANSIENT_NR_ITERATIONS,

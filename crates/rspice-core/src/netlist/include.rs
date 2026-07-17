@@ -21,6 +21,7 @@ use super::{
     read_file_with_encoding_with_abort,
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
 /// One source-aware item in an include-expanded netlist.
 ///
@@ -48,11 +49,12 @@ pub(crate) enum ExpandedSourceItem {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ExpandedSource {
     pub(crate) items: Vec<ExpandedSourceItem>,
+    rendered_bytes: usize,
 }
 
 impl ExpandedSource {
     pub(crate) fn render(&self) -> String {
-        let mut output = String::new();
+        let mut output = String::with_capacity(self.rendered_bytes);
         for item in &self.items {
             if let ExpandedSourceItem::Line { text, .. } = item {
                 output.push_str(text);
@@ -62,8 +64,24 @@ impl ExpandedSource {
         output
     }
 
-    fn append(&mut self, other: Self) {
+    fn append_limited(&mut self, other: Self, limit: usize) -> Result<(), ParseError> {
+        let requested = self.rendered_bytes.saturating_add(other.rendered_bytes);
+        ResourceLimitError::ensure(ResourceKind::ExpandedSourceBytes, requested, limit)?;
+        self.rendered_bytes = requested;
         self.items.extend(other.items);
+        Ok(())
+    }
+
+    fn push_limited(&mut self, item: ExpandedSourceItem, limit: usize) -> Result<(), ParseError> {
+        let additional = match &item {
+            ExpandedSourceItem::Line { text, .. } => text.len().saturating_add(1),
+            _ => 0,
+        };
+        let requested = self.rendered_bytes.saturating_add(additional);
+        ResourceLimitError::ensure(ResourceKind::ExpandedSourceBytes, requested, limit)?;
+        self.rendered_bytes = requested;
+        self.items.push(item);
+        Ok(())
     }
 }
 
@@ -283,8 +301,8 @@ pub struct IncludeProcessor {
     /// Optional authenticated in-memory resolver. When present, every source
     /// lookup is confined to this bundle and filesystem fallback is forbidden.
     sealed_sources: Option<SealedSourceBundle>,
-    /// Maximum include depth to prevent stack overflow
-    max_depth: usize,
+    /// Shared parsing and expansion resource policy.
+    resource_limits: ResourceLimits,
     /// Current include depth
     current_depth: usize,
     /// Exact successful filesystem/sealed-bundle reads performed while
@@ -393,10 +411,16 @@ impl IncludeProcessor {
             active_includes: HashSet::new(),
             lib_paths: Vec::new(),
             sealed_sources: None,
-            max_depth: DEFAULT_MAX_INCLUDE_DEPTH,
+            resource_limits: ResourceLimits::default(),
             current_depth: 0,
             resolved_dependencies: Vec::new(),
         }
+    }
+
+    /// Apply an explicit resource policy to subsequent expansion work.
+    pub fn with_resource_limits(mut self, resource_limits: ResourceLimits) -> Self {
+        self.resource_limits = resource_limits;
+        self
     }
 
     /// Exact dependency edges read by the most recent expansion, in traversal
@@ -887,6 +911,12 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
+        ResourceLimitError::ensure(
+            ResourceKind::ExpandedSourceBytes,
+            content.len(),
+            self.resource_limits.max_expanded_source_bytes,
+        )
+        .map_err(ParseError::from)?;
         let mut result = ExpandedSource::default();
         result.items.push(ExpandedSourceItem::EnterSource {
             path: current_path.to_path_buf(),
@@ -948,7 +978,7 @@ impl IncludeProcessor {
                             include_error_at(error, current_path, line_number, ".lib")
                         })
                     })?;
-                result.append(included);
+                result.append_limited(included, self.resource_limits.max_expanded_source_bytes)?;
                 continue;
             }
 
@@ -1019,10 +1049,13 @@ impl IncludeProcessor {
                     }
                     let path = self.resolve_path_from_with_abort(current_path, &filename, abort)?;
                     let normalized = path.display().to_string().replace('\\', "/");
-                    result.items.push(ExpandedSourceItem::Line {
-                        text: format!(".spef_include \"{normalized}\""),
-                        origin: NetlistSourceLocation::in_file(current_path, line_number),
-                    });
+                    result.push_limited(
+                        ExpandedSourceItem::Line {
+                            text: format!(".spef_include \"{normalized}\""),
+                            origin: NetlistSourceLocation::in_file(current_path, line_number),
+                        },
+                        self.resource_limits.max_expanded_source_bytes,
+                    )?;
                     continue;
                 }
                 let included = self
@@ -1038,14 +1071,17 @@ impl IncludeProcessor {
                             include_error_at(error, current_path, line_number, ".include")
                         })
                     })?;
-                result.append(included);
+                result.append_limited(included, self.resource_limits.max_expanded_source_bytes)?;
                 continue;
             }
 
-            result.items.push(ExpandedSourceItem::Line {
-                text: line.to_string(),
-                origin: NetlistSourceLocation::in_file(current_path, line_number),
-            });
+            result.push_limited(
+                ExpandedSourceItem::Line {
+                    text: line.to_string(),
+                    origin: NetlistSourceLocation::in_file(current_path, line_number),
+                },
+                self.resource_limits.max_expanded_source_bytes,
+            )?;
         }
 
         if let Some(frame) = inline_sections.last() {
@@ -1077,12 +1113,11 @@ impl IncludeProcessor {
     }
 
     fn enter_include(&mut self, key: &IncludeKey) -> Result<(), ParseError> {
-        if self.current_depth >= self.max_depth {
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!("Include depth exceeded maximum of {}", self.max_depth),
-            });
-        }
+        ResourceLimitError::ensure(
+            ResourceKind::IncludeDepth,
+            self.current_depth.saturating_add(1),
+            self.resource_limits.max_include_depth,
+        )?;
 
         if !self.active_includes.insert(key.clone()) {
             return Err(ParseError::Syntax {
@@ -1241,6 +1276,9 @@ fn include_error_at(
     source_line: usize,
     directive: &str,
 ) -> ParseError {
+    if matches!(&error, ParseError::ResourceLimit(_)) {
+        return error;
+    }
     let detail = match error {
         ParseError::Syntax { line, message } if line > 0 => {
             format!("{message} (nested source line {line})")
@@ -2044,11 +2082,14 @@ R1 1 0 {selected}
         let rejected = IncludeProcessor::new_sealed(&rejected_root, rejected_bundle)
             .process_sealed_root(&rejected_root, None)
             .expect_err("one frame beyond the production boundary must fail");
-        assert!(
-            rejected
-                .to_string()
-                .contains("Include depth exceeded maximum of 64")
-        );
+        assert!(matches!(
+            rejected,
+            ParseError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::IncludeDepth,
+                requested: 65,
+                limit: DEFAULT_MAX_INCLUDE_DEPTH,
+            })
+        ));
     }
 
     fn unique_include_temp_dir(label: &str) -> PathBuf {

@@ -78,6 +78,8 @@ pub struct NetlistParseOptions {
     pub statistical_mode: StatisticalParamMode,
     pub expression_dialect: ExpressionDialect,
     pub parameter_redefinition_policy: ParameterRedefinitionPolicy,
+    /// Limits applied before parser-owned collections are materialized.
+    pub resource_limits: crate::resource::ResourceLimits,
 }
 
 impl Default for NetlistParseOptions {
@@ -86,6 +88,7 @@ impl Default for NetlistParseOptions {
             statistical_mode: StatisticalParamMode::Sample,
             expression_dialect: ExpressionDialect::Ngspice,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            resource_limits: crate::resource::ResourceLimits::default(),
         }
     }
 }
@@ -354,9 +357,21 @@ fn parse_netlist_impl(
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::NetlistBytes,
+        input.len(),
+        options.resource_limits.max_netlist_bytes,
+    )
+    .map_err(ParseError::from)?;
     let mut original_lines: Vec<&str> = Vec::new();
     for (index, line) in input.lines().enumerate() {
         poll_parse_abort(abort, index)?;
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::NetlistLines,
+            index.saturating_add(1),
+            options.resource_limits.max_netlist_lines,
+        )
+        .map_err(ParseError::from)?;
         original_lines.push(line);
     }
 

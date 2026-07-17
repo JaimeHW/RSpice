@@ -299,6 +299,9 @@ pub enum DeviceInitialConditionError {
 /// Errors that can occur during netlist parsing
 #[derive(Debug, Error)]
 pub enum ParseError {
+    #[error(transparent)]
+    ResourceLimit(#[from] crate::resource::ResourceLimitError),
+
     #[error("Syntax error at line {line}: {message}")]
     Syntax { line: usize, message: String },
 
@@ -681,6 +684,29 @@ pub struct Netlist {
 }
 
 impl Netlist {
+    fn enforce_root_source_limits_with_abort(
+        input: &str,
+        limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::NetlistBytes,
+            input.len(),
+            limits.max_netlist_bytes,
+        )
+        .map_err(ParseError::from)?;
+        for (line_index, _) in input.lines().enumerate() {
+            poll_parse_abort(abort, line_index)?;
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::NetlistLines,
+                line_index.saturating_add(1),
+                limits.max_netlist_lines,
+            )
+            .map_err(ParseError::from)?;
+        }
+        ensure_parse_not_aborted(abort)
+    }
+
     /// Effective ground policy shared by elaboration, validation, and output
     /// execution. This is semantic state, independent of source spelling.
     pub fn ground_policy(&self) -> GroundPolicy {
@@ -808,7 +834,7 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        ensure_parse_not_aborted(abort)?;
+        Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let promoted_input = Self::promote_control_analysis_commands_with_abort(input, abort)?;
         let (sanitized, mut diagnostics) =
             Self::strip_control_blocks_with_diagnostics_and_abort(&promoted_input, abort)?;
@@ -966,8 +992,10 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
+        Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let mut include_processor =
-            IncludeProcessor::new_with_execution_dir(file_path, execution_dir);
+            IncludeProcessor::new_with_execution_dir(file_path, execution_dir)
+                .with_resource_limits(options.resource_limits);
         let expanded =
             include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
         let (sanitized, mut diagnostics) =
@@ -990,7 +1018,8 @@ impl Netlist {
             .or(default_execution_dir.as_deref())
             .expect("explicit or process execution directory is available");
         let initcond_source_provider =
-            IncludeProcessor::new_with_execution_dir(file_path, Some(initcond_execution_dir));
+            IncludeProcessor::new_with_execution_dir(file_path, Some(initcond_execution_dir))
+                .with_resource_limits(options.resource_limits);
         netlist
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
@@ -1116,7 +1145,8 @@ impl Netlist {
         search_paths: &[std::path::PathBuf],
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        ensure_parse_not_aborted(abort)?;
+        let resource_limits = crate::resource::ResourceLimits::default();
+        Self::enforce_root_source_limits_with_abort(input, resource_limits, abort)?;
         let mut processor = IncludeProcessor::new(path);
         for (index, dir) in search_paths.iter().enumerate() {
             poll_parse_abort(abort, index)?;

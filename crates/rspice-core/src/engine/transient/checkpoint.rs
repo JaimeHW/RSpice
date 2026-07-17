@@ -2552,6 +2552,7 @@ mod tests {
             statistical_mode: crate::netlist::StatisticalParamMode::Sample,
             expression_dialect: crate::netlist::ExpressionDialect::Xyce,
             parameter_redefinition_policy: crate::netlist::ParameterRedefinitionPolicy::UseLast,
+            ..crate::netlist::NetlistParseOptions::default()
         };
         let scoped_omitted = crate::netlist::parse_netlist_with_options(
             "scoped startup identity\n\
