@@ -88,6 +88,26 @@ fn nested_convergence_and_bypass_settings_are_validated() {
             gmin_target: 1.0e-12,
         })
     );
+
+    let mut disabled_junction_floor = SimulationConfig::default();
+    disabled_junction_floor
+        .convergence_config
+        .junction_gmin_target = 0.0;
+    disabled_junction_floor
+        .validate()
+        .expect("zero is the explicit device-junction GMIN disable value");
+
+    disabled_junction_floor
+        .convergence_config
+        .junction_gmin_target = -1.0;
+    assert!(matches!(
+        disabled_junction_floor.validate(),
+        Err(SimulationConfigError::InvalidValue {
+            field: "convergence_config.junction_gmin_target",
+            requirement: "a non-negative finite number",
+            ..
+        })
+    ));
 }
 
 #[test]

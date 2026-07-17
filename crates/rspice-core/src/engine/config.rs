@@ -309,6 +309,8 @@ pub struct ConvergenceConfig {
     /// Final global nodal diagonal floor used only for numerical conditioning.
     pub gmin_target: Value,
     /// Final SPICE device-junction GMIN floor seen by compact models.
+    /// Zero explicitly disables the device-junction floor, matching `.OPTIONS
+    /// GMIN=0` semantics used by equation-oracle and idealized model decks.
     pub junction_gmin_target: Value,
     /// Relative voltage tolerance for Newton voltage convergence checks.
     pub voltage_reltol: Value,
@@ -386,7 +388,7 @@ impl ConvergenceConfig {
                 gmin_target: self.gmin_target,
             });
         }
-        validate_positive(
+        validate_non_negative(
             "convergence_config.junction_gmin_target",
             self.junction_gmin_target,
         )?;
