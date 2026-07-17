@@ -607,7 +607,7 @@ fn planned_split(
     right: impl FnOnce(&mut Ui),
 ) {
     let border = Tokens::get(ui.ctx()).color.border_strong;
-    let wide = ui.ctx().content_rect().width() > 760.0;
+    let wide = ui.available_width() > 760.0;
     ui.add_space(10.0);
     let frame = Frame::NONE.stroke(Stroke::new(1.0, border));
     if wide {
@@ -810,7 +810,7 @@ fn render_planned_content(ui: &mut Ui, specification: &data::PlannedWorkflowSpec
 }
 
 fn render_planned_table(ui: &mut Ui, table: &data::PlannedWorkflowTable) {
-    let narrow = ui.ctx().content_rect().width() <= 820.0;
+    let narrow = ui.available_width() <= 820.0;
     if narrow {
         egui::ScrollArea::horizontal()
             .id_salt(("planned-capability-table", table.headers))
@@ -1044,7 +1044,7 @@ fn render_toolbar(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.set_min_height(34.0);
-            let compact = ui.ctx().content_rect().width() <= 560.0;
+            let compact = ui.available_width() <= 560.0;
             if compact {
                 setting_row_copy(ui);
                 ui.add_space(10.0);
@@ -2676,7 +2676,7 @@ fn workflow_toolbar(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
 }
 
 fn contract_table(ui: &mut Ui, id: &'static str, columns: &[&str], body: impl FnOnce(&mut Ui)) {
-    if ui.ctx().content_rect().width() <= 820.0 {
+    if ui.available_width() <= 820.0 {
         egui::ScrollArea::horizontal()
             .id_salt(("capability-contract-table", id))
             .auto_shrink([false, true])

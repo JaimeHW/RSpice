@@ -26,6 +26,7 @@ use crate::common::app::app_dialog_state::{
 const RESPONSIVE_TABLE_BREAKPOINT: f32 = 760.0;
 const ENGINEERING_TABLE_BREAKPOINT: f32 = 820.0;
 const EDITOR_NARROW_TABLE_MIN_WIDTH: f32 = 660.0;
+const REGISTRY_NARROW_TABLE_MIN_WIDTH: f32 = 640.0;
 const REGISTRY_COLUMN_COUNT: f32 = 5.0;
 const REGISTRY_ROW_HEIGHT: f32 = 28.0;
 const REGISTRY_HEADER_HEIGHT: f32 = 27.0;
@@ -278,88 +279,103 @@ fn policy_select(
 fn render_registry_table(ui: &mut Ui, profile: &ShortcutPreferences) {
     let audit = profile.audit();
     let operating_system = ui.ctx().os();
-    let table_width = ui.available_width().max(1.0);
+    let viewport_width = ui.available_width().max(1.0);
+    let table_width = if viewport_width <= ENGINEERING_TABLE_BREAKPOINT {
+        viewport_width.max(REGISTRY_NARROW_TABLE_MIN_WIDTH)
+    } else {
+        viewport_width
+    };
     let column_width = table_width / REGISTRY_COLUMN_COUNT;
     let table_response = ui
         .vertical(|ui| {
-            ui.set_width(table_width);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            semantic_table_row(ui, "Shortcut registry column headings", |ui| {
-                for heading in [
-                    "Command",
-                    "Desktop primary",
-                    "Browser / touch alternate",
-                    "Context",
-                    "Status",
-                ] {
-                    table_text_cell(
-                        ui,
-                        heading,
-                        true,
-                        false,
-                        column_width,
-                        REGISTRY_HEADER_HEIGHT,
-                        TableCellTone::Normal,
-                    );
-                }
-            });
-            for (command, label) in REGISTRY_ROWS.iter().copied() {
-                ui.push_id(command.stable_id(), |ui| {
-                    semantic_table_row(ui, label, |ui| {
-                        table_text_cell(
-                            ui,
-                            label,
-                            false,
-                            false,
-                            column_width,
-                            REGISTRY_ROW_HEIGHT,
-                            TableCellTone::Normal,
-                        );
-                        table_kbd(
-                            ui,
-                            &binding_for_platform(
-                                profile,
-                                command,
-                                ShortcutBindingSlot::Primary,
-                                CommandPlatform::Desktop,
-                                operating_system,
-                            ),
-                            column_width,
-                            REGISTRY_ROW_HEIGHT,
-                        );
-                        table_kbd(
-                            ui,
-                            &binding_for_platform(
-                                profile,
-                                command,
-                                ShortcutBindingSlot::Alternate,
-                                CommandPlatform::Browser,
-                                operating_system,
-                            ),
-                            column_width,
-                            REGISTRY_ROW_HEIGHT,
-                        );
-                        table_text_cell(
-                            ui,
-                            command.shortcut_context().label(),
-                            false,
-                            true,
-                            column_width,
-                            REGISTRY_ROW_HEIGHT,
-                            TableCellTone::Normal,
-                        );
-                        table_text_cell(
-                            ui,
-                            registry_status(&audit, command),
-                            false,
-                            false,
-                            column_width,
-                            REGISTRY_ROW_HEIGHT,
-                            registry_status_tone(&audit, command),
-                        );
-                    });
+            ui.set_width(viewport_width);
+            egui::ScrollArea::horizontal()
+                .id_salt("shortcut-registry-table-scroll")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.set_min_width(table_width);
+                    ui.vertical(|ui| {
+                        ui.set_width(table_width);
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        semantic_table_row(ui, "Shortcut registry column headings", |ui| {
+                            for heading in [
+                                "Command",
+                                "Desktop primary",
+                                "Browser / touch alternate",
+                                "Context",
+                                "Status",
+                            ] {
+                                table_text_cell(
+                                    ui,
+                                    heading,
+                                    true,
+                                    false,
+                                    column_width,
+                                    REGISTRY_HEADER_HEIGHT,
+                                    TableCellTone::Normal,
+                                );
+                            }
+                        });
+                        for (command, label) in REGISTRY_ROWS.iter().copied() {
+                            ui.push_id(command.stable_id(), |ui| {
+                                semantic_table_row(ui, label, |ui| {
+                                    table_text_cell(
+                                        ui,
+                                        label,
+                                        false,
+                                        false,
+                                        column_width,
+                                        REGISTRY_ROW_HEIGHT,
+                                        TableCellTone::Normal,
+                                    );
+                                    table_kbd(
+                                        ui,
+                                        &binding_for_platform(
+                                            profile,
+                                            command,
+                                            ShortcutBindingSlot::Primary,
+                                            CommandPlatform::Desktop,
+                                            operating_system,
+                                        ),
+                                        column_width,
+                                        REGISTRY_ROW_HEIGHT,
+                                    );
+                                    table_kbd(
+                                        ui,
+                                        &binding_for_platform(
+                                            profile,
+                                            command,
+                                            ShortcutBindingSlot::Alternate,
+                                            CommandPlatform::Browser,
+                                            operating_system,
+                                        ),
+                                        column_width,
+                                        REGISTRY_ROW_HEIGHT,
+                                    );
+                                    table_text_cell(
+                                        ui,
+                                        command.shortcut_context().label(),
+                                        false,
+                                        true,
+                                        column_width,
+                                        REGISTRY_ROW_HEIGHT,
+                                        TableCellTone::Normal,
+                                    );
+                                    table_text_cell(
+                                        ui,
+                                        registry_status(&audit, command),
+                                        false,
+                                        false,
+                                        column_width,
+                                        REGISTRY_ROW_HEIGHT,
+                                        registry_status_tone(&audit, command),
+                                    );
+                                });
+                            });
+                        }
+                    })
+                    .response
                 });
-            }
         })
         .response;
     table_response.widget_info(|| {
@@ -742,7 +758,7 @@ fn editor_toolbar(ui: &mut Ui, editor: &mut ShortcutEditorState) {
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            let narrow = ui.ctx().content_rect().width() <= RESPONSIVE_TABLE_BREAKPOINT;
+            let narrow = ui.available_width() <= RESPONSIVE_TABLE_BREAKPOINT;
             if narrow {
                 ui.vertical(|ui| toolbar_controls(ui, editor, true));
             } else {
@@ -832,7 +848,7 @@ fn editor_table(
     commands: &[Command],
 ) {
     let viewport_width = ui.available_width().max(1.0);
-    let narrow = ui.ctx().content_rect().width() <= ENGINEERING_TABLE_BREAKPOINT;
+    let narrow = viewport_width <= ENGINEERING_TABLE_BREAKPOINT;
     let table_width = if narrow {
         viewport_width.max(EDITOR_NARROW_TABLE_MIN_WIDTH)
     } else {
@@ -1639,7 +1655,7 @@ fn repair_invalid_entries(editor: &mut ShortcutEditorState) {
 
 fn editor_notes(ui: &mut Ui) {
     ui.add_space(10.0);
-    let narrow = ui.ctx().content_rect().width() <= RESPONSIVE_TABLE_BREAKPOINT;
+    let narrow = ui.available_width() <= RESPONSIVE_TABLE_BREAKPOINT;
     let t = Tokens::get(ui.ctx());
     let outer = egui::Frame::NONE
         .fill(t.color.bg_panel)
@@ -1915,6 +1931,7 @@ mod tests {
         assert_eq!(REGISTRY_ROWS[10].1, "Toggle console");
         assert_eq!(ENGINEERING_TABLE_BREAKPOINT, 820.0);
         assert_eq!(EDITOR_NARROW_TABLE_MIN_WIDTH, 660.0);
+        assert_eq!(REGISTRY_NARROW_TABLE_MIN_WIDTH, 640.0);
         assert_eq!(REGISTRY_COLUMN_COUNT, 5.0);
         assert_eq!(REGISTRY_HEADER_HEIGHT, 27.0);
         assert_eq!(REGISTRY_ROW_HEIGHT, 28.0);

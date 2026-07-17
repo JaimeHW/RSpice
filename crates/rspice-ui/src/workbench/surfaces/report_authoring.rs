@@ -28,6 +28,12 @@ const OUTLINE_DESKTOP_WIDTH: f32 = 220.0;
 const OUTLINE_TABLET_WIDTH: f32 = 180.0;
 const INSPECTOR_WIDTH: f32 = 280.0;
 const PANEL_GAP: f32 = 0.0;
+const OUTLINE_HEADER_HEIGHT: f32 = 39.0;
+const OUTLINE_ROW_HEIGHT: f32 = 34.0;
+const PREVIEW_MIN_HEIGHT: f32 = 420.0;
+const INSPECTOR_SECTION_HEIGHT: f32 = 29.0;
+const INSPECTOR_ROW_HEIGHT: f32 = 29.0;
+const INSPECTOR_SECTION_PADDING: f32 = 17.0;
 
 const PAPER: Color32 = Color32::from_rgb(255, 255, 255);
 const PAPER_PANEL: Color32 = Color32::from_rgb(246, 247, 247);
@@ -54,6 +60,20 @@ enum ComposerLayout {
     Stacked,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PaneSeparators {
+    top: bool,
+    right: bool,
+    bottom: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ComposerPaneHeights {
+    outline: f32,
+    preview: f32,
+    inspector: f32,
+}
+
 impl ComposerLayout {
     fn resolve(width: f32) -> Self {
         if width > DESKTOP_BREAKPOINT {
@@ -62,6 +82,88 @@ impl ComposerLayout {
             Self::TwoColumnInspectorBelow
         } else {
             Self::Stacked
+        }
+    }
+
+    fn separators(self) -> [PaneSeparators; 3] {
+        match self {
+            Self::ThreeColumn => [
+                PaneSeparators {
+                    right: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators {
+                    right: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators::default(),
+            ],
+            Self::TwoColumnInspectorBelow => [
+                PaneSeparators {
+                    right: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators::default(),
+                PaneSeparators {
+                    top: true,
+                    ..PaneSeparators::default()
+                },
+            ],
+            Self::Stacked => [
+                PaneSeparators {
+                    bottom: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators {
+                    bottom: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators::default(),
+            ],
+        }
+    }
+}
+
+fn composer_pane_heights(
+    layout: ComposerLayout,
+    available_height: f32,
+    page_count: usize,
+    page_selected: bool,
+) -> ComposerPaneHeights {
+    let viewport_height = if available_height.is_finite() {
+        available_height.max(1.0)
+    } else {
+        PREVIEW_MIN_HEIGHT
+    };
+    let outline_content = OUTLINE_HEADER_HEIGHT + OUTLINE_ROW_HEIGHT * page_count as f32;
+    let inspector_sections = if page_selected { 2.0 } else { 1.0 };
+    let inspector_content = inspector_sections
+        * (INSPECTOR_SECTION_HEIGHT + INSPECTOR_ROW_HEIGHT * 5.0 + INSPECTOR_SECTION_PADDING);
+
+    match layout {
+        ComposerLayout::ThreeColumn => ComposerPaneHeights {
+            outline: viewport_height,
+            preview: viewport_height,
+            inspector: viewport_height,
+        },
+        ComposerLayout::TwoColumnInspectorBelow => {
+            let top_content = outline_content.max(PREVIEW_MIN_HEIGHT);
+            let base_height = top_content + inspector_content;
+            let surplus = (viewport_height - base_height).max(0.0);
+            ComposerPaneHeights {
+                outline: top_content + surplus * 0.65,
+                preview: top_content + surplus * 0.65,
+                inspector: inspector_content + surplus * 0.35,
+            }
+        }
+        ComposerLayout::Stacked => {
+            let base_height = outline_content + PREVIEW_MIN_HEIGHT + inspector_content;
+            let surplus = (viewport_height - base_height).max(0.0);
+            ComposerPaneHeights {
+                outline: outline_content,
+                preview: PREVIEW_MIN_HEIGHT + surplus * 0.70,
+                inspector: inspector_content + surplus * 0.30,
+            }
         }
     }
 }
@@ -173,14 +275,30 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         };
         let selected_page = selected_page_id(&app.state, &document);
         let available = ui.available_size();
-        match ComposerLayout::resolve(available.x) {
+        let layout = ComposerLayout::resolve(available.x);
+        let heights = composer_pane_heights(
+            layout,
+            available.y,
+            document.pages().len(),
+            selected_page.is_some(),
+        );
+        let [outline_separators, preview_separators, inspector_separators] = layout.separators();
+        match layout {
             ComposerLayout::ThreeColumn => {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = PANEL_GAP;
                     ui.allocate_ui_with_layout(
                         Vec2::new(OUTLINE_DESKTOP_WIDTH, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| outline(ui, app, &document, selected_page),
+                        |ui| {
+                            outline(
+                                ui,
+                                app,
+                                &document,
+                                selected_page,
+                                outline_separators,
+                            )
+                        },
                     );
                     let preview_width = (available.x
                         - OUTLINE_DESKTOP_WIDTH
@@ -190,12 +308,12 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.allocate_ui_with_layout(
                         Vec2::new(preview_width, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| preview(ui, &document, selected_page),
+                        |ui| preview(ui, &document, selected_page, preview_separators),
                     );
                     ui.allocate_ui_with_layout(
                         Vec2::new(INSPECTOR_WIDTH, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| inspector(ui, &document, selected_page),
+                        |ui| inspector(ui, &document, selected_page, inspector_separators),
                     );
                 });
             }
@@ -203,26 +321,49 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 ScrollArea::vertical()
                     .id_salt("report-authoring.tablet")
                     .show(ui, |ui| {
+                        let local_width = ui.available_width().max(1.0);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = PANEL_GAP;
                             ui.allocate_ui_with_layout(
-                                Vec2::new(OUTLINE_TABLET_WIDTH, 470.0),
+                                Vec2::new(OUTLINE_TABLET_WIDTH, heights.outline),
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| outline(ui, app, &document, selected_page),
+                                |ui| {
+                                    outline(
+                                        ui,
+                                        app,
+                                        &document,
+                                        selected_page,
+                                        outline_separators,
+                                    )
+                                },
                             );
                             ui.allocate_ui_with_layout(
                                 Vec2::new(
-                                    (available.x - OUTLINE_TABLET_WIDTH).max(1.0),
-                                    470.0,
+                                    (local_width - OUTLINE_TABLET_WIDTH).max(1.0),
+                                    heights.preview,
                                 ),
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| preview(ui, &document, selected_page),
+                                |ui| {
+                                    preview(
+                                        ui,
+                                        &document,
+                                        selected_page,
+                                        preview_separators,
+                                    )
+                                },
                             );
                         });
                         ui.allocate_ui_with_layout(
-                            Vec2::new(available.x, 360.0),
+                            Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| inspector(ui, &document, selected_page),
+                            |ui| {
+                                inspector(
+                                    ui,
+                                    &document,
+                                    selected_page,
+                                    inspector_separators,
+                                )
+                            },
                         );
                     });
             }
@@ -230,20 +371,43 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 ScrollArea::vertical()
                     .id_salt("report-authoring.compact")
                     .show(ui, |ui| {
+                        let local_width = ui.available_width().max(1.0);
                         ui.allocate_ui_with_layout(
-                            Vec2::new(available.x, 280.0),
+                            Vec2::new(local_width, heights.outline),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| outline(ui, app, &document, selected_page),
+                            |ui| {
+                                outline(
+                                    ui,
+                                    app,
+                                    &document,
+                                    selected_page,
+                                    outline_separators,
+                                )
+                            },
                         );
                         ui.allocate_ui_with_layout(
-                            Vec2::new(available.x, 540.0),
+                            Vec2::new(local_width, heights.preview),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| preview(ui, &document, selected_page),
+                            |ui| {
+                                preview(
+                                    ui,
+                                    &document,
+                                    selected_page,
+                                    preview_separators,
+                                )
+                            },
                         );
                         ui.allocate_ui_with_layout(
-                            Vec2::new(available.x, 380.0),
+                            Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| inspector(ui, &document, selected_page),
+                            |ui| {
+                                inspector(
+                                    ui,
+                                    &document,
+                                    selected_page,
+                                    inspector_separators,
+                                )
+                            },
                         );
                     });
             }
@@ -259,63 +423,62 @@ fn outline(
     app: &mut RSpiceApp,
     document: &ReportDocument,
     selected_page: Option<ReportPageId>,
+    separators: PaneSeparators,
 ) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let height = ui.available_height();
-    egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .show(ui, |ui| {
-            ui.set_min_size(Vec2::new((width - 2.0).max(1.0), (height - 2.0).max(1.0)));
-            let (head, _) =
-                ui.allocate_exact_size(Vec2::new(ui.available_width(), 39.0), Sense::hover());
-            ui.painter().hline(
-                head.x_range(),
-                head.bottom(),
-                Stroke::new(1.0, t.color.border),
-            );
-            ui.painter().text(
-                head.left_center() + Vec2::new(10.0, 0.0),
-                Align2::LEFT_CENTER,
-                "Report outline",
-                theme::sans(tokens::FS_2, FontWeight::SemiBold),
-                t.color.text,
-            );
-            let button_rect = Rect::from_center_size(
-                head.right_center() - Vec2::new(19.5, 0.0),
-                Vec2::new(29.0, 29.0),
-            );
-            let mut properties = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(button_rect)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            if icon_button(
-                &mut properties,
-                WorkbenchIcon::Sliders,
-                "Page properties",
-                false,
-                Vec2::new(29.0, 29.0),
-            )
-            .clicked()
-            {
-                open_page_properties(app);
-            }
+    let pane = egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
+        ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
+        let (head, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 39.0), Sense::hover());
+        ui.painter().hline(
+            head.x_range(),
+            head.bottom(),
+            Stroke::new(1.0, t.color.border),
+        );
+        ui.painter().text(
+            head.left_center() + Vec2::new(10.0, 0.0),
+            Align2::LEFT_CENTER,
+            "Report outline",
+            theme::sans(tokens::FS_2, FontWeight::SemiBold),
+            t.color.text,
+        );
+        let button_rect = Rect::from_center_size(
+            head.right_center() - Vec2::new(19.5, 0.0),
+            Vec2::new(29.0, 29.0),
+        );
+        let mut properties = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(button_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        if icon_button(
+            &mut properties,
+            WorkbenchIcon::Sliders,
+            "Page properties",
+            false,
+            Vec2::new(29.0, 29.0),
+        )
+        .clicked()
+        {
+            open_page_properties(app);
+        }
 
-            ScrollArea::vertical()
-                .id_salt("report-authoring.outline")
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    for (index, page) in document.pages().iter().enumerate() {
-                        let marker = page_marker(index, page.title());
-                        let selected = Some(page.id()) == selected_page;
-                        if outline_row(ui, marker, page.title(), selected).clicked() {
-                            app.state.workbench.report_authoring.selected_page = Some(page.id());
-                        }
+        ScrollArea::vertical()
+            .id_salt("report-authoring.outline")
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (index, page) in document.pages().iter().enumerate() {
+                    let marker = page_marker(index, page.title());
+                    let selected = Some(page.id()) == selected_page;
+                    if outline_row(ui, marker, page.title(), selected).clicked() {
+                        app.state.workbench.report_authoring.selected_page = Some(page.id());
                     }
-                });
-        });
+                }
+            });
+    });
+    paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
 }
 
 fn outline_row(ui: &mut Ui, marker: &str, label: &str, selected: bool) -> egui::Response {
@@ -361,14 +524,19 @@ fn outline_row(ui: &mut Ui, marker: &str, label: &str, selected: bool) -> egui::
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn preview(ui: &mut Ui, document: &ReportDocument, selected_page: Option<ReportPageId>) {
+fn preview(
+    ui: &mut Ui,
+    document: &ReportDocument,
+    selected_page: Option<ReportPageId>,
+    separators: PaneSeparators,
+) {
+    let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let height = ui.available_height();
-    egui::Frame::new()
+    let pane = egui::Frame::new()
         .fill(PAPER_PANEL)
-        .stroke(Stroke::new(1.0, PAPER_BORDER))
         .show(ui, |ui| {
-            ui.set_min_size(Vec2::new((width - 2.0).max(1.0), (height - 2.0).max(1.0)));
+            ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
             ScrollArea::vertical()
                 .id_salt("report-authoring.preview")
                 .show(ui, |ui| {
@@ -451,6 +619,7 @@ fn preview(ui: &mut Ui, document: &ReportDocument, selected_page: Option<ReportP
                         });
                 });
         });
+    paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
 }
 
 fn section_heading(ui: &mut Ui, marker: &str, title: &str, description: &str) {
@@ -564,48 +733,72 @@ fn paper_label(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
     );
 }
 
-fn inspector(ui: &mut Ui, document: &ReportDocument, selected_page: Option<ReportPageId>) {
+fn inspector(
+    ui: &mut Ui,
+    document: &ReportDocument,
+    selected_page: Option<ReportPageId>,
+    separators: PaneSeparators,
+) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let height = ui.available_height();
-    egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .show(ui, |ui| {
-            ui.set_min_size(Vec2::new((width - 2.0).max(1.0), (height - 2.0).max(1.0)));
-            ScrollArea::vertical()
-                .id_salt("report-authoring.inspector")
-                .show(ui, |ui| {
-                    code_inspector_section(ui, "Report document", None, |ui| {
+    let pane = egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
+        ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
+        ScrollArea::vertical()
+            .id_salt("report-authoring.inspector")
+            .show(ui, |ui| {
+                code_inspector_section(ui, "Report document", None, |ui| {
+                    code_inspector_property_list(ui, |ui| {
+                        property_row(ui, "Title", document.title());
+                        property_row(ui, "Identity", &document.id().to_string());
+                        property_row(ui, "Revision", &document.revision().get().to_string());
+                        property_row(ui, "Template", report_template_label(document.template()));
+                        property_row(ui, "Pages", &document.pages().len().to_string());
+                    });
+                });
+                if let Some(page) = selected_page.and_then(|id| document.page(id)) {
+                    code_inspector_section(ui, "Selected page", None, |ui| {
                         code_inspector_property_list(ui, |ui| {
-                            property_row(ui, "Title", document.title());
-                            property_row(ui, "Identity", &document.id().to_string());
-                            property_row(ui, "Revision", &document.revision().get().to_string());
+                            property_row(ui, "Title", page.title());
+                            property_row(ui, "Identity", &page.id().to_string());
+                            property_row(ui, "Revision", &page.revision().get().to_string());
                             property_row(
                                 ui,
-                                "Template",
-                                report_template_label(document.template()),
+                                "Update policy",
+                                page_update_policy_label(page.update_policy()),
                             );
-                            property_row(ui, "Pages", &document.pages().len().to_string());
+                            property_row(ui, "Sections", &page.sections().len().to_string());
                         });
                     });
-                    if let Some(page) = selected_page.and_then(|id| document.page(id)) {
-                        code_inspector_section(ui, "Selected page", None, |ui| {
-                            code_inspector_property_list(ui, |ui| {
-                                property_row(ui, "Title", page.title());
-                                property_row(ui, "Identity", &page.id().to_string());
-                                property_row(ui, "Revision", &page.revision().get().to_string());
-                                property_row(
-                                    ui,
-                                    "Update policy",
-                                    page_update_policy_label(page.update_policy()),
-                                );
-                                property_row(ui, "Sections", &page.sections().len().to_string());
-                            });
-                        });
-                    }
-                });
-        });
+                }
+            });
+    });
+    paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
+}
+
+fn paint_pane_separators(ui: &Ui, rect: Rect, separators: PaneSeparators, color: Color32) {
+    let stroke = Stroke::new(1.0, color);
+    if separators.top {
+        let y = rect.top() + 0.5;
+        ui.painter().line_segment(
+            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+            stroke,
+        );
+    }
+    if separators.right {
+        let x = rect.right() - 0.5;
+        ui.painter().line_segment(
+            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+            stroke,
+        );
+    }
+    if separators.bottom {
+        let y = rect.bottom() - 0.5;
+        ui.painter().line_segment(
+            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+            stroke,
+        );
+    }
 }
 
 fn add_page_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
@@ -1076,6 +1269,79 @@ mod tests {
         );
         assert_eq!(ComposerLayout::resolve(820.0), ComposerLayout::Stacked);
         assert_eq!(ComposerLayout::resolve(390.0), ComposerLayout::Stacked);
+    }
+
+    #[test]
+    fn every_report_layout_assigns_each_internal_seam_to_one_pane() {
+        assert_eq!(
+            ComposerLayout::ThreeColumn.separators(),
+            [
+                PaneSeparators {
+                    right: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators {
+                    right: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators::default(),
+            ]
+        );
+        assert_eq!(
+            ComposerLayout::TwoColumnInspectorBelow.separators(),
+            [
+                PaneSeparators {
+                    right: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators::default(),
+                PaneSeparators {
+                    top: true,
+                    ..PaneSeparators::default()
+                },
+            ]
+        );
+        assert_eq!(
+            ComposerLayout::Stacked.separators(),
+            [
+                PaneSeparators {
+                    bottom: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators {
+                    bottom: true,
+                    ..PaneSeparators::default()
+                },
+                PaneSeparators::default(),
+            ]
+        );
+    }
+
+    #[test]
+    fn tablet_and_stacked_pane_heights_follow_local_space_and_document_content() {
+        let tablet_short = composer_pane_heights(
+            ComposerLayout::TwoColumnInspectorBelow,
+            640.0,
+            INITIAL_PAGES.len(),
+            true,
+        );
+        let tablet_tall = composer_pane_heights(
+            ComposerLayout::TwoColumnInspectorBelow,
+            1_000.0,
+            INITIAL_PAGES.len(),
+            true,
+        );
+        assert!(tablet_tall.preview > tablet_short.preview);
+        assert!(tablet_tall.inspector > tablet_short.inspector);
+        assert!(tablet_short.preview + tablet_short.inspector + 0.01 >= 640.0);
+        assert!(tablet_tall.preview + tablet_tall.inspector + 0.01 >= 1_000.0);
+
+        let compact_seven =
+            composer_pane_heights(ComposerLayout::Stacked, 720.0, INITIAL_PAGES.len(), true);
+        let compact_twelve = composer_pane_heights(ComposerLayout::Stacked, 720.0, 12, true);
+        assert!(compact_twelve.outline > compact_seven.outline);
+        assert_eq!(compact_seven.preview, PREVIEW_MIN_HEIGHT);
+        assert!(compact_seven.inspector > 300.0);
     }
 
     #[test]

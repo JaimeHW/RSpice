@@ -33,8 +33,8 @@ pub enum DialogSize {
     /// capped at 760 pt, with the full-viewport shell applied at 560 pt.
     Transaction,
     /// Mockup-authored Simulation Studio transactions: 760 pt wide and
-    /// content-height, with the two-column workflow retained through tablet
-    /// widths and the full-viewport shell applied at 560 pt.
+    /// content-height, with the full-viewport workflow shell applied at the
+    /// shared 820 pt dialog breakpoint; individual fields stack by local width.
     SimulationWorkflow,
     /// Mockup-owned specialist workspace discovery manager: 760 pt wide on
     /// desktop and full-viewport at the 820 pt one-column breakpoint.
@@ -49,6 +49,10 @@ pub enum DialogSize {
     /// Wide numerical/setup workflows: 980 pt wide, content-height capped at
     /// 760 pt, and edge-to-edge at the mockup's 820 pt breakpoint.
     WideWorkflow,
+    /// Account, organization, and licensing manager: the mockup's 920 pt
+    /// desktop surface, content-height capped at 760 pt, and edge-to-edge at
+    /// the shared 820 pt manager breakpoint.
+    AccountManager,
     /// Governed capability matrices: 1040 pt wide, content-height capped at
     /// 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
     CapabilityReview,
@@ -99,7 +103,7 @@ impl DialogSize {
                 max_height: 760.0,
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
-                narrow_max_width: 560.0,
+                narrow_max_width: 820.0,
                 narrow_inset: 0.0,
                 narrow_vertical_inset: 0.0,
                 cap_narrow_height: false,
@@ -160,6 +164,22 @@ impl DialogSize {
             },
             Self::WideWorkflow => DialogSurfaceSpec {
                 width: 980.0,
+                max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 820.0,
+                narrow_inset: 0.0,
+                narrow_vertical_inset: 0.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
+            Self::AccountManager => DialogSurfaceSpec {
+                width: 920.0,
                 max_height: 760.0,
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
@@ -283,7 +303,7 @@ impl DialogLayout {
 
         Self {
             surface_rect,
-            fill_height: spec.fill_height || (size == DialogSize::SpecialistToolBrowser && narrow),
+            fill_height: spec.fill_height || (narrow && spec.fill_narrow_viewport),
             app_background: spec.app_background,
             radius: if narrow && spec.edge_to_edge_narrow {
                 0.0
@@ -691,6 +711,12 @@ impl<'a> Dialog<'a> {
                     if layout.fill_height {
                         ui.set_min_height(max_height);
                     }
+                    // Header, body, transaction state, and footer are one
+                    // continuous structural stack. Their own borders and
+                    // insets own every seam; egui's ordinary inter-widget gap
+                    // must never open a strip of background between them.
+                    let body_item_spacing_y = ui.spacing().item_spacing.y;
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     let header_top = ui.cursor().top();
                     let header = self.header(ui, &t, large_targets);
                     rendered_focus.close = header.close_id;
@@ -698,7 +724,8 @@ impl<'a> Dialog<'a> {
                         choice = DialogChoice::Cancelled;
                     }
                     let header_height = ui.cursor().top() - header_top;
-                    let footer_height = self.footer_height(hide_close_only_footer, large_targets);
+                    let footer_height =
+                        self.footer_height(hide_close_only_footer, large_targets, width);
                     let transaction_height = if self.transaction_state.is_some() {
                         37.0
                     } else {
@@ -711,6 +738,7 @@ impl<'a> Dialog<'a> {
                         .as_deref()
                         .copied()
                         .unwrap_or_default();
+                    let flush_body = self.flush_body;
                     if self.manual_body_scroll {
                         let body_output = ui.allocate_ui_with_layout(
                             vec2(ui.available_width(), body_max_height),
@@ -727,7 +755,11 @@ impl<'a> Dialog<'a> {
                                     } else {
                                         Margin::same(12)
                                     })
-                                    .show(ui, body)
+                                    .show(ui, |ui| {
+                                        ui.spacing_mut().item_spacing.y =
+                                            if flush_body { 0.0 } else { body_item_spacing_y };
+                                        body(ui)
+                                    })
                                     .inner
                             },
                         );
@@ -755,7 +787,11 @@ impl<'a> Dialog<'a> {
                                 } else {
                                     Margin::same(12)
                                 })
-                                .show(ui, body)
+                                .show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.y =
+                                        if flush_body { 0.0 } else { body_item_spacing_y };
+                                    body(ui)
+                                })
                                 .inner
                         });
                         rendered_focus.body = body_output.inner;
@@ -912,14 +948,50 @@ impl<'a> Dialog<'a> {
     }
 
     /// Footer strip with the canonical button order.
-    fn footer_height(&self, hide_close_only_footer: bool, _large_targets: bool) -> f32 {
+    fn footer_height(
+        &self,
+        hide_close_only_footer: bool,
+        large_targets: bool,
+        surface_width: f32,
+    ) -> f32 {
         if self.note_only_footer {
             return 48.0;
         }
         if self.hides_close_only_footer(hide_close_only_footer) {
             return 0.0;
         }
-        48.0
+        if !self.footer_stacks(surface_width) {
+            return 48.0;
+        }
+
+        let action_count =
+            1 + usize::from(self.secondary.is_some()) + usize::from(self.ghost.is_some());
+        let action_height = if large_targets {
+            TOUCH_TARGET_SIDE
+        } else {
+            29.0
+        };
+        let hint_height = if self.hint.is_some() { 19.0 } else { 0.0 };
+        let row_count = action_count + usize::from(self.hint.is_some());
+        20.0 + action_count as f32 * action_height
+            + hint_height
+            + row_count.saturating_sub(1) as f32 * 6.0
+    }
+
+    fn footer_stacks(&self, surface_width: f32) -> bool {
+        let button_width = |label: &str| label.chars().count() as f32 * 6.4 + 20.0;
+        let mut required = button_width(self.primary);
+        let mut items: usize = 1;
+        for label in [self.secondary, self.ghost].into_iter().flatten() {
+            required += button_width(label);
+            items += 1;
+        }
+        if let Some(hint) = self.hint {
+            required += hint.chars().count() as f32 * 6.4;
+            items += 1;
+        }
+        required += items.saturating_sub(1) as f32 * 6.0;
+        required > (surface_width - 2.0 * WORKFLOW_FOOTER_HORIZONTAL_MARGIN as f32).max(1.0)
     }
 
     fn transaction_strip(&self, ui: &mut Ui, t: &Tokens) {
@@ -1045,10 +1117,74 @@ impl<'a> Dialog<'a> {
         } else {
             WORKFLOW_FOOTER_VERTICAL_MARGIN
         };
+        let stack_footer = self.footer_stacks(surface_width);
         Frame::NONE
             .fill(c.bg_panel)
-            .inner_margin(Margin::symmetric(horizontal_margin, vertical_margin))
+            .inner_margin(Margin::symmetric(
+                horizontal_margin,
+                if stack_footer {
+                    WORKFLOW_FOOTER_VERTICAL_MARGIN
+                } else {
+                    vertical_margin
+                },
+            ))
             .show(ui, |ui| {
+                if stack_footer {
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    if let Some(hint) = self.hint {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(hint)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .color(c.text_faint),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    let action_width = ui.available_width();
+                    let action_height = if large_targets {
+                        TOUCH_TARGET_SIDE
+                    } else {
+                        29.0
+                    };
+                    let primary = crate::ui::widgets::Button::new(self.primary)
+                        .accent()
+                        .destructive(self.destructive)
+                        .enabled(self.primary_enabled)
+                        .min_width(action_width)
+                        .max_width(action_width)
+                        .min_height(action_height)
+                        .show(ui);
+                    primary_id = self.primary_enabled.then_some(primary.id);
+                    if primary.clicked() {
+                        choice = DialogChoice::Primary;
+                    }
+                    if let Some(label) = self.secondary {
+                        let secondary = crate::ui::widgets::Button::new(label)
+                            .min_width(action_width)
+                            .max_width(action_width)
+                            .min_height(action_height)
+                            .show(ui);
+                        secondary_id = Some(secondary.id);
+                        if secondary.clicked() {
+                            choice = DialogChoice::Secondary;
+                        }
+                    }
+                    if let Some(label) = self.ghost {
+                        let ghost = crate::ui::widgets::Button::new(label)
+                            .ghost()
+                            .enabled(self.ghost_enabled)
+                            .min_width(action_width)
+                            .max_width(action_width)
+                            .min_height(action_height)
+                            .show(ui);
+                        ghost_id = self.ghost_enabled.then_some(ghost.id);
+                        if ghost.clicked() {
+                            choice = DialogChoice::Ghost;
+                        }
+                    }
+                    return;
+                }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if let Some(hint) = self.hint {
@@ -1419,6 +1555,22 @@ mod tests {
     }
 
     #[test]
+    fn account_manager_geometry_matches_its_mockup_width_and_breakpoint() {
+        let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_000.0, 800.0));
+        let desktop =
+            DialogLayout::resolve(DialogSize::AccountManager, desktop_screen, Some(640.0));
+        assert_eq!(desktop.surface_rect.size(), vec2(920.0, 640.0));
+        assert_eq!(desktop.surface_rect.left(), 40.0);
+        assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
+
+        let breakpoint = Rect::from_min_size(egui::pos2(5.0, 7.0), vec2(820.0, 900.0));
+        let narrow = DialogLayout::resolve(DialogSize::AccountManager, breakpoint, Some(500.0));
+        assert_eq!(narrow.surface_rect, breakpoint);
+        assert_eq!(narrow.radius, 0.0);
+        assert!(narrow.narrow);
+    }
+
+    #[test]
     fn jobs_manager_geometry_matches_the_mockup_on_desktop_and_phone() {
         let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
         let desktop = DialogLayout::resolve(DialogSize::JobsManager, desktop_screen, None);
@@ -1464,6 +1616,17 @@ mod tests {
     }
 
     #[test]
+    fn simulation_workflow_becomes_edge_to_edge_at_the_mockup_breakpoint() {
+        let screen = Rect::from_min_size(egui::pos2(5.0, 7.0), vec2(820.0, 900.0));
+        let layout = DialogLayout::resolve(DialogSize::SimulationWorkflow, screen, Some(500.0));
+
+        assert_eq!(layout.surface_rect, screen);
+        assert_eq!(layout.radius, 0.0);
+        assert!(layout.narrow);
+        assert!(layout.fill_height);
+    }
+
+    #[test]
     fn specialist_browser_uses_desktop_cap_and_full_tablet_phone_viewport() {
         let desktop_screen = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_440.0, 900.0));
         let desktop =
@@ -1499,7 +1662,20 @@ mod tests {
             .hint("Catalog classification note");
         assert!(dialog.manual_body_scroll);
         assert!(dialog.note_only_footer);
-        assert_eq!(dialog.footer_height(false, false), 48.0);
+        assert_eq!(dialog.footer_height(false, false, 760.0), 48.0);
+    }
+
+    #[test]
+    fn long_footer_actions_stack_inside_a_phone_surface() {
+        let dialog = Dialog::new("Test", TEST_TITLE, "Apply governed configuration changes")
+            .secondary("Review compatibility report")
+            .ghost("Discard pending changes")
+            .hint("3 validated records");
+
+        assert!(dialog.footer_stacks(390.0));
+        assert!(dialog.footer_height(false, true, 390.0) > 48.0);
+        assert!(!dialog.footer_stacks(1_440.0));
+        assert_eq!(dialog.footer_height(false, false, 1_440.0), 48.0);
     }
 
     #[test]
@@ -1556,7 +1732,7 @@ mod tests {
     fn close_only_workflow_hides_redundant_footer() {
         let dialog = Dialog::new("Test", TEST_TITLE, "Close").size(DialogSize::CapabilityReview);
 
-        assert_eq!(dialog.footer_height(true, false), 0.0);
+        assert_eq!(dialog.footer_height(true, false, 1_040.0), 0.0);
         assert!(dialog.hides_close_only_footer(true));
     }
 

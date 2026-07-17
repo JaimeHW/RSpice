@@ -148,11 +148,18 @@ fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
         return inspector_check_row(ui, label, value);
     }
     field_cell(ui, label, |ui| {
-        ui.add_sized(
-            vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h),
-            egui::Checkbox::new(value, if *value { "Enabled" } else { "Disabled" }),
-        )
-        .changed()
+        let row_size = vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
+        ui.allocate_ui_with_layout(row_size, Layout::left_to_right(Align::Center), |ui| {
+            // The cell owns the full grid column, but the checkbox keeps its
+            // natural compact width at the leading edge. `add_sized` would
+            // center its contents across an oversized half-column.
+            ui.add(egui::Checkbox::new(
+                value,
+                if *value { "Enabled" } else { "Disabled" },
+            ))
+            .changed()
+        })
+        .inner
     })
 }
 

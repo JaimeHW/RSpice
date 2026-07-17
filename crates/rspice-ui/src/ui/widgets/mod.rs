@@ -23,7 +23,7 @@ pub use chip::chip;
 pub use dialog::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, dialog_tabs,
 };
-pub use docbar::{crumb_text, docbar};
+pub use docbar::{crumb_text, docbar, docbar_at_height};
 pub use form::{check_row, choice_row, input_row, input_row_readonly, kv_row, mono_input};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,

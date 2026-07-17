@@ -41,7 +41,7 @@ use crate::state::{SharedWaveformValues, WaveformData};
 use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, docbar};
+use crate::ui::widgets::{chip, docbar_at_height};
 use crate::workbench::visualization_family::SourceSampleSelection;
 
 pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
@@ -634,25 +634,41 @@ pub(super) fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
+    let (name_width, value_width) = stat_column_widths(width);
     for (i, (name, value, highlight)) in rows.iter().enumerate() {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 25.0), egui::Sense::hover());
+        let name_galley = ui.painter().layout(
+            (*name).to_owned(),
+            theme::sans(tokens::FS_1, FontWeight::Regular),
+            if *highlight { c.text } else { c.text_dim },
+            name_width,
+        );
+        let value_galley = ui.painter().layout(
+            value.clone(),
+            theme::mono(tokens::FS_1, FontWeight::Regular),
+            if *highlight { c.accent } else { c.text },
+            value_width,
+        );
+        let row_height = 25.0_f32.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
         if !ui.is_rect_visible(rect) {
             continue;
         }
         let painter = ui.painter();
-        painter.text(
-            egui::pos2(rect.left() + 12.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            *name,
-            theme::sans(tokens::FS_1, FontWeight::Regular),
-            if *highlight { c.text } else { c.text_dim },
+        let name_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 12.0, rect.top() + 4.0),
+            egui::vec2(name_width, row_height - 8.0),
         );
-        painter.text(
-            egui::pos2(rect.right() - 12.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            value,
-            theme::mono(tokens::FS_1, FontWeight::Regular),
-            if *highlight { c.accent } else { c.text },
+        let value_rect = egui::Rect::from_min_size(
+            egui::pos2(name_rect.right() + 8.0, rect.top() + 4.0),
+            egui::vec2(value_width, row_height - 8.0),
+        );
+        painter
+            .with_clip_rect(name_rect)
+            .galley(name_rect.min, name_galley, c.text_dim);
+        painter.with_clip_rect(value_rect).galley(
+            egui::pos2(value_rect.right() - value_galley.size().x, value_rect.top()),
+            value_galley,
+            c.text,
         );
         if i + 1 < rows.len() {
             painter.hline(
@@ -662,6 +678,14 @@ pub(super) fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
             );
         }
     }
+}
+
+fn stat_column_widths(width: f32) -> (f32, f32) {
+    const OUTER_INSET: f32 = 24.0;
+    const GAP: f32 = 8.0;
+    let content = (width - OUTER_INSET - GAP).max(0.0);
+    let name = content * 0.42;
+    (name, content - name)
 }
 
 /// A faint explanatory note under a right-panel section.
@@ -822,122 +846,287 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn show_docbar(ui: &mut Ui, state: &mut AppState) {
-    docbar(ui, |ui| {
-        run_selector(ui, state);
-        viewer_tabs(ui, state);
-
+    let local_width = ui.available_width();
+    let compact = local_width <= RESULT_ACTIONS_COMPACT_BREAKPOINT;
+    let height = result_docbar_height(local_width);
+    docbar_at_height(ui, height, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            ui.menu_button("Export…", |ui| {
-                if ui.button("Waveform data (CSV)…").clicked() {
-                    state.ui.export_csv_requested = true;
-                    ui.close();
+            let trailing_width = result_trailing_width(local_width, state.ui.results.viewer);
+            ui.allocate_ui_with_layout(
+                egui::vec2(trailing_width, ui.available_height()),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    if compact {
+                        compact_result_actions(ui, state);
+                    } else {
+                        inline_result_actions(ui, state);
+                    }
+                },
+            );
+            ui.separator();
+
+            // Run context and trailing actions remain fixed. Only the tab list
+            // owns horizontal overflow, matching the mockup's flex contract.
+            let remaining = ui.available_size();
+            ui.allocate_ui_with_layout(
+                remaining,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    run_selector(ui, state);
+                    ui.separator();
+                    let tabs_size = ui.available_size();
+                    ui.allocate_ui_with_layout(
+                        tabs_size,
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            egui::ScrollArea::horizontal()
+                                .id_salt("rspice.results.viewer-tabs")
+                                .auto_shrink([false, true])
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                                )
+                                .show(ui, |ui| {
+                                    let tabs = ui.horizontal(|ui| viewer_tabs(ui, state));
+                                    ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
+                                        node.set_role(egui::accesskit::Role::TabList);
+                                        node.set_label("Result viewers");
+                                    });
+                                });
+                        },
+                    );
+                },
+            );
+        });
+    });
+}
+
+const RESULT_DOCBAR_DESKTOP_HEIGHT: f32 = 41.0;
+const RESULT_DOCBAR_PHONE_HEIGHT: f32 = 39.0;
+const RESULT_DOCBAR_PHONE_BREAKPOINT: f32 = 560.0;
+const RESULT_ACTIONS_COMPACT_BREAKPOINT: f32 = 760.0;
+
+fn result_docbar_height(local_width: f32) -> f32 {
+    if local_width <= RESULT_DOCBAR_PHONE_BREAKPOINT {
+        RESULT_DOCBAR_PHONE_HEIGHT
+    } else {
+        RESULT_DOCBAR_DESKTOP_HEIGHT
+    }
+}
+
+fn result_trailing_width(local_width: f32, viewer: ResultViewer) -> f32 {
+    if local_width <= RESULT_ACTIONS_COMPACT_BREAKPOINT {
+        return local_width.min(92.0);
+    }
+    let desired: f32 = match viewer {
+        ResultViewer::Waves => 390.0,
+        ResultViewer::Op => 300.0,
+        ResultViewer::Specs => 230.0,
+        ResultViewer::Eye => 150.0,
+        ResultViewer::Fft => 230.0,
+        _ => 90.0,
+    };
+    desired.min(local_width * 0.55)
+}
+
+fn export_menu(ui: &mut Ui, state: &mut AppState) {
+    ui.menu_button("Export…", |ui| {
+        if ui.button("Waveform data (CSV)…").clicked() {
+            state.ui.export_csv_requested = true;
+            ui.close();
+        }
+        if ui.button("Viewer image (PNG)…").clicked() {
+            state.ui.export_png_requested = true;
+            ui.close();
+        }
+    });
+}
+
+fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
+    export_menu(ui, state);
+    match state.ui.results.viewer {
+        ResultViewer::Waves => {
+            let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
+                crate::workbench::commands::Command::ToggleLinkedCursors,
+                crate::common::app::runtime_command_platform(ui.ctx()),
+                ui.ctx().os(),
+            );
+            let results = &mut state.ui.results;
+            if !results.hidden_strips.is_empty() {
+                let n = results.hidden_strips.len();
+                if chip(ui, &format!("{n} hidden"), true)
+                    .on_hover_text("Restore closed strips")
+                    .clicked()
+                {
+                    results.hidden_strips.clear();
                 }
-                if ui.button("Viewer image (PNG)…").clicked() {
-                    state.ui.export_png_requested = true;
-                    ui.close();
-                }
+            }
+            let on = results.cursors.any();
+            if chip(ui, "cursors A/B", on)
+                .on_hover_text("Click a plot to place A, click again for B; Esc clears")
+                .clicked()
+            {
+                results.clear_cursors();
+            }
+            let linked_label = "Linked A/B cursors";
+            let linked = results.linked_cursors;
+            let linked_tooltip = if linked {
+                "A/B positions are shared across plots with matching analysis and X-axis domains"
+            } else {
+                "A/B positions are scoped to the active plot"
+            };
+            let linked_tooltip = if linked_shortcut.is_empty() {
+                linked_tooltip.to_owned()
+            } else {
+                format!("{linked_tooltip} · {linked_shortcut}")
+            };
+            let response = chip(ui, linked_label, linked).on_hover_text(linked_tooltip);
+            response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::Button, true, linked, linked_label)
             });
-            // Viewer-local controls.
-            match state.ui.results.viewer {
-                ResultViewer::Waves => {
-                    let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
-                        crate::workbench::commands::Command::ToggleLinkedCursors,
-                        crate::common::app::runtime_command_platform(ui.ctx()),
-                        ui.ctx().os(),
-                    );
-                    let results = &mut state.ui.results;
-                    if !results.hidden_strips.is_empty() {
-                        let n = results.hidden_strips.len();
-                        if chip(ui, &format!("{n} hidden"), true)
-                            .on_hover_text("Restore closed strips")
-                            .clicked()
-                        {
-                            results.hidden_strips.clear();
-                        }
-                    }
-                    let on = results.cursors.any();
-                    if chip(ui, "cursors A/B", on)
-                        .on_hover_text("Click a plot to place A, click again for B; Esc clears")
-                        .clicked()
-                    {
-                        results.clear_cursors();
-                    }
-                    let linked_label = "Linked A/B cursors";
-                    let linked = results.linked_cursors;
-                    let linked_tooltip = if linked {
-                        "A/B positions are shared across plots with matching analysis and X-axis domains"
-                    } else {
-                        "A/B positions are scoped to the active plot"
-                    };
-                    let linked_tooltip = if linked_shortcut.is_empty() {
-                        linked_tooltip.to_owned()
-                    } else {
-                        format!("{linked_tooltip} · {linked_shortcut}")
-                    };
-                    let response = chip(ui, linked_label, linked).on_hover_text(linked_tooltip);
-                    response.widget_info(|| {
-                        WidgetInfo::selected(WidgetType::Button, true, linked, linked_label)
-                    });
-                    if !linked_shortcut.is_empty() {
-                        ui.ctx().accesskit_node_builder(response.id, |node| {
-                            node.set_keyboard_shortcut(linked_shortcut.as_str());
-                        });
-                    }
-                    if response.clicked() {
-                        results.toggle_linked_cursors();
-                    }
+            if !linked_shortcut.is_empty() {
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.set_keyboard_shortcut(linked_shortcut.as_str());
+                });
+            }
+            if response.clicked() {
+                results.toggle_linked_cursors();
+            }
+        }
+        ResultViewer::Fft => {
+            let label = state
+                .analysis
+                .fft_state
+                .data
+                .as_ref()
+                .map(|d| format!("{} · {}", d.window.display_name(), d.fft_size));
+            if let Some(label) = label {
+                ui.label(
+                    egui::RichText::new(label)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(Tokens::get(ui.ctx()).color.text_faint),
+                );
+            }
+        }
+        ResultViewer::Eye => {
+            let mask_on = state.analysis.eye_diagram_state.show_mask;
+            if chip(ui, "mask", mask_on).clicked() {
+                state.analysis.eye_diagram_state.show_mask = !mask_on;
+            }
+        }
+        ResultViewer::Op => {
+            let filter = &mut state.ui.results.op_filter;
+            if !filter.is_empty() && chip(ui, "clear", true).clicked() {
+                filter.clear();
+            }
+            ui.add(
+                egui::TextEdit::singleline(filter)
+                    .desired_width(150.0)
+                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                    .hint_text("filter devices…"),
+            );
+        }
+        ResultViewer::Specs => {
+            if state.ui.results.spec_drafts.is_some() {
+                if ui.button("Discard").clicked() {
+                    state.ui.results.spec_drafts = None;
                 }
-                ResultViewer::Fft => {
-                    let label = state
-                        .analysis
-                        .fft_state
-                        .data
-                        .as_ref()
-                        .map(|d| format!("{} · {}", d.window.display_name(), d.fft_size));
-                    if let Some(label) = label {
-                        ui.label(
-                            egui::RichText::new(label)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(Tokens::get(ui.ctx()).color.text_faint),
-                        );
-                    }
+                if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
+                    state.push_sim_message(crate::common::app::ConsoleMessage::warning(
+                        "Specs not applied — fix the invalid bound first",
+                    ));
                 }
-                ResultViewer::Eye => {
-                    let mask_on = state.analysis.eye_diagram_state.show_mask;
-                    if chip(ui, "mask", mask_on).clicked() {
-                        state.analysis.eye_diagram_state.show_mask = !mask_on;
-                    }
+            } else if ui.button("Edit specs…").clicked() {
+                specs::open_editor(state);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn compact_result_actions(ui: &mut Ui, state: &mut AppState) {
+    ui.menu_button("Actions…", |ui| {
+        ui.set_min_width(230.0);
+        if ui.button("Export waveform data (CSV)…").clicked() {
+            state.ui.export_csv_requested = true;
+            ui.close();
+        }
+        if ui.button("Export viewer image (PNG)…").clicked() {
+            state.ui.export_png_requested = true;
+            ui.close();
+        }
+        ui.separator();
+        match state.ui.results.viewer {
+            ResultViewer::Waves => {
+                if !state.ui.results.hidden_strips.is_empty()
+                    && ui.button("Restore hidden strips").clicked()
+                {
+                    state.ui.results.hidden_strips.clear();
+                    ui.close();
                 }
-                ResultViewer::Op => {
-                    let filter = &mut state.ui.results.op_filter;
-                    if !filter.is_empty() && chip(ui, "clear", true).clicked() {
-                        filter.clear();
-                    }
-                    ui.add(
-                        egui::TextEdit::singleline(filter)
-                            .desired_width(150.0)
-                            .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                            .hint_text("filter devices…"),
-                    );
+                if ui.button("Clear cursors A/B").clicked() {
+                    state.ui.results.clear_cursors();
+                    ui.close();
                 }
-                ResultViewer::Specs => {
-                    if state.ui.results.spec_drafts.is_some() {
-                        if ui.button("Discard").clicked() {
-                            state.ui.results.spec_drafts = None;
-                        }
-                        if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
+                let mut linked = state.ui.results.linked_cursors;
+                if ui.checkbox(&mut linked, "Linked A/B cursors").changed() {
+                    state.ui.results.linked_cursors = linked;
+                }
+            }
+            ResultViewer::Eye => {
+                ui.checkbox(
+                    &mut state.analysis.eye_diagram_state.show_mask,
+                    "Compliance mask",
+                );
+            }
+            ResultViewer::Op => {
+                ui.label("Device filter");
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut state.ui.results.op_filter)
+                        .desired_width(210.0)
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .hint_text("filter devices…"),
+                );
+                if response.changed() {
+                    ui.ctx().request_repaint();
+                }
+                if !state.ui.results.op_filter.is_empty() && ui.button("Clear filter").clicked() {
+                    state.ui.results.op_filter.clear();
+                }
+            }
+            ResultViewer::Specs => {
+                if state.ui.results.spec_drafts.is_some() {
+                    if ui.button("Discard specification edits").clicked() {
+                        state.ui.results.spec_drafts = None;
+                        ui.close();
+                    }
+                    if ui.button("Apply specification edits").clicked() {
+                        if !specs::apply_drafts(state) {
                             state.push_sim_message(crate::common::app::ConsoleMessage::warning(
                                 "Specs not applied — fix the invalid bound first",
                             ));
+                        } else {
+                            ui.close();
                         }
-                    } else if ui.button("Edit specs…").clicked() {
-                        specs::open_editor(state);
                     }
+                } else if ui.button("Edit specifications…").clicked() {
+                    specs::open_editor(state);
+                    ui.close();
                 }
-                _ => {}
             }
-        });
+            ResultViewer::Fft => {
+                if let Some(data) = state.analysis.fft_state.data.as_ref() {
+                    ui.label(format!(
+                        "{} · {}",
+                        data.window.display_name(),
+                        data.fft_size
+                    ));
+                }
+            }
+            _ => {
+                ui.label("No viewer-local controls");
+            }
+        }
     });
 }
 
@@ -1076,8 +1265,7 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
 
 fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    ui.add_space(6.0);
-    ui.spacing_mut().item_spacing.x = 2.0;
+    ui.spacing_mut().item_spacing.x = 0.0;
 
     let current = state.ui.results.viewer;
     let mut clicked: Option<ResultViewer> = None;
@@ -1093,7 +1281,8 @@ fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
         }
     }
     // Legacy surfaces, gated on data availability and visually set apart.
-    let (sep, _) = ui.allocate_exact_size(egui::vec2(13.0, 24.0), egui::Sense::hover());
+    let tab_height = ui.available_height().min(40.0);
+    let (sep, _) = ui.allocate_exact_size(egui::vec2(13.0, tab_height), egui::Sense::hover());
     ui.painter().vline(
         sep.center().x,
         egui::Rangef::new(sep.center().y - 7.0, sep.center().y + 7.0),
@@ -1219,8 +1408,8 @@ fn specialized_availability(state: &AppState, viewer: ActiveViewer) -> ViewerAva
     }
 }
 
-/// One viewer tab, per the design: a 24 px chip with 11 px side padding,
-/// letterspaced mono label, hover fill, and an accent wash when active.
+/// One viewer tab, per the mockup: full-strip hit target, compact horizontal
+/// padding, hover fill, and a 2 px bottom rule when active.
 fn viewer_tab(
     ui: &mut Ui,
     viewer: ResultViewer,
@@ -1245,8 +1434,10 @@ fn viewer_tab(
     );
     let galley = ui.fonts_mut(|f| f.layout_job(job));
 
+    let height = ui.available_height().min(40.0);
+    let horizontal_padding = if height <= 38.5 { 16.0 } else { 20.0 };
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(galley.size().x + 22.0, 24.0),
+        egui::vec2(galley.size().x + horizontal_padding, height),
         if availability.available {
             egui::Sense::click()
         } else {
@@ -1278,7 +1469,7 @@ fn viewer_tab(
         ui.style().animation_time,
     );
     let (fill, text_color) = if active {
-        (c.accent_dim, c.accent)
+        (egui::Color32::TRANSPARENT, c.text)
     } else if !availability.available {
         (egui::Color32::TRANSPARENT, c.text_faint)
     } else {
@@ -1290,13 +1481,26 @@ fn viewer_tab(
 
     let painter = ui.painter();
     if fill != egui::Color32::TRANSPARENT {
-        painter.rect_filled(rect, t.radius, fill);
+        painter.rect_filled(rect, 0.0, fill);
     }
     painter.galley(
-        egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y * 0.5),
+        egui::pos2(
+            rect.left() + horizontal_padding * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
         galley,
         text_color,
     );
+    if active {
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() + 8.0, rect.bottom() - 2.0),
+                egui::pos2(rect.right() - 8.0, rect.bottom()),
+            ),
+            0.0,
+            c.accent,
+        );
+    }
 
     theme::paint_focus_ring(ui, &response, rect);
 
@@ -1423,5 +1627,22 @@ mod availability_tests {
         reconcile_active_viewer(&mut state);
 
         assert_eq!(state.ui.results.viewer, ResultViewer::Waves);
+    }
+
+    #[test]
+    fn result_strip_matches_mockup_heights_and_bounds_trailing_controls() {
+        assert_eq!(result_docbar_height(1280.0), 41.0);
+        assert_eq!(result_docbar_height(390.0), 39.0);
+        assert_eq!(result_trailing_width(390.0, ResultViewer::Waves), 92.0);
+        assert!(result_trailing_width(720.0, ResultViewer::Waves) <= 720.0 * 0.55);
+    }
+
+    #[test]
+    fn stat_columns_are_disjoint_at_phone_panel_width() {
+        let width = 240.0;
+        let (name, value) = stat_column_widths(width);
+        assert!(name > 0.0);
+        assert!(value > name);
+        assert!((name + value + 24.0 + 8.0 - width).abs() < f32::EPSILON * width);
     }
 }
