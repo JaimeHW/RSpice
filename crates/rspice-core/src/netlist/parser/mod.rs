@@ -99,6 +99,7 @@ struct DataTableBuilder {
     name: String,
     params: Vec<String>,
     flat_values: Vec<Value>,
+    resource_limits: crate::resource::ResourceLimits,
 }
 
 #[derive(Debug)]
@@ -141,6 +142,7 @@ impl DataTableBuilder {
     fn new(
         opened_at_line: usize,
         line: &str,
+        resource_limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         poll_parse_text(abort, line)?;
@@ -164,6 +166,7 @@ impl DataTableBuilder {
             name: name.to_string(),
             params,
             flat_values: Vec::new(),
+            resource_limits,
         })
     }
 
@@ -195,9 +198,21 @@ impl DataTableBuilder {
 
         for (index, field) in fields.enumerate() {
             poll_parse_abort(abort, index)?;
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ResultValues,
+                self.flat_values.len().saturating_add(1),
+                self.resource_limits.max_result_values,
+            )
+            .map_err(ParseError::from)?;
             self.flat_values.push(parse_data_table_value_with_abort(
                 line_num, &self.name, field, params, abort,
             )?);
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::AnalysisPoints,
+                self.flat_values.len().div_ceil(self.params.len()),
+                self.resource_limits.max_analysis_points,
+            )
+            .map_err(ParseError::from)?;
         }
         ensure_parse_not_aborted(abort)?;
         Ok(())
@@ -228,7 +243,19 @@ impl DataTableBuilder {
             }
             .into());
         }
-        let mut rows = Vec::with_capacity(self.flat_values.len() / columns);
+        let row_count = self.flat_values.len() / columns;
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            row_count,
+            self.resource_limits.max_analysis_points,
+        )
+        .map_err(ParseError::from)?;
+        let mut rows = Vec::new();
+        rows.try_reserve_exact(row_count).map_err(|error| {
+            ParseError::Io(std::io::Error::other(format!(
+                "unable to reserve {row_count} .DATA rows: {error}"
+            )))
+        })?;
         for (index, chunk) in self.flat_values.chunks_exact(columns).enumerate() {
             poll_parse_abort(abort, index)?;
             rows.push(chunk.to_vec());
@@ -548,7 +575,12 @@ fn parse_netlist_impl(
             break;
         }
         if head.eq_ignore_ascii_case(".data") {
-            data_table = Some(DataTableBuilder::new(line_num, trimmed, abort)?);
+            data_table = Some(DataTableBuilder::new(
+                line_num,
+                trimmed,
+                options.resource_limits,
+                abort,
+            )?);
             continue;
         }
         if head.eq_ignore_ascii_case(".enddata") {
@@ -3286,9 +3318,13 @@ mod cancellation_tests {
 
     #[test]
     fn data_row_tokenization_aborts_inside_one_large_logical_line() {
-        let mut builder =
-            DataTableBuilder::new(2, ".data sweep value", &crate::abort_signal::NoAbort)
-                .expect("fixture .DATA header is valid");
+        let mut builder = DataTableBuilder::new(
+            2,
+            ".data sweep value",
+            crate::resource::ResourceLimits::default(),
+            &crate::abort_signal::NoAbort,
+        )
+        .expect("fixture .DATA header is valid");
         let row = std::iter::repeat_n("1", 8_192)
             .collect::<Vec<_>>()
             .join(" ");
@@ -3301,6 +3337,51 @@ mod cancellation_tests {
             abort.count() > 7,
             "one large .DATA row must poll beyond its outer line boundary"
         );
+    }
+
+    #[test]
+    fn inline_data_tables_obey_point_and_value_limits_while_parsing() {
+        let source = "bounded data\n.data sweep a b\n1 2\n3 4\n.enddata\n.op\n.end\n";
+
+        let value_error = parse_netlist_with_options(
+            source,
+            NetlistParseOptions {
+                resource_limits: crate::resource::ResourceLimits {
+                    max_result_values: 3,
+                    ..crate::resource::ResourceLimits::default()
+                },
+                ..NetlistParseOptions::default()
+            },
+        )
+        .expect_err("four retained values must exceed a limit of three");
+        assert!(matches!(
+            value_error,
+            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
+                resource: crate::resource::ResourceKind::ResultValues,
+                requested: 4,
+                limit: 3,
+            })
+        ));
+
+        let point_error = parse_netlist_with_options(
+            source,
+            NetlistParseOptions {
+                resource_limits: crate::resource::ResourceLimits {
+                    max_analysis_points: 1,
+                    ..crate::resource::ResourceLimits::default()
+                },
+                ..NetlistParseOptions::default()
+            },
+        )
+        .expect_err("two rows must exceed a one-point policy");
+        assert!(matches!(
+            point_error,
+            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
+                resource: crate::resource::ResourceKind::AnalysisPoints,
+                requested: 2,
+                limit: 1,
+            })
+        ));
     }
 }
 

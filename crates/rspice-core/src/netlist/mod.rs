@@ -1147,16 +1147,26 @@ impl Netlist {
         path: &std::path::Path,
         options: NetlistParseOptions,
     ) -> Result<String, ParseError> {
-        finish_non_aborting_parse(
-            read_file_with_encoding_limited_with_abort(
-                path,
-                crate::resource::ResourceKind::NetlistBytes,
-                0,
-                options.resource_limits.max_netlist_bytes,
-                &NoAbort,
-            )
-            .map(|(source, _)| source),
+        finish_non_aborting_parse(Self::read_source_with_options_and_abort(
+            path, options, &NoAbort,
+        ))
+    }
+
+    /// Read and decode a root source file under an explicit byte policy while
+    /// observing cooperative cancellation between bounded read chunks.
+    pub fn read_source_with_options_and_abort(
+        path: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        read_file_with_encoding_limited_with_abort(
+            path,
+            crate::resource::ResourceKind::NetlistBytes,
+            0,
+            options.resource_limits.max_netlist_bytes,
+            abort,
         )
+        .map(|(source, _)| source)
     }
 
     /// Parse a netlist from a file with additional include search directories

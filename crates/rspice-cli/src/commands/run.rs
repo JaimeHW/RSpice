@@ -343,6 +343,56 @@ impl<'a> RunContext<'a> {
     }
 }
 
+fn cancellation_cli_error(timeout_seconds: Option<f64>) -> CliError {
+    match crate::abort::reason() {
+        Some(crate::abort::AbortReason::Interrupt) => CliError::Interrupted,
+        Some(crate::abort::AbortReason::Timeout) => CliError::TimedOut {
+            seconds: timeout_seconds.unwrap_or(0.0),
+        },
+        None => CliError::InternalError {
+            message: "operation was cancelled without a recorded process abort reason".to_string(),
+        },
+    }
+}
+
+fn map_cancellable_parse_error(
+    error: rspice_core::netlist::ParseWithAbortError,
+    timeout_seconds: Option<f64>,
+) -> CliError {
+    match error {
+        rspice_core::netlist::ParseWithAbortError::Aborted => {
+            cancellation_cli_error(timeout_seconds)
+        }
+        rspice_core::netlist::ParseWithAbortError::Parse(error) => {
+            crate::commands::map_parse_error(error)
+        }
+    }
+}
+
+fn map_multi_run_error(
+    error: rspice_core::netlist::multi_run::MultiRunError,
+    timeout_seconds: Option<f64>,
+) -> CliError {
+    if error.is_aborted() {
+        return cancellation_cli_error(timeout_seconds);
+    }
+    let suggestion = error.resource_limit_error().map_or_else(
+        || Some("fix the .DATA table or its DATA=<name> reference".to_string()),
+        |limit| {
+            Some(format!(
+                "reduce the workload or raise resources.max_{} above {}",
+                limit.resource.as_str(),
+                limit.requested
+            ))
+        },
+    );
+    CliError::ParseError {
+        message: error.to_string(),
+        line: None,
+        suggestion,
+    }
+}
+
 pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Result<(), CliError> {
     let from_stdin = crate::commands::is_stdin(&args.input);
     if !from_stdin && !args.input.exists() {
@@ -358,26 +408,35 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         crate::abort::arm_timeout(seconds);
     }
 
+    let resource_limits = config.resources.limits();
+    let parse_options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits,
+        ..rspice_core::netlist::NetlistParseOptions::default()
+    };
     log::info!("Loading netlist: {}", args.input.display());
     let source = if from_stdin {
-        crate::commands::read_stdin_source()?
+        crate::commands::read_stdin_source_with_limits_and_abort(
+            resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| map_cancellable_parse_error(error, args.timeout))?
     } else {
-        Netlist::read_source(&args.input).map_err(|e| CliError::ParseError {
-            message: e.to_string(),
-            line: None,
-            suggestion: None,
-        })?
+        Netlist::read_source_with_options_and_abort(
+            &args.input,
+            parse_options,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| map_cancellable_parse_error(error, args.timeout))?
     };
 
     // HSPICE `.ALTER` / `.DATA` constructs expand into several concrete
     // runs; a plain deck passes through as a single unlabeled run.
-    let plan = rspice_core::netlist::multi_run::try_expand_multi_run(&source).map_err(|error| {
-        CliError::ParseError {
-            message: error.to_string(),
-            line: None,
-            suggestion: Some("fix the .DATA table or its DATA=<name> reference".to_string()),
-        }
-    })?;
+    let plan = rspice_core::netlist::multi_run::try_expand_multi_run_with_limits_and_abort(
+        &source,
+        resource_limits,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| map_multi_run_error(error, args.timeout))?;
     let multi_run = plan.len() > 1;
     if multi_run {
         // One Xyce-compatible sibling name cannot safely represent several
@@ -1125,13 +1184,28 @@ fn load_netlist_from_source(
     let mut search_paths: Vec<PathBuf> = args.includes.clone();
     search_paths.extend(config.paths.include_paths.iter().cloned());
     search_paths.extend(config.paths.library_paths.iter().cloned());
+    let parse_options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: config.resources.limits(),
+        ..rspice_core::netlist::NetlistParseOptions::default()
+    };
 
     let parsed = if search_paths.is_empty() {
-        Netlist::parse_with_path(source, &args.input)
+        Netlist::parse_with_path_and_options_and_abort(
+            source,
+            &args.input,
+            parse_options,
+            &crate::abort::ProcessAbort,
+        )
     } else {
-        Netlist::parse_with_search_paths(source, &args.input, &search_paths)
+        Netlist::parse_with_search_paths_and_options_and_abort(
+            source,
+            &args.input,
+            &search_paths,
+            parse_options,
+            &crate::abort::ProcessAbort,
+        )
     };
-    let mut netlist = parsed.map_err(crate::commands::map_parse_error)?;
+    let mut netlist = parsed.map_err(|error| map_cancellable_parse_error(error, args.timeout))?;
 
     if !args.defines.is_empty() {
         let defines: Vec<(String, f64)> = args
@@ -1151,8 +1225,13 @@ fn load_netlist_from_source(
                 message: "netlist source unavailable for --define substitution".to_string(),
             })?;
         let rewritten = apply_defines_to_source(&source, &defines);
-        netlist = Netlist::parse_with_path(&rewritten, &args.input)
-            .map_err(crate::commands::map_parse_error)?;
+        netlist = Netlist::parse_with_path_and_options_and_abort(
+            &rewritten,
+            &args.input,
+            parse_options,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| map_cancellable_parse_error(error, args.timeout))?;
         for (name, value) in &defines {
             netlist.params.set(name, *value);
         }
@@ -1207,8 +1286,8 @@ fn load_netlist_from_source(
         netlist.output_requests.extend(override_requests);
     }
 
-    rspice_core::netlist::validate_output_symbols(&netlist)
-        .map_err(crate::commands::map_parse_error)?;
+    rspice_core::netlist::validate_output_symbols_with_abort(&netlist, &crate::abort::ProcessAbort)
+        .map_err(|error| map_cancellable_parse_error(error, args.timeout))?;
 
     if emit_diagnostics {
         crate::commands::emit_netlist_diagnostics(&netlist, false);
@@ -1413,6 +1492,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
             residual_reltol: config.simulation.residual_reltol,
             ..ConvergenceConfig::default()
         },
+        resource_limits: config.resources.limits(),
         ..SimulationConfig::default()
     };
 

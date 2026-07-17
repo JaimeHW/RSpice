@@ -925,7 +925,16 @@ fn run_corner_job(
         None => setup.source.clone(),
     };
 
-    let corner_netlist = match rspice_core::Netlist::parse_with_path(&corner_source, &setup.base) {
+    let parse_options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: setup.config.resource_limits,
+        ..rspice_core::netlist::NetlistParseOptions::default()
+    };
+    let corner_netlist = match rspice_core::Netlist::parse_with_path_and_options_and_abort(
+        &corner_source,
+        &setup.base,
+        parse_options,
+        &crate::abort::ProcessAbort,
+    ) {
         Ok(netlist) => netlist,
         Err(e) => {
             return CornerOutcome {
@@ -1100,12 +1109,26 @@ fn run_corner_serial_source(
     base: &std::path::Path,
     corner: &str,
 ) -> Result<(bool, bool), CliError> {
-    let corner_netlist =
-        rspice_core::Netlist::parse_with_path(source, base).map_err(|e| CliError::ParseError {
-            message: format!("corner '{}': {}", corner, e),
+    let parse_options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: ctx.engine.config().resource_limits,
+        ..rspice_core::netlist::NetlistParseOptions::default()
+    };
+    let corner_netlist = rspice_core::Netlist::parse_with_path_and_options_and_abort(
+        source,
+        base,
+        parse_options,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| match error {
+        rspice_core::netlist::ParseWithAbortError::Aborted => {
+            super::cancellation_cli_error(ctx.args.timeout)
+        }
+        rspice_core::netlist::ParseWithAbortError::Parse(error) => CliError::ParseError {
+            message: format!("corner '{}': {}", corner, error),
             line: None,
             suggestion: None,
-        })?;
+        },
+    })?;
 
     let corner_engine = rspice_core::Engine::new(ctx.engine.config().clone());
     let corner_ctx = RunContext {
@@ -1765,12 +1788,25 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
             excited.push_str(line);
             excited.push('\n');
         }
-        let netlist = rspice_core::Netlist::parse_with_path(&excited, &base).map_err(|e| {
-            CliError::ParseError {
-                message: format!("S-parameter excitation: {e}"),
+        let parse_options = rspice_core::netlist::NetlistParseOptions {
+            resource_limits: ctx.engine.config().resource_limits,
+            ..rspice_core::netlist::NetlistParseOptions::default()
+        };
+        let netlist = rspice_core::Netlist::parse_with_path_and_options_and_abort(
+            &excited,
+            &base,
+            parse_options,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| match error {
+            rspice_core::netlist::ParseWithAbortError::Aborted => {
+                super::cancellation_cli_error(ctx.args.timeout)
+            }
+            rspice_core::netlist::ParseWithAbortError::Parse(error) => CliError::ParseError {
+                message: format!("S-parameter excitation: {error}"),
                 line: None,
                 suggestion: None,
-            }
+            },
         })?;
         ctx.engine
             .run_ac(&netlist, &frequencies)

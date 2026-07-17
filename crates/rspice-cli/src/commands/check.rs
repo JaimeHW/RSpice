@@ -1,6 +1,6 @@
 //! Check Command - Validate netlist syntax
 
-use crate::cli::{CheckArgs, CliError};
+use crate::cli::{CheckArgs, CliError, Config};
 use rspice_core::{Engine, Netlist};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -36,16 +36,23 @@ impl ValidationResult {
 }
 
 /// Execute the check command
-pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
+pub fn execute(
+    args: CheckArgs,
+    config: &Config,
+    _verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
     if !quiet {
         println!("Checking: {}", args.input.display());
     }
 
-    let parsed = crate::commands::parse_netlist_input(&args.input).and_then(|netlist| {
-        rspice_core::netlist::validate_output_symbols(&netlist)
-            .map_err(crate::commands::map_parse_error)?;
-        Ok(netlist)
-    });
+    let resource_limits = config.resources.limits();
+    let parsed =
+        crate::commands::parse_netlist_input(&args.input, resource_limits).and_then(|netlist| {
+            rspice_core::netlist::validate_output_symbols(&netlist)
+                .map_err(crate::commands::map_parse_error)?;
+            Ok(netlist)
+        });
     let netlist = match parsed {
         Ok(n) => n,
         Err(e @ CliError::InputNotFound { .. } | e @ CliError::InputReadError { .. }) => {
@@ -75,7 +82,7 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
     check_topology(&netlist, &mut result);
-    check_xspice_build(&netlist, &mut result);
+    check_xspice_build(&netlist, &mut result, resource_limits);
 
     if args.connectivity {
         check_connectivity(&netlist, &mut result);
@@ -108,13 +115,21 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
     }
 }
 
-fn check_xspice_build(netlist: &Netlist, result: &mut ValidationResult) {
+fn check_xspice_build(
+    netlist: &Netlist,
+    result: &mut ValidationResult,
+    resource_limits: rspice_core::ResourceLimits,
+) {
     if !netlist_contains_xspice(netlist) {
         return;
     }
 
     let _external_guard = XspiceCheckExternalRuntimeGuard::install();
-    if let Err(error) = Engine::default().build_circuit(netlist) {
+    let config = rspice_core::SimulationConfig {
+        resource_limits,
+        ..rspice_core::SimulationConfig::default()
+    };
+    if let Err(error) = Engine::new(config).build_circuit(netlist) {
         result.errors.push(ValidationIssue {
             message: format!("XSPICE build validation failed: {error}"),
             element: None,
@@ -516,6 +531,7 @@ mod tests {
                 strict: false,
                 json: false,
             },
+            &Config::default(),
             false,
             true,
         );
@@ -561,6 +577,7 @@ mod tests {
                 strict: false,
                 json: false,
             },
+            &Config::default(),
             false,
             true,
         );

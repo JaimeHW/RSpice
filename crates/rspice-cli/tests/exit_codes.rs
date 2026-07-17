@@ -328,7 +328,7 @@ fn fourier_ground_probe_exits_zero_without_panicking() {
 }
 
 #[test]
-fn fourier_invalid_numeric_node_is_a_simulation_error() {
+fn fourier_invalid_numeric_node_is_rejected_before_simulation() {
     let dir = test_dir("four_invalid_node");
     let deck = dir.join("four_invalid_node.sp");
     std::fs::write(
@@ -344,14 +344,14 @@ fn fourier_invalid_numeric_node_is_a_simulation_error() {
     let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
     assert_eq!(
         output.status.code(),
-        Some(1),
-        "invalid Fourier node must be a simulation error, not a panic; stderr: {}",
+        Some(65),
+        "invalid Fourier node must be a semantic input error, not a panic; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("V(999)") && stderr.contains("not available"),
-        "stderr should name the unavailable Fourier output: {stderr}"
+        stderr.contains(".FOUR node '999' via V") && stderr.contains("undefined output symbols"),
+        "stderr should retain the typed unavailable-output context: {stderr}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -399,6 +399,116 @@ fn malformed_data_sweep_exits_sixty_five() {
     assert!(
         stderr.contains(".data corners") && stderr.contains("does not fill 2 columns"),
         "stderr should explain the malformed .DATA table: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn configured_batch_limit_rejects_multi_run_before_execution() {
+    let dir = test_dir("bounded_multi_run");
+    let deck = dir.join("bounded.sp");
+    let config = dir.join("rspice.toml");
+    std::fs::write(
+        &deck,
+        "* bounded multi-run\n\
+         V1 in 0 1\n\
+         R1 in 0 1k\n\
+         .op\n\
+         .alter second\n\
+         V1 in 0 2\n\
+         .end\n",
+    )
+    .expect("write deck");
+    std::fs::write(&config, "[resources]\nmax_batch_runs = 1\n").expect("write config");
+
+    let output = run_rspice(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+    ]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(65),
+        "resource rejection must be an input-policy error; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("batch_runs limit exceeded: requested 2, limit 1"),
+        "typed batch limit must reach the CLI: {stderr}"
+    );
+    assert!(
+        stderr.contains("resources.max_batch_runs"),
+        "operator guidance must name the config key: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn resource_policy_applies_to_run_check_and_info_ingestion() {
+    let dir = test_dir("bounded_frontends");
+    let deck = dir.join("bounded.sp");
+    let config = dir.join("rspice.toml");
+    std::fs::write(&deck, "* exceeds eight bytes\nV1 in 0 1\n.op\n.end\n").expect("write deck");
+    std::fs::write(&config, "[resources]\nmax_netlist_bytes = 8\n").expect("write config");
+
+    for subcommand in ["run", "check", "info"] {
+        let output = run_rspice(&[
+            "--config",
+            config.to_str().unwrap(),
+            "--quiet",
+            subcommand,
+            deck.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            output.status.code(),
+            Some(65),
+            "{subcommand} must apply the same ingestion policy; stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("netlist_bytes limit exceeded"),
+            "{subcommand} must preserve typed resource diagnostics"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn resource_environment_override_takes_precedence_over_config_file() {
+    let dir = test_dir("bounded_env_override");
+    let deck = dir.join("bounded.sp");
+    let config = dir.join("rspice.toml");
+    std::fs::write(
+        &deck,
+        "* bounded multi-run\nV1 in 0 1\nR1 in 0 1k\n.op\n.alter second\nV1 in 0 2\n.end\n",
+    )
+    .expect("write deck");
+    std::fs::write(&config, "[resources]\nmax_batch_runs = 4\n").expect("write config");
+
+    let output = run_rspice_with_envs(
+        &[
+            "--config",
+            config.to_str().unwrap(),
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+        ],
+        &[("RSPICE_MAX_BATCH_RUNS", "1")],
+    );
+
+    assert_eq!(output.status.code(), Some(65));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("batch_runs limit exceeded: requested 2, limit 1")
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -779,6 +889,7 @@ fn missing_input_exits_sixty_six() {
 fn timeout_exits_one_twenty_four() {
     let dir = test_dir("timeout");
     let deck = dir.join("slow.sp");
+    let config = dir.join("rspice.toml");
     // 100 simulated seconds of a 1kHz sine at 1ns steps: far longer than
     // the 1-second budget on any machine.
     std::fs::write(
@@ -791,9 +902,24 @@ fn timeout_exits_one_twenty_four() {
          .end\n",
     )
     .expect("write deck");
+    // This fixture intentionally exceeds production defaults so it can test
+    // runtime cancellation rather than point-count admission control.
+    std::fs::write(
+        &config,
+        "[resources]\nmax_analysis_points = 100000000001\nmax_result_values = 500000000005\n",
+    )
+    .expect("write config");
 
     let start = std::time::Instant::now();
-    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap(), "--timeout", "1"]);
+    let output = run_rspice(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--timeout",
+        "1",
+    ]);
     assert_eq!(
         output.status.code(),
         Some(124),

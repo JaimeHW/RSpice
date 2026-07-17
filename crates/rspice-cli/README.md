@@ -354,7 +354,29 @@ show_progress = false            # default for --progress
 include_paths = ["./models", "./lib"]   # extra .include/.lib search dirs for run
 library_paths = []                      # extra .include/.lib search dirs for run
 veriloga_includes = []                  # extra include dirs for compile-va
+
+[resources]
+max_netlist_bytes = 67108864             # 64 MiB root deck
+max_netlist_lines = 2000000
+max_expanded_source_bytes = 268435456    # includes and retained multi-run decks
+max_dependency_source_bytes = 268435456
+max_external_data_bytes = 268435456
+max_external_data_values = 25000000
+max_shared_cache_bytes = 536870912
+max_include_depth = 64
+max_hierarchy_depth = 100
+max_flattened_elements = 250000
+max_circuit_nodes = 250000
+max_matrix_unknowns = 250000
+max_analysis_points = 2000000
+max_result_values = 25000000
+max_batch_runs = 10000
 ```
+
+The same resource policy is applied consistently to `run`, `check`, and
+`info`, including stdin, include expansion, `.ALTER`/`.DATA` materialization,
+derived corner/S-parameter decks, circuit construction, and result retention.
+Lower these ceilings for a service with a fixed memory budget.
 
 Environment variable overrides:
 
@@ -364,6 +386,7 @@ Environment variable overrides:
 | `RSPICE_OUTPUT_FORMAT` | Default output format |
 | `RSPICE_INCLUDE_PATH` | Include search paths, platform path separator (`;` on Windows, `:` elsewhere) |
 | `RSPICE_LIBRARY_PATH` | Model library paths, platform path separator |
+| `RSPICE_MAX_<RESOURCE>` | Override any `[resources]` key in uppercase, for example `RSPICE_MAX_BATCH_RUNS` or `RSPICE_MAX_NETLIST_BYTES` |
 
 ## Exit Codes
 

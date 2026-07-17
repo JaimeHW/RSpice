@@ -24,6 +24,9 @@ pub struct Config {
 
     /// Path settings
     pub paths: PathConfig,
+
+    /// Resource ceilings for untrusted and batch workloads
+    pub resources: ResourceConfig,
 }
 
 /// Simulation-related configuration
@@ -90,6 +93,73 @@ pub struct PathConfig {
     pub veriloga_includes: Vec<PathBuf>,
 }
 
+/// Resource ceilings shared by ingestion, parsing, construction, and analyses.
+/// Values are counts or bytes and can be lowered for service deployments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ResourceConfig {
+    pub max_netlist_bytes: usize,
+    pub max_netlist_lines: usize,
+    pub max_expanded_source_bytes: usize,
+    pub max_dependency_source_bytes: usize,
+    pub max_external_data_bytes: usize,
+    pub max_external_data_values: usize,
+    pub max_shared_cache_bytes: usize,
+    pub max_include_depth: usize,
+    pub max_hierarchy_depth: usize,
+    pub max_flattened_elements: usize,
+    pub max_circuit_nodes: usize,
+    pub max_matrix_unknowns: usize,
+    pub max_analysis_points: usize,
+    pub max_result_values: usize,
+    pub max_batch_runs: usize,
+}
+
+impl Default for ResourceConfig {
+    fn default() -> Self {
+        let limits = rspice_core::ResourceLimits::default();
+        Self {
+            max_netlist_bytes: limits.max_netlist_bytes,
+            max_netlist_lines: limits.max_netlist_lines,
+            max_expanded_source_bytes: limits.max_expanded_source_bytes,
+            max_dependency_source_bytes: limits.max_dependency_source_bytes,
+            max_external_data_bytes: limits.max_external_data_bytes,
+            max_external_data_values: limits.max_external_data_values,
+            max_shared_cache_bytes: limits.max_shared_cache_bytes,
+            max_include_depth: limits.max_include_depth,
+            max_hierarchy_depth: limits.max_hierarchy_depth,
+            max_flattened_elements: limits.max_flattened_elements,
+            max_circuit_nodes: limits.max_circuit_nodes,
+            max_matrix_unknowns: limits.max_matrix_unknowns,
+            max_analysis_points: limits.max_analysis_points,
+            max_result_values: limits.max_result_values,
+            max_batch_runs: limits.max_batch_runs,
+        }
+    }
+}
+
+impl ResourceConfig {
+    pub fn limits(&self) -> rspice_core::ResourceLimits {
+        let mut limits = rspice_core::ResourceLimits::default();
+        limits.max_netlist_bytes = self.max_netlist_bytes;
+        limits.max_netlist_lines = self.max_netlist_lines;
+        limits.max_expanded_source_bytes = self.max_expanded_source_bytes;
+        limits.max_dependency_source_bytes = self.max_dependency_source_bytes;
+        limits.max_external_data_bytes = self.max_external_data_bytes;
+        limits.max_external_data_values = self.max_external_data_values;
+        limits.max_shared_cache_bytes = self.max_shared_cache_bytes;
+        limits.max_include_depth = self.max_include_depth;
+        limits.max_hierarchy_depth = self.max_hierarchy_depth;
+        limits.max_flattened_elements = self.max_flattened_elements;
+        limits.max_circuit_nodes = self.max_circuit_nodes;
+        limits.max_matrix_unknowns = self.max_matrix_unknowns;
+        limits.max_analysis_points = self.max_analysis_points;
+        limits.max_result_values = self.max_result_values;
+        limits.max_batch_runs = self.max_batch_runs;
+        limits
+    }
+}
+
 impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
@@ -130,6 +200,7 @@ struct ConfigLayer {
     simulation: SimulationLayer,
     output: OutputLayer,
     paths: PathConfig,
+    resources: ResourceLayer,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -153,6 +224,26 @@ struct OutputLayer {
     format: Option<String>,
     show_progress: Option<bool>,
     output_directory: Option<PathBuf>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ResourceLayer {
+    max_netlist_bytes: Option<usize>,
+    max_netlist_lines: Option<usize>,
+    max_expanded_source_bytes: Option<usize>,
+    max_dependency_source_bytes: Option<usize>,
+    max_external_data_bytes: Option<usize>,
+    max_external_data_values: Option<usize>,
+    max_shared_cache_bytes: Option<usize>,
+    max_include_depth: Option<usize>,
+    max_hierarchy_depth: Option<usize>,
+    max_flattened_elements: Option<usize>,
+    max_circuit_nodes: Option<usize>,
+    max_matrix_unknowns: Option<usize>,
+    max_analysis_points: Option<usize>,
+    max_result_values: Option<usize>,
+    max_batch_runs: Option<usize>,
 }
 
 impl Config {
@@ -277,6 +368,53 @@ impl Config {
         self.paths
             .veriloga_includes
             .extend(layer.paths.veriloga_includes);
+
+        let resources = layer.resources;
+        if let Some(value) = resources.max_netlist_bytes {
+            self.resources.max_netlist_bytes = value;
+        }
+        if let Some(value) = resources.max_netlist_lines {
+            self.resources.max_netlist_lines = value;
+        }
+        if let Some(value) = resources.max_expanded_source_bytes {
+            self.resources.max_expanded_source_bytes = value;
+        }
+        if let Some(value) = resources.max_dependency_source_bytes {
+            self.resources.max_dependency_source_bytes = value;
+        }
+        if let Some(value) = resources.max_external_data_bytes {
+            self.resources.max_external_data_bytes = value;
+        }
+        if let Some(value) = resources.max_external_data_values {
+            self.resources.max_external_data_values = value;
+        }
+        if let Some(value) = resources.max_shared_cache_bytes {
+            self.resources.max_shared_cache_bytes = value;
+        }
+        if let Some(value) = resources.max_include_depth {
+            self.resources.max_include_depth = value;
+        }
+        if let Some(value) = resources.max_hierarchy_depth {
+            self.resources.max_hierarchy_depth = value;
+        }
+        if let Some(value) = resources.max_flattened_elements {
+            self.resources.max_flattened_elements = value;
+        }
+        if let Some(value) = resources.max_circuit_nodes {
+            self.resources.max_circuit_nodes = value;
+        }
+        if let Some(value) = resources.max_matrix_unknowns {
+            self.resources.max_matrix_unknowns = value;
+        }
+        if let Some(value) = resources.max_analysis_points {
+            self.resources.max_analysis_points = value;
+        }
+        if let Some(value) = resources.max_result_values {
+            self.resources.max_result_values = value;
+        }
+        if let Some(value) = resources.max_batch_runs {
+            self.resources.max_batch_runs = value;
+        }
     }
 
     /// Apply environment variable overrides
@@ -315,6 +453,35 @@ impl Config {
                 .library_paths
                 .extend(std::env::split_paths(&libs));
         }
+
+        macro_rules! apply_resource_env {
+            ($variable:literal, $field:ident) => {
+                if let Some(value) = parse_usize_env($variable)? {
+                    self.resources.$field = value;
+                }
+            };
+        }
+        apply_resource_env!("RSPICE_MAX_NETLIST_BYTES", max_netlist_bytes);
+        apply_resource_env!("RSPICE_MAX_NETLIST_LINES", max_netlist_lines);
+        apply_resource_env!(
+            "RSPICE_MAX_EXPANDED_SOURCE_BYTES",
+            max_expanded_source_bytes
+        );
+        apply_resource_env!(
+            "RSPICE_MAX_DEPENDENCY_SOURCE_BYTES",
+            max_dependency_source_bytes
+        );
+        apply_resource_env!("RSPICE_MAX_EXTERNAL_DATA_BYTES", max_external_data_bytes);
+        apply_resource_env!("RSPICE_MAX_EXTERNAL_DATA_VALUES", max_external_data_values);
+        apply_resource_env!("RSPICE_MAX_SHARED_CACHE_BYTES", max_shared_cache_bytes);
+        apply_resource_env!("RSPICE_MAX_INCLUDE_DEPTH", max_include_depth);
+        apply_resource_env!("RSPICE_MAX_HIERARCHY_DEPTH", max_hierarchy_depth);
+        apply_resource_env!("RSPICE_MAX_FLATTENED_ELEMENTS", max_flattened_elements);
+        apply_resource_env!("RSPICE_MAX_CIRCUIT_NODES", max_circuit_nodes);
+        apply_resource_env!("RSPICE_MAX_MATRIX_UNKNOWNS", max_matrix_unknowns);
+        apply_resource_env!("RSPICE_MAX_ANALYSIS_POINTS", max_analysis_points);
+        apply_resource_env!("RSPICE_MAX_RESULT_VALUES", max_result_values);
+        apply_resource_env!("RSPICE_MAX_BATCH_RUNS", max_batch_runs);
 
         Ok(())
     }
@@ -366,6 +533,19 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn parse_usize_env(variable: &str) -> Result<Option<usize>, ConfigError> {
+    let Ok(raw) = std::env::var(variable) else {
+        return Ok(None);
+    };
+    raw.parse::<usize>()
+        .map(Some)
+        .map_err(|error| ConfigError::EnvironmentError {
+            variable: variable.to_owned(),
+            value: raw,
+            message: error.to_string(),
+        })
 }
 
 fn validate_positive(field: &str, value: f64) -> Result<(), ConfigError> {

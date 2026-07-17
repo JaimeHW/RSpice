@@ -21,7 +21,9 @@
 //! loops the expanded decks.
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::lexer::parse_spice_value;
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
 /// One concrete, self-contained run produced by the expansion.
 #[derive(Debug, Clone)]
@@ -36,17 +38,47 @@ pub struct RunDeck {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiRunError {
     message: String,
+    resource_limit: Option<ResourceLimitError>,
+    aborted: bool,
 }
 
 impl MultiRunError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            resource_limit: None,
+            aborted: false,
+        }
+    }
+
+    fn resource_limit(error: ResourceLimitError) -> Self {
+        Self {
+            message: error.to_string(),
+            resource_limit: Some(error),
+            aborted: false,
+        }
+    }
+
+    fn aborted() -> Self {
+        Self {
+            message: "multi-run expansion aborted".to_owned(),
+            resource_limit: None,
+            aborted: true,
         }
     }
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Typed resource-limit details, when expansion was rejected by policy.
+    pub fn resource_limit_error(&self) -> Option<ResourceLimitError> {
+        self.resource_limit
+    }
+
+    /// Whether cooperative cancellation stopped the expansion.
+    pub fn is_aborted(&self) -> bool {
+        self.aborted
     }
 }
 
@@ -91,92 +123,289 @@ pub fn expand_multi_run(source: &str) -> Vec<RunDeck> {
 /// Checked expansion for production callers. Malformed `.DATA` constructs
 /// return an error instead of silently dropping values or running the base deck.
 pub fn try_expand_multi_run(source: &str) -> Result<Vec<RunDeck>, MultiRunError> {
-    let has_multi_run = source.lines().any(|line| {
+    try_expand_multi_run_with_limits(source, ResourceLimits::default())
+}
+
+/// Checked expansion under an explicit resource policy.
+pub fn try_expand_multi_run_with_limits(
+    source: &str,
+    resource_limits: ResourceLimits,
+) -> Result<Vec<RunDeck>, MultiRunError> {
+    try_expand_multi_run_with_limits_and_abort(source, resource_limits, &NoAbort)
+}
+
+/// Checked expansion under an explicit resource policy with cooperative
+/// cancellation. The retained concrete decks are bounded both by run count
+/// and by their aggregate source bytes.
+pub fn try_expand_multi_run_with_limits_and_abort(
+    source: &str,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<RunDeck>, MultiRunError> {
+    ensure_not_aborted(abort)?;
+    ensure_resource(
+        ResourceKind::NetlistBytes,
+        source.len(),
+        resource_limits.max_netlist_bytes,
+    )?;
+
+    let mut has_multi_run = false;
+    for (index, line) in source.lines().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
+        ensure_resource(
+            ResourceKind::NetlistLines,
+            index.saturating_add(1),
+            resource_limits.max_netlist_lines,
+        )?;
         let token = first_token(line);
-        token.eq_ignore_ascii_case(".alter")
+        has_multi_run |= token.eq_ignore_ascii_case(".alter")
             || token.eq_ignore_ascii_case(".data")
             || token.eq_ignore_ascii_case(".enddata")
-            || references_data_table(line)
-    });
+            || references_data_table(line);
+    }
     if !has_multi_run {
-        return Ok(vec![RunDeck {
-            label: None,
-            source: source.to_owned(),
-        }]);
+        let mut decks = Vec::new();
+        let mut retained_source_bytes = 0;
+        push_source_deck(
+            &mut decks,
+            &mut retained_source_bytes,
+            None,
+            source,
+            resource_limits,
+            abort,
+        )?;
+        return Ok(decks);
     }
 
-    let (base, alters) = split_alters(source);
+    let (mut current_lines, alters) = split_alters(source, abort)?;
+    ensure_resource(
+        ResourceKind::BatchRuns,
+        alters.len().saturating_add(1),
+        resource_limits.max_batch_runs,
+    )?;
 
-    // Cumulative alter application: alter N edits the deck as left by
-    // alter N-1, exactly like HSPICE's sequential re-read.
-    let mut variants: Vec<(Option<String>, Vec<String>)> = Vec::with_capacity(alters.len() + 1);
-    variants.push((None, base));
+    let mut decks = Vec::new();
+    let mut retained_source_bytes = 0usize;
+    let base_label = (!alters.is_empty()).then(|| "base".to_owned());
+    expand_variant(
+        base_label,
+        &current_lines,
+        &mut decks,
+        &mut retained_source_bytes,
+        resource_limits,
+        abort,
+    )?;
+
+    // Apply each alter cumulatively and expand it immediately. Keeping only
+    // the current variant avoids an O(alters * deck-size) intermediate.
     for (index, block) in alters.iter().enumerate() {
-        let mut next = variants
-            .last()
-            .map(|(_, lines)| lines.clone())
-            .unwrap_or_default();
-        apply_alter(&mut next, block);
+        poll_abort(abort, index)?;
+        apply_alter(&mut current_lines, block, abort)?;
         let label = if block.title.is_empty() {
             format!("alter {}", index + 1)
         } else {
             block.title.clone()
         };
-        variants.push((Some(label), next));
+        expand_variant(
+            Some(label),
+            &current_lines,
+            &mut decks,
+            &mut retained_source_bytes,
+            resource_limits,
+            abort,
+        )?;
     }
-    // With alters present, the unmodified pass gets an explicit label too.
-    if variants.len() > 1 {
-        variants[0].0 = Some("base".to_owned());
-    }
-
-    let mut decks = Vec::new();
-    for (label, lines) in variants {
-        let (tables, mut lines) = extract_data_tables(lines)?;
-        let reference = find_data_reference(&lines, &tables)?;
-
-        match reference {
-            Some((table_index, _)) => {
-                let table = &tables[table_index];
-                if table.rows.is_empty() {
-                    return Err(MultiRunError::new(format!(
-                        ".data {} has no rows",
-                        table.name
-                    )));
-                }
-                strip_data_tokens(&mut lines);
-                for (row_index, row) in table.rows.iter().enumerate() {
-                    let mut run_lines = lines.clone();
-                    for (param, value) in table.params.iter().zip(row) {
-                        override_param(&mut run_lines, param, &format_value(*value));
-                    }
-                    let row_label = format!("{} row {}", table.name, row_index + 1);
-                    decks.push(RunDeck {
-                        label: Some(match &label {
-                            Some(label) => format!("{label} · {row_label}"),
-                            None => row_label,
-                        }),
-                        source: assemble(&run_lines),
-                    });
-                }
-            }
-            None => decks.push(RunDeck {
-                label: label.clone(),
-                source: assemble(&lines),
-            }),
-        }
-    }
+    ensure_not_aborted(abort)?;
     Ok(decks)
 }
 
+fn expand_variant(
+    label: Option<String>,
+    source_lines: &[String],
+    decks: &mut Vec<RunDeck>,
+    retained_source_bytes: &mut usize,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
+    ensure_not_aborted(abort)?;
+    let (tables, mut lines) = extract_data_tables(source_lines.to_vec(), resource_limits, abort)?;
+    let reference = find_data_reference(&lines, &tables, abort)?;
+
+    match reference {
+        Some((table_index, _)) => {
+            let table = &tables[table_index];
+            if table.rows.is_empty() {
+                return Err(MultiRunError::new(format!(
+                    ".data {} has no rows",
+                    table.name
+                )));
+            }
+            ensure_resource(
+                ResourceKind::BatchRuns,
+                decks.len().saturating_add(table.rows.len()),
+                resource_limits.max_batch_runs,
+            )?;
+            strip_data_tokens(&mut lines, abort)?;
+            for (row_index, row) in table.rows.iter().enumerate() {
+                poll_abort(abort, row_index)?;
+                let mut run_lines = lines.clone();
+                for (param_index, (param, value)) in table.params.iter().zip(row).enumerate() {
+                    poll_abort(abort, param_index)?;
+                    override_param_with_abort(&mut run_lines, param, &format_value(*value), abort)?;
+                }
+                let row_label = format!("{} row {}", table.name, row_index + 1);
+                push_assembled_deck(
+                    decks,
+                    retained_source_bytes,
+                    Some(match &label {
+                        Some(label) => format!("{label} · {row_label}"),
+                        None => row_label,
+                    }),
+                    &run_lines,
+                    resource_limits,
+                    abort,
+                )?;
+            }
+        }
+        None => push_assembled_deck(
+            decks,
+            retained_source_bytes,
+            label,
+            &lines,
+            resource_limits,
+            abort,
+        )?,
+    }
+    Ok(())
+}
+
+fn push_assembled_deck(
+    decks: &mut Vec<RunDeck>,
+    retained_source_bytes: &mut usize,
+    label: Option<String>,
+    lines: &[String],
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
+    let requested_bytes = assembled_len(lines);
+    let requested_total = retained_source_bytes.saturating_add(requested_bytes);
+    ensure_resource(
+        ResourceKind::ExpandedSourceBytes,
+        requested_total,
+        resource_limits.max_expanded_source_bytes,
+    )?;
+    ensure_resource(
+        ResourceKind::BatchRuns,
+        decks.len().saturating_add(1),
+        resource_limits.max_batch_runs,
+    )?;
+    let source = assemble(lines, requested_bytes, abort)?;
+    push_owned_deck(decks, retained_source_bytes, label, source)
+}
+
+fn push_source_deck(
+    decks: &mut Vec<RunDeck>,
+    retained_source_bytes: &mut usize,
+    label: Option<String>,
+    source: &str,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
+    ensure_resource(
+        ResourceKind::ExpandedSourceBytes,
+        retained_source_bytes.saturating_add(source.len()),
+        resource_limits.max_expanded_source_bytes,
+    )?;
+    ensure_resource(
+        ResourceKind::BatchRuns,
+        decks.len().saturating_add(1),
+        resource_limits.max_batch_runs,
+    )?;
+    poll_text_abort(abort, source)?;
+    let mut owned = String::new();
+    owned
+        .try_reserve_exact(source.len())
+        .map_err(|error| allocation_error("plain run deck source", error))?;
+    owned.push_str(source);
+    push_owned_deck(decks, retained_source_bytes, label, owned)
+}
+
+fn push_owned_deck(
+    decks: &mut Vec<RunDeck>,
+    retained_source_bytes: &mut usize,
+    label: Option<String>,
+    source: String,
+) -> Result<(), MultiRunError> {
+    decks
+        .try_reserve(1)
+        .map_err(|error| allocation_error("run deck list", error))?;
+    *retained_source_bytes = retained_source_bytes.saturating_add(source.len());
+    decks.push(RunDeck { label, source });
+    Ok(())
+}
+
+fn ensure_resource(
+    resource: ResourceKind,
+    requested: usize,
+    limit: usize,
+) -> Result<(), MultiRunError> {
+    ResourceLimitError::ensure(resource, requested, limit).map_err(MultiRunError::resource_limit)
+}
+
+#[inline]
+fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), MultiRunError> {
+    if abort.is_aborted() {
+        Err(MultiRunError::aborted())
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn poll_abort(abort: &dyn AbortSignal, index: usize) -> Result<(), MultiRunError> {
+    const POLL_STRIDE: usize = 64;
+    if index.is_multiple_of(POLL_STRIDE) {
+        ensure_not_aborted(abort)?;
+    }
+    Ok(())
+}
+
+fn poll_text_abort(abort: &dyn AbortSignal, text: &str) -> Result<(), MultiRunError> {
+    const TEXT_CHUNK_BYTES: usize = 4096;
+    for _ in text.as_bytes().chunks(TEXT_CHUNK_BYTES) {
+        ensure_not_aborted(abort)?;
+    }
+    Ok(())
+}
+
+fn allocation_error(resource: &str, error: std::collections::TryReserveError) -> MultiRunError {
+    MultiRunError::new(format!("unable to reserve memory for {resource}: {error}"))
+}
+
 /// Reassemble deck lines with a terminating `.end`.
-fn assemble(lines: &[String]) -> String {
-    let mut out = String::with_capacity(lines.iter().map(|l| l.len() + 1).sum::<usize>() + 8);
-    for line in lines {
+fn assemble(
+    lines: &[String],
+    capacity: usize,
+    abort: &dyn AbortSignal,
+) -> Result<String, MultiRunError> {
+    let mut out = String::new();
+    out.try_reserve_exact(capacity)
+        .map_err(|error| allocation_error("expanded run deck source", error))?;
+    for (index, line) in lines.iter().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
         out.push_str(line);
         out.push('\n');
     }
     out.push_str(".end\n");
-    out
+    Ok(out)
+}
+
+fn assembled_len(lines: &[String]) -> usize {
+    lines.iter().fold(".end\n".len(), |total, line| {
+        total.saturating_add(line.len()).saturating_add(1)
+    })
 }
 
 /// First whitespace-delimited token of a line (empty for blank lines).
@@ -186,12 +415,17 @@ fn first_token(line: &str) -> &str {
 
 /// Split the deck at its `.ALTER` markers. The returned base and blocks
 /// carry raw lines without the final `.END`.
-fn split_alters(source: &str) -> (Vec<String>, Vec<AlterBlock>) {
+fn split_alters(
+    source: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(Vec<String>, Vec<AlterBlock>), MultiRunError> {
     let mut base = Vec::new();
     let mut alters: Vec<AlterBlock> = Vec::new();
     let mut in_alter = false;
 
-    for line in source.lines() {
+    for (index, line) in source.lines().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
         let token = first_token(line);
         if token.eq_ignore_ascii_case(".alter") {
             let title = line
@@ -217,49 +451,70 @@ fn split_alters(source: &str) -> (Vec<String>, Vec<AlterBlock>) {
             base.push(line.to_owned());
         }
     }
-    (base, alters)
+    Ok((base, alters))
 }
 
 /// Apply one alter block to the deck lines (HSPICE substitution rules).
-fn apply_alter(lines: &mut Vec<String>, block: &AlterBlock) {
-    for statement in statements(&block.lines) {
+fn apply_alter(
+    lines: &mut Vec<String>,
+    block: &AlterBlock,
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
+    for (statement_index, statement) in statements(&block.lines, abort)?.into_iter().enumerate() {
+        poll_abort(abort, statement_index)?;
         let head = first_token(&statement[0]);
         if head.is_empty() || head.starts_with('*') {
             continue;
         }
         if head.starts_with('.') {
             if head.eq_ignore_ascii_case(".param") {
-                for line in &statement {
+                for (line_index, line) in statement.iter().enumerate() {
+                    poll_abort(abort, line_index)?;
+                    poll_text_abort(abort, line)?;
                     for (name, value) in line_assignments(line) {
-                        override_param(lines, &name, &value);
+                        override_param_with_abort(lines, &name, &value, abort)?;
                     }
                 }
             } else if head.eq_ignore_ascii_case(".model") {
                 let name = statement[0].split_whitespace().nth(1).unwrap_or("");
-                replace_statement(lines, &statement, |first| {
-                    first_token(first).eq_ignore_ascii_case(".model")
-                        && first
-                            .split_whitespace()
-                            .nth(1)
-                            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
-                });
+                replace_statement(
+                    lines,
+                    &statement,
+                    |first| {
+                        first_token(first).eq_ignore_ascii_case(".model")
+                            && first
+                                .split_whitespace()
+                                .nth(1)
+                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+                    },
+                    abort,
+                )?;
             } else {
                 lines.extend(statement);
             }
         } else {
             // Element statement: replace the element with the same name.
-            replace_statement(lines, &statement, |first| {
-                first_token(first).eq_ignore_ascii_case(head)
-            });
+            replace_statement(
+                lines,
+                &statement,
+                |first| first_token(first).eq_ignore_ascii_case(head),
+                abort,
+            )?;
         }
     }
+    ensure_not_aborted(abort)
 }
 
 /// Group raw lines into statements: each statement is a line plus its
 /// `+` continuation lines.
-fn statements(lines: &[String]) -> Vec<Vec<String>> {
+fn statements(
+    lines: &[String],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Vec<String>>, MultiRunError> {
     let mut out: Vec<Vec<String>> = Vec::new();
-    for line in lines {
+    for (index, line) in lines.iter().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
         if line.trim_start().starts_with('+')
             && let Some(last) = out.last_mut()
         {
@@ -268,7 +523,7 @@ fn statements(lines: &[String]) -> Vec<Vec<String>> {
         }
         out.push(vec![line.clone()]);
     }
-    out
+    Ok(out)
 }
 
 /// Replace the first statement whose head line matches `matches` with
@@ -278,33 +533,50 @@ fn replace_statement(
     lines: &mut Vec<String>,
     replacement: &[String],
     matches: impl Fn(&str) -> bool,
-) {
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
     let mut index = 0;
     while index < lines.len() {
+        poll_abort(abort, index)?;
         let line = &lines[index];
         if !line.trim_start().starts_with('+') && matches(line) {
             let mut end = index + 1;
             while end < lines.len() && lines[end].trim_start().starts_with('+') {
+                poll_abort(abort, end)?;
                 end += 1;
             }
             lines.splice(index..end, replacement.iter().cloned());
-            return;
+            return Ok(());
         }
         index += 1;
     }
     lines.extend(replacement.iter().cloned());
+    Ok(())
 }
 
 /// Override every top-level `.param` assignment of `name` in place; insert
 /// a fresh assignment after the title when the deck never assigns it.
 /// In-place replacement preserves the deck's in-order parameter-evaluation
 /// semantics (an appended line would lose to later defaults).
+#[cfg(test)]
 fn override_param(lines: &mut Vec<String>, name: &str, value: &str) {
+    override_param_with_abort(lines, name, value, &NoAbort)
+        .expect("NoAbort cannot cancel parameter override");
+}
+
+fn override_param_with_abort(
+    lines: &mut Vec<String>,
+    name: &str,
+    value: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
     let mut replaced = false;
     let mut subckt_depth = 0usize;
     let mut in_param_statement = false;
 
-    for line in lines.iter_mut() {
+    for (index, line) in lines.iter_mut().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
         let token = first_token(line).to_ascii_lowercase();
         match token.as_str() {
             ".subckt" => subckt_depth += 1,
@@ -326,6 +598,7 @@ fn override_param(lines: &mut Vec<String>, name: &str, value: &str) {
         let insert_at = if lines.is_empty() { 0 } else { 1 };
         lines.insert(insert_at, format!(".param {name}={value}"));
     }
+    Ok(())
 }
 
 /// Rewrite `name`'s assignment value inside one physical line. Returns
@@ -424,13 +697,19 @@ fn scan_assignments(line: &str) -> Vec<(String, usize, usize)> {
 
 /// Pull `.DATA … .ENDDATA` blocks out of the deck, returning the parsed
 /// tables and the deck lines with the blocks removed.
-fn extract_data_tables(lines: Vec<String>) -> Result<(Vec<DataTable>, Vec<String>), MultiRunError> {
+fn extract_data_tables(
+    lines: Vec<String>,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<(Vec<DataTable>, Vec<String>), MultiRunError> {
     let mut tables: Vec<DataTable> = Vec::new();
     let mut kept = Vec::with_capacity(lines.len());
     let mut current: Option<DataTable> = None;
     let mut flat_values: Vec<Value> = Vec::new();
 
     for (line_index, line) in lines.into_iter().enumerate() {
+        poll_abort(abort, line_index)?;
+        poll_text_abort(abort, &line)?;
         let line_number = line_index + 1;
         let token = first_token(&line);
         if let Some(table) = current.as_mut() {
@@ -450,20 +729,45 @@ fn extract_data_tables(lines: Vec<String>) -> Result<(Vec<DataTable>, Vec<String
                         columns
                     )));
                 }
-                table.rows = flat_values
-                    .chunks_exact(columns)
-                    .map(|chunk| chunk.to_vec())
-                    .collect();
+                let row_count = flat_values.len() / columns;
+                ensure_resource(
+                    ResourceKind::AnalysisPoints,
+                    row_count,
+                    resource_limits.max_analysis_points,
+                )?;
+                table
+                    .rows
+                    .try_reserve_exact(row_count)
+                    .map_err(|error| allocation_error(".DATA rows", error))?;
+                for (row_index, chunk) in flat_values.chunks_exact(columns).enumerate() {
+                    poll_abort(abort, row_index)?;
+                    table.rows.push(chunk.to_vec());
+                }
                 flat_values.clear();
                 tables.push(current.take().unwrap());
             } else {
-                for raw in line.split_whitespace() {
+                for (value_index, raw) in line.split_whitespace().enumerate() {
+                    poll_abort(abort, value_index)?;
                     let raw = raw.trim_start_matches('+');
                     if raw.is_empty() {
                         continue;
                     }
                     match parse_spice_value(raw) {
-                        Ok(value) => flat_values.push(value),
+                        Ok(value) => {
+                            ensure_resource(
+                                ResourceKind::ResultValues,
+                                flat_values.len().saturating_add(1),
+                                resource_limits.max_result_values,
+                            )?;
+                            flat_values.push(value);
+                            if !table.params.is_empty() {
+                                ensure_resource(
+                                    ResourceKind::AnalysisPoints,
+                                    flat_values.len().div_ceil(table.params.len()),
+                                    resource_limits.max_analysis_points,
+                                )?;
+                            }
+                        }
                         Err(_) => {
                             return Err(MultiRunError::new(format!(
                                 ".data {} line {} contains non-numeric token `{raw}`",
@@ -503,6 +807,7 @@ fn extract_data_tables(lines: Vec<String>) -> Result<(Vec<DataTable>, Vec<String
             table.name
         )));
     }
+    ensure_not_aborted(abort)?;
     Ok((tables, kept))
 }
 
@@ -511,8 +816,11 @@ fn extract_data_tables(lines: Vec<String>) -> Result<(Vec<DataTable>, Vec<String
 fn find_data_reference(
     lines: &[String],
     tables: &[DataTable],
+    abort: &dyn AbortSignal,
 ) -> Result<Option<(usize, usize)>, MultiRunError> {
     for (line_index, line) in lines.iter().enumerate() {
+        poll_abort(abort, line_index)?;
+        poll_text_abort(abort, line)?;
         if !is_sweep_analysis(line) {
             continue;
         }
@@ -557,8 +865,10 @@ fn data_reference_name(line: &str) -> Option<String> {
 
 /// Remove `[SWEEP] DATA=<name>` from every analysis line; a `.dc` left
 /// with no sweep arguments becomes `.op` (one point per data row).
-fn strip_data_tokens(lines: &mut [String]) {
-    for line in lines.iter_mut() {
+fn strip_data_tokens(lines: &mut [String], abort: &dyn AbortSignal) -> Result<(), MultiRunError> {
+    for (index, line) in lines.iter_mut().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
         if !is_sweep_analysis(line) || data_reference_name(line).is_none() {
             continue;
         }
@@ -584,6 +894,7 @@ fn strip_data_tokens(lines: &mut [String]) {
             kept.join(" ")
         };
     }
+    Ok(())
 }
 
 /// Collapse whitespace around `=` so `data = name` tokenizes as one field.
@@ -820,6 +1131,102 @@ mod tests {
         assert_eq!(decks[3].label.as_deref(), Some("big load · tbl row 2"));
         assert!(decks[3].source.contains("R1 a 0 10k"));
         assert!(decks[3].source.contains("vdd=2"));
+    }
+
+    #[test]
+    fn expansion_enforces_total_batch_runs_before_retaining_cross_product() {
+        let source = "t\n\
+            .param vdd=1\n\
+            V1 a 0 {vdd}\n\
+            .data tbl vdd\n\
+            1\n\
+            2\n\
+            3\n\
+            .enddata\n\
+            .dc data=tbl\n\
+            .end\n";
+        let limits = ResourceLimits {
+            max_batch_runs: 2,
+            ..ResourceLimits::default()
+        };
+
+        let error = try_expand_multi_run_with_limits(source, limits)
+            .expect_err("three rows must exceed the two-run policy");
+
+        assert_eq!(
+            error.resource_limit_error(),
+            Some(ResourceLimitError {
+                resource: ResourceKind::BatchRuns,
+                requested: 3,
+                limit: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn expansion_bounds_aggregate_retained_deck_source_bytes() {
+        let source = "t\n\
+            .param vdd=1\n\
+            V1 a 0 {vdd}\n\
+            .data tbl vdd\n\
+            1\n\
+            2\n\
+            .enddata\n\
+            .dc data=tbl\n\
+            .end\n";
+        let expanded = try_expand_multi_run(source).expect("fixture expands");
+        let retained_bytes = expanded.iter().map(|deck| deck.source.len()).sum::<usize>();
+        let limits = ResourceLimits {
+            max_expanded_source_bytes: retained_bytes - 1,
+            ..ResourceLimits::default()
+        };
+
+        let error = try_expand_multi_run_with_limits(source, limits)
+            .expect_err("aggregate concrete deck bytes must be bounded");
+        let resource = error
+            .resource_limit_error()
+            .expect("failure must retain typed resource details");
+        assert_eq!(resource.resource, ResourceKind::ExpandedSourceBytes);
+        assert_eq!(resource.requested, retained_bytes);
+        assert_eq!(resource.limit, retained_bytes - 1);
+    }
+
+    #[test]
+    fn alter_variants_are_preflighted_against_batch_limit() {
+        let source = "t\nR1 a 0 1k\n.alter one\nR1 a 0 2k\n.alter two\nR1 a 0 3k\n.end\n";
+        let limits = ResourceLimits {
+            max_batch_runs: 2,
+            ..ResourceLimits::default()
+        };
+
+        let error = try_expand_multi_run_with_limits(source, limits)
+            .expect_err("base plus two alters must exceed a two-run policy");
+
+        assert_eq!(
+            error.resource_limit_error(),
+            Some(ResourceLimitError {
+                resource: ResourceKind::BatchRuns,
+                requested: 3,
+                limit: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn expansion_observes_cooperative_cancellation_during_text_work() {
+        let mut source = String::from("cancel expansion\n");
+        for index in 0..256 {
+            source.push_str(&format!("R{index} n{index} 0 1k\n"));
+        }
+        source.push_str(".alter second\nR0 n0 0 2k\n.end\n");
+        let abort = crate::abort_signal::CountingAbort::new(12);
+
+        let error =
+            try_expand_multi_run_with_limits_and_abort(&source, ResourceLimits::default(), &abort)
+                .expect_err("counting abort must stop expansion");
+
+        assert!(error.is_aborted());
+        assert!(abort.count() > 12, "expansion must poll during text work");
     }
 
     #[test]

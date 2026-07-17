@@ -29,30 +29,90 @@ pub(crate) fn is_stdin(path: &std::path::Path) -> bool {
     path.as_os_str() == "-"
 }
 
-/// Read a netlist from stdin for commands that accept `-`.
-pub(crate) fn read_stdin_source() -> Result<String, crate::cli::CliError> {
+/// Read stdin in bounded chunks under the same root-source byte policy used
+/// for files, observing cooperative cancellation between reads.
+pub(crate) fn read_stdin_source_with_limits_and_abort(
+    resource_limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<String, rspice_core::netlist::ParseWithAbortError> {
     use std::io::Read;
-    let mut source = String::new();
-    std::io::stdin().read_to_string(&mut source).map_err(|e| {
-        crate::cli::CliError::InputReadError {
-            path: std::path::PathBuf::from("-"),
-            source: e,
+
+    const READ_CHUNK_BYTES: usize = 64 * 1024;
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; READ_CHUNK_BYTES];
+    let stdin = std::io::stdin();
+    let mut stdin = stdin.lock();
+    loop {
+        if abort.is_aborted() {
+            return Err(rspice_core::netlist::ParseWithAbortError::Aborted);
         }
-    })?;
-    Ok(source)
+        let count = stdin
+            .read(&mut chunk)
+            .map_err(rspice_core::netlist::ParseError::Io)?;
+        if count == 0 {
+            break;
+        }
+        let requested = bytes.len().saturating_add(count);
+        if requested > resource_limits.max_netlist_bytes {
+            return Err(rspice_core::netlist::ParseError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::NetlistBytes,
+                    requested,
+                    limit: resource_limits.max_netlist_bytes,
+                },
+            )
+            .into());
+        }
+        if bytes.capacity().saturating_sub(bytes.len()) < count {
+            bytes.try_reserve(count).map_err(|error| {
+                rspice_core::netlist::ParseError::Io(std::io::Error::other(format!(
+                    "unable to grow stdin netlist buffer: {error}"
+                )))
+            })?;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+    }
+    if abort.is_aborted() {
+        return Err(rspice_core::netlist::ParseWithAbortError::Aborted);
+    }
+    String::from_utf8(bytes).map_err(|error| {
+        rspice_core::netlist::ParseError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            error.utf8_error(),
+        ))
+        .into()
+    })
 }
 
 /// Parse a netlist argument, treating `-` as stdin (includes resolve
 /// against the working directory).
 pub(crate) fn parse_netlist_input(
     input: &std::path::Path,
+    resource_limits: rspice_core::ResourceLimits,
 ) -> Result<rspice_core::Netlist, crate::cli::CliError> {
     use rspice_core::Netlist;
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits,
+        ..rspice_core::netlist::NetlistParseOptions::default()
+    };
 
     if is_stdin(input) {
-        let source = read_stdin_source()?;
-        return Netlist::parse_with_path(&source, std::path::Path::new("stdin.sp"))
-            .map_err(map_parse_error);
+        let source =
+            match read_stdin_source_with_limits_and_abort(resource_limits, &rspice_core::NoAbort) {
+                Ok(source) => source,
+                Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => {
+                    return Err(map_parse_error(error));
+                }
+                Err(rspice_core::netlist::ParseWithAbortError::Aborted) => {
+                    unreachable!("NoAbort cannot cancel stdin ingestion")
+                }
+            };
+        return Netlist::parse_with_path_and_options(
+            &source,
+            std::path::Path::new("stdin.sp"),
+            options,
+        )
+        .map_err(map_parse_error);
     }
 
     if !input.exists() {
@@ -61,7 +121,7 @@ pub(crate) fn parse_netlist_input(
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
         });
     }
-    Netlist::parse_file(input).map_err(map_parse_error)
+    Netlist::parse_file_with_options(input, options).map_err(map_parse_error)
 }
 
 /// Preserve typed semantic context when crossing the core/CLI boundary.
