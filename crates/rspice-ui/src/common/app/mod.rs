@@ -117,8 +117,6 @@ mod app_export_image;
 
 mod app_workspace_actions;
 
-mod app_veriloga_workflow;
-
 mod app_pdk_workflow;
 
 mod app_state_init;
@@ -331,6 +329,29 @@ impl AppState {
         }
         if self.schematic.components.is_empty() {
             return Some("Add a component before running a schematic simulation".to_string());
+        }
+        if let Some(source) = self
+            .workspace
+            .project_sources
+            .get(crate::state::ProjectSourceLanguage::VerilogA)
+        {
+            let compiled = self
+                .ui
+                .code_workspace
+                .veriloga
+                .receipt
+                .as_ref()
+                .is_some_and(|receipt| {
+                    receipt.token.project_id == self.workspace.project.id()
+                        && receipt.token.revision == source.revision().get()
+                        && receipt.token.content_digest == source.content_digest()
+                });
+            if !compiled {
+                return Some(format!(
+                    "Compile the exact current {} project source before simulation",
+                    source.file_name()
+                ));
+            }
         }
         if let Some(issue) = plan.validation_issues().first() {
             return Some(format!("Correct simulation plan: {issue}"));
@@ -810,7 +831,6 @@ impl RSpiceApp {
 
     fn render_frame_dialogs(&mut self, ctx: &Context) {
         self.render_confirmation_dialog(ctx);
-        self.process_veriloga_load_dialog(ctx);
         crate::panels::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);
         self.render_simulation_options_dialog(ctx);
@@ -1236,6 +1256,9 @@ mod tests {
 
     fn runnable_state() -> AppState {
         let mut state = AppState::default();
+        // These readiness tests isolate schematic/DRC policy. Project-owned
+        // behavioral sources have their own compile-before-run contract.
+        state.workspace.project_sources = Default::default();
         state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));

@@ -18,6 +18,7 @@ thiserror.workspace = true
 log.workspace = true
 serde = { workspace = true, features = ["derive"] }
 blake3 = "1.5"
+web-time = "1.1"
 
 # Parsing - using nom for professional-grade parsing
 nom.workspace = true

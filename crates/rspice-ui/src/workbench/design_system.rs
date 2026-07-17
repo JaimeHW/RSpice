@@ -638,6 +638,16 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
+    property_row_with_tone(ui, label, value, t.color.text)
+}
+
+/// Property row whose value communicates an explicit semantic tone.
+pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
+    property_row_with_tone(ui, label, value, value_tone)
+}
+
+fn property_row_with_tone(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
+    let t = Tokens::get(ui.ctx());
     let full_label = label;
     let full_value = value;
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
@@ -651,9 +661,9 @@ pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let label_galley =
         ui.painter()
             .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
-    let value_galley =
-        ui.painter()
-            .layout(value.to_owned(), value_font, t.color.text, value_column);
+    let value_galley = ui
+        .painter()
+        .layout(value.to_owned(), value_font, value_tone, value_column);
     let height = (label_galley.size().y.max(value_galley.size().y) + 12.0).max(29.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
@@ -672,7 +682,7 @@ pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     ui.painter().with_clip_rect(value_rect).galley(
         Pos2::new(value_rect.left(), value_rect.top() + 6.0),
         value_galley,
-        t.color.text,
+        value_tone,
     );
     response.on_hover_text(format!("{full_label}: {full_value}"))
 }
@@ -800,6 +810,122 @@ pub fn heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(t.color.text_dim),
     );
+}
+
+/// Exact compact heading used by the mockup's Code & Automation title rows.
+///
+/// This is deliberately separate from [`heading`]: code workspaces use the
+/// mockup's three-point vertical rhythm and tracked mono eyebrow while other
+/// workbench headings retain their existing composition.
+pub fn code_workspace_heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(eyebrow.to_uppercase())
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .extra_letter_spacing(0.09 * tokens::FS_0)
+            .color(t.color.text_faint),
+    );
+    ui.add_space(3.0);
+    ui.label(
+        egui::RichText::new(title)
+            .font(theme::sans(15.0, FontWeight::SemiBold))
+            .color(t.color.text),
+    );
+    ui.add_space(3.0);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(description)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        )
+        .wrap(),
+    );
+}
+
+/// One canonical section of the embedded Code-workspace inspector.
+///
+/// The section owns its 29 px header and bottom divider. `status` uses the
+/// mockup's row-status grammar: a five-point dot, six-point gap, and mono text.
+pub fn code_inspector_section(
+    ui: &mut Ui,
+    title: &str,
+    status: Option<(&str, Color32)>,
+    body: impl FnOnce(&mut Ui),
+) {
+    let t = Tokens::get(ui.ctx());
+    let shown = ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), PANEL_SECTION_H),
+            Sense::hover(),
+        );
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            Color32::from_rgba_unmultiplied(
+                t.color.bg_panel_2.r(),
+                t.color.bg_panel_2.g(),
+                t.color.bg_panel_2.b(),
+                204,
+            ),
+        );
+
+        let status_left = if let Some((label, tone)) = status {
+            let galley = ui.painter().layout_no_wrap(
+                label.to_owned(),
+                theme::mono(tokens::FS_0, FontWeight::Medium),
+                tone,
+            );
+            let label_pos = Pos2::new(
+                rect.right() - 10.0 - galley.size().x,
+                rect.center().y - galley.size().y * 0.5,
+            );
+            ui.painter().galley(label_pos, galley, tone);
+            let dot_center = Pos2::new(label_pos.x - 8.5, rect.center().y);
+            ui.painter().circle_filled(dot_center, 2.5, tone);
+            dot_center.x - 2.5
+        } else {
+            rect.right()
+        };
+
+        let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+        let title_job = egui::text::LayoutJob::single_section(
+            title.to_uppercase(),
+            egui::TextFormat {
+                font_id: title_font,
+                color: t.color.text_dim,
+                extra_letter_spacing: 0.055 * tokens::FS_0,
+                ..Default::default()
+            },
+        );
+        let title_galley = ui.fonts_mut(|fonts| fonts.layout_job(title_job));
+        ui.painter()
+            .with_clip_rect(Rect::from_min_max(
+                Pos2::new(rect.left() + 10.0, rect.top()),
+                Pos2::new((status_left - 6.0).max(rect.left() + 10.0), rect.bottom()),
+            ))
+            .galley(
+                Pos2::new(
+                    rect.left() + 10.0,
+                    rect.center().y - title_galley.size().y * 0.5,
+                ),
+                title_galley,
+                t.color.text_dim,
+            );
+        body(ui);
+    });
+    ui.painter().hline(
+        shown.response.rect.x_range(),
+        shown.response.rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+}
+
+/// Canonical seven/ten-point vertical inset around inspector property rows.
+pub fn code_inspector_property_list(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+    ui.add_space(7.0);
+    body(ui);
+    ui.add_space(10.0);
 }
 
 /// Full-width title row used by non-project workspaces in the reference shell.

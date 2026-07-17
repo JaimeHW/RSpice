@@ -88,7 +88,12 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::ExportCsvWaveforms => {
             super::waveform_export::action_export_csv_with_io(state, export_workflow_io)
         }
-        FileMenuAction::ImportVerilogA => open_veriloga_import_dialog(state),
+        FileMenuAction::ImportVerilogA => {
+            state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+            state.ui.code_workspace.page =
+                crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+            state.ui.code_workspace.veriloga.import_requested = true;
+        }
         FileMenuAction::Exit => request_exit(state),
     }
 }
@@ -100,10 +105,6 @@ fn require_save_confirmation_if_dirty(state: &mut AppState, action: Confirmation
 
     state.dialogs.confirmation_dialog.show(action);
     true
-}
-
-fn open_veriloga_import_dialog(state: &mut AppState) {
-    state.dialogs.veriloga_dialog.open();
 }
 
 fn request_exit(state: &mut AppState) {

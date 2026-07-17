@@ -65,6 +65,23 @@ pub fn replace_owned_source(state: &mut AppState, source: String) -> bool {
     true
 }
 
+/// Select the immutable generated primary without deleting or changing an
+/// owned source or generated-diff document. This is an explicit document
+/// transition; navigating among Code workspace pages must not call it.
+pub fn open_generated_primary(state: &mut AppState) -> bool {
+    if state.ui.netlist.active_document == ActiveNetlistDocument::Generated {
+        return false;
+    }
+    state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+    state.ui.netlist.active_document_initialized = true;
+    state.simulation.netlist_content = state.ui.netlist.generated_source.clone();
+    state.ui.netlist.completion_open = false;
+    state.ui.netlist.completion_dismissed_at = None;
+    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    invalidate_source_evidence(&mut state.ui.netlist);
+    true
+}
+
 /// Open a separate immutable `generated.diff` document comparing the newest
 /// retained predecessor with the current generated artifact.
 pub fn compare_latest_generated_revision(state: &mut AppState) -> Result<(), String> {

@@ -78,6 +78,10 @@ pub mod workbench;
 /// and fail-closed object lifecycles. This layer is UI-framework independent.
 pub mod product;
 
+/// Strict project-scoped Automation/CI workflow language and deterministic
+/// evidence artifact rendering. This domain is UI-framework independent.
+pub mod automation_workflow;
+
 // =============================================================================
 // Core Infrastructure
 // =============================================================================

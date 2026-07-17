@@ -381,6 +381,11 @@ pub(super) fn generate_sparse_local_kernel_device(
     let source_bytes = device
         .files
         .iter()
+        // The sparse-kernel budget protects generated stamp/state compile
+        // complexity. The separately compiled noise ABI scales with the
+        // model's declared noise table and must not force an otherwise
+        // bounded sparse kernel onto the larger structured fallback.
+        .filter(|file| file.relative_path != "noise.rs")
         .try_fold(0usize, |total, file| total.checked_add(file.contents.len()))
         .unwrap_or(usize::MAX);
     if !sparse_local_device_source_is_bounded(source_bytes) {

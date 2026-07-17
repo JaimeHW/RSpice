@@ -283,7 +283,7 @@ struct CardToken {
     column: usize,
 }
 
-pub(super) fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
+pub(crate) fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
     source
         .lines()
         .enumerate()

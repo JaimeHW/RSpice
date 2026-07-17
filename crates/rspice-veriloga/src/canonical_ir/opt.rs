@@ -457,7 +457,7 @@ impl OptModel {
         let mut builder = ScalarGraphBuilder::new(hir, mir);
         if let Some(hir) = hir {
             trace_opt_phase(trace, &mir.module_name, "lower statements", None, None);
-            let phase_started = std::time::Instant::now();
+            let phase_started = web_time::Instant::now();
             builder.lower_statements(&hir.statements);
             trace_opt_phase(
                 trace,
@@ -470,7 +470,7 @@ impl OptModel {
         }
         let mut equation_values = Vec::with_capacity(mir.equations.len());
         trace_opt_phase(trace, &mir.module_name, "lower equations", None, None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         for equation in &mir.equations {
             let equation_phase = trace_equations.then(|| mir_equation_trace_label(equation));
             if let Some(phase) = equation_phase.as_deref() {
@@ -482,7 +482,7 @@ impl OptModel {
                     Some(builder.values.len()),
                 );
             }
-            let equation_started = std::time::Instant::now();
+            let equation_started = web_time::Instant::now();
             let value = builder.lower_equation_expression(equation);
             builder.cache_declared_branch_current(equation, value);
             equation_values.push(value);
@@ -504,7 +504,7 @@ impl OptModel {
             Some(builder.values.len()),
         );
         trace_opt_phase(trace, &mir.module_name, "add derivatives", None, None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         builder.add_sparse_derivatives();
         trace_opt_phase(
             trace,
@@ -514,7 +514,7 @@ impl OptModel {
             Some(builder.values.len()),
         );
         trace_opt_phase(trace, &mir.module_name, "finish", None, None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let (values, runtime_loops) = builder.finish(&mut equation_values);
         trace_opt_phase(
             trace,
@@ -525,7 +525,7 @@ impl OptModel {
         );
 
         trace_opt_phase(trace, &mir.module_name, "build schedules", None, None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let mut schedules = Vec::new();
         for invalidation in [
             InvalidationClass::InstanceStatic,
@@ -586,7 +586,7 @@ impl OptModel {
             None,
             Some(opt.values.len()),
         );
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         opt.validate().map(|()| {
             trace_opt_phase(
                 trace,
@@ -1368,7 +1368,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 None,
                 Some(self.values.len()),
             );
-            let phase_started = std::time::Instant::now();
+            let phase_started = web_time::Instant::now();
             self.lower_statement(statement);
             trace_opt_phase(
                 trace,

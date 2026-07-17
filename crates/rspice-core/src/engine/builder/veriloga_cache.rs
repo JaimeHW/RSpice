@@ -164,7 +164,18 @@ pub(super) fn clear_in_memory_veriloga_cache() {
 
 #[cfg(feature = "veriloga")]
 pub(super) fn canonicalize_for_cache(path: &Path) -> PathBuf {
+    if is_project_veriloga_virtual_path(path) {
+        return PathBuf::from(path.to_string_lossy().replace('\\', "/"));
+    }
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(feature = "veriloga")]
+fn is_project_veriloga_virtual_path(path: &Path) -> bool {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    normalized
+        .split_once('/')
+        .is_some_and(|(root, _)| root.eq_ignore_ascii_case("__rspice_project__"))
 }
 
 #[cfg(feature = "veriloga")]
@@ -832,6 +843,16 @@ pub(super) fn resolve_cached_or_compile_veriloga(
         cache.remove(&canonical);
     }
 
+    // A project-owned virtual key is an authenticated in-memory capability,
+    // never a filesystem locator. A missing registration must fail closed;
+    // disk cache and ambient files are not eligible fallbacks.
+    if is_project_veriloga_virtual_path(path) {
+        return Err(SimulationError::Netlist(format!(
+            "Project Verilog-A runtime '{}' is not installed for this execution",
+            path.display()
+        )));
+    }
+
     if let Some(entry) = load_model_from_disk(&canonical) {
         if let Ok(mut cache) = veriloga_model_cache().write() {
             cache.insert(canonical.clone(), entry.clone());
@@ -960,6 +981,46 @@ pub fn register_precompiled_veriloga_runtime_with_dependencies(
         model,
         Some(canonical_ir),
     )
+}
+
+/// Register an exact in-memory project-owned Verilog-A runtime for this
+/// process session.
+///
+/// Unlike file-backed registration, this entry has no filesystem dependency
+/// fingerprints and is never persisted to the shared disk cache. Its key is
+/// still normalized exactly like an `.include` path, so a generated deck can
+/// resolve the project-owned logical file name without writing source bytes to
+/// an ambient directory.
+#[cfg(feature = "veriloga")]
+pub fn register_project_veriloga_runtime_for_session(
+    source_key: impl AsRef<Path>,
+    model: rspice_veriloga::CompiledModel,
+    canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+) -> Result<(), String> {
+    let source_key = source_key.as_ref();
+    let key_text = source_key.to_string_lossy().replace('\\', "/");
+    if !key_text.starts_with("__rspice_project__/")
+        || key_text
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+    {
+        return Err(
+            "project Verilog-A runtime keys must be normalized content-addressed virtual paths under __rspice_project__/"
+                .to_owned(),
+        );
+    }
+    validate_runtime_artifact_pair(&model, Some(&canonical_ir))?;
+    let normalized = canonicalize_for_cache(source_key);
+    let entry = CachedVerilogAModel {
+        dependencies: Vec::new(),
+        model: std::sync::Arc::new(model),
+        canonical_ir: Some(std::sync::Arc::new(canonical_ir)),
+    };
+    let mut cache = veriloga_model_cache()
+        .write()
+        .map_err(|_| "failed to acquire Verilog-A cache lock".to_owned())?;
+    cache.insert(normalized, entry);
+    Ok(())
 }
 
 /// Register a precompiled Verilog-A model in the global engine cache.
@@ -1096,5 +1157,158 @@ endmodule
         );
 
         std::fs::remove_dir_all(root).expect("remove temporary cache root");
+    }
+
+    #[test]
+    fn project_owned_runtime_registration_requires_no_ambient_source_file() {
+        let source_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000001/0123456789abcdef/model.va",
+        );
+        assert!(!source_key.exists());
+        let report = rspice_veriloga::VerilogACompiler::default()
+            .compile_runtime(
+                "module owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+                None,
+            )
+            .expect("compile in-memory project source");
+
+        register_project_veriloga_runtime_for_session(
+            &source_key,
+            report.model,
+            report.canonical_ir,
+        )
+        .expect("register in-memory project runtime");
+
+        let key = canonicalize_for_cache(&source_key);
+        let mut cache = veriloga_model_cache().write().expect("cache lock");
+        let entry = cache.get(&key).expect("session entry");
+        assert!(entry.dependencies.is_empty());
+        assert_eq!(entry.model.name.as_str(), "owned");
+        assert!(entry.canonical_ir.is_some());
+        cache.remove(&key);
+    }
+
+    #[test]
+    fn same_file_name_in_distinct_projects_resolves_only_its_registered_runtime() {
+        let compile = |module_name: &str| {
+            rspice_veriloga::VerilogACompiler::default()
+                .compile_runtime(
+                    &format!(
+                        "module {module_name}(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n"
+                    ),
+                    None,
+                )
+                .expect("compile project runtime")
+        };
+        let first_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000011/digest/model.va",
+        );
+        let second_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000022/digest/model.va",
+        );
+        let first = compile("first_owned");
+        let second = compile("second_owned");
+        register_project_veriloga_runtime_for_session(&first_key, first.model, first.canonical_ir)
+            .unwrap();
+        register_project_veriloga_runtime_for_session(
+            &second_key,
+            second.model,
+            second.canonical_ir,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&first_key)
+                .unwrap()
+                .model
+                .name
+                .as_str(),
+            "first_owned"
+        );
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&second_key)
+                .unwrap()
+                .model
+                .name
+                .as_str(),
+            "second_owned"
+        );
+
+        let mut cache = veriloga_model_cache().write().unwrap();
+        cache.remove(&canonicalize_for_cache(&first_key));
+        cache.remove(&canonicalize_for_cache(&second_key));
+    }
+
+    #[test]
+    fn project_virtual_cache_identity_is_lexical_even_if_an_ambient_path_exists() {
+        let unique = unique_test_root("virtual-lexical")
+            .file_name()
+            .expect("unique component")
+            .to_string_lossy()
+            .into_owned();
+        let source_key = PathBuf::from(format!(
+            "__rspice_project__/{unique}/0123456789abcdef/model.va"
+        ));
+        let parent = source_key.parent().expect("virtual key parent");
+        std::fs::create_dir_all(parent).expect("materialize adversarial ambient directory");
+        std::fs::write(
+            &source_key,
+            "ambient bytes must never define cache identity",
+        )
+        .expect("materialize adversarial ambient file");
+
+        assert_eq!(canonicalize_for_cache(&source_key), source_key);
+
+        std::fs::remove_dir_all(PathBuf::from("__rspice_project__").join(&unique))
+            .expect("remove adversarial ambient path");
+        assert_eq!(canonicalize_for_cache(&source_key), source_key);
+    }
+
+    #[test]
+    fn missing_project_virtual_runtime_never_falls_back_to_ambient_io() {
+        let source_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000099/missing/model.va",
+        );
+        let error = resolve_cached_or_compile_veriloga(&source_key)
+            .expect_err("unregistered project runtime must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("is not installed for this execution")
+        );
+    }
+
+    #[test]
+    fn case_altered_project_virtual_path_never_compiles_an_ambient_file() {
+        let unique = unique_test_root("virtual-case")
+            .file_name()
+            .expect("unique component")
+            .to_string_lossy()
+            .into_owned();
+        let exact_source_key = PathBuf::from(format!(
+            "__rspice_project__/{unique}/0123456789abcdef/model.va"
+        ));
+        std::fs::create_dir_all(exact_source_key.parent().expect("virtual key parent"))
+            .expect("materialize adversarial ambient directory");
+        std::fs::write(
+            &exact_source_key,
+            "module ambient_escape(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+        )
+        .expect("materialize compilable adversarial ambient source");
+
+        let altered_source_key = PathBuf::from(format!(
+            "__RSPICE_PROJECT__/{unique}/0123456789abcdef/model.va"
+        ));
+        let error = resolve_cached_or_compile_veriloga(&altered_source_key)
+            .expect_err("case-altered project key must fail before ambient compilation");
+        assert!(
+            error
+                .to_string()
+                .contains("is not installed for this execution"),
+            "unexpected error: {error}"
+        );
+
+        std::fs::remove_dir_all(PathBuf::from("__rspice_project__").join(unique))
+            .expect("remove adversarial ambient path");
     }
 }

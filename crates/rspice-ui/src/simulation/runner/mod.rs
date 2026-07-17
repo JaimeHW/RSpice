@@ -54,6 +54,7 @@ pub(crate) enum SimulationRequest {
 pub(crate) struct NetlistInput {
     netlist: String,
     source_path: Option<PathBuf>,
+    project_veriloga_runtime: Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
 }
 
 /// Thread-safe simulation runner
@@ -251,7 +252,7 @@ impl SimulationRunner {
         &mut self,
         dispatch: AuthorizedTaskDispatch,
     ) -> Result<(), SimulationError> {
-        let (task, executable_netlist) = dispatch.into_runner_parts();
+        let (task, executable_netlist, project_veriloga_runtime) = dispatch.into_runner_parts();
         let request = match task.config {
             Some(config) => SimulationRequest::Config(Box::new(config)),
             None => SimulationRequest::Spec {
@@ -264,6 +265,7 @@ impl SimulationRunner {
             NetlistInput {
                 netlist: executable_netlist.to_string(),
                 source_path: None,
+                project_veriloga_runtime,
             },
         )
     }
@@ -289,6 +291,7 @@ impl SimulationRunner {
             NetlistInput {
                 netlist,
                 source_path,
+                project_veriloga_runtime: None,
             },
         )
     }
@@ -336,6 +339,7 @@ impl SimulationRunner {
             NetlistInput {
                 netlist,
                 source_path,
+                project_veriloga_runtime: None,
             },
         )
     }
@@ -698,6 +702,14 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
         p.abort();
         notify_progress(&p, progress_observer);
         return Err(SimulationError::Aborted);
+    }
+
+    if let Some(runtime) = &input.project_veriloga_runtime {
+        runtime.install().map_err(|error| {
+            SimulationError::CircuitError(format!(
+                "Could not install prepared project Verilog-A runtime: {error}"
+            ))
+        })?;
     }
 
     // Create engine bridge

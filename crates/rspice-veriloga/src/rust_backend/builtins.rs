@@ -5,7 +5,7 @@ use std::fs;
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::canonical_ir::StableDigest;
 use crate::{CompilerOptions, VerilogACompiler};

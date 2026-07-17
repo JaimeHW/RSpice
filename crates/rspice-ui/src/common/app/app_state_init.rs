@@ -31,6 +31,36 @@ pub(super) fn default_app_state() -> AppState {
     if let Ok(plan) = sim_setup.stable_analysis_plan() {
         workspace.migrate_active_plan_data(plan.id());
     }
+    let mut ui = crate::workbench::UiSessionState::new();
+    if let Some(document) = workspace
+        .project_sources
+        .get(crate::state::ProjectSourceLanguage::VerilogA)
+    {
+        ui.code_workspace.veriloga.receipt = Some(
+            crate::workbench::code_workspace::compile_project_source_receipt(
+                workspace.project.id(),
+                document,
+            )
+            .expect("the canonical bootstrapped Verilog-A source must compile"),
+        );
+    }
+    if let Some(document) = workspace
+        .project_sources
+        .get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
+    {
+        let plan = crate::automation_workflow::compile_workflow(document.content())
+            .expect("the canonical bootstrapped Automation source must compile");
+        ui.code_workspace.automation.receipt = Some(
+            crate::workbench::code_workspace::AutomationValidationReceipt {
+                token: crate::workbench::code_workspace::SourceOperationToken {
+                    project_id: workspace.project.id(),
+                    revision: document.revision().get(),
+                    content_digest: document.content_digest(),
+                },
+                plan,
+            },
+        );
+    }
 
     AppState {
         schematic,
@@ -61,11 +91,38 @@ pub(super) fn default_app_state() -> AppState {
         license_key: None,
         license: None,
         analysis,
-        ui: crate::workbench::UiSessionState::new(),
+        ui,
         workbench: crate::workbench::WorkbenchState::default(),
         shortcut_resolver: super::app_shortcuts::ShortcutResolverState::default(),
         shortcut_library_persistence:
             super::app_shortcut_library_persistence::ShortcutLibraryPersistenceRuntime::default(),
         shortcut_library_publication_continuation: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::ProjectSourceLanguage;
+
+    #[test]
+    fn bootstrapped_code_sources_have_exact_current_runtime_receipts() {
+        let state = super::default_app_state();
+        let automation = state
+            .workspace
+            .project_sources
+            .get(ProjectSourceLanguage::RSpiceAutomation)
+            .expect("bootstrapped Automation source");
+        let receipt = state
+            .ui
+            .code_workspace
+            .automation
+            .receipt
+            .expect("bootstrapped Automation receipt");
+
+        assert_eq!(receipt.token.project_id, state.workspace.project.id());
+        assert_eq!(receipt.token.revision, automation.revision().get());
+        assert_eq!(receipt.token.content_digest, automation.content_digest());
+        assert_eq!(receipt.plan.project_name(), "Lab characterization");
+        assert!(state.ui.code_workspace.veriloga.receipt.is_some());
     }
 }

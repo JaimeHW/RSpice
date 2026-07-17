@@ -60,7 +60,8 @@ pub(crate) fn create_new_project(state: &mut AppState) {
         return;
     }
     let mut library_manager = crate::state::LibraryManager::with_primitives();
-    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut library_manager);
+    let mut workspace =
+        crate::state::ProjectWorkspace::new_empty_bootstrapped(&mut library_manager);
     let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
 

@@ -294,9 +294,6 @@ pub struct DialogState {
     /// Cached, integrity-verified full-project recovery catalog.
     pub(crate) project_checkpoint_recovery: ProjectCheckpointRecoveryState,
 
-    /// Verilog-A model loading dialog state
-    pub veriloga_dialog: crate::panels::VerilogALoadDialogState,
-
     /// Runtime interaction state for drag, hover, etc.
     pub interaction: super::InteractionState,
 
@@ -337,7 +334,6 @@ impl DialogState {
             || self.license_dialog.open
             || self.command_palette.open
             || self.technology_attachment.open
-            || self.veriloga_dialog.open
             || self.interaction.schematic_delete_confirmation_open
             || self.confirmation_dialog.visible
             || self.project_review_dialog.request.is_some()
@@ -378,7 +374,6 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.technology_attachment.open = true);
-        assert_blocks_shortcuts(|dialogs| dialogs.veriloga_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs.interaction.schematic_delete_confirmation_open = true;
         });

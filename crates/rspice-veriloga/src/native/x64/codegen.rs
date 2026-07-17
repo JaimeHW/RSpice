@@ -10956,7 +10956,7 @@ mod tests {
         let mut sample_ns_per_eval = Vec::with_capacity(samples);
         let mut checksum = 0.0_f64;
         for _ in 0..samples {
-            let start = std::time::Instant::now();
+            let start = web_time::Instant::now();
             checksum += run_native_microbench_sample(f, ctx, vars, iterations);
             let elapsed = start.elapsed();
             sample_ns_per_eval.push(elapsed.as_nanos() as f64 / iterations as f64);

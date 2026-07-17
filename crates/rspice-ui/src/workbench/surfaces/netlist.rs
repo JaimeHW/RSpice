@@ -25,9 +25,12 @@ const PHONE_BREAKPOINT: f32 = 560.0;
 const PHONE_PRIMARY_WIDTH: f32 = 154.0;
 const PHONE_ACTION_WIDTH: f32 = PHONE_PRIMARY_WIDTH + CODE_TOOLBAR_GAP + 28.0;
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
     reconcile_documents(app);
     super::super::netlist_document::prepare(&mut app.state);
+}
+
+pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     code_toolbar(ui, app);
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
@@ -120,49 +123,55 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         crate::io::NetlistFormat::Spice,
     );
     match generated {
-        Some(source) => match publish_generated_document(&app.state, input_digest, source) {
-            Ok((generated_document, owned_document)) => {
-                if let Some(previous) = app.state.ui.netlist.generated_document.as_ref()
-                    && previous.generated_artifact().content_digest()
-                        != generated_document.generated_artifact().content_digest()
-                {
-                    let predecessor = previous.generated_artifact().clone();
-                    if app
-                        .state
-                        .ui
-                        .netlist
-                        .generated_history
-                        .last()
-                        .is_none_or(|artifact| {
-                            artifact.content_digest() != predecessor.content_digest()
-                        })
+        Some(mut source) => {
+            if let Err(error) = append_project_veriloga_directive(&app.state, &mut source) {
+                app.state.ui.netlist.generation_error = Some(error);
+                return;
+            }
+            match publish_generated_document(&app.state, input_digest, source) {
+                Ok((generated_document, owned_document)) => {
+                    if let Some(previous) = app.state.ui.netlist.generated_document.as_ref()
+                        && previous.generated_artifact().content_digest()
+                            != generated_document.generated_artifact().content_digest()
                     {
-                        app.state.ui.netlist.generated_history.push(predecessor);
-                        const RETAINED_GENERATED_REVISIONS: usize = 16;
-                        let excess = app
+                        let predecessor = previous.generated_artifact().clone();
+                        if app
                             .state
                             .ui
                             .netlist
                             .generated_history
-                            .len()
-                            .saturating_sub(RETAINED_GENERATED_REVISIONS);
-                        if excess > 0 {
-                            app.state.ui.netlist.generated_history.drain(..excess);
+                            .last()
+                            .is_none_or(|artifact| {
+                                artifact.content_digest() != predecessor.content_digest()
+                            })
+                        {
+                            app.state.ui.netlist.generated_history.push(predecessor);
+                            const RETAINED_GENERATED_REVISIONS: usize = 16;
+                            let excess = app
+                                .state
+                                .ui
+                                .netlist
+                                .generated_history
+                                .len()
+                                .saturating_sub(RETAINED_GENERATED_REVISIONS);
+                            if excess > 0 {
+                                app.state.ui.netlist.generated_history.drain(..excess);
+                            }
                         }
                     }
+                    app.state.ui.netlist.generated_source =
+                        generated_document.generated_artifact().source().to_owned();
+                    app.state.ui.netlist.generated_document = Some(generated_document);
+                    app.state.workspace.netlist_document = owned_document.clone();
+                    app.state.ui.netlist.owned_document = owned_document;
+                    app.state.ui.netlist.generated_input_digest = Some(input_digest);
+                    app.state.ui.netlist.generation_error = None;
                 }
-                app.state.ui.netlist.generated_source =
-                    generated_document.generated_artifact().source().to_owned();
-                app.state.ui.netlist.generated_document = Some(generated_document);
-                app.state.workspace.netlist_document = owned_document.clone();
-                app.state.ui.netlist.owned_document = owned_document;
-                app.state.ui.netlist.generated_input_digest = Some(input_digest);
-                app.state.ui.netlist.generation_error = None;
+                Err(error) => {
+                    app.state.ui.netlist.generation_error = Some(error);
+                }
             }
-            Err(error) => {
-                app.state.ui.netlist.generation_error = Some(error);
-            }
-        },
+        }
         None => {
             let detail = app
                 .state
@@ -178,6 +187,69 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
     }
 }
 
+fn append_project_veriloga_directive(state: &AppState, source: &mut String) -> Result<(), String> {
+    let Some(document) = state
+        .workspace
+        .project_sources
+        .get(crate::state::ProjectSourceLanguage::VerilogA)
+    else {
+        return Ok(());
+    };
+    let source_key = super::super::code_workspace::project_veriloga_source_key(
+        state.workspace.project.id(),
+        document,
+    );
+    let receipt = state
+        .ui
+        .code_workspace
+        .veriloga
+        .receipt
+        .as_ref()
+        .filter(|receipt| {
+            receipt.token.project_id == state.workspace.project.id()
+                && receipt.token.revision == document.revision().get()
+                && receipt.token.content_digest == document.content_digest()
+        })
+        .cloned()
+        .map(Ok)
+        .unwrap_or_else(|| {
+            if !document.validation_is_current() {
+                return Err(format!(
+                    "Compile the exact current project Verilog-A source '{}' before generating the executable netlist",
+                    document.file_name()
+                ));
+            }
+            super::super::code_workspace::compile_project_source_receipt(
+                state.workspace.project.id(),
+                document,
+            )
+            .map_err(|diagnostics| {
+                diagnostics
+                    .first()
+                    .map(|diagnostic| {
+                        format!(
+                            "Could not rebuild validated Verilog-A source '{}': {}: {}",
+                            document.file_name(),
+                            diagnostic.message,
+                            diagnostic.detail
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        format!(
+                            "Could not rebuild validated Verilog-A source '{}': the compiler returned no diagnostic",
+                            document.file_name()
+                        )
+                    })
+            })
+        })?;
+    super::super::code_workspace::append_project_veriloga_directive(
+        source,
+        &source_key,
+        &receipt.module_name,
+    );
+    Ok(())
+}
+
 fn publish_generated_document(
     state: &AppState,
     input_digest: crate::product::ContentDigest,
@@ -189,8 +261,9 @@ fn publish_generated_document(
     )
     .map_err(|error| error.to_string())?;
     let source_map = generated_source_map(state, &source)?;
+    let dependencies = generated_project_source_dependencies(state, &source)?;
     let artifact =
-        GeneratedArtifact::try_from_utf8(provenance, source.into_bytes(), Vec::new(), source_map)
+        GeneratedArtifact::try_from_utf8(provenance, source.into_bytes(), dependencies, source_map)
             .map_err(|error| error.to_string())?;
 
     let generated_document = if let Some(existing) = &state.ui.netlist.generated_document {
@@ -212,6 +285,43 @@ fn publish_generated_document(
     // three-way ownership contract.
     let owned_document = state.ui.netlist.owned_document.clone();
     Ok((generated_document, owned_document))
+}
+
+fn generated_project_source_dependencies(
+    state: &AppState,
+    source: &str,
+) -> Result<Vec<super::super::code_workspace::DependencyMetadata>, String> {
+    let Some(document) = state
+        .workspace
+        .project_sources
+        .get(crate::state::ProjectSourceLanguage::VerilogA)
+    else {
+        return Ok(Vec::new());
+    };
+    let source_key = super::super::code_workspace::project_veriloga_source_key(
+        state.workspace.project.id(),
+        document,
+    );
+    let include_index = super::super::code_workspace::parse_include_directives(source)
+        .iter()
+        .position(|directive| directive.locator() == source_key)
+        .ok_or_else(|| {
+            "Generated source is missing its authenticated project Verilog-A directive".to_owned()
+        })?;
+    let locator = super::super::code_workspace::SourceLocator::try_new(
+        source_key.clone(),
+        document.file_name(),
+    )
+    .map_err(|error| error.to_string())?;
+    let dependency = super::super::code_workspace::DependencyMetadata::unresolved_direct_to(
+        include_index,
+        source_key,
+        locator,
+    )
+    .map_err(|error| error.to_string())?
+    .resolve_utf8(document.content().as_bytes().to_vec())
+    .map_err(|error| error.to_string())?;
+    Ok(vec![dependency])
 }
 
 fn generated_source_map(
@@ -612,7 +722,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             let _ = open_owned_source(&mut app.state);
         }
         Some(NetlistToolbarAction::OpenGenerated) => {
-            let _ = open_generated_primary(&mut app.state);
+            let _ = super::super::netlist_document::open_generated_primary(&mut app.state);
         }
         Some(NetlistToolbarAction::OpenOwnershipDialog(strategy)) => {
             open_ownership_dialog(&mut app.state, strategy);
@@ -1115,6 +1225,10 @@ fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             )
         })
         .unwrap_or_default();
+    let requires_bundle = dependency_count > 0;
+    if requires_bundle {
+        dialog.bundle_dependencies = true;
+    }
     let bundle_ready = !dialog.bundle_dependencies || dependencies_sealed;
     let primary = if dialog.bundle_dependencies {
         "Export bundle"
@@ -1176,10 +1290,18 @@ fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                     }
                 });
             ui.add_space(6.0);
-            let bundle_response = ui.checkbox(
-                &mut dialog.bundle_dependencies,
-                "Create self-contained dependency bundle (.zip)",
+            let bundle_response = ui.add_enabled(
+                !requires_bundle,
+                egui::Checkbox::new(
+                    &mut dialog.bundle_dependencies,
+                    "Create self-contained dependency bundle (.zip)",
+                ),
             );
+            if requires_bundle {
+                bundle_response.clone().on_disabled_hover_text(
+                    "This generated deck references project-owned source bytes and must be exported as a reproducible bundle.",
+                );
+            }
             if bundle_response.changed() && !dialog.bundle_dependencies {
                 dialog.include_source_map = false;
             }
@@ -1607,7 +1729,8 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 app.state.ui.netlist.find.selected_match = index;
                 match result.document.active_document {
                     ActiveNetlistDocument::Generated => {
-                        let _ = open_generated_primary(&mut app.state);
+                        let _ =
+                            super::super::netlist_document::open_generated_primary(&mut app.state);
                     }
                     ActiveNetlistDocument::OwnedSource => {
                         let _ = open_owned_source(&mut app.state);
@@ -1826,31 +1949,18 @@ fn open_owned_source(state: &mut AppState) -> bool {
     true
 }
 
-/// Return to the immutable primary without deleting or changing any owned
-/// source document.
-fn open_generated_primary(state: &mut AppState) -> bool {
-    if state.ui.netlist.active_document == ActiveNetlistDocument::Generated {
-        return false;
-    }
-    state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-    state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = state.ui.netlist.generated_source.clone();
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    super::super::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn retain_generated(state: &mut AppState, source: &str) {
         let input_digest = crate::product::ContentDigest::from_bytes([0x41; 32]);
-        let (document, owned) = publish_generated_document(state, input_digest, source.to_owned())
+        let mut source = source.to_owned();
+        append_project_veriloga_directive(state, &mut source)
+            .expect("canonical generated Verilog-A dependency is valid");
+        let (document, owned) = publish_generated_document(state, input_digest, source.clone())
             .expect("canonical generated fixture");
-        state.ui.netlist.generated_source = source.to_owned();
+        state.ui.netlist.generated_source = source;
         state.ui.netlist.generated_document = Some(document);
         state.ui.netlist.owned_document = owned;
         state.ui.netlist.generated_input_digest = Some(input_digest);
@@ -1861,6 +1971,7 @@ mod tests {
     fn editable_source_and_generated_primary_coexist_without_overwrite() {
         let mut state = AppState::default();
         retain_generated(&mut state, "generated\n.end\n");
+        let retained_generated = state.ui.netlist.generated_source.clone();
         state.simulation.netlist_content = state.ui.netlist.generated_source.clone();
 
         create_owned_source(
@@ -1871,20 +1982,20 @@ mod tests {
         .expect("create owned source");
         assert_eq!(
             state.workspace.netlist_source.as_deref(),
-            Some("generated\n.end\n")
+            Some(retained_generated.as_str())
         );
         assert!(crate::workbench::netlist_document::replace_owned_source(
             &mut state,
             "owned edit\n.end\n".to_owned()
         ));
 
-        assert!(open_generated_primary(&mut state));
-        assert_eq!(state.simulation.netlist_content, "generated\n.end\n");
+        assert!(super::super::super::netlist_document::open_generated_primary(&mut state));
+        assert_eq!(state.simulation.netlist_content, retained_generated);
         assert_eq!(
             state.workspace.netlist_source.as_deref(),
             Some("owned edit\n.end\n")
         );
-        assert!(!open_generated_primary(&mut state));
+        assert!(!super::super::super::netlist_document::open_generated_primary(&mut state));
     }
 
     #[test]
@@ -1917,5 +2028,34 @@ mod tests {
             false,
             DocumentStatusTone::Warning
         ));
+    }
+
+    #[test]
+    fn generated_deck_references_project_veriloga_once_before_end() {
+        let state = AppState::default();
+        let mut source = "R1 1 0 1k\n.end\n".to_owned();
+
+        append_project_veriloga_directive(&state, &mut source).unwrap();
+        append_project_veriloga_directive(&state, &mut source).unwrap();
+
+        let document = state
+            .workspace
+            .project_sources
+            .get(crate::state::ProjectSourceLanguage::VerilogA)
+            .expect("bootstrapped Verilog-A source");
+        let source_key = crate::workbench::code_workspace::project_veriloga_source_key(
+            state.workspace.project.id(),
+            document,
+        );
+        assert_eq!(
+            source,
+            format!("R1 1 0 1k\n.veriloga \"{source_key}\" sensor_bridge\n.end\n")
+        );
+
+        let dependencies = generated_project_source_dependencies(&state, &source)
+            .expect("project dependency is sealed");
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies[0].requested_locator(), source_key);
+        assert_eq!(dependencies[0].source(), Some(document.content()));
     }
 }

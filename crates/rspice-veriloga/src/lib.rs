@@ -95,6 +95,7 @@ pub mod ir;
 pub mod lexer;
 pub mod parser;
 pub mod preprocessor;
+pub mod runtime_report;
 pub mod rust_backend;
 pub mod semantic;
 pub mod source;
@@ -124,6 +125,13 @@ pub use error::{CompileError, CompileResult};
 pub use lexer::{Lexer, Token, TokenKind};
 pub use parser::Parser;
 pub use preprocessor::{Preprocessor, PreprocessorError};
+pub use runtime_report::{
+    CompileDiagnostic, CompileDiagnosticPhase, CompileDiagnosticSeverity, CompileDiagnosticSpan,
+    CompileSourcePosition, RuntimeAbiParameter, RuntimeAbiPort, RuntimeAbiSummary,
+    RuntimeArtifactIntegrityError, RuntimeCompileReport, RuntimeTarget, RuntimeTargetMaturity,
+    RuntimeTargetQualification, RuntimeTargetQualifications, RuntimeTargetReadiness,
+    compile_diagnostics,
+};
 pub use semantic::SemanticAnalyzer;
 pub use source::{SourceId, SourceMap, Span};
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
@@ -268,6 +276,27 @@ impl VerilogACompiler {
         pp
     }
 
+    /// Build the deterministic preprocessor used by source-only APIs.
+    ///
+    /// Project callers resolve their own virtual include graph before calling
+    /// [`Self::compile_runtime`]. Standard built-in VAMS headers remain
+    /// available, while configured disk include paths are intentionally not
+    /// consulted.
+    fn configured_in_memory_preprocessor(&self) -> Preprocessor {
+        let mut pp = Preprocessor::new();
+
+        for name in &self.options.undefines {
+            pp.undefine(name);
+        }
+
+        for (name, value) in &self.options.defines {
+            let def = preprocessor::MacroDef::simple(value.as_deref().unwrap_or(""));
+            pp.define(name, def);
+        }
+
+        pp
+    }
+
     /// Compile Verilog-A source code to a device model
     ///
     /// The source is preprocessed first, so `include/`define/`ifdef work
@@ -294,6 +323,40 @@ impl VerilogACompiler {
             .preprocess_source(source)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
         self.compile_preprocessed(&preprocessed, module_name)
+    }
+
+    /// Compile source text once for every simulator runtime surface.
+    ///
+    /// Preprocessing, lexing, parsing, and semantic analysis each run once.
+    /// The compiled bytecode model and canonical IR are then emitted from the
+    /// same analyzed module, cross-validated, and qualified against the
+    /// available runtime backends. No source or generated artifact is written
+    /// to the file system.
+    pub fn compile_runtime(
+        &self,
+        source: &str,
+        module_name: Option<&str>,
+    ) -> CompileResult<RuntimeCompileReport> {
+        let mut pp = self.configured_in_memory_preprocessor();
+        let preprocessed = pp
+            .preprocess_source(source)
+            .map_err(|error| CompileError::io_error(format!("Preprocessor error: {error}")))?;
+        let analyzed = self.analyze_preprocessed("<input>", &preprocessed)?;
+        let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
+        let model = CodeGenerator::new().generate_module_with_source_digest(
+            &analyzed,
+            module_name,
+            source_digest,
+        )?;
+        let canonical_ir =
+            self.build_canonical_ir_artifact("<input>", &preprocessed, &analyzed, module_name)?;
+        let report = RuntimeCompileReport::from_artifacts(model, canonical_ir);
+        report.validate_integrity().map_err(|error| {
+            CompileError::CodeGen(error::CodeGenError::new(error::CodeGenErrorKind::Internal(
+                format!("runtime artifact integrity validation failed: {error}"),
+            )))
+        })?;
+        Ok(report)
     }
 
     /// Compile Verilog-A source code to the canonical HIR/MIR/OptIR artifact.
@@ -359,7 +422,7 @@ impl VerilogACompiler {
             None,
             Some(format!("{} bytes", source.len())),
         );
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let source_map = SourceMap::new();
         let source_id = source_map.add_source(source_package, source);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
@@ -373,7 +436,7 @@ impl VerilogACompiler {
 
         // Phase 2: Parsing
         trace_compiler_phase(trace, &target, "parse", None, None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let source_file = Parser::new(&tokens).parse()?;
         trace_compiler_phase(
             trace,
@@ -385,7 +448,7 @@ impl VerilogACompiler {
 
         // Phase 3: Semantic analysis
         trace_compiler_phase(trace, &target, "semantic", None, None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
         trace_compiler_phase(
             trace,
@@ -429,18 +492,18 @@ impl VerilogACompiler {
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         trace_canonical_ir_phase(trace, &module.name, "hir", None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let mut hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
         trace_canonical_ir_phase(trace, &module.name, "hir", Some(phase_started.elapsed()));
         trace_canonical_ir_phase(trace, &module.name, "mir", None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let mut mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
         trace_canonical_ir_phase(trace, &module.name, "mir", Some(phase_started.elapsed()));
         let noise_sources =
             canonical_ir::CanonicalNoiseSourcePlan::from_hir_and_mir(&mut hir, &mut mir)
                 .map_err(Self::canonical_ir_error)?;
         trace_canonical_ir_phase(trace, &module.name, "opt", None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let opt = canonical_ir::OptModel::from_hir_and_mir(&hir, &mir)
             .map_err(Self::canonical_ir_error)?;
         trace_canonical_ir_phase(trace, &module.name, "opt", Some(phase_started.elapsed()));
@@ -574,7 +637,7 @@ impl VerilogACompiler {
         let mut pp = self.configured_preprocessor();
 
         trace_compiler_phase(trace, &trace_target, "preprocess", None, None);
-        let phase_started = std::time::Instant::now();
+        let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_file(path)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;

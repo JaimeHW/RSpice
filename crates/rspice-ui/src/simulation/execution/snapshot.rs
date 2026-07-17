@@ -513,6 +513,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     task: QueuedAnalysis,
     saved_output_contracts: Vec<PreparedSavedOutput>,
     executable_netlist: Arc<str>,
+    project_veriloga_runtime: Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
     touchstone_export: TouchstoneExportPolicy,
 }
 
@@ -631,8 +632,18 @@ impl AuthorizedTaskDispatch {
         &self.saved_output_contracts
     }
 
-    pub(in crate::simulation) fn into_runner_parts(self) -> (QueuedAnalysis, Arc<str>) {
-        (self.task, self.executable_netlist)
+    pub(in crate::simulation) fn into_runner_parts(
+        self,
+    ) -> (
+        QueuedAnalysis,
+        Arc<str>,
+        Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
+    ) {
+        (
+            self.task,
+            self.executable_netlist,
+            self.project_veriloga_runtime,
+        )
     }
 }
 
@@ -650,6 +661,8 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) executable_netlist: String,
     pub(in crate::simulation) save_policy: SavePolicy,
     pub(in crate::simulation) model_identities: Vec<ModelSourceIdentity>,
+    pub(in crate::simulation) project_veriloga_runtime:
+        Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
     pub(in crate::simulation) receipt: RunSourceReceipt,
     pub(in crate::simulation) advisories: Vec<String>,
@@ -677,6 +690,7 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     executable_netlist: String,
     save_policy: SavePolicy,
     model_identities: Vec<ModelSourceIdentity>,
+    project_veriloga_runtime: Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
@@ -854,6 +868,32 @@ impl PreparedRunSnapshot {
         // Model identities describe a set. Sort by canonical label/digest so
         // discovery or map insertion order cannot perturb snapshot identity;
         // executable model precedence remains bound by the netlist bytes.
+        if let Some(runtime) = &parts.project_veriloga_runtime {
+            runtime.validate().map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!("Project Verilog-A runtime is invalid: {error}"),
+                )
+            })?;
+            let directive = crate::workbench::code_workspace::project_veriloga_directive(
+                runtime.source_key(),
+                runtime.module_name(),
+            );
+            if !parts
+                .executable_netlist
+                .lines()
+                .any(|line| line.trim().eq_ignore_ascii_case(&directive))
+            {
+                return Err(PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    "Prepared project Verilog-A runtime is not referenced by the executable netlist",
+                ));
+            }
+            parts.model_identities.push(ModelSourceIdentity::new(
+                format!("project-veriloga:{}", runtime.source_key()),
+                runtime.artifact_digest(),
+            ));
+        }
         parts.model_identities.sort_unstable();
         parts.model_identities.dedup();
 
@@ -891,6 +931,7 @@ impl PreparedRunSnapshot {
             executable_netlist: parts.executable_netlist,
             save_policy: parts.save_policy,
             model_identities: parts.model_identities,
+            project_veriloga_runtime: parts.project_veriloga_runtime,
             target: parts.target,
             receipt: parts.receipt,
             advisories: parts.advisories,
@@ -951,6 +992,7 @@ impl PreparedRunSnapshot {
         }
         let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
         let default_touchstone_export = self.touchstone_export.clone();
+        let project_veriloga_runtime = self.project_veriloga_runtime.clone();
         let tasks = self
             .tasks
             .into_iter()
@@ -975,6 +1017,7 @@ impl PreparedRunSnapshot {
                     task: prepared.task,
                     saved_output_contracts: prepared.saved_output_contracts,
                     executable_netlist: Arc::clone(&executable_netlist),
+                    project_veriloga_runtime: project_veriloga_runtime.clone(),
                     touchstone_export,
                 }
             })
@@ -1394,6 +1437,7 @@ mod tests {
             executable_netlist: "deck\n.op\n.end\n".to_owned(),
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities: Vec::new(),
+            project_veriloga_runtime: None,
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([4; 32])),
             advisories: Vec::new(),
@@ -1402,6 +1446,51 @@ mod tests {
             touchstone_export: TouchstoneExportPolicy::disabled(),
             sealed_source_dependencies: Vec::new(),
         }
+    }
+
+    fn project_runtime() -> crate::workbench::code_workspace::PreparedVerilogARuntime {
+        let project_id = crate::product::ProjectId::new();
+        let document = crate::state::ProjectSourceDocument::try_new(
+            "file_name_differs.va",
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "module snapshot_owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+        )
+        .unwrap();
+        let receipt =
+            crate::workbench::code_workspace::compile_project_source_receipt(project_id, &document)
+                .unwrap();
+        crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_receipt(
+            project_id, &document, &receipt,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
+        let runtime = project_runtime();
+        let mut missing = parts();
+        missing.project_veriloga_runtime = Some(runtime.clone());
+        assert!(matches!(
+            PreparedRunSnapshot::new(missing),
+            Err(PreparationError {
+                stage: PreparationStage::ModelBindings,
+                ..
+            })
+        ));
+
+        let directive = crate::workbench::code_workspace::project_veriloga_directive(
+            runtime.source_key(),
+            runtime.module_name(),
+        );
+        let mut suffixed = parts();
+        suffixed.executable_netlist = format!("deck\n{directive} unexpected\n.op\n.end\n");
+        suffixed.project_veriloga_runtime = Some(runtime.clone());
+        assert!(PreparedRunSnapshot::new(suffixed).is_err());
+
+        let mut exact = parts();
+        exact.executable_netlist = format!("deck\n{directive}\n.op\n.end\n");
+        exact.project_veriloga_runtime = Some(runtime);
+        assert!(PreparedRunSnapshot::new(exact).is_ok());
     }
 
     #[test]
@@ -1752,8 +1841,9 @@ mod tests {
         assert!(authorized.dependencies().is_empty());
         assert_eq!(authorized.label(), "DC Operating Point");
         assert_eq!(authorized.config_digest(), parts().tasks[0].config_digest());
-        let (_, netlist) = authorized.into_runner_parts();
+        let (_, netlist, runtime) = authorized.into_runner_parts();
         assert_eq!(&*netlist, "deck\n.op\n.end\n");
+        assert!(runtime.is_none());
         assert!(tasks.is_empty());
     }
 

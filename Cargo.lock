@@ -4283,6 +4283,7 @@ dependencies = [
  "serde",
  "smol_str 0.3.6",
  "thiserror 2.0.18",
+ "web-time",
  "windows-sys 0.61.2",
 ]
 

@@ -13,7 +13,7 @@ use crate::device::VerilogADevice;
 use crate::vm::{Vm, VmContext, VmError};
 use crate::{CompilerOptions, VerilogACompiler};
 use serde::Serialize;
-use std::time::Instant;
+use web_time::Instant;
 
 const DEFAULT_ITERATIONS: usize = 200_000;
 const DEFAULT_SAMPLES: usize = 7;

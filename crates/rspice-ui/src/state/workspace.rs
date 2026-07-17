@@ -14,8 +14,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
 use crate::product::{
-    AnalysisInstanceId, DesignVariableId, ObjectRevision, ProjectId, RevisionError, RunId,
-    SavedOutputId, SimulationPlanId,
+    AnalysisInstanceId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId, RevisionError,
+    RunId, SavedOutputId, SimulationPlanId,
 };
 use crate::state::{
     AnalysisResultSourceDomain, Cell, ComponentType, Library, LibraryCellInstance, LibraryManager,
@@ -1835,6 +1835,8 @@ fn validate_bounded_text(
 pub enum SimulationConfigurationError {
     #[error("project-owned netlist document is invalid: {message}")]
     InvalidNetlistDocumentProjection { message: String },
+    #[error("project-owned Code source registry is invalid: {message}")]
+    InvalidProjectSourceRegistry { message: String },
     #[error("simulation_plan_payloads contains duplicate owner {plan_id}")]
     DuplicatePlanPayload { plan_id: SimulationPlanId },
     #[error("simulation_plan_payloads[{plan_id}].design_variables[{index}] is invalid: {message}")]
@@ -2130,6 +2132,426 @@ pub struct OwnedNetlistDescriptor {
     pub save_history: Vec<OwnedNetlistSaveRecord>,
 }
 
+/// Stable language identity for a project-owned source document in the Code
+/// workspace. A language is an engineering contract, not an editor hint: it
+/// determines which validator and execution path may consume the exact bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectSourceLanguage {
+    VerilogA,
+    #[serde(rename = "rspice-automation")]
+    RSpiceAutomation,
+}
+
+impl ProjectSourceLanguage {
+    pub const ALL: [Self; 2] = [Self::VerilogA, Self::RSpiceAutomation];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::VerilogA => "Verilog-A",
+            Self::RSpiceAutomation => "RSpice Automation",
+        }
+    }
+
+    pub const fn required_extension(self) -> &'static str {
+        match self {
+            Self::VerilogA => ".va",
+            Self::RSpiceAutomation => ".rspice",
+        }
+    }
+}
+
+/// Identity of validation evidence for exact source bytes. Validation remains
+/// current only while both the document revision and SHA-256 digest match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSourceValidationIdentity {
+    revision: ObjectRevision,
+    content_digest: ContentDigest,
+}
+
+impl ProjectSourceValidationIdentity {
+    #[must_use]
+    pub const fn revision(self) -> ObjectRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn content_digest(self) -> ContentDigest {
+        self.content_digest
+    }
+}
+
+/// One exact UTF-8 source document owned by the project.
+///
+/// File name and language are immutable after construction. Mutating content
+/// is possible only through [`ProjectSourceRegistry::replace_content`], which
+/// advances the revision and invalidates prior validation evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSourceDocument {
+    file_name: String,
+    language: ProjectSourceLanguage,
+    content: String,
+    revision: ObjectRevision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    validated_identity: Option<ProjectSourceValidationIdentity>,
+}
+
+impl ProjectSourceDocument {
+    pub fn try_new(
+        file_name: impl Into<String>,
+        language: ProjectSourceLanguage,
+        content: impl Into<String>,
+    ) -> Result<Self, ProjectSourceError> {
+        let document = Self {
+            file_name: file_name.into(),
+            language,
+            content: content.into(),
+            revision: ObjectRevision::INITIAL,
+            validated_identity: None,
+        };
+        document.validate()?;
+        Ok(document)
+    }
+
+    #[must_use]
+    pub fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
+    #[must_use]
+    pub const fn language(&self) -> ProjectSourceLanguage {
+        self.language
+    }
+
+    #[must_use]
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> ObjectRevision {
+        self.revision
+    }
+
+    /// SHA-256 over the exact UTF-8 content bytes. No newline normalization,
+    /// Unicode normalization, trimming, or transcoding is performed.
+    #[must_use]
+    pub fn content_digest(&self) -> ContentDigest {
+        ContentDigest::from_bytes(sha2::Sha256::digest(self.content.as_bytes()).into())
+    }
+
+    #[must_use]
+    pub const fn validated_identity(&self) -> Option<ProjectSourceValidationIdentity> {
+        self.validated_identity
+    }
+
+    #[must_use]
+    pub fn validation_is_current(&self) -> bool {
+        self.validated_identity.is_some_and(|identity| {
+            identity.revision == self.revision && identity.content_digest == self.content_digest()
+        })
+    }
+
+    fn replace_content(&mut self, content: String) -> Result<bool, ProjectSourceError> {
+        if self.content == content {
+            return Ok(false);
+        }
+        self.revision =
+            self.revision
+                .next()
+                .map_err(|_| ProjectSourceError::RevisionExhausted {
+                    file_name: self.file_name.clone(),
+                })?;
+        self.content = content;
+        self.validated_identity = None;
+        Ok(true)
+    }
+
+    fn replace_imported(
+        &mut self,
+        file_name: String,
+        content: String,
+    ) -> Result<bool, ProjectSourceError> {
+        if self.file_name == file_name && self.content == content {
+            return Ok(false);
+        }
+        let revision = self
+            .revision
+            .next()
+            .map_err(|_| ProjectSourceError::RevisionExhausted {
+                file_name: self.file_name.clone(),
+            })?;
+        let replacement = Self {
+            file_name,
+            language: self.language,
+            content,
+            revision,
+            validated_identity: None,
+        };
+        replacement.validate()?;
+        *self = replacement;
+        Ok(true)
+    }
+
+    fn mark_validated(&mut self) -> ProjectSourceValidationIdentity {
+        let identity = ProjectSourceValidationIdentity {
+            revision: self.revision,
+            content_digest: self.content_digest(),
+        };
+        self.validated_identity = Some(identity);
+        identity
+    }
+
+    fn validate(&self) -> Result<(), ProjectSourceError> {
+        validate_project_source_file_name(&self.file_name, self.language)?;
+        if self.content.contains('\0') {
+            return Err(ProjectSourceError::NulInContent {
+                file_name: self.file_name.clone(),
+            });
+        }
+        if self.content.len() > MAX_PROJECT_CODE_SOURCE_BYTES {
+            return Err(ProjectSourceError::SourceTooLarge {
+                file_name: self.file_name.clone(),
+                bytes: self.content.len(),
+                limit: MAX_PROJECT_CODE_SOURCE_BYTES,
+            });
+        }
+        if self.validated_identity.is_some() && !self.validation_is_current() {
+            return Err(ProjectSourceError::StaleValidationIdentity {
+                file_name: self.file_name.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Maximum exact UTF-8 payload accepted for one project-owned code document.
+/// This bound applies before compilation and worker transfer on every target.
+pub const MAX_PROJECT_CODE_SOURCE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Typed registry of project-owned Code & Automation sources. Fixed language
+/// slots make document identity stable and prevent duplicate compiler inputs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSourceRegistry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verilog_a: Option<ProjectSourceDocument>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    automation: Option<ProjectSourceDocument>,
+}
+
+impl ProjectSourceRegistry {
+    pub fn try_from_documents(
+        documents: impl IntoIterator<Item = ProjectSourceDocument>,
+    ) -> Result<Self, ProjectSourceError> {
+        let mut registry = Self::default();
+        for document in documents {
+            registry.insert(document)?;
+        }
+        registry.validate()?;
+        Ok(registry)
+    }
+
+    pub fn insert(&mut self, document: ProjectSourceDocument) -> Result<(), ProjectSourceError> {
+        document.validate()?;
+        let language = document.language;
+        let slot = match language {
+            ProjectSourceLanguage::VerilogA => &mut self.verilog_a,
+            ProjectSourceLanguage::RSpiceAutomation => &mut self.automation,
+        };
+        if slot.is_some() {
+            return Err(ProjectSourceError::DuplicateLanguage { language });
+        }
+        *slot = Some(document);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn get(&self, language: ProjectSourceLanguage) -> Option<&ProjectSourceDocument> {
+        match language {
+            ProjectSourceLanguage::VerilogA => self.verilog_a.as_ref(),
+            ProjectSourceLanguage::RSpiceAutomation => self.automation.as_ref(),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ProjectSourceDocument> {
+        [self.verilog_a.as_ref(), self.automation.as_ref()]
+            .into_iter()
+            .flatten()
+    }
+
+    pub fn remove(&mut self, language: ProjectSourceLanguage) -> Option<ProjectSourceDocument> {
+        match language {
+            ProjectSourceLanguage::VerilogA => self.verilog_a.take(),
+            ProjectSourceLanguage::RSpiceAutomation => self.automation.take(),
+        }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.verilog_a.is_none() && self.automation.is_none()
+    }
+
+    pub fn replace_content(
+        &mut self,
+        language: ProjectSourceLanguage,
+        content: String,
+    ) -> Result<bool, ProjectSourceError> {
+        self.get_mut(language)
+            .ok_or(ProjectSourceError::MissingLanguage { language })?
+            .replace_content(content)
+    }
+
+    pub fn replace_imported(
+        &mut self,
+        language: ProjectSourceLanguage,
+        file_name: String,
+        content: String,
+    ) -> Result<bool, ProjectSourceError> {
+        match self.get_mut(language) {
+            Some(document) => document.replace_imported(file_name, content),
+            None => {
+                self.insert(ProjectSourceDocument::try_new(
+                    file_name, language, content,
+                )?)?;
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn mark_validated(
+        &mut self,
+        language: ProjectSourceLanguage,
+    ) -> Result<ProjectSourceValidationIdentity, ProjectSourceError> {
+        Ok(self
+            .get_mut(language)
+            .ok_or(ProjectSourceError::MissingLanguage { language })?
+            .mark_validated())
+    }
+
+    pub fn validate(&self) -> Result<(), ProjectSourceError> {
+        for (expected_language, document) in [
+            (ProjectSourceLanguage::VerilogA, self.verilog_a.as_ref()),
+            (
+                ProjectSourceLanguage::RSpiceAutomation,
+                self.automation.as_ref(),
+            ),
+        ] {
+            if let Some(document) = document {
+                if document.language != expected_language {
+                    return Err(ProjectSourceError::RegistryLanguageMismatch {
+                        slot: expected_language,
+                        document: document.language,
+                    });
+                }
+                document.validate()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn get_mut(&mut self, language: ProjectSourceLanguage) -> Option<&mut ProjectSourceDocument> {
+        match language {
+            ProjectSourceLanguage::VerilogA => self.verilog_a.as_mut(),
+            ProjectSourceLanguage::RSpiceAutomation => self.automation.as_mut(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProjectSourceError {
+    #[error("{language} source file name is empty or not trimmed")]
+    InvalidFileNameWhitespace { language: ProjectSourceLanguage },
+    #[error("{language} source file name must be one file name without path separators")]
+    InvalidFileNamePath { language: ProjectSourceLanguage },
+    #[error("{language} source file name contains a reserved or non-portable character")]
+    InvalidFileNameCharacters { language: ProjectSourceLanguage },
+    #[error("{language} source file name is reserved by a supported desktop platform")]
+    ReservedFileName { language: ProjectSourceLanguage },
+    #[error("{language} source file name must end in '{required_extension}'")]
+    InvalidFileNameExtension {
+        language: ProjectSourceLanguage,
+        required_extension: &'static str,
+    },
+    #[error("source file '{file_name}' contains a NUL byte")]
+    NulInContent { file_name: String },
+    #[error("source file '{file_name}' is {bytes} bytes; the supported limit is {limit} bytes")]
+    SourceTooLarge {
+        file_name: String,
+        bytes: usize,
+        limit: usize,
+    },
+    #[error("source file '{file_name}' has stale validation evidence")]
+    StaleValidationIdentity { file_name: String },
+    #[error("source file '{file_name}' exhausted its revision space")]
+    RevisionExhausted { file_name: String },
+    #[error("the project already owns a {language} source document")]
+    DuplicateLanguage { language: ProjectSourceLanguage },
+    #[error("the project has no {language} source document")]
+    MissingLanguage { language: ProjectSourceLanguage },
+    #[error("the {slot} registry slot contains a {document} document")]
+    RegistryLanguageMismatch {
+        slot: ProjectSourceLanguage,
+        document: ProjectSourceLanguage,
+    },
+}
+
+impl std::fmt::Display for ProjectSourceLanguage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
+fn validate_project_source_file_name(
+    file_name: &str,
+    language: ProjectSourceLanguage,
+) -> Result<(), ProjectSourceError> {
+    if file_name.is_empty()
+        || file_name != file_name.trim()
+        || file_name.chars().any(char::is_control)
+    {
+        return Err(ProjectSourceError::InvalidFileNameWhitespace { language });
+    }
+    if file_name.contains('/') || file_name.contains('\\') || matches!(file_name, "." | "..") {
+        return Err(ProjectSourceError::InvalidFileNamePath { language });
+    }
+    if file_name
+        .chars()
+        .any(|character| matches!(character, '"' | '\'' | ':' | '*' | '?' | '<' | '>' | '|'))
+    {
+        return Err(ProjectSourceError::InvalidFileNameCharacters { language });
+    }
+    let portable_stem = file_name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    if matches!(portable_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || portable_stem
+            .strip_prefix("COM")
+            .and_then(|suffix| suffix.parse::<u8>().ok())
+            .is_some_and(|number| (1..=9).contains(&number))
+        || portable_stem
+            .strip_prefix("LPT")
+            .and_then(|suffix| suffix.parse::<u8>().ok())
+            .is_some_and(|number| (1..=9).contains(&number))
+    {
+        return Err(ProjectSourceError::ReservedFileName { language });
+    }
+    let required_extension = language.required_extension();
+    if !file_name.to_ascii_lowercase().ends_with(required_extension)
+        || file_name.len() == required_extension.len()
+    {
+        return Err(ProjectSourceError::InvalidFileNameExtension {
+            language,
+            required_extension,
+        });
+    }
+    Ok(())
+}
+
 /// Project-level workspace state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectWorkspace {
@@ -2167,6 +2589,11 @@ pub struct ProjectWorkspace {
     /// Ownership-dialog selection for the project-owned source artifact.
     #[serde(default)]
     pub netlist_descriptor: Option<OwnedNetlistDescriptor>,
+    /// Project-owned source documents shown by the Verilog-A and Automation
+    /// pages of the Code workspace. Older projects intentionally restore an
+    /// empty registry rather than receiving demonstration content.
+    #[serde(default, skip_serializing_if = "ProjectSourceRegistry::is_empty")]
+    pub project_sources: ProjectSourceRegistry,
     /// Native filesystem origin for `netlist_source`, used to resolve relative
     /// `.include`/`.lib` paths for imported decks. Edits retain this origin:
     /// changing document bytes does not change the directory against which its
@@ -2178,6 +2605,11 @@ pub struct ProjectWorkspace {
     /// session-local while the source itself is persisted with the project.
     #[serde(default, skip)]
     pub netlist_source_dirty: bool,
+    /// Runtime dirty state for `project_sources`. Source bytes and validation
+    /// identities persist; dirty state is derived against the accepted project
+    /// and remains session-local.
+    #[serde(default, skip)]
+    pub project_sources_dirty: bool,
     /// Runtime dirty state for project-owned metadata such as an exact
     /// technology attachment. The binding itself persists in `project`.
     #[serde(default, skip)]
@@ -2203,8 +2635,10 @@ impl Default for ProjectWorkspace {
             netlist_source: None,
             netlist_document: None,
             netlist_descriptor: None,
+            project_sources: ProjectSourceRegistry::default(),
             netlist_source_path: None,
             netlist_source_dirty: false,
+            project_sources_dirty: false,
             project_metadata_dirty: false,
         }
     }
@@ -2215,6 +2649,11 @@ impl ProjectWorkspace {
     /// runtime editor state. Cross-document targets are validated by project
     /// I/O once the library tree and simulation plan are available.
     pub fn validate_simulation_configuration(&self) -> Result<(), SimulationConfigurationError> {
+        self.project_sources.validate().map_err(|error| {
+            SimulationConfigurationError::InvalidProjectSourceRegistry {
+                message: error.to_string(),
+            }
+        })?;
         if let Some(document) = &self.netlist_document {
             if document.ownership()
                 == crate::workbench::code_workspace::DocumentOwnership::Generated
@@ -3214,8 +3653,45 @@ impl ProjectWorkspace {
     /// Create a new default project and ensure its editable top cell exists in
     /// the shared library manager.
     pub fn new_bootstrapped(libraries: &mut LibraryManager) -> Self {
-        let mut workspace = Self::default();
+        let mut project_sources = ProjectSourceRegistry::try_from_documents([
+            ProjectSourceDocument::try_new(
+                "sensor_bridge.va",
+                ProjectSourceLanguage::VerilogA,
+                "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule",
+            )
+            .expect("the built-in Verilog-A example is valid"),
+            ProjectSourceDocument::try_new(
+                "characterize.rspice",
+                ProjectSourceLanguage::RSpiceAutomation,
+                "plan = project.plan(\"Lab characterization\")\nrun = plan.with_corners(\"all\").execute(target=\"local\")\nrun.require(specs=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([\"junit\", \"summary.json\", \"report.pdf\"])",
+            )
+            .expect("the built-in Automation example is valid"),
+        ])
+        .expect("the bootstrapped Code source registry is valid");
+        // The canonical demonstration project opens with both exact examples
+        // already validated. File > New uses `new_empty_bootstrapped`, and any
+        // subsequent byte edit invalidates this identity immediately.
+        project_sources
+            .mark_validated(ProjectSourceLanguage::VerilogA)
+            .expect("the built-in Verilog-A identity is valid");
+        project_sources
+            .mark_validated(ProjectSourceLanguage::RSpiceAutomation)
+            .expect("the built-in Automation identity is valid");
+        let mut workspace = Self {
+            project_sources,
+            ..Self::default()
+        };
         workspace.ensure_library_model(libraries);
+        workspace
+    }
+
+    /// Create a genuinely empty user project. The canonical startup fixture
+    /// keeps the mockup's example sources, while File > New must not force an
+    /// unrelated circuit to compile or execute demonstration code.
+    pub fn new_empty_bootstrapped(libraries: &mut LibraryManager) -> Self {
+        let mut workspace = Self::new_bootstrapped(libraries);
+        workspace.project_sources = ProjectSourceRegistry::default();
+        workspace.project_sources_dirty = false;
         workspace
     }
 
@@ -3349,6 +3825,7 @@ impl ProjectWorkspace {
             schematic.is_dirty = false;
         }
         self.netlist_source_dirty = false;
+        self.project_sources_dirty = false;
         self.project_metadata_dirty = false;
     }
 
@@ -3359,6 +3836,7 @@ impl ProjectWorkspace {
                 .values()
                 .any(|schematic| schematic.is_dirty)
             || self.netlist_source_dirty
+            || self.project_sources_dirty
             || self.project_metadata_dirty
     }
 
@@ -3376,6 +3854,81 @@ impl ProjectWorkspace {
 
     pub fn set_netlist_source_dirty(&mut self, dirty: bool) {
         self.netlist_source_dirty = dirty;
+    }
+
+    /// Add a source document to a legacy/empty project and enter the ordinary
+    /// project dirty lifecycle. Duplicate language identities are rejected.
+    pub fn add_project_source(
+        &mut self,
+        document: ProjectSourceDocument,
+    ) -> Result<(), ProjectSourceError> {
+        self.project_sources.insert(document)?;
+        self.project_sources_dirty = true;
+        Ok(())
+    }
+
+    /// Replace exact source bytes and enter the ordinary project dirty
+    /// lifecycle. An unchanged write is a no-op and retains validation.
+    pub fn replace_project_source(
+        &mut self,
+        language: ProjectSourceLanguage,
+        content: String,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed = self.project_sources.replace_content(language, content)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    /// Replace one language slot from an explicitly imported UTF-8 file while
+    /// preserving monotonic slot revision and invalidating old validation.
+    pub fn replace_imported_project_source(
+        &mut self,
+        language: ProjectSourceLanguage,
+        file_name: String,
+        content: String,
+    ) -> Result<bool, ProjectSourceError> {
+        let changed = self
+            .project_sources
+            .replace_imported(language, file_name, content)?;
+        if changed {
+            self.project_sources_dirty = true;
+        }
+        Ok(changed)
+    }
+
+    pub fn remove_project_source(
+        &mut self,
+        language: ProjectSourceLanguage,
+    ) -> Option<ProjectSourceDocument> {
+        let removed = self.project_sources.remove(language);
+        if removed.is_some() {
+            self.project_sources_dirty = true;
+        }
+        removed
+    }
+
+    /// Record successful validation for the document's exact current identity.
+    /// This evidence is persisted and therefore marks the project dirty only
+    /// when it changes.
+    pub fn mark_project_source_validated(
+        &mut self,
+        language: ProjectSourceLanguage,
+    ) -> Result<ProjectSourceValidationIdentity, ProjectSourceError> {
+        let before = self
+            .project_sources
+            .get(language)
+            .and_then(ProjectSourceDocument::validated_identity);
+        let identity = self.project_sources.mark_validated(language)?;
+        if before != Some(identity) {
+            self.project_sources_dirty = true;
+        }
+        Ok(identity)
+    }
+
+    pub fn mark_project_sources_clean(&mut self) {
+        self.project_sources_dirty = false;
     }
 
     /// Whether the Netlist workspace owns an editable source deck.
@@ -4641,6 +5194,259 @@ mod tests {
             Err(ProjectDescriptorError::Technology(
                 TechnologyBindingError::NonAbsoluteSource(_)
             ))
+        ));
+    }
+
+    #[test]
+    fn legacy_workspaces_restore_with_no_project_source_examples() {
+        let mut value = serde_json::to_value(ProjectWorkspace::default()).unwrap();
+        value.as_object_mut().unwrap().remove("project_sources");
+
+        let restored: ProjectWorkspace = serde_json::from_value(value).unwrap();
+
+        assert!(restored.project_sources.is_empty());
+        assert!(!restored.project_sources_dirty);
+    }
+
+    #[test]
+    fn only_bootstrapped_projects_receive_exact_mockup_sources() {
+        let mut libraries = LibraryManager::default();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let verilog_a = workspace
+            .project_sources
+            .get(ProjectSourceLanguage::VerilogA)
+            .unwrap();
+        let automation = workspace
+            .project_sources
+            .get(ProjectSourceLanguage::RSpiceAutomation)
+            .unwrap();
+
+        assert_eq!(verilog_a.file_name(), "sensor_bridge.va");
+        assert_eq!(
+            verilog_a.content(),
+            "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule"
+        );
+        assert_eq!(automation.file_name(), "characterize.rspice");
+        assert_eq!(
+            automation.content(),
+            "plan = project.plan(\"Lab characterization\")\nrun = plan.with_corners(\"all\").execute(target=\"local\")\nrun.require(specs=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([\"junit\", \"summary.json\", \"report.pdf\"])",
+        );
+        assert!(!workspace.any_dirty());
+        assert!(ProjectWorkspace::default().project_sources.is_empty());
+    }
+
+    #[test]
+    fn file_new_bootstrap_is_empty_but_keeps_a_valid_project_hierarchy() {
+        let mut libraries = LibraryManager::default();
+        let workspace = ProjectWorkspace::new_empty_bootstrapped(&mut libraries);
+
+        assert!(workspace.project_sources.is_empty());
+        assert!(!workspace.project_sources_dirty);
+        assert!(
+            libraries
+                .get_library(&workspace.active_view.library)
+                .and_then(|library| library.get_cell(&workspace.active_view.cell))
+                .and_then(|cell| cell.get_view(&workspace.active_view.view))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn project_source_names_are_portable_and_extensions_are_case_insensitive() {
+        assert!(
+            ProjectSourceDocument::try_new(
+                "MODEL.VA",
+                ProjectSourceLanguage::VerilogA,
+                "module model; endmodule",
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            ProjectSourceDocument::try_new(
+                "bad\"name.va",
+                ProjectSourceLanguage::VerilogA,
+                "module model; endmodule",
+            ),
+            Err(ProjectSourceError::InvalidFileNameCharacters { .. })
+        ));
+        assert!(matches!(
+            ProjectSourceDocument::try_new(
+                "COM1.va",
+                ProjectSourceLanguage::VerilogA,
+                "module model; endmodule",
+            ),
+            Err(ProjectSourceError::ReservedFileName { .. })
+        ));
+    }
+
+    #[test]
+    fn project_source_payload_limit_is_enforced_before_compilation() {
+        let oversized = "x".repeat(MAX_PROJECT_CODE_SOURCE_BYTES + 1);
+        assert!(matches!(
+            ProjectSourceDocument::try_new(
+                "oversized.va",
+                ProjectSourceLanguage::VerilogA,
+                oversized,
+            ),
+            Err(ProjectSourceError::SourceTooLarge {
+                bytes,
+                limit: MAX_PROJECT_CODE_SOURCE_BYTES,
+                ..
+            }) if bytes == MAX_PROJECT_CODE_SOURCE_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn source_edits_preserve_exact_utf8_and_invalidate_validation_identity() {
+        let mut registry =
+            ProjectSourceRegistry::try_from_documents([ProjectSourceDocument::try_new(
+                "sensor_bridge.va",
+                ProjectSourceLanguage::VerilogA,
+                "module sensor_bridge; endmodule\r\n",
+            )
+            .unwrap()])
+            .unwrap();
+        let first_identity = registry
+            .mark_validated(ProjectSourceLanguage::VerilogA)
+            .unwrap();
+        assert!(
+            registry
+                .get(ProjectSourceLanguage::VerilogA)
+                .unwrap()
+                .validation_is_current()
+        );
+
+        let source = "module sensor_bridge; // Δ温度\nendmodule\n".to_owned();
+        assert!(
+            registry
+                .replace_content(ProjectSourceLanguage::VerilogA, source.clone())
+                .unwrap()
+        );
+        let edited = registry.get(ProjectSourceLanguage::VerilogA).unwrap();
+        assert_eq!(edited.content(), source);
+        assert_eq!(edited.revision().get(), 2);
+        assert!(edited.validated_identity().is_none());
+        assert_ne!(edited.content_digest(), first_identity.content_digest());
+        let edited_revision = edited.revision();
+        assert!(
+            !registry
+                .replace_content(ProjectSourceLanguage::VerilogA, source)
+                .unwrap()
+        );
+        assert_eq!(
+            registry
+                .get(ProjectSourceLanguage::VerilogA)
+                .unwrap()
+                .revision(),
+            edited_revision
+        );
+    }
+
+    #[test]
+    fn imported_source_replacement_is_monotonic_validated_and_atomic() {
+        let mut registry =
+            ProjectSourceRegistry::try_from_documents([ProjectSourceDocument::try_new(
+                "first.va",
+                ProjectSourceLanguage::VerilogA,
+                "module first; endmodule\n",
+            )
+            .unwrap()])
+            .unwrap();
+        registry
+            .mark_validated(ProjectSourceLanguage::VerilogA)
+            .unwrap();
+
+        assert!(
+            registry
+                .replace_imported(
+                    ProjectSourceLanguage::VerilogA,
+                    "second.va".to_owned(),
+                    "module second; endmodule\r\n".to_owned(),
+                )
+                .unwrap()
+        );
+        let imported = registry.get(ProjectSourceLanguage::VerilogA).unwrap();
+        assert_eq!(imported.file_name(), "second.va");
+        assert_eq!(imported.content(), "module second; endmodule\r\n");
+        assert_eq!(imported.revision().get(), 2);
+        assert!(imported.validated_identity().is_none());
+
+        let before = registry.clone();
+        assert!(matches!(
+            registry.replace_imported(
+                ProjectSourceLanguage::VerilogA,
+                "wrong.txt".to_owned(),
+                "module wrong; endmodule\n".to_owned(),
+            ),
+            Err(ProjectSourceError::InvalidFileNameExtension { .. })
+        ));
+        assert_eq!(registry, before);
+    }
+
+    #[test]
+    fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
+        let mut libraries = LibraryManager::default();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+
+        workspace
+            .replace_project_source(
+                ProjectSourceLanguage::RSpiceAutomation,
+                "plan = project.plan(\"Unicode Δ\")".to_owned(),
+            )
+            .unwrap();
+        assert!(workspace.project_sources_dirty);
+        assert!(workspace.any_dirty());
+        workspace.mark_project_sources_clean();
+        assert!(!workspace.any_dirty());
+
+        let identity = workspace
+            .mark_project_source_validated(ProjectSourceLanguage::RSpiceAutomation)
+            .unwrap();
+        assert!(workspace.project_sources_dirty);
+        assert_eq!(
+            workspace
+                .project_sources
+                .get(ProjectSourceLanguage::RSpiceAutomation)
+                .unwrap()
+                .validated_identity(),
+            Some(identity)
+        );
+        workspace.mark_all_clean();
+        assert!(!workspace.any_dirty());
+
+        let repeated = workspace
+            .mark_project_source_validated(ProjectSourceLanguage::RSpiceAutomation)
+            .unwrap();
+        assert_eq!(repeated, identity);
+        assert!(!workspace.any_dirty());
+    }
+
+    #[test]
+    fn project_source_validation_rejects_mismatched_slots_and_stale_evidence() {
+        let document = ProjectSourceDocument::try_new(
+            "sensor_bridge.va",
+            ProjectSourceLanguage::VerilogA,
+            "module sensor_bridge; endmodule",
+        )
+        .unwrap();
+        let mut registry = ProjectSourceRegistry::try_from_documents([document]).unwrap();
+        registry
+            .mark_validated(ProjectSourceLanguage::VerilogA)
+            .unwrap();
+        let mut value = serde_json::to_value(&registry).unwrap();
+        value["verilog_a"]["content"] = serde_json::Value::String("changed".to_owned());
+        let stale: ProjectSourceRegistry = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            stale.validate(),
+            Err(ProjectSourceError::StaleValidationIdentity { .. })
+        ));
+
+        let mut value = serde_json::to_value(&registry).unwrap();
+        value["verilog_a"]["language"] = serde_json::Value::String("rspice-automation".to_owned());
+        let mismatched: ProjectSourceRegistry = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            mismatched.validate(),
+            Err(ProjectSourceError::RegistryLanguageMismatch { .. })
         ));
     }
 }

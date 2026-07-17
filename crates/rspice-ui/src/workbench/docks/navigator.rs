@@ -2,7 +2,7 @@
 
 mod design;
 
-use egui::{Align, Layout, ScrollArea, Ui};
+use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::common::RSpiceApp;
 use crate::state::{CellViewRef, ViewType};
@@ -54,6 +54,13 @@ fn responsive_result_control_height(desktop_height: f32, control_height: f32) ->
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app);
+    if app.state.workbench.workspace == Workspace::Netlist {
+        // Canonical code navigator order: header, search, page tabs, outline.
+        workspace_search(ui, app, Workspace::Netlist);
+        code_workspace_pages(ui, app);
+        netlist(ui, app);
+        return;
+    }
     match app.state.workbench.workspace {
         Workspace::Design => design::show(ui, app),
         workspace => {
@@ -79,10 +86,84 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         });
                 }
                 Workspace::Models => models(ui, app),
-                Workspace::Netlist => netlist(ui, app),
+                Workspace::Netlist => unreachable!("handled above"),
                 Workspace::Design => unreachable!("handled above"),
             }
         }
+    }
+}
+
+fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
+    use super::super::code_workspace::CodeWorkspacePage;
+
+    let t = Tokens::get(ui.ctx());
+    let touch = app.state.workbench.coarse_pointer;
+    let height = if touch { 44.0 } else { 31.0 };
+    let width = ui.available_width().max(1.0);
+    let (strip, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    ui.painter().rect_filled(strip, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        strip.x_range(),
+        strip.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let content = strip.shrink2(Vec2::new(8.0, 0.0));
+    let button_width = content.width() / CodeWorkspacePage::ALL.len() as f32;
+    let mut selected = None;
+    for (index, page) in CodeWorkspacePage::ALL.into_iter().enumerate() {
+        let left = content.left() + button_width * index as f32;
+        let right = if index + 1 == CodeWorkspacePage::ALL.len() {
+            content.right()
+        } else {
+            left + button_width
+        };
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(left, content.top()),
+            egui::pos2(right, content.bottom()),
+        );
+        let response = ui.interact(
+            rect,
+            egui::Id::new(("workbench.code.page", page.label())),
+            Sense::click(),
+        );
+        let active = app.state.ui.code_workspace.page == page;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                active,
+                page.label(),
+            )
+        });
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            page.label(),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            if active || response.hovered() {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+        if active {
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + 6.0, rect.bottom() - 2.0),
+                    egui::pos2(rect.right() - 6.0, rect.bottom()),
+                ),
+                0.0,
+                t.color.accent,
+            );
+        }
+        theme::paint_focus_ring(ui, &response, rect.shrink(2.0));
+        if response.clicked() {
+            selected = Some(page);
+        }
+    }
+    if let Some(page) = selected {
+        app.state.ui.code_workspace.page = page;
+        app.state.ui.netlist.completion_open = false;
     }
 }
 

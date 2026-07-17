@@ -1049,11 +1049,15 @@ impl Command {
                 .state
                 .pdk_settings_dialog
                 .open(app.state.pdk_config.clone()),
-            Self::CompileVerilogA => app.state.dialogs.veriloga_dialog.open(),
+            Self::CompileVerilogA => {
+                activate_workspace(app, Workspace::Netlist);
+                app.state.ui.code_workspace.page =
+                    super::code_workspace::CodeWorkspacePage::VerilogA;
+            }
             Self::AutomationConsole => {
                 activate_workspace(app, Workspace::Netlist);
-                app.state.workbench.console_visible = true;
-                app.state.workbench.console_page = super::state::ConsolePage::Console;
+                app.state.ui.code_workspace.page =
+                    super::code_workspace::CodeWorkspacePage::Automation;
             }
             Self::CommandPalette => app.state.dialogs.command_palette.open(),
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,

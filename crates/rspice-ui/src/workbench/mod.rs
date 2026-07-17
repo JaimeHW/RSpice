@@ -149,6 +149,9 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     }
     chrome::title_bar::show(ctx, app, layout);
     chrome::toolbar::show(ctx, app, layout);
+    // egui allocates same-edge side panels from the outside inward in call
+    // order. Reserve the canonical 51 px activity rail first, then place the
+    // navigator between that rail and the active document surface.
     if layout.show_activity_rail {
         chrome::activity_rail::show(ctx, app);
     }

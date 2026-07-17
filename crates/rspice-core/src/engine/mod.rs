@@ -48,8 +48,8 @@ pub use builder::{
     VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
     prune_veriloga_cache, register_precompiled_veriloga_model,
     register_precompiled_veriloga_model_with_dependencies,
-    register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_entries,
-    veriloga_cache_stats,
+    register_precompiled_veriloga_runtime_with_dependencies,
+    register_project_veriloga_runtime_for_session, veriloga_cache_entries, veriloga_cache_stats,
 };
 pub use config::{
     BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,

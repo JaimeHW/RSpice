@@ -175,6 +175,7 @@ fn document_digests(
             &project.workspace.netlist_source_path,
             &project.workspace.netlist_document,
             &project.workspace.netlist_descriptor,
+            &project.workspace.project_sources,
         ))?,
     );
 
@@ -520,5 +521,44 @@ mod tests {
         registry.rebuild(&current, Some(&baseline)).unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::SimulationPlan));
         assert!(!registry.is_dirty(&ProjectDocumentId::VerificationSpecifications));
+    }
+
+    #[test]
+    fn code_sources_participate_in_the_code_document_digest() {
+        let mut state = AppState::default();
+        if state
+            .workspace
+            .project_sources
+            .get(crate::state::ProjectSourceLanguage::VerilogA)
+            .is_none()
+        {
+            state
+                .workspace
+                .project_sources
+                .insert(
+                    crate::state::ProjectSourceDocument::try_new(
+                        "sensor_bridge.va",
+                        crate::state::ProjectSourceLanguage::VerilogA,
+                        "module sensor_bridge; endmodule",
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        let baseline = super::super::snapshot(&state).expect("baseline snapshot");
+
+        state
+            .workspace
+            .replace_project_source(
+                crate::state::ProjectSourceLanguage::VerilogA,
+                "module sensor_bridge; analog begin end endmodule".to_owned(),
+            )
+            .unwrap();
+        let current = super::super::snapshot(&state).expect("edited snapshot");
+        let mut registry = DocumentRegistry::default();
+        registry.rebuild(&current, Some(&baseline)).unwrap();
+
+        assert!(registry.is_dirty(&ProjectDocumentId::NetlistSource));
+        assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
     }
 }

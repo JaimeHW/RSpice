@@ -243,8 +243,10 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
 /// Canonical identity of every authoritative input consumed by schematic
 /// netlist generation. Result history and independently owned source decks are
 /// removed because neither is a generator input; design, hierarchy, project
-/// configuration, simulation-plan payloads, model bindings, and libraries
-/// remain covered by the ordinary document digests.
+/// configuration, simulation-plan payloads, project-owned behavioral sources,
+/// model bindings, and libraries remain covered by the ordinary document
+/// digests. Project sources must stay authenticated because their virtual
+/// directive identities and exact bytes affect generated output and execution.
 pub(crate) fn generated_netlist_input_digest(
     state: &AppState,
 ) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
@@ -369,10 +371,16 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
     {
         state.schematic.is_dirty = *dirty;
     }
-    state.workspace.netlist_source_dirty = state
-        .project_lifecycle
-        .registry
-        .is_dirty(&ProjectDocumentId::NetlistSource);
+    if let Some(accepted) = state.project_lifecycle.accepted.as_ref() {
+        let baseline = &accepted.baseline.workspace;
+        state.workspace.netlist_source_dirty = state.workspace.netlist_source
+            != baseline.netlist_source
+            || state.workspace.netlist_source_path != baseline.netlist_source_path
+            || state.workspace.netlist_document != baseline.netlist_document
+            || state.workspace.netlist_descriptor != baseline.netlist_descriptor;
+        state.workspace.project_sources_dirty =
+            state.workspace.project_sources != baseline.project_sources;
+    }
 }
 
 pub(crate) fn initialize_from_session(state: &mut AppState) {
@@ -1370,7 +1378,10 @@ fn mark_active_document_clean(state: &mut AppState) {
                 view.modified = false;
             }
         }
-        ProjectDocumentId::NetlistSource => state.workspace.netlist_source_dirty = false,
+        ProjectDocumentId::NetlistSource => {
+            state.workspace.netlist_source_dirty = false;
+            state.workspace.project_sources_dirty = false;
+        }
         _ => {}
     }
 }
@@ -1508,7 +1519,9 @@ fn revert_document(
             state.workspace.netlist_source_path = baseline.workspace.netlist_source_path;
             state.workspace.netlist_document = baseline.workspace.netlist_document;
             state.workspace.netlist_descriptor = baseline.workspace.netlist_descriptor;
+            state.workspace.project_sources = baseline.workspace.project_sources;
             state.workspace.netlist_source_dirty = false;
+            state.workspace.project_sources_dirty = false;
             state.ui.netlist = Default::default();
             state.simulation.netlist_content =
                 state.workspace.netlist_source.clone().unwrap_or_default();
@@ -1722,6 +1735,7 @@ fn overlay_document(
             target.workspace.netlist_source_path = working.workspace.netlist_source_path.clone();
             target.workspace.netlist_document = working.workspace.netlist_document.clone();
             target.workspace.netlist_descriptor = working.workspace.netlist_descriptor.clone();
+            target.workspace.project_sources = working.workspace.project_sources.clone();
         }
     }
     target
@@ -2070,6 +2084,101 @@ mod tests {
             Some(&receipt),
             9,
         ));
+    }
+
+    fn ensure_veriloga_source(state: &mut AppState, content: &str) {
+        if state
+            .workspace
+            .project_sources
+            .get(crate::state::ProjectSourceLanguage::VerilogA)
+            .is_none()
+        {
+            state
+                .workspace
+                .project_sources
+                .insert(
+                    crate::state::ProjectSourceDocument::try_new(
+                        "sensor_bridge.va",
+                        crate::state::ProjectSourceLanguage::VerilogA,
+                        content,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn code_document_overlay_copies_project_sources_atomically() {
+        let mut state = AppState::default();
+        ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
+        let mut target = snapshot(&state).unwrap();
+        state
+            .workspace
+            .replace_project_source(
+                crate::state::ProjectSourceLanguage::VerilogA,
+                "module sensor_bridge; analog begin end endmodule".to_owned(),
+            )
+            .unwrap();
+        let working = snapshot(&state).unwrap();
+
+        overlay_document(&mut target, &working, &ProjectDocumentId::NetlistSource).unwrap();
+
+        assert_eq!(
+            target.workspace.project_sources,
+            working.workspace.project_sources
+        );
+        assert_eq!(
+            target.workspace.netlist_source,
+            working.workspace.netlist_source
+        );
+    }
+
+    #[test]
+    fn code_sources_change_generated_netlist_and_execution_identity() {
+        let mut state = AppState::default();
+        ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
+        let before = generated_netlist_input_digest(&state).unwrap();
+
+        state
+            .workspace
+            .replace_project_source(
+                crate::state::ProjectSourceLanguage::VerilogA,
+                "module sensor_bridge; analog begin end endmodule".to_owned(),
+            )
+            .unwrap();
+
+        assert_ne!(generated_netlist_input_digest(&state).unwrap(), before);
+    }
+
+    #[test]
+    fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
+        let mut state = AppState::default();
+        ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
+        let baseline = snapshot(&state).unwrap();
+        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.accepted = Some(AcceptedProject {
+            baseline: baseline.clone(),
+            binding: None,
+        });
+        state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        state
+            .workspace
+            .replace_project_source(
+                crate::state::ProjectSourceLanguage::VerilogA,
+                "module sensor_bridge; analog begin end endmodule".to_owned(),
+            )
+            .unwrap();
+        assert!(state.workspace.project_sources_dirty);
+
+        revert_document(&mut state, ProjectDocumentId::NetlistSource).unwrap();
+
+        assert_eq!(
+            state.workspace.project_sources,
+            baseline.workspace.project_sources
+        );
+        assert!(!state.workspace.project_sources_dirty);
+        assert!(!state.workspace.netlist_source_dirty);
     }
 
     #[test]

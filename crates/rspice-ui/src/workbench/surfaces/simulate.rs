@@ -3081,7 +3081,7 @@ fn design_variables_card(
     height: f32,
     border: SetupCardBorder,
 ) -> bool {
-    setup_table_card(ui, height, border, |ui| {
+    setup_table_card(ui, "design-variables", height, border, |ui| {
         let add = setup_card_header(ui, "Design variables", "Add design variable");
         setup_table_row(
             ui,
@@ -3126,7 +3126,7 @@ fn outputs_specifications_card(
     height: f32,
     border: SetupCardBorder,
 ) -> bool {
-    setup_table_card(ui, height, border, |ui| {
+    setup_table_card(ui, "outputs-specifications", height, border, |ui| {
         let add = setup_card_header(ui, "Outputs & specifications", "Add saved output");
         setup_table_row(
             ui,
@@ -3200,6 +3200,7 @@ fn outputs_specifications_card(
 
 fn setup_table_card(
     ui: &mut Ui,
+    scroll_id: &'static str,
     height: f32,
     border: SetupCardBorder,
     body: impl FnOnce(&mut Ui) -> bool,
@@ -3212,7 +3213,10 @@ fn setup_table_card(
         ui.spacing_mut().item_spacing.y = 0.0;
         if width <= SIMULATION_STACK_BREAKPOINT {
             ScrollArea::horizontal()
-                .id_salt(("simulation-setup-card", ui.id()))
+                // Sibling setup tables share the same parent Ui. Give each
+                // scroll state an explicit stable identity so egui never
+                // aliases their state or emits a duplicate-id diagnostic.
+                .id_salt(("simulation-setup-card", scroll_id))
                 .auto_shrink([false, true])
                 .min_scrolled_width(540.0)
                 .show(ui, |ui| {

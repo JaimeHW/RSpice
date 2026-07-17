@@ -1,7 +1,6 @@
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
 use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState};
-use crate::device::veriloga_generated::kernel_runtime::{ReactiveScratch as KernelReactiveScratch, Scratch as KernelScratch};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -2369,8 +2368,6 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) scratch: Option<Box<KernelScratch<1871, 13, 9>>>,
-    pub(crate) reactive_scratch: Option<Box<KernelReactiveScratch<1871, 13, 9>>>,
 }
 
 impl Clone for Instance {
@@ -2394,8 +2391,6 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
-            scratch: None,
-            reactive_scratch: None,
         }
     }
 }
@@ -2411,7 +2406,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 1871;
     pub const DDT_STATE_COUNT: usize = 15;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "ceb02e4ca0f2c4ebed2c1f9a817c6abf0fee6d31d4b39ee4492454d5925a8aaa";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "011253fde5e9194b6ed8e0dc8485e61767d2f09b12e0c2b6b5599591c1031535";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -2437,15 +2432,11 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            scratch: None,
-            reactive_scratch: None,
         }
     }
 
     #[inline]
     pub fn restore_from_snapshot(&mut self, snapshot: Self) {
-        let scratch = self.scratch.take();
-        let reactive_scratch = self.reactive_scratch.take();
         let Self {
             nodes,
             branches,
@@ -2464,8 +2455,6 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scratch: _,
-            reactive_scratch: _,
         } = snapshot;
         *self = Self {
             nodes,
@@ -2485,8 +2474,6 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scratch,
-            reactive_scratch,
         };
     }
 
@@ -2527,8 +2514,6 @@ impl Instance {
         self.idt_state_previous.copy_from_slice(&state.idt_previous);
         self.idt_state_current.copy_from_slice(&state.idt_previous);
         self.idt_state_initialized.copy_from_slice(&state.idt_initialized);
-        self.scratch = None;
-        self.reactive_scratch = None;
         Ok(())
     }
 

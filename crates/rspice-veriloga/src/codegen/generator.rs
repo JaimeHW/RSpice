@@ -106,7 +106,7 @@ impl CodeGenerator {
         let timings = compile_timings_enabled();
 
         // Build IR
-        let phase_start = std::time::Instant::now();
+        let phase_start = web_time::Instant::now();
         let ir = DeviceIR::from_analyzed(module)?;
         if timings {
             eprintln!(
@@ -121,7 +121,7 @@ impl CodeGenerator {
         }
 
         // Generate code from IR
-        let phase_start = std::time::Instant::now();
+        let phase_start = web_time::Instant::now();
         let mut model = self.generate_from_ir(&ir)?;
         model.source_digest = source_digest;
         if timings {
@@ -199,7 +199,7 @@ impl CodeGenerator {
         self.cross_detector_count.set(0);
         self.timer_state_count.set(0);
 
-        let phase_start = std::time::Instant::now();
+        let phase_start = web_time::Instant::now();
         let parameters = ir
             .parameters
             .iter()
@@ -296,7 +296,7 @@ impl CodeGenerator {
         };
 
         // Generate evaluation steps (executed in order before contributions)
-        let phase_start = std::time::Instant::now();
+        let phase_start = web_time::Instant::now();
         model.assignment_steps = self.compile_assignment_items(&ir.assignments, &emit_ctx)?;
         if timings {
             eprintln!(
@@ -308,7 +308,7 @@ impl CodeGenerator {
         }
 
         // Generate stamp programs for each equation
-        let phase_start = std::time::Instant::now();
+        let phase_start = web_time::Instant::now();
         for eq in &ir.equations {
             let program = self.compile_equation(eq, ir, &emit_ctx)?;
             model.stamp_programs.push(program);
@@ -325,7 +325,7 @@ impl CodeGenerator {
 
         // Compile noise-source PSD programs (evaluated at the operating
         // point during noise analysis)
-        let phase_start = std::time::Instant::now();
+        let phase_start = web_time::Instant::now();
         for source in &ir.noise_sources {
             let psd_program = self.compile_expr(&source.psd, &emit_ctx)?;
             let exponent_program = source

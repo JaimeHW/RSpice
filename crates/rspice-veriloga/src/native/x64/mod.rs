@@ -6839,7 +6839,7 @@ endmodule
         samples: usize,
     ) {
         let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let compile_start = std::time::Instant::now();
+        let compile_start = web_time::Instant::now();
         let runtime = compiler
             .compile_file_runtime_with_metadata(path, module)
             .unwrap_or_else(|error| {
@@ -6849,7 +6849,7 @@ endmodule
                 )
             });
         let compile_elapsed = compile_start.elapsed();
-        let native_start = std::time::Instant::now();
+        let native_start = web_time::Instant::now();
         let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
             .unwrap_or_else(|error| panic!("native x64 compile shipped model {name}: {error}"));
         let native_compile_elapsed = native_start.elapsed();
@@ -6895,7 +6895,7 @@ endmodule
         let mut sample_ns_per_sweep = Vec::with_capacity(samples);
         let mut checksum = 0.0_f64;
         for _ in 0..samples {
-            let start = std::time::Instant::now();
+            let start = web_time::Instant::now();
             checksum += run_native_model_sweep_sample(
                 &runtime.model,
                 &native,
@@ -8034,7 +8034,7 @@ endmodule
         let mut sample_ns_per_eval = Vec::with_capacity(samples);
         let mut checksum = 0.0_f64;
         for _ in 0..samples {
-            let start = std::time::Instant::now();
+            let start = web_time::Instant::now();
             checksum += run_native_model_microbench_sample(&mut f, iterations);
             let elapsed = start.elapsed();
             sample_ns_per_eval.push(elapsed.as_nanos() as f64 / iterations as f64);

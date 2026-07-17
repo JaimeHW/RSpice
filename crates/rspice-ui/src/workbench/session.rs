@@ -436,6 +436,8 @@ pub struct UiSessionState {
     pub results: super::result_document::ResultsState,
     /// Netlist editor state (diagnostics, diff pips, tuner mode).
     pub netlist: super::netlist_document::NetlistDocumentState,
+    /// Visible Code & Automation page and revision-bound operation receipts.
+    pub code_workspace: super::code_workspace::CodeWorkspaceRuntimeState,
     /// Runtime state for the Schematic-family symbol editor surface.
     pub symbol: SymbolUiState,
     /// In-flight inspector edit session, if any.

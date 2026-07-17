@@ -201,6 +201,12 @@ pub(crate) fn action_export_generated_netlist_with_options(
         ));
         return false;
     }
+    if !bundle_dependencies && !artifact.dependencies().is_empty() {
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(
+            "Generated decks with project or external source dependencies must be exported as a self-contained bundle.",
+        ));
+        return false;
+    }
     if !bundle_dependencies {
         return publish_generated_source(state, &artifact, format, io);
     }
