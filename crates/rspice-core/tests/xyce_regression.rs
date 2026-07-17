@@ -4523,6 +4523,192 @@ fn test_xyce_measure_cont_tran_removed_wrappers_run_natively() {
 }
 
 #[test]
+fn test_xyce_measure_cont_step_tran_wrappers_run_relationally() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, owns_wrapper) in [
+        ("Netlists/MEASURE_CONT/STEP/DerivTestTran.cir", true),
+        ("Netlists/MEASURE_CONT/STEP/DerivTestTran.s0.cir", false),
+        ("Netlists/MEASURE_CONT/STEP/DerivTestTran.s1.cir", false),
+        ("Netlists/MEASURE_CONT/STEP/FindWhenTestTran.cir", true),
+        ("Netlists/MEASURE_CONT/STEP/FindWhenTestTran.s0.cir", false),
+        ("Netlists/MEASURE_CONT/STEP/FindWhenTestTran.s1.cir", false),
+        ("Netlists/MEASURE_CONT/STEP/TrigTargTestTran.cir", true),
+        ("Netlists/MEASURE_CONT/STEP/TrigTargTestTran.s0.cir", false),
+        ("Netlists/MEASURE_CONT/STEP/TrigTargTestTran.s1.cir", false),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            owns_wrapper,
+            "{relative} has incorrect Release-7.10 owner/control provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should execute its exact step/control/remeasure oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(
+            result.contract,
+            if owns_wrapper {
+                "measure_cont_step_tran_relational_wrapper"
+            } else {
+                "measure_cont_step_tran_relational_control"
+            }
+        );
+    }
+}
+
+#[test]
+fn test_xyce_measure_cont_step_tran_provenance_mutations_fail_closed() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
+    const OWNER: &str = "Netlists/MEASURE_CONT/STEP/DerivTestTran.cir";
+    const MEMBERS: [&str; 9] = [
+        "Netlists/MEASURE_CONT/STEP/DerivTestTran.cir",
+        "Netlists/MEASURE_CONT/STEP/DerivTestTran.s0.cir",
+        "Netlists/MEASURE_CONT/STEP/DerivTestTran.s1.cir",
+        "Netlists/MEASURE_CONT/STEP/FindWhenTestTran.cir",
+        "Netlists/MEASURE_CONT/STEP/FindWhenTestTran.s0.cir",
+        "Netlists/MEASURE_CONT/STEP/FindWhenTestTran.s1.cir",
+        "Netlists/MEASURE_CONT/STEP/TrigTargTestTran.cir",
+        "Netlists/MEASURE_CONT/STEP/TrigTargTestTran.s0.cir",
+        "Netlists/MEASURE_CONT/STEP/TrigTargTestTran.s1.cir",
+    ];
+    let corpus = get_xyce_tests_dir();
+    let make_fixture = |label: &str| {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-measure-cont-step-{label}-{}-{}",
+            std::process::id(),
+            FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        copy_fixture_tree(
+            &corpus.join("Netlists/MEASURE_CONT"),
+            &root.join("Netlists/MEASURE_CONT"),
+        );
+        copy_fixture_tree(
+            &corpus.join("OutputData/MEASURE_CONT"),
+            &root.join("OutputData/MEASURE_CONT"),
+        );
+        fs::copy(
+            corpus.join("RSPICE-HARNESS-MANIFEST.tsv"),
+            root.join("RSPICE-HARNESS-MANIFEST.tsv"),
+        )
+        .expect("copy canonical harness manifest");
+        root
+    };
+    let assert_fails = |root: &Path, label: &str| {
+        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+        let result = runner.run_test(root.join(OWNER));
+        assert!(
+            !result.passed && !result.expected_unsupported,
+            "{label} must fail the exact stepped MEASURE_CONT oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, "measure_cont_step_tran_relational_wrapper");
+    };
+
+    let root = make_fixture("canonical-lf");
+    for relative in MEMBERS {
+        let path = root.join(relative);
+        let source = fs::read_to_string(&path).expect("read stepped source");
+        fs::write(&path, source.replace("\r\n", "\n")).expect("write canonical LF source");
+    }
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let result = runner.run_test(root.join(OWNER));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "canonical LF must preserve stepped MEASURE_CONT provenance, got {result:?}"
+    );
+    fs::remove_dir_all(&root).expect("remove canonical-LF stepped fixture");
+
+    for (index, relative) in MEMBERS.into_iter().enumerate() {
+        let root = make_fixture(&format!("source-{index}"));
+        let path = root.join(relative);
+        let mut bytes = fs::read(&path).expect("read stepped source mutation target");
+        bytes.push(b' ');
+        fs::write(&path, bytes).expect("write stepped source mutation");
+        assert_fails(&root, relative);
+        fs::remove_dir_all(&root).expect("remove stepped source-mutation fixture");
+    }
+
+    for (label, mutate) in [
+        (
+            "extra-control",
+            "Netlists/MEASURE_CONT/STEP/DerivTestTran.s2.cir",
+        ),
+        (
+            "fake-mt",
+            "OutputData/MEASURE_CONT/STEP/DerivTestTran.cir.mt0",
+        ),
+        (
+            "fake-prn",
+            "OutputData/MEASURE_CONT/STEP/DerivTestTran.cir.prn",
+        ),
+    ] {
+        let root = make_fixture(label);
+        fs::write(root.join(mutate), "unexpected\n").expect("write unexpected stepped artifact");
+        assert_fails(&root, label);
+        fs::remove_dir_all(&root).expect("remove unexpected stepped-artifact fixture");
+    }
+
+    let root = make_fixture("control-in-manifest");
+    let manifest_path = root.join("RSPICE-HARNESS-MANIFEST.tsv");
+    let mut manifest = fs::read_to_string(&manifest_path).expect("read harness manifest");
+    manifest
+        .push_str("Netlists/MEASURE_CONT/STEP/DerivTestTran.s0.cir\trequires_upstream_wrapper\n");
+    fs::write(&manifest_path, manifest).expect("add stepped control to manifest");
+    assert_fails(&root, "control manifest ownership");
+    fs::remove_dir_all(&root).expect("remove control-manifest fixture");
+
+    let root = make_fixture("case-only-control");
+    let source = root.join("Netlists/MEASURE_CONT/STEP/DerivTestTran.s0.cir");
+    let temporary = root.join("Netlists/MEASURE_CONT/STEP/case-rename.tmp");
+    let renamed = root.join("Netlists/MEASURE_CONT/STEP/derivTestTran.s0.cir");
+    fs::rename(&source, &temporary).expect("stage case-only control rename");
+    fs::rename(&temporary, &renamed).expect("complete case-only control rename");
+    assert_fails(&root, "case-only control rename");
+    fs::remove_dir_all(&root).expect("remove case-only fixture");
+
+    let root = make_fixture("missing-control");
+    fs::remove_file(root.join("Netlists/MEASURE_CONT/STEP/DerivTestTran.s1.cir"))
+        .expect("remove stepped control");
+    assert_fails(&root, "missing stepped control");
+    fs::remove_dir_all(&root).expect("remove missing-control fixture");
+
+    let root = make_fixture("swapped-controls");
+    let s0 = root.join("Netlists/MEASURE_CONT/STEP/DerivTestTran.s0.cir");
+    let s1 = root.join("Netlists/MEASURE_CONT/STEP/DerivTestTran.s1.cir");
+    let s0_bytes = fs::read(&s0).expect("read s0 control");
+    let s1_bytes = fs::read(&s1).expect("read s1 control");
+    fs::write(&s0, s1_bytes).expect("replace s0 with s1");
+    fs::write(&s1, s0_bytes).expect("replace s1 with s0");
+    assert_fails(&root, "swapped stepped controls");
+    fs::remove_dir_all(&root).expect("remove swapped-control fixture");
+
+    for label in ["manifest-owner-missing", "manifest-owner-contract"] {
+        let root = make_fixture(label);
+        let manifest_path = root.join("RSPICE-HARNESS-MANIFEST.tsv");
+        let manifest = fs::read_to_string(&manifest_path).expect("read harness manifest");
+        let canonical = "Netlists/MEASURE_CONT/STEP/DerivTestTran.cir\trequires_upstream_wrapper";
+        let mutated = if label == "manifest-owner-missing" {
+            manifest
+                .lines()
+                .filter(|line| line.trim_end_matches('\r') != canonical)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        } else {
+            manifest.replace(canonical, &format!("{canonical} "))
+        };
+        fs::write(&manifest_path, mutated).expect("mutate stepped owner manifest row");
+        assert_fails(&root, label);
+        fs::remove_dir_all(&root).expect("remove manifest mutation fixture");
+    }
+}
+
+#[test]
 fn test_xyce_measure_cont_tran_provenance_mutations_fail_closed() {
     let _xyce_runner_guard = lock_xyce_runner();
     static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
