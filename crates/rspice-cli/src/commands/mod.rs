@@ -88,6 +88,10 @@ pub(crate) fn map_parse_error(error: rspice_core::error::ParseError) -> crate::c
                 }),
             )
         }
+        rspice_core::netlist::ParseError::StartupDirectiveConflict(conflict) => (
+            error.to_string(),
+            (conflict.conflicting.line != 0).then_some(conflict.conflicting.line),
+        ),
         _ => (error.to_string(), None),
     };
     crate::cli::CliError::ParseError {
@@ -186,5 +190,27 @@ mod tests {
             panic!("typed output failure must map to a CLI parse error")
         };
         assert_eq!(line, Some(17));
+    }
+
+    #[test]
+    fn startup_conflict_maps_to_the_conflicting_card_location() {
+        let mapped = map_parse_error(rspice_core::netlist::ParseError::StartupDirectiveConflict(
+            Box::new(rspice_core::netlist::StartupDirectiveConflictError {
+                first_kind: rspice_core::netlist::StartupDirectiveKind::Ic,
+                first: rspice_core::netlist::NetlistSourceLocation::in_file("deck.cir", 4),
+                conflicting_kind: rspice_core::netlist::StartupDirectiveKind::NodeSet,
+                conflicting: rspice_core::netlist::NetlistSourceLocation::in_file("deck.cir", 9),
+            }),
+        ));
+
+        match mapped {
+            crate::cli::CliError::ParseError { message, line, .. } => {
+                assert_eq!(line, Some(9));
+                assert!(message.contains("Cannot set both .IC and .NODESET simultaneously"));
+                assert!(message.contains("deck.cir:4"));
+                assert!(message.contains("deck.cir:9"));
+            }
+            other => panic!("expected parse error, got {other:?}"),
+        }
     }
 }
