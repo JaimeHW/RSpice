@@ -25,7 +25,8 @@ use crate::netlist::{
     DuplicateSubcircuitPortBindingError, ElementKind, ExpressionDialect,
     MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist, NetlistParseOptions,
     OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy, ParametricValue,
-    ParseError, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    ParseError, StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind,
+    StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
     TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, validate_output_symbols,
 };
 use crate::{Complex64, Engine, Value};
@@ -117,6 +118,39 @@ const XYCE_BUG667_NODESET_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_667_son/nodeset_in_subckt.cir";
 const XYCE_BUG667_NODESET_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_667_son/nodeset_not_in_subckt.cir";
+const XYCE_IC_MISSING_NODE_WARNING_RECORD: &str =
+    "netlists/message/input/ic_at_missing_node_warning.cir";
+const XYCE_IC_EMPTY_WARNING_RECORD: &str = "netlists/message/input/ic_no_args_warning.cir";
+const XYCE_NODESET_MISSING_NODE_WARNING_RECORD: &str =
+    "netlists/message/input/nodeset_at_missing_node_warning.cir";
+const XYCE_NODESET_EMPTY_WARNING_RECORD: &str =
+    "netlists/message/input/nodeset_no_args_warning.cir";
+const XYCE_BUG667_SCOPED_GLOBAL_WARNING_RECORD: &str =
+    "netlists/certification_tests/bug_667_son/ic_in_subckt_warning.cir";
+const XYCE_IC_NODESET_CONFLICT_RECORD: &str = "netlists/message/input/ic_and_nodeset_specified.cir";
+
+const XYCE_IC_MISSING_NODE_WARNING_BLAKE3: &str =
+    "c49c834da18ec5603a8fc748f79d184fd94385acdf12a2ffdf0c9c2b77efa793";
+const XYCE_IC_EMPTY_WARNING_BLAKE3: &str =
+    "b2f42b66d52f0c2dbf11d075e02f4fa5910b7b0f563cb7533e8759e43c4f708f";
+const XYCE_NODESET_MISSING_NODE_WARNING_BLAKE3: &str =
+    "9b861bfd6daed7c866918ddfb98f67c8f3968836b674ce1ca42c45c608059ab9";
+const XYCE_NODESET_EMPTY_WARNING_BLAKE3: &str =
+    "f89293d171168ccc1e958b88a0ca64127d29b06ed44fb50383880e9747f79729";
+const XYCE_BUG667_SCOPED_GLOBAL_WARNING_BLAKE3: &str =
+    "be5e0b168367716ca744c38417952c0b680ae063d309859100202d2b37242f19";
+const XYCE_IC_NODESET_CONFLICT_BLAKE3: &str =
+    "1e7597f00478759e105259a832d7aa298c3ffcb3c4d3a8efda4c236504ebed6b";
+
+const XYCE_STARTUP_MESSAGE_INPUT_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
+    "c1c3aab2bbf03214039de43671c9c36fe3b4e69a2baf92fd60124de6da76e950";
+const XYCE_STARTUP_BUG667_PHYSICAL_CENSUS_BLAKE3: &str =
+    "e6f6e3062ace9ab02388edc91e9a01dba2979617d480dcaba154d6398f125603";
+const XYCE_STARTUP_BUG667_MANIFEST_CENSUS_BLAKE3: &str =
+    "2457b1e041aeb407a95238024680799052bf59342381aeb9b67b16ce85df8891";
+const XYCE_STARTUP_OPTIONS_BLAKE3: &str =
+    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
+const XYCE_STARTUP_OPTIONS_BYTES: usize = 14;
 const XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_754_son/dcsweep_globalpar.cir";
 const XYCE_BUG754_LITERAL_REFERENCE_RECORD: &str =
@@ -472,6 +506,149 @@ q1 3 2 0 2n3510\n\
 .end\n";
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
+
+/// Removed-wrapper startup contracts whose observable is a diagnostic rather
+/// than a numeric output artifact. Warning contracts still execute the full
+/// native transient and require a successful simulation; the conflict
+/// contract requires the typed Xyce parse failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStartupOracleKind {
+    IcMissingNodeWarning,
+    IcEmptyWarning,
+    NodeSetMissingNodeWarning,
+    NodeSetEmptyWarning,
+    Bug667ScopedGlobalWarning,
+    IcNodeSetConflict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceStartupWarningExpectation {
+    directive: StartupDirectiveKind,
+    code: StartupDiagnosticCode,
+    stage: StartupDiagnosticStage,
+    line: usize,
+    canonical_nodes: &'static [&'static str],
+    ordered_upstream_patterns: &'static [&'static str],
+}
+
+impl XyceStartupOracleKind {
+    fn for_record(relative_path: &str) -> Option<Self> {
+        match XyceTestRunner::normalize_manifest_key(relative_path).as_str() {
+            XYCE_IC_MISSING_NODE_WARNING_RECORD => Some(Self::IcMissingNodeWarning),
+            XYCE_IC_EMPTY_WARNING_RECORD => Some(Self::IcEmptyWarning),
+            XYCE_NODESET_MISSING_NODE_WARNING_RECORD => Some(Self::NodeSetMissingNodeWarning),
+            XYCE_NODESET_EMPTY_WARNING_RECORD => Some(Self::NodeSetEmptyWarning),
+            XYCE_BUG667_SCOPED_GLOBAL_WARNING_RECORD => Some(Self::Bug667ScopedGlobalWarning),
+            XYCE_IC_NODESET_CONFLICT_RECORD => Some(Self::IcNodeSetConflict),
+            _ => None,
+        }
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::IcMissingNodeWarning => XYCE_IC_MISSING_NODE_WARNING_RECORD,
+            Self::IcEmptyWarning => XYCE_IC_EMPTY_WARNING_RECORD,
+            Self::NodeSetMissingNodeWarning => XYCE_NODESET_MISSING_NODE_WARNING_RECORD,
+            Self::NodeSetEmptyWarning => XYCE_NODESET_EMPTY_WARNING_RECORD,
+            Self::Bug667ScopedGlobalWarning => XYCE_BUG667_SCOPED_GLOBAL_WARNING_RECORD,
+            Self::IcNodeSetConflict => XYCE_IC_NODESET_CONFLICT_RECORD,
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::IcMissingNodeWarning => (347, XYCE_IC_MISSING_NODE_WARNING_BLAKE3),
+            Self::IcEmptyWarning => (309, XYCE_IC_EMPTY_WARNING_BLAKE3),
+            Self::NodeSetMissingNodeWarning => (352, XYCE_NODESET_MISSING_NODE_WARNING_BLAKE3),
+            Self::NodeSetEmptyWarning => (319, XYCE_NODESET_EMPTY_WARNING_BLAKE3),
+            Self::Bug667ScopedGlobalWarning => (965, XYCE_BUG667_SCOPED_GLOBAL_WARNING_BLAKE3),
+            Self::IcNodeSetConflict => (409, XYCE_IC_NODESET_CONFLICT_BLAKE3),
+        }
+    }
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::IcMissingNodeWarning => "expected_warning_ic_undefined_node_success",
+            Self::IcEmptyWarning => "expected_warning_ic_empty_success",
+            Self::NodeSetMissingNodeWarning => "expected_warning_nodeset_undefined_node_success",
+            Self::NodeSetEmptyWarning => "expected_warning_nodeset_empty_success",
+            Self::Bug667ScopedGlobalWarning => "expected_warning_bug667_scoped_global_ic_success",
+            Self::IcNodeSetConflict => "expected_failure_message_ic_nodeset_conflict_parse",
+        }
+    }
+
+    fn warning_expectation(self) -> Option<XyceStartupWarningExpectation> {
+        const MISSING_PATTERNS: &[&str] = &[
+            "Netlist warning: Initial conditions specified at nodes not present in circuit.",
+            "May be error in .IC or .NODESET line. Ignoring nodes:",
+            "BLEEM",
+        ];
+        match self {
+            Self::IcMissingNodeWarning => Some(XyceStartupWarningExpectation {
+                directive: StartupDirectiveKind::Ic,
+                code: StartupDiagnosticCode::UndefinedNode,
+                stage: StartupDiagnosticStage::StartupTopology,
+                line: 16,
+                canonical_nodes: &["BLEEM"],
+                ordered_upstream_patterns: MISSING_PATTERNS,
+            }),
+            Self::IcEmptyWarning => Some(XyceStartupWarningExpectation {
+                directive: StartupDirectiveKind::Ic,
+                code: StartupDiagnosticCode::EmptyDirective,
+                stage: StartupDiagnosticStage::Parse,
+                line: 15,
+                canonical_nodes: &[],
+                ordered_upstream_patterns: &[
+                    "Netlist warning in file IC_No_Args_Warning.cir",
+                    "Ignored .IC and/or .DCVOLT, no arguments provided.",
+                ],
+            }),
+            Self::NodeSetMissingNodeWarning => Some(XyceStartupWarningExpectation {
+                directive: StartupDirectiveKind::NodeSet,
+                code: StartupDiagnosticCode::UndefinedNode,
+                stage: StartupDiagnosticStage::StartupTopology,
+                line: 16,
+                canonical_nodes: &["BLEEM"],
+                ordered_upstream_patterns: MISSING_PATTERNS,
+            }),
+            Self::NodeSetEmptyWarning => Some(XyceStartupWarningExpectation {
+                directive: StartupDirectiveKind::NodeSet,
+                code: StartupDiagnosticCode::EmptyDirective,
+                stage: StartupDiagnosticStage::Parse,
+                line: 15,
+                canonical_nodes: &[],
+                ordered_upstream_patterns: &[
+                    "Netlist warning in file NODESET_No_Args_Warning.cir",
+                    "Ignored .NODESET, no arguments provided.",
+                ],
+            }),
+            Self::Bug667ScopedGlobalWarning => Some(XyceStartupWarningExpectation {
+                directive: StartupDirectiveKind::Ic,
+                code: StartupDiagnosticCode::ScopedGlobalNode,
+                stage: StartupDiagnosticStage::Parse,
+                line: 31,
+                canonical_nodes: &["$G_VCC"],
+                ordered_upstream_patterns: &[
+                    "Ignored .IC and/or .DCVOLT on global node",
+                    "move statement to global scope",
+                ],
+            }),
+            Self::IcNodeSetConflict => None,
+        }
+    }
+
+    fn conflict_error_policy(self) -> Option<XyceUpstreamExpectedErrorPolicy> {
+        (self == Self::IcNodeSetConflict).then_some(XyceUpstreamExpectedErrorPolicy {
+            requires_nonzero_exit: true,
+            search_streams: XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr,
+            ordered_patterns: &["Cannot set both .IC and .NODESET simultaneously"],
+        })
+    }
+
+    fn is_message_input(self) -> bool {
+        !matches!(self, Self::Bug667ScopedGlobalWarning)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceExpectedFailureKind {
@@ -2089,6 +2266,7 @@ enum XyceExpectedFailureCategory {
     InvalidNetlistLinePrefix,
     InvalidNumericNotation,
     UndefinedMutualInductorReference,
+    ConflictingStartupDirectives,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4771,6 +4949,23 @@ impl XyceTestRunner {
             );
         }
 
+        if let Some(kind) = XyceStartupOracleKind::for_record(&deck.relative_path) {
+            let contract = kind.result_contract();
+            let result = match self.validate_startup_diagnostic_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(result) = self.run_expected_error_contract(deck, start) {
             if self.config.verbose {
                 println!(
@@ -5261,6 +5456,601 @@ impl XyceTestRunner {
             duration_ms: start.elapsed().as_millis(),
             contract: contract.to_string(),
         }
+    }
+
+    fn validate_startup_diagnostic_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceStartupOracleKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        self.validate_startup_oracle_provenance(deck, kind)?;
+        let source_bytes = fs::read(&deck.path).map_err(|error| {
+            format!(
+                "failed to read startup-diagnostic record {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        Self::validate_startup_source_identity(kind, &source_bytes)?;
+        let source = std::str::from_utf8(&source_bytes).map_err(|error| {
+            format!(
+                "startup-diagnostic record '{}' is not UTF-8: {error}",
+                kind.record()
+            )
+        })?;
+
+        if kind == XyceStartupOracleKind::IcNodeSetConflict {
+            let policy = kind.conflict_error_policy().ok_or_else(|| {
+                "IC/NODESET conflict is missing its removed-wrapper error policy".to_string()
+            })?;
+            if !policy.requires_nonzero_exit
+                || policy.search_streams
+                    != XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr
+                || policy.ordered_patterns != ["Cannot set both .IC and .NODESET simultaneously"]
+            {
+                return Err(
+                    "IC/NODESET conflict has an incomplete removed-wrapper error policy"
+                        .to_string(),
+                );
+            }
+            let observation = Self::observe_startup_conflict(source, &deck.path)?;
+            let expected = XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::ConflictingStartupDirectives,
+                identifiers: vec![
+                    format!(".IC|{}:16", kind.record()),
+                    format!(".NODESET|{}:17", kind.record()),
+                ],
+            };
+            if observation != expected {
+                return Err(format!(
+                    "IC/NODESET conflict produced the wrong typed expected-failure observation: expected {expected:?}, got {observation:?}"
+                ));
+            }
+            return Ok(());
+        }
+
+        let expectation = kind
+            .warning_expectation()
+            .ok_or_else(|| "startup warning record has no warning expectation".to_string())?;
+        if expectation.ordered_upstream_patterns.is_empty()
+            || expectation
+                .ordered_upstream_patterns
+                .iter()
+                .any(|pattern| pattern.is_empty())
+        {
+            return Err(format!(
+                "startup warning record '{}' has an incomplete removed-wrapper success-warning policy",
+                kind.record()
+            ));
+        }
+
+        let netlist = Self::parse_xyce_netlist(source, &deck.path).map_err(|error| {
+            format!(
+                "startup warning record '{}' did not parse successfully: {error}",
+                kind.record()
+            )
+        })?;
+        Self::validate_startup_warning_observation(&netlist, &deck.path, kind, expectation)?;
+
+        // The removed wrappers required a zero simulator exit, not merely a
+        // successful parser return. Execute the complete admitted transient
+        // and require a finite, structurally valid result grid.
+        let tran = Self::single_tran_analysis(&netlist)?;
+        let max_step = Self::transient_family_max_step(&netlist, &tran)?;
+        let initial_step = Self::xyce_initial_timestep_for_tran(&tran);
+        let engine = self.create_xyce_static_tran_engine(None, initial_step);
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let result = engine
+            .run_tran_with_abort(&netlist, tran.stop, max_step, &abort)
+            .map_err(|error| {
+                format!(
+                    "startup warning record '{}' failed native transient execution: {error}",
+                    kind.record()
+                )
+            })?;
+        Self::validate_transient_result_time_grid(&result).map_err(|error| {
+            format!(
+                "startup warning record '{}' produced an invalid transient result: {error}",
+                kind.record()
+            )
+        })
+    }
+
+    fn validate_startup_source_identity(
+        kind: XyceStartupOracleKind,
+        source_bytes: &[u8],
+    ) -> Result<(), String> {
+        let (expected_bytes, expected_hash) = kind.source_identity();
+        let actual_hash = blake3::hash(source_bytes).to_hex().to_string();
+        if source_bytes.len() != expected_bytes || actual_hash != expected_hash {
+            return Err(format!(
+                "startup-diagnostic record '{}' source identity changed: expected {expected_bytes} bytes / {expected_hash}, got {} bytes / {actual_hash}",
+                kind.record(),
+                source_bytes.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_startup_warning_observation(
+        netlist: &Netlist,
+        deck_path: &Path,
+        kind: XyceStartupOracleKind,
+        expected: XyceStartupWarningExpectation,
+    ) -> Result<(), String> {
+        let diagnostics = netlist.startup_diagnostics();
+        if diagnostics.len() != 1 {
+            return Err(format!(
+                "startup warning record '{}' produced {} typed startup diagnostics, expected exactly one: {diagnostics:?}",
+                kind.record(),
+                diagnostics.len()
+            ));
+        }
+        let actual = &diagnostics[0];
+        if actual.code != expected.code
+            || actual.stage != expected.stage
+            || actual.kind != expected.directive
+            || actual.canonical_nodes
+                != expected
+                    .canonical_nodes
+                    .iter()
+                    .map(|node| (*node).to_string())
+                    .collect::<Vec<_>>()
+        {
+            return Err(format!(
+                "startup warning record '{}' produced the wrong typed observation: expected {:?}/{:?}/{:?}/{:?}, got {actual:?}",
+                kind.record(),
+                expected.directive,
+                expected.code,
+                expected.stage,
+                expected.canonical_nodes
+            ));
+        }
+        if actual.origins.len() != 1 || actual.origins[0].line != expected.line {
+            return Err(format!(
+                "startup warning record '{}' produced the wrong physical origin: expected line {}, got {:?}",
+                kind.record(),
+                expected.line,
+                actual.origins
+            ));
+        }
+        let origin_path = actual.origins[0].path.as_ref().ok_or_else(|| {
+            format!(
+                "startup warning record '{}' lost its physical source path",
+                kind.record()
+            )
+        })?;
+        if origin_path.canonicalize().ok() != deck_path.canonicalize().ok() {
+            return Err(format!(
+                "startup warning record '{}' diagnostic origin resolved to {}, not {}",
+                kind.record(),
+                origin_path.display(),
+                deck_path.display()
+            ));
+        }
+
+        match kind {
+            XyceStartupOracleKind::Bug667ScopedGlobalWarning => {
+                if actual.scopes.len() != 1 {
+                    return Err(format!(
+                        "BUG667 startup warning must retain exactly one scoped origin, got {:?}",
+                        actual.scopes
+                    ));
+                }
+                match &actual.scopes[0] {
+                    StartupDirectiveScope::Subcircuit {
+                        qualified_definition,
+                        qualified_instances,
+                    } if qualified_definition.eq_ignore_ascii_case("IC_SUBCKT")
+                        && qualified_instances.is_empty() => {}
+                    scope => {
+                        return Err(format!(
+                            "BUG667 startup warning produced the wrong exact subcircuit scope: {scope:?}"
+                        ));
+                    }
+                }
+                let subcircuit = netlist
+                    .subcircuits
+                    .iter()
+                    .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case("IC_SUBCKT"))
+                    .ok_or_else(|| "BUG667 IC_SUBCKT definition is missing".to_string())?;
+                if subcircuit.initial_conditions.len() != 1
+                    || !subcircuit.initial_conditions[0]
+                        .node
+                        .eq_ignore_ascii_case("mid")
+                {
+                    return Err(format!(
+                        "BUG667 valid sibling .IC card did not survive whole-card global rejection: {:?}",
+                        subcircuit.initial_conditions
+                    ));
+                }
+            }
+            _ => {
+                if actual.scopes.as_slice() != [StartupDirectiveScope::TopLevel] {
+                    return Err(format!(
+                        "startup warning record '{}' must retain exact top-level scope, got {:?}",
+                        kind.record(),
+                        actual.scopes
+                    ));
+                }
+            }
+        }
+
+        // Startup projection owns one public warning per typed observation.
+        // Reject any other parser warning so a newly introduced diagnostic can
+        // never be silently admitted by this contract.
+        if netlist.diagnostics.len() != 1
+            || netlist.diagnostics[0].line != expected.line
+            || netlist.diagnostics[0].code != expected.code.as_str()
+        {
+            return Err(format!(
+                "startup warning record '{}' emitted unexpected public parse warnings: {:?}",
+                kind.record(),
+                netlist.diagnostics
+            ));
+        }
+        Ok(())
+    }
+
+    fn observe_startup_conflict(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let error = match Self::parse_xyce_netlist(source, deck_path) {
+            Ok(_) => {
+                return Err(
+                    "IC/NODESET conflict unexpectedly parsed successfully in Xyce mode".to_string(),
+                );
+            }
+            Err(error) => error,
+        };
+        let ParseError::StartupDirectiveConflict(conflict) = error else {
+            return Err(format!(
+                "IC/NODESET conflict produced the wrong typed failure (conflict must precede undefined-node validation): {error}"
+            ));
+        };
+        if conflict.first_kind != StartupDirectiveKind::Ic
+            || conflict.first.line != 16
+            || conflict.conflicting_kind != StartupDirectiveKind::NodeSet
+            || conflict.conflicting.line != 17
+        {
+            return Err(format!(
+                "IC/NODESET conflict retained the wrong ordered physical origins: {conflict:?}"
+            ));
+        }
+        for origin in [&conflict.first, &conflict.conflicting] {
+            let path = origin
+                .path
+                .as_ref()
+                .ok_or_else(|| "IC/NODESET conflict lost a physical source path".to_string())?;
+            if path.canonicalize().ok() != deck_path.canonicalize().ok() {
+                return Err(format!(
+                    "IC/NODESET conflict origin resolved to {}, not {}",
+                    path.display(),
+                    deck_path.display()
+                ));
+            }
+        }
+        let record = XYCE_IC_NODESET_CONFLICT_RECORD;
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::ConflictingStartupDirectives,
+            identifiers: vec![format!(".IC|{record}:16"), format!(".NODESET|{record}:17")],
+        })
+    }
+
+    fn validate_startup_oracle_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceStartupOracleKind,
+    ) -> Result<(), String> {
+        if deck.section != XyceDeckSection::Netlists {
+            return Err(format!(
+                "startup-diagnostic record '{}' is not in the Netlists corpus",
+                kind.record()
+            ));
+        }
+        if Self::normalize_manifest_key(&deck.relative_path) != kind.record() {
+            return Err(format!(
+                "startup-diagnostic record path mismatch: expected '{}', got '{}'",
+                kind.record(),
+                deck.relative_path
+            ));
+        }
+        let canonical_deck = deck.path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize startup-diagnostic record {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        let canonical_expected = self
+            .root
+            .join(Path::new(&deck.relative_path))
+            .canonicalize()
+            .map_err(|error| {
+                format!(
+                    "startup-diagnostic record '{}' is missing from the vendored corpus: {error}",
+                    kind.record()
+                )
+            })?;
+        if canonical_deck != canonical_expected {
+            return Err(format!(
+                "startup-diagnostic record '{}' resolved outside its canonical corpus path",
+                kind.record()
+            ));
+        }
+        let metadata = fs::symlink_metadata(&deck.path).map_err(|error| {
+            format!(
+                "failed to inspect startup-diagnostic record {}: {error}",
+                deck.path.display()
+            )
+        })?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "startup-diagnostic record '{}' must be a regular non-symlink file",
+                kind.record()
+            ));
+        }
+        if !self.requires_upstream_wrapper(&deck.relative_path) {
+            return Err(format!(
+                "startup-diagnostic record '{}' lost its removed-wrapper manifest provenance",
+                kind.record()
+            ));
+        }
+
+        let (
+            family_prefix,
+            physical_count,
+            physical_hash,
+            manifest_count,
+            manifest_hash,
+            complete_count,
+            complete_hash,
+        ) = if kind.is_message_input() {
+            (
+                "netlists/message/input/",
+                79,
+                XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
+                50,
+                XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+                87,
+                XYCE_STARTUP_MESSAGE_INPUT_SOURCE_DIRECTORY_CENSUS_BLAKE3,
+            )
+        } else {
+            (
+                "netlists/certification_tests/bug_667_son/",
+                5,
+                XYCE_STARTUP_BUG667_PHYSICAL_CENSUS_BLAKE3,
+                3,
+                XYCE_STARTUP_BUG667_MANIFEST_CENSUS_BLAKE3,
+                5,
+                XYCE_STARTUP_BUG667_PHYSICAL_CENSUS_BLAKE3,
+            )
+        };
+        let family_dir = deck.path.parent().ok_or_else(|| {
+            "startup-diagnostic record has no source family directory".to_string()
+        })?;
+        Self::validate_startup_source_family_census(
+            family_dir,
+            physical_count,
+            physical_hash,
+            complete_count,
+            complete_hash,
+        )?;
+        let manifest_records = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| record.starts_with(family_prefix))
+            .cloned()
+            .collect::<Vec<_>>();
+        let actual_manifest_hash = blake3::hash(manifest_records.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if manifest_records.len() != manifest_count || actual_manifest_hash != manifest_hash {
+            return Err(format!(
+                "startup-diagnostic manifest family '{}' changed: expected {manifest_count} / {manifest_hash}, got {} / {actual_manifest_hash}",
+                family_prefix.trim_end_matches('/'),
+                manifest_records.len()
+            ));
+        }
+        if !manifest_records
+            .iter()
+            .any(|record| record == kind.record())
+        {
+            return Err(format!(
+                "startup-diagnostic record '{}' is absent from its pinned manifest family",
+                kind.record()
+            ));
+        }
+
+        if kind.is_message_input() {
+            let options = family_dir.join("options");
+            let metadata = fs::symlink_metadata(&options).map_err(|error| {
+                format!("failed to inspect Message/Input options file: {error}")
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err("Message/Input options must be a regular non-symlink file".to_string());
+            }
+            let bytes = fs::read(&options)
+                .map_err(|error| format!("failed to read Message/Input options: {error}"))?;
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            if bytes.len() != XYCE_STARTUP_OPTIONS_BYTES || hash != XYCE_STARTUP_OPTIONS_BLAKE3 {
+                return Err(format!(
+                    "Message/Input options changed: expected {} / {}, got {} / {hash}",
+                    XYCE_STARTUP_OPTIONS_BYTES,
+                    XYCE_STARTUP_OPTIONS_BLAKE3,
+                    bytes.len()
+                ));
+            }
+        }
+
+        Self::reject_startup_source_sidecars(&deck.path)?;
+        self.reject_startup_output_artifacts(&deck.path)?;
+        Ok(())
+    }
+
+    fn validate_startup_source_family_census(
+        family_dir: &Path,
+        expected_physical_count: usize,
+        expected_physical_hash: &str,
+        expected_complete_count: usize,
+        expected_complete_hash: &str,
+    ) -> Result<(), String> {
+        let mut physical = BTreeSet::new();
+        let mut complete = BTreeSet::new();
+        for entry in fs::read_dir(family_dir).map_err(|error| {
+            format!(
+                "failed to inspect startup-diagnostic source family {}: {error}",
+                family_dir.display()
+            )
+        })? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to read startup-diagnostic family entry in {}: {error}",
+                    family_dir.display()
+                )
+            })?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect startup-diagnostic family member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "startup-diagnostic family member {} must be a regular non-symlink file",
+                    entry.path().display()
+                ));
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| {
+                    format!(
+                        "startup-diagnostic family filename in {} is not UTF-8",
+                        family_dir.display()
+                    )
+                })?
+                .to_ascii_lowercase();
+            if !complete.insert(name.clone()) {
+                return Err(format!(
+                    "startup-diagnostic family contains case-colliding name {name:?}"
+                ));
+            }
+            if name.ends_with(".cir") {
+                physical.insert(name);
+            }
+        }
+        let physical = physical.into_iter().collect::<Vec<_>>();
+        let complete = complete.into_iter().collect::<Vec<_>>();
+        let physical_hash = blake3::hash(physical.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let complete_hash = blake3::hash(complete.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if physical.len() != expected_physical_count || physical_hash != expected_physical_hash {
+            return Err(format!(
+                "startup-diagnostic physical .cir census changed: expected {expected_physical_count} / {expected_physical_hash}, got {} / {physical_hash}",
+                physical.len()
+            ));
+        }
+        if complete.len() != expected_complete_count || complete_hash != expected_complete_hash {
+            return Err(format!(
+                "startup-diagnostic complete source-directory census changed: expected {expected_complete_count} / {expected_complete_hash}, got {} / {complete_hash}",
+                complete.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_startup_source_sidecars(deck_path: &Path) -> Result<(), String> {
+        let family_dir = deck_path
+            .parent()
+            .ok_or_else(|| "startup-diagnostic source has no family directory".to_string())?;
+        let deck_name = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "startup-diagnostic source filename is not UTF-8".to_string())?;
+        let prefix = format!("{deck_name}.").to_ascii_lowercase();
+        let mut sidecars = Vec::new();
+        for entry in fs::read_dir(family_dir)
+            .map_err(|error| format!("failed to inspect source sidecars: {error}"))?
+        {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to read source-sidecar entry in {}: {error}",
+                    family_dir.display()
+                )
+            })?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&prefix))
+            {
+                sidecars.push(entry.path());
+            }
+        }
+        sidecars.sort();
+        if !sidecars.is_empty() {
+            return Err(format!(
+                "startup-diagnostic source must not own source-directory sidecars: {sidecars:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_startup_output_artifacts(&self, deck_path: &Path) -> Result<(), String> {
+        let anchor = self
+            .static_output_reference_path(deck_path, "anchor")
+            .ok_or_else(|| {
+                "startup-diagnostic source cannot be mapped into OutputData".to_string()
+            })?;
+        let output_dir = anchor
+            .parent()
+            .ok_or_else(|| "startup-diagnostic OutputData path has no parent".to_string())?;
+        if !output_dir.exists() {
+            return Ok(());
+        }
+        let metadata = fs::symlink_metadata(output_dir)
+            .map_err(|error| format!("failed to inspect startup OutputData: {error}"))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "startup-diagnostic OutputData path {} must be a regular non-symlink directory",
+                output_dir.display()
+            ));
+        }
+        let deck_name = deck_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "startup-diagnostic filename is not UTF-8".to_string())?;
+        let prefix = format!("{deck_name}.").to_ascii_lowercase();
+        let mut artifacts = Vec::new();
+        for entry in fs::read_dir(output_dir)
+            .map_err(|error| format!("failed to inspect startup OutputData entries: {error}"))?
+        {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to read startup OutputData entry in {}: {error}",
+                    output_dir.display()
+                )
+            })?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&prefix))
+            {
+                artifacts.push(entry.path());
+            }
+        }
+        artifacts.sort();
+        if !artifacts.is_empty() {
+            return Err(format!(
+                "startup-diagnostic source must not own checked-in output artifacts: {artifacts:?}"
+            ));
+        }
+        Ok(())
     }
 
     fn run_expected_error_contract(
@@ -73839,5 +74629,143 @@ R2 2 0 1
         );
 
         fs::remove_dir_all(temp_root).expect("remove BUG 204 artifact fixture");
+    }
+
+    #[test]
+    fn startup_oracle_source_identity_and_provenance_mutations_fail_closed() {
+        let root = expected_failure_test_root();
+        let relative = "Netlists/Message/Input/IC_No_Args_Warning.cir";
+        let path = root.join(relative);
+        let kind = XyceStartupOracleKind::IcEmptyWarning;
+        let canonical = fs::read(&path).expect("read startup warning source");
+        XyceTestRunner::validate_startup_source_identity(kind, &canonical)
+            .expect("canonical startup source identity qualifies");
+
+        let mut byte_mutation = canonical.clone();
+        byte_mutation[0] ^= 1;
+        assert!(
+            XyceTestRunner::validate_startup_source_identity(kind, &byte_mutation).is_err(),
+            "one-byte mutation must fail the exact source digest"
+        );
+        let mut length_mutation = canonical.clone();
+        length_mutation.push(b'\n');
+        assert!(
+            XyceTestRunner::validate_startup_source_identity(kind, &length_mutation).is_err(),
+            "length mutation must fail the exact source identity"
+        );
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let canonical_deck = XyceDeck {
+            path: path.clone(),
+            section: XyceDeckSection::Netlists,
+            relative_path: relative.to_string(),
+        };
+        runner
+            .validate_startup_oracle_provenance(&canonical_deck, kind)
+            .expect("canonical startup provenance qualifies");
+
+        let wrong_path = XyceDeck {
+            relative_path: "Netlists/Message/Input/NODESET_No_Args_Warning.cir".to_string(),
+            ..canonical_deck.clone()
+        };
+        assert!(
+            runner
+                .validate_startup_oracle_provenance(&wrong_path, kind)
+                .is_err(),
+            "record/path substitution must fail closed"
+        );
+
+        let mut missing_owner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            missing_owner
+                .upstream_wrapper_decks
+                .remove(XYCE_IC_EMPTY_WARNING_RECORD),
+            "canonical manifest contains startup warning owner"
+        );
+        assert!(
+            missing_owner
+                .validate_startup_oracle_provenance(&canonical_deck, kind)
+                .is_err(),
+            "missing manifest ownership must fail closed"
+        );
+    }
+
+    #[test]
+    fn startup_warning_observers_reject_typed_semantic_mutations() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Message/Input/IC_At_Missing_Node_Warning.cir");
+        let source = fs::read_to_string(&path).expect("read IC missing-node source");
+        let kind = XyceStartupOracleKind::IcMissingNodeWarning;
+        let expected = kind.warning_expectation().expect("warning expectation");
+        let canonical = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("canonical startup warning source parses");
+        XyceTestRunner::validate_startup_warning_observation(&canonical, &path, kind, expected)
+            .expect("canonical typed startup warning qualifies");
+
+        let known_source = source.replace("V(Bleem)=1", "V(1)=1");
+        assert_ne!(known_source, source);
+        let known = XyceTestRunner::parse_xyce_netlist(&known_source, &path)
+            .expect("known-node mutation parses");
+        assert!(
+            XyceTestRunner::validate_startup_warning_observation(&known, &path, kind, expected,)
+                .is_err(),
+            "known topology node must not retain the undefined-node observation"
+        );
+
+        let extra_warning_source = source.replace(".IC V(Bleem)=1", ".IC V(Bleem)=1\n.NODESET");
+        assert_ne!(extra_warning_source, source);
+        let extra = XyceTestRunner::parse_xyce_netlist(&extra_warning_source, &path)
+            .expect("extra-warning mutation parses");
+        assert!(
+            XyceTestRunner::validate_startup_warning_observation(&extra, &path, kind, expected,)
+                .is_err(),
+            "additional parse warnings must fail an exact success-warning contract"
+        );
+
+        let bug_path =
+            root.join("Netlists/Certification_Tests/BUG_667_SON/ic_in_subckt_warning.cir");
+        let bug_source = fs::read_to_string(&bug_path).expect("read BUG667 startup source");
+        let bug_kind = XyceStartupOracleKind::Bug667ScopedGlobalWarning;
+        let bug_expected = bug_kind.warning_expectation().expect("BUG667 expectation");
+        let local_source = bug_source.replace("V($G_VCC)=0.0", "V(mid)=0.0");
+        assert_ne!(local_source, bug_source);
+        let local = XyceTestRunner::parse_xyce_netlist(&local_source, &bug_path)
+            .expect("local scoped startup mutation parses");
+        assert!(
+            XyceTestRunner::validate_startup_warning_observation(
+                &local,
+                &bug_path,
+                bug_kind,
+                bug_expected,
+            )
+            .is_err(),
+            "local subcircuit target must not satisfy the scoped-global warning"
+        );
+    }
+
+    #[test]
+    fn startup_conflict_observer_requires_typed_order_and_precedence() {
+        let root = expected_failure_test_root();
+        let path = root.join("Netlists/Message/Input/IC_And_NODESET_Specified.cir");
+        let source = fs::read_to_string(&path).expect("read startup conflict source");
+        XyceTestRunner::observe_startup_conflict(&source, &path)
+            .expect("canonical conflict is IC then NODESET at physical lines 16 and 17");
+
+        let same_mode = source.replace(".NODESET V(Bleem)=1", ".IC V(Bleem)=1");
+        assert_ne!(same_mode, source);
+        assert!(
+            XyceTestRunner::observe_startup_conflict(&same_mode, &path).is_err(),
+            "same-mode cards must not satisfy the mixed-mode conflict"
+        );
+
+        let reversed = source
+            .replace(".IC V(Bleem)=1", ".TEMP_STARTUP V(Bleem)=1")
+            .replace(".NODESET V(Bleem)=1", ".IC V(Bleem)=1")
+            .replace(".TEMP_STARTUP V(Bleem)=1", ".NODESET V(Bleem)=1");
+        assert_ne!(reversed, source);
+        assert!(
+            XyceTestRunner::observe_startup_conflict(&reversed, &path).is_err(),
+            "reversing the ordered conflict origins must fail closed"
+        );
     }
 }

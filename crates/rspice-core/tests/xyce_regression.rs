@@ -7611,6 +7611,53 @@ fn test_xyce_nested_include_identity_relational_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_startup_diagnostic_wrappers_run_with_exact_typed_contracts() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Message/Input/IC_At_Missing_Node_Warning.cir",
+            "expected_warning_ic_undefined_node_success",
+        ),
+        (
+            "Netlists/Message/Input/IC_No_Args_Warning.cir",
+            "expected_warning_ic_empty_success",
+        ),
+        (
+            "Netlists/Message/Input/NODESET_At_Missing_Node_Warning.cir",
+            "expected_warning_nodeset_undefined_node_success",
+        ),
+        (
+            "Netlists/Message/Input/NODESET_No_Args_Warning.cir",
+            "expected_warning_nodeset_empty_success",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_667_SON/ic_in_subckt_warning.cir",
+            "expected_warning_bug667_scoped_global_ic_success",
+        ),
+        (
+            "Netlists/Message/Input/IC_And_NODESET_Specified.cir",
+            "expected_failure_message_ic_nodeset_conflict_parse",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} must retain its removed upstream wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy its exact native startup diagnostic contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
