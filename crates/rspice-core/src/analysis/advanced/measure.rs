@@ -2557,7 +2557,13 @@ fn measurement_condition_crossings(
         }
 
         let denominator = current_difference - previous_difference;
-        let fraction = if denominator == 0.0 {
+        let fraction = if current_equal {
+            // The accepted endpoint is equal within Xyce's MINVAL contract.
+            // Pinning the event to that endpoint prevents a tiny same-side
+            // solver residual from extrapolating the nominal root beyond the
+            // segment and changing after finite-precision PRN serialization.
+            1.0
+        } else if denominator == 0.0 {
             // Parallel, identical moving operands are considered equal at the
             // current accepted point by Xyce.
             1.0
@@ -3300,6 +3306,21 @@ mod tests {
         assert_eq!(results[1].value, Some(2.5));
         assert_eq!(results[2].value, Some(5.5));
         assert_eq!(results[3].value, Some(3.5));
+    }
+
+    #[test]
+    fn minval_endpoint_equality_pins_crossing_inside_segment() {
+        let nearly_equal = [-1.0, -1.0e-14];
+        assert_eq!(
+            measurement_condition_crossings(
+                &nearly_equal,
+                ResolvedMeasureOperand::Constant(0.0),
+                nearly_equal.len(),
+                &[],
+                EdgeType::Cross,
+            ),
+            vec![(0, 1.0)]
+        );
     }
 
     #[test]
