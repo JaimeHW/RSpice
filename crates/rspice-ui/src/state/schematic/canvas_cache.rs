@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use super::net_label::Junction;
 use super::point::Point;
 use super::state::SchematicState;
-use super::wire::Wire;
+use super::wire::{Wire, WireSegment};
 
 /// Cached per-frame canvas geometry, valid for one topology version.
 #[derive(Debug, Default)]
@@ -28,6 +28,11 @@ pub struct CanvasCache {
 
     /// Junction marker positions.
     pub junctions: HashSet<Point>,
+
+    /// Ambiguous interior/interior crossings between distinct wires. Endpoint
+    /// and T contacts are already electrically connected and are not valid
+    /// targets for the explicit-junction authoring tool.
+    pub junction_candidates: Vec<Point>,
 }
 
 impl Clone for CanvasCache {
@@ -49,6 +54,7 @@ impl CanvasCache {
         self.wire_bounds.reserve(wires.len());
         self.wire_vertices.clear();
         self.junctions.clear();
+        self.junction_candidates.clear();
 
         for wire in wires {
             let mut min = Point::new(i32::MAX, i32::MAX);
@@ -64,6 +70,7 @@ impl CanvasCache {
         }
 
         self.junctions.extend(junctions.iter().map(|j| j.pos));
+        self.junction_candidates = collect_junction_candidates(wires);
         self.version = Some(version);
     }
 }
@@ -85,6 +92,79 @@ impl SchematicState {
     pub fn canvas_cache(&self) -> Option<&CanvasCache> {
         self.canvas_cache.fresh(self.topology_version())
     }
+
+    /// Return the nearest valid explicit-junction target within `radius`.
+    /// The frame cache serves the hot path; the fallback keeps the first
+    /// interactive frame correct before derived geometry has been rebuilt.
+    pub fn nearest_junction_candidate(&self, pos: Point, radius: i32) -> Option<Point> {
+        let fallback;
+        let candidates = if let Some(cache) = self.canvas_cache() {
+            cache.junction_candidates.as_slice()
+        } else {
+            fallback = collect_junction_candidates(&self.wires);
+            fallback.as_slice()
+        };
+        let radius_sq = i128::from(radius.max(0)).pow(2);
+        candidates
+            .iter()
+            .copied()
+            .filter_map(|candidate| {
+                let dx = i128::from(candidate.x) - i128::from(pos.x);
+                let dy = i128::from(candidate.y) - i128::from(pos.y);
+                let distance_sq = dx * dx + dy * dy;
+                (distance_sq <= radius_sq).then_some((distance_sq, candidate))
+            })
+            .min_by_key(|(distance_sq, candidate)| (*distance_sq, candidate.x, candidate.y))
+            .map(|(_, candidate)| candidate)
+    }
+}
+
+fn collect_junction_candidates(wires: &[Wire]) -> Vec<Point> {
+    const CELL: i32 = 256;
+    let segments: Vec<(u64, WireSegment)> = wires
+        .iter()
+        .flat_map(|wire| wire.segments().map(move |segment| (wire.id, segment)))
+        .collect();
+    let mut cells: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for (index, (_, segment)) in segments.iter().enumerate() {
+        for cell_x in segment.start.x.min(segment.end.x).div_euclid(CELL)
+            ..=segment.start.x.max(segment.end.x).div_euclid(CELL)
+        {
+            for cell_y in segment.start.y.min(segment.end.y).div_euclid(CELL)
+                ..=segment.start.y.max(segment.end.y).div_euclid(CELL)
+            {
+                cells.entry((cell_x, cell_y)).or_default().push(index);
+            }
+        }
+    }
+
+    let mut candidates = HashSet::new();
+    let mut tested = HashSet::new();
+    for bucket in cells.values() {
+        for (offset, &left) in bucket.iter().enumerate() {
+            for &right in &bucket[offset + 1..] {
+                let pair = if left < right {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                if !tested.insert(pair) || segments[left].0 == segments[right].0 {
+                    continue;
+                }
+                if let Some(point) = segments[left].1.intersection(&segments[right].1)
+                    && point != segments[left].1.start
+                    && point != segments[left].1.end
+                    && point != segments[right].1.start
+                    && point != segments[right].1.end
+                {
+                    candidates.insert(point);
+                }
+            }
+        }
+    }
+    let mut candidates: Vec<_> = candidates.into_iter().collect();
+    candidates.sort_by_key(|point| (point.x, point.y));
+    candidates
 }
 
 #[cfg(test)]
@@ -131,6 +211,56 @@ mod tests {
         assert_eq!(
             cache.wire_bounds[0],
             (Point::new(-20, 0), Point::new(40, 0))
+        );
+    }
+
+    #[test]
+    fn junction_candidates_are_deduplicated_cached_and_nearest() {
+        let mut state = SchematicState::default();
+        state.wires = vec![
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
+            Wire::new(3, vec![Point::new(0, 0), Point::new(40, 40)]),
+        ];
+        state.bump_topology_version();
+
+        assert_eq!(
+            state.nearest_junction_candidate(Point::new(19, 21), 4),
+            Some(Point::new(20, 20))
+        );
+        state.ensure_canvas_cache();
+        let cache = state.canvas_cache().expect("cache fresh");
+        assert_eq!(cache.junction_candidates, vec![Point::new(20, 20)]);
+        assert_eq!(
+            state.nearest_junction_candidate(Point::new(19, 21), 4),
+            Some(Point::new(20, 20))
+        );
+        assert_eq!(
+            state.nearest_junction_candidate(Point::new(100, 100), 4),
+            None
+        );
+    }
+
+    #[test]
+    fn endpoint_and_t_contacts_are_not_explicit_junction_targets() {
+        let mut state = SchematicState::default();
+        state.wires = vec![
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(2, vec![Point::new(20, 20), Point::new(20, 40)]),
+        ];
+        state.bump_topology_version();
+
+        assert_eq!(
+            state.nearest_junction_candidate(Point::new(20, 20), 4),
+            None
+        );
+        state.ensure_canvas_cache();
+        assert!(
+            state
+                .canvas_cache()
+                .expect("cache fresh")
+                .junction_candidates
+                .is_empty()
         );
     }
 }

@@ -325,6 +325,7 @@ const PLACE_INSTANCE: &[ShortcutBinding] =
     &[primary(chord(Key::I, false, false, true, "Shift+I"), ALL)];
 const SELECT_TOOL: &[ShortcutBinding] = &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const PLACE_WIRE: &[ShortcutBinding] = &[primary(chord(Key::W, false, false, false, "W"), ALL)];
+const PLACE_JUNCTION: &[ShortcutBinding] = &[primary(chord(Key::J, false, false, false, "J"), ALL)];
 const PLACE_LABEL: &[ShortcutBinding] = &[primary(chord(Key::N, false, false, false, "N"), ALL)];
 const PLACE_PROBE: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
@@ -444,6 +445,7 @@ impl Command {
             Self::FindInDesign
             | Self::PlaceInstance
             | Self::PlaceWire
+            | Self::PlaceJunction
             | Self::PlaceLabel
             | Self::PlaceProbe
             | Self::Place(_)
@@ -524,6 +526,7 @@ impl Command {
             Self::SelectTool => SELECT_TOOL,
             Self::PlaceInstance => PLACE_INSTANCE,
             Self::PlaceWire => PLACE_WIRE,
+            Self::PlaceJunction => PLACE_JUNCTION,
             Self::PlaceLabel => PLACE_LABEL,
             Self::PlaceProbe => PLACE_PROBE,
             Self::SymbolPinTool => SYMBOL_PIN,
@@ -739,5 +742,12 @@ mod tests {
             Command::PlaceWire.shortcut_context(),
             ShortcutContext::EngineeringCanvas
         );
+        assert_eq!(
+            Command::PlaceJunction.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        for platform in CommandPlatform::ALL {
+            assert_eq!(Command::PlaceJunction.default_shortcut_label(platform), "J");
+        }
     }
 }

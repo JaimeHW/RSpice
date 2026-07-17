@@ -484,6 +484,20 @@ impl Selection {
         self.junctions.push(JunctionSelection::new(pos));
     }
 
+    /// Get the single selected junction position (if exactly one is selected).
+    pub fn single_junction(&self) -> Option<Point> {
+        if self.junctions.len() == 1
+            && self.components.is_empty()
+            && self.wires.is_empty()
+            && self.wire_segments.is_empty()
+            && self.wire_vertices.is_empty()
+        {
+            Some(self.junctions[0].pos)
+        } else {
+            None
+        }
+    }
+
     // =========================================================================
     // Query Methods
     // =========================================================================
@@ -528,3 +542,19 @@ impl Selection {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_junction_requires_an_exclusive_junction_selection() {
+        let point = Point::new(4, 6);
+        let mut selection = Selection::new();
+        selection.select_only_junction(point);
+        assert_eq!(selection.single_junction(), Some(point));
+
+        selection.select_component(9);
+        assert_eq!(selection.single_junction(), None);
+    }
+}

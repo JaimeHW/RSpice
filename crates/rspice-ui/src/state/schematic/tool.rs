@@ -25,6 +25,9 @@ pub enum Tool {
     /// Click to start/extend wire, right-click or Escape to finish.
     Wire,
 
+    /// Place an explicit electrical junction at a conductor intersection.
+    Junction,
+
     /// Place a specific component type
     ///
     /// Click to place component at cursor position. Press 'R' to rotate.
@@ -47,6 +50,7 @@ impl Tool {
         match self {
             Tool::Select => "Select",
             Tool::Wire => "Wire",
+            Tool::Junction => "Junction",
             Tool::Place(kind) => kind.display_name(),
             Tool::Probe => "Probe",
             Tool::Label => "Label",
@@ -58,6 +62,7 @@ impl Tool {
         match self {
             Tool::Select => Some('s'),
             Tool::Wire => Some('w'),
+            Tool::Junction => Some('j'),
             Tool::Place(ComponentType::Resistor) => None, // 'r' is for rotate
             Tool::Place(ComponentType::Capacitor) => Some('c'),
             Tool::Place(ComponentType::Inductor) => Some('l'),
@@ -73,9 +78,9 @@ impl Tool {
         }
     }
 
-    /// Check if this tool places components
+    /// Check if this tool places a durable schematic object.
     pub fn is_place_tool(&self) -> bool {
-        matches!(self, Tool::Place(_))
+        matches!(self, Tool::Place(_) | Tool::Junction)
     }
 
     /// Check if this is the select tool
@@ -101,6 +106,7 @@ impl Tool {
         match self {
             Tool::Select => "default",
             Tool::Wire => "crosshair",
+            Tool::Junction => "crosshair",
             Tool::Place(_) => "copy",
             Tool::Probe => "crosshair",
             Tool::Label => "text",

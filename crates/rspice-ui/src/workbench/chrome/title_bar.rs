@@ -1161,6 +1161,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlaceInstance => WorkbenchIcon::Component,
         Command::Place(_) => WorkbenchIcon::Add,
         Command::PlaceWire => WorkbenchIcon::Wire,
+        Command::PlaceJunction => WorkbenchIcon::Grid,
         Command::PlaceLabel => WorkbenchIcon::Label,
         Command::PlaceProbe => WorkbenchIcon::Probe,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
@@ -1309,6 +1310,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     for command in [
         Command::PlaceInstance,
         Command::PlaceWire,
+        Command::PlaceJunction,
         Command::PlaceLabel,
         Command::PlaceProbe,
     ] {
@@ -2321,6 +2323,7 @@ mod tests {
             Command::Save,
             Command::Undo,
             Command::PlaceWire,
+            Command::PlaceJunction,
             Command::RunSimulation,
             Command::WaveformCalculator,
             Command::PdkSettings,

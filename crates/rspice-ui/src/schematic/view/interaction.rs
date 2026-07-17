@@ -27,7 +27,9 @@ pub(super) fn handle_tool_interactions(
     {
         match current_tool {
             // Read-only views take no edits; the console names the library.
-            Tool::Place(_) | Tool::Wire | Tool::Label if state.schematic.read_only => {
+            Tool::Place(_) | Tool::Wire | Tool::Junction | Tool::Label
+                if state.schematic.read_only =>
+            {
                 state.deny_read_only_edit();
             }
             Tool::Place(component_type) => {
@@ -45,6 +47,10 @@ pub(super) fn handle_tool_interactions(
                 } else {
                     state.schematic.start_wire(wire_pos);
                 }
+            }
+            Tool::Junction => {
+                let grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
+                handle_junction_click(ui, state, grid_pos);
             }
             Tool::Select => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
@@ -267,6 +273,70 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JunctionPlacementOutcome {
+    Placed(Point),
+    Removed(Point),
+    NoIntersection,
+}
+
+fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionPlacementOutcome {
+    let Some(target) = state
+        .schematic
+        .nearest_junction_candidate(requested, state.schematic.grid_size)
+    else {
+        return JunctionPlacementOutcome::NoIntersection;
+    };
+
+    if let Some(junction_id) = state.schematic.junction_at(target) {
+        state.schematic.with_undo("remove junction", |schematic| {
+            schematic.remove_junction(junction_id);
+        });
+        state.schematic.net_highlight.clear();
+        return JunctionPlacementOutcome::Removed(target);
+    }
+
+    state.schematic.with_undo("place junction", |schematic| {
+        schematic.add_junction(target);
+    });
+    state.schematic.net_highlight.clear();
+    JunctionPlacementOutcome::Placed(target)
+}
+
+fn handle_junction_click(ui: &Ui, state: &mut AppState, requested: Point) {
+    let (title, message, warning) = match commit_explicit_junction(state, requested) {
+        JunctionPlacementOutcome::Placed(point) => (
+            "Junction placed",
+            format!("Added an explicit junction at ({}, {}).", point.x, point.y),
+            false,
+        ),
+        JunctionPlacementOutcome::Removed(point) => (
+            "Junction removed",
+            format!(
+                "Removed the explicit junction at ({}, {}).",
+                point.x, point.y
+            ),
+            false,
+        ),
+        JunctionPlacementOutcome::NoIntersection => (
+            "No conductor intersection",
+            "Move the pointer to a point where two conductors meet.".to_owned(),
+            true,
+        ),
+    };
+
+    if warning {
+        state
+            .ui
+            .toasts
+            .warn_with_title(ui.ctx(), title, message.clone());
+        state.push_user_message(ConsoleMessage::warning(message));
+    } else {
+        state.ui.toasts.success(ui.ctx(), title, message.clone());
+        state.push_user_message(ConsoleMessage::info(message));
+    }
+}
+
 fn handle_select_click(
     ui: &Ui,
     state: &mut AppState,
@@ -281,6 +351,7 @@ fn handle_select_click(
     let comp_id = symbol_context
         .component_at_resolved_symbol(&state.schematic.components, grid_pos)
         .or_else(|| state.schematic.component_at(grid_pos));
+    let junction_pos = state.schematic.junction_at(grid_pos).map(|_| grid_pos);
     let wire_id = state.schematic.wire_at(grid_pos);
 
     if let Some(id) = comp_id {
@@ -291,9 +362,20 @@ fn handle_select_click(
             state.schematic.selection.clear();
             state.schematic.selection.select_component(id);
         }
+    } else if let Some(pos) = junction_pos {
+        state.schematic.net_highlight.clear();
+        if additive {
+            if state.schematic.selection.has_junction(pos) {
+                state.schematic.selection.deselect_junction(pos);
+            } else {
+                state.schematic.selection.select_junction(pos);
+            }
+        } else {
+            state.schematic.selection.select_only_junction(pos);
+        }
     } else if let Some(id) = wire_id {
         if alt_held {
-            let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
+            let net_graph = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
             let connected_wires = net_graph.get_connected_wires(id);
 
             state.schematic.selection.clear();
@@ -390,7 +472,8 @@ fn handle_probe_click(
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
                 {
-                    let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
+                    let net_graph =
+                        NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
                     state
                         .schematic
                         .net_highlight
@@ -469,10 +552,100 @@ fn open_component_properties(state: &mut AppState, grid_pos: Point) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Wire;
 
     #[test]
     fn shift_primary_drag_is_reserved_for_pan() {
         assert!(select_drag_can_start(false));
         assert!(!select_drag_can_start(true));
+    }
+
+    #[test]
+    fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
+        let mut state = AppState::default();
+        state.schematic.wires = vec![
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
+        ];
+        state.schematic.bump_topology_version();
+        state
+            .schematic
+            .net_highlight
+            .highlight_wires([1].into_iter().collect());
+
+        assert_eq!(
+            commit_explicit_junction(&mut state, Point::new(20, 20)),
+            JunctionPlacementOutcome::Placed(Point::new(20, 20))
+        );
+        assert!(state.schematic.has_junction(Point::new(20, 20)));
+        assert!(!state.schematic.net_highlight.active);
+        assert!(state.schematic.net_highlight.highlighted_wires.is_empty());
+        assert!(state.schematic.can_undo());
+        assert!(state.schematic.undo());
+        assert!(!state.schematic.has_junction(Point::new(20, 20)));
+
+        assert_eq!(
+            commit_explicit_junction(&mut state, Point::new(100, 100)),
+            JunctionPlacementOutcome::NoIntersection
+        );
+        assert!(!state.schematic.can_undo());
+    }
+
+    #[test]
+    fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
+        let mut state = AppState::default();
+        state.schematic.wires = vec![
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
+        ];
+        state.schematic.add_junction(Point::new(20, 20));
+        state
+            .schematic
+            .net_highlight
+            .highlight_wires([1, 2].into_iter().collect());
+
+        assert_eq!(
+            commit_explicit_junction(&mut state, Point::new(20, 20)),
+            JunctionPlacementOutcome::Removed(Point::new(20, 20))
+        );
+        assert!(!state.schematic.has_junction(Point::new(20, 20)));
+        assert!(!state.schematic.net_highlight.active);
+        assert!(state.schematic.net_highlight.highlighted_wires.is_empty());
+        let disconnected = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
+        assert_eq!(
+            disconnected.get_connected_wires(1),
+            [1].into_iter().collect()
+        );
+        assert_eq!(
+            disconnected.get_connected_wires(2),
+            [2].into_iter().collect()
+        );
+        assert!(state.schematic.can_undo());
+        assert!(state.schematic.undo());
+        assert!(state.schematic.has_junction(Point::new(20, 20)));
+        let connected = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
+        assert_eq!(
+            connected.get_connected_wires(1),
+            [1, 2].into_iter().collect()
+        );
+        assert!(!state.schematic.can_undo());
+    }
+
+    #[test]
+    fn automatic_t_marker_is_not_an_explicit_junction_toggle_target() {
+        let point = Point::new(20, 20);
+        let mut state = AppState::default();
+        state.schematic.wires = vec![
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(2, vec![point, Point::new(20, 40)]),
+        ];
+        state.schematic.add_junction(point);
+
+        assert_eq!(
+            commit_explicit_junction(&mut state, point),
+            JunctionPlacementOutcome::NoIntersection
+        );
+        assert!(state.schematic.has_junction(point));
+        assert!(!state.schematic.can_undo());
     }
 }

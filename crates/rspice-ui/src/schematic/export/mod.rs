@@ -28,7 +28,9 @@ use self::controlled_symbols::{
     write_cccs_symbol, write_ccvs_symbol, write_opamp_symbol, write_vccs_symbol, write_vcvs_symbol,
     write_vswitch_symbol,
 };
-use self::geometry::{calculate_bounds, get_rotation_transform, write_wire};
+use self::geometry::{
+    calculate_bounds, get_rotation_transform, include_junction_bounds, write_junction, write_wire,
+};
 use self::jfet_symbols::{write_njfet_symbol, write_pjfet_symbol};
 use self::mos_symbols::{write_nmos_symbol, write_pmos_symbol};
 use self::passive_symbols::{
@@ -109,6 +111,7 @@ fn export_to_svg_with_resolved_symbol_entries(
 <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"{vx} {vy} {width} {height}\">\n\
 <style>\n\
   .wire {{ stroke: {wire_color}; stroke-width: {wire_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
+  .junction {{ fill: {wire_color}; stroke: none; }}\n\
   .component {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
   .text {{ font-family: monospace; font-size: {font_size}px; fill: {text_color}; }}\n\
 </style>\n\
@@ -126,6 +129,12 @@ fn export_to_svg_with_resolved_symbol_entries(
     // Export wires
     for wire in &state.wires {
         write_wire(&mut svg, wire, config);
+    }
+
+    // Junction dots encode explicit connectivity and are document content,
+    // not a transient canvas decoration.
+    for junction in &state.junctions {
+        write_junction(&mut svg, junction, config);
     }
 
     // Export components
@@ -191,6 +200,10 @@ fn calculate_bounds_with_resolved_symbols(
             max_y = max_y.max(y);
         }
     }
+
+    include_junction_bounds(
+        state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+    );
 
     if min_x == f64::MAX {
         (0.0, 0.0, 100.0, 100.0)
@@ -340,8 +353,8 @@ fn escape_xml(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, Library, LibraryCellInstance, LibraryManager, Point, PortDirection, PortSpec,
-        SymbolDocument, SymbolPin, SymbolResolver, SymbolShape, View, ViewType,
+        Cell, Junction, Library, LibraryCellInstance, LibraryManager, Point, PortDirection,
+        PortSpec, SymbolDocument, SymbolPin, SymbolResolver, SymbolShape, View, ViewType,
     };
     use std::collections::HashMap;
 
@@ -511,5 +524,23 @@ mod tests {
         assert!(svg.contains("1k &amp; 2k"));
         assert!(!svg.contains("R<&>"));
         assert!(!svg.contains("1k & 2k"));
+    }
+
+    #[test]
+    fn svg_export_emits_explicit_junction_and_includes_marker_extents() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .junctions
+            .push(Junction::new(19, Point::new(7, 11)));
+        let config = SvgExportConfig {
+            margin: 0.0,
+            ..SvgExportConfig::default()
+        };
+
+        let svg = export_to_svg(&schematic, &config);
+
+        assert!(svg.contains(r#".junction { fill: #00FF00; stroke: none; }"#));
+        assert!(svg.contains(r#"<circle class="junction" cx="70" cy="110" r="3"/>"#));
+        assert!(svg.contains(r#"width="6" height="6" viewBox="67 107 6 6""#));
     }
 }

@@ -76,6 +76,7 @@ pub enum Command {
     SelectTool,
     PlaceInstance,
     PlaceWire,
+    PlaceJunction,
     PlaceLabel,
     PlaceProbe,
     SymbolPinTool,
@@ -254,6 +255,7 @@ impl Command {
             Self::SelectTool => spec("select-tool", "Select tool", "Design"),
             Self::PlaceInstance => spec("place-instance", "Place instance…", "Design"),
             Self::PlaceWire => spec("place-wire", "Draw wire", "Design"),
+            Self::PlaceJunction => spec("place-junction", "Place junction", "Design"),
             Self::PlaceLabel => spec("place-label", "Place net label", "Design"),
             Self::PlaceProbe => spec("place-probe", "Place probe", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
@@ -527,14 +529,24 @@ impl Command {
                     active_schematic_editor(app) && state.schematic.can_redo()
                 }
             }
-            Self::Cut | Self::Duplicate | Self::Delete => {
+            Self::Cut | Self::Delete => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
                         && !state.ui.symbol.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic.read_only
-                        && !state.schematic.selection.is_empty()
+                        && schematic_selection_has_live_object(&state.schematic)
+                }
+            }
+            Self::Duplicate => {
+                if active_symbol_editor(app) {
+                    !state.active_view_read_only()
+                        && !state.ui.symbol.effective_selection().is_empty()
+                } else {
+                    active_schematic_editor(app)
+                        && !state.schematic.read_only
+                        && schematic_selection_has_duplicable_object(&state.schematic)
                 }
             }
             Self::Copy => {
@@ -543,7 +555,8 @@ impl Command {
                 } else if active_symbol_editor(app) {
                     !state.ui.symbol.effective_selection().is_empty()
                 } else {
-                    active_schematic_editor(app) && !state.schematic.selection.is_empty()
+                    active_schematic_editor(app)
+                        && schematic_selection_has_live_object(&state.schematic)
                 }
             }
             Self::Paste => {
@@ -561,7 +574,13 @@ impl Command {
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic.read_only
-                    && !state.schematic.selection.is_empty()
+                    && state.schematic.selection.components.iter().any(|id| {
+                        state
+                            .schematic
+                            .components
+                            .iter()
+                            .any(|component| component.id == *id)
+                    })
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -583,7 +602,7 @@ impl Command {
             Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
             Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::PlaceWire | Self::PlaceProbe => {
+            Self::PlaceWire | Self::PlaceJunction | Self::PlaceProbe => {
                 active_schematic_editor(app) && !state.schematic.read_only
             }
             Self::PlaceInstance | Self::PlaceLabel | Self::Place(_) => {
@@ -767,7 +786,12 @@ impl Command {
                     app.paste_symbol_shape();
                 } else {
                     let anchor = app.state.schematic_paste_anchor();
-                    app.state.schematic.paste_at(anchor);
+                    if !app.state.schematic.paste_at(anchor) {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                                "Paste could not be completed at the current canvas target",
+                            ));
+                    }
                 }
             }
             Self::Duplicate => {
@@ -778,7 +802,12 @@ impl Command {
                     app.state.schematic.copy_selection();
                     let anchor =
                         app.state.schematic_paste_anchor() + crate::state::Point::new(2, 2);
-                    app.state.schematic.paste_at(anchor);
+                    if !app.state.schematic.paste_at(anchor) {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                                "Duplicate could not be completed at the current canvas target",
+                            ));
+                    }
                 }
             }
             Self::Delete => {
@@ -806,12 +835,22 @@ impl Command {
                         .iter()
                         .map(|wire| wire.id)
                         .collect();
+                    let junction_positions: Vec<_> = app
+                        .state
+                        .schematic
+                        .junctions
+                        .iter()
+                        .map(|junction| junction.pos)
+                        .collect();
                     app.state.schematic.selection.clear();
                     for id in component_ids {
                         app.state.schematic.selection.select_component(id);
                     }
                     for id in wire_ids {
                         app.state.schematic.selection.select_wire(id);
+                    }
+                    for pos in junction_positions {
+                        app.state.schematic.selection.select_junction(pos);
                     }
                 }
             }
@@ -957,6 +996,7 @@ impl Command {
                 app.state.workbench.focus_placement_search = true;
             }
             Self::PlaceWire => set_tool(app, Tool::Wire),
+            Self::PlaceJunction => set_tool(app, Tool::Junction),
             Self::PlaceLabel => set_tool(app, Tool::Label),
             Self::PlaceProbe => set_tool(app, Tool::Probe),
             Self::SymbolPinTool => {
@@ -1250,6 +1290,36 @@ fn active_schematic_editor(app: &RSpiceApp) -> bool {
         )
 }
 
+fn schematic_selection_has_live_object(schematic: &crate::state::SchematicState) -> bool {
+    let selection = &schematic.selection;
+    schematic
+        .components
+        .iter()
+        .any(|component| selection.has_component(component.id))
+        || schematic
+            .wires
+            .iter()
+            .any(|wire| selection.has_wire(wire.id))
+        || schematic
+            .junctions
+            .iter()
+            .any(|junction| selection.has_junction(junction.pos))
+}
+
+fn schematic_selection_has_duplicable_object(schematic: &crate::state::SchematicState) -> bool {
+    let selection = &schematic.selection;
+    selection.wire_segments.is_empty()
+        && selection.wire_vertices.is_empty()
+        && (schematic
+            .components
+            .iter()
+            .any(|component| selection.has_component(component.id))
+            || schematic
+                .wires
+                .iter()
+                .any(|wire| selection.has_wire(wire.id)))
+}
+
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     activate_workspace(app, Workspace::Design);
     app.state.schematic.tool = tool;
@@ -1417,6 +1487,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SelectTool,
     Command::PlaceInstance,
     Command::PlaceWire,
+    Command::PlaceJunction,
     Command::PlaceLabel,
     Command::PlaceProbe,
     Command::SymbolPinTool,
