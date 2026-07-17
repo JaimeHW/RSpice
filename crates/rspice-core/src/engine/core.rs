@@ -1,7 +1,8 @@
 //! Core engine type and shared orchestration helpers.
 
 use super::{
-    SimulationConfig, SimulationConfigOverrides, SimulationError, resolve_simulation_config,
+    SimulationConfig, SimulationConfigError, SimulationConfigOverrides, SimulationError,
+    resolve_simulation_config,
 };
 use crate::netlist::{ElementKind, SubcircuitDef};
 use crate::{Netlist, Value};
@@ -35,6 +36,17 @@ impl Engine {
     /// Create a new engine with the given configuration
     pub fn new(config: SimulationConfig) -> Self {
         Self { config }
+    }
+
+    /// Create an engine only when its complete configuration is valid.
+    ///
+    /// Prefer this constructor at trust boundaries such as CLI configuration,
+    /// language bindings, job queues, and services. [`Self::new`] remains
+    /// available for compatibility with callers that construct known-good
+    /// configurations internally.
+    pub fn try_new(config: SimulationConfig) -> Result<Self, SimulationConfigError> {
+        config.validate()?;
+        Ok(Self { config })
     }
 
     /// Get a reference to the simulation configuration

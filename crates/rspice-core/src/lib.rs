@@ -76,8 +76,8 @@ pub use circuit::{Circuit, CircuitData, Node, NodeId};
 pub use device::{Device, DeviceModel};
 pub use engine::{
     ConvergenceConfig, ConvergencePreset, DampingStrategy, Engine, JfetLevel2Model,
-    SimulationConfig, SimulationConfigOverrides, SimulationError, SpiceDialect,
-    resolve_simulation_config,
+    SimulationConfig, SimulationConfigError, SimulationConfigOverrides, SimulationError,
+    SpiceDialect, resolve_simulation_config,
 };
 #[cfg(feature = "veriloga")]
 pub use engine::{

@@ -2,6 +2,78 @@
 
 use crate::Value;
 use crate::netlist::{NonlinearContinuationMode, TransientLteReference};
+use thiserror::Error;
+
+/// A violated invariant in [`SimulationConfig`].
+///
+/// The fields are intentionally structured so service and language bindings
+/// can report invalid configuration without parsing display strings.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum SimulationConfigError {
+    /// A floating-point field was not finite or did not satisfy its lower bound.
+    #[error("{field} must be {requirement}, got {value}")]
+    InvalidValue {
+        /// Configuration field name.
+        field: &'static str,
+        /// Rejected value.
+        value: Value,
+        /// Stable human-readable constraint.
+        requirement: &'static str,
+    },
+    /// An iteration or similar count was zero.
+    #[error("{field} must be greater than zero, got {value}")]
+    InvalidCount {
+        /// Configuration field name.
+        field: &'static str,
+        /// Rejected value.
+        value: usize,
+    },
+    /// The configured transient timestep bounds were reversed.
+    #[error(
+        "min_timestep ({min_timestep}) must be less than or equal to max_timestep ({max_timestep})"
+    )]
+    InvalidTimestepRange {
+        /// Configured minimum timestep.
+        min_timestep: Value,
+        /// Configured maximum timestep.
+        max_timestep: Value,
+    },
+    /// The explicitly requested first transient step exceeds the hard maximum.
+    #[error(
+        "transient_initial_timestep ({initial_timestep}) must be less than or equal to max_timestep ({max_timestep})"
+    )]
+    InitialTimestepExceedsMaximum {
+        /// Configured initial timestep.
+        initial_timestep: Value,
+        /// Configured maximum timestep.
+        max_timestep: Value,
+    },
+    /// The XSPICE digital delay selector was outside its documented domain.
+    #[error("digital_delay_type must be an integer from 0 through 3, got {0}")]
+    InvalidDigitalDelayType(i64),
+    /// A prescribed transient grid contained a non-finite or negative point.
+    #[error("locked_time_grid[{index}] must be a finite, non-negative time, got {value}")]
+    InvalidLockedTimeGridPoint {
+        /// Zero-based point index.
+        index: usize,
+        /// Rejected time value.
+        value: Value,
+    },
+    /// A prescribed transient grid was not strictly increasing.
+    #[error(
+        "locked_time_grid must be strictly increasing; point {index} ({value}) is not greater than point {previous_index} ({previous})"
+    )]
+    NonIncreasingLockedTimeGrid {
+        /// Zero-based index of the rejected point.
+        index: usize,
+        /// Rejected time value.
+        value: Value,
+        /// Zero-based index of the preceding point.
+        previous_index: usize,
+        /// Preceding time value.
+        previous: Value,
+    },
+}
 
 /// Broad SPICE compatibility policy for internal device-model selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -131,6 +203,55 @@ pub struct SimulationConfig {
 }
 
 impl SimulationConfig {
+    /// Validate every engine-level configuration invariant.
+    ///
+    /// Frontends that accept configuration from files, users, or remote jobs
+    /// should call this directly or construct the engine with
+    /// [`crate::Engine::try_new`] before starting simulation work.
+    pub fn validate(&self) -> Result<(), SimulationConfigError> {
+        validate_positive("tolerance", self.tolerance)?;
+        validate_count("max_iterations", self.max_iterations)?;
+        validate_count("transient_max_iterations", self.transient_max_iterations)?;
+        validate_positive("min_timestep", self.min_timestep)?;
+        validate_positive("max_timestep", self.max_timestep)?;
+        if self.min_timestep > self.max_timestep {
+            return Err(SimulationConfigError::InvalidTimestepRange {
+                min_timestep: self.min_timestep,
+                max_timestep: self.max_timestep,
+            });
+        }
+        if let Some(initial_timestep) = self.transient_initial_timestep {
+            validate_positive("transient_initial_timestep", initial_timestep)?;
+            if initial_timestep > self.max_timestep {
+                return Err(SimulationConfigError::InitialTimestepExceedsMaximum {
+                    initial_timestep,
+                    max_timestep: self.max_timestep,
+                });
+            }
+        }
+        validate_positive("temperature", self.temperature)?;
+        validate_finite("ramptime", self.ramptime)?;
+        if let Some(delay_type) = self.digital_delay_type
+            && !(0..=3).contains(&delay_type)
+        {
+            return Err(SimulationConfigError::InvalidDigitalDelayType(delay_type));
+        }
+        validate_positive("transient_trtol", self.transient_trtol)?;
+        validate_optional_positive("transient_lte_reltol", self.transient_lte_reltol)?;
+        validate_optional_positive("transient_lte_abstol", self.transient_lte_abstol)?;
+        validate_positive(
+            "transient_node_activity_bound",
+            self.transient_node_activity_bound,
+        )?;
+
+        self.convergence_config.validate()?;
+        self.bypass_config.validate()?;
+        if let Some(grid) = self.locked_time_grid.as_deref() {
+            validate_locked_time_grid(grid)?;
+        }
+        Ok(())
+    }
+
     /// Select a broad compatibility dialect and use its device defaults.
     pub fn with_spice_dialect(mut self, dialect: SpiceDialect) -> Self {
         self.spice_dialect = dialect;
@@ -245,6 +366,22 @@ impl Default for ConvergenceConfig {
 }
 
 impl ConvergenceConfig {
+    /// Validate the numerical invariants of the convergence policy.
+    pub fn validate(&self) -> Result<(), SimulationConfigError> {
+        validate_positive("convergence_config.gmin_initial", self.gmin_initial)?;
+        validate_positive("convergence_config.gmin_target", self.gmin_target)?;
+        validate_positive(
+            "convergence_config.junction_gmin_target",
+            self.junction_gmin_target,
+        )?;
+        validate_positive("convergence_config.voltage_reltol", self.voltage_reltol)?;
+        validate_finite("convergence_config.voltage_abstol", self.voltage_abstol)?;
+        validate_finite("convergence_config.current_abstol", self.current_abstol)?;
+        validate_finite("convergence_config.charge_abstol", self.charge_abstol)?;
+        validate_positive("convergence_config.residual_reltol", self.residual_reltol)?;
+        Ok(())
+    }
+
     /// Create a minimal config (direct Newton only)
     pub fn fast() -> Self {
         Self {
@@ -324,6 +461,12 @@ impl Default for BypassConfig {
 }
 
 impl BypassConfig {
+    /// Validate bypass thresholds even when bypass is currently disabled.
+    pub fn validate(&self) -> Result<(), SimulationConfigError> {
+        validate_non_negative("bypass_config.reltol", self.reltol)?;
+        validate_non_negative("bypass_config.abstol", self.abstol)
+    }
+
     /// Create bypass config with optimization enabled
     pub fn enabled() -> Self {
         Self {
@@ -369,4 +512,76 @@ impl Default for SimulationConfig {
             locked_time_grid: None,
         }
     }
+}
+
+fn validate_count(field: &'static str, value: usize) -> Result<(), SimulationConfigError> {
+    if value == 0 {
+        Err(SimulationConfigError::InvalidCount { field, value })
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_finite(field: &'static str, value: Value) -> Result<(), SimulationConfigError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(SimulationConfigError::InvalidValue {
+            field,
+            value,
+            requirement: "finite",
+        })
+    }
+}
+
+fn validate_positive(field: &'static str, value: Value) -> Result<(), SimulationConfigError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(SimulationConfigError::InvalidValue {
+            field,
+            value,
+            requirement: "a positive finite number",
+        })
+    }
+}
+
+fn validate_non_negative(field: &'static str, value: Value) -> Result<(), SimulationConfigError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(SimulationConfigError::InvalidValue {
+            field,
+            value,
+            requirement: "a non-negative finite number",
+        })
+    }
+}
+
+fn validate_optional_positive(
+    field: &'static str,
+    value: Option<Value>,
+) -> Result<(), SimulationConfigError> {
+    value.map_or(Ok(()), |value| validate_positive(field, value))
+}
+
+fn validate_locked_time_grid(grid: &[Value]) -> Result<(), SimulationConfigError> {
+    let mut previous = None;
+    for (index, value) in grid.iter().copied().enumerate() {
+        if !value.is_finite() || value < 0.0 {
+            return Err(SimulationConfigError::InvalidLockedTimeGridPoint { index, value });
+        }
+        if let Some((previous_index, previous)) = previous
+            && value <= previous
+        {
+            return Err(SimulationConfigError::NonIncreasingLockedTimeGrid {
+                index,
+                value,
+                previous_index,
+                previous,
+            });
+        }
+        previous = Some((index, value));
+    }
+    Ok(())
 }

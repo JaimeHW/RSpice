@@ -53,7 +53,7 @@ pub use builder::{
 };
 pub use config::{
     BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,
-    SpiceDialect,
+    SimulationConfigError, SpiceDialect,
 };
 pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
