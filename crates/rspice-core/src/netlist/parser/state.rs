@@ -144,7 +144,8 @@ impl ParseState {
             )
             .into());
         }
-        super::super::expr::validate_global_parameter_expressions(&self.params)
+        let mut params = self.params;
+        super::super::expr::finalize_parameter_expressions(&mut params)
             .map_err(ParseError::InvalidValue)
             .map_err(ParseWithAbortError::from)?;
 
@@ -164,7 +165,7 @@ impl ParseState {
             data_tables: self.data_tables,
             models: self.models,
             subcircuits: self.subcircuits,
-            params: self.params,
+            params,
             initial_conditions: self.initial_conditions,
             device_initial_conditions: self.device_initial_conditions,
             node_sets: self.node_sets,

@@ -1565,6 +1565,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * frequency;
+            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency);
             let mut ac_matrix =
                 Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
             let mut covariance = vec![vec![zero; num_ports]; num_ports];
@@ -1982,6 +1983,7 @@ impl Engine {
                     return Err(SimulationError::Aborted);
                 }
                 let omega = 2.0 * PI * freq;
+                circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
                 let mut ac_matrix =
                     Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
 
@@ -2149,6 +2151,64 @@ impl Engine {
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+
+    fn xyce_frequency_resistor_netlist(body: &str) -> Netlist {
+        Netlist::parse_with_options(
+            body,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("frequency-dependent noise deck parses")
+    }
+
+    fn xyce_engine() -> Engine {
+        Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        )
+    }
+
+    #[test]
+    fn noise_refreshes_frequency_dependent_behavioral_conductance() {
+        let netlist = xyce_frequency_resistor_netlist(
+            "live FREQ noise transfer\n\
+             .PARAM RUNTIME_R={FREQ}\n\
+             RNOISE out 0 1k\n\
+             RF out 0 {RUNTIME_R}\n\
+             .END\n",
+        );
+        let results = xyce_engine()
+            .run_noise(&netlist, 1, &[10.0, 100.0], 300.15)
+            .expect("frequency-dependent noise transfer solves");
+        assert_eq!(results.len(), 2);
+        assert!(
+            results[1].output_noise_density > 80.0 * results[0].output_noise_density,
+            "noise operator retained a stale FREQ conductance: {results:?}"
+        );
+    }
+
+    #[test]
+    fn port_noise_refreshes_frequency_dependent_behavioral_conductance() {
+        let netlist = xyce_frequency_resistor_netlist(
+            "live FREQ port-noise transfer\n\
+             .PARAM RUNTIME_R={FREQ}\n\
+             VPORT p 0 0\n\
+             RNOISE n 0 1k\n\
+             RF n p {RUNTIME_R}\n\
+             .END\n",
+        );
+        let results = xyce_engine()
+            .run_port_noise_correlation(&netlist, &["VPORT".to_string()], &[10.0, 10_000.0], 300.15)
+            .expect("frequency-dependent port-noise transfer solves");
+        let low = results[0].current_correlation[0][0].re;
+        let high = results[1].current_correlation[0][0].re;
+        assert!(
+            low > 100.0 * high,
+            "port-noise operator retained a stale FREQ conductance: low={low:e}, high={high:e}"
+        );
+    }
 
     #[test]
     fn unit_noise_rhs_accepts_unified_branch_equation_ids() {

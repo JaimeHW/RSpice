@@ -31,7 +31,9 @@ struct BehavioralDerivativeContext<'a> {
     node_values: &'a [Value],
     branch_values: &'a [Value],
     time: Value,
+    frequency: Value,
     temperature: Value,
+    gmin: Value,
     expression_dialect: ExpressionDialect,
     target: DerivativeTarget,
 }
@@ -69,6 +71,12 @@ pub struct BehavioralVoltageSource {
     linearized_affine: Value,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
+    /// Active analysis frequency in hertz.
+    frequency: Value,
+    /// Whether the resolved expression contains the live AC frequency.
+    frequency_dependent: bool,
+    /// Active nonlinear minimum conductance, surfaced as `GMIN`.
+    gmin: Value,
     /// Dialect-specific expression-function semantics.
     expression_dialect: ExpressionDialect,
     /// True when the expression can jump discontinuously as its inputs cross a predicate.
@@ -102,6 +110,7 @@ impl BehavioralVoltageSource {
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let transient_voltage_lte_excluded =
             expression_excludes_voltage_output_from_transient_lte(&ast);
+        let frequency_dependent = expression_depends_on_frequency(&ast);
         let program = compile(&ast);
 
         Ok(Self {
@@ -122,6 +131,9 @@ impl BehavioralVoltageSource {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            frequency: 0.0,
+            frequency_dependent,
+            gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
             transient_voltage_lte_excluded,
         })
@@ -221,7 +233,9 @@ impl BehavioralVoltageSource {
     #[inline]
     fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
         let ctx = Context::transient(&self.node_values, &self.branch_values, time)
+            .with_frequency(self.frequency)
             .with_temperature(self.temperature)
+            .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect);
         self.vm.execute(&self.program, &ctx)
     }
@@ -229,6 +243,20 @@ impl BehavioralVoltageSource {
     /// Set the circuit temperature (degrees Celsius) surfaced as `temper`.
     pub fn set_temperature(&mut self, temperature: Value) {
         self.temperature = temperature;
+    }
+
+    pub fn set_frequency(&mut self, frequency: Value) {
+        self.frequency = frequency;
+    }
+
+    /// Whether this source's resolved expression depends on `FREQ`/`HERTZ`.
+    #[inline]
+    pub(crate) fn is_frequency_dependent(&self) -> bool {
+        self.frequency_dependent
+    }
+
+    pub fn set_gmin(&mut self, gmin: Value) {
+        self.gmin = gmin;
     }
 
     /// Set dialect-specific expression-function semantics.
@@ -310,7 +338,9 @@ impl BehavioralVoltageSource {
                     &self.node_values,
                     &self.branch_values,
                     time,
+                    self.frequency,
                     self.temperature,
+                    self.gmin,
                     self.expression_dialect,
                     DerivativeTarget::Node(idx),
                 )
@@ -327,7 +357,9 @@ impl BehavioralVoltageSource {
                     &self.node_values,
                     &self.branch_values,
                     time,
+                    self.frequency,
                     self.temperature,
+                    self.gmin,
                     self.expression_dialect,
                     DerivativeTarget::Branch(idx),
                 )
@@ -357,6 +389,27 @@ impl BehavioralVoltageSource {
     /// operating point for small-signal assembly. AC has no time axis;
     /// expressions see t = 0.
     pub(crate) fn linearize_at(&mut self, solution: &[Value]) {
+        self.frequency = 0.0;
+        let _ = self.linearize_expression(solution, 0.0);
+    }
+
+    pub(crate) fn linearize_at_frequency(&mut self, solution: &[Value], frequency: Value) {
+        if !self.frequency_dependent {
+            return;
+        }
+        self.frequency = frequency;
+        let _ = self.linearize_expression(solution, 0.0);
+    }
+
+    /// Linearize at an arbitrary state and frequency. Unlike
+    /// [`Self::linearize_at_frequency`], this always refreshes the Jacobian
+    /// because the supplied state may have changed.
+    pub(crate) fn linearize_at_state_and_frequency(
+        &mut self,
+        solution: &[Value],
+        frequency: Value,
+    ) {
+        self.frequency = frequency;
         let _ = self.linearize_expression(solution, 0.0);
     }
 
@@ -462,7 +515,9 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
         | Expr::BranchCurrent(_)
         | Expr::StringLiteral(_)
         | Expr::Frequency
-        | Expr::Temperature => false,
+        | Expr::Temperature
+        | Expr::ThermalVoltage
+        | Expr::Gmin => false,
         Expr::Time => true,
         Expr::LookupTable(table) => table.transient_breakpoints,
         Expr::Unary { op, operand } => {
@@ -559,7 +614,9 @@ fn collect_expression_transient_breakpoints(
         | Expr::StringLiteral(_)
         | Expr::Time
         | Expr::Frequency
-        | Expr::Temperature => {}
+        | Expr::Temperature
+        | Expr::ThermalVoltage
+        | Expr::Gmin => {}
         Expr::LookupTable(table) => {
             if table.transient_breakpoints {
                 breakpoints.extend(table.points.iter().map(|(time, _)| *time));
@@ -701,7 +758,9 @@ fn expression_depends_on_runtime_quantity(expr: &Expr) -> bool {
         | Expr::StringLiteral(_)
         | Expr::Time
         | Expr::Frequency
-        | Expr::Temperature => true,
+        | Expr::Temperature
+        | Expr::ThermalVoltage
+        | Expr::Gmin => true,
         Expr::LookupTable(_) => true,
         Expr::Unary { operand, .. } => expression_depends_on_runtime_quantity(operand),
         Expr::Binary { left, right, .. } => {
@@ -709,6 +768,29 @@ fn expression_depends_on_runtime_quantity(expr: &Expr) -> bool {
                 || expression_depends_on_runtime_quantity(right)
         }
         Expr::Function { args, .. } => args.iter().any(expression_depends_on_runtime_quantity),
+    }
+}
+
+/// Detect the live frequency after parameter/function expansion has produced
+/// the canonical behavioral AST. Probe names remain ordinary strings in
+/// `NodeVoltage`/`BranchCurrent`, so a node named `FREQ` is not misclassified.
+fn expression_depends_on_frequency(expr: &Expr) -> bool {
+    match expr {
+        Expr::Frequency => true,
+        Expr::Unary { operand, .. } => expression_depends_on_frequency(operand),
+        Expr::Binary { left, right, .. } => {
+            expression_depends_on_frequency(left) || expression_depends_on_frequency(right)
+        }
+        Expr::Function { args, .. } => args.iter().any(expression_depends_on_frequency),
+        Expr::Const(_)
+        | Expr::NodeVoltage(_)
+        | Expr::BranchCurrent(_)
+        | Expr::StringLiteral(_)
+        | Expr::LookupTable(_)
+        | Expr::Time
+        | Expr::Temperature
+        | Expr::ThermalVoltage
+        | Expr::Gmin => false,
     }
 }
 
@@ -727,7 +809,9 @@ fn analytic_expression_partial(
     node_values: &[Value],
     branch_values: &[Value],
     time: Value,
+    frequency: Value,
     temperature: Value,
+    gmin: Value,
     expression_dialect: ExpressionDialect,
     target: DerivativeTarget,
 ) -> Option<Value> {
@@ -736,7 +820,9 @@ fn analytic_expression_partial(
         node_values,
         branch_values,
         time,
+        frequency,
         temperature,
+        gmin,
         expression_dialect,
         target,
     };
@@ -762,8 +848,15 @@ fn eval_behavioral_expr_with_derivative(
     match expr {
         Expr::Const(value) => Some((*value, 0.0)),
         Expr::Time => Some((context.time, 0.0)),
-        Expr::Frequency => Some((0.0, 0.0)),
+        Expr::Frequency => Some((context.frequency, 0.0)),
         Expr::Temperature => Some((context.temperature, 0.0)),
+        Expr::ThermalVoltage => Some((
+            crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(
+                context.temperature,
+            )),
+            0.0,
+        )),
+        Expr::Gmin => Some((context.gmin, 0.0)),
         Expr::StringLiteral(_) => Some((0.0, 0.0)),
         Expr::LookupTable(table) => {
             let value = eval_lookup_table(table.points.as_ref(), context.time)?;
@@ -1357,6 +1450,12 @@ pub struct BehavioralCurrentSource {
     linearized_affine: Value,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
+    /// Active analysis frequency in hertz.
+    frequency: Value,
+    /// Whether the resolved expression contains the live AC frequency.
+    frequency_dependent: bool,
+    /// Active nonlinear minimum conductance, surfaced as `GMIN`.
+    gmin: Value,
     /// Dialect-specific expression-function semantics.
     expression_dialect: ExpressionDialect,
     /// Whether this expression represents a two-terminal device whose lead
@@ -1387,6 +1486,7 @@ impl BehavioralCurrentSource {
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let ast = resolve_file_lookup_functions(ast, source_path)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
+        let frequency_dependent = expression_depends_on_frequency(&ast);
         let program = compile(&ast);
 
         Ok(Self {
@@ -1406,6 +1506,9 @@ impl BehavioralCurrentSource {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            frequency: 0.0,
+            frequency_dependent,
+            gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
             two_terminal_observables: false,
         })
@@ -1500,7 +1603,9 @@ impl BehavioralCurrentSource {
     #[inline]
     fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
         let ctx = Context::transient(&self.node_values, &self.branch_values, time)
+            .with_frequency(self.frequency)
             .with_temperature(self.temperature)
+            .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect);
         self.vm.execute(&self.program, &ctx)
     }
@@ -1508,6 +1613,20 @@ impl BehavioralCurrentSource {
     /// Set the circuit temperature (degrees Celsius) surfaced as `temper`.
     pub fn set_temperature(&mut self, temperature: Value) {
         self.temperature = temperature;
+    }
+
+    pub fn set_frequency(&mut self, frequency: Value) {
+        self.frequency = frequency;
+    }
+
+    /// Whether this source's resolved expression depends on `FREQ`/`HERTZ`.
+    #[inline]
+    pub(crate) fn is_frequency_dependent(&self) -> bool {
+        self.frequency_dependent
+    }
+
+    pub fn set_gmin(&mut self, gmin: Value) {
+        self.gmin = gmin;
     }
 
     /// Set dialect-specific expression-function semantics.
@@ -1600,7 +1719,9 @@ impl BehavioralCurrentSource {
                     &self.node_values,
                     &self.branch_values,
                     time,
+                    self.frequency,
                     self.temperature,
+                    self.gmin,
                     self.expression_dialect,
                     DerivativeTarget::Node(idx),
                 )
@@ -1617,7 +1738,9 @@ impl BehavioralCurrentSource {
                     &self.node_values,
                     &self.branch_values,
                     time,
+                    self.frequency,
                     self.temperature,
+                    self.gmin,
                     self.expression_dialect,
                     DerivativeTarget::Branch(idx),
                 )
@@ -1647,6 +1770,27 @@ impl BehavioralCurrentSource {
     /// operating point for small-signal assembly. AC has no time axis;
     /// expressions see t = 0.
     pub(crate) fn linearize_at(&mut self, solution: &[Value]) {
+        self.frequency = 0.0;
+        let _ = self.linearize_expression(solution, 0.0);
+    }
+
+    pub(crate) fn linearize_at_frequency(&mut self, solution: &[Value], frequency: Value) {
+        if !self.frequency_dependent {
+            return;
+        }
+        self.frequency = frequency;
+        let _ = self.linearize_expression(solution, 0.0);
+    }
+
+    /// Linearize at an arbitrary state and frequency. Unlike
+    /// [`Self::linearize_at_frequency`], this always refreshes the Jacobian
+    /// because the supplied state may have changed.
+    pub(crate) fn linearize_at_state_and_frequency(
+        &mut self,
+        solution: &[Value],
+        frequency: Value,
+    ) {
+        self.frequency = frequency;
         let _ = self.linearize_expression(solution, 0.0);
     }
 
@@ -1765,6 +1909,16 @@ impl BehavioralSources {
         self.current_sources.push(source);
     }
 
+    /// Update the live solver GMIN seen by every retained expression.
+    pub fn set_gmin(&mut self, gmin: Value) {
+        for source in &mut self.voltage_sources {
+            source.set_gmin(gmin);
+        }
+        for source in &mut self.current_sources {
+            source.set_gmin(gmin);
+        }
+    }
+
     /// Resolve expression V(...) and I(...) references for all behavioral sources.
     pub fn bind_references<FN, FB>(
         &mut self,
@@ -1863,6 +2017,54 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn frequency_dependency_is_tracked_from_the_resolved_ast() {
+        let voltage = BehavioralVoltageSource::new(
+            "Bfreq".to_string(),
+            1,
+            0,
+            1,
+            "if(v(ctrl)>0, hertz, 2*freq)",
+        )
+        .expect("frequency-dependent voltage source parses");
+        assert!(voltage.is_frequency_dependent());
+
+        let probe_named_freq = BehavioralCurrentSource::new("Bprobe".to_string(), 1, 0, "v(freq)")
+            .expect("probe named FREQ parses");
+        assert!(!probe_named_freq.is_frequency_dependent());
+    }
+
+    #[test]
+    fn per_frequency_refresh_skips_invariant_source_jacobians() {
+        let mut invariant = BehavioralCurrentSource::new("Binvariant".to_string(), 1, 0, "2*v(n)")
+            .expect("invariant source parses");
+        invariant
+            .bind_references(|name| (name == "n").then_some(1), |_| None)
+            .expect("invariant source binds");
+        invariant.linearize_at(&[3.0]);
+        let initial_partials = invariant.linearized_partials().collect::<Vec<_>>();
+        invariant.linearize_at_frequency(&[9.0], 100.0);
+        assert_eq!(invariant.frequency, 0.0);
+        assert_eq!(
+            invariant.linearized_partials().collect::<Vec<_>>(),
+            initial_partials
+        );
+
+        let mut dependent =
+            BehavioralCurrentSource::new("Bdependent".to_string(), 1, 0, "freq*v(n)")
+                .expect("frequency-dependent source parses");
+        dependent
+            .bind_references(|name| (name == "n").then_some(1), |_| None)
+            .expect("frequency-dependent source binds");
+        dependent.linearize_at(&[3.0]);
+        dependent.linearize_at_frequency(&[3.0], 100.0);
+        assert_eq!(dependent.frequency, 100.0);
+        assert_eq!(
+            dependent.linearized_partials().collect::<Vec<_>>(),
+            vec![(0, 100.0)]
+        );
+    }
 
     #[test]
     fn xyce_power_analytic_derivative_matches_bytecode_and_finite_difference() {
@@ -2036,7 +2238,9 @@ mod tests {
             node_values: &[],
             branch_values: &[],
             time: 0.0,
+            frequency: 0.0,
             temperature: 27.0,
+            gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
             target: DerivativeTarget::Node(0),
         };
@@ -2061,7 +2265,9 @@ mod tests {
             node_values: &[node_value],
             branch_values: &[],
             time: 0.0,
+            frequency: 0.0,
             temperature: 27.0,
+            gmin: crate::constants::GMIN,
             expression_dialect,
             target: DerivativeTarget::Node(0),
         };

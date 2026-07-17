@@ -59,6 +59,30 @@ impl Engine {
         circuit.prepare_behavioral_small_signal(operating_state);
     }
 
+    /// Align nonlinear devices and behavioral-source Jacobians with an
+    /// arbitrary state at the actual small-signal frequency. This is used by
+    /// Volterra perturbations, where both state and frequency may differ from
+    /// the preceding operator evaluation.
+    pub(super) fn prepare_small_signal_state_at_frequency(
+        circuit: &mut CircuitData,
+        operating_state: &[Value],
+        frequency: Value,
+    ) {
+        if circuit.has_nonlinear_devices() {
+            for dev in &circuit.b3soi.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_fd.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_pd.devices {
+                dev.begin_timestep_iteration();
+            }
+            circuit.update_nonlinear(operating_state);
+        }
+        circuit.prepare_behavioral_small_signal_state_at_frequency(operating_state, frequency);
+    }
+
     #[inline]
     fn ac_node_voltage(voltages: &[Value], node: NodeId) -> Value {
         if node == 0 {
@@ -2068,9 +2092,9 @@ impl Engine {
         }
 
         // Behavioral sources: small-signal linearization at the DC
-        // operating point. Partials are frequency-independent and were
-        // cached by `prepare_behavioral_small_signal` after the DC solve;
-        // sign conventions mirror the DC stamps exactly.
+        // operating point and active frequency. The per-point caller
+        // refreshes these partials so Xyce FREQ/HERTZ expressions remain
+        // live; sign conventions mirror the DC stamps exactly.
         for source in &circuit.behavioral_sources.voltage_sources {
             let np = source.node_pos;
             let nn = source.node_neg;
@@ -2151,7 +2175,11 @@ impl Engine {
         omega: Value,
     ) -> Result<ComplexMatrix, SimulationError> {
         let mut state_circuit = circuit.clone();
-        Self::prepare_small_signal_state(&mut state_circuit, operating_state);
+        Self::prepare_small_signal_state_at_frequency(
+            &mut state_circuit,
+            operating_state,
+            omega / (2.0 * PI),
+        );
         Self::try_build_small_signal_ac_matrix(&state_circuit, matrix, operating_state, omega)
     }
 
@@ -2298,7 +2326,7 @@ impl Engine {
         // Closure to solve at a single frequency. Takes the circuit as a
         // parameter so the parallel path below can hand each worker its own
         // clone (device-evaluation caches are Cell-based and not Sync).
-        let solve_at_freq = |circuit: &CircuitData,
+        let solve_at_freq = |circuit: &mut CircuitData,
                              ac_matrix: &mut ComplexMatrix,
                              freq: Value|
          -> Result<AcResult, SimulationError> {
@@ -2306,6 +2334,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * freq;
+            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
             Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
                 circuit,
                 ac_matrix,
@@ -2357,11 +2386,11 @@ impl Engine {
                 .collect();
             let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = work
                 .into_par_iter()
-                .map(|(worker_circuit, chunk)| {
+                .map(|(mut worker_circuit, chunk)| {
                     let mut workspace = ComplexMatrix::from_real_structure(&matrix);
                     chunk
                         .iter()
-                        .map(|&freq| solve_at_freq(&worker_circuit, &mut workspace, freq))
+                        .map(|&freq| solve_at_freq(&mut worker_circuit, &mut workspace, freq))
                         .collect()
                 })
                 .collect();
@@ -2371,7 +2400,7 @@ impl Engine {
         let mut workspace = ComplexMatrix::from_real_structure(&matrix);
         frequencies
             .iter()
-            .map(|&freq| solve_at_freq(&circuit, &mut workspace, freq))
+            .map(|&freq| solve_at_freq(&mut circuit, &mut workspace, freq))
             .collect()
     }
 }
@@ -2471,5 +2500,41 @@ mod tests {
             1,
             "capacitor IC current must not be duplicated"
         );
+    }
+
+    #[test]
+    fn xyce_frequency_dependent_ordinary_param_relinearizes_each_ac_point() {
+        let netlist = Netlist::parse_with_options(
+            "Xyce live AC parameter\n\
+             .PARAM RUNTIME_R={FREQ}\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 {RUNTIME_R}\n\
+             .AC LIN 2 10 100\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("frequency-dependent ordinary parameter parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let frequencies = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0];
+        let results = engine
+            .run_ac(&netlist, &frequencies)
+            .expect("frequency-dependent behavioralized resistor solves");
+        assert_eq!(results.len(), frequencies.len());
+        for (result, expected_resistance) in results.iter().zip(frequencies) {
+            assert_eq!(result.frequency, expected_resistance);
+            assert!(
+                (result.voltages[0].norm() - expected_resistance).abs()
+                    <= 1.0e-10 * expected_resistance,
+                "FREQ-dependent resistor did not relinearize at {} Hz: {:?}",
+                result.frequency,
+                result.voltages[0]
+            );
+        }
     }
 }

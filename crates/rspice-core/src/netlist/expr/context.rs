@@ -182,6 +182,18 @@ pub struct ParamContext {
     params: HashMap<String, Value>,
     complex_params: HashMap<String, ComplexValue>,
     string_params: HashMap<String, String>,
+    /// Retained ordinary `.PARAM`/`.CSPARAM` expressions whose value depends
+    /// on an active analysis quantity such as `TIME` or `FREQ`. Ordinary
+    /// expressions remain scoped and settable; a numeric or string binding in
+    /// a child scope removes the inherited symbolic definition.
+    parameter_expressions: HashMap<String, String>,
+    /// Numeric projections owned by the independent `.GLOBAL_PARAM`
+    /// namespace. Xyce resolves an ordinary binding first, regardless of
+    /// directive order, and consults this namespace only when no ordinary
+    /// binding of any type exists.
+    global_params: HashMap<String, Value>,
+    global_complex_params: HashMap<String, ComplexValue>,
+    global_string_params: HashMap<String, String>,
     /// Retained top-level `.GLOBAL_PARAM` expressions. Statically evaluable
     /// definitions may also have a numeric projection in `params`, while
     /// runtime-dependent definitions remain symbolic until device binding.
@@ -215,14 +227,16 @@ impl ParamContext {
         let key = name.to_uppercase();
         self.params.insert(key.clone(), value);
         self.complex_params.remove(&key);
-        self.global_expressions.remove(&key);
+        self.string_params.remove(&key);
+        self.parameter_expressions.remove(&key);
     }
 
     /// Set a parameter value while preserving its imaginary component.
     pub fn set_complex(&mut self, name: &str, value: ComplexValue) {
         let key = name.to_uppercase();
         self.params.insert(key.clone(), value.real_projection());
-        self.global_expressions.remove(&key);
+        self.string_params.remove(&key);
+        self.parameter_expressions.remove(&key);
         if value.is_real() {
             self.complex_params.remove(&key);
         } else {
@@ -234,13 +248,16 @@ impl ParamContext {
     pub fn set_string(&mut self, name: &str, value: impl Into<String>) {
         let key = name.to_uppercase();
         self.string_params.insert(key.clone(), value.into());
-        self.global_expressions.remove(&key);
+        self.params.remove(&key);
+        self.complex_params.remove(&key);
+        self.parameter_expressions.remove(&key);
     }
 
-    /// Define a top-level `.GLOBAL_PARAM` expression with an optional static
-    /// projection. The expression remains authoritative so dependencies that
-    /// contain `TIME` or `FREQ` cannot be accidentally frozen at parse time.
-    pub fn define_global_expression(
+    /// Define an ordinary scoped parameter expression with an optional static
+    /// projection. This is distinct from `.GLOBAL_PARAM`: ordinary parameters
+    /// retain lexical shadowing and can be replaced by `.STEP`/instance scope
+    /// bindings through the normal numeric setters.
+    pub fn define_parameter_expression(
         &mut self,
         name: &str,
         expression: impl Into<String>,
@@ -256,7 +273,79 @@ impl ParamContext {
                 self.complex_params.insert(key.clone(), value);
             }
         }
+        self.parameter_expressions.insert(key, expression.into());
+    }
+
+    /// Return a retained ordinary scoped parameter expression.
+    pub fn get_parameter_expression(&self, name: &str) -> Option<&str> {
+        self.parameter_expressions
+            .get(&name.to_uppercase())
+            .map(String::as_str)
+    }
+
+    /// Return all retained ordinary parameter expressions for deterministic
+    /// validation and scope propagation.
+    pub fn all_parameter_expressions(&self) -> Vec<(String, String)> {
+        self.parameter_expressions
+            .iter()
+            .map(|(name, expression)| (name.clone(), expression.clone()))
+            .collect()
+    }
+
+    /// Define a top-level `.GLOBAL_PARAM` expression with an optional static
+    /// projection. The expression remains authoritative so dependencies that
+    /// contain `TIME` or `FREQ` cannot be accidentally frozen at parse time.
+    pub fn define_global_expression(
+        &mut self,
+        name: &str,
+        expression: impl Into<String>,
+        static_value: Option<ComplexValue>,
+    ) {
+        let key = name.to_uppercase();
+        self.global_params.remove(&key);
+        self.global_complex_params.remove(&key);
+        self.global_string_params.remove(&key);
+        if let Some(value) = static_value {
+            self.global_params
+                .insert(key.clone(), value.real_projection());
+            if !value.is_real() {
+                self.global_complex_params.insert(key.clone(), value);
+            }
+        }
         self.global_expressions.insert(key, expression.into());
+    }
+
+    /// Set a numeric `.GLOBAL_PARAM` value without disturbing a same-name
+    /// ordinary `.PARAM` binding.
+    pub fn set_global(&mut self, name: &str, value: Value) {
+        let key = name.to_uppercase();
+        self.global_params.insert(key.clone(), value);
+        self.global_complex_params.remove(&key);
+        self.global_string_params.remove(&key);
+        self.global_expressions.remove(&key);
+    }
+
+    /// Set a complex `.GLOBAL_PARAM` value without crossing namespaces.
+    pub fn set_global_complex(&mut self, name: &str, value: ComplexValue) {
+        let key = name.to_uppercase();
+        self.global_params
+            .insert(key.clone(), value.real_projection());
+        self.global_string_params.remove(&key);
+        self.global_expressions.remove(&key);
+        if value.is_real() {
+            self.global_complex_params.remove(&key);
+        } else {
+            self.global_complex_params.insert(key, value);
+        }
+    }
+
+    /// Set a string `.GLOBAL_PARAM` value without crossing namespaces.
+    pub fn set_global_string(&mut self, name: &str, value: impl Into<String>) {
+        let key = name.to_uppercase();
+        self.global_string_params.insert(key.clone(), value.into());
+        self.global_params.remove(&key);
+        self.global_complex_params.remove(&key);
+        self.global_expressions.remove(&key);
     }
 
     /// Return the retained `.GLOBAL_PARAM` expression, if this name denotes
@@ -276,21 +365,46 @@ impl ParamContext {
             .collect()
     }
 
+    /// Whether the ordinary namespace contains this name in any value class.
+    pub fn has_parameter_binding(&self, name: &str) -> bool {
+        let key = name.to_uppercase();
+        self.params.contains_key(&key)
+            || self.complex_params.contains_key(&key)
+            || self.string_params.contains_key(&key)
+            || self.parameter_expressions.contains_key(&key)
+    }
+
+    fn has_global_binding_key(&self, key: &str) -> bool {
+        self.global_params.contains_key(key)
+            || self.global_complex_params.contains_key(key)
+            || self.global_string_params.contains_key(key)
+            || self.global_expressions.contains_key(key)
+    }
+
+    fn effective_numeric_without_builtin(&self, key: &str) -> Option<Value> {
+        if self.has_parameter_binding(key) {
+            return self
+                .complex_params
+                .get(key)
+                .map(|value| value.real_projection())
+                .or_else(|| self.params.get(key).copied());
+        }
+        self.global_complex_params
+            .get(key)
+            .map(|value| value.real_projection())
+            .or_else(|| self.global_params.get(key).copied())
+    }
+
     /// Get a parameter value
     pub fn get(&self, name: &str) -> Option<Value> {
         let key = name.to_uppercase();
-        if let Some(value) = self.complex_params.get(&key) {
-            return Some(value.real_projection());
-        }
-        if let Some(value) = self.params.get(&key) {
-            return Some(*value);
+        if self.has_parameter_binding(&key) || self.has_global_binding_key(&key) {
+            return self.effective_numeric_without_builtin(&key);
         }
 
         let temp_c = self
-            .params
-            .get("TEMP")
-            .or_else(|| self.params.get("TEMPER"))
-            .copied()
+            .effective_numeric_without_builtin("TEMP")
+            .or_else(|| self.effective_numeric_without_builtin("TEMPER"))
             .unwrap_or(DEFAULT_TEMPERATURE_C);
         builtin_numeric_param(&key, temp_c)
     }
@@ -298,17 +412,31 @@ impl ParamContext {
     /// Get a parameter value, preserving any imaginary component.
     pub fn get_complex(&self, name: &str) -> Option<ComplexValue> {
         let key = name.to_uppercase();
-        if let Some(value) = self.complex_params.get(&key) {
-            return Some(*value);
+        if self.has_parameter_binding(&key) {
+            return self
+                .complex_params
+                .get(&key)
+                .copied()
+                .or_else(|| self.params.get(&key).copied().map(ComplexValue::real));
+        }
+        if self.has_global_binding_key(&key) {
+            return self.global_complex_params.get(&key).copied().or_else(|| {
+                self.global_params
+                    .get(&key)
+                    .copied()
+                    .map(ComplexValue::real)
+            });
         }
         self.get(&key).map(ComplexValue::real)
     }
 
     /// Get a string parameter value.
     pub fn get_string(&self, name: &str) -> Option<&str> {
-        self.string_params
-            .get(&name.to_uppercase())
-            .map(String::as_str)
+        let key = name.to_uppercase();
+        if self.has_parameter_binding(&key) {
+            return self.string_params.get(&key).map(String::as_str);
+        }
+        self.global_string_params.get(&key).map(String::as_str)
     }
 
     /// Merge another context into this one
@@ -317,32 +445,38 @@ impl ParamContext {
     /// random stream so merging scopes never perturbs draw sequences.
     pub fn merge(&mut self, other: &ParamContext) {
         for (k, v) in &other.params {
-            self.params.insert(k.clone(), *v);
-            if !other.complex_params.contains_key(k) {
-                self.complex_params.remove(k);
-            }
-            if !other.global_expressions.contains_key(k) {
-                self.global_expressions.remove(k);
-            }
+            self.set(k, *v);
         }
         for (k, v) in &other.complex_params {
-            self.complex_params.insert(k.clone(), *v);
-            if !other.global_expressions.contains_key(k) {
-                self.global_expressions.remove(k);
-            }
+            self.set_complex(k, *v);
         }
         for (k, v) in &other.string_params {
-            self.string_params.insert(k.clone(), v.clone());
-            self.global_expressions.remove(k);
+            self.set_string(k, v.clone());
+        }
+        for (k, expression) in &other.parameter_expressions {
+            let value = other
+                .complex_params
+                .get(k)
+                .copied()
+                .or_else(|| other.params.get(k).copied().map(ComplexValue::real));
+            self.define_parameter_expression(k, expression.clone(), value);
+        }
+        for (k, v) in &other.global_params {
+            self.set_global(k, *v);
+        }
+        for (k, v) in &other.global_complex_params {
+            self.set_global_complex(k, *v);
+        }
+        for (k, v) in &other.global_string_params {
+            self.set_global_string(k, v.clone());
         }
         for (k, expression) in &other.global_expressions {
-            if !other.params.contains_key(k) {
-                self.params.remove(k);
-                self.complex_params.remove(k);
-            }
-            self.string_params.remove(k);
-            self.global_expressions
-                .insert(k.clone(), expression.clone());
+            let value = other
+                .global_complex_params
+                .get(k)
+                .copied()
+                .or_else(|| other.global_params.get(k).copied().map(ComplexValue::real));
+            self.define_global_expression(k, expression.clone(), value);
         }
         for (k, v) in &other.functions {
             self.functions.insert(k.clone(), v.clone());
@@ -432,15 +566,39 @@ impl ParamContext {
 
     /// Get all parameters as a vector of (name, value) tuples
     pub fn all_params(&self) -> Vec<(String, Value)> {
-        self.params.iter().map(|(k, v)| (k.clone(), *v)).collect()
+        let mut values = self.global_params.clone();
+        for name in self
+            .string_params
+            .keys()
+            .chain(self.parameter_expressions.keys())
+        {
+            values.remove(name);
+        }
+        values.extend(
+            self.params
+                .iter()
+                .map(|(name, value)| (name.clone(), *value)),
+        );
+        values.into_iter().collect()
     }
 
     /// Get all string parameters as a vector of (name, value) tuples.
     pub fn all_string_params(&self) -> Vec<(String, String)> {
-        self.string_params
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
+        let mut values = self.global_string_params.clone();
+        for name in self
+            .params
+            .keys()
+            .chain(self.complex_params.keys())
+            .chain(self.parameter_expressions.keys())
+        {
+            values.remove(name);
+        }
+        values.extend(
+            self.string_params
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+        values.into_iter().collect()
     }
 
     /// Get all user-defined functions as owned definitions.
@@ -480,11 +638,7 @@ impl ParamContext {
     /// This is used by analyses whose parameter context can vary at every
     /// accepted point, such as Xyce `.DC DATA` table rows.
     pub fn numeric_parameters(&self) -> Vec<(String, Value)> {
-        let mut values = self
-            .params
-            .iter()
-            .map(|(name, value)| (name.clone(), *value))
-            .collect::<Vec<_>>();
+        let mut values = self.all_params();
         values.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         values
     }
@@ -511,16 +665,40 @@ impl ParamContext {
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect::<Vec<_>>();
         strings.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut global_numeric = self
+            .global_params
+            .iter()
+            .map(|(name, value)| (name.clone(), value.to_bits()))
+            .collect::<Vec<_>>();
+        global_numeric.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut global_complex = self
+            .global_complex_params
+            .iter()
+            .map(|(name, value)| (name.clone(), value.re.to_bits(), value.im.to_bits()))
+            .collect::<Vec<_>>();
+        global_complex.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut global_strings = self
+            .global_string_params
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        global_strings.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         let mut globals = self
             .global_expressions
             .iter()
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect::<Vec<_>>();
         globals.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut parameter_expressions = self
+            .parameter_expressions
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        parameter_expressions.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         let mut functions = self.functions.values().cloned().collect::<Vec<_>>();
         functions.sort_unstable_by(|left, right| left.name.cmp(&right.name));
         format!(
-            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nglobals={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nexpression_dialect={:?}\nparameter_redefinition_policy={:?}\n",
+            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nparameter_expressions={parameter_expressions:?}\nglobal_numeric={global_numeric:?}\nglobal_complex={global_complex:?}\nglobal_strings={global_strings:?}\nglobal_expressions={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nexpression_dialect={:?}\nparameter_redefinition_policy={:?}\n",
             self.random.seed,
             self.statistical_mode,
             self.expression_dialect,

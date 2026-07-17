@@ -1,4 +1,5 @@
 use super::*;
+use crate::Value;
 
 pub(in crate::engine::builder) fn expression_references_circuit_state(expression: &str) -> bool {
     crate::netlist::expr::behavioral_expression_references_runtime_quantity(expression)
@@ -41,6 +42,7 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
+    expression_gmin: Value,
 ) -> Result<(), SimulationError> {
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -80,6 +82,7 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
     .map_err(SimulationError::Circuit)?;
     bcs.set_expression_dialect(netlist.params.expression_dialect());
     bcs.set_temperature(policy.temperature_celsius);
+    bcs.set_gmin(expression_gmin);
     bcs.enable_two_terminal_observables();
     circuit.behavioral_sources.add_current(bcs);
     Ok(())

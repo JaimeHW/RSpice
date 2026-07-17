@@ -29,14 +29,55 @@ impl DeviceOpReport {
 impl CircuitData {
     /// Linearize every behavioral source at the DC operating point so the
     /// small-signal (AC/noise/sensitivity) assembly can read the cached
-    /// partials immutably. One-shot per analysis: the partials are
-    /// frequency-independent, and per-worker circuit clones carry them.
+    /// partials immutably. One-shot per analysis for frequency-invariant
+    /// expressions; frequency-dependent sources are selectively refreshed
+    /// at each analysis point.
     pub(crate) fn prepare_behavioral_small_signal(&mut self, dc_solution: &[Value]) {
         for source in &mut self.behavioral_sources.voltage_sources {
             source.linearize_at(dc_solution);
         }
         for source in &mut self.behavioral_sources.current_sources {
             source.linearize_at(dc_solution);
+        }
+    }
+
+    /// Refresh behavioral-source Jacobians for one AC frequency point.
+    ///
+    /// Most behavioral expressions are frequency-independent. Re-evaluating
+    /// here is nevertheless required for Xyce `FREQ`/`HERTZ` parameter
+    /// graphs and behavioralized passive values, whose small-signal
+    /// conductance can change at every point.
+    pub(crate) fn prepare_behavioral_small_signal_at_frequency(
+        &mut self,
+        dc_solution: &[Value],
+        frequency: Value,
+    ) {
+        for source in &mut self.behavioral_sources.voltage_sources {
+            if source.is_frequency_dependent() {
+                source.linearize_at_frequency(dc_solution, frequency);
+            }
+        }
+        for source in &mut self.behavioral_sources.current_sources {
+            if source.is_frequency_dependent() {
+                source.linearize_at_frequency(dc_solution, frequency);
+            }
+        }
+    }
+
+    /// Linearize every behavioral source at an arbitrary state and active
+    /// frequency. Distortion uses this for nearby bias states, where even a
+    /// frequency-invariant expression must be refreshed because its inputs
+    /// have changed.
+    pub(crate) fn prepare_behavioral_small_signal_state_at_frequency(
+        &mut self,
+        state: &[Value],
+        frequency: Value,
+    ) {
+        for source in &mut self.behavioral_sources.voltage_sources {
+            source.linearize_at_state_and_frequency(state, frequency);
+        }
+        for source in &mut self.behavioral_sources.current_sources {
+            source.linearize_at_state_and_frequency(state, frequency);
         }
     }
 

@@ -114,6 +114,24 @@ const XYCE_ABM_POW_CANDIDATE_CONTENT_BLAKE3: &str =
     "2ffe099c0701a75920d9dd5b26db68736bf85297ce7ae794e673fdbaf93dd7eb";
 const XYCE_ABM_POW_MANIFEST_BLAKE3: &str =
     "8f4fa483c6b5862124323c57f642e8763050821be3344c4d5ae036733617c144";
+const XYCE_ABM_TRANSIENT_TIME_FAMILY_PREFIX: &str = "netlists/abm_time/";
+const XYCE_ABM_TRANSIENT_SQRT_FAMILY_PREFIX: &str = "netlists/abm_sqrt/";
+const XYCE_ABM_TRANSIENT_TIME_DIRECTORY_COUNT: usize = 2;
+const XYCE_ABM_TRANSIENT_TIME_DIRECTORY_BLAKE3: &str =
+    "b33b695a8ea3282c92677ab31dea460e37e77206a6441a8e5194714272132508";
+const XYCE_ABM_TRANSIENT_TIME_CONTENT_BLAKE3: &str =
+    "c952881c72e510be28bbd3912163a9039b5deee30d0b638355176ba5434f52b6";
+const XYCE_ABM_TRANSIENT_SQRT_DIRECTORY_COUNT: usize = 1;
+const XYCE_ABM_TRANSIENT_SQRT_DIRECTORY_BLAKE3: &str =
+    "caa6b38ddf60870fe4f1244904485c46fc483d5721da36b7b08bfc91258109b8";
+const XYCE_ABM_TRANSIENT_SQRT_CONTENT_BLAKE3: &str =
+    "286988ba2d0a13300b42021cdcc69d282ae2419f1b64454e7006cd41e72f62a1";
+const XYCE_ABM_TRANSIENT_CANDIDATE_BLAKE3: &str =
+    "01fa5d35bc700b26933db5f1bfdc7b69a12d7f7eafa7e3b687fbc705f54aa81d";
+const XYCE_ABM_TRANSIENT_CANDIDATE_CONTENT_BLAKE3: &str =
+    "72f62e2db60be24d51f72b1efecba72f07479ec6d95c43a1f49b43e471a83142";
+const XYCE_ABM_TRANSIENT_MANIFEST_BLAKE3: &str =
+    "01fa5d35bc700b26933db5f1bfdc7b69a12d7f7eafa7e3b687fbc705f54aa81d";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
@@ -2738,6 +2756,99 @@ impl XyceAbmPowKind {
         match self {
             Self::UnaryMinusPrecedence => 51,
             Self::NegativeIntegerExponent | Self::FractionalPrincipalComplex => 26,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAbmTransientKind {
+    DirectTime,
+    ParameterTime,
+    SquareRoot,
+}
+
+impl XyceAbmTransientKind {
+    const ALL: [Self; 3] = [Self::DirectTime, Self::ParameterTime, Self::SquareRoot];
+
+    // Text identities use canonical LF bytes. This is the representation in
+    // Git and the Release-7.10.0 artifacts; validation normalizes a CRLF
+    // checkout before comparing lengths and digests.
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL.into_iter().find(|kind| kind.record() == record)
+    }
+
+    fn record(self) -> &'static str {
+        match self {
+            Self::DirectTime => "netlists/abm_time/time.cir",
+            Self::ParameterTime => "netlists/abm_time/time_param.cir",
+            Self::SquareRoot => "netlists/abm_sqrt/sqrt.cir",
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::DirectTime => (
+                1652,
+                "8b3000ba77b14f3afbb7ef92517f480f4960d7ece02a32430567787bf7331960",
+            ),
+            Self::ParameterTime => (
+                1678,
+                "67db073fdc5f21c0604aaa087b44310ca11efef7ee4b64ebc35100e0f8db1db9",
+            ),
+            Self::SquareRoot => (
+                1444,
+                "489b81dfda01f2c8339a7d12042597ed70d1f97462b5da72b8b99fae470e5661",
+            ),
+        }
+    }
+
+    fn historical_wrapper_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::DirectTime => (
+                1259,
+                "d81921bdbb1cfc58c17ca024b02dbe2f05fa5f294a9600b46d81da46c1b7ae4f",
+            ),
+            Self::ParameterTime => (
+                1271,
+                "7933696b9e61c08d509d1673ac1aa6f040f465ed295ab679fb0b64c30ad098a5",
+            ),
+            Self::SquareRoot => (
+                1259,
+                "fb977e06d51ec5f8cf550e2868505b061a85ebfbbd11013a86351eacaea295bd",
+            ),
+        }
+    }
+
+    fn historical_perl_identity(self) -> (usize, &'static str) {
+        match self {
+            Self::DirectTime => (
+                384,
+                "7a5793fcdf29d886ff789e7076b7b92b7d8209d8decb03370286768884074730",
+            ),
+            Self::ParameterTime => (
+                396,
+                "51aa9bd0f445c1915cdfd769a8348c3aba709ef3266d730bfea2948862c37b3c",
+            ),
+            Self::SquareRoot => (
+                518,
+                "22789907f0aa9d9902fa8ba4280e71fa1c9bfd135cf8d83db5cdeabb25786ecf",
+            ),
+        }
+    }
+
+    fn expected_columns(self) -> &'static [&'static str] {
+        match self {
+            Self::DirectTime | Self::ParameterTime => &["Index", "TIME", "V(1)", "V(2)"],
+            Self::SquareRoot => &["Index", "TIME", "V(1)", "V(2)", "V(3)"],
+        }
+    }
+
+    fn stop(self) -> Value {
+        match self {
+            Self::DirectTime | Self::ParameterTime => 6.0,
+            Self::SquareRoot => 12.0,
         }
     }
 }
@@ -5548,6 +5659,23 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(kind) = XyceAbmTransientKind::for_record(&deck.relative_path) {
+            let contract = "abm_generated_gold_transient_wrapper";
+            let result = match self.validate_abm_transient_oracle(deck, kind, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(kind) = XyceAbmPowKind::for_record(&deck.relative_path) {
             let contract = "abm_pow_generated_gold_dc_wrapper";
             let result = match self.validate_abm_pow_oracle(deck, kind, start) {
@@ -6091,6 +6219,729 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_abm_transient_oracle(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceAbmTransientKind,
+        start: Instant,
+    ) -> Result<(), String> {
+        let source_bytes = self.validate_abm_transient_provenance(deck, kind)?;
+        self.check_abm_transient_deadline(start, "provenance")?;
+        let source = std::str::from_utf8(&source_bytes)
+            .map_err(|error| format!("ABM transient source is not UTF-8: {error}"))?;
+        let plan = self.static_tran_plan_for_path_with_purpose(
+            &deck.path,
+            XyceStaticTranPlanPurpose::AnalyticOracle,
+        )?;
+        if plan.source.as_bytes() != source_bytes {
+            return Err("ABM transient plan did not preserve the exact source bytes".into());
+        }
+        let parsed = Self::parse_xyce_netlist(source, &deck.path)
+            .map_err(|error| format!("ABM transient parse failed: {error}"))?;
+        Self::validate_abm_transient_plan(&plan, &parsed, kind)?;
+        Self::validate_abm_transient_topology(&parsed, kind)?;
+        self.check_abm_transient_deadline(start, "parse and exact topology")?;
+
+        let (netlist, result) =
+            self.run_transient_family_plan(&plan, start, None)
+                .map_err(|error| match error {
+                    SimulationError::Aborted => format!(
+                        "ABM transient native execution exceeded shared timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    other => format!("ABM transient native execution failed: {other}"),
+                })?;
+        Self::validate_abm_transient_topology(&netlist, kind)?;
+        let actual = Self::transient_family_result_to_prn_table(&plan, &netlist, &result)?;
+        Self::validate_abm_transient_output_domain(&actual, kind)?;
+        let gold = Self::abm_transient_dynamic_gold_table(&actual, kind)?;
+        let mismatches = self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+            &gold,
+            &actual,
+            XyceVerifyTransientTolerance::release_7_10_default(),
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        )?;
+        if !mismatches.is_empty() {
+            return Err(format!(
+                "ABM transient Release 7.10 generated-gold comparison produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ));
+        }
+
+        let counterfactual = Self::abm_transient_counterfactual_table(&actual, kind)?;
+        let counterfactual_mismatches = self
+            .compare_xyce_verify_transient_tables_with_uniform_tolerance(
+                &counterfactual,
+                &actual,
+                XyceVerifyTransientTolerance::release_7_10_default(),
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+        if counterfactual_mismatches.is_empty() {
+            return Err(
+                "ABM transient counterfactual unexpectedly reproduced the native output".into(),
+            );
+        }
+        self.check_abm_transient_deadline(start, "native execution, generated gold, and causality")
+    }
+
+    fn check_abm_transient_deadline(&self, start: Instant, phase: &str) -> Result<(), String> {
+        if DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1)).is_aborted() {
+            Err(format!(
+                "ABM transient shared deadline expired during {phase} ({}ms)",
+                self.config.max_time_per_test_ms
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_abm_transient_provenance(
+        &self,
+        deck: &XyceDeck,
+        kind: XyceAbmTransientKind,
+    ) -> Result<Vec<u8>, String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err(format!(
+                "ABM transient record '{}' lost exact removed-wrapper ownership",
+                kind.record()
+            ));
+        }
+        let canonical_deck = deck
+            .path
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize ABM transient record: {error}"))?;
+        let canonical_expected = self
+            .root
+            .join(Path::new(kind.record()))
+            .canonicalize()
+            .map_err(|error| format!("canonical ABM transient record is missing: {error}"))?;
+        if canonical_deck != canonical_expected {
+            return Err("ABM transient record resolved outside its canonical corpus path".into());
+        }
+
+        for (prefix, count, names_hash, content_hash) in [
+            (
+                XYCE_ABM_TRANSIENT_TIME_FAMILY_PREFIX,
+                XYCE_ABM_TRANSIENT_TIME_DIRECTORY_COUNT,
+                XYCE_ABM_TRANSIENT_TIME_DIRECTORY_BLAKE3,
+                XYCE_ABM_TRANSIENT_TIME_CONTENT_BLAKE3,
+            ),
+            (
+                XYCE_ABM_TRANSIENT_SQRT_FAMILY_PREFIX,
+                XYCE_ABM_TRANSIENT_SQRT_DIRECTORY_COUNT,
+                XYCE_ABM_TRANSIENT_SQRT_DIRECTORY_BLAKE3,
+                XYCE_ABM_TRANSIENT_SQRT_CONTENT_BLAKE3,
+            ),
+        ] {
+            self.validate_abm_transient_family_census(prefix, count, names_hash, content_hash)?;
+        }
+
+        let mut candidates = BTreeSet::new();
+        let mut candidate_content = BTreeSet::new();
+        for candidate in XyceAbmTransientKind::ALL {
+            let path = self.root.join(Path::new(candidate.record()));
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!(
+                    "ABM transient candidate {} is missing: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "ABM transient candidate {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read ABM transient candidate: {error}"))?;
+            let canonical_bytes = Self::canonical_lf_text_identity(
+                &format!("ABM transient source {}", candidate.record()),
+                &bytes,
+            )?;
+            Self::validate_xdm_replaceground_identity(
+                "ABM transient source",
+                candidate.record(),
+                &canonical_bytes,
+                candidate.source_identity(),
+            )?;
+            candidates.insert(candidate.record().to_string());
+            candidate_content.insert(format!(
+                "{}\t{}",
+                candidate.record(),
+                blake3::hash(&canonical_bytes).to_hex()
+            ));
+            self.reject_wrapper_output_artifacts(&path)?;
+        }
+        let candidates = candidates.into_iter().collect::<Vec<_>>();
+        let candidate_content = candidate_content.into_iter().collect::<Vec<_>>();
+        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let candidate_content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let manifest = self
+            .upstream_wrapper_decks
+            .iter()
+            .filter(|record| {
+                record.starts_with(XYCE_ABM_TRANSIENT_TIME_FAMILY_PREFIX)
+                    || record.starts_with(XYCE_ABM_TRANSIENT_SQRT_FAMILY_PREFIX)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let manifest_hash = blake3::hash(manifest.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if candidates.len() != XyceAbmTransientKind::ALL.len()
+            || candidate_hash != XYCE_ABM_TRANSIENT_CANDIDATE_BLAKE3
+            || candidate_content_hash != XYCE_ABM_TRANSIENT_CANDIDATE_CONTENT_BLAKE3
+            || manifest != candidates
+            || manifest_hash != XYCE_ABM_TRANSIENT_MANIFEST_BLAKE3
+        {
+            return Err(format!(
+                "ABM transient candidate/manifest bijection changed: candidates={}/{candidate_hash}/{candidate_content_hash}, manifest={}/{manifest_hash}",
+                candidates.len(),
+                manifest.len()
+            ));
+        }
+        Self::validate_abm_transient_historical_identities()?;
+        fs::read(&deck.path).map_err(|error| format!("failed to read ABM transient owner: {error}"))
+    }
+
+    /// Return the canonical byte representation used for textual provenance.
+    ///
+    /// Git and the Release 7.10 artifacts use LF. A Windows checkout may
+    /// materialize the same text with CRLF, so provenance hashes normalize
+    /// CRLF to LF before applying byte counts and digests. Bare CR is rejected
+    /// instead of being silently reinterpreted, and every non-line-ending byte
+    /// remains covered by the canonical identity.
+    fn canonical_lf_text_identity(label: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        std::str::from_utf8(bytes).map_err(|error| format!("{label} is not UTF-8: {error}"))?;
+        let mut canonical = Vec::with_capacity(bytes.len());
+        let mut index = 0usize;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'\r' => {
+                    if bytes.get(index + 1) != Some(&b'\n') {
+                        return Err(format!(
+                            "{label} contains a bare carriage return at byte {index}"
+                        ));
+                    }
+                    canonical.push(b'\n');
+                    index += 2;
+                }
+                byte => {
+                    canonical.push(byte);
+                    index += 1;
+                }
+            }
+        }
+        Ok(canonical)
+    }
+
+    fn validate_abm_transient_family_census(
+        &self,
+        prefix: &str,
+        expected_count: usize,
+        expected_names_hash: &str,
+        expected_content_hash: &str,
+    ) -> Result<(), String> {
+        let family = self.root.join(Path::new(prefix));
+        let metadata = fs::symlink_metadata(&family)
+            .map_err(|error| format!("failed to inspect ABM transient family: {error}"))?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "ABM transient family {} must be a regular non-symlink directory",
+                family.display()
+            ));
+        }
+        let mut names = BTreeSet::new();
+        let mut content = BTreeSet::new();
+        for entry in fs::read_dir(&family)
+            .map_err(|error| format!("failed to read ABM transient family: {error}"))?
+        {
+            let entry = entry
+                .map_err(|error| format!("failed to inspect ABM transient member: {error}"))?;
+            let member_metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect ABM transient member {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            if !member_metadata.file_type().is_file() || member_metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "ABM transient member {} must be a regular non-symlink file",
+                    entry.path().display()
+                ));
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| "ABM transient filename is not UTF-8".to_string())?
+                .to_ascii_lowercase();
+            if !names.insert(name.clone()) {
+                return Err(format!(
+                    "ABM transient family has case-colliding name {name:?}"
+                ));
+            }
+            let bytes = fs::read(entry.path())
+                .map_err(|error| format!("failed to hash ABM transient member: {error}"))?;
+            let canonical_bytes = Self::canonical_lf_text_identity(
+                &format!("ABM transient member {}", entry.path().display()),
+                &bytes,
+            )?;
+            content.insert(format!(
+                "{name}\0{}",
+                blake3::hash(&canonical_bytes).to_hex()
+            ));
+        }
+        let names = names.into_iter().collect::<Vec<_>>();
+        let content = content.into_iter().collect::<Vec<_>>();
+        let names_hash = blake3::hash(names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let content_hash = blake3::hash(content.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if names.len() != expected_count
+            || names_hash != expected_names_hash
+            || content.len() != expected_count
+            || content_hash != expected_content_hash
+        {
+            return Err(format!(
+                "ABM transient family census changed: {prefix} names={}/{names_hash}, content={}/{content_hash}",
+                names.len(),
+                content.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_abm_transient_historical_identities() -> Result<(), String> {
+        let mut wrappers = BTreeSet::new();
+        let mut perl = BTreeSet::new();
+        for kind in XyceAbmTransientKind::ALL {
+            let (wrapper_bytes, wrapper_sha256) = kind.historical_wrapper_identity();
+            let (perl_bytes, perl_sha256) = kind.historical_perl_identity();
+            if wrapper_bytes == 0
+                || perl_bytes == 0
+                || wrapper_sha256.len() != 64
+                || perl_sha256.len() != 64
+                || !wrapper_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || !perl_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err("ABM transient historical wrapper/Perl identity is malformed".into());
+            }
+            wrappers.insert((kind.record(), wrapper_bytes, wrapper_sha256));
+            perl.insert((kind.record(), perl_bytes, perl_sha256));
+        }
+        if wrappers.len() != 3 || perl.len() != 3 {
+            return Err("ABM transient historical wrapper/Perl provenance is incomplete".into());
+        }
+        Ok(())
+    }
+
+    fn validate_abm_transient_plan(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        kind: XyceAbmTransientKind,
+    ) -> Result<(), String> {
+        let expected_probes = kind
+            .expected_columns()
+            .iter()
+            .skip(2)
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let probes = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        if plan.tran.step.to_bits() != 1.0f64.to_bits()
+            || plan.tran.stop.to_bits() != kind.stop().to_bits()
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || probes != expected_probes
+            || netlist.analyses.len() != 1
+            || netlist.output_requests.len() != 1
+            || !netlist.measurements.is_empty()
+            || !netlist.diagnostics.is_empty()
+        {
+            return Err(format!(
+                "ABM transient exact TRAN/PRINT contract changed: tran={:?}, probes={probes:?}, analyses={}, outputs={}, diagnostics={}",
+                plan.tran,
+                netlist.analyses.len(),
+                netlist.output_requests.len(),
+                netlist.diagnostics.len()
+            ));
+        }
+        if netlist.options.replace_ground.is_some()
+            || netlist.options.remove_unused.is_some()
+            || netlist.options.add_resistors.is_some()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+        {
+            return Err(
+                "ABM transient deck acquired unrelated model, hierarchy, data, or preprocessing state"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_abm_transient_topology(
+        netlist: &Netlist,
+        kind: XyceAbmTransientKind,
+    ) -> Result<(), String> {
+        let expected_points: &[(Value, Value)] = match kind {
+            XyceAbmTransientKind::DirectTime | XyceAbmTransientKind::ParameterTime => &[
+                (0.0, 0.0),
+                (1.0, 5.0),
+                (2.0, 10.0),
+                (3.0, 10.0),
+                (4.0, 5.0),
+                (5.0, 0.0),
+                (6.0, 0.0),
+            ],
+            XyceAbmTransientKind::SquareRoot => &[
+                (0.0, 0.0),
+                (1.0, 1.0),
+                (2.0, 4.0),
+                (3.0, 9.0),
+                (4.0, 16.0),
+                (5.0, 25.0),
+                (6.0, 36.0),
+                (7.0, 49.0),
+                (8.0, 1.0e6),
+                (9.0, 998001.0),
+                (10.0, 1.0e8),
+                (11.0, 1.0e10),
+                (12.0, 390625.0),
+            ],
+        };
+        let expected_element_count = if kind == XyceAbmTransientKind::SquareRoot {
+            6
+        } else {
+            4
+        };
+        if netlist.elements.len() != expected_element_count {
+            return Err(format!(
+                "ABM transient topology has {} elements instead of {expected_element_count}",
+                netlist.elements.len()
+            ));
+        }
+        let source = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("VS"))
+            .ok_or_else(|| "ABM transient has no VS source".to_string())?;
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Pwl {
+            points,
+            delay,
+            repeat_from,
+        }) = &source.kind
+        else {
+            return Err("ABM transient VS is not an inline PWL voltage source".into());
+        };
+        if source.nodes != ["1", "0"]
+            || delay.to_bits() != 0.0f64.to_bits()
+            || repeat_from.is_some()
+            || points.len() != expected_points.len()
+            || points
+                .iter()
+                .zip(expected_points)
+                .any(|(actual, expected)| {
+                    actual.0.to_bits() != expected.0.to_bits()
+                        || actual.1.to_bits() != expected.1.to_bits()
+                })
+        {
+            return Err("ABM transient exact PWL source contract changed".into());
+        }
+
+        let expected_resistors: &[(&str, &str, Value)] = if kind == XyceAbmTransientKind::SquareRoot
+        {
+            &[("r1", "1", 1.0), ("r2", "2", 1.0), ("r3", "3", 1.0)]
+        } else {
+            &[("r1", "1", 1000.0), ("r2", "2", 1000.0)]
+        };
+        for (name, node, expected_value) in expected_resistors {
+            let resistor = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("ABM transient is missing resistor {name}"))?;
+            if resistor.nodes != [*node, "0"]
+                || !matches!(&resistor.kind, ElementKind::Resistor { value, value_expr: None, model: None, instance_params, deferred_params } if value.to_bits() == expected_value.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+            {
+                return Err(format!(
+                    "ABM transient resistor {name} changed exact topology"
+                ));
+            }
+        }
+
+        let expected_behavioral: &[(&str, &str, &str)] = match kind {
+            XyceAbmTransientKind::DirectTime => &[("b2", "2", "(v(1)*time)")],
+            XyceAbmTransientKind::ParameterTime => &[("b2", "2", "(v(1)*partime)")],
+            XyceAbmTransientKind::SquareRoot => {
+                &[("b2", "2", "sqrt(v(1))"), ("b3", "3", "v(2)**2")]
+            }
+        };
+        for (name, node, expected_expression) in expected_behavioral {
+            let behavioral = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("ABM transient is missing behavioral source {name}"))?;
+            let ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            } = &behavioral.kind
+            else {
+                return Err(format!(
+                    "ABM transient {name} is not a behavioral voltage source"
+                ));
+            };
+            if behavioral.nodes != [*node, "0"]
+                || tc1.to_bits() != 0.0f64.to_bits()
+                || tc2.to_bits() != 0.0f64.to_bits()
+                || Self::normalize_probe(expression) != *expected_expression
+            {
+                return Err(format!(
+                    "ABM transient {name} topology/expression changed: nodes={:?}, expression={expression:?}",
+                    behavioral.nodes
+                ));
+            }
+        }
+
+        let mut parameter_expressions = netlist.params.all_parameter_expressions();
+        parameter_expressions.sort();
+        let expected_params = if kind == XyceAbmTransientKind::ParameterTime {
+            vec![("PARTIME".to_string(), "time".to_string())]
+        } else {
+            Vec::new()
+        };
+        if parameter_expressions != expected_params
+            || !netlist.params.all_global_expressions().is_empty()
+        {
+            return Err(format!(
+                "ABM transient parameter contract changed: ordinary={parameter_expressions:?}, global={:?}",
+                netlist.params.all_global_expressions()
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_abm_transient_output_domain(
+        table: &XycePrnTable,
+        kind: XyceAbmTransientKind,
+    ) -> Result<(), String> {
+        if table.columns != kind.expected_columns() || table.rows.len() < 3 {
+            return Err(format!(
+                "ABM transient output layout changed: columns={:?}, rows={}",
+                table.columns,
+                table.rows.len()
+            ));
+        }
+        let mut previous_time = None;
+        let mut observed_nontrivial = false;
+        for (index, row) in table.rows.iter().enumerate() {
+            if row.len() != table.columns.len()
+                || row.iter().any(|value| !value.is_finite())
+                || row[0].to_bits() != (index as Value).to_bits()
+            {
+                return Err(format!(
+                    "ABM transient row {index} is malformed or nonfinite: {row:?}"
+                ));
+            }
+            let time = Self::xyce_default_prn_roundtrip(row[1])?;
+            let input = Self::xyce_default_prn_roundtrip(row[2])?;
+            if previous_time.is_some_and(|previous| time < previous) {
+                return Err(format!("ABM transient TIME regressed at row {index}"));
+            }
+            let expected_input = Self::abm_transient_pwl_value(kind, time)?;
+            // The historical Perl oracle observes both TIME and V(1) only
+            // after Xyce's default `%.8e` PRN serialization. On a steep PWL
+            // segment, the hidden pre-serialization TIME displacement is
+            // amplified by the local slope. Account for that quantization
+            // explicitly instead of applying an arbitrary loose value
+            // tolerance.
+            let time_quantization = 5.0e-9 * time.abs().max(1.0);
+            let local_slope =
+                Self::abm_transient_pwl_max_slope_near(kind, time, time_quantization)?;
+            let input_quantization = 5.0e-9 * expected_input.abs().max(input.abs()).max(1.0);
+            let input_tolerance =
+                input_quantization + local_slope * time_quantization + 8.0 * Value::EPSILON;
+            if (input - expected_input).abs() > input_tolerance {
+                return Err(format!(
+                    "ABM transient PWL causality failed at row {index}: time={time}, input={input}, expected={expected_input}"
+                ));
+            }
+            observed_nontrivial |= time > 0.0 && input.abs() > 1.0;
+            previous_time = Some(time);
+        }
+        let first_time = Self::xyce_default_prn_roundtrip(table.rows[0][1])?;
+        let last_time = Self::xyce_default_prn_roundtrip(
+            table.rows.last().expect("table has at least three rows")[1],
+        )?;
+        if first_time.to_bits() != 0.0f64.to_bits()
+            || last_time.to_bits() != kind.stop().to_bits()
+            || !observed_nontrivial
+        {
+            return Err(format!(
+                "ABM transient time/input domain changed: first={first_time}, last={last_time}, nontrivial={observed_nontrivial}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn abm_transient_pwl_value(kind: XyceAbmTransientKind, time: Value) -> Result<Value, String> {
+        let points = Self::abm_transient_pwl_points(kind);
+        if !time.is_finite() || time < points[0].0 || time > points[points.len() - 1].0 {
+            return Err(format!(
+                "ABM transient PWL time {time} is outside the exact domain"
+            ));
+        }
+        for pair in points.windows(2) {
+            let (left_time, left_value) = pair[0];
+            let (right_time, right_value) = pair[1];
+            if time <= right_time {
+                let fraction = (time - left_time) / (right_time - left_time);
+                return Ok(left_value + fraction * (right_value - left_value));
+            }
+        }
+        Ok(points[points.len() - 1].1)
+    }
+
+    fn abm_transient_pwl_max_slope_near(
+        kind: XyceAbmTransientKind,
+        time: Value,
+        radius: Value,
+    ) -> Result<Value, String> {
+        if !time.is_finite() || !radius.is_finite() || radius < 0.0 {
+            return Err("ABM transient PWL slope window is nonfinite or negative".into());
+        }
+        let points = Self::abm_transient_pwl_points(kind);
+        let window_start = time - radius;
+        let window_end = time + radius;
+        let mut maximum: Value = 0.0;
+        let mut intersects = false;
+        for pair in points.windows(2) {
+            let (left_time, left_value) = pair[0];
+            let (right_time, right_value) = pair[1];
+            if right_time < window_start || left_time > window_end {
+                continue;
+            }
+            intersects = true;
+            maximum = maximum.max(((right_value - left_value) / (right_time - left_time)).abs());
+        }
+        if intersects {
+            Ok(maximum)
+        } else {
+            Err(format!(
+                "ABM transient PWL slope window around {time} is outside the exact domain"
+            ))
+        }
+    }
+
+    fn abm_transient_pwl_points(kind: XyceAbmTransientKind) -> &'static [(Value, Value)] {
+        match kind {
+            XyceAbmTransientKind::DirectTime | XyceAbmTransientKind::ParameterTime => &[
+                (0.0, 0.0),
+                (1.0, 5.0),
+                (2.0, 10.0),
+                (3.0, 10.0),
+                (4.0, 5.0),
+                (5.0, 0.0),
+                (6.0, 0.0),
+            ],
+            XyceAbmTransientKind::SquareRoot => &[
+                (0.0, 0.0),
+                (1.0, 1.0),
+                (2.0, 4.0),
+                (3.0, 9.0),
+                (4.0, 16.0),
+                (5.0, 25.0),
+                (6.0, 36.0),
+                (7.0, 49.0),
+                (8.0, 1.0e6),
+                (9.0, 998001.0),
+                (10.0, 1.0e8),
+                (11.0, 1.0e10),
+                (12.0, 390625.0),
+            ],
+        }
+    }
+
+    fn abm_transient_dynamic_gold_table(
+        actual: &XycePrnTable,
+        kind: XyceAbmTransientKind,
+    ) -> Result<XycePrnTable, String> {
+        Self::abm_transient_derived_table(actual, kind, false)
+    }
+
+    fn abm_transient_counterfactual_table(
+        actual: &XycePrnTable,
+        kind: XyceAbmTransientKind,
+    ) -> Result<XycePrnTable, String> {
+        Self::abm_transient_derived_table(actual, kind, true)
+    }
+
+    fn abm_transient_derived_table(
+        actual: &XycePrnTable,
+        kind: XyceAbmTransientKind,
+        counterfactual: bool,
+    ) -> Result<XycePrnTable, String> {
+        if actual.columns != kind.expected_columns() || actual.rows.len() < 3 {
+            return Err(
+                "ABM transient derived gold received a table outside its exact layout".into(),
+            );
+        }
+        let mut rows = Vec::with_capacity(actual.rows.len());
+        for (row_index, row) in actual.rows.iter().enumerate() {
+            if row.len() != actual.columns.len() {
+                return Err(format!(
+                    "ABM transient derived-gold row {row_index} has wrong width"
+                ));
+            }
+            // The historical Perl programs split the DUT's already serialized
+            // default PRN and printf all fields with %.8e before xyce_verify.
+            let time = Self::xyce_default_prn_roundtrip(row[1])?;
+            let input = Self::xyce_default_prn_roundtrip(row[2])?;
+            let expected = match (kind, counterfactual) {
+                (XyceAbmTransientKind::DirectTime, false)
+                | (XyceAbmTransientKind::ParameterTime, false) => vec![time * input],
+                (XyceAbmTransientKind::DirectTime, true)
+                | (XyceAbmTransientKind::ParameterTime, true) => vec![time + input],
+                (XyceAbmTransientKind::SquareRoot, false) => vec![input.sqrt(), input],
+                (XyceAbmTransientKind::SquareRoot, true) => vec![input, input.sqrt()],
+            };
+            let mut derived = vec![row[0], time, input];
+            for value in expected {
+                derived.push(Self::xyce_default_prn_roundtrip(value)?);
+            }
+            if derived.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "ABM transient derived gold produced nonfinite row {row_index}"
+                ));
+            }
+            rows.push(derived);
+        }
+        Ok(XycePrnTable {
+            columns: actual.columns.clone(),
+            rows,
+        })
+    }
+
     fn validate_abm_pow_oracle(
         &self,
         deck: &XyceDeck,
@@ -6142,16 +6993,14 @@ impl XyceTestRunner {
         // catch.  A passing counterfactual would prove that the selected power
         // grammar/complex projection is not causally observed by this oracle.
         let counterfactual = Self::abm_pow_counterfactual_table(&actual, kind)?;
-        if self
-            .compare_release_7_10_xyce_verify_dc_tables(
-                "ABM_POW counterfactual",
-                &counterfactual,
-                &actual,
-                &results,
-                &results,
-            )
-            .is_ok_and(|mismatches| mismatches.is_empty())
-        {
+        let counterfactual_mismatches = self.compare_release_7_10_xyce_verify_dc_tables(
+            "ABM_POW counterfactual",
+            &counterfactual,
+            &actual,
+            &results,
+            &results,
+        )?;
+        if counterfactual_mismatches.is_empty() {
             return Err("ABM_POW counterfactual unexpectedly reproduced the native output".into());
         }
         self.check_abm_pow_deadline(start, "native execution, generated gold, and causality")
@@ -44063,7 +44912,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | Expr::LookupTable(_)
             | Expr::Time
             | Expr::Frequency
-            | Expr::Temperature => false,
+            | Expr::Temperature
+            | Expr::ThermalVoltage
+            | Expr::Gmin => false,
         }
     }
 
@@ -44083,7 +44934,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | Expr::LookupTable(_)
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
-            | Expr::Temperature => false,
+            | Expr::Temperature
+            | Expr::ThermalVoltage
+            | Expr::Gmin => false,
         }
     }
 
@@ -44094,7 +44947,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | Expr::BranchCurrent(_)
             | Expr::LookupTable(_)
             | Expr::Time
-            | Expr::Frequency => true,
+            | Expr::Frequency
+            | Expr::ThermalVoltage
+            | Expr::Gmin => true,
             Expr::Unary { operand, .. } => {
                 Self::passive_value_expression_depends_on_runtime_quantity(operand)
             }
@@ -45877,7 +46732,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | Expr::LookupTable(_)
             | Expr::Time
             | Expr::Frequency
-            | Expr::Temperature => false,
+            | Expr::Temperature
+            | Expr::ThermalVoltage
+            | Expr::Gmin => false,
         }
     }
 
@@ -48599,7 +49456,28 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist
             .params
             .get(parameter_name)
-            .ok_or_else(|| format!("scalar parameter probe '{}' is not defined", parameter_name))
+            .map(Ok)
+            .unwrap_or_else(|| {
+                let expression = Self::scalar_parameter_expression(&netlist.params, parameter_name)
+                    .ok_or_else(|| {
+                        format!("scalar parameter probe '{}' is not defined", parameter_name)
+                    })?;
+                let context = Self::print_eval_context(netlist, Some(dc), Some(sweep_point));
+                let prepared =
+                    crate::netlist::expr::prepare_behavioral_expression(expression, &context)
+                        .map_err(|err| {
+                            format!(
+                                "scalar parameter probe '{}' could not be prepared: {}",
+                                parameter_name, err
+                            )
+                        })?;
+                crate::netlist::expr::eval_expression(&prepared, &context).map_err(|err| {
+                    format!(
+                        "scalar parameter probe '{}' could not be evaluated: {}",
+                        parameter_name, err
+                    )
+                })
+            })
     }
 
     fn print_eval_context(
@@ -48617,13 +49495,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             "GMIN",
             netlist.options.gmin.unwrap_or(crate::constants::GMIN),
         );
+        Self::add_runtime_scalar_parameter_bindings(&mut context);
         Self::add_resistor_parameter_bindings(netlist, &mut context);
         context
+    }
+
+    fn add_runtime_scalar_parameter_bindings(context: &mut crate::netlist::ParamContext) {
+        crate::netlist::expr::materialize_available_parameter_expressions(context);
     }
 
     fn print_tran_eval_context(netlist: &Netlist, time: Value) -> crate::netlist::ParamContext {
         let mut context = Self::print_eval_context(netlist, None, None);
         context.set("TIME", time);
+        Self::add_runtime_scalar_parameter_bindings(&mut context);
         for measurement in &netlist.measurements {
             if measurement.analysis.eq_ignore_ascii_case("TRAN") {
                 if matches!(
@@ -49048,6 +49932,28 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || parameter_name.eq_ignore_ascii_case("TEMPER")
             || parameter_name.eq_ignore_ascii_case("VT")
             || netlist.params.get(parameter_name).is_some()
+            || Self::scalar_parameter_expression(&netlist.params, parameter_name).is_some_and(
+                |expression| {
+                    let context = Self::print_eval_context(netlist, None, None);
+                    crate::netlist::expr::prepare_behavioral_expression(expression, &context)
+                        .and_then(|prepared| {
+                            crate::netlist::expr::eval_expression(&prepared, &context)
+                                .map_err(|err| err.to_string())
+                        })
+                        .is_ok()
+                },
+            )
+    }
+
+    fn scalar_parameter_expression<'a>(
+        params: &'a crate::netlist::ParamContext,
+        parameter_name: &str,
+    ) -> Option<&'a str> {
+        if params.has_parameter_binding(parameter_name) {
+            params.get_parameter_expression(parameter_name)
+        } else {
+            params.get_global_expression(parameter_name)
+        }
     }
 
     fn scalar_parameter_sweep_source_is_supported(netlist: &Netlist, parameter_name: &str) -> bool {
@@ -58685,8 +59591,21 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
         let Some(parent) = output_path.parent() else {
             return Err("wrapper output path has no parent directory".to_string());
         };
-        if !parent.is_dir() {
-            return Ok(());
+        let parent_metadata = match fs::symlink_metadata(parent) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(format!(
+                    "could not inspect wrapper output directory {}: {error}",
+                    parent.display()
+                ));
+            }
+        };
+        if parent_metadata.file_type().is_symlink() || !parent_metadata.file_type().is_dir() {
+            return Err(format!(
+                "wrapper output location {} must be a regular non-symlink directory",
+                parent.display()
+            ));
         }
         let prefix = deck_path
             .file_name()
@@ -58694,15 +59613,29 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             .ok_or_else(|| "wrapper deck filename is not valid UTF-8".to_string())?
             .to_ascii_lowercase()
             + ".";
-        let mut artifacts = fs::read_dir(parent)
+        let mut artifacts = Vec::new();
+        for entry in fs::read_dir(parent)
             .map_err(|err| format!("could not inspect wrapper output directory: {err}"))?
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-                (entry.file_type().ok()?.is_file() && name.starts_with(&prefix))
-                    .then(|| entry.path())
-            })
-            .collect::<Vec<_>>();
+        {
+            let entry =
+                entry.map_err(|err| format!("could not inspect wrapper output artifact: {err}"))?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| {
+                    format!(
+                        "wrapper output artifact name is not UTF-8: {}",
+                        entry.path().display()
+                    )
+                })?
+                .to_ascii_lowercase();
+            if name.starts_with(&prefix) {
+                // Any path with the deck's output prefix is an artifact. Do
+                // not let a symlink, directory, socket, or other non-regular
+                // entry bypass the checked-in-output prohibition.
+                artifacts.push(entry.path());
+            }
+        }
         artifacts.sort();
         if artifacts.is_empty() {
             Ok(())

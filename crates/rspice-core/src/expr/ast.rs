@@ -35,6 +35,10 @@ pub enum Expr {
     Frequency,
     /// Circuit temperature in degrees Celsius (`temper`)
     Temperature,
+    /// Thermal voltage kT/q at the active circuit temperature.
+    ThermalVoltage,
+    /// Active minimum conductance used by the nonlinear solver.
+    Gmin,
 }
 
 /// Binary operators

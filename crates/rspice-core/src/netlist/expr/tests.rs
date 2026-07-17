@@ -1021,6 +1021,172 @@ fn global_parameter_expressions_expand_live_dependencies_case_insensitively() {
 }
 
 #[test]
+fn available_runtime_bindings_materialize_retained_parameter_namespaces() {
+    let mut ctx = ParamContext::new();
+    ctx.define_global_expression("RTEMP", "TEMP", None);
+    ctx.define_global_expression("PARAMMULT", "RTEMP*VT", None);
+    ctx.define_global_expression("SHADOWED", "TEMP+1", None);
+    ctx.set("SHADOWED", 5.0);
+    ctx.set("TEMP", 37.0);
+    ctx.set("VT", 0.03);
+
+    assert_eq!(materialize_available_parameter_expressions(&mut ctx), 3);
+    assert_eq!(ctx.get("RTEMP"), Some(37.0));
+    assert!((ctx.get("PARAMMULT").expect("PARAMMULT materialized") - 1.11).abs() < 1.0e-15);
+    assert_eq!(
+        ctx.get("SHADOWED"),
+        Some(5.0),
+        "ordinary bindings must continue to shadow a materialized global value"
+    );
+}
+
+#[test]
+fn ordinary_parameter_expressions_expand_live_dependencies_and_shadow_lexically() {
+    let mut ctx = ParamContext::new();
+    ctx.define_parameter_expression("PAR_TIME", "TIME", None);
+    ctx.define_parameter_expression("SCALED", "2*par_time", None);
+
+    let prepared =
+        prepare_behavioral_expression("scaled+1", &ctx).expect("ordinary expression expands");
+    assert!(
+        behavioral_expression_references_runtime_quantity(&prepared),
+        "expanded ordinary parameter must preserve TIME: {prepared}"
+    );
+    assert!(!prepared.to_ascii_uppercase().contains("PAR_TIME"));
+    assert!(!prepared.to_ascii_uppercase().contains("SCALED"));
+
+    let mut child = ctx.clone();
+    child.set("PAR_TIME", 3.0);
+    let shadowed = prepare_behavioral_expression("PAR_TIME", &child)
+        .expect("child numeric binding shadows symbolic parent");
+    assert_eq!(eval_expression(&shadowed, &child).unwrap(), 3.0);
+    assert_eq!(child.get_parameter_expression("PAR_TIME"), None);
+}
+
+#[test]
+fn xyce_parser_retains_runtime_ordinary_params_and_folds_forward_static_params() {
+    let options = crate::netlist::NetlistParseOptions {
+        expression_dialect: ExpressionDialect::Xyce,
+        ..crate::netlist::NetlistParseOptions::default()
+    };
+    let netlist = crate::netlist::Netlist::parse_with_options(
+        "ordinary runtime params\n\
+         .param parTime={TIME}\n\
+         .param shifted={parTime+1}\n\
+         .param staticForward={base+1}\n\
+         .param base=2\n\
+         b1 out 0 v={shifted}\n\
+         r1 out 0 {staticForward}\n\
+         .tran 1 2\n\
+         .end\n",
+        options,
+    )
+    .expect("Xyce ordinary TIME parameter deck parses");
+
+    assert_eq!(
+        netlist.params.get_parameter_expression("PARTIME"),
+        Some("TIME")
+    );
+    assert_eq!(
+        netlist.params.get_parameter_expression("SHIFTED"),
+        Some("parTime+1")
+    );
+    assert_eq!(netlist.params.get("STATICFORWARD"), Some(3.0));
+    assert_eq!(
+        netlist.params.get_parameter_expression("STATICFORWARD"),
+        None
+    );
+    let prepared = prepare_behavioral_expression("shifted", &netlist.params)
+        .expect("runtime ordinary dependency prepares");
+    assert!(behavioral_expression_references_runtime_quantity(&prepared));
+    assert!(!prepared.to_ascii_uppercase().contains("PARTIME"));
+}
+
+#[test]
+fn xyce_ordinary_parameter_cycles_fail_and_ngspice_behavior_is_unchanged() {
+    let xyce = crate::netlist::NetlistParseOptions {
+        expression_dialect: ExpressionDialect::Xyce,
+        ..crate::netlist::NetlistParseOptions::default()
+    };
+    let cycle = crate::netlist::Netlist::parse_with_options(
+        "ordinary cycle\n.param a={b+1}\n.param b={a+1}\n.end\n",
+        xyce,
+    )
+    .expect_err("ordinary parameter cycle must fail");
+    assert!(
+        cycle.to_string().contains("cyclic .PARAM dependency"),
+        "{cycle}"
+    );
+
+    let ngspice = crate::netlist::Netlist::parse(
+        "ngspice runtime ordinary parameter\n.param p={TIME}\n.end\n",
+    )
+    .expect_err("non-Xyce ordinary TIME behavior remains unchanged");
+    assert!(
+        ngspice.to_string().contains("Undefined parameter"),
+        "{ngspice}"
+    );
+}
+
+#[test]
+fn subcircuit_numeric_param_shadows_top_level_runtime_ordinary_param() {
+    let options = crate::netlist::NetlistParseOptions {
+        expression_dialect: ExpressionDialect::Xyce,
+        ..crate::netlist::NetlistParseOptions::default()
+    };
+    let netlist = crate::netlist::Netlist::parse_with_options(
+        "runtime parameter scope\n\
+         .param gain={TIME}\n\
+         btop top 0 v={gain}\n\
+         x1 child 0 cell\n\
+         .subckt cell p n\n\
+         .param gain=2\n\
+         bchild p n v={gain}\n\
+         .ends\n\
+         .tran 1 2\n\
+         .end\n",
+        options,
+    )
+    .expect("runtime ordinary parameter scope parses");
+    let cell = netlist
+        .subcircuits
+        .iter()
+        .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case("cell"))
+        .expect("cell definition");
+    assert!(
+        cell.body_params
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("gain") && *value == 2.0),
+        "local numeric GAIN definition was not retained: {cell:?}"
+    );
+    let flattened = crate::netlist::flatten_netlist(&netlist).expect("scope flattens");
+    let expressions = flattened
+        .iter()
+        .filter_map(|element| match &element.kind {
+            crate::netlist::ElementKind::BehavioralVoltage { expression, .. } => {
+                Some((element.name.to_ascii_uppercase(), expression.clone()))
+            }
+            _ => None,
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let top = expressions.get("BTOP").expect("top behavioral source");
+    let prepared_top =
+        prepare_behavioral_expression(top, &netlist.params).expect("top expression prepares");
+    assert!(
+        behavioral_expression_references_runtime_quantity(&prepared_top),
+        "{prepared_top}"
+    );
+    let child = expressions
+        .get("X1.BCHILD")
+        .expect("flattened child behavioral source");
+    assert!(
+        !behavioral_expression_references_runtime_quantity(child),
+        "{child}; flattened expressions: {expressions:?}"
+    );
+    assert_eq!(eval_expression(child, &netlist.params).unwrap(), 2.0);
+}
+
+#[test]
 fn global_parameter_redefinitions_do_not_freeze_dependent_numeric_projections() {
     let mut ctx = ParamContext::new();
     ctx.define_global_expression("A", "2", Some(ComplexValue::real(2.0)));
@@ -1036,7 +1202,7 @@ fn global_parameter_redefinitions_do_not_freeze_dependent_numeric_projections() 
 }
 
 #[test]
-fn merging_an_ordinary_parameter_clears_a_shadowed_global_expression() {
+fn merging_an_ordinary_parameter_shadows_but_preserves_the_global_namespace() {
     let mut base = ParamContext::new();
     base.define_global_expression("A", "TIME", None);
     let mut overlay = ParamContext::new();
@@ -1045,7 +1211,153 @@ fn merging_an_ordinary_parameter_clears_a_shadowed_global_expression() {
     base.merge(&overlay);
 
     assert_eq!(base.get("A"), Some(5.0));
-    assert_eq!(base.get_global_expression("A"), None);
+    assert_eq!(base.get_global_expression("A"), Some("TIME"));
+    let prepared = prepare_behavioral_expression("A", &base).expect("ordinary wins");
+    assert_eq!(prepared, "5");
+}
+
+#[test]
+fn ordinary_and_global_namespaces_are_order_independent_and_type_exclusive() {
+    for global_first in [false, true] {
+        let mut params = ParamContext::new();
+        if global_first {
+            params.define_global_expression("P", "TIME", None);
+            params.set("P", 7.0);
+        } else {
+            params.set("P", 7.0);
+            params.define_global_expression("P", "TIME", None);
+        }
+        assert_eq!(params.get("P"), Some(7.0));
+        assert_eq!(params.get_global_expression("P"), Some("TIME"));
+        assert_eq!(prepare_behavioral_expression("P", &params).unwrap(), "7");
+    }
+
+    let mut params = ParamContext::new();
+    params.set("K", 2.0);
+    params.set_string("K", "model.lib");
+    assert_eq!(params.get("K"), None);
+    assert_eq!(params.get_string("K"), Some("model.lib"));
+    params.set("K", 3.0);
+    assert_eq!(params.get("K"), Some(3.0));
+    assert_eq!(params.get_string("K"), None);
+
+    params.set_global("G", 4.0);
+    params.set_global_string("G", "global.lib");
+    assert_eq!(params.get("G"), None);
+    assert_eq!(params.get_string("G"), Some("global.lib"));
+    params.set_global("G", 5.0);
+    assert_eq!(params.get("G"), Some(5.0));
+    assert_eq!(params.get_string("G"), None);
+
+    let legal_frequency_name = crate::netlist::Netlist::parse_with_options(
+        "legal FREQUENCY user parameter\n\
+         .PARAM PERIOD=2\n\
+         .GLOBAL_PARAM FREQUENCY={1/PERIOD}\n\
+         .END\n",
+        crate::netlist::NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..crate::netlist::NetlistParseOptions::default()
+        },
+    )
+    .expect("FREQUENCY is not a reserved Xyce special identifier");
+    assert_eq!(legal_frequency_name.params.get("FREQUENCY"), Some(0.5));
+
+    let reserved_hertz = crate::netlist::Netlist::parse_with_options(
+        "reserved HERTZ global name\n.GLOBAL_PARAM HERTZ=1\n.END\n",
+        crate::netlist::NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..crate::netlist::NetlistParseOptions::default()
+        },
+    )
+    .expect_err("HERTZ is the canonical Xyce frequency special alias");
+    assert!(
+        reserved_hertz.to_string().contains("reserved"),
+        "{reserved_hertz}"
+    );
+}
+
+#[test]
+fn xyce_runtime_specials_remain_live_through_ordinary_params_and_vm_context() {
+    let netlist = crate::netlist::Netlist::parse_with_options(
+        "runtime specials\n\
+         .param LIVE={TIME+TEMP+VT+GMIN}\n\
+         B1 1 0 V={LIVE}\n\
+         .tran 1 1\n\
+         .end\n",
+        crate::netlist::NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..crate::netlist::NetlistParseOptions::default()
+        },
+    )
+    .expect("Xyce runtime specials parse");
+    let prepared = prepare_behavioral_expression("LIVE", &netlist.params).unwrap();
+    assert!(behavioral_expression_references_runtime_quantity(&prepared));
+    let ast = crate::expr::parse_expression_strict(&prepared).unwrap();
+    let program = crate::expr::compile(&ast);
+    let context = crate::expr::Context::transient(&[], &[], 2.0)
+        .with_temperature(50.0)
+        .with_gmin(1.0e-6)
+        .with_expression_dialect(ExpressionDialect::Xyce);
+    let actual = crate::expr::Vm::new().execute(&program, &context);
+    let expected = 2.0
+        + 50.0
+        + crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(50.0))
+        + 1.0e-6;
+    assert!((actual - expected).abs() <= 1.0e-14, "{prepared}: {actual}");
+
+    let delta_time = crate::netlist::Netlist::parse_with_options(
+        "unsupported delta-time special\n.param LIVE={DT}\n.end\n",
+        crate::netlist::NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..crate::netlist::NetlistParseOptions::default()
+        },
+    )
+    .expect_err("DT must fail explicitly until the active timestep is supplied to expressions");
+    assert!(
+        delta_time.to_string().contains("Undefined parameter: DT"),
+        "{delta_time}"
+    );
+}
+
+#[test]
+fn subcircuit_instance_runtime_argument_keeps_caller_lexical_binding() {
+    let netlist = crate::netlist::Netlist::parse_with_options(
+        "runtime instance arg\n\
+         .param SCALE=2\n\
+         .subckt S 1 0 PARAMS: GAIN=1\n\
+         .param SCALE=9\n\
+         BCHILD 1 0 V={GAIN}\n\
+         .ends S\n\
+         X1 1 0 S GAIN={SCALE*TIME}\n\
+         .tran 1 1\n\
+         .end\n",
+        crate::netlist::NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..crate::netlist::NetlistParseOptions::default()
+        },
+    )
+    .expect("runtime subcircuit argument parses");
+    let flattened = crate::netlist::flatten_netlist(&netlist).expect("runtime argument flattens");
+    let expression = flattened
+        .iter()
+        .find_map(|element| match &element.kind {
+            crate::netlist::ElementKind::BehavioralVoltage { expression, .. }
+                if element.name.to_ascii_uppercase().contains("BCHILD") =>
+            {
+                Some(expression)
+            }
+            _ => None,
+        })
+        .expect("flattened child expression");
+    assert!(behavioral_expression_references_runtime_quantity(
+        expression
+    ));
+    let ast = crate::expr::parse_expression_strict(expression).unwrap();
+    let value = crate::expr::Vm::new().execute(
+        &crate::expr::compile(&ast),
+        &crate::expr::Context::transient(&[], &[], 3.0),
+    );
+    assert_eq!(value, 6.0, "caller SCALE=2 must be captured: {expression}");
 }
 
 #[test]
@@ -1150,7 +1462,7 @@ fn parameter_circuit_probe_classifier_matches_xyce_classes_and_precedence() {
 
 #[test]
 fn frequency_dependency_classifier_uses_expression_structure() {
-    for expression in ["FREQ", "2*PI*HERTZ", "IF(1,FREQUENCY,0)", "-F"] {
+    for expression in ["FREQ", "2*PI*HERTZ"] {
         assert!(
             behavioral_expression_references_frequency(expression),
             "{expression} contains an AC frequency symbol"
@@ -1170,10 +1482,8 @@ fn frequency_dependency_classifier_uses_expression_structure() {
         !behavioral_expression_references_unbound_frequency("FREQ+HERTZ", &bound),
         "explicit parameter bindings shadow runtime frequency spellings"
     );
-    assert!(
-        behavioral_expression_references_unbound_frequency("FREQUENCY", &bound),
-        "unshadowed frequency aliases remain runtime-dependent"
-    );
+    assert!(!behavioral_expression_references_frequency("FREQUENCY"));
+    assert!(!behavioral_expression_references_frequency("F"));
 }
 
 #[test]

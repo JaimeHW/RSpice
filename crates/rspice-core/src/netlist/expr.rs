@@ -26,10 +26,13 @@ pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
 };
 pub use behavioral::{
-    ParameterCircuitProbe, ParameterCircuitProbeKind, behavioral_expression_references_frequency,
-    behavioral_expression_references_runtime_quantity,
-    behavioral_expression_references_unbound_frequency, parameter_expression_circuit_probe,
-    prepare_behavioral_expression, validate_global_parameter_expressions,
+    ParameterCircuitProbe, ParameterCircuitProbeKind, RuntimeSpecialQuantity,
+    behavioral_expression_references_frequency, behavioral_expression_references_runtime_quantity,
+    behavioral_expression_references_unbound_frequency, finalize_parameter_expressions,
+    materialize_available_parameter_expressions, parameter_expression_circuit_probe,
+    prepare_behavioral_expression, prepare_behavioral_expression_preserving_spelling,
+    runtime_special_quantity, validate_global_parameter_expressions,
+    validate_parameter_expressions,
 };
 pub use context::{
     DEFAULT_RANDOM_SEED, ExpressionDialect, FunctionDef, ParamContext, ParameterRedefinitionPolicy,

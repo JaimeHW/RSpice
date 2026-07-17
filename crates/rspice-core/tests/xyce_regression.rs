@@ -4450,6 +4450,189 @@ fn test_xyce_abm_pow_generated_gold_dc_wrappers_run_natively() {
 }
 
 #[test]
+fn test_xyce_abm_generated_gold_transient_wrappers_run_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/ABM_TIME/time.cir",
+        "Netlists/ABM_TIME/time_param.cir",
+        "Netlists/ABM_SQRT/sqrt.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed shell/Perl wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should execute its exact native generated-gold transient oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(result.contract, "abm_generated_gold_transient_wrapper");
+    }
+}
+
+#[test]
+fn test_xyce_abm_generated_gold_transient_provenance_mutations_fail_closed() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
+    let corpus = get_xyce_tests_dir();
+    let make_fixture = |label: &str| {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-abm-transient-{label}-{}-{}",
+            std::process::id(),
+            FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        for (family, names) in [
+            ("ABM_TIME", &["time.cir", "time_param.cir"][..]),
+            ("ABM_SQRT", &["sqrt.cir"][..]),
+        ] {
+            let target = root.join("Netlists").join(family);
+            fs::create_dir_all(&target).expect("create ABM transient fixture family");
+            for name in names {
+                fs::copy(
+                    corpus.join("Netlists").join(family).join(name),
+                    target.join(name),
+                )
+                .expect("copy canonical ABM transient source");
+            }
+        }
+        fs::write(
+            root.join("RSPICE-HARNESS-MANIFEST.tsv"),
+            "Netlists/ABM_SQRT/sqrt.cir\trequires_upstream_wrapper\n\
+             Netlists/ABM_TIME/time.cir\trequires_upstream_wrapper\n\
+             Netlists/ABM_TIME/time_param.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write ABM transient fixture manifest");
+        root
+    };
+    let assert_fails = |root: &Path, relative: &str, label: &str| {
+        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            !result.passed && !result.expected_unsupported,
+            "{label} must fail the exact ABM transient oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, "abm_generated_gold_transient_wrapper");
+    };
+
+    let root = make_fixture("canonical-lf");
+    for relative in [
+        "Netlists/ABM_TIME/time.cir",
+        "Netlists/ABM_TIME/time_param.cir",
+        "Netlists/ABM_SQRT/sqrt.cir",
+    ] {
+        let path = root.join(relative);
+        let source = fs::read_to_string(&path).expect("read CRLF ABM transient source");
+        fs::write(&path, source.replace("\r\n", "\n"))
+            .expect("write canonical-LF ABM transient source");
+    }
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for relative in [
+        "Netlists/ABM_TIME/time.cir",
+        "Netlists/ABM_TIME/time_param.cir",
+        "Netlists/ABM_SQRT/sqrt.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} canonical-LF provenance should execute natively, got {result:?}"
+        );
+        assert_eq!(result.contract, "abm_generated_gold_transient_wrapper");
+    }
+    fs::remove_dir_all(&root).expect("remove canonical-LF ABM transient fixture");
+
+    let root = make_fixture("source");
+    let path = root.join("Netlists/ABM_TIME/time.cir");
+    let source = fs::read_to_string(&path).expect("read mutation source");
+    fs::write(&path, source.replace("V(1) * TIME", "V(1) + TIME"))
+        .expect("write TIME-expression mutation");
+    assert_fails(
+        &root,
+        "Netlists/ABM_TIME/time.cir",
+        "TIME behavioral-expression source mutation",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM transient source fixture");
+
+    let root = make_fixture("manifest");
+    fs::write(
+        root.join("RSPICE-HARNESS-MANIFEST.tsv"),
+        "Netlists/ABM_SQRT/sqrt.cir\trequires_upstream_wrapper\n\
+         Netlists/ABM_TIME/time.cir\trequires_upstream_wrapper\n",
+    )
+    .expect("remove ABM transient manifest owner");
+    assert_fails(
+        &root,
+        "Netlists/ABM_TIME/time_param.cir",
+        "removed wrapper ownership",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM transient manifest fixture");
+
+    let root = make_fixture("family");
+    fs::write(
+        root.join("Netlists/ABM_SQRT/unexpected.txt"),
+        "unexpected\n",
+    )
+    .expect("write extra ABM_SQRT family member");
+    assert_fails(
+        &root,
+        "Netlists/ABM_SQRT/sqrt.cir",
+        "family census mutation",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM transient family fixture");
+
+    let root = make_fixture("output");
+    fs::create_dir_all(root.join("OutputData/ABM_TIME"))
+        .expect("create forbidden ABM_TIME output directory");
+    fs::write(
+        root.join("OutputData/ABM_TIME/time.cir.prn"),
+        "forbidden static gold\n",
+    )
+    .expect("write forbidden ABM_TIME output artifact");
+    assert_fails(
+        &root,
+        "Netlists/ABM_TIME/time.cir",
+        "forbidden checked-in output",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM transient output fixture");
+
+    let root = make_fixture("output-symlink");
+    let output_dir = root.join("OutputData/ABM_TIME");
+    fs::create_dir_all(&output_dir).expect("create symlink-output ABM_TIME directory");
+    let target = root.join("external-time.cir.prn");
+    fs::write(&target, "forbidden symlink target\n")
+        .expect("write forbidden output symlink target");
+    let artifact = output_dir.join("time.cir.prn");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &artifact)
+        .expect("create forbidden ABM transient output symlink");
+    #[cfg(windows)]
+    {
+        if let Err(error) = std::os::windows::fs::symlink_file(&target, &artifact) {
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(1314)
+            {
+                // Windows may require Developer Mode or elevation for
+                // symlinks. A directory with the same output prefix exercises
+                // the identical non-regular-artifact rejection path.
+                fs::create_dir(&artifact)
+                    .expect("create forbidden non-regular ABM transient output artifact");
+            } else {
+                panic!("create forbidden ABM transient output symlink: {error}");
+            }
+        }
+    }
+    assert_fails(
+        &root,
+        "Netlists/ABM_TIME/time.cir",
+        "forbidden checked-in symlink/non-regular output",
+    );
+    fs::remove_dir_all(&root).expect("remove ABM transient symlink-output fixture");
+}
+
+#[test]
 fn test_xyce_abm_pow_provenance_mutations_fail_closed() {
     let _xyce_runner_guard = lock_xyce_runner();
     static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);

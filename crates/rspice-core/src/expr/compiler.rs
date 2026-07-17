@@ -30,6 +30,14 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
             program.instructions.push(Instruction::PushTemperature);
         }
 
+        Expr::ThermalVoltage => {
+            program.instructions.push(Instruction::PushThermalVoltage);
+        }
+
+        Expr::Gmin => {
+            program.instructions.push(Instruction::PushGmin);
+        }
+
         Expr::NodeVoltage(node) => {
             let idx = program.get_or_create_node(node);
             program.instructions.push(Instruction::LoadVoltage(idx));

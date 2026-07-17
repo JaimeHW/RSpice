@@ -52,7 +52,9 @@ fn resolve_expr(expr: Expr, source_path: Option<&Path>) -> Result<Expr, String> 
         | Expr::LookupTable(_)
         | Expr::Time
         | Expr::Frequency
-        | Expr::Temperature => Ok(expr),
+        | Expr::Temperature
+        | Expr::ThermalVoltage
+        | Expr::Gmin => Ok(expr),
     }
 }
 

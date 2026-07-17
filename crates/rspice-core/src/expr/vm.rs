@@ -22,6 +22,10 @@ pub enum Instruction {
     PushFreq,
     /// Push circuit temperature (degrees Celsius)
     PushTemperature,
+    /// Push kT/q at the active circuit temperature.
+    PushThermalVoltage,
+    /// Push the active nonlinear minimum conductance.
+    PushGmin,
     /// Load node voltage by index
     LoadVoltage(usize),
     /// Load branch current by index
@@ -178,6 +182,8 @@ pub struct Context<'a> {
     pub frequency: Value,
     /// Circuit temperature in degrees Celsius (`temper`)
     pub temperature: Value,
+    /// Active minimum conductance.
+    pub gmin: Value,
     /// Dialect-specific expression-function semantics.
     pub expression_dialect: ExpressionDialect,
 }
@@ -193,6 +199,7 @@ impl<'a> Context<'a> {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
         }
     }
@@ -207,6 +214,7 @@ impl<'a> Context<'a> {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
         }
     }
@@ -214,6 +222,18 @@ impl<'a> Context<'a> {
     /// Set the circuit temperature (degrees Celsius) for `temper`.
     pub fn with_temperature(mut self, temperature: Value) -> Self {
         self.temperature = temperature;
+        self
+    }
+
+    /// Set the active analysis frequency in hertz.
+    pub fn with_frequency(mut self, frequency: Value) -> Self {
+        self.frequency = frequency;
+        self
+    }
+
+    /// Set the active nonlinear minimum conductance.
+    pub fn with_gmin(mut self, gmin: Value) -> Self {
+        self.gmin = gmin;
         self
     }
 
@@ -274,6 +294,12 @@ impl Vm {
                 Instruction::PushTime => self.stack.push(ctx.time),
                 Instruction::PushFreq => self.stack.push(ctx.frequency),
                 Instruction::PushTemperature => self.stack.push(ctx.temperature),
+                Instruction::PushThermalVoltage => {
+                    self.stack.push(crate::constants::thermal_voltage(
+                        crate::analysis::temperature::celsius_to_kelvin(ctx.temperature),
+                    ))
+                }
+                Instruction::PushGmin => self.stack.push(ctx.gmin),
 
                 Instruction::LoadVoltage(idx) => {
                     let v = ctx.voltages.get(*idx).copied().unwrap_or(0.0);
