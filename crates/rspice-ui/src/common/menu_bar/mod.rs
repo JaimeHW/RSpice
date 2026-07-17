@@ -15,7 +15,10 @@ mod tools_menu;
 mod waveform_export;
 
 pub(crate) use examples_menu::load_named_example;
-pub(crate) use export_actions::{action_export_netlist_with_io, action_view_netlist};
+pub(crate) use export_actions::{
+    action_export_generated_netlist_with_options, action_export_netlist_with_io,
+    action_view_netlist, build_menu_netlist,
+};
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
 pub(crate) use simulate_menu::open_simulation_options;
 pub(crate) use tools_menu::run_design_rule_check;

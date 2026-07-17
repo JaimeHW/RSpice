@@ -1760,6 +1760,7 @@ mod tests {
             manual_source: None,
             cross_probe: None,
             touchstone_export: TouchstoneExportPolicy::disabled(),
+            sealed_source_dependencies: Vec::new(),
         })
         .expect("dependency-ordered snapshot validates");
         let digest = snapshot.digest();
@@ -2030,6 +2031,9 @@ mod tests {
             Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
         state.simulation.request_manual_deck_run();
         let mut controller = SimulationController::new();
+        controller
+            .validate_manual_deck_document(&state)
+            .expect("explicit validation authorizes the exact manual deck");
 
         controller.start_simulation(&mut state);
         let total_analyses = controller.total_analyses;
@@ -2067,6 +2071,9 @@ mod tests {
         let project_revision = state.workspace.project.revision();
         state.simulation.request_manual_deck_run();
         let mut controller = SimulationController::new();
+        controller
+            .validate_manual_deck_document(&state)
+            .expect("explicit validation authorizes the exact manual deck");
 
         controller.start_simulation(&mut state);
 
@@ -2130,6 +2137,9 @@ mod tests {
             Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
         state.simulation.request_manual_deck_run();
         let mut controller = SimulationController::new();
+        controller
+            .validate_manual_deck_document(&state)
+            .expect("explicit validation authorizes the exact manual deck");
         controller.start_simulation(&mut state);
         let task_provenance = controller
             .current_provenance
@@ -2196,6 +2206,9 @@ mod tests {
             Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
         state.simulation.request_manual_deck_run();
         let mut controller = SimulationController::new();
+        controller
+            .validate_manual_deck_document(&state)
+            .expect("explicit validation authorizes the exact manual deck");
 
         controller.start_simulation(&mut state);
         let cached_netlist = controller.cached_netlist.clone().unwrap_or_default();

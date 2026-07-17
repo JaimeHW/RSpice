@@ -10,6 +10,7 @@ pub(crate) mod account_organization;
 pub mod availability;
 pub mod browser_navigation;
 pub mod capability_workflow;
+pub mod code_workspace;
 pub mod commands;
 pub mod design_system;
 mod feature_availability;

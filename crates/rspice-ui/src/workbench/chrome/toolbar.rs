@@ -453,6 +453,8 @@ fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 }
 
 fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let generated = app.state.ui.netlist.active_document
+        == crate::workbench::netlist_document::ActiveNetlistDocument::Generated;
     toolbar_text_command(
         ui,
         app,
@@ -461,7 +463,39 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         "Export generated deck",
         layout,
     );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::FindCodeDocument,
+        WorkbenchIcon::Search,
+        if generated {
+            "Find generated netlist"
+        } else {
+            "Find source"
+        },
+        layout,
+    );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::ValidateCodeDocument,
+        WorkbenchIcon::Check,
+        if generated {
+            "Validate generated netlist"
+        } else {
+            "Validate source"
+        },
+        layout,
+    );
     context_separator(ui, layout);
+    toolbar_text_command(
+        ui,
+        app,
+        Command::CompareGeneratedRevisions,
+        WorkbenchIcon::Compare,
+        "Compare generated revisions",
+        layout,
+    );
     toolbar_icon_command(ui, app, Command::RunSimulation, WorkbenchIcon::Run, layout);
 }
 
@@ -740,7 +774,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             }
             if !enabled {
                 let reason = if app.state.workbench.workspace == Workspace::Netlist {
-                    app.state.manual_deck_run_block_reason()
+                    app.manual_deck_run_block_reason()
                 } else {
                     app.state.simulation_run_block_reason()
                 };

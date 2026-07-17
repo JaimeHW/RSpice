@@ -101,6 +101,9 @@ pub enum Command {
     PreflightChecks,
     SimulationOptions,
     GenerateNetlist,
+    FindCodeDocument,
+    ValidateCodeDocument,
+    CompareGeneratedRevisions,
     ClearResults,
     ToggleLinkedCursors,
     WaveformCalculator,
@@ -295,6 +298,15 @@ impl Command {
             Self::GenerateNetlist => {
                 spec("generated-netlist", "Open generated netlist", "Simulate")
             }
+            Self::FindCodeDocument => spec("find-code", "Find in Code document…", "Code"),
+            Self::ValidateCodeDocument => {
+                spec("validate-code", "Validate active Code document", "Code")
+            }
+            Self::CompareGeneratedRevisions => spec(
+                "compare-generated-revisions",
+                "Compare generated revisions",
+                "Code",
+            ),
             Self::ClearResults => spec("clear-results", "Clear result history", "Results"),
             Self::ToggleLinkedCursors => {
                 spec("toggle-linked-cursors", "Linked A/B cursors", "Results")
@@ -538,10 +550,22 @@ impl Command {
             Self::NextViolation | Self::PreviousViolation => state.dialogs.drc_results.is_some(),
             Self::RunSimulation => {
                 if state.workbench.workspace == Workspace::Netlist {
-                    state.manual_deck_run_block_reason().is_none()
+                    app.manual_deck_run_block_reason().is_none()
                 } else {
                     state.can_run_simulation()
                 }
+            }
+            Self::FindCodeDocument => state.workbench.workspace == Workspace::Netlist,
+            Self::ValidateCodeDocument => {
+                state.workbench.workspace == Workspace::Netlist
+                    && state.ui.netlist.active_document
+                        != super::netlist_document::ActiveNetlistDocument::GeneratedDiff
+                    && !state.simulation.netlist_content.trim().is_empty()
+            }
+            Self::CompareGeneratedRevisions => {
+                state.workbench.workspace == Workspace::Netlist
+                    && !state.ui.netlist.generated_history.is_empty()
+                    && state.ui.netlist.generated_document.is_some()
             }
             Self::StopSimulation => stop_simulation_enabled(state.simulation.is_running),
             Self::ClearResults => state.simulation.has_results(),
@@ -577,7 +601,17 @@ impl Command {
             Self::RecentProjects => open_recent_projects(&mut app.state.workbench),
             Self::NewProject => file_action(app, FileMenuAction::NewProject),
             Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
-            Self::Save => file_action(app, FileMenuAction::Save),
+            Self::Save => {
+                if app.state.workbench.workspace == Workspace::Netlist
+                    && app.state.ui.netlist.active_document
+                        == super::netlist_document::ActiveNetlistDocument::OwnedSource
+                {
+                    app.state.ui.netlist.save_dialog.open = true;
+                    app.state.ui.netlist.save_dialog.error = None;
+                } else {
+                    file_action(app, FileMenuAction::Save);
+                }
+            }
             Self::SaveAs => file_action(app, FileMenuAction::SaveProjectAs),
             Self::SaveAll => file_action(app, FileMenuAction::SaveAll),
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
@@ -592,11 +626,19 @@ impl Command {
             Self::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
             Self::ExportSchematicSvg => file_action(app, FileMenuAction::ExportSvg),
             Self::ExportWaveformsCsv => file_action(app, FileMenuAction::ExportCsvWaveforms),
-            Self::ExportNetlist(format) => crate::common::menu_bar::action_export_netlist_with_io(
-                &mut app.state,
-                format,
-                app.export_workflow_io.as_ref(),
-            ),
+            Self::ExportNetlist(format) => {
+                if app.state.workbench.workspace == Workspace::Netlist {
+                    app.state.ui.netlist.export_dialog.open = true;
+                    app.state.ui.netlist.export_dialog.format = format;
+                    app.state.ui.netlist.export_dialog.error = None;
+                } else {
+                    crate::common::menu_bar::action_export_netlist_with_io(
+                        &mut app.state,
+                        format,
+                        app.export_workflow_io.as_ref(),
+                    );
+                }
+            }
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => {
                 if active_symbol_editor(app) {
@@ -699,10 +741,14 @@ impl Command {
                 }
             }
             Self::FindInDesign => {
-                activate_workspace(app, Workspace::Design);
-                app.state.workbench.navigator_visible = true;
-                app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
-                app.state.workbench.focus_navigator_search = true;
+                if app.state.workbench.workspace == Workspace::Netlist {
+                    app.state.ui.netlist.find.open = true;
+                } else {
+                    activate_workspace(app, Workspace::Design);
+                    app.state.workbench.navigator_visible = true;
+                    app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
+                    app.state.workbench.focus_navigator_search = true;
+                }
             }
             Self::Preferences => {
                 let route = super::SurfaceRoute::surface(super::SurfaceId::Preferences);
@@ -922,7 +968,7 @@ impl Command {
             }
             Self::RunSimulation => {
                 if app.state.workbench.workspace == Workspace::Netlist {
-                    if app.state.manual_deck_run_block_reason().is_none() {
+                    if app.manual_deck_run_block_reason().is_none() {
                         app.state.request_netlist_manual_deck_run();
                     }
                 } else if app.state.can_run_simulation() {
@@ -948,6 +994,24 @@ impl Command {
             Self::GenerateNetlist => {
                 crate::common::menu_bar::action_view_netlist(&mut app.state);
                 activate_workspace(app, Workspace::Netlist);
+            }
+            Self::FindCodeDocument => app.state.ui.netlist.find.open = true,
+            Self::ValidateCodeDocument => {
+                crate::common::netlist_workflow::validate_visible_netlist_source(app);
+            }
+            Self::CompareGeneratedRevisions => {
+                app.state.ui.netlist.comparison_dialog.open = true;
+                app.state
+                    .ui
+                    .netlist
+                    .comparison_dialog
+                    .selected_history_index = app
+                    .state
+                    .ui
+                    .netlist
+                    .generated_history
+                    .len()
+                    .saturating_sub(1);
             }
             Self::ClearResults => app.state.clear_simulation_results(),
             Self::ToggleLinkedCursors => app.state.ui.results.toggle_linked_cursors(),
@@ -1252,6 +1316,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PreflightChecks,
     Command::SimulationOptions,
     Command::GenerateNetlist,
+    Command::FindCodeDocument,
+    Command::ValidateCodeDocument,
+    Command::CompareGeneratedRevisions,
     Command::ExportWaveformsCsv,
     Command::ClearResults,
     Command::ToggleLinkedCursors,

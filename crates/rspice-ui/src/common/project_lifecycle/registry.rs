@@ -173,6 +173,8 @@ fn document_digests(
         digest(&(
             &project.workspace.netlist_source,
             &project.workspace.netlist_source_path,
+            &project.workspace.netlist_document,
+            &project.workspace.netlist_descriptor,
         ))?,
     );
 

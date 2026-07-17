@@ -1,6 +1,6 @@
 //! Context inspector with authoritative object and provenance details.
 
-use egui::{ScrollArea, Ui};
+use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::common::{AppState, RSpiceApp};
 use crate::state::{Component, ComponentType};
@@ -8,7 +8,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::super::design_system::{
-    PANEL_HEADER_H, property_row, section_header as design_section_header, status_dot,
+    PANEL_HEADER_H, PANEL_SECTION_H, WorkbenchIcon, property_row,
+    section_header as design_section_header, status_dot,
 };
 use super::super::state::{VerificationPage, Workspace};
 
@@ -82,6 +83,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             "Yield details"
         }
         Workspace::Verify => app.state.workbench.verification_page.label(),
+        Workspace::Netlist => "Diagnostics & tuner",
         _ => app.state.workbench.workspace.inspector_title(),
     };
     ui.painter().text(
@@ -1273,75 +1275,403 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Source", None);
-    let manual = app.state.workspace.netlist_source.is_some();
-    property_row(
+    use super::super::netlist_document::{ActiveNetlistDocument, DiagnosticSeverity};
+
+    let errors = app
+        .state
+        .ui
+        .netlist
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    let advisories = app
+        .state
+        .ui
+        .netlist
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+
+    if !errors.is_empty() {
+        diagnostic_section_header(ui, "Errors", errors.len(), DiagnosticSeverity::Error);
+        for diagnostic in errors {
+            diagnostic_row(ui, diagnostic);
+        }
+    }
+
+    diagnostic_section_header(
         ui,
-        "Ownership",
-        if manual {
-            "Manual source"
-        } else {
-            "Generated artifact"
-        },
+        "Advisories",
+        advisories.len(),
+        DiagnosticSeverity::Warning,
     );
-    property_row(
+    if advisories.is_empty() {
+        empty_diagnostic_row(ui, "No advisories for the current document.");
+    } else {
+        for diagnostic in advisories {
+            diagnostic_row(ui, diagnostic);
+        }
+    }
+
+    design_section_header(ui, "Parameter exploration", Some("dedicated workspace"));
+    muted_inspector_copy(
         ui,
-        "Dirty",
-        if app.state.workspace.netlist_source_dirty {
-            "Modified"
-        } else {
-            "Clean"
-        },
+        "Use the non-destructive tuning sandbox for live plots, measurement deltas, limit checks and explicit commit or revert.",
     );
-    property_row(
-        ui,
-        "Origin",
-        &app.state
-            .workspace
-            .netlist_source_path
-            .as_ref()
-            .map_or_else(
-                || {
-                    if manual {
-                        "In project".to_owned()
-                    } else {
-                        "Schematic generator".to_owned()
-                    }
-                },
-                |path| path.display().to_string(),
+
+    match app.state.ui.netlist.active_document {
+        ActiveNetlistDocument::Generated => generated_provenance(ui, &app.state),
+        ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, &app.state),
+        ActiveNetlistDocument::GeneratedDiff => generated_provenance(ui, &app.state),
+    }
+}
+
+fn diagnostic_section_header(
+    ui: &mut Ui,
+    title: &str,
+    count: usize,
+    severity: super::super::netlist_document::DiagnosticSeverity,
+) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), PANEL_SECTION_H),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        Color32::from_rgba_unmultiplied(
+            t.color.bg_panel_2.r(),
+            t.color.bg_panel_2.g(),
+            t.color.bg_panel_2.b(),
+            204,
+        ),
+    );
+    ui.painter()
+        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
+    ui.painter().text(
+        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        title.to_ascii_uppercase(),
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
+    );
+
+    let tone = if count == 0 {
+        t.color.ok
+    } else {
+        diagnostic_tone(&t, severity)
+    };
+    let count_text = count.to_string();
+    let count_galley = ui.painter().layout_no_wrap(
+        count_text,
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        tone,
+    );
+    let count_width = count_galley.size().x;
+    let count_pos = Pos2::new(rect.right() - 10.0, rect.center().y);
+    ui.painter().galley(
+        Pos2::new(
+            count_pos.x - count_width,
+            count_pos.y - count_galley.size().y * 0.5,
+        ),
+        count_galley,
+        tone,
+    );
+    ui.painter().circle_filled(
+        Pos2::new(count_pos.x - count_width - 8.5, rect.center().y),
+        2.5,
+        tone,
+    );
+}
+
+fn diagnostic_row(ui: &mut Ui, diagnostic: &super::super::netlist_document::Diagnostic) {
+    const ICON_COLUMN_W: f32 = 14.0;
+    const COLUMN_GAP: f32 = 7.0;
+    const PADDING_X: f32 = 9.0;
+    const PADDING_Y: f32 = 8.0;
+    const DETAIL_GAP: f32 = 3.0;
+
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let text_width = (width - PADDING_X * 2.0 - ICON_COLUMN_W - COLUMN_GAP).max(1.0);
+    let message_galley = ui.painter().layout(
+        diagnostic.message.clone(),
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+        text_width,
+    );
+    let location = diagnostic_location(diagnostic);
+    let location_galley = ui.painter().layout(
+        location.clone(),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+        text_width,
+    );
+    let message_height = message_galley.size().y;
+    let height = PADDING_Y * 2.0 + message_height + DETAIL_GAP + location_galley.size().y;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            format!(
+                "{}: {}. {location}",
+                diagnostic_severity_name(diagnostic.severity),
+                diagnostic.message
             ),
+        )
+    });
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+
+    let icon = match diagnostic.severity {
+        super::super::netlist_document::DiagnosticSeverity::Info => WorkbenchIcon::Info,
+        super::super::netlist_document::DiagnosticSeverity::Warning
+        | super::super::netlist_document::DiagnosticSeverity::Error => WorkbenchIcon::Warning,
+    };
+    icon.paint(
+        ui.painter(),
+        Rect::from_min_size(
+            Pos2::new(rect.left() + PADDING_X, rect.top() + PADDING_Y),
+            Vec2::splat(ICON_COLUMN_W),
+        ),
+        diagnostic_tone(&t, diagnostic.severity),
+    );
+
+    let text_x = rect.left() + PADDING_X + ICON_COLUMN_W + COLUMN_GAP;
+    ui.painter().galley(
+        Pos2::new(text_x, rect.top() + PADDING_Y),
+        message_galley,
+        t.color.text,
+    );
+    ui.painter().galley(
+        Pos2::new(text_x, rect.top() + PADDING_Y + message_height + DETAIL_GAP),
+        location_galley,
+        t.color.text_faint,
+    );
+}
+
+fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let galley = ui.painter().layout(
+        message.to_owned(),
+        font,
+        t.color.text_faint,
+        (ui.available_width() - 20.0).max(1.0),
+    );
+    let height = (galley.size().y + 16.0).max(31.0);
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message)
+    });
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().galley(
+        Pos2::new(rect.left() + 10.0, rect.top() + 8.0),
+        galley,
+        t.color.text_faint,
+    );
+}
+
+fn muted_inspector_copy(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let galley = ui.painter().layout(
+        text.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        (ui.available_width() - 20.0).max(1.0),
+    );
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), galley.size().y + 16.0),
+        Sense::hover(),
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    ui.painter().galley(
+        Pos2::new(rect.left() + 10.0, rect.top() + 8.0),
+        galley,
+        t.color.text_dim,
+    );
+}
+
+fn generated_provenance(ui: &mut Ui, state: &AppState) {
+    design_section_header(ui, "Generated provenance", None);
+    let netlist = &state.ui.netlist;
+    let canonical = netlist.generated_document.as_ref();
+    let source = canonical
+        .and_then(|document| document.generated_artifact().source_map().first())
+        .map(|entry| entry.view_identity().to_owned())
+        .unwrap_or_else(|| "Unavailable".to_owned());
+    property_row(ui, "Source cell/view", &source);
+    property_row(ui, "Input revision", &generated_input_revision(state));
+    property_row(
+        ui,
+        "Input digest",
+        &canonical
+            .map(|document| {
+                short_digest(document.generated_artifact().provenance().input().digest())
+            })
+            .unwrap_or_else(|| "Unavailable".to_owned()),
+    );
+    property_row(ui, "Generator state", generated_state(state));
+    property_row(
+        ui,
+        "Netlist digest",
+        &canonical
+            .map(|document| short_digest(document.generated_artifact().content_digest()))
+            .unwrap_or_else(|| "Unavailable".to_owned()),
+    );
+}
+
+fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
+    design_section_header(ui, "Owned source provenance", None);
+    let source = &state.simulation.netlist_content;
+    let source_digest = super::super::netlist_document::source_content_digest(source);
+    property_row(
+        ui,
+        "Source origin",
+        &state.workspace.netlist_source_path.as_ref().map_or_else(
+            || "Project-owned source".to_owned(),
+            |path| path.display().to_string(),
+        ),
     );
     property_row(
         ui,
-        "Bytes",
-        &app.state.simulation.netlist_content.len().to_string(),
+        "Project revision",
+        &state.workspace.project.revision().get().to_string(),
     );
+    if let Some(document) = state.ui.netlist.owned_document.as_ref() {
+        property_row(
+            ui,
+            "Document revision",
+            &document.revision().get().to_string(),
+        );
+        property_row(
+            ui,
+            "Generated base",
+            &short_digest(document.generated_artifact().content_digest()),
+        );
+    }
     property_row(
         ui,
-        "Lines",
-        &app.state
-            .simulation
-            .netlist_content
-            .lines()
-            .count()
-            .to_string(),
+        "Document state",
+        owned_source_state(state, source_digest),
     );
-    section_header(ui, "Execution", None);
+    property_row(ui, "Netlist digest", &short_digest(source_digest));
     property_row(
         ui,
-        "Status",
-        if app.state.simulation.is_running {
-            "Running"
+        "Saved digest",
+        &state
+            .ui
+            .netlist
+            .externally_saved_content_digest
+            .map(short_digest)
+            .unwrap_or_else(|| "Not published".to_owned()),
+    );
+}
+
+fn generated_state(state: &AppState) -> &'static str {
+    let netlist = &state.ui.netlist;
+    if netlist.generated_source.is_empty() {
+        "not generated"
+    } else if netlist.generation_error.is_some() {
+        "blocked · prior artifact retained"
+    } else if netlist.generated_input_digest != netlist.current_generation_input_digest {
+        "stale · refresh pending"
+    } else {
+        let digest =
+            super::super::netlist_document::source_content_digest(&netlist.generated_source);
+        if netlist.validation.as_ref().is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision == state.workspace.project.revision().get()
+        }) {
+            "generated · validated"
         } else {
-            "Ready"
-        },
-    );
-    property_row(
-        ui,
-        "Run history",
-        &app.state.simulation.runs.len().to_string(),
-    );
-    super::super::netlist_document::show_parameter_inspector(ui, &mut app.state);
+            "generated · current"
+        }
+    }
+}
+
+fn generated_input_revision(state: &AppState) -> String {
+    state
+        .ui
+        .netlist
+        .generated_document
+        .as_ref()
+        .map(|document| {
+            document
+                .generated_artifact()
+                .provenance()
+                .input()
+                .revision()
+                .get()
+                .to_string()
+        })
+        .unwrap_or_else(|| "Unavailable".to_owned())
+}
+
+fn owned_source_state(state: &AppState, digest: crate::product::ContentDigest) -> &'static str {
+    let validated = state.ui.netlist.validation.as_ref().is_some_and(|receipt| {
+        receipt.visible_content_digest == digest
+            && receipt.project_revision == state.workspace.project.revision().get()
+    });
+    let saved = state.ui.netlist.externally_saved_content_digest == Some(digest);
+    if state.workspace.netlist_source_dirty {
+        "modified · validation pending"
+    } else if validated && saved {
+        "saved · validated"
+    } else if validated {
+        "validated · save required"
+    } else if saved {
+        "saved · validation required"
+    } else {
+        "owned · validation required"
+    }
+}
+
+fn short_digest(digest: crate::product::ContentDigest) -> String {
+    let digest = digest.to_string();
+    format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
+}
+
+fn diagnostic_location(diagnostic: &super::super::netlist_document::Diagnostic) -> String {
+    match (diagnostic.line, diagnostic.column) {
+        (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
+        (Some(line), None) => format!("line {}", line + 1),
+        (None, _) => "document scope".to_owned(),
+    }
+}
+
+fn diagnostic_tone(
+    tokens: &Tokens,
+    severity: super::super::netlist_document::DiagnosticSeverity,
+) -> Color32 {
+    match severity {
+        super::super::netlist_document::DiagnosticSeverity::Info => tokens.color.info,
+        super::super::netlist_document::DiagnosticSeverity::Warning => tokens.color.warn,
+        super::super::netlist_document::DiagnosticSeverity::Error => tokens.color.err,
+    }
+}
+
+fn diagnostic_severity_name(
+    severity: super::super::netlist_document::DiagnosticSeverity,
+) -> &'static str {
+    match severity {
+        super::super::netlist_document::DiagnosticSeverity::Info => "Information",
+        super::super::netlist_document::DiagnosticSeverity::Warning => "Warning",
+        super::super::netlist_document::DiagnosticSeverity::Error => "Error",
+    }
 }
 
 fn validation(ui: &mut Ui, message: &str) {
@@ -1361,6 +1691,63 @@ mod tests {
     fn inspector_property_lists_keep_mockup_vertical_padding() {
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_TOP, 7.0);
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM, 10.0);
+    }
+
+    #[test]
+    fn netlist_diagnostic_locations_are_one_based_and_exact() {
+        let diagnostic = crate::workbench::netlist_document::Diagnostic {
+            severity: crate::workbench::netlist_document::DiagnosticSeverity::Warning,
+            span: None,
+            line: Some(127),
+            column: Some(8),
+            message: "Maximum transient step is implicit".to_owned(),
+            fix: None,
+        };
+
+        assert_eq!(diagnostic_location(&diagnostic), "line 128 · column 9");
+    }
+
+    #[test]
+    fn generated_provenance_never_claims_source_mapping_without_evidence() {
+        let mut state = AppState::default();
+        state.ui.netlist.generated_source = "generated\n.end\n".to_owned();
+        let input = crate::product::ContentDigest::from_bytes([0x31; 32]);
+        state.ui.netlist.generated_input_digest = Some(input);
+        state.ui.netlist.current_generation_input_digest = Some(input);
+
+        assert_eq!(generated_state(&state), "generated · current");
+        assert!(!generated_state(&state).contains("source mapped"));
+    }
+
+    #[test]
+    fn owned_provenance_requires_exact_saved_and_validated_bytes() {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = "owned\n.end\n".to_owned();
+        let project_revision = state.workspace.project.revision().get();
+        let digest = crate::workbench::netlist_document::source_content_digest(
+            &state.simulation.netlist_content,
+        );
+        state.ui.netlist.externally_saved_content_digest = Some(digest);
+        state.ui.netlist.validation = Some(
+            crate::workbench::netlist_document::NetlistValidationReceipt {
+                visible_content_digest: digest,
+                executable_source_digest: digest,
+                prepared_snapshot_digest: digest,
+                project_revision,
+                task_count: 1,
+                advisory_count: 0,
+            },
+        );
+
+        assert_eq!(owned_source_state(&state, digest), "saved · validated");
+        state.simulation.netlist_content.push_str("* edit\n");
+        let edited = crate::workbench::netlist_document::source_content_digest(
+            &state.simulation.netlist_content,
+        );
+        assert_eq!(
+            owned_source_state(&state, edited),
+            "owned · validation required"
+        );
     }
 
     #[test]

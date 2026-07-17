@@ -262,19 +262,49 @@ pub(in crate::simulation) fn manual_source_receipt_digest(
     source: &str,
     executable_netlist: &str,
     origin: Option<&str>,
+    dependency_closure_digest: ContentDigest,
     task_digests: &[ContentDigest],
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.manual-source-check-receipt/v1");
+    let mut writer = CanonicalWriter::new("rspice.manual-source-check-receipt/v2");
     writer.domain("source");
     writer.string(source);
     writer.domain("origin");
     writer.option(origin, |writer, origin| writer.string(origin));
     writer.domain("expanded-executable-netlist");
     writer.string(executable_netlist);
+    writer.domain("sealed-dependency-closure");
+    writer.digest(dependency_closure_digest);
     writer.domain("accepted-task-configs");
     writer.sequence(task_digests.len());
     for digest in task_digests {
         writer.digest(*digest);
+    }
+    writer.finish()
+}
+
+/// Canonical identity of the exact complete external source files and edges
+/// observed by the core include processor. Full file bytes are included so a
+/// change confined to an unselected library section still invalidates the
+/// retained export bundle evidence rather than silently changing later output.
+pub(in crate::simulation) fn sealed_dependency_closure_digest(
+    dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
+) -> ContentDigest {
+    let mut writer = CanonicalWriter::new("rspice.sealed-manual-dependency-closure/v1");
+    writer.sequence(dependencies.len());
+    for dependency in dependencies {
+        writer.string(&dependency.owner_path().to_string_lossy().replace('\\', "/"));
+        writer.usize(dependency.directive_line());
+        writer.string(dependency.requested_path());
+        writer.string(
+            &dependency
+                .resolved_path()
+                .to_string_lossy()
+                .replace('\\', "/"),
+        );
+        writer.option(dependency.selected_section(), |writer, section| {
+            writer.string(section)
+        });
+        writer.string(dependency.source());
     }
     writer.finish()
 }

@@ -126,7 +126,17 @@ impl RSpiceApp {
                 crate::common::menu_bar::FileMenuAction::OpenProject,
             ),
             ShortcutCommand::Save => {
-                self.execute_project_file_shortcut(crate::common::menu_bar::FileMenuAction::Save)
+                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+                    && self.state.ui.netlist.active_document
+                        == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+                {
+                    self.state.ui.netlist.save_dialog.open = true;
+                    self.state.ui.netlist.save_dialog.error = None;
+                } else {
+                    self.execute_project_file_shortcut(
+                        crate::common::menu_bar::FileMenuAction::Save,
+                    )
+                }
             }
             ShortcutCommand::SaveAs => self.execute_project_file_shortcut(
                 crate::common::menu_bar::FileMenuAction::SaveProjectAs,
@@ -241,7 +251,7 @@ impl RSpiceApp {
             }
             ShortcutCommand::RunSimulation => {
                 if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
-                    if self.state.manual_deck_run_block_reason().is_none() {
+                    if self.manual_deck_run_block_reason().is_none() {
                         self.state.request_netlist_manual_deck_run();
                     }
                 } else if self.state.can_run_simulation() {
@@ -305,11 +315,15 @@ impl RSpiceApp {
                 self.state.ascend_workspace_level();
             }
             ShortcutCommand::FindInDesign => {
-                self.state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
-                self.state.workbench.navigator_visible = true;
-                self.state.workbench.focus_navigator_search = true;
+                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
+                    self.state.ui.netlist.find.open = true;
+                } else {
+                    self.state
+                        .workbench
+                        .activate(crate::workbench::state::Workspace::Design);
+                    self.state.workbench.navigator_visible = true;
+                    self.state.workbench.focus_navigator_search = true;
+                }
             }
             ShortcutCommand::CommandPalette => {
                 self.state.dialogs.command_palette.open();

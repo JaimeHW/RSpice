@@ -287,6 +287,49 @@ pub struct IncludeProcessor {
     max_depth: usize,
     /// Current include depth
     current_depth: usize,
+    /// Exact successful filesystem/sealed-bundle reads performed while
+    /// expanding the current source. This is an execution-derived audit trail,
+    /// not a second dependency resolver.
+    resolved_dependencies: Vec<ResolvedIncludeDependency>,
+}
+
+/// One exact external source edge resolved by [`IncludeProcessor`]. The source
+/// bytes are the complete referenced file (including unselected `.lib`
+/// sections), so callers can retain a truthful, reconstructable source bundle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedIncludeDependency {
+    owner_path: PathBuf,
+    directive_line: usize,
+    requested_path: String,
+    resolved_path: PathBuf,
+    selected_section: Option<String>,
+    source: Arc<str>,
+}
+
+impl ResolvedIncludeDependency {
+    pub fn owner_path(&self) -> &Path {
+        &self.owner_path
+    }
+
+    pub const fn directive_line(&self) -> usize {
+        self.directive_line
+    }
+
+    pub fn requested_path(&self) -> &str {
+        &self.requested_path
+    }
+
+    pub fn resolved_path(&self) -> &Path {
+        &self.resolved_path
+    }
+
+    pub fn selected_section(&self) -> Option<&str> {
+        self.selected_section.as_deref()
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -352,7 +395,14 @@ impl IncludeProcessor {
             sealed_sources: None,
             max_depth: DEFAULT_MAX_INCLUDE_DEPTH,
             current_depth: 0,
+            resolved_dependencies: Vec::new(),
         }
+    }
+
+    /// Exact dependency edges read by the most recent expansion, in traversal
+    /// order. Callers must consume this only after expansion succeeds.
+    pub fn resolved_dependencies(&self) -> &[ResolvedIncludeDependency] {
+        &self.resolved_dependencies
     }
 
     /// Create a processor that can resolve sources only from an authenticated
@@ -514,6 +564,7 @@ impl IncludeProcessor {
         current_path: &Path,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.resolved_dependencies.clear();
         self.expand_content_mapped_with_abort(content, current_path, abort)
             .map(|expanded| expanded.render())
     }
@@ -708,18 +759,20 @@ impl IncludeProcessor {
         filename: &str,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
-        self.process_include_from_with_selection_and_abort(owner_path, filename, None, abort)
+        self.process_include_from_with_selection_and_abort(owner_path, 0, filename, None, abort)
     }
 
     fn process_include_from_with_selection_and_abort(
         &mut self,
         owner_path: &Path,
+        directive_line: usize,
         filename: &str,
         selected_section: Option<&str>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
         self.process_include_from_with_selection_mapped_and_abort(
             owner_path,
+            directive_line,
             filename,
             selected_section,
             abort,
@@ -730,6 +783,7 @@ impl IncludeProcessor {
     fn process_include_from_with_selection_mapped_and_abort(
         &mut self,
         owner_path: &Path,
+        directive_line: usize,
         filename: &str,
         selected_section: Option<&str>,
         abort: &dyn AbortSignal,
@@ -747,6 +801,14 @@ impl IncludeProcessor {
 
         let result = (|| {
             let content = self.read_source_with_abort(&path, filename, abort)?;
+            self.resolved_dependencies.push(ResolvedIncludeDependency {
+                owner_path: owner_path.to_path_buf(),
+                directive_line,
+                requested_path: filename.to_owned(),
+                resolved_path: canonical.clone(),
+                selected_section: selected_section.map(str::to_owned),
+                source: Arc::clone(&content),
+            });
             self.expand_content_from_mapped_with_abort(
                 &content,
                 &canonical,
@@ -768,13 +830,14 @@ impl IncludeProcessor {
         section: Option<&str>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
-        self.process_lib_from_mapped_with_abort(owner_path, filename, section, abort)
+        self.process_lib_from_mapped_with_abort(owner_path, 0, filename, section, abort)
             .map(|expanded| expanded.render())
     }
 
     fn process_lib_from_mapped_with_abort(
         &mut self,
         owner_path: &Path,
+        directive_line: usize,
         filename: &str,
         section: Option<&str>,
         abort: &dyn AbortSignal,
@@ -792,6 +855,14 @@ impl IncludeProcessor {
 
         let result = (|| {
             let content = self.read_source_with_abort(&path, filename, abort)?;
+            self.resolved_dependencies.push(ResolvedIncludeDependency {
+                owner_path: owner_path.to_path_buf(),
+                directive_line,
+                requested_path: filename.to_owned(),
+                resolved_path: canonical.clone(),
+                selected_section: section.map(str::to_owned),
+                source: Arc::clone(&content),
+            });
             self.expand_content_from_mapped_with_abort(
                 &content,
                 &canonical,
@@ -867,6 +938,7 @@ impl IncludeProcessor {
                 let included = self
                     .process_lib_from_mapped_with_abort(
                         current_path,
+                        line_number,
                         &filename,
                         section.as_deref(),
                         abort,
@@ -956,6 +1028,7 @@ impl IncludeProcessor {
                 let included = self
                     .process_include_from_with_selection_mapped_and_abort(
                         current_path,
+                        line_number,
                         &filename,
                         selected_section,
                         abort,
@@ -1438,6 +1511,36 @@ mod tests {
         assert!(expanded.contains("R2 2 3 1"), "{expanded}");
         assert!(expanded.contains("R3 3 0 1"), "{expanded}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dependency_trace_is_replaced_for_each_top_level_expansion() {
+        let dir = unique_include_temp_dir("dependency-trace-reuse");
+        std::fs::create_dir_all(&dir).expect("create trace fixture");
+        let deck_path = dir.join("deck.cir");
+        std::fs::write(dir.join("a.inc"), "Ra 1 0 1k\n").expect("write a");
+        std::fs::write(dir.join("b.inc"), "Rb 2 0 2k\n").expect("write b");
+        let mut processor = IncludeProcessor::new(&deck_path);
+
+        processor
+            .expand_content(".include a.inc\n", &deck_path)
+            .expect("first expansion");
+        assert_eq!(processor.resolved_dependencies().len(), 1);
+        assert_eq!(
+            processor.resolved_dependencies()[0].requested_path(),
+            "a.inc"
+        );
+
+        processor
+            .expand_content(".include b.inc\n", &deck_path)
+            .expect("second expansion");
+        assert_eq!(processor.resolved_dependencies().len(), 1);
+        assert_eq!(
+            processor.resolved_dependencies()[0].requested_path(),
+            "b.inc"
+        );
+
+        std::fs::remove_dir_all(dir).expect("remove trace fixture");
     }
 
     #[test]

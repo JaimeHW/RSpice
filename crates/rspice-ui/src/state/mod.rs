@@ -42,7 +42,8 @@ pub use symbol_resolver::{
 pub use workspace::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableRange, DesignVariableScope, DesignVariableScopeKind,
-    DesignVariableSweepEligibility, OpenCellView, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+    DesignVariableSweepEligibility, OpenCellView, OwnedNetlistDescriptor, OwnedNetlistEditStrategy,
+    OwnedNetlistSaveRecord, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
     PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION, ProjectDescriptor, ProjectDescriptorError,
     ProjectTechnologyBinding, ProjectWorkspace, RegressionComparisonMethod,
     RegressionComparisonWindow, RegressionTargetKind, RegressionTargetSelector,

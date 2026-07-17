@@ -478,6 +478,9 @@ pub(crate) struct PreparedRunMetadata {
     pub(crate) save_policy: &'static str,
     pub(crate) model_identity_count: usize,
     pub(crate) advisories: Vec<String>,
+    /// Exact complete source files read while sealing a manual deck. Empty for
+    /// schematic-generated runs and manual decks without external sources.
+    pub(crate) sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
 }
 
 /// Whole-run dispatch object that can only be created with a successfully
@@ -653,6 +656,8 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) manual_source: Option<String>,
     pub(in crate::simulation) cross_probe: Option<CrossProbeSnapshot>,
     pub(in crate::simulation) touchstone_export: TouchstoneExportPolicy,
+    pub(in crate::simulation) sealed_source_dependencies:
+        Vec<rspice_core::netlist::ResolvedIncludeDependency>,
 }
 
 /// Complete immutable execution tuple produced by preflight.
@@ -678,6 +683,7 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     manual_source: Option<String>,
     cross_probe: Option<CrossProbeSnapshot>,
     touchstone_export: TouchstoneExportPolicy,
+    sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
 }
 
 impl std::fmt::Debug for PreparedRunSnapshot {
@@ -692,6 +698,10 @@ impl std::fmt::Debug for PreparedRunSnapshot {
             .field("source_digest", &self.source_digest)
             .field("tasks", &self.tasks.len())
             .field("executable_netlist_bytes", &self.executable_netlist.len())
+            .field(
+                "sealed_source_dependencies",
+                &self.sealed_source_dependencies.len(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -887,6 +897,7 @@ impl PreparedRunSnapshot {
             manual_source: parts.manual_source,
             cross_probe: parts.cross_probe,
             touchstone_export: parts.touchstone_export,
+            sealed_source_dependencies: parts.sealed_source_dependencies,
         })
     }
 
@@ -922,6 +933,7 @@ impl PreparedRunSnapshot {
             save_policy: self.save_policy.label(),
             model_identity_count: self.model_identities.len(),
             advisories: self.advisories.clone(),
+            sealed_source_dependencies: self.sealed_source_dependencies.clone(),
         }
     }
 
@@ -1388,6 +1400,7 @@ mod tests {
             manual_source: None,
             cross_probe: None,
             touchstone_export: TouchstoneExportPolicy::disabled(),
+            sealed_source_dependencies: Vec::new(),
         }
     }
 

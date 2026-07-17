@@ -240,6 +240,23 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
     Ok(project)
 }
 
+/// Canonical identity of every authoritative input consumed by schematic
+/// netlist generation. Result history and independently owned source decks are
+/// removed because neither is a generator input; design, hierarchy, project
+/// configuration, simulation-plan payloads, model bindings, and libraries
+/// remain covered by the ordinary document digests.
+pub(crate) fn generated_netlist_input_digest(
+    state: &AppState,
+) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
+    let mut project = snapshot(state)?;
+    project.simulation_results = ProjectSimulationResults::default();
+    project.workspace.netlist_source = None;
+    project.workspace.netlist_source_path = None;
+    project.workspace.netlist_document = None;
+    project.workspace.netlist_descriptor = None;
+    registry::content_digest(&project).map_err(ProjectLifecycleError::InvalidState)
+}
+
 pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
     if !state.project_lifecycle.project_open {
         return false;
@@ -1489,8 +1506,15 @@ fn revert_document(
         ProjectDocumentId::NetlistSource => {
             state.workspace.netlist_source = baseline.workspace.netlist_source;
             state.workspace.netlist_source_path = baseline.workspace.netlist_source_path;
+            state.workspace.netlist_document = baseline.workspace.netlist_document;
+            state.workspace.netlist_descriptor = baseline.workspace.netlist_descriptor;
             state.workspace.netlist_source_dirty = false;
             state.ui.netlist = Default::default();
+            state.simulation.netlist_content =
+                state.workspace.netlist_source.clone().unwrap_or_default();
+            state.simulation.trigger_simulation = false;
+            state.ui.netlist.rerun_queued = false;
+            state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         }
     }
     refresh_registry(state)
@@ -1696,6 +1720,8 @@ fn overlay_document(
         ProjectDocumentId::NetlistSource => {
             target.workspace.netlist_source = working.workspace.netlist_source.clone();
             target.workspace.netlist_source_path = working.workspace.netlist_source_path.clone();
+            target.workspace.netlist_document = working.workspace.netlist_document.clone();
+            target.workspace.netlist_descriptor = working.workspace.netlist_descriptor.clone();
         }
     }
     target

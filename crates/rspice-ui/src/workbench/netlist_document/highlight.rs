@@ -13,6 +13,9 @@ use crate::ui::palette::Palette;
 
 use super::{Diagnostic, DiagnosticSeverity};
 
+/// Mockup contract: 11-point editor text at a 1.55 line-height.
+const EDITOR_LINE_HEIGHT: f32 = 17.05;
+
 /// Build the highlighted layout job for the whole buffer. The job's text
 /// must equal `text` exactly — `TextEdit` maps cursor positions onto it.
 pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnostic]) -> LayoutJob {
@@ -51,11 +54,48 @@ pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnost
                 TextFormat {
                     font_id: font.clone(),
                     color: c.text,
+                    line_height: Some(EDITOR_LINE_HEIGHT),
                     ..Default::default()
                 },
             );
             line_start += line.len() + 1;
         }
+    }
+    job
+}
+
+/// Unified-diff highlighting for immutable generated-revision comparisons.
+/// The complete input is appended byte-for-byte so TextEdit selection and
+/// copy semantics remain exact.
+pub fn diff_layout_job(text: &str, font: FontId, c: &Palette) -> LayoutJob {
+    let mut job = LayoutJob {
+        break_on_newline: true,
+        ..Default::default()
+    };
+    job.wrap.max_width = f32::INFINITY;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let color = if content.starts_with("@@") {
+            c.traces[1]
+        } else if content.starts_with("+++") || content.starts_with("---") {
+            c.text_dim
+        } else if content.starts_with('+') {
+            c.ok
+        } else if content.starts_with('-') {
+            c.err
+        } else {
+            c.text_faint
+        };
+        job.append(
+            line,
+            0.0,
+            TextFormat {
+                font_id: font.clone(),
+                color,
+                line_height: Some(EDITOR_LINE_HEIGHT),
+                ..Default::default()
+            },
+        );
     }
     job
 }
@@ -108,6 +148,7 @@ fn append_diagnostic_span(
             TextFormat {
                 font_id: style.font.clone(),
                 color,
+                line_height: Some(EDITOR_LINE_HEIGHT),
                 underline: severity
                     .map(|severity| severity_stroke(severity, style.palette))
                     .unwrap_or(Stroke::NONE),
@@ -201,7 +242,7 @@ fn highlight_dot_line(
         .map(|(i, _)| i)
         .unwrap_or(code.len());
     let (cmd, rest) = code.split_at(cmd_end);
-    push(job, cmd, c.accent);
+    push(job, cmd, c.traces[1]);
 
     if cmd.eq_ignore_ascii_case(".model") || cmd.eq_ignore_ascii_case(".subckt") {
         // The defined name reads in the model hue.
@@ -218,7 +259,7 @@ fn highlight_dot_line(
             .map(|(i, _)| i)
             .unwrap_or(after.len());
         let (name, tail) = after.split_at(name_end);
-        push(job, name, c.traces[2]);
+        push(job, name, c.traces[0]);
         highlight_fields(job, tail, c, push, false);
     } else {
         highlight_fields(job, rest, c, push, false);
@@ -274,6 +315,27 @@ fn highlight_fields(
             continue;
         }
 
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
+            let start = i;
+            i += 1;
+            let mut escaped = false;
+            while i < bytes.len() {
+                let current = bytes[i] as char;
+                i += 1;
+                if escaped {
+                    escaped = false;
+                } else if current == '\\' {
+                    escaped = true;
+                } else if current == quote {
+                    break;
+                }
+            }
+            push(job, &text[start..i], c.warn);
+            field_index += 1;
+            continue;
+        }
+
         if ch == '=' {
             push(job, "=", c.text_faint);
             i += 1;
@@ -293,16 +355,16 @@ fn highlight_fields(
         let next_is_assign = bytes.get(i).copied() == Some(b'=');
 
         let color = if field_index == 0 && first_is_element {
-            c.text
+            c.traces[0]
         } else if next_is_assign {
-            c.text_dim
+            c.net_label
         } else if looks_numeric(token) {
-            c.traces[1]
+            c.traces[3]
         } else if was_preceded_by_assign(text, start) {
-            // Bare-word parameter values (e.g. `model=nch`) read as values.
-            c.traces[1]
+            // Bare-word parameter values remain distinct from circuit nodes.
+            c.net_label
         } else {
-            c.text_dim
+            c.traces[2]
         };
         push(job, token, color);
         field_index += 1;

@@ -45,7 +45,8 @@ struct TunedMetricRow {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let editable = state.workspace.has_editable_netlist_source();
+    let editable = state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource
+        && state.workspace.has_editable_netlist_source();
 
     section_header(ui, "Tuner", None);
     let rows = scan_params(&state.simulation.netlist_content);
@@ -395,7 +396,9 @@ fn slider_range(
 /// The run request fires even when the value is already written — the
 /// on-release commit lands on a frame where the drag updated nothing.
 fn apply_param_edit(ui: &Ui, state: &mut AppState, row: &ParamRow, value: f64, fire_run: bool) {
-    if !state.workspace.has_editable_netlist_source() {
+    if state.ui.netlist.active_document != super::ActiveNetlistDocument::OwnedSource
+        || !state.workspace.has_editable_netlist_source()
+    {
         return;
     }
 
@@ -421,17 +424,12 @@ fn apply_param_edit(ui: &Ui, state: &mut AppState, row: &ParamRow, value: f64, f
         next.push_str(&formatted);
         next.push_str(&buffer[end..]);
 
-        let replaced = state
-            .workspace
-            .replace_editable_netlist_source(next.clone());
+        let replaced = super::replace_owned_source(state, next);
         debug_assert!(replaced, "an editable source changed before tuner commit");
         if !replaced {
             return;
         }
-        state.simulation.netlist_content = next;
-
         let netlist = &mut state.ui.netlist;
-        netlist.revision = netlist.revision.wrapping_add(1);
         netlist.last_edit_time = ui.input(|input| input.time);
         netlist.edited_lines.insert(row.line);
         super::refresh_diff_pips_from_baseline(state);
@@ -837,6 +835,7 @@ mod tests {
         let mut state = AppState::default();
         state.simulation.netlist_content = ".param gain=1\n.end\n".to_owned();
         state.workspace.netlist_source = Some(state.simulation.netlist_content.clone());
+        state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
         state.workspace.netlist_source_path = Some(std::path::PathBuf::from("decks/owned.cir"));
         let row = scan_params(&state.simulation.netlist_content)
             .into_iter()
@@ -855,7 +854,10 @@ mod tests {
             state.workspace.netlist_source.as_deref(),
             Some(".param gain=2\n.end\n")
         );
-        assert!(state.workspace.netlist_source_path.is_none());
+        assert_eq!(
+            state.workspace.netlist_source_path.as_deref(),
+            Some(std::path::Path::new("decks/owned.cir"))
+        );
         assert!(state.workspace.netlist_source_dirty);
         assert_eq!(state.ui.netlist.revision, 1);
         assert!(state.ui.netlist.edited_lines.contains(&0));

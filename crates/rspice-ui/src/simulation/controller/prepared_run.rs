@@ -19,6 +19,25 @@ pub(super) struct PendingPreparedRun {
 }
 
 impl SimulationController {
+    /// Validate the exact visible manual-deck document through the same
+    /// dependency expansion, source checks, task construction, model binding,
+    /// and execution-target contract used immediately before dispatch.
+    ///
+    /// The validated snapshot is retained behind a one-shot execution permit.
+    /// Run rebuilds the complete source/dependency/target contract and must
+    /// match this exact snapshot, so a dependency changed after validation
+    /// cannot execute under a stale receipt.
+    pub(crate) fn validate_manual_deck_document(
+        &mut self,
+        state: &AppState,
+    ) -> Result<PreparedRunMetadata, PreparationError> {
+        self.clear_prepared_run();
+        let snapshot = self.build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
+        let metadata = snapshot.metadata();
+        self.authorize_snapshot(snapshot)?;
+        Ok(metadata)
+    }
+
     /// Produce and retain the exact run-set tuple rendered by the mockup's
     /// preflight surface. The caller runs DRC immediately before this method.
     pub(crate) fn prepare_run_set_for_preflight(
@@ -38,6 +57,41 @@ impl SimulationController {
         }
     }
 
+    pub(crate) fn has_retained_manual_authorization(
+        &self,
+        expected_snapshot_digest: crate::product::ContentDigest,
+    ) -> bool {
+        self.pending_prepared_run.as_ref().is_some_and(|pending| {
+            pending.snapshot.intent() == SimulationRunIntent::ManualDeck
+                && pending.snapshot.digest() == expected_snapshot_digest
+        })
+    }
+
+    /// Rebuild the complete manual-deck contract and require both the retained
+    /// one-shot permit and the current source/dependency/environment snapshot
+    /// to identify the validation receipt exactly. Used before publishing an
+    /// owned source revision so Save cannot rely on stale source-only evidence.
+    pub(crate) fn ensure_retained_manual_authorization_current(
+        &self,
+        state: &AppState,
+        expected_snapshot_digest: crate::product::ContentDigest,
+    ) -> Result<(), PreparationError> {
+        if !self.has_retained_manual_authorization(expected_snapshot_digest) {
+            return Err(PreparationError::new(
+                PreparationStage::Authorization,
+                "The retained netlist validation authorization is no longer available",
+            ));
+        }
+        let current = self.build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
+        if current.digest() != expected_snapshot_digest {
+            return Err(PreparationError::new(
+                PreparationStage::Authorization,
+                "A source dependency, PVT setting, execution capability, or project input changed after validation",
+            ));
+        }
+        Ok(())
+    }
+
     /// Resolve a fresh internal preflight when Run was invoked directly, or
     /// validate an explicitly retained preflight snapshot. Only the retained
     /// immutable snapshot is returned for execution.
@@ -55,9 +109,13 @@ impl SimulationController {
         }
 
         if self.pending_prepared_run.is_none() {
-            if intent == SimulationRunIntent::SimulateRunSet {
-                crate::common::menu_bar::run_design_rule_check(state);
+            if intent == SimulationRunIntent::ManualDeck {
+                return Err(PreparationError::new(
+                    PreparationStage::Authorization,
+                    "Validate the exact current netlist before running; manual decks are never auto-authorized",
+                ));
             }
+            crate::common::menu_bar::run_design_rule_check(state);
             let snapshot = self.build_prepared_snapshot(state, intent)?;
             self.authorize_snapshot(snapshot)?;
         }
@@ -291,6 +349,7 @@ impl SimulationController {
                 state.schematic.topology_version(),
             )),
             touchstone_export,
+            sealed_source_dependencies: Vec::new(),
         })
     }
 
@@ -298,11 +357,29 @@ impl SimulationController {
         &self,
         state: &AppState,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
-        let source = state
-            .workspace
-            .netlist_source
-            .as_deref()
-            .unwrap_or(&state.simulation.netlist_content);
+        if state.ui.netlist.active_document_initialized
+            && state.ui.netlist.active_document
+                == crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff
+        {
+            return Err(PreparationError::new(
+                PreparationStage::SourceChecks,
+                "Generated comparison documents cannot be executed",
+            ));
+        }
+        let owned_active = state.ui.netlist.active_document
+            == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+            || (!state.ui.netlist.active_document_initialized
+                && state.simulation.netlist_content.is_empty()
+                && state.workspace.netlist_source.is_some());
+        let source = if owned_active {
+            state
+                .workspace
+                .netlist_source
+                .as_deref()
+                .unwrap_or(state.simulation.netlist_content.as_str())
+        } else {
+            state.simulation.netlist_content.as_str()
+        };
         if source.trim().is_empty() {
             return Err(PreparationError::new(
                 PreparationStage::SourceChecks,
@@ -310,15 +387,26 @@ impl SimulationController {
             ));
         }
 
-        let composed = manual_deck::compose_manual_deck_source(source);
-        let origin = state.workspace.netlist_source_path.as_deref();
+        let owned_materialized = if owned_active {
+            crate::common::netlist_workflow::compose_owned_netlist_execution_source(state, source)
+                .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?
+        } else {
+            source.to_owned()
+        };
+        let composed = manual_deck::compose_manual_deck_source(&owned_materialized);
+        let origin = if owned_active {
+            state.workspace.netlist_source_path.as_deref()
+        } else {
+            state.schematic.current_file.as_deref()
+        };
         if origin.is_none() && contains_external_include_directive(&composed) {
             return Err(PreparationError::new(
                 PreparationStage::SourceChecks,
                 "Relative .include/.inc/.lib sources require an imported deck origin before they can be sealed",
             ));
         }
-        let (expanded, canonical_origin) = expand_manual_dependencies(&composed, origin)?;
+        let (expanded, canonical_origin, sealed_source_dependencies) =
+            expand_manual_dependencies(&composed, origin)?;
         reject_deferred_external_sources(&expanded)?;
         let queued_tasks =
             manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
@@ -336,10 +424,15 @@ impl SimulationController {
             .iter()
             .map(PreparedTask::config_digest)
             .collect::<Vec<_>>();
+        let dependency_closure_digest =
+            crate::simulation::execution::sealed_dependency_closure_digest(
+                &sealed_source_dependencies,
+            );
         let receipt_digest = manual_source_receipt_digest(
             source,
             &expanded,
             canonical_origin.as_deref(),
+            dependency_closure_digest,
             &analysis_config_digests,
         );
         let mut model_identities = Vec::new();
@@ -350,7 +443,7 @@ impl SimulationController {
         let touchstone_export = touchstone_export_policy(
             state,
             tasks.iter().map(PreparedTask::queued_analysis),
-            state.workspace.netlist_source_path.as_deref(),
+            origin,
         )?;
 
         PreparedRunSnapshot::new(SnapshotParts {
@@ -371,6 +464,7 @@ impl SimulationController {
             manual_source: Some(source.to_owned()),
             cross_probe: None,
             touchstone_export,
+            sealed_source_dependencies,
         })
     }
 
@@ -438,9 +532,16 @@ fn attach_saved_output_contracts(
 fn expand_manual_dependencies(
     source: &str,
     origin: Option<&Path>,
-) -> Result<(String, Option<String>), PreparationError> {
+) -> Result<
+    (
+        String,
+        Option<String>,
+        Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+    ),
+    PreparationError,
+> {
     let Some(origin) = origin else {
-        return Ok((source.to_owned(), None));
+        return Ok((source.to_owned(), None, Vec::new()));
     };
     let absolute_origin = absolute_source_identity(origin)?;
     let mut processor = IncludeProcessor::new(&absolute_origin);
@@ -452,7 +553,11 @@ fn expand_manual_dependencies(
                 format!("Could not seal manual deck dependencies: {error}"),
             )
         })?;
-    Ok((expanded, Some(path_identity(&absolute_origin))))
+    Ok((
+        expanded,
+        Some(path_identity(&absolute_origin)),
+        processor.resolved_dependencies().to_vec(),
+    ))
 }
 
 fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
@@ -1254,6 +1359,15 @@ mod tests {
         controller.start_simulation(&mut state);
 
         assert!(controller.pending_prepared_run.is_none());
+        assert_eq!(controller.total_analyses, 0);
+        assert!(controller.cached_netlist.is_none());
+
+        controller
+            .validate_manual_deck_document(&state)
+            .expect("explicit validation authorizes the exact manual deck");
+        controller.start_simulation(&mut state);
+
+        assert!(controller.pending_prepared_run.is_none());
         assert_eq!(controller.total_analyses, 1);
         assert!(
             controller
@@ -1279,15 +1393,8 @@ mod tests {
         state.workspace.netlist_source_path = Some(origin);
         let mut controller = SimulationController::new();
         let metadata = controller
-            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-            .expect("prepare first include closure")
-            .metadata();
-        let authorized = controller
-            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-            .expect("authorize include closure");
-        controller
-            .authorize_snapshot(authorized)
-            .expect("issue authorization");
+            .validate_manual_deck_document(&state)
+            .expect("validate and retain first include closure");
 
         fs::write(&include, "R1 out 0 2k\n").expect("mutate include");
         let changed = controller

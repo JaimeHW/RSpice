@@ -231,7 +231,10 @@ impl AppState {
     pub(crate) fn clear_design_execution_context(&mut self) {
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
         self.workspace.netlist_source = None;
+        self.workspace.netlist_document = None;
+        self.workspace.netlist_descriptor = None;
         self.workspace.netlist_source_path = None;
+        self.workspace.netlist_source_dirty = false;
         self.simulation = crate::state::SimulationState::default();
         self.ui.netlist = Default::default();
         self.ui.results_seen_version = 0;

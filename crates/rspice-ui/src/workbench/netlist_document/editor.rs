@@ -1,16 +1,16 @@
 //! The netlist source surface: a selectable, immutable generated view or an
-//! editable project-owned `TextEdit`, plus line numbers, diagnostic/diff pips,
-//! and the diagnostics strip.
+//! editable project-owned `TextEdit`, plus line numbers and diagnostic/diff
+//! pips. Full diagnostics are projected by the Code inspector.
 //!
 //! Diagnostics come from one debounced parse of the buffer with the same
-//! resolver the runner uses; the squiggle (underline), the gutter pip,
-//! and the bottom strip all read that single vector.
+//! resolver the runner uses; the squiggle (underline), gutter pip, and
+//! inspector all read that single vector.
 
 use egui::Ui;
 
 use crate::common::AppState;
 use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::ui::tokens::Tokens;
 
 use super::{
     Diagnostic, DiagnosticSeverity, completion,
@@ -19,9 +19,14 @@ use super::{
 };
 
 /// Editor body font size (gutter follows it).
-const FONT_SIZE: f32 = 12.5;
-/// Width reserved for line numbers and pips.
-const GUTTER_W: f32 = 64.0;
+const FONT_SIZE: f32 = 11.0;
+/// Width reserved for the mockup's line-number gutter.
+const GUTTER_W: f32 = 47.0;
+const GUTTER_NUMBER_RIGHT_PADDING: f32 = 11.0;
+const CODE_LEFT_PADDING: f32 = 12.0;
+const CODE_RIGHT_PADDING: i8 = 20;
+const CODE_TOP_PADDING: i8 = 8;
+const CODE_BOTTOM_PADDING: i8 = 36;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
 
@@ -41,7 +46,8 @@ fn line_for_char_index(text: &str, char_index: usize) -> usize {
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let editable = state.workspace.has_editable_netlist_source();
+    let editable = state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource
+        && state.workspace.has_editable_netlist_source();
 
     refresh_diagnostics(ui, state);
 
@@ -58,16 +64,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Document well backdrop.
     let well = ui.available_rect_before_wrap();
-    ui.painter().rect_filled(well, 0.0, c.canvas_bg);
+    ui.painter().rect_filled(well, 0.0, c.bg_inset);
 
-    // Reserve the diagnostics strip before the editor takes the rest.
-    let strip_rows = state.ui.netlist.diagnostics.len().min(3);
-    let strip_h = if strip_rows > 0 {
-        strip_rows as f32 * 22.0 + 10.0
-    } else {
-        0.0
-    };
-    let editor_h = (ui.available_height() - strip_h).max(60.0);
+    let editor_h = ui.available_height().max(60.0);
 
     let font = theme::mono(FONT_SIZE, FontWeight::Regular);
     let diagnostics = state.ui.netlist.diagnostics.clone();
@@ -76,10 +75,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Take the buffer out so the layouter and the post-edit bookkeeping
     // don't fight over `state`.
     let mut buffer = std::mem::take(&mut state.simulation.netlist_content);
+    if let Some(requested_line) = state.ui.netlist.requested_line.take() {
+        let char_index = char_index_for_line(&buffer, requested_line);
+        completion::place_caret(ui, editor_id(), char_index);
+        state.ui.netlist.cursor_line = requested_line.saturating_sub(1);
+    }
 
     let layouter_font = font.clone();
+    let diff_document =
+        state.ui.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff;
     let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let job = highlight::layout_job(text.as_str(), layouter_font.clone(), &c, &diagnostics);
+        let job = if diff_document {
+            highlight::diff_layout_job(text.as_str(), layouter_font.clone(), &c)
+        } else {
+            highlight::layout_job(text.as_str(), layouter_font.clone(), &c, &diagnostics)
+        };
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
@@ -93,6 +103,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .id_salt("rspice.netlist.editor")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                // Reserve background paint slots before TextEdit emits its
+                // glyphs and selection, then fill them once galley row
+                // geometry is known. This preserves crisp text/selection while
+                // matching the mockup's active-line wash and accent rail.
+                let hover_background = ui.painter().add(egui::Shape::Noop);
+                let active_background = ui.painter().add(egui::Shape::Noop);
+                let active_rail = ui.painter().add(egui::Shape::Noop);
                 let mut show_text = |text: &mut dyn egui::TextBuffer| {
                     egui::TextEdit::multiline(text)
                         .id(editor_id())
@@ -102,10 +119,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         .desired_rows(30)
                         .frame(egui::Frame::NONE)
                         .margin(egui::Margin {
-                            left: GUTTER_W as i8,
-                            right: 12,
-                            top: 6,
-                            bottom: 6,
+                            left: (GUTTER_W + CODE_LEFT_PADDING) as i8,
+                            right: CODE_RIGHT_PADDING,
+                            top: CODE_TOP_PADDING,
+                            bottom: CODE_BOTTOM_PADDING,
                         })
                         .layouter(&mut layouter)
                         .show(ui)
@@ -129,6 +146,50 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 // pips, aligned to the galley's actual rows.
                 let painter = ui.painter();
                 let origin = output.galley_pos;
+                let row_rect = |row: &egui::epaint::text::PlacedRow| {
+                    egui::Rect::from_min_max(
+                        egui::pos2(output.response.rect.left(), origin.y + row.rect().top()),
+                        egui::pos2(output.response.rect.right(), origin.y + row.rect().bottom()),
+                    )
+                };
+                if let Some(row) = output.galley.rows.get(cursor_line) {
+                    let rect = row_rect(row);
+                    painter.set(
+                        active_background,
+                        egui::Shape::rect_filled(rect, 0.0, c.accent.gamma_multiply(0.075)),
+                    );
+                    painter.set(
+                        active_rail,
+                        egui::Shape::rect_filled(
+                            egui::Rect::from_min_max(
+                                rect.left_top(),
+                                egui::pos2(rect.left() + 2.0, rect.bottom()),
+                            ),
+                            0.0,
+                            c.accent,
+                        ),
+                    );
+                }
+                if let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
+                    && output.response.rect.contains(pointer)
+                    && let Some((index, row)) = output
+                        .galley
+                        .rows
+                        .iter()
+                        .enumerate()
+                        .find(|(_, row)| row_rect(row).contains(pointer))
+                    && index != cursor_line
+                {
+                    painter.set(
+                        hover_background,
+                        egui::Shape::rect_filled(row_rect(row), 0.0, c.bg_hover),
+                    );
+                }
+                painter.vline(
+                    output.response.rect.left() + GUTTER_W,
+                    output.response.rect.y_range(),
+                    egui::Stroke::new(1.0, c.border),
+                );
                 let gutter_font = theme::mono(FONT_SIZE - 1.5, FontWeight::Regular);
                 for (idx, row) in output.galley.rows.iter().enumerate() {
                     let y = origin.y + row.rect().center().y;
@@ -144,7 +205,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         c.text_faint
                     };
                     painter.text(
-                        egui::pos2(origin.x - 22.0, y),
+                        egui::pos2(
+                            output.response.rect.left() + GUTTER_W - GUTTER_NUMBER_RIGHT_PADDING,
+                            y,
+                        ),
                         egui::Align2::RIGHT_CENTER,
                         (idx + 1).to_string(),
                         gutter_font.clone(),
@@ -152,12 +216,16 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     );
                     if let Some(severity) = diagnostic_severity {
                         painter.circle_filled(
-                            egui::pos2(origin.x - 12.0, y),
+                            egui::pos2(output.response.rect.left() + GUTTER_W - 5.0, y),
                             2.5,
                             diagnostic_color(severity, &c),
                         );
                     } else if edited_lines.contains(&idx) {
-                        painter.circle_filled(egui::pos2(origin.x - 12.0, y), 2.5, c.accent);
+                        painter.circle_filled(
+                            egui::pos2(output.response.rect.left() + GUTTER_W - 5.0, y),
+                            2.5,
+                            c.accent,
+                        );
                     }
                 }
 
@@ -192,10 +260,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if source_changed {
         super::refresh_diff_pips_from_baseline(state);
     }
+}
 
-    if strip_rows > 0 {
-        diagnostics_strip(ui, state, strip_rows);
+fn char_index_for_line(source: &str, one_based_line: usize) -> usize {
+    let target = one_based_line.max(1);
+    let mut line = 1;
+    for (index, ch) in source.chars().enumerate() {
+        if line == target {
+            return index;
+        }
+        if ch == '\n' {
+            line += 1;
+        }
     }
+    source.chars().count()
 }
 
 /// Commit a text/completion edit without promoting generated output to owned
@@ -206,59 +284,26 @@ fn commit_owned_source_edit(
     cursor_line: usize,
     now: f64,
 ) -> bool {
-    if !state
-        .workspace
-        .replace_editable_netlist_source(buffer.to_owned())
-    {
+    if state.ui.netlist.active_document != super::ActiveNetlistDocument::OwnedSource {
         return false;
     }
-
-    state.simulation.netlist_content = buffer.to_owned();
+    if !super::replace_owned_source(state, buffer.to_owned()) {
+        return false;
+    }
     let netlist = &mut state.ui.netlist;
-    netlist.revision = netlist.revision.wrapping_add(1);
     netlist.last_edit_time = now;
     netlist.edited_lines.insert(cursor_line);
     true
 }
 
-/// Bottom strip: the first few diagnostics as `line N · message` rows.
-fn diagnostics_strip(ui: &mut Ui, state: &AppState, rows: usize) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let width = ui.available_width();
-
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(width, rows as f32 * 22.0 + 10.0),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 0.0, c.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.top() + 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-
-    for (idx, diagnostic) in state.ui.netlist.diagnostics.iter().take(rows).enumerate() {
-        let y = rect.top() + 5.0 + idx as f32 * 22.0 + 11.0;
-        let color = diagnostic_color(diagnostic.severity, &c);
-        ui.painter()
-            .circle_filled(egui::pos2(rect.left() + 14.0, y), 2.5, color);
-        let text =
-            diagnostic_strip_text(diagnostic, &state.simulation.netlist_content, rect.width());
-        ui.painter().text(
-            egui::pos2(rect.left() + 26.0, y),
-            egui::Align2::LEFT_CENTER,
-            text,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            color,
-        );
-    }
-}
-
+#[cfg(test)]
 const DIAGNOSTIC_STRIP_TEXT_X: f32 = 26.0;
+#[cfg(test)]
 const DIAGNOSTIC_STRIP_RIGHT_PADDING: f32 = 8.0;
+#[cfg(test)]
 const DIAGNOSTIC_STRIP_CHAR_WIDTH: f32 = 7.0;
 
+#[cfg(test)]
 fn diagnostic_strip_text(diagnostic: &Diagnostic, buffer: &str, width: f32) -> String {
     let location = diagnostic_location(diagnostic, buffer);
     let primary = format!(
@@ -282,10 +327,12 @@ fn diagnostic_strip_text(diagnostic: &Diagnostic, buffer: &str, width: f32) -> S
     truncate_diagnostic_strip_text(&primary, width)
 }
 
+#[cfg(test)]
 fn diagnostic_strip_text_fits(text: &str, width: f32) -> bool {
     text.chars().count() <= diagnostic_strip_char_budget(width)
 }
 
+#[cfg(test)]
 fn truncate_diagnostic_strip_text(text: &str, width: f32) -> String {
     let budget = diagnostic_strip_char_budget(width);
     if text.chars().count() <= budget {
@@ -299,6 +346,7 @@ fn truncate_diagnostic_strip_text(text: &str, width: f32) -> String {
     truncated
 }
 
+#[cfg(test)]
 fn diagnostic_strip_char_budget(width: f32) -> usize {
     ((width - DIAGNOSTIC_STRIP_TEXT_X - DIAGNOSTIC_STRIP_RIGHT_PADDING).max(0.0)
         / DIAGNOSTIC_STRIP_CHAR_WIDTH)
@@ -326,6 +374,7 @@ fn diagnostic_line(diagnostic: &Diagnostic, buffer: &str) -> Option<usize> {
     })
 }
 
+#[cfg(test)]
 fn diagnostic_location(diagnostic: &Diagnostic, buffer: &str) -> String {
     let derived = diagnostic
         .span
@@ -343,6 +392,7 @@ fn diagnostic_location(diagnostic: &Diagnostic, buffer: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn diagnostic_label(severity: DiagnosticSeverity) -> &'static str {
     match severity {
         DiagnosticSeverity::Error => "error · ",
@@ -378,11 +428,26 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
         return;
     }
 
-    let buffer = &state.simulation.netlist_content;
+    if state.ui.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+        state.ui.netlist.diagnostics.clear();
+        state.ui.netlist.diag_revision = Some(revision);
+        return;
+    }
+
+    let buffer = state.simulation.netlist_content.clone();
+    let materialized =
+        if state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
+            crate::common::netlist_workflow::compose_owned_netlist_execution_source(state, &buffer)
+        } else {
+            Ok(buffer.clone())
+        };
     let (diagnostics, symbols) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()))
     } else {
-        parse_buffer(buffer)
+        match materialized {
+            Ok(source) => parse_buffer(&source),
+            Err(error) => (vec![Diagnostic::error(error)], None),
+        }
     };
     let netlist = &mut state.ui.netlist;
     netlist.diagnostics = diagnostics;
@@ -809,6 +874,7 @@ mod tests {
     fn editor_commit_updates_only_an_existing_owned_source() {
         let mut state = AppState::default();
         state.workspace.netlist_source = Some("owned\n.op\n.end\n".to_owned());
+        state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
         state.workspace.netlist_source_path = Some(std::path::PathBuf::from("imported/owned.cir"));
         state.simulation.netlist_content = "owned\n.op\n.end\n".to_owned();
         state.ui.netlist.revision = 9;
@@ -827,7 +893,10 @@ mod tests {
             state.simulation.netlist_content,
             "owned\n.tran 1n 1u\n.end\n"
         );
-        assert!(state.workspace.netlist_source_path.is_none());
+        assert_eq!(
+            state.workspace.netlist_source_path.as_deref(),
+            Some(std::path::Path::new("imported/owned.cir"))
+        );
         assert!(state.workspace.netlist_source_dirty);
         assert_eq!(state.ui.netlist.revision, 10);
         assert_eq!(state.ui.netlist.last_edit_time, 7.25);

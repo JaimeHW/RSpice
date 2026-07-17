@@ -1833,6 +1833,8 @@ fn validate_bounded_text(
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SimulationConfigurationError {
+    #[error("project-owned netlist document is invalid: {message}")]
+    InvalidNetlistDocumentProjection { message: String },
     #[error("simulation_plan_payloads contains duplicate owner {plan_id}")]
     DuplicatePlanPayload { plan_id: SimulationPlanId },
     #[error("simulation_plan_payloads[{plan_id}].design_variables[{index}] is invalid: {message}")]
@@ -2082,6 +2084,52 @@ pub struct SimulationPlanPayloadRecord {
     pub payload: SimulationPlanPayload,
 }
 
+/// Mockup-specified ownership strategy for a project-owned SPICE artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum OwnedNetlistEditStrategy {
+    #[default]
+    OwnedSource,
+    ParameterOptionOverride,
+    IncludeOrderOverride,
+    AnalysisOnlyDeck,
+}
+
+impl OwnedNetlistEditStrategy {
+    pub const ALL: [Self; 4] = [
+        Self::OwnedSource,
+        Self::ParameterOptionOverride,
+        Self::IncludeOrderOverride,
+        Self::AnalysisOnlyDeck,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::OwnedSource => "Owned source derived from generated output",
+            Self::ParameterOptionOverride => "Parameter and option override",
+            Self::IncludeOrderOverride => "Include-order override",
+            Self::AnalysisOnlyDeck => "Analysis-only deck",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnedNetlistSaveRecord {
+    pub document_revision: u64,
+    pub content_digest: crate::product::ContentDigest,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnedNetlistDescriptor {
+    pub artifact_name: String,
+    pub strategy: OwnedNetlistEditStrategy,
+    #[serde(default)]
+    pub save_history: Vec<OwnedNetlistSaveRecord>,
+}
+
 /// Project-level workspace state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectWorkspace {
@@ -2110,9 +2158,20 @@ pub struct ProjectWorkspace {
     /// `None` means the netlist view shows the generated artifact.
     #[serde(default)]
     pub netlist_source: Option<String>,
+    /// Canonical owned-source identity, provenance, generated base, sealed
+    /// dependency metadata, revision, and validation evidence. The legacy
+    /// `netlist_source` projection remains for backwards compatibility and
+    /// must exactly match this document when both are present.
+    #[serde(default)]
+    pub netlist_document: Option<crate::workbench::code_workspace::NetlistDocument>,
+    /// Ownership-dialog selection for the project-owned source artifact.
+    #[serde(default)]
+    pub netlist_descriptor: Option<OwnedNetlistDescriptor>,
     /// Native filesystem origin for `netlist_source`, used to resolve relative
-    /// `.include`/`.lib` paths for imported decks. Browser imports and direct
-    /// editor edits clear this because they do not have a reliable file base.
+    /// `.include`/`.lib` paths for imported decks. Edits retain this origin:
+    /// changing document bytes does not change the directory against which its
+    /// authored relative dependencies resolve. Browser imports have no native
+    /// path authority and therefore leave it absent.
     #[serde(default)]
     pub netlist_source_path: Option<PathBuf>,
     /// Runtime dirty bit for `netlist_source`; skipped because dirty state is
@@ -2142,6 +2201,8 @@ impl Default for ProjectWorkspace {
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),
             netlist_source: None,
+            netlist_document: None,
+            netlist_descriptor: None,
             netlist_source_path: None,
             netlist_source_dirty: false,
             project_metadata_dirty: false,
@@ -2154,6 +2215,67 @@ impl ProjectWorkspace {
     /// runtime editor state. Cross-document targets are validated by project
     /// I/O once the library tree and simulation plan are available.
     pub fn validate_simulation_configuration(&self) -> Result<(), SimulationConfigurationError> {
+        if let Some(document) = &self.netlist_document {
+            if document.ownership()
+                == crate::workbench::code_workspace::DocumentOwnership::Generated
+            {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: "project-owned netlist document cannot have generated ownership"
+                            .to_owned(),
+                    },
+                );
+            }
+            if self.netlist_source.as_deref() != Some(document.source()) {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: "canonical document bytes differ from netlist_source".to_owned(),
+                    },
+                );
+            }
+            let descriptor = self.netlist_descriptor.as_ref().ok_or_else(|| {
+                SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                    message: "canonical document has no owned-artifact descriptor".to_owned(),
+                }
+            })?;
+            let name = descriptor.artifact_name.trim();
+            if name.is_empty()
+                || name != descriptor.artifact_name
+                || name.chars().any(char::is_control)
+                || name.contains('/')
+                || name.contains('\\')
+            {
+                return Err(
+                    SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                        message: "owned artifact name must be one trimmed file name".to_owned(),
+                    },
+                );
+            }
+            let mut previous_revision = 0_u64;
+            for record in &descriptor.save_history {
+                if record.document_revision == 0
+                    || record.document_revision <= previous_revision
+                    || record.document_revision > document.revision().get()
+                    || record.message.trim().is_empty()
+                    || record.message != record.message.trim()
+                    || record.message.chars().any(char::is_control)
+                {
+                    return Err(
+                        SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                            message: "owned source save history is not strictly revision ordered or has an invalid message".to_owned(),
+                        },
+                    );
+                }
+                previous_revision = record.document_revision;
+            }
+        } else if self.netlist_descriptor.is_some() {
+            return Err(
+                SimulationConfigurationError::InvalidNetlistDocumentProjection {
+                    message: "owned-artifact descriptor has no canonical document".to_owned(),
+                },
+            );
+        }
+
         let mut plan_ids = HashMap::<SimulationPlanId, usize>::new();
         let mut variable_ids = HashMap::<DesignVariableId, SimulationPlanId>::new();
         let mut output_ids = HashMap::<SavedOutputId, SimulationPlanId>::new();
@@ -3297,7 +3419,6 @@ impl ProjectWorkspace {
         }
 
         *owned_source = source;
-        self.netlist_source_path = None;
         self.netlist_source_dirty = true;
         true
     }
@@ -3311,6 +3432,8 @@ impl ProjectWorkspace {
             return false;
         }
 
+        self.netlist_document = None;
+        self.netlist_descriptor = None;
         self.netlist_source_path = None;
         self.netlist_source_dirty = true;
         true
@@ -4363,6 +4486,20 @@ mod tests {
             Some(Path::new("owned.cir"))
         );
         assert!(!workspace.netlist_source_dirty);
+    }
+
+    #[test]
+    fn editing_imported_source_preserves_its_dependency_origin() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.netlist_source = Some("owned\n.end\n".to_owned());
+        workspace.netlist_source_path = Some(PathBuf::from("decks/owned.cir"));
+
+        assert!(workspace.replace_editable_netlist_source("edited\n.end\n".to_owned()));
+        assert_eq!(
+            workspace.netlist_source_path.as_deref(),
+            Some(Path::new("decks/owned.cir"))
+        );
+        assert!(workspace.netlist_source_dirty);
     }
 
     #[test]

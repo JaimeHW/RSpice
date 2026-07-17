@@ -4245,6 +4245,7 @@ dependencies = [
  "pollster",
  "rand 0.8.6",
  "raw-window-handle",
+ "regex",
  "rfd",
  "rspice-core",
  "rspice-veriloga",
@@ -4254,6 +4255,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.10.9",
+ "similar",
  "svgtypes",
  "thiserror 2.0.18",
  "tokio",
@@ -4646,6 +4648,12 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "simplecss"

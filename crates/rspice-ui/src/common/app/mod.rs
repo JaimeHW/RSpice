@@ -290,6 +290,8 @@ impl AppState {
 
         self.workbench.application_modal_open()
             || self.dialogs.application_modal_open()
+            || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
+                && self.ui.netlist.application_modal_open())
             || self.sim_setup.options_open
             || self.sim_setup.palette_open
             || self.tabbed_property_dialog.open
@@ -367,13 +369,58 @@ impl AppState {
         if self.simulation.is_running {
             return Some("A simulation is already running".to_string());
         }
-        let source = self
-            .workspace
-            .netlist_source
-            .as_deref()
-            .unwrap_or(self.simulation.netlist_content.as_str());
+        let active_document = if self.ui.netlist.active_document_initialized {
+            self.ui.netlist.active_document
+        } else if self.workspace.netlist_source.is_some() {
+            crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+        } else {
+            crate::workbench::netlist_document::ActiveNetlistDocument::Generated
+        };
+        let source = if active_document
+            == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+        {
+            self.workspace
+                .netlist_source
+                .as_deref()
+                .unwrap_or(self.simulation.netlist_content.as_str())
+        } else {
+            self.simulation.netlist_content.as_str()
+        };
         if source.trim().is_empty() {
             return Some("Enter a netlist before running".to_string());
+        }
+        if active_document
+            == crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff
+        {
+            return Some("Generated comparison documents cannot be executed".to_owned());
+        }
+        let current_digest = crate::workbench::netlist_document::source_content_digest(source);
+        if active_document == crate::workbench::netlist_document::ActiveNetlistDocument::Generated
+            && (self.ui.netlist.generation_error.is_some()
+                || self.ui.netlist.generated_input_digest
+                    != self.ui.netlist.current_generation_input_digest)
+        {
+            return Some(
+                self.ui
+                    .netlist
+                    .generation_error
+                    .clone()
+                    .unwrap_or_else(|| "Regenerate the stale netlist before running".to_owned()),
+            );
+        }
+        let validated = self.ui.netlist.validation.as_ref().is_some_and(|receipt| {
+            receipt.visible_content_digest == current_digest
+                && receipt.project_revision == self.workspace.project.revision().get()
+        });
+        if !validated {
+            return Some(
+                "Validate the exact current source and project revision before running".to_owned(),
+            );
+        }
+        if active_document == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+            && self.ui.netlist.externally_saved_content_digest != Some(current_digest)
+        {
+            return Some("Save the validated owned source deck before running".to_owned());
         }
         None
     }
@@ -542,6 +589,23 @@ fn configure_platform_input_contract(ctx: &Context) {
 }
 
 impl RSpiceApp {
+    pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
+        if let Some(reason) = self.state.manual_deck_run_block_reason() {
+            return Some(reason);
+        }
+        let receipt = self.state.ui.netlist.validation.as_ref()?;
+        if !self
+            .simulation_controller
+            .has_retained_manual_authorization(receipt.prepared_snapshot_digest)
+        {
+            return Some(
+                "Validate the exact current netlist before running; its one-shot authorization is no longer retained"
+                    .to_owned(),
+            );
+        }
+        None
+    }
+
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn test_instance() -> Self {
         Self {
@@ -1258,9 +1322,13 @@ mod tests {
             !state.can_run_simulation(),
             "schematic Simulate must still be blocked by current schematic DRC"
         );
+        let manual_reason = state
+            .manual_deck_run_block_reason()
+            .expect("an unvalidated manual deck must remain blocked");
+        assert!(manual_reason.contains("Validate"));
         assert!(
-            state.manual_deck_run_block_reason().is_none(),
-            "manual deck runs should not be blocked by schematic DRC"
+            !manual_reason.contains("DRC"),
+            "manual deck readiness must remain independent of schematic DRC"
         );
     }
 
@@ -1341,6 +1409,27 @@ mod tests {
         state.model_browser_state.open = true;
         assert!(state.application_modal_open());
         state.model_browser_state.open = false;
+
+        state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        state.ui.netlist.find.open = true;
+        assert!(state.application_modal_open());
+        state.ui.netlist.find.open = false;
+
+        state.ui.netlist.ownership_dialog.open = true;
+        assert!(state.application_modal_open());
+        state.ui.netlist.ownership_dialog.open = false;
+
+        state.ui.netlist.comparison_dialog.open = true;
+        assert!(state.application_modal_open());
+        state.ui.netlist.comparison_dialog.open = false;
+
+        state.ui.netlist.save_dialog.open = true;
+        assert!(state.application_modal_open());
+        state.ui.netlist.save_dialog.open = false;
+
+        state.ui.netlist.export_dialog.open = true;
+        assert!(state.application_modal_open());
+        state.ui.netlist.export_dialog.open = false;
 
         state.workbench.open_project_launcher();
         assert!(state.application_modal_open());
