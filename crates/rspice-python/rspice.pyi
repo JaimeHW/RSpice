@@ -13,6 +13,9 @@ __all__ = [
     "__author__",
     "Netlist",
     "ParseDiagnostic",
+    "NetlistSourceLocation",
+    "StartupDirectiveScope",
+    "StartupDiagnostic",
     "UnresolvedOutputSymbol",
     "Engine",
     "SimulationConfig",
@@ -77,6 +80,7 @@ class ParseError(RSpiceError):
         "global_subcircuit_port_binding",
         "undefined_mutual_inductor_reference",
         "undefined_output_symbols",
+        "conflicting_startup_directives",
         "device_initial_condition_duplicate_directive",
         "device_initial_condition_missing_information",
         "device_initial_condition_malformed_directive",
@@ -96,6 +100,7 @@ class ParseError(RSpiceError):
         "subcircuit_binding",
         "mutual_inductor_reference",
         "output_symbol_validation",
+        "startup_directive_validation",
     ] | None
     line: int | None
     detail: str | None
@@ -138,6 +143,8 @@ class ParseError(RSpiceError):
     actual: int | None
     device_type: str | None
     unresolved_output_symbols: list[UnresolvedOutputSymbol] | None
+    first_startup_kind: Literal["ic", "nodeset"] | None
+    conflicting_startup_kind: Literal["ic", "nodeset"] | None
 
 class SimulationError(RSpiceError):
     """Raised when simulation fails due to circuit or solver errors."""
@@ -168,6 +175,43 @@ class ParseDiagnostic:
     def code(self) -> str: ...
     @property
     def message(self) -> str: ...
+
+@final
+class NetlistSourceLocation:
+    @property
+    def line(self) -> int: ...
+    @property
+    def source(self) -> str | None: ...
+
+@final
+class StartupDirectiveScope:
+    @property
+    def kind(self) -> Literal["top_level", "subcircuit"]: ...
+    @property
+    def qualified_definition(self) -> str | None: ...
+    @property
+    def qualified_instances(self) -> list[str]: ...
+
+@final
+class StartupDiagnostic:
+    @property
+    def code(
+        self,
+    ) -> Literal[
+        "startup-empty-directive",
+        "startup-undefined-node",
+        "startup-scoped-global-node",
+    ]: ...
+    @property
+    def stage(self) -> Literal["parse", "startup_topology"]: ...
+    @property
+    def directive(self) -> Literal["ic", "nodeset"]: ...
+    @property
+    def origins(self) -> list[NetlistSourceLocation]: ...
+    @property
+    def scopes(self) -> list[StartupDirectiveScope]: ...
+    @property
+    def canonical_nodes(self) -> list[str]: ...
 
 @final
 class UnresolvedOutputSymbol:
@@ -210,6 +254,8 @@ class Netlist:
     def title(self) -> str: ...
     @property
     def diagnostics(self) -> list[ParseDiagnostic]: ...
+    @property
+    def startup_diagnostics(self) -> list[StartupDiagnostic]: ...
     @property
     def element_names(self) -> list[str]: ...
     @property

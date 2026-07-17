@@ -19,6 +19,25 @@ class TestParseStatementSemantics:
         assert diagnostic.code == "xyce_resistor_missing_value"
         assert diagnostic.message
 
+    def test_startup_diagnostics_are_structured_without_removing_legacy_warning(self):
+        netlist = rspice.Netlist.parse_spice(
+            "startup diagnostics\nV1 in 0 1\n.IC V(MISSING)=1\n.END\n"
+        )
+
+        assert any(item.code == "startup-undefined-node" for item in netlist.diagnostics)
+        assert len(netlist.startup_diagnostics) == 1
+        diagnostic = netlist.startup_diagnostics[0]
+        assert isinstance(diagnostic, rspice.StartupDiagnostic)
+        assert diagnostic.code == "startup-undefined-node"
+        assert diagnostic.stage == "startup_topology"
+        assert diagnostic.directive == "ic"
+        assert diagnostic.canonical_nodes == ["MISSING"]
+        assert diagnostic.origins[0].line == 3
+        assert diagnostic.origins[0].source is None
+        assert diagnostic.scopes[0].kind == "top_level"
+        assert diagnostic.scopes[0].qualified_definition is None
+        assert diagnostic.scopes[0].qualified_instances == []
+
     def test_titleless_content_parses_all_elements(self):
         netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
         assert netlist.num_elements == 2

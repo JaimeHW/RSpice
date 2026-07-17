@@ -114,6 +114,8 @@ struct ParseErrorAttributes {
     actual: Option<usize>,
     device_type: Option<String>,
     unresolved_output_symbols: Option<Vec<PyUnresolvedOutputSymbol>>,
+    first_startup_kind: Option<String>,
+    conflicting_startup_kind: Option<String>,
 }
 
 impl ParseErrorAttributes {
@@ -220,6 +222,26 @@ fn output_symbol_validation_attributes(
     if let Some(first) = error.unresolved.first() {
         attributes.set_primary(&first.origin);
     }
+    attributes
+}
+
+fn startup_directive_kind_name(kind: rspice_core::netlist::StartupDirectiveKind) -> &'static str {
+    match kind {
+        rspice_core::netlist::StartupDirectiveKind::Ic => "ic",
+        rspice_core::netlist::StartupDirectiveKind::NodeSet => "nodeset",
+    }
+}
+
+fn startup_directive_conflict_attributes(
+    error: &rspice_core::netlist::StartupDirectiveConflictError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("conflicting_startup_directives");
+    attributes.category = Some("startup_directive_validation");
+    attributes.set_primary(&error.first);
+    attributes.set_related(&error.conflicting);
+    attributes.first_startup_kind = Some(startup_directive_kind_name(error.first_kind).to_string());
+    attributes.conflicting_startup_kind =
+        Some(startup_directive_kind_name(error.conflicting_kind).to_string());
     attributes
 }
 
@@ -341,6 +363,9 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             undefined_mutual_inductor_reference_attributes(error)
         }
         CoreParseError::OutputSymbolValidation(error) => output_symbol_validation_attributes(error),
+        CoreParseError::StartupDirectiveConflict(error) => {
+            startup_directive_conflict_attributes(error)
+        }
         CoreParseError::DeviceInitialCondition(error) => {
             let mut attributes = ParseErrorAttributes::new("device_initial_condition");
             attributes.category = Some("device_initial_condition");
@@ -518,6 +543,11 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             "unresolved_output_symbols",
             attributes.unresolved_output_symbols,
         )?;
+        value.setattr("first_startup_kind", attributes.first_startup_kind)?;
+        value.setattr(
+            "conflicting_startup_kind",
+            attributes.conflicting_startup_kind,
+        )?;
         Ok::<_, PyErr>(())
     });
     error
@@ -554,7 +584,8 @@ mod tests {
     use rspice_core::netlist::{
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
         NetlistSourceLocation, OutputDirectiveKind, OutputSymbolKind, OutputSymbolValidationError,
-        UndefinedMutualInductorReferenceError, UnresolvedOutputSymbol,
+        StartupDirectiveConflictError, StartupDirectiveKind, UndefinedMutualInductorReferenceError,
+        UnresolvedOutputSymbol,
     };
 
     #[test]
@@ -681,6 +712,28 @@ mod tests {
                 ("print", "VP", "bogo9", "node", 17, Some("invalid.cir")),
                 ("print", "VM", "bogo9", "node", 17, Some("invalid.cir")),
             ]
+        );
+    }
+
+    #[test]
+    fn startup_conflict_preserves_both_typed_origins_and_modes() {
+        let attributes = startup_directive_conflict_attributes(&StartupDirectiveConflictError {
+            first_kind: StartupDirectiveKind::Ic,
+            first: NetlistSourceLocation::in_file("deck.cir", 8),
+            conflicting_kind: StartupDirectiveKind::NodeSet,
+            conflicting: NetlistSourceLocation::in_file("included.cir", 12),
+        });
+
+        assert_eq!(attributes.kind, "conflicting_startup_directives");
+        assert_eq!(attributes.category, Some("startup_directive_validation"));
+        assert_eq!(attributes.primary_line, Some(8));
+        assert_eq!(attributes.primary_source.as_deref(), Some("deck.cir"));
+        assert_eq!(attributes.related_line, Some(12));
+        assert_eq!(attributes.related_source.as_deref(), Some("included.cir"));
+        assert_eq!(attributes.first_startup_kind.as_deref(), Some("ic"));
+        assert_eq!(
+            attributes.conflicting_startup_kind.as_deref(),
+            Some("nodeset")
         );
     }
 }
