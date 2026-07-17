@@ -79,6 +79,67 @@ pub enum WorkbenchIcon {
     Export,
 }
 
+/// Compact semantic status marks painted as vector geometry.
+///
+/// These deliberately replace Unicode check/triangle characters in dense
+/// engineering rows. The bundled text faces are not the authority for icon
+/// coverage, and a missing fallback must never turn a status into a tofu box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusMark {
+    Success,
+    Warning,
+    Failure,
+    Neutral,
+}
+
+pub fn paint_status_mark(painter: &egui::Painter, rect: Rect, mark: StatusMark, color: Color32) {
+    let side = rect.width().min(rect.height()).max(1.0);
+    let center = rect.center();
+    let half = side * 0.42;
+    let stroke = Stroke::new((side * 0.11).max(1.0), color);
+    match mark {
+        StatusMark::Success => {
+            painter.add(Shape::line(
+                vec![
+                    Pos2::new(center.x - half, center.y),
+                    Pos2::new(center.x - half * 0.22, center.y + half * 0.72),
+                    Pos2::new(center.x + half, center.y - half * 0.78),
+                ],
+                stroke,
+            ));
+        }
+        StatusMark::Warning => {
+            painter.add(Shape::closed_line(
+                vec![
+                    Pos2::new(center.x, center.y - half),
+                    Pos2::new(center.x + half, center.y + half * 0.82),
+                    Pos2::new(center.x - half, center.y + half * 0.82),
+                ],
+                stroke,
+            ));
+        }
+        StatusMark::Failure => {
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - half, center.y - half),
+                    Pos2::new(center.x + half, center.y + half),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + half, center.y - half),
+                    Pos2::new(center.x - half, center.y + half),
+                ],
+                stroke,
+            );
+        }
+        StatusMark::Neutral => {
+            painter.circle_filled(center, (side * 0.18).max(1.25), color);
+        }
+    }
+}
+
 impl WorkbenchIcon {
     pub fn paint(self, painter: &egui::Painter, rect: Rect, color: Color32) {
         let side = rect.width().min(rect.height());
@@ -684,15 +745,32 @@ fn section_header_column_widths(
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(ui, label, value, t.color.text)
+    property_row_with_tone(ui, label, value, t.color.text, None)
 }
 
 /// Property row whose value communicates an explicit semantic tone.
 pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
-    property_row_with_tone(ui, label, value, value_tone)
+    property_row_with_tone(ui, label, value, value_tone, None)
 }
 
-fn property_row_with_tone(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
+/// Property row with a font-independent semantic mark before its value.
+pub fn property_row_status(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    value_tone: Color32,
+    mark: StatusMark,
+) -> Response {
+    property_row_with_tone(ui, label, value, value_tone, Some(mark))
+}
+
+fn property_row_with_tone(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    value_tone: Color32,
+    mark: Option<StatusMark>,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let full_label = label;
     let full_value = value;
@@ -707,9 +785,13 @@ fn property_row_with_tone(ui: &mut Ui, label: &str, value: &str, value_tone: Col
     let label_galley =
         ui.painter()
             .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
-    let value_galley = ui
-        .painter()
-        .layout(value.to_owned(), value_font, value_tone, value_column);
+    let status_prefix = if mark.is_some() { 17.0 } else { 0.0 };
+    let value_galley = ui.painter().layout(
+        value.to_owned(),
+        value_font,
+        value_tone,
+        (value_column - status_prefix).max(1.0),
+    );
     let height = (label_galley.size().y.max(value_galley.size().y) + 12.0).max(29.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
@@ -725,8 +807,19 @@ fn property_row_with_tone(ui: &mut Ui, label: &str, value: &str, value_tone: Col
         label_galley,
         t.color.text_dim,
     );
+    if let Some(mark) = mark {
+        paint_status_mark(
+            &ui.painter().with_clip_rect(value_rect),
+            Rect::from_center_size(
+                Pos2::new(value_rect.left() + 5.5, rect.center().y),
+                Vec2::splat(11.0),
+            ),
+            mark,
+            value_tone,
+        );
+    }
     ui.painter().with_clip_rect(value_rect).galley(
-        Pos2::new(value_rect.left(), value_rect.top() + 6.0),
+        Pos2::new(value_rect.left() + status_prefix, value_rect.top() + 6.0),
         value_galley,
         value_tone,
     );
@@ -1013,6 +1106,70 @@ pub fn empty_state(ui: &mut Ui, icon: WorkbenchIcon, title: &str, description: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn shape_contains_text(shape: &Shape) -> bool {
+        match shape {
+            Shape::Text(_) => true,
+            Shape::Vec(shapes) => shapes.iter().any(shape_contains_text),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn semantic_status_marks_are_font_independent_vector_geometry() {
+        let ctx = egui::Context::default();
+        let output = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                for mark in [
+                    StatusMark::Success,
+                    StatusMark::Warning,
+                    StatusMark::Failure,
+                    StatusMark::Neutral,
+                ] {
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
+                    paint_status_mark(ui.painter(), rect, mark, Color32::WHITE);
+                }
+            });
+        });
+
+        let status_shapes = output
+            .shapes
+            .iter()
+            .filter(|shape| {
+                matches!(
+                    &shape.shape,
+                    Shape::Path(_) | Shape::LineSegment { .. } | Shape::Circle(_)
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            status_shapes
+                .iter()
+                .filter(|shape| matches!(&shape.shape, Shape::Path(_)))
+                .count(),
+            2
+        );
+        assert_eq!(
+            status_shapes
+                .iter()
+                .filter(|shape| matches!(&shape.shape, Shape::LineSegment { .. }))
+                .count(),
+            2
+        );
+        assert_eq!(
+            status_shapes
+                .iter()
+                .filter(|shape| matches!(&shape.shape, Shape::Circle(_)))
+                .count(),
+            1
+        );
+        assert!(
+            output
+                .shapes
+                .iter()
+                .all(|shape| !shape_contains_text(&shape.shape))
+        );
+    }
 
     #[test]
     fn section_header_uses_measured_copy_before_eliding() {

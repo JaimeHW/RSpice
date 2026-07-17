@@ -19,6 +19,7 @@ use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
+use crate::workbench::design_system::{StatusMark, WorkbenchIcon, icon_button, paint_status_mark};
 
 use super::well_hint;
 
@@ -387,21 +388,40 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     c.text_dim,
                 );
                 for (idx, failed) in failed_runs.iter().enumerate() {
-                    let (label, color) = if *failed {
-                        ("✕ fail", c.err)
+                    let (label, color, mark) = if *failed {
+                        ("fail", c.err, StatusMark::Failure)
                     } else {
-                        ("✓ pass", c.ok)
+                        ("pass", c.ok, StatusMark::Success)
                     };
                     let right = foot.left() + run_x(idx);
+                    let cell = egui::Rect::from_min_max(
+                        egui::pos2(right - RUN_W + 6.0, foot.top()),
+                        egui::pos2(right + 6.0, foot.bottom()),
+                    );
                     paint_clipped_table_text(
                         ui,
-                        egui::Rect::from_min_max(
-                            egui::pos2(right - RUN_W + 6.0, foot.top()),
-                            egui::pos2(right + 6.0, foot.bottom()),
-                        ),
+                        cell,
                         egui::Align2::RIGHT_CENTER,
                         label,
                         theme::mono(tokens::FS_0, FontWeight::Medium),
+                        color,
+                    );
+                    let label_width = ui
+                        .painter()
+                        .layout_no_wrap(
+                            label.to_owned(),
+                            theme::mono(tokens::FS_0, FontWeight::Medium),
+                            color,
+                        )
+                        .size()
+                        .x;
+                    paint_status_mark(
+                        &ui.painter().with_clip_rect(cell),
+                        egui::Rect::from_center_size(
+                            egui::pos2(cell.right() - label_width - 8.0, cell.center().y),
+                            egui::Vec2::splat(8.0),
+                        ),
+                        mark,
                         color,
                     );
                 }
@@ -577,7 +597,15 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     field(ui, &mut draft.min, 110.0, "—");
                     field(ui, &mut draft.max, 110.0, "—");
                     field(ui, &mut draft.unit, 70.0, "");
-                    if ui.small_button("✕").on_hover_text("Remove spec").clicked() {
+                    if icon_button(
+                        ui,
+                        WorkbenchIcon::Close,
+                        "Remove spec",
+                        false,
+                        egui::vec2(22.0, 22.0),
+                    )
+                    .clicked()
+                    {
                         remove = Some(idx);
                     }
                     if let Err(field) = draft.parse() {

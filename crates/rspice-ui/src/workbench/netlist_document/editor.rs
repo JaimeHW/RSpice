@@ -30,6 +30,15 @@ const CODE_BOTTOM_PADDING: i8 = 36;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
 
+fn code_editor_frame() -> egui::Frame {
+    egui::Frame::new().inner_margin(egui::Margin {
+        left: (GUTTER_W + CODE_LEFT_PADDING) as i8,
+        right: CODE_RIGHT_PADDING,
+        top: CODE_TOP_PADDING,
+        bottom: CODE_BOTTOM_PADDING,
+    })
+}
+
 /// Stable id so the completion accept can reposition the caret.
 fn editor_id() -> egui::Id {
     egui::Id::new("rspice.netlist.editor.text")
@@ -117,13 +126,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         .font(font.clone())
                         .desired_width(f32::INFINITY)
                         .desired_rows(30)
-                        .frame(egui::Frame::NONE)
-                        .margin(egui::Margin {
-                            left: (GUTTER_W + CODE_LEFT_PADDING) as i8,
-                            right: CODE_RIGHT_PADDING,
-                            top: CODE_TOP_PADDING,
-                            bottom: CODE_BOTTOM_PADDING,
-                        })
+                        // A custom TextEdit frame owns its insets in egui;
+                        // `TextEdit::margin` is not applied in that mode.
+                        .frame(code_editor_frame())
                         .layouter(&mut layouter)
                         .show(ui)
                 };
@@ -629,6 +634,15 @@ fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_frame_owns_the_canonical_gutter_and_code_insets() {
+        let frame = code_editor_frame();
+        assert_eq!(frame.inner_margin.left, 59);
+        assert_eq!(frame.inner_margin.right, CODE_RIGHT_PADDING);
+        assert_eq!(frame.inner_margin.top, CODE_TOP_PADDING);
+        assert_eq!(frame.inner_margin.bottom, CODE_BOTTOM_PADDING);
+    }
 
     #[test]
     fn parse_buffer_maps_syntax_error_to_structured_diagnostic() {

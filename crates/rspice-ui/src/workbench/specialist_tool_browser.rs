@@ -733,11 +733,7 @@ fn tool_card(
         ui,
         favorite_rect,
         ("specialist-favorite", row.surface_id),
-        if browser.is_favorite(row.surface_id) {
-            "★"
-        } else {
-            "☆"
-        },
+        CardActionMark::Favorite,
         if browser.is_favorite(row.surface_id) {
             format!("Remove from favorites: {}", row.label())
         } else {
@@ -749,11 +745,7 @@ fn tool_card(
         ui,
         pin_rect,
         ("specialist-pin", row.surface_id),
-        if browser.is_pinned(row.surface_id) {
-            "●"
-        } else {
-            "○"
-        },
+        CardActionMark::Pin,
         if browser.is_pinned(row.surface_id) {
             format!("Unpin: {}", row.label())
         } else {
@@ -775,11 +767,17 @@ fn tool_card(
     }
 }
 
+#[derive(Clone, Copy)]
+enum CardActionMark {
+    Favorite,
+    Pin,
+}
+
 fn card_action(
     ui: &mut Ui,
     rect: Rect,
     salt: (&'static str, SurfaceId),
-    glyph: &str,
+    mark: CardActionMark,
     label: String,
     pressed: bool,
 ) -> Response {
@@ -796,17 +794,35 @@ fn card_action(
     if response.hovered() || response.has_focus() {
         ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
     }
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        glyph,
-        theme::sans(tokens::FS_2, FontWeight::Regular),
-        if pressed {
-            t.color.accent
-        } else {
-            t.color.text_dim
-        },
-    );
+    let ink = if pressed {
+        t.color.accent
+    } else {
+        t.color.text_dim
+    };
+    match mark {
+        CardActionMark::Favorite => {
+            let points = (0..10)
+                .map(|index| {
+                    let angle =
+                        -std::f32::consts::FRAC_PI_2 + index as f32 * std::f32::consts::PI / 5.0;
+                    let radius = if index % 2 == 0 { 6.0 } else { 2.7 };
+                    rect.center() + Vec2::angled(angle) * radius
+                })
+                .collect::<Vec<_>>();
+            ui.painter().add(egui::Shape::closed_line(
+                points,
+                Stroke::new(if pressed { 1.8 } else { 1.0 }, ink),
+            ));
+        }
+        CardActionMark::Pin => {
+            if pressed {
+                ui.painter().circle_filled(rect.center(), 4.0, ink);
+            } else {
+                ui.painter()
+                    .circle_stroke(rect.center(), 4.0, Stroke::new(1.0, ink));
+            }
+        }
+    }
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(label)
 }

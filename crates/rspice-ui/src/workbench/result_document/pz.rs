@@ -42,7 +42,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             on: true,
         },
         LegendChip {
-            name: "zeros ○",
+            name: "zeros",
             color: c.traces[1],
             on: true,
         },

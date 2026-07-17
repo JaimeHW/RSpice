@@ -21,6 +21,11 @@ use super::super::design_system::{
 const INTERNAL_INSPECTOR_MIN_WIDTH: f32 = 270.0;
 const INTERNAL_INSPECTOR_WIDTH: f32 = 330.0;
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
+const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
+
+fn title_actions_stack(available_width: f32) -> bool {
+    available_width <= TITLE_ACTION_STACK_BREAKPOINT
+}
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     super::super::code_workspace::poll_automation_workflow(app);
@@ -133,9 +138,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
-    let phone = ui.ctx().content_rect().width() <= 560.0;
     workspace_title_row(ui, |ui| {
-        if phone {
+        if title_actions_stack(ui.available_width()) {
             code_workspace_heading(
                 ui,
                 "AUTOMATION · LOCAL SCRIPT · REPRODUCIBLE BATCH",
@@ -161,6 +165,7 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
                     Vec2::new(heading_width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        ui.set_width(heading_width);
                         code_workspace_heading(
                             ui,
                             "AUTOMATION · LOCAL SCRIPT · REPRODUCIBLE BATCH",
@@ -519,5 +524,16 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
         });
     if (response.clicked() || keyboard_activate) && available {
         super::super::code_workspace::export_automation_artifact(app, kind);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_actions_follow_workspace_width_not_viewport_width() {
+        assert!(title_actions_stack(560.0));
+        assert!(!title_actions_stack(561.0));
     }
 }

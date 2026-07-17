@@ -11,7 +11,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::code_workspace::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 
-use super::super::design_system::{PANEL_HEADER_H, WorkbenchIcon, property_row, section_header};
+use super::super::design_system::{
+    PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
+};
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
@@ -934,9 +936,15 @@ struct VerificationFlowPresentation {
     label: String,
     detail: String,
     status: String,
-    glyph: &'static str,
+    mark: VerificationFlowMark,
     icon_tone: FlowTone,
     status_tone: FlowTone,
+}
+
+#[derive(Clone, Copy)]
+enum VerificationFlowMark {
+    Status(StatusMark),
+    Text(&'static str),
 }
 
 const fn verification_flow_label(page: VerificationPage) -> &'static str {
@@ -998,7 +1006,15 @@ fn verification_flow_presentation(
                     || "not run".to_owned(),
                     |result| format!("{:.2}% retained yield", result.yield_percent),
                 ),
-                glyph: "△",
+                mark: VerificationFlowMark::Status(
+                    if worst.is_some_and(|result| result.fail_count == 0) {
+                        StatusMark::Success
+                    } else if worst.is_some() {
+                        StatusMark::Warning
+                    } else {
+                        StatusMark::Neutral
+                    },
+                ),
                 icon_tone: if worst.is_some_and(|result| result.fail_count == 0) {
                     FlowTone::Ok
                 } else if worst.is_some() {
@@ -1035,11 +1051,15 @@ fn verification_flow_presentation(
                 } else {
                     "failed / incomplete".to_owned()
                 },
-                glyph: if result.is_some_and(|analysis| analysis.success) {
-                    "✓"
-                } else {
-                    "△"
-                },
+                mark: VerificationFlowMark::Status(
+                    if result.is_some_and(|analysis| analysis.success) {
+                        StatusMark::Success
+                    } else if result.is_some() {
+                        StatusMark::Warning
+                    } else {
+                        StatusMark::Neutral
+                    },
+                ),
                 icon_tone: if result.is_some_and(|analysis| analysis.success) {
                     FlowTone::Ok
                 } else if result.is_some() {
@@ -1060,7 +1080,7 @@ fn verification_flow_presentation(
             label: verification_flow_label(page).to_owned(),
             detail: "Capability unavailable".to_owned(),
             status: "not exposed".to_owned(),
-            glyph: "·",
+            mark: VerificationFlowMark::Status(StatusMark::Neutral),
             icon_tone: FlowTone::Neutral,
             status_tone: FlowTone::Neutral,
         },
@@ -1079,7 +1099,7 @@ fn verification_flow_presentation(
                 } else {
                     "not run".to_owned()
                 },
-                glyph: "O",
+                mark: VerificationFlowMark::Text("O"),
                 icon_tone: if result.is_some() {
                     FlowTone::Accent
                 } else {
@@ -1110,7 +1130,11 @@ fn verification_flow_presentation(
                 } else {
                     "not run".to_owned()
                 },
-                glyph: "△",
+                mark: VerificationFlowMark::Status(if has_evidence {
+                    StatusMark::Warning
+                } else {
+                    StatusMark::Neutral
+                }),
                 icon_tone: if has_evidence {
                     FlowTone::Warn
                 } else {
@@ -1144,7 +1168,11 @@ fn verification_flow_presentation(
                 } else {
                     "baseline unavailable".to_owned()
                 },
-                glyph: if ready { "✓" } else { "·" },
+                mark: VerificationFlowMark::Status(if ready {
+                    StatusMark::Success
+                } else {
+                    StatusMark::Neutral
+                }),
                 icon_tone: if ready {
                     FlowTone::Accent
                 } else {
@@ -1162,7 +1190,7 @@ fn verification_flow_presentation(
             detail: "Unavailable until layout, rule-deck, and marker evidence are retained"
                 .to_owned(),
             status: "not selectable".to_owned(),
-            glyph: "·",
+            mark: VerificationFlowMark::Status(StatusMark::Neutral),
             icon_tone: FlowTone::Neutral,
             status_tone: FlowTone::Error,
         },
@@ -1295,7 +1323,7 @@ fn flow_row(
         label,
         detail,
         status,
-        glyph,
+        mark,
         icon_tone,
         status_tone,
     } = flow;
@@ -1385,13 +1413,23 @@ fn flow_row(
         8.0,
         egui::Stroke::new(1.0, circle_border),
     );
-    ui.painter().text(
-        status_circle.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        theme::sans(tokens::FS_0, FontWeight::Medium),
-        icon_ink,
-    );
+    match mark {
+        VerificationFlowMark::Status(mark) => paint_status_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(status_circle.center(), egui::Vec2::splat(8.0)),
+            *mark,
+            icon_ink,
+        ),
+        VerificationFlowMark::Text(text) => {
+            ui.painter().text(
+                status_circle.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                theme::sans(tokens::FS_0, FontWeight::Medium),
+                icon_ink,
+            );
+        }
+    }
     let text_left = rect.left() + FLOW_TEXT_LEFT;
     let text_right = rect.right() - 9.0;
     let clip = egui::Rect::from_x_y_ranges(text_left..=text_right, rect.y_range());

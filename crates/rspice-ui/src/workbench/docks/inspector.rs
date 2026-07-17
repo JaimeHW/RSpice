@@ -8,7 +8,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::super::design_system::{
-    PANEL_HEADER_H, PANEL_SECTION_H, WorkbenchIcon, property_row,
+    PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row, property_row_status,
     section_header as design_section_header, status_dot,
 };
 use super::super::state::{VerificationPage, Workspace};
@@ -554,19 +554,17 @@ fn component_checks(ui: &mut Ui, app: &RSpiceApp, _component: &Component) {
         format!("{finding_count} errors")
     };
     section_header(ui, "Checks", Some(&status));
-    property_row(
-        ui,
-        "Connectivity",
-        if current && summary.is_some() {
-            if finding_count == 0 {
-                "✓ checked"
-            } else {
-                "△ findings present"
-            }
+    let t = Tokens::get(ui.ctx());
+    let (connectivity, tone, mark) = if current && summary.is_some() {
+        if finding_count == 0 {
+            ("checked", t.color.ok, StatusMark::Success)
         } else {
-            "△ pending recheck"
-        },
-    );
+            ("findings present", t.color.warn, StatusMark::Warning)
+        }
+    } else {
+        ("pending recheck", t.color.warn, StatusMark::Warning)
+    };
+    property_row_status(ui, "Connectivity", connectivity, tone, mark);
     property_row(ui, "Safe operating area", "Dataset attribution unavailable");
     property_row(
         ui,

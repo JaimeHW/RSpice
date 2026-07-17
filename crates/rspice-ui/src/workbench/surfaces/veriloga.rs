@@ -13,13 +13,18 @@ use super::super::code_workspace::{
     show_code_editor,
 };
 use super::super::design_system::{
-    code_inspector_property_list, code_inspector_section, code_workspace_heading, property_row,
-    property_row_toned, workspace_title_row,
+    StatusMark, code_inspector_property_list, code_inspector_section, code_workspace_heading,
+    property_row, property_row_status, property_row_toned, workspace_title_row,
 };
 
 const INTERNAL_INSPECTOR_MIN_WIDTH: f32 = 270.0;
 const INTERNAL_INSPECTOR_WIDTH: f32 = 330.0;
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
+const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
+
+fn title_actions_stack(available_width: f32) -> bool {
+    available_width <= TITLE_ACTION_STACK_BREAKPOINT
+}
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     super::super::code_workspace::poll_veriloga_import(app);
@@ -111,9 +116,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str) {
-    let phone = ui.ctx().content_rect().width() <= 560.0;
     workspace_title_row(ui, |ui| {
-        if phone {
+        // Open docks can make the workspace much narrower than the viewport.
+        // Stack against the actual row width so actions never overlap.
+        if title_actions_stack(ui.available_width()) {
             code_workspace_heading(
                 ui,
                 "VERILOG-A · SEMANTIC COMPILE · MULTI-RUNTIME",
@@ -139,6 +145,11 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str) {
                     Vec2::new(heading_width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        // `allocate_ui_with_layout` is content-sized unless
+                        // the child claims its width. The mockup's flex-grow
+                        // heading must consume the measured remainder so the
+                        // action group stays flush right.
+                        ui.set_width(heading_width);
                         code_workspace_heading(
                             ui,
                             "VERILOG-A · SEMANTIC COMPILE · MULTI-RUNTIME",
@@ -344,21 +355,30 @@ fn inspector(ui: &mut Ui, app: &RSpiceApp, document: &crate::state::ProjectSourc
     code_inspector_section(ui, "Build targets", None, |ui| {
         code_inspector_property_list(ui, |ui| {
             if let Some(receipt) = current_receipt(app, document) {
-                property_row_toned(ui, "Semantic IR", "✓ canonical", t.color.ok);
-                property_row_toned(
+                property_row_status(
                     ui,
-                    "Bytecode VM",
-                    if receipt.bytecode_available {
-                        "✓ available"
-                    } else {
-                        "unavailable"
-                    },
-                    if receipt.bytecode_available {
-                        t.color.ok
-                    } else {
-                        t.color.err
-                    },
+                    "Semantic IR",
+                    "canonical",
+                    t.color.ok,
+                    StatusMark::Success,
                 );
+                if receipt.bytecode_available {
+                    property_row_status(
+                        ui,
+                        "Bytecode VM",
+                        "available",
+                        t.color.ok,
+                        StatusMark::Success,
+                    );
+                } else {
+                    property_row_status(
+                        ui,
+                        "Bytecode VM",
+                        "unavailable",
+                        t.color.err,
+                        StatusMark::Failure,
+                    );
+                }
                 target_row(ui, "Native x64 JIT", &receipt.native_jit);
                 target_row(ui, "WASM interpreter", &receipt.wasm_interpreter);
                 target_row(ui, "Generated Rust", &receipt.generated_rust);
@@ -430,16 +450,36 @@ fn inspector(ui: &mut Ui, app: &RSpiceApp, document: &crate::state::ProjectSourc
 
 fn target_row(ui: &mut Ui, label: &str, target: &TargetQualification) {
     let t = Tokens::get(ui.ctx());
-    let (value, tone) = match target {
-        TargetQualification::Available => ("✓ available".to_owned(), t.color.ok),
-        TargetQualification::Preview => ("△ preview".to_owned(), t.color.warn),
-        TargetQualification::QualificationOnly => ("qualification only".to_owned(), t.color.text),
-        TargetQualification::Unsupported(reason) => {
-            (format!("unsupported · {reason}"), t.color.err)
+    let (value, tone, mark) = match target {
+        TargetQualification::Available => (
+            "available".to_owned(),
+            t.color.ok,
+            Some(StatusMark::Success),
+        ),
+        TargetQualification::Preview => (
+            "preview".to_owned(),
+            t.color.warn,
+            Some(StatusMark::Warning),
+        ),
+        TargetQualification::QualificationOnly => {
+            ("qualification only".to_owned(), t.color.text, None)
         }
-        TargetQualification::Failed(reason) => (format!("failed · {reason}"), t.color.err),
+        TargetQualification::Unsupported(reason) => (
+            format!("unsupported · {reason}"),
+            t.color.err,
+            Some(StatusMark::Failure),
+        ),
+        TargetQualification::Failed(reason) => (
+            format!("failed · {reason}"),
+            t.color.err,
+            Some(StatusMark::Failure),
+        ),
     };
-    property_row_toned(ui, label, &value, tone);
+    if let Some(mark) = mark {
+        property_row_status(ui, label, &value, tone, mark);
+    } else {
+        property_row_toned(ui, label, &value, tone);
+    }
 }
 
 fn muted_row(ui: &mut Ui, text: &str) {
@@ -495,4 +535,15 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &super::super::code_workspace::CodeEd
         shown.response.rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_actions_follow_workspace_width_not_viewport_width() {
+        assert!(title_actions_stack(560.0));
+        assert!(!title_actions_stack(561.0));
+    }
 }

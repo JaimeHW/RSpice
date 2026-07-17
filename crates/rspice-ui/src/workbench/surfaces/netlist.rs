@@ -15,7 +15,7 @@ use super::super::code_workspace::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
 };
-use super::super::design_system::{WorkbenchIcon, icon_button};
+use super::super::design_system::{WorkbenchIcon, empty_state, icon_button};
 use super::super::netlist_document::{ActiveNetlistDocument, source_content_digest};
 
 const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
@@ -34,13 +34,54 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     code_toolbar(ui, app);
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
-        super::super::netlist_document::show_editor(ui, &mut app.state);
+        ui.set_min_size(ui.available_size());
+        if generated_primary_unavailable(&app.state) {
+            empty_state(
+                ui,
+                WorkbenchIcon::Netlist,
+                "Generated netlist unavailable",
+                app.state
+                    .ui
+                    .netlist
+                    .generation_error
+                    .as_deref()
+                    .unwrap_or("Add a circuit before generating the primary netlist."),
+            );
+        } else {
+            super::super::netlist_document::show_editor(ui, &mut app.state);
+        }
     });
     find_replace_window(ui.ctx(), app);
     ownership_dialog_window(ui.ctx(), app);
     comparison_dialog_window(ui.ctx(), app);
     save_source_dialog_window(ui.ctx(), app);
     export_generated_dialog_window(ui.ctx(), app);
+}
+
+fn generated_primary_unavailable(state: &AppState) -> bool {
+    state.ui.netlist.active_document == ActiveNetlistDocument::Generated
+        && !generated_primary_ready(state)
+}
+
+fn generated_primary_ready(state: &AppState) -> bool {
+    state.ui.netlist.generated_document.is_some() && !state.ui.netlist.generated_source.is_empty()
+}
+
+fn active_document_available(state: &AppState) -> bool {
+    match state.ui.netlist.active_document {
+        ActiveNetlistDocument::Generated => generated_primary_ready(state),
+        ActiveNetlistDocument::OwnedSource => state.workspace.netlist_source.is_some(),
+        ActiveNetlistDocument::GeneratedDiff => !state.ui.netlist.generated_diff_source.is_empty(),
+    }
+}
+
+fn generation_block_reason(state: &AppState) -> &str {
+    state
+        .ui
+        .netlist
+        .generation_error
+        .as_deref()
+        .unwrap_or("Generate a primary netlist before using this action.")
 }
 
 /// Rebuild the immutable generated primary whenever any authoritative project
@@ -426,6 +467,8 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let content = rect.shrink2(vec2(CODE_TOOLBAR_PADDING_X, 0.0));
     let active = app.state.ui.netlist.active_document;
+    let generated_ready = generated_primary_ready(&app.state);
+    let active_available = active_document_available(&app.state);
     let action_width: f32 = if compact {
         PHONE_ACTION_WIDTH
     } else {
@@ -580,15 +623,20 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     actions.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
     if compact {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if icon_button(
-                ui,
-                WorkbenchIcon::Search,
-                "Find generated netlist",
-                false,
-                vec2(28.0, 28.0),
-            )
-            .clicked()
-            {
+            let mut find_clicked = false;
+            ui.add_enabled_ui(active_available, |ui| {
+                find_clicked = icon_button(
+                    ui,
+                    WorkbenchIcon::Search,
+                    "Find in active netlist document",
+                    false,
+                    vec2(28.0, 28.0),
+                )
+                .clicked();
+            })
+            .response
+            .on_disabled_hover_text("Open or generate a netlist document before searching.");
+            if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
             }
             match active {
@@ -603,11 +651,16 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                             ),
                         )
                     };
+                    let primary_ready =
+                        app.state.workspace.netlist_source.is_some() || generated_ready;
                     if ui
-                        .add_sized(
-                            [PHONE_PRIMARY_WIDTH, 28.0],
-                            egui::Button::new(label).truncate(),
+                        .add_enabled(
+                            primary_ready,
+                            egui::Button::new(label)
+                                .truncate()
+                                .min_size(vec2(PHONE_PRIMARY_WIDTH, 28.0)),
                         )
+                        .on_disabled_hover_text(generation_block_reason(&app.state))
                         .clicked()
                     {
                         action = Some(candidate);
@@ -645,31 +698,41 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     } else {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if icon_button(
-                ui,
-                WorkbenchIcon::Search,
-                "Find generated netlist",
-                false,
-                vec2(28.0, 28.0),
-            )
-            .clicked()
-            {
+            let mut find_clicked = false;
+            ui.add_enabled_ui(active_available, |ui| {
+                find_clicked = icon_button(
+                    ui,
+                    WorkbenchIcon::Search,
+                    "Find in active netlist document",
+                    false,
+                    vec2(28.0, 28.0),
+                )
+                .clicked();
+            })
+            .response
+            .on_disabled_hover_text("Open or generate a netlist document before searching.");
+            if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
             }
 
             match active {
                 ActiveNetlistDocument::Generated => {
-                    if !compact
-                        && app.state.workspace.netlist_source.is_none()
-                        && icon_button(
-                            ui,
-                            WorkbenchIcon::More,
-                            "Create a narrow generated-source override",
-                            false,
-                            vec2(28.0, 28.0),
-                        )
-                        .clicked()
-                    {
+                    let mut override_clicked = false;
+                    if !compact && app.state.workspace.netlist_source.is_none() {
+                        ui.add_enabled_ui(generated_ready, |ui| {
+                            override_clicked = icon_button(
+                                ui,
+                                WorkbenchIcon::More,
+                                "Create a narrow generated-source override",
+                                false,
+                                vec2(28.0, 28.0),
+                            )
+                            .clicked();
+                        })
+                        .response
+                        .on_disabled_hover_text(generation_block_reason(&app.state));
+                    }
+                    if override_clicked {
                         action = Some(NetlistToolbarAction::OpenOwnershipDialog(
                             crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
                         ));
@@ -679,7 +742,14 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                     } else {
                         "Create editable source from generated netlist…"
                     };
-                    let response = ui.add(egui::Button::new(label).min_size(vec2(0.0, 28.0)));
+                    let primary_ready =
+                        app.state.workspace.netlist_source.is_some() || generated_ready;
+                    let response = ui
+                        .add_enabled(
+                            primary_ready,
+                            egui::Button::new(label).min_size(vec2(0.0, 28.0)),
+                        )
+                        .on_disabled_hover_text(generation_block_reason(&app.state));
                     if response.clicked() {
                         action = Some(if app.state.workspace.netlist_source.is_some() {
                             NetlistToolbarAction::OpenOwned
@@ -1834,11 +1904,18 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
     }
     if state.ui.netlist.active_document == ActiveNetlistDocument::Generated
         && (state.ui.netlist.generation_error.is_some()
+            || !generated_primary_ready(state)
             || state.ui.netlist.generated_input_digest
                 != state.ui.netlist.current_generation_input_digest)
     {
+        let retained_artifact = generated_primary_ready(state);
         return (
-            "stale · generation blocked".to_owned(),
+            if retained_artifact {
+                "stale · generation blocked"
+            } else {
+                "generation blocked"
+            }
+            .to_owned(),
             DocumentStatusTone::Warning,
         );
     }
@@ -2028,6 +2105,57 @@ mod tests {
             false,
             DocumentStatusTone::Warning
         ));
+    }
+
+    #[test]
+    fn empty_generated_primary_reports_blocked_without_claiming_staleness() {
+        let mut state = AppState::default();
+        state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+        state.ui.netlist.generation_error =
+            Some("Add a circuit before generating the primary netlist.".to_owned());
+
+        assert!(generated_primary_unavailable(&state));
+        assert!(!generated_primary_ready(&state));
+        assert_eq!(
+            document_syntax_status(&state),
+            ("generation blocked".to_owned(), DocumentStatusTone::Warning)
+        );
+    }
+
+    #[test]
+    fn retained_generated_primary_reports_stale_when_regeneration_is_blocked() {
+        let mut state = AppState::default();
+        retain_generated(&mut state, "retained\n.end\n");
+        state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+        state.ui.netlist.generation_error = Some("Regeneration failed.".to_owned());
+
+        assert!(!generated_primary_unavailable(&state));
+        assert!(generated_primary_ready(&state));
+        assert_eq!(
+            document_syntax_status(&state),
+            (
+                "stale · generation blocked".to_owned(),
+                DocumentStatusTone::Warning
+            )
+        );
+    }
+
+    #[test]
+    fn split_generated_state_fails_closed_as_unavailable() {
+        let mut state = AppState::default();
+        retain_generated(&mut state, "retained\n.end\n");
+        state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+        state.ui.netlist.generated_source.clear();
+        state.ui.netlist.generation_error = None;
+
+        assert!(state.ui.netlist.generated_document.is_some());
+        assert!(generated_primary_unavailable(&state));
+        assert!(!generated_primary_ready(&state));
+        assert!(!active_document_available(&state));
+        assert_eq!(
+            document_syntax_status(&state),
+            ("generation blocked".to_owned(), DocumentStatusTone::Warning)
+        );
     }
 
     #[test]

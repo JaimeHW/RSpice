@@ -23,7 +23,8 @@ use crate::workbench::state::{
 
 use super::super::commands::Command;
 use super::super::design_system::{
-    WorkbenchIcon, heading, property_row, status_dot, workspace_title_row,
+    StatusMark, WorkbenchIcon, heading, paint_status_mark, property_row, status_dot,
+    workspace_title_row,
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
@@ -2982,6 +2983,19 @@ fn preflight_cell(
     draw_bottom_border: bool,
 ) {
     let t = Tokens::get(ui.ctx());
+    let status = match pass {
+        Some(true) => "passed",
+        Some(false) => "blocked",
+        None => "not available",
+    };
+    let response = ui.interact(rect, ui.id().with(("preflight-cell", name)), Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            format!("{name}: {status}. {detail}"),
+        )
+    });
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     if draw_right_border {
         painter.vline(
@@ -2998,15 +3012,14 @@ fn preflight_cell(
         );
     }
     let (mark, mark_color) = match pass {
-        Some(true) => ("✓", t.color.ok),
-        Some(false) => ("△", t.color.err),
-        None => ("·", t.color.text_faint),
+        Some(true) => (StatusMark::Success, t.color.ok),
+        Some(false) => (StatusMark::Warning, t.color.err),
+        None => (StatusMark::Neutral, t.color.text_faint),
     };
-    painter.text(
-        rect.left_center() + vec2(9.0, 0.0),
-        Align2::LEFT_CENTER,
+    paint_status_mark(
+        &painter,
+        Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), Vec2::splat(11.0)),
         mark,
-        theme::sans(tokens::FS_1, FontWeight::Regular),
         mark_color,
     );
     let text_left = rect.left() + 28.0;

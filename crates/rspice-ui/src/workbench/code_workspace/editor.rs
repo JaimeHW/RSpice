@@ -17,6 +17,15 @@ const GUTTER_WIDTH: f32 = 47.0;
 const NUMBER_RIGHT_PADDING: f32 = 11.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
 
+fn code_editor_frame() -> egui::Frame {
+    egui::Frame::new().inner_margin(egui::Margin {
+        left: (GUTTER_WIDTH + CODE_LEFT_PADDING) as i8,
+        right: 20,
+        top: 8,
+        bottom: 36,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeEditorLanguage {
     VerilogA,
@@ -73,13 +82,11 @@ pub fn show_code_editor(
                     .font(font.clone())
                     .desired_width(f32::INFINITY)
                     .desired_rows(24)
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin {
-                        left: (GUTTER_WIDTH + CODE_LEFT_PADDING) as i8,
-                        right: 20,
-                        top: 8,
-                        bottom: 36,
-                    })
+                    // egui intentionally ignores `TextEdit::margin` whenever
+                    // a custom frame is supplied. Put the canonical code-well
+                    // insets on that frame so source glyphs cannot render
+                    // underneath the gutter or against the toolbar divider.
+                    .frame(code_editor_frame())
                     .layouter(&mut layouter)
                     .show(ui);
                 changed = output.response.changed();
@@ -353,6 +360,11 @@ mod tests {
         assert_eq!(GUTTER_WIDTH, 47.0);
         assert_eq!(NUMBER_RIGHT_PADDING, 11.0);
         assert_eq!(CODE_LEFT_PADDING, 12.0);
+        let frame = code_editor_frame();
+        assert_eq!(frame.inner_margin.left, 59);
+        assert_eq!(frame.inner_margin.right, 20);
+        assert_eq!(frame.inner_margin.top, 8);
+        assert_eq!(frame.inner_margin.bottom, 36);
     }
 
     #[test]

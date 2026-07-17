@@ -186,26 +186,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 for (i, (key, _unit)) in columns.iter().enumerate() {
                     let x = header.left() + NAME_W + REGION_W + (i as f32 + 1.0) * value_w;
                     let sorted_here = sort.as_ref().is_some_and(|(k, _)| k == key);
-                    let label = if sorted_here {
-                        let ascending = sort.as_ref().is_some_and(|(_, a)| *a);
-                        format!(
-                            "{} {}",
-                            key.to_uppercase(),
-                            if ascending { "▲" } else { "▼" }
-                        )
-                    } else {
-                        key.to_uppercase()
-                    };
+                    let label = key.to_uppercase();
                     let galley = ui.painter().layout_no_wrap(
                         label,
                         theme::mono(tokens::FS_0, FontWeight::Regular),
                         if sorted_here { c.accent } else { c.text_faint },
                     );
+                    let arrow_width = if sorted_here { 10.0 } else { 0.0 };
                     let pos = egui::pos2(
-                        x - galley.size().x,
+                        x - arrow_width - galley.size().x,
                         header.center().y - galley.size().y / 2.0,
                     );
-                    let hit = egui::Rect::from_min_size(pos, galley.size()).expand(4.0);
+                    let hit = egui::Rect::from_min_size(
+                        pos,
+                        egui::vec2(galley.size().x + arrow_width, galley.size().y),
+                    )
+                    .expand(4.0);
                     let response = ui.interact(
                         hit,
                         ui.id().with(("op-sort", family, key)),
@@ -233,6 +229,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         ui.painter().rect_filled(hit, 2.0, c.bg_hover);
                     }
                     ui.painter().galley(pos, galley, c.text_faint);
+                    if sorted_here {
+                        let ascending = sort.as_ref().is_some_and(|(_, ascending)| *ascending);
+                        let center = egui::pos2(x - 3.5, header.center().y);
+                        let direction = if ascending { -1.0 } else { 1.0 };
+                        ui.painter().add(egui::Shape::closed_line(
+                            vec![
+                                center + egui::vec2(0.0, direction * 3.0),
+                                center + egui::vec2(3.0, -direction * 2.0),
+                                center + egui::vec2(-3.0, -direction * 2.0),
+                            ],
+                            egui::Stroke::new(1.0, c.accent),
+                        ));
+                    }
                     theme::paint_focus_ring(ui, &response, hit);
                     if response.clicked() {
                         clicked_sort = Some((*key).to_owned());
