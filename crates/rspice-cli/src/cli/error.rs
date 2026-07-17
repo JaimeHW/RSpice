@@ -87,6 +87,19 @@ pub enum CliError {
         source: std::io::Error,
     },
 
+    #[error("Failed to materialize Xyce ADDRESISTORS derived netlist: {source}")]
+    AddResistorsMaterialization {
+        #[source]
+        source: rspice_core::netlist::XyceAddResistorsMaterializationError,
+    },
+
+    #[error("Failed to write Xyce ADDRESISTORS derived netlist: {path}")]
+    AddResistorsArtifactIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("Failed to serialize output: {path}")]
     OutputSerializationError {
         path: PathBuf,
@@ -125,6 +138,8 @@ impl CliError {
             CliError::TimedOut { .. } => ExitCode::TimedOut,
             CliError::Interrupted => ExitCode::Interrupted,
             CliError::OutputError { .. } => ExitCode::IoError,
+            CliError::AddResistorsMaterialization { .. } => ExitCode::InputError,
+            CliError::AddResistorsArtifactIo { .. } => ExitCode::IoError,
             CliError::OutputSerializationError { .. } => ExitCode::InternalError,
             CliError::InvalidArgument { .. } => ExitCode::MisuseOfCommand,
             CliError::ConfigError { .. } => ExitCode::ConfigError,
