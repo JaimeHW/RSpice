@@ -77,6 +77,7 @@ pub(super) struct ParseState {
     pub(super) initial_conditions: Vec<InitialCondition>,
     pub(super) device_initial_conditions: Option<DeviceInitialConditionDirective>,
     pub(super) node_sets: Vec<NodeSet>,
+    pub(super) startup_directives: Vec<StartupDirectiveRecord>,
     pub(super) global_nodes: HashSet<String>,
     pub(super) veriloga_includes: Vec<VerilogAInclude>,
     pub(super) spef_includes: Vec<String>,
@@ -108,6 +109,7 @@ impl ParseState {
             initial_conditions: Vec::new(),
             device_initial_conditions: None,
             node_sets: Vec::new(),
+            startup_directives: Vec::new(),
             global_nodes: HashSet::new(),
             veriloga_includes: Vec::new(),
             spef_includes: Vec::new(),
@@ -166,6 +168,7 @@ impl ParseState {
             initial_conditions: self.initial_conditions,
             device_initial_conditions: self.device_initial_conditions,
             node_sets: self.node_sets,
+            startup_directives: self.startup_directives,
             global_nodes: self.global_nodes,
             measurements: self.measurements,
             saves: self.saves,
@@ -192,6 +195,7 @@ impl ParseState {
                 }
             }
         }
+        validate_startup_directives_with_abort(&mut netlist, abort)?;
         Ok(netlist)
     }
 
@@ -229,6 +233,8 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) initial_conditions: &'a mut Vec<InitialCondition>,
     pub(super) device_initial_conditions: &'a mut Option<DeviceInitialConditionDirective>,
     pub(super) node_sets: &'a mut Vec<NodeSet>,
+    pub(super) startup_directives: &'a mut Vec<StartupDirectiveRecord>,
+    pub(super) startup_scope: StartupDirectiveScope,
     pub(super) global_nodes: &'a mut HashSet<String>,
     pub(super) saves: &'a mut SaveSet,
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
@@ -248,6 +254,8 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) initial_conditions: &'a mut Vec<InitialCondition>,
     pub(super) device_initial_conditions: &'a mut Option<DeviceInitialConditionDirective>,
     pub(super) node_sets: &'a mut Vec<NodeSet>,
+    pub(super) startup_directives: &'a mut Vec<StartupDirectiveRecord>,
+    pub(super) startup_scope: StartupDirectiveScope,
     pub(super) global_nodes: &'a mut HashSet<String>,
     pub(super) measurements: &'a mut Vec<MeasureStatement>,
     pub(super) saves: &'a mut SaveSet,

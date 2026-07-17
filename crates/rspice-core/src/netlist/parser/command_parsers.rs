@@ -1002,14 +1002,15 @@ pub(super) fn parse_nodeset_command(
     params: &ParamContext,
     node_sets: &mut Vec<NodeSet>,
     defer_values: bool,
-) -> Result<(), ParseError> {
+) -> Result<Vec<String>, ParseError> {
+    let mut authored_nodes = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
 
-        let Some(node) = parse_voltage_hint_target(stream, line_num)? else {
+        let Some((node, authored_node)) = parse_voltage_hint_target(stream, line_num)? else {
             break;
         };
 
@@ -1021,9 +1022,10 @@ pub(super) fn parse_nodeset_command(
             voltage,
             voltage_expr,
         });
+        authored_nodes.push(authored_node);
     }
 
-    Ok(())
+    Ok(authored_nodes)
 }
 
 /// Parse .IC command: .IC V(node1)=val V(node2)=val...
@@ -1036,14 +1038,15 @@ pub(super) fn parse_ic_command(
     params: &ParamContext,
     initial_conditions: &mut Vec<InitialCondition>,
     defer_values: bool,
-) -> Result<(), ParseError> {
+) -> Result<Vec<String>, ParseError> {
+    let mut authored_nodes = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
 
-        let Some(node) = parse_voltage_hint_target(stream, line_num)? else {
+        let Some((node, authored_node)) = parse_voltage_hint_target(stream, line_num)? else {
             break;
         };
 
@@ -1055,9 +1058,10 @@ pub(super) fn parse_ic_command(
             voltage,
             voltage_expr,
         });
+        authored_nodes.push(authored_node);
     }
 
-    Ok(())
+    Ok(authored_nodes)
 }
 
 fn parse_voltage_hint_value(
@@ -1170,7 +1174,7 @@ fn looks_like_voltage_hint_target(stream: &TokenStream) -> bool {
 fn parse_voltage_hint_target(
     stream: &mut TokenStream,
     line_num: usize,
-) -> Result<Option<String>, ParseError> {
+) -> Result<Option<(String, String)>, ParseError> {
     skip_commas(stream);
     if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         return Ok(None);
@@ -1183,7 +1187,7 @@ fn parse_voltage_hint_target(
         stream.advance(); // V
         stream.advance(); // (
 
-        let node = expect_node(stream, line_num)?;
+        let (node, authored_node) = expect_node_with_authored_spelling(stream, line_num)?;
         if stream.consume(&TokenKind::Comma) {
             // Optional reference node (e.g. V(out,0)); currently ignored.
             let _ = expect_node(stream, line_num)?;
@@ -1195,8 +1199,26 @@ fn parse_voltage_hint_target(
                 message: "Expected ')' in voltage target specification".to_string(),
             });
         }
-        return Ok(Some(node));
+        return Ok(Some((node, authored_node)));
     }
 
-    Ok(Some(expect_node(stream, line_num)?))
+    Ok(Some(expect_node_with_authored_spelling(stream, line_num)?))
+}
+
+fn expect_node_with_authored_spelling(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<(String, String), ParseError> {
+    let mut authored_stream = stream.clone();
+    let node = expect_node(stream, line_num)?;
+    let end = stream.peek().span.start;
+    let mut authored = String::new();
+    while authored_stream.peek().span.start < end {
+        authored.push_str(&authored_stream.peek().lexeme);
+        authored_stream.advance();
+    }
+    if authored.is_empty() {
+        authored = node.clone();
+    }
+    Ok((node, authored))
 }

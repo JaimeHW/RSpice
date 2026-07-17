@@ -23,9 +23,11 @@ use super::{
     ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
     PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
     SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
-    VerilogAInclude, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
-    poll_parse_text,
+    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
+    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
+    validate_startup_directives_with_abort,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};

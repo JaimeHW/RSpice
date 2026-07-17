@@ -8,8 +8,9 @@
 //! topology reduction or device stamping occurs.
 
 use super::{
-    ElementKind, Flattener, FlattenerConfig, MeasureStatement, Netlist, NetlistSourceLocation,
-    ParseError, ParseWithAbortError, ensure_parse_not_aborted, poll_parse_abort, poll_parse_text,
+    Element, ElementKind, Flattener, FlattenerConfig, MeasureStatement, Netlist,
+    NetlistSourceLocation, ParseError, ParseWithAbortError, ensure_parse_not_aborted,
+    poll_parse_abort, poll_parse_text,
 };
 use crate::abort_signal::AbortSignal;
 use std::collections::{HashMap, HashSet};
@@ -260,10 +261,14 @@ pub fn validate_output_symbols_with_abort(
         &netlist.models,
         FlattenerConfig::debug(),
     );
-    let Ok(elements) = flattener.flatten(netlist) else {
-        // Do not change established flattening-error precedence. The same
-        // elaboration will report its typed failure before topology/stamping.
-        return Ok(());
+    let elements = match flattener.flatten_with_abort(netlist, abort) {
+        Ok(elements) => elements,
+        Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
+        Err(ParseWithAbortError::Parse(_)) => {
+            // Do not change established flattening-error precedence. The same
+            // elaboration will report its typed failure before topology/stamping.
+            return Ok(());
+        }
     };
 
     let mut nodes = HashSet::new();
@@ -338,6 +343,42 @@ pub fn validate_output_symbols_with_abort(
             .into(),
         )
     }
+}
+
+/// Build the complete flattened node namespace used by semantic validators.
+///
+/// This includes element terminals, control/embedded nodes, and transitive
+/// hierarchy-interface aliases. `None` preserves ordinary elaboration-error
+/// precedence when a deck cannot yet be flattened.
+pub(crate) fn collect_output_node_namespace_from_elements_with_abort(
+    netlist: &Netlist,
+    elements: &[Element],
+    abort: &dyn AbortSignal,
+) -> Result<HashSet<String>, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    let mut nodes = HashSet::new();
+    nodes.insert("0".to_string());
+    for (index, element) in elements.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        for node in &element.nodes {
+            nodes.insert(canonical_symbol(node));
+        }
+        collect_embedded_element_nodes(&element.kind, &mut nodes);
+    }
+    let aliases = collect_interface_aliases(netlist, abort)?;
+    loop {
+        let before = nodes.len();
+        for alias in aliases.keys() {
+            if resolved_alias_exists(&nodes, &aliases, alias) {
+                nodes.insert(alias.clone());
+            }
+        }
+        if nodes.len() == before {
+            break;
+        }
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(nodes)
 }
 
 fn n_operator_device_vector_exists(devices: &HashSet<String>, canonical: &str) -> bool {

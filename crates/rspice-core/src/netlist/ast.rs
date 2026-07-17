@@ -2199,6 +2199,172 @@ pub struct SensitivityAcSweep {
 // Initial Conditions
 //=============================================================================
 
+/// Startup directive that supplied a node-voltage seed or hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StartupDirectiveKind {
+    Ic,
+    NodeSet,
+}
+
+impl StartupDirectiveKind {
+    pub fn as_spice_directive(self) -> &'static str {
+        match self {
+            Self::Ic => ".IC",
+            Self::NodeSet => ".NODESET",
+        }
+    }
+}
+
+/// Semantic stage at which a startup diagnostic is established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StartupDiagnosticStage {
+    Parse,
+    StartupTopology,
+}
+
+/// Stable, typed startup-directive diagnostic code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StartupDiagnosticCode {
+    EmptyDirective,
+    UndefinedNode,
+    ScopedGlobalNode,
+}
+
+impl StartupDiagnosticCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyDirective => "startup-empty-directive",
+            Self::UndefinedNode => "startup-undefined-node",
+            Self::ScopedGlobalNode => "startup-scoped-global-node",
+        }
+    }
+
+    pub fn stage(self) -> StartupDiagnosticStage {
+        match self {
+            Self::EmptyDirective | Self::ScopedGlobalNode => StartupDiagnosticStage::Parse,
+            Self::UndefinedNode => StartupDiagnosticStage::StartupTopology,
+        }
+    }
+}
+
+/// Source scope that owns a startup directive card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupDirectiveScope {
+    TopLevel,
+    Subcircuit {
+        /// Qualified definition name (nested definitions use `PARENT:CHILD`).
+        qualified_definition: String,
+        /// Deterministic concrete instance paths after hierarchy expansion.
+        qualified_instances: Vec<String>,
+    },
+}
+
+/// Whether a startup card or one of its entries affects simulation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StartupDirectiveDisposition {
+    Applied,
+    PartiallyApplied,
+    Ignored(StartupDiagnosticCode),
+}
+
+/// One ordered `V(node)=value` assignment retained for diagnostics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartupDirectiveEntry {
+    /// Node spelling exactly as parsed from the authored card.
+    pub(crate) authored_node: String,
+    /// Parser-normalized node spelling used by the existing numeric startup
+    /// representation. Kept distinct so diagnostics never alter execution.
+    pub(crate) execution_node: String,
+    /// Case- and hierarchy-separator-normalized node identity.
+    pub(crate) canonical_node: String,
+    /// Concrete execution node after hierarchy expansion, when applicable.
+    pub(crate) qualified_nodes: Vec<String>,
+    pub(crate) disposition: StartupDirectiveDisposition,
+    /// Immutable parsed payload used to rebuild the effective execution
+    /// vectors transactionally during semantic revalidation.
+    pub(crate) voltage: Value,
+    pub(crate) voltage_expr: Option<String>,
+}
+
+impl StartupDirectiveEntry {
+    pub fn authored_node(&self) -> &str {
+        &self.authored_node
+    }
+
+    pub fn execution_node(&self) -> &str {
+        &self.execution_node
+    }
+
+    pub fn canonical_node(&self) -> &str {
+        &self.canonical_node
+    }
+
+    pub fn qualified_nodes(&self) -> &[String] {
+        &self.qualified_nodes
+    }
+
+    pub fn disposition(&self) -> StartupDirectiveDisposition {
+        self.disposition
+    }
+
+    pub fn voltage(&self) -> Value {
+        self.voltage
+    }
+
+    pub fn voltage_expression(&self) -> Option<&str> {
+        self.voltage_expr.as_deref()
+    }
+}
+
+/// One physical `.IC` or `.NODESET` card with its ordered assignments.
+///
+/// Empty cards are retained with an empty `entries` vector. This sidecar owns
+/// diagnostic provenance only; execution continues to use
+/// [`InitialCondition`] and [`NodeSet`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartupDirectiveRecord {
+    pub(crate) kind: StartupDirectiveKind,
+    pub(crate) origin: super::NetlistSourceLocation,
+    pub(crate) scope: StartupDirectiveScope,
+    pub(crate) entries: Vec<StartupDirectiveEntry>,
+    pub(crate) disposition: StartupDirectiveDisposition,
+}
+
+impl StartupDirectiveRecord {
+    pub fn kind(&self) -> StartupDirectiveKind {
+        self.kind
+    }
+
+    pub fn origin(&self) -> &super::NetlistSourceLocation {
+        &self.origin
+    }
+
+    pub fn scope(&self) -> &StartupDirectiveScope {
+        &self.scope
+    }
+
+    pub fn entries(&self) -> &[StartupDirectiveEntry] {
+        &self.entries
+    }
+
+    pub fn disposition(&self) -> StartupDirectiveDisposition {
+        self.disposition
+    }
+}
+
+/// Typed warning projection derived deterministically from startup records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupDiagnostic {
+    pub code: StartupDiagnosticCode,
+    pub stage: StartupDiagnosticStage,
+    pub kind: StartupDirectiveKind,
+    pub origins: Vec<super::NetlistSourceLocation>,
+    pub scopes: Vec<StartupDirectiveScope>,
+    /// Canonical affected nodes, sorted and deduplicated. Empty-directive
+    /// warnings naturally retain an empty vector.
+    pub canonical_nodes: Vec<String>,
+}
+
 /// Initial condition specification
 #[derive(Debug, Clone)]
 pub struct InitialCondition {

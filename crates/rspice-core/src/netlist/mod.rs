@@ -26,6 +26,7 @@ pub mod param_scope;
 mod parser;
 pub mod source_map;
 pub mod spef;
+mod startup;
 mod topology;
 mod xspice_parser;
 
@@ -33,6 +34,7 @@ pub use ast::*;
 pub use expr::{
     ExpressionDialect, ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
 };
+pub(crate) use flattener::flatten_netlist_with_models_with_abort;
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
     flatten_netlist, flatten_netlist_with_models,
@@ -48,6 +50,7 @@ pub use initcond::{
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
 };
 pub use mutual_inductor::validate_mutual_inductor_references;
+pub(crate) use output_symbols::collect_output_node_namespace_from_elements_with_abort;
 pub use output_symbols::{
     OutputDirectiveKind, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
     OutputSymbolValidationError, UnresolvedOutputSymbol, validate_output_symbols,
@@ -56,6 +59,7 @@ pub use output_symbols::{
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
+pub use startup::{validate_startup_directives, validate_startup_directives_with_abort};
 pub use topology::{
     ConnectivityAnalysisError, ConnectivityDiagnostics, TopologyReduction,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL, analyze_xyce_connectivity, reduce_supernode_topology,
@@ -202,6 +206,18 @@ pub struct UndefinedMutualInductorReferenceError {
     pub reference_position: usize,
 }
 
+/// Xyce does not permit `.IC` and `.NODESET` startup modes in one deck.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "Cannot set both .IC and .NODESET simultaneously (first {first_kind:?} card at {first}; conflicting {conflicting_kind:?} card at {conflicting})"
+)]
+pub struct StartupDirectiveConflictError {
+    pub first_kind: StartupDirectiveKind,
+    pub first: NetlistSourceLocation,
+    pub conflicting_kind: StartupDirectiveKind,
+    pub conflicting: NetlistSourceLocation,
+}
+
 /// Structured `.INITCOND` failures retained across parser, source-provider,
 /// hierarchy, and public adapter boundaries.
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -313,6 +329,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     OutputSymbolValidation(Box<OutputSymbolValidationError>),
+
+    #[error(transparent)]
+    StartupDirectiveConflict(Box<StartupDirectiveConflictError>),
 
     #[error(transparent)]
     DeviceInitialCondition(Box<DeviceInitialConditionError>),
@@ -624,6 +643,9 @@ pub struct Netlist {
     pub device_initial_conditions: Option<DeviceInitialConditionDirective>,
     /// Operating-point node voltage hints from .NODESET statements
     pub node_sets: Vec<NodeSet>,
+    /// Card-level startup diagnostic provenance. This sidecar is read-only
+    /// metadata and is intentionally excluded from checkpoint identity.
+    pub(crate) startup_directives: Vec<StartupDirectiveRecord>,
     /// Global nodes from .GLOBAL (not renamed in subcircuits)
     pub global_nodes: HashSet<String>,
     /// Measurement statements from .MEAS commands
@@ -2167,6 +2189,7 @@ impl Default for Netlist {
             initial_conditions: Vec::new(),
             device_initial_conditions: None,
             node_sets: Vec::new(),
+            startup_directives: Vec::new(),
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
             saves: SaveSet::default(),

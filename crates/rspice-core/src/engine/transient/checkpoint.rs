@@ -2528,4 +2528,75 @@ mod tests {
             "expected trailing-content diagnostic, got {err}"
         );
     }
+
+    #[test]
+    fn startup_warning_sidecars_do_not_split_semantic_checkpoint_identity() {
+        let omitted = Netlist::parse("startup identity\nV1 1 0 1\n.OP\n.END\n")
+            .expect("omitted startup deck parses");
+        let empty = Netlist::parse("startup identity\nV1 1 0 1\n.IC\n.OP\n.END\n")
+            .expect("empty startup deck parses");
+        let missing = Netlist::parse("startup identity\nV1 1 0 1\n.IC V(missing)=2\n.OP\n.END\n")
+            .expect("missing startup node is warning-only");
+        assert_eq!(
+            netlist_checkpoint_identity(&omitted),
+            netlist_checkpoint_identity(&empty),
+            "empty diagnostic provenance is not simulation state"
+        );
+        assert_eq!(
+            netlist_checkpoint_identity(&omitted),
+            netlist_checkpoint_identity(&missing),
+            "ignored missing-node provenance is not simulation state"
+        );
+
+        let xyce_options = crate::netlist::NetlistParseOptions {
+            statistical_mode: crate::netlist::StatisticalParamMode::Sample,
+            expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+            parameter_redefinition_policy: crate::netlist::ParameterRedefinitionPolicy::UseLast,
+        };
+        let scoped_omitted = crate::netlist::parse_netlist_with_options(
+            "scoped startup identity\n\
+             .GLOBAL VCC\n\
+             V1 1 0 1\n\
+             X1 1 0 CELL\n\
+             .SUBCKT CELL a b\n\
+             R1 a b 1\n\
+             .ENDS\n\
+             .OP\n\
+             .END\n",
+            xyce_options,
+        )
+        .expect("scoped baseline parses");
+        let scoped_global = crate::netlist::parse_netlist_with_options(
+            "scoped startup identity\n\
+             .GLOBAL VCC\n\
+             V1 1 0 1\n\
+             X1 1 0 CELL\n\
+             .SUBCKT CELL a b\n\
+             R1 a b 1\n\
+             .NODESET V(VCC)=3\n\
+             .ENDS\n\
+             .OP\n\
+             .END\n",
+            xyce_options,
+        )
+        .expect("scoped global startup is warning-only");
+        assert_eq!(
+            netlist_checkpoint_identity(&scoped_omitted),
+            netlist_checkpoint_identity(&scoped_global),
+            "whole-card scoped-global discard is simulation-identical to omission"
+        );
+    }
+
+    #[test]
+    fn effective_startup_value_changes_checkpoint_identity() {
+        let first = Netlist::parse("startup value identity\nV1 1 0 1\n.IC V(1)=0.25\n.OP\n.END\n")
+            .expect("first startup value parses");
+        let second = Netlist::parse("startup value identity\nV1 1 0 1\n.IC V(1)=0.5\n.OP\n.END\n")
+            .expect("second startup value parses");
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&second),
+            "effective numeric startup values remain semantic checkpoint state"
+        );
+    }
 }

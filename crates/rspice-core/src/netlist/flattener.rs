@@ -25,10 +25,13 @@ use super::{
     DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
     DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
     InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
-    ParametricValue, ParseError, RandomState, SourceSpec, SubcircuitDef,
+    ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceSpec,
+    StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, SubcircuitDef,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
     validate_mutual_inductor_references,
 };
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -127,6 +130,8 @@ pub struct FlattenedNetlist {
     pub scoped_models: Vec<ModelDef>,
     pub scoped_initial_conditions: Vec<InitialCondition>,
     pub scoped_node_sets: Vec<NodeSet>,
+    /// Per-instance startup provenance with concrete qualified nodes.
+    pub scoped_startup_directives: Vec<StartupDirectiveRecord>,
     pub xspice_auto_bridge_node_hints: Vec<XspiceAutoBridgeNodeHint>,
 }
 
@@ -181,6 +186,8 @@ pub struct Flattener<'a> {
     /// Startup directives scoped while flattening subcircuit instances.
     scoped_initial_conditions: Vec<InitialCondition>,
     scoped_node_sets: Vec<NodeSet>,
+    startup_directives: Vec<StartupDirectiveRecord>,
+    scoped_startup_directives: Vec<StartupDirectiveRecord>,
     /// Digital XSPICE nodes with the effective scope-local VCC value.
     xspice_auto_bridge_node_hints: Vec<XspiceAutoBridgeNodeHint>,
     /// Scope parameter used for digital auto-bridge voltage levels.
@@ -231,6 +238,8 @@ impl<'a> Flattener<'a> {
             scoped_models: Vec::new(),
             scoped_initial_conditions: Vec::new(),
             scoped_node_sets: Vec::new(),
+            startup_directives: Vec::new(),
+            scoped_startup_directives: Vec::new(),
             xspice_auto_bridge_node_hints: Vec::new(),
             xspice_auto_bridge_digital_param_name: "vcc".to_string(),
             source_base_dir: None,
@@ -249,6 +258,17 @@ impl<'a> Flattener<'a> {
 
     /// Flatten a netlist, expanding all subcircuit instances
     pub fn flatten(&mut self, netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
+        finish_non_aborting_parse(self.flatten_with_abort(netlist, &NoAbort))
+    }
+
+    /// Flatten a netlist with cooperative cancellation between hierarchy
+    /// records and recursive expansion steps.
+    pub(crate) fn flatten_with_abort(
+        &mut self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Element>, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         validate_mutual_inductor_references(netlist)?;
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
@@ -258,6 +278,8 @@ impl<'a> Flattener<'a> {
         self.scoped_models.clear();
         self.scoped_initial_conditions.clear();
         self.scoped_node_sets.clear();
+        self.startup_directives = netlist.startup_directives.clone();
+        self.scoped_startup_directives.clear();
         self.xspice_auto_bridge_node_hints.clear();
         self.xspice_auto_bridge_digital_param_name = netlist
             .options
@@ -280,7 +302,8 @@ impl<'a> Flattener<'a> {
             self.param_resolver.set_global(&name, value);
         }
 
-        for element in &netlist.elements {
+        for (element_index, element) in netlist.elements.iter().enumerate() {
+            poll_parse_abort(abort, element_index)?;
             self.flatten_element(
                 element,
                 "",
@@ -288,6 +311,7 @@ impl<'a> Flattener<'a> {
                 &global_scope,
                 0,
                 &mut flat_elements,
+                abort,
             )?;
         }
 
@@ -307,7 +331,9 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         depth: usize,
         output: &mut Vec<Element>,
-    ) -> Result<(), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         if depth > self.config.max_depth {
             return Err(ParseError::Syntax {
                 line: 0,
@@ -315,7 +341,8 @@ impl<'a> Flattener<'a> {
                     "Subcircuit recursion depth exceeded (max {})",
                     self.config.max_depth
                 ),
-            });
+            }
+            .into());
         }
 
         match &element.kind {
@@ -333,6 +360,7 @@ impl<'a> Flattener<'a> {
                         scope,
                         depth,
                         output,
+                        abort,
                     )?;
                 } else if self.is_external_subckt(subckt_name) {
                     // Preserve external instance (e.g. Verilog-A model) as a leaf.
@@ -345,7 +373,8 @@ impl<'a> Flattener<'a> {
                     return Err(ParseError::Syntax {
                         line: 0,
                         message: format!("Undefined subcircuit: {}", subckt_name),
-                    });
+                    }
+                    .into());
                 }
             }
             _ => {
@@ -451,7 +480,9 @@ impl<'a> Flattener<'a> {
         caller_scope: &ParamContext,
         depth: usize,
         output: &mut Vec<Element>,
-    ) -> Result<(), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
         // Look up subcircuit definition
         let subckt = self
             .find_subcircuit(subckt_name)
@@ -478,6 +509,7 @@ impl<'a> Flattener<'a> {
             .collect::<Vec<_>>();
         let mut first_bindings = HashMap::<String, (usize, &str)>::new();
         for (index, (formal, actual)) in mapped_ports.iter().enumerate() {
+            poll_parse_abort(abort, index)?;
             let canonical_formal = formal.to_ascii_uppercase();
             if let Some((first_index, first_actual)) = first_bindings.get(&canonical_formal) {
                 if !first_actual.eq_ignore_ascii_case(actual) {
@@ -494,7 +526,8 @@ impl<'a> Flattener<'a> {
                             first_actual_node: (*first_actual).to_string(),
                             conflicting_actual_node: actual.clone(),
                         },
-                    )));
+                    ))
+                    .into());
                 }
             } else {
                 let formal_is_global = self.global_nodes.contains(&canonical_formal)
@@ -513,7 +546,8 @@ impl<'a> Flattener<'a> {
                             position: index + 1,
                             actual_node: actual.clone(),
                         },
-                    )));
+                    ))
+                    .into());
                 }
                 first_bindings.insert(canonical_formal, (index, actual.as_str()));
             }
@@ -532,7 +566,8 @@ impl<'a> Flattener<'a> {
                     subckt.ports.len(),
                     subckt.ports.join(" ")
                 ),
-            });
+            }
+            .into());
         }
 
         if self
@@ -557,7 +592,8 @@ impl<'a> Flattener<'a> {
                     new_prefix,
                     chain.join(" -> ")
                 ),
-            });
+            }
+            .into());
         }
 
         // Preserve the first mapping, matching Xyce. Repeated identical
@@ -584,7 +620,8 @@ impl<'a> Flattener<'a> {
             .any(|(name, _)| name.eq_ignore_ascii_case("M"));
         let mut multiplicity = 1.0;
         if !formal_declares_m {
-            for (name, value) in instance_params {
+            for (param_index, (name, value)) in instance_params.iter().enumerate() {
+                poll_parse_abort(abort, param_index)?;
                 if name.eq_ignore_ascii_case("M") {
                     let resolved = resolve_parametric_value(value, caller_scope, &self.random)?;
                     if !resolved.is_finite() || resolved <= 0.0 {
@@ -594,7 +631,8 @@ impl<'a> Flattener<'a> {
                                 "Subcircuit instance '{}' has invalid multiplicity M={}",
                                 instance.name, resolved
                             ),
-                        });
+                        }
+                        .into());
                     }
                     multiplicity = resolved;
                 }
@@ -603,7 +641,8 @@ impl<'a> Flattener<'a> {
 
         // Expand each element in the subcircuit
         self.expansion_stack.push(subckt_name.to_owned());
-        for sub_element in &subckt.elements {
+        for (element_index, sub_element) in subckt.elements.iter().enumerate() {
+            poll_parse_abort(abort, element_index)?;
             // Apply parameter substitution to element values
             let element_path = if new_prefix.is_empty() {
                 sub_element.name.clone()
@@ -622,10 +661,17 @@ impl<'a> Flattener<'a> {
                 &param_scope,
                 depth + 1,
                 output,
+                abort,
             )?;
         }
         self.expansion_stack.pop();
-        self.collect_scoped_startup_directives(subckt, &new_prefix, &node_map, &param_scope)?;
+        self.collect_scoped_startup_directives(
+            subckt,
+            &new_prefix,
+            &node_map,
+            &param_scope,
+            abort,
+        )?;
 
         Ok(())
     }
@@ -636,8 +682,10 @@ impl<'a> Flattener<'a> {
         prefix: &str,
         node_map: &HashMap<String, String>,
         scope: &ParamContext,
-    ) -> Result<(), ParseError> {
-        for ic in &subckt.initial_conditions {
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        for (index, ic) in subckt.initial_conditions.iter().enumerate() {
+            poll_parse_abort(abort, index)?;
             self.scoped_initial_conditions.push(InitialCondition {
                 node: self.remap_node(&ic.node, prefix, node_map),
                 voltage: self.resolve_startup_voltage(
@@ -651,7 +699,8 @@ impl<'a> Flattener<'a> {
             });
         }
 
-        for nodeset in &subckt.node_sets {
+        for (index, nodeset) in subckt.node_sets.iter().enumerate() {
+            poll_parse_abort(abort, index)?;
             self.scoped_node_sets.push(NodeSet {
                 node: self.remap_node(&nodeset.node, prefix, node_map),
                 voltage: self.resolve_startup_voltage(
@@ -663,6 +712,35 @@ impl<'a> Flattener<'a> {
                 )?,
                 voltage_expr: None,
             });
+        }
+
+        for (index, record) in self
+            .startup_directives
+            .iter()
+            .filter(|record| {
+                matches!(
+                    &record.scope,
+                    StartupDirectiveScope::Subcircuit {
+                        qualified_definition,
+                        ..
+                    } if qualified_definition.eq_ignore_ascii_case(&subckt.name)
+                ) && !matches!(record.disposition, StartupDirectiveDisposition::Ignored(_))
+            })
+            .enumerate()
+        {
+            poll_parse_abort(abort, index)?;
+            let mut elaborated = record.clone();
+            elaborated.scope = StartupDirectiveScope::Subcircuit {
+                qualified_definition: subckt.name.clone(),
+                qualified_instances: vec![prefix.replace(':', ".")],
+            };
+            for entry in &mut elaborated.entries {
+                entry.qualified_nodes = vec![
+                    self.remap_node(&entry.execution_node, prefix, node_map)
+                        .replace(':', "."),
+                ];
+            }
+            self.scoped_startup_directives.push(elaborated);
         }
 
         Ok(())
@@ -2881,17 +2959,25 @@ pub fn flatten_netlist(netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
 /// Convenience function to flatten a netlist and return instance-scoped model
 /// definitions created during subcircuit expansion.
 pub fn flatten_netlist_with_models(netlist: &Netlist) -> Result<FlattenedNetlist, ParseError> {
+    finish_non_aborting_parse(flatten_netlist_with_models_with_abort(netlist, &NoAbort))
+}
+
+pub(crate) fn flatten_netlist_with_models_with_abort(
+    netlist: &Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<FlattenedNetlist, ParseWithAbortError> {
     let mut flattener = Flattener::with_models_config(
         &netlist.subcircuits,
         &netlist.models,
         FlattenerConfig::default(),
     );
-    let elements = flattener.flatten(netlist)?;
+    let elements = flattener.flatten_with_abort(netlist, abort)?;
     Ok(FlattenedNetlist {
         elements,
         scoped_models: flattener.scoped_models,
         scoped_initial_conditions: flattener.scoped_initial_conditions,
         scoped_node_sets: flattener.scoped_node_sets,
+        scoped_startup_directives: flattener.scoped_startup_directives,
         xspice_auto_bridge_node_hints: flattener.xspice_auto_bridge_node_hints,
     })
 }
@@ -3023,6 +3109,7 @@ fn is_simple_probe_name(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::CountingAbort;
 
     fn duplicate_binding_error(source: &str) -> Box<DuplicateSubcircuitPortBindingError> {
         let netlist = Netlist::parse(source).expect("duplicate-formal deck parses");
@@ -3518,5 +3605,30 @@ C1 mid out 1u
                 .scoped_node_sets
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn nested_abort_is_distinct_and_the_same_flattener_retries_cleanly() {
+        let mut source = String::from("abortable hierarchy\nXTOP 1 0 S0\n");
+        for depth in 0..8 {
+            source.push_str(&format!(
+                ".SUBCKT S{depth} a b\nX{depth} a b S{}\n.ENDS\n",
+                depth + 1
+            ));
+        }
+        source.push_str(".SUBCKT S8 a b\nR1 a b 1\n.ENDS\n.END\n");
+        let netlist = Netlist::parse(&source).expect("nested abort deck parses");
+        let mut flattener = Flattener::new(&netlist.subcircuits);
+
+        let error = flattener
+            .flatten_with_abort(&netlist, &CountingAbort::new(4))
+            .expect_err("nested expansion must observe cancellation");
+        assert!(matches!(error, ParseWithAbortError::Aborted));
+
+        let elements = flattener
+            .flatten(&netlist)
+            .expect("retry clears partial recursion state");
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].name, "XTOP.X0.X1.X2.X3.X4.X5.X6.X7.R1");
     }
 }

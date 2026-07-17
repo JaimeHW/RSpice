@@ -22,6 +22,8 @@ pub(super) fn parse_command(
         measurements,
         saves,
         output_requests,
+        startup_directives,
+        startup_scope,
         options,
         diagnostics,
         spef_includes,
@@ -251,13 +253,30 @@ pub(super) fn parse_command(
             analyses.push(pz);
         }
         ".IC" => {
-            parse_ic_command(
+            let first_entry = initial_conditions.len();
+            let authored_nodes = parse_ic_command(
                 stream,
                 line_num,
                 params,
                 initial_conditions,
                 defer_scoped_values,
             )?;
+            startup_directives.push(startup_directive_record(
+                StartupDirectiveKind::Ic,
+                origin,
+                startup_scope.clone(),
+                initial_conditions[first_entry..]
+                    .iter()
+                    .zip(authored_nodes.iter())
+                    .map(|(entry, authored_node)| {
+                        (
+                            authored_node.as_str(),
+                            entry.node.as_str(),
+                            entry.voltage,
+                            entry.voltage_expr.as_deref(),
+                        )
+                    }),
+            ));
         }
         ".INITCOND" => {
             parse_device_initial_condition_command(
@@ -269,7 +288,25 @@ pub(super) fn parse_command(
             )?;
         }
         ".NODESET" => {
-            parse_nodeset_command(stream, line_num, params, node_sets, defer_scoped_values)?;
+            let first_entry = node_sets.len();
+            let authored_nodes =
+                parse_nodeset_command(stream, line_num, params, node_sets, defer_scoped_values)?;
+            startup_directives.push(startup_directive_record(
+                StartupDirectiveKind::NodeSet,
+                origin,
+                startup_scope,
+                node_sets[first_entry..]
+                    .iter()
+                    .zip(authored_nodes.iter())
+                    .map(|(entry, authored_node)| {
+                        (
+                            authored_node.as_str(),
+                            entry.node.as_str(),
+                            entry.voltage,
+                            entry.voltage_expr.as_deref(),
+                        )
+                    }),
+            ));
         }
         ".INCLUDE" | ".INC" => {
             // Include directives are handled in a preprocessing pass
@@ -404,6 +441,40 @@ pub(super) fn parse_command(
     }
 
     Ok(())
+}
+
+fn startup_directive_record<'a>(
+    kind: StartupDirectiveKind,
+    origin: &NetlistSourceLocation,
+    scope: StartupDirectiveScope,
+    entries: impl IntoIterator<Item = (&'a str, &'a str, Value, Option<&'a str>)>,
+) -> StartupDirectiveRecord {
+    let entries = entries
+        .into_iter()
+        .map(
+            |(authored_node, execution_node, voltage, voltage_expr)| StartupDirectiveEntry {
+                authored_node: authored_node.to_string(),
+                execution_node: execution_node.to_string(),
+                canonical_node: execution_node.replace(':', ".").to_ascii_uppercase(),
+                qualified_nodes: Vec::new(),
+                disposition: StartupDirectiveDisposition::Applied,
+                voltage,
+                voltage_expr: voltage_expr.map(ToString::to_string),
+            },
+        )
+        .collect::<Vec<_>>();
+    let disposition = if entries.is_empty() {
+        StartupDirectiveDisposition::Ignored(StartupDiagnosticCode::EmptyDirective)
+    } else {
+        StartupDirectiveDisposition::Applied
+    };
+    StartupDirectiveRecord {
+        kind,
+        origin: origin.clone(),
+        scope,
+        entries,
+        disposition,
+    }
 }
 
 fn remaining_command_source(stream: &TokenStream) -> String {

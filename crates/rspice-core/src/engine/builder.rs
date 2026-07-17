@@ -3065,6 +3065,15 @@ impl Engine {
 
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
+        let mut startup_validated;
+        let netlist = if netlist.startup_directives.is_empty() {
+            netlist
+        } else {
+            startup_validated = netlist.clone();
+            crate::netlist::validate_startup_directives(&mut startup_validated)
+                .map_err(|error| SimulationError::Netlist(error.to_string()))?;
+            &startup_validated
+        };
         crate::netlist::validate_output_symbols(netlist)
             .map_err(|error| SimulationError::Netlist(error.to_string()))?;
         let mut circuit = CircuitData::new();
@@ -3077,13 +3086,15 @@ impl Engine {
         // Flatten subcircuit instances into top-level elements
         let flattened = flatten_netlist_with_models(netlist)
             .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
-        let mut effective_netlist;
+        let mut effective_model_netlist;
         let netlist = if flattened.scoped_models.is_empty() {
             netlist
         } else {
-            effective_netlist = netlist.clone();
-            effective_netlist.models.extend(flattened.scoped_models);
-            &effective_netlist
+            effective_model_netlist = netlist.clone();
+            effective_model_netlist
+                .models
+                .extend(flattened.scoped_models);
+            &effective_model_netlist
         };
         let mut flat_elements = flattened.elements;
         if netlist.options.topology_supernode.unwrap_or(false) {

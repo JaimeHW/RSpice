@@ -320,6 +320,7 @@ pub(super) fn process_line(
             let global_nodes = &mut state.global_nodes;
             let saves = &mut state.saves;
             let output_requests = &mut state.output_requests;
+            let startup_directives = &mut state.startup_directives;
             let options = &mut state.options;
             let diagnostics = &mut state.diagnostics;
             let spef_includes = &mut state.spef_includes;
@@ -347,6 +348,11 @@ pub(super) fn process_line(
                     initial_conditions: &mut subckt_initial_conditions,
                     device_initial_conditions,
                     node_sets: &mut subckt_node_sets,
+                    startup_directives,
+                    startup_scope: StartupDirectiveScope::Subcircuit {
+                        qualified_definition: frame.qualified_name.clone(),
+                        qualified_instances: Vec::new(),
+                    },
                     global_nodes,
                     saves,
                     output_requests,
@@ -399,6 +405,8 @@ pub(super) fn process_line(
             initial_conditions: &mut state.initial_conditions,
             device_initial_conditions: &mut state.device_initial_conditions,
             node_sets: &mut state.node_sets,
+            startup_directives: &mut state.startup_directives,
+            startup_scope: StartupDirectiveScope::TopLevel,
             global_nodes: &mut state.global_nodes,
             saves: &mut state.saves,
             output_requests: &mut state.output_requests,
@@ -442,6 +450,8 @@ pub(super) fn parse_line(
         initial_conditions,
         device_initial_conditions,
         node_sets,
+        startup_directives,
+        startup_scope,
         global_nodes,
         saves,
         output_requests,
@@ -488,6 +498,8 @@ pub(super) fn parse_line(
                 initial_conditions,
                 device_initial_conditions,
                 node_sets,
+                startup_directives,
+                startup_scope,
                 global_nodes,
                 measurements,
                 saves,

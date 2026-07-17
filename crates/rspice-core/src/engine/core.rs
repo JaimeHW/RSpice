@@ -12,6 +12,26 @@ pub struct Engine {
 }
 
 impl Engine {
+    fn validated_startup_netlist<'a>(
+        &self,
+        netlist: &'a Netlist,
+    ) -> Option<std::borrow::Cow<'a, Netlist>> {
+        if netlist.startup_directives.is_empty() {
+            return Some(std::borrow::Cow::Borrowed(netlist));
+        }
+        let mut validated = netlist.clone();
+        match crate::netlist::validate_startup_directives(&mut validated) {
+            Ok(()) => Some(std::borrow::Cow::Owned(validated)),
+            Err(error) => {
+                // Circuit construction owns the typed fatal error path. Hint
+                // collection remains infallible for established internal API
+                // callers, but never applies unvalidated sidecar entries.
+                log::debug!("startup validation failed before hint collection: {error}");
+                None
+            }
+        }
+    }
+
     /// Create a new engine with the given configuration
     pub fn new(config: SimulationConfig) -> Self {
         Self { config }
@@ -512,6 +532,37 @@ C1 mid b 1u
         let ic_hints = engine.collect_initial_condition_hints(&netlist, &circuit);
         assert_eq!(ic_hints, vec![(connected_node, 0.5)]);
     }
+
+    #[test]
+    fn infallible_hint_collectors_never_apply_failed_startup_validation() {
+        let mut netlist = Netlist::parse(
+            "invalid startup hints\n\
+             V1 1 0 1\n\
+             .IC V(1)=0.25\n\
+             .NODESET V(1)=0.75\n\
+             .OP\n\
+             .END\n",
+        )
+        .expect("default/ngspice mode permits both startup modes");
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("permissive-mode circuit builds");
+        netlist
+            .params
+            .set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+
+        assert!(
+            engine
+                .collect_initial_condition_hints(&netlist, &circuit)
+                .is_empty()
+        );
+        assert!(
+            engine
+                .collect_node_voltage_hints(&netlist, &circuit)
+                .is_empty()
+        );
+    }
 }
 
 impl Default for Engine {
@@ -554,6 +605,10 @@ impl Engine {
         netlist: &Netlist,
         circuit: &crate::CircuitData,
     ) -> Vec<(usize, Value)> {
+        let Some(validated) = self.validated_startup_netlist(netlist) else {
+            return Vec::new();
+        };
+        let netlist = validated.as_ref();
         let mut by_node: Vec<Option<Value>> = vec![None; circuit.num_nodes() + 1];
         let (scoped_initial_conditions, scoped_node_sets) = self.scoped_startup_directives(netlist);
 
@@ -599,6 +654,10 @@ impl Engine {
         netlist: &Netlist,
         circuit: &crate::CircuitData,
     ) -> Vec<(usize, Value)> {
+        let Some(validated) = self.validated_startup_netlist(netlist) else {
+            return Vec::new();
+        };
+        let netlist = validated.as_ref();
         let (scoped_initial_conditions, _) = self.scoped_startup_directives(netlist);
         netlist
             .initial_conditions
