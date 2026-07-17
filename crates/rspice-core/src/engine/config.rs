@@ -320,6 +320,8 @@ pub struct ConvergenceConfig {
     /// Initial continuation GMIN value for stepping.
     pub gmin_initial: Value,
     /// Final global nodal diagonal floor used only for numerical conditioning.
+    /// Zero explicitly disables this floor for idealized or equation-oracle
+    /// simulations.
     pub gmin_target: Value,
     /// Final SPICE device-junction GMIN floor seen by compact models.
     /// Zero explicitly disables the device-junction floor, matching `.OPTIONS
@@ -394,7 +396,7 @@ impl ConvergenceConfig {
     /// Validate the numerical invariants of the convergence policy.
     pub fn validate(&self) -> Result<(), SimulationConfigError> {
         validate_positive("convergence_config.gmin_initial", self.gmin_initial)?;
-        validate_positive("convergence_config.gmin_target", self.gmin_target)?;
+        validate_non_negative("convergence_config.gmin_target", self.gmin_target)?;
         if self.gmin_initial < self.gmin_target {
             return Err(SimulationConfigError::InvalidGminRange {
                 gmin_initial: self.gmin_initial,

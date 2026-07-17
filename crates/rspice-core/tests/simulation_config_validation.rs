@@ -108,6 +108,22 @@ fn nested_convergence_and_bypass_settings_are_validated() {
             ..
         })
     ));
+
+    let mut disabled_nodal_floor = SimulationConfig::default();
+    disabled_nodal_floor.convergence_config.gmin_target = 0.0;
+    disabled_nodal_floor
+        .validate()
+        .expect("zero is the explicit global nodal GMIN disable value");
+
+    disabled_nodal_floor.convergence_config.gmin_target = -1.0;
+    assert!(matches!(
+        disabled_nodal_floor.validate(),
+        Err(SimulationConfigError::InvalidValue {
+            field: "convergence_config.gmin_target",
+            requirement: "a non-negative finite number",
+            ..
+        })
+    ));
 }
 
 #[test]
