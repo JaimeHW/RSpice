@@ -408,6 +408,12 @@ pub struct MeasureResult {
     pub expected: Option<Value>,
     /// The effective tolerance applied to the goal check.
     pub tolerance: Option<Value>,
+    /// Independent-axis location associated with a point or extrema result.
+    ///
+    /// Xyce reports this metadata alongside scalar `AT`, `WHEN`, `MIN`, and
+    /// `MAX` measurements. Keeping it typed prevents output adapters and
+    /// regression oracles from reverse-engineering the event from a value.
+    pub event_axis: Option<Value>,
 }
 
 impl MeasureResult {
@@ -422,6 +428,7 @@ impl MeasureResult {
             passed: true,
             expected: None,
             tolerance: None,
+            event_axis: None,
         }
     }
 
@@ -433,7 +440,19 @@ impl MeasureResult {
             passed: false,
             expected: None,
             tolerance: None,
+            event_axis: None,
         }
+    }
+
+    fn with_event_axis(mut self, event_axis: Value) -> Self {
+        if !event_axis.is_finite() {
+            return Self::failed(
+                &self.name,
+                &format!("measurement event axis is non-finite ({event_axis})"),
+            );
+        }
+        self.event_axis = Some(event_axis);
+        self
     }
 
     /// Apply a statement's GOAL/TOL contract to a computed result.
@@ -1532,7 +1551,7 @@ impl MeasureEngine {
             ExtremaOutput::IndependentAxis => time[selected_index],
         };
 
-        MeasureResult::success(name, result)
+        MeasureResult::success(name, result).with_event_axis(time[selected_index])
     }
 
     fn eval_pp(
@@ -1840,12 +1859,14 @@ impl MeasureEngine {
 
         if let Some(target) = at {
             if !Self::axis_in_measurement_window(target, lower, upper) {
-                return MeasureResult::failed(name, "AT point is outside the measurement window");
+                return MeasureResult::failed(name, "AT point is outside the measurement window")
+                    .with_event_axis(target);
             }
             let Some(segment) = measurement_segment_containing(time, target, segment_starts) else {
-                return MeasureResult::failed(name, "Time point not in simulation range");
+                return MeasureResult::failed(name, "Time point not in simulation range")
+                    .with_event_axis(target);
             };
-            return measurement_segment_slope(name, time, signal, segment);
+            return measurement_segment_slope(name, time, signal, segment).with_event_axis(target);
         }
 
         let Some(condition) = when else {
@@ -1853,8 +1874,9 @@ impl MeasureEngine {
         };
         match first_measure_condition_event(condition, time, signals, lower, upper, segment_starts)
         {
-            Ok(Some((segment, _, _))) => {
-                return measurement_segment_slope(name, time, signal, segment);
+            Ok(Some((segment, _, event_axis))) => {
+                return measurement_segment_slope(name, time, signal, segment)
+                    .with_event_axis(event_axis);
             }
             Err(error) => return MeasureResult::failed(name, &error),
             Ok(None) => {}
@@ -2856,6 +2878,7 @@ mod tests {
         let results = engine_with(statement).evaluate(&axis, &signals);
 
         assert_eq!(results[0].value, Some(20.0));
+        assert_eq!(results[0].event_axis, Some(20.0));
     }
 
     fn max_statement(signal: &str) -> MeasureStatement {
@@ -2884,6 +2907,7 @@ mod tests {
 
         let results = engine_with(max_statement("v(OUT)")).evaluate(&time, &signals);
         assert_eq!(results[0].value, Some(3.0));
+        assert_eq!(results[0].event_axis, Some(1.0));
     }
 
     #[test]
@@ -3087,6 +3111,9 @@ mod tests {
         assert_eq!(results[0].value, Some(3.0));
         assert_eq!(results[1].value, Some(5.0));
         assert_eq!(results[2].value, Some(3.0));
+        assert_eq!(results[0].event_axis, Some(1.0));
+        assert_eq!(results[1].event_axis, Some(2.5));
+        assert_eq!(results[2].event_axis, Some(1.0));
         assert!(!results[3].passed);
 
         let descending_axis = [5.0, 4.0, 3.0, 2.0, 1.0];
@@ -3114,6 +3141,8 @@ mod tests {
         let results = descending.evaluate(&descending_axis, &descending_signals);
         assert_eq!(results[0].value, Some(2.5));
         assert_eq!(results[1].value, Some(1.5));
+        assert_eq!(results[0].event_axis, Some(2.5));
+        assert_eq!(results[1].event_axis, Some(1.0));
     }
 
     #[test]
@@ -3171,6 +3200,8 @@ mod tests {
         let results = engine.evaluate(&axis, &signals);
         assert_eq!(results[0].value, Some(7.0));
         assert_eq!(results[1].value, Some(0.9));
+        assert_eq!(results[0].event_axis, Some(4.0));
+        assert_eq!(results[1].event_axis, Some(3.5555555555555554));
         assert!(!results[2].passed);
     }
 
