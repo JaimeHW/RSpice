@@ -24,8 +24,9 @@ use crate::netlist::{
     AnalysisCommand, DcSecondSweep, DeviceInitialConditionError, DeviceInitialConditionSource,
     DuplicateSubcircuitPortBindingError, ElementKind, ExpressionDialect,
     MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, Netlist, NetlistParseOptions,
-    ParameterRedefinitionPolicy, ParametricValue, ParseError, StatisticalParamMode, StepCommand,
-    StepSweep, StepTarget, SubcircuitDef, TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    OutputDirectiveKind, OutputSymbolKind, ParameterRedefinitionPolicy, ParametricValue,
+    ParseError, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    TransientLteReference, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, validate_output_symbols,
 };
 use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -129,6 +130,21 @@ const XYCE_BUG744_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_744/bad_dc_op.cir";
 const XYCE_BUG75_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_75_son/bug75.cir";
+const XYCE_BUG1148_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_1148/bug_1148.cir";
+const XYCE_BUG40_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_40/bug_40.cir";
+const XYCE_BUG718_INVALID_NODES_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_718_son/invalidnodes.cir";
+const XYCE_MESSAGE_PRINT_BAD_NODENAME_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/print/bad_nodename.cir";
+const XYCE_MESSAGE_PRINT_BAD_VARIABLE_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/message/print/bad_variable.cir";
+const XYCE_LEAD_CURRENTS_INVALID_DEVICE_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/lead_currents/lead_for_invalid_device.cir";
+const XYCE_MEASURE_INVALID_NODES_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/measure/invalid_nodes.cir";
+const XYCE_FOURIER_BAD_LINE3_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/fourier/bad_dot_four_line3.cir";
 const XYCE_BUG387_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_387_son/bug_387.cir";
 const XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD: &str =
@@ -215,6 +231,22 @@ const XYCE_BUG744_SOURCE_BLAKE3: &str =
     "b0c2ba9e38e293eb0d9d53cc14713921890e81330e6b06c64d3fc8f0df26afda";
 const XYCE_BUG75_SOURCE_BLAKE3: &str =
     "eab31dd9fba0e2020d8ec5f40d5cfd4f3232aac87a54e7c19ced83a20fb9886f";
+const XYCE_BUG1148_SOURCE_BLAKE3: &str =
+    "de3cfb1443716a2c1bb376213cb54a2dcb38d218b074c6c2986b74c7227f7c8a";
+const XYCE_BUG40_SOURCE_BLAKE3: &str =
+    "cb77ddca1c3837d9bfc7aad5780567cc2cd2090e7903b1d749927e5f1b0bb658";
+const XYCE_BUG718_INVALID_NODES_SOURCE_BLAKE3: &str =
+    "69d78900ed75aa899acc0127836e4c2462b6f48d2ed6a34857bb10c4a170f4b2";
+const XYCE_MESSAGE_PRINT_BAD_NODENAME_SOURCE_BLAKE3: &str =
+    "20c8e3c04b88c993a4c901015eb4dd795a827f62c17692744bd5b015a0545384";
+const XYCE_MESSAGE_PRINT_BAD_VARIABLE_SOURCE_BLAKE3: &str =
+    "6bb9862735fc3d2444c4b8f819e2c96c9c4b648c8b38aa8802b94f9268531613";
+const XYCE_LEAD_CURRENTS_INVALID_DEVICE_SOURCE_BLAKE3: &str =
+    "ff72347a18df0f5d471bc20ede53cc3285adf4490707475033bd85bca7f58555";
+const XYCE_MEASURE_INVALID_NODES_SOURCE_BLAKE3: &str =
+    "aec265c84b6042e692ee6a2f5500561b1d320fcad0f83f7cb71b53d49b626f0d";
+const XYCE_FOURIER_BAD_LINE3_SOURCE_BLAKE3: &str =
+    "aeb7fd393692890326f1f2cf59663a0783720184927235c719b2e71717db21f1";
 const XYCE_BUG387_SOURCE_BLAKE3: &str =
     "4cf9e5605ea32387fb6e670928e057940236b92fe3c240ee64b8b9bdce60e1b0";
 const XYCE_SUBCKT_NONAME_SOURCE_BLAKE3: &str =
@@ -338,6 +370,52 @@ const XYCE_BUG75_README_BYTES: usize = 414;
 const XYCE_BUG75_OPTIONS_BLAKE3: &str =
     "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
 const XYCE_BUG75_OPTIONS_BYTES: usize = 14;
+const XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3: &str =
+    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
+const XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES: usize = 14;
+const XYCE_BUG1148_PHYSICAL_CENSUS_BLAKE3: &str =
+    "ac119116158a8781bda4860d6bce618dee17d497a1b07008255728a27340ebea";
+const XYCE_BUG1148_MANIFEST_CENSUS_BLAKE3: &str =
+    "444ec7285ebbb7da61300887823b9572d5124a5c4873fda753e193461c63bf95";
+const XYCE_BUG40_PHYSICAL_CENSUS_BLAKE3: &str =
+    "a99b9de40f7e32b6ba9e7835661a6d22d6067ab58140767d55ad8bbe023e4b39";
+const XYCE_BUG40_MANIFEST_CENSUS_BLAKE3: &str =
+    "fd7e3ba932274866eb0b1208f461257e5746a5342628a24c57716f80017baab3";
+const XYCE_BUG718_PHYSICAL_CENSUS_BLAKE3: &str =
+    "20eb41f65004e3e4060543181b2004d74086002327e13963cf70451a52a2c6c9";
+const XYCE_BUG718_MANIFEST_CENSUS_BLAKE3: &str =
+    "24ba969b3b9febf20a9c6d7daf71f220c303d5b6ce085127e96b311724cc04c7";
+const XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3: &str =
+    "e2361e63f931254fb1cb432255c5b684e885b6e4b7de79a74e954fa0d93706e1";
+const XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3: &str =
+    "110a0757f67d20b148af340af3df80312f7f6e67e8da44155fb51d9523f1e397";
+const XYCE_LEAD_CURRENTS_PHYSICAL_CENSUS_BLAKE3: &str =
+    "7945aaa6487937d9d9eabcd4690c69643c600a88ae86cdf479f1baafa570eddd";
+const XYCE_LEAD_CURRENTS_MANIFEST_CENSUS_BLAKE3: &str =
+    "679c3ea6664d25eda3bb4eedbc7a3984bab14833d92bb9c57b1939aaf34c10ef";
+const XYCE_MEASURE_PHYSICAL_CENSUS_BLAKE3: &str =
+    "c28cba07612ac07b5e934ae6ddb8b2e0a1c1316a18d1d83bf7b78461e9605e41";
+const XYCE_MEASURE_MANIFEST_CENSUS_BLAKE3: &str =
+    "f6316ce77132d90d5b1142095236bff3584824cdd507e23907bde28b1e0cafa8";
+const XYCE_FOURIER_PHYSICAL_CENSUS_BLAKE3: &str =
+    "7d2de16d5e506c7bf1f82adfa924c99796844f851621c1900ddd36bea469e2a2";
+const XYCE_FOURIER_MANIFEST_CENSUS_BLAKE3: &str =
+    "58b62857cf810e7cdbb279d6289852df1c79e7afd9f4e3b0934316ba1822e752";
+const XYCE_BUG1148_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
+    "c0a9d188b9704e6679379ff8e44a06c957c3c562700c5f8ade8a6dedccf2d0ab";
+const XYCE_BUG1148_README_BLAKE3: &str =
+    "28fae4b412da1d44c559a9b13049228044ea19d49e34c4c5e65244344065bc45";
+const XYCE_BUG1148_README_BYTES: usize = 398;
+const XYCE_BUG40_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
+    "37eb9791f65872d7682a7dccebbff69ed1e4f140fb27e6186721a8bb7f723212";
+const XYCE_BUG40_README_BLAKE3: &str =
+    "9bd772abdd9221479fadcbc3671f824da1a47f409a8c496a10cb28a8eb037a12";
+const XYCE_BUG40_README_BYTES: usize = 740;
+const XYCE_BUG40_OUT_BLAKE3: &str =
+    "faa9b6622c09538c755394cc38da008c6900cd1cce7737d16a18c479e37cf162";
+const XYCE_BUG40_OUT_BYTES: usize = 3_416;
+const XYCE_BUG40_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
+    "3b9727f72a4c72226dd83bf527675458f3a92a00b1171496d8d79ca1e6567d58";
 const XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
     "bcd3e366443f97db8ccb98d5d9f0102cbb67a5903657382da3ea7770ed666afc";
 const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
@@ -402,6 +480,14 @@ enum XyceExpectedFailureKind {
     Bug726AdjacentCouplings,
     Bug744DcOperatingPoint,
     Bug75UndefinedMutualInductorReference,
+    Bug1148UndefinedPrintNode,
+    Bug40UndefinedPrintNode,
+    Bug718InvalidPrintNodes,
+    MessagePrintBadNodeName,
+    MessagePrintBadVariable,
+    LeadCurrentsInvalidDevice,
+    MeasureInvalidNodes,
+    FourierBadLine3OutputSymbols,
     Bug387MissingLibraryEndl,
     MessageSubcircuitMissingName,
     MessageSubcircuitMissingEndsEndCard,
@@ -453,6 +539,32 @@ struct XyceExpectedFailureRetainedArtifact {
     file_name: &'static str,
     bytes: usize,
     blake3: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceExpectedFailureSourceSidecar {
+    file_name: &'static str,
+    bytes: usize,
+    blake3: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceExpectedOutputSymbol {
+    directive: OutputDirectiveKind,
+    operator: &'static str,
+    symbol: &'static str,
+    kind: OutputSymbolKind,
+    file_name: &'static str,
+    line: usize,
+}
+
+impl XyceExpectedOutputSymbol {
+    fn identifier(self) -> String {
+        format!(
+            "{}|{}|{}|{}|{}:{}",
+            self.directive, self.operator, self.symbol, self.kind, self.file_name, self.line
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -553,6 +665,24 @@ impl XyceExpectedFailureKind {
             XYCE_BUG726_EXPECTED_FAILURE_RECORD => Some(Self::Bug726AdjacentCouplings),
             XYCE_BUG744_EXPECTED_FAILURE_RECORD => Some(Self::Bug744DcOperatingPoint),
             XYCE_BUG75_EXPECTED_FAILURE_RECORD => Some(Self::Bug75UndefinedMutualInductorReference),
+            XYCE_BUG1148_EXPECTED_FAILURE_RECORD => Some(Self::Bug1148UndefinedPrintNode),
+            XYCE_BUG40_EXPECTED_FAILURE_RECORD => Some(Self::Bug40UndefinedPrintNode),
+            XYCE_BUG718_INVALID_NODES_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug718InvalidPrintNodes)
+            }
+            XYCE_MESSAGE_PRINT_BAD_NODENAME_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessagePrintBadNodeName)
+            }
+            XYCE_MESSAGE_PRINT_BAD_VARIABLE_EXPECTED_FAILURE_RECORD => {
+                Some(Self::MessagePrintBadVariable)
+            }
+            XYCE_LEAD_CURRENTS_INVALID_DEVICE_EXPECTED_FAILURE_RECORD => {
+                Some(Self::LeadCurrentsInvalidDevice)
+            }
+            XYCE_MEASURE_INVALID_NODES_EXPECTED_FAILURE_RECORD => Some(Self::MeasureInvalidNodes),
+            XYCE_FOURIER_BAD_LINE3_EXPECTED_FAILURE_RECORD => {
+                Some(Self::FourierBadLine3OutputSymbols)
+            }
             XYCE_BUG387_EXPECTED_FAILURE_RECORD => Some(Self::Bug387MissingLibraryEndl),
             XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD => Some(Self::MessageSubcircuitMissingName),
             XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD => {
@@ -643,6 +773,20 @@ impl XyceExpectedFailureKind {
             Self::Bug726AdjacentCouplings => XYCE_BUG726_EXPECTED_FAILURE_RECORD,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_EXPECTED_FAILURE_RECORD,
             Self::Bug75UndefinedMutualInductorReference => XYCE_BUG75_EXPECTED_FAILURE_RECORD,
+            Self::Bug1148UndefinedPrintNode => XYCE_BUG1148_EXPECTED_FAILURE_RECORD,
+            Self::Bug40UndefinedPrintNode => XYCE_BUG40_EXPECTED_FAILURE_RECORD,
+            Self::Bug718InvalidPrintNodes => XYCE_BUG718_INVALID_NODES_EXPECTED_FAILURE_RECORD,
+            Self::MessagePrintBadNodeName => {
+                XYCE_MESSAGE_PRINT_BAD_NODENAME_EXPECTED_FAILURE_RECORD
+            }
+            Self::MessagePrintBadVariable => {
+                XYCE_MESSAGE_PRINT_BAD_VARIABLE_EXPECTED_FAILURE_RECORD
+            }
+            Self::LeadCurrentsInvalidDevice => {
+                XYCE_LEAD_CURRENTS_INVALID_DEVICE_EXPECTED_FAILURE_RECORD
+            }
+            Self::MeasureInvalidNodes => XYCE_MEASURE_INVALID_NODES_EXPECTED_FAILURE_RECORD,
+            Self::FourierBadLine3OutputSymbols => XYCE_FOURIER_BAD_LINE3_EXPECTED_FAILURE_RECORD,
             Self::Bug387MissingLibraryEndl => XYCE_BUG387_EXPECTED_FAILURE_RECORD,
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD,
             Self::MessageSubcircuitMissingEndsEndCard => {
@@ -716,6 +860,14 @@ impl XyceExpectedFailureKind {
             Self::Bug726AdjacentCouplings => XYCE_BUG726_SOURCE_BLAKE3,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_SOURCE_BLAKE3,
             Self::Bug75UndefinedMutualInductorReference => XYCE_BUG75_SOURCE_BLAKE3,
+            Self::Bug1148UndefinedPrintNode => XYCE_BUG1148_SOURCE_BLAKE3,
+            Self::Bug40UndefinedPrintNode => XYCE_BUG40_SOURCE_BLAKE3,
+            Self::Bug718InvalidPrintNodes => XYCE_BUG718_INVALID_NODES_SOURCE_BLAKE3,
+            Self::MessagePrintBadNodeName => XYCE_MESSAGE_PRINT_BAD_NODENAME_SOURCE_BLAKE3,
+            Self::MessagePrintBadVariable => XYCE_MESSAGE_PRINT_BAD_VARIABLE_SOURCE_BLAKE3,
+            Self::LeadCurrentsInvalidDevice => XYCE_LEAD_CURRENTS_INVALID_DEVICE_SOURCE_BLAKE3,
+            Self::MeasureInvalidNodes => XYCE_MEASURE_INVALID_NODES_SOURCE_BLAKE3,
+            Self::FourierBadLine3OutputSymbols => XYCE_FOURIER_BAD_LINE3_SOURCE_BLAKE3,
             Self::Bug387MissingLibraryEndl => XYCE_BUG387_SOURCE_BLAKE3,
             Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_SOURCE_BLAKE3,
             Self::MessageSubcircuitMissingEndsEndCard => {
@@ -774,6 +926,20 @@ impl XyceExpectedFailureKind {
             Self::Bug744DcOperatingPoint => "expected_failure_dc_operating_point",
             Self::Bug75UndefinedMutualInductorReference => {
                 "expected_failure_bug75_undefined_mutual_inductor_reference_parse"
+            }
+            Self::Bug1148UndefinedPrintNode => {
+                "expected_failure_bug1148_undefined_print_node_parse"
+            }
+            Self::Bug40UndefinedPrintNode => "expected_failure_bug40_undefined_print_node_parse",
+            Self::Bug718InvalidPrintNodes => "expected_failure_bug718_invalid_print_nodes_parse",
+            Self::MessagePrintBadNodeName => "expected_failure_message_print_bad_nodename_parse",
+            Self::MessagePrintBadVariable => "expected_failure_message_print_bad_variable_parse",
+            Self::LeadCurrentsInvalidDevice => {
+                "expected_failure_lead_currents_invalid_device_parse"
+            }
+            Self::MeasureInvalidNodes => "expected_failure_measure_invalid_nodes_parse",
+            Self::FourierBadLine3OutputSymbols => {
+                "expected_failure_fourier_bad_dot_four_line3_symbols_parse"
             }
             Self::Bug387MissingLibraryEndl => "expected_failure_missing_library_endl_parse",
             Self::MessageSubcircuitMissingName => "expected_failure_missing_subcircuit_name_parse",
@@ -875,6 +1041,51 @@ impl XyceExpectedFailureKind {
             Self::Bug75UndefinedMutualInductorReference => {
                 &["Undefined inductor L2 in mutual inductor K3 definition"][..]
             }
+            Self::Bug1148UndefinedPrintNode => {
+                &[r"There was 1 undefined symbol in \.PRINT command: node 2"][..]
+            }
+            Self::Bug40UndefinedPrintNode => {
+                &[r"There was 1 undefined symbol in \.PRINT command: node BAD"][..]
+            }
+            Self::Bug718InvalidPrintNodes => &[
+                "Function or variable V(BOGO1) is not defined",
+                "Function or variable V(BOGO2) is not defined",
+                "Function or variable V(BOGO3) is not defined",
+                "Function or variable V(BOGO4) is not defined",
+                "Function or variable V(BOGO5) is not defined",
+                "Function or variable N(BOGO6) is not defined",
+                "Function or variable V(BOGO7) is not defined",
+                "Function or variable V(BOGO8) is not defined",
+                "Function or variable V(BOGO9) is not defined",
+                "Function or variable V(BOGO9) is not defined",
+                "Function or variable V(BOGO10) is not defined",
+                "Function or variable V(BOGO11) is not defined",
+                "Function or variable V(BOGO12) is not defined",
+                "Function or variable V(BOGO13) is not defined",
+                "Function or variable V(BOGO14) is not defined",
+                "Function or variable V(BOGO15) is not defined",
+            ][..],
+            Self::MessagePrintBadNodeName | Self::MessagePrintBadVariable => &[
+                r"There were 2 undefined symbols in \.PRINT command: node C",
+                "node D",
+            ][..],
+            Self::LeadCurrentsInvalidDevice => &[
+                r"There were 2 undefined symbols in \.PRINT command: device RBOGO",
+                "node 2",
+            ][..],
+            Self::MeasureInvalidNodes => &[
+                "Function or variable V(BOGONODE) is not defined",
+                "Function or variable N(MISSINGNODE) is not defined",
+                "Function or variable V(GND) is not defined",
+            ][..],
+            Self::FourierBadLine3OutputSymbols => &[
+                "Function or variable I(BOGODEVICE1) is not defined",
+                "Function or variable P(BOGODEVICE2) is not defined",
+                "Function or variable W(BOGODEVICE3) is not defined",
+                "Function or variable V(2) is not defined",
+                "Function or variable N(3) is not defined",
+                "Function or variable V(GND) is not defined",
+            ][..],
             Self::Bug387MissingLibraryEndl => {
                 &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..]
             }
@@ -973,8 +1184,326 @@ impl XyceExpectedFailureKind {
         }
     }
 
+    fn expected_output_symbols(self) -> Option<&'static [XyceExpectedOutputSymbol]> {
+        use OutputDirectiveKind::{Four, Measure, Print};
+        use OutputSymbolKind::{Device, Node};
+        const BUG1148: &[XyceExpectedOutputSymbol] = &[XyceExpectedOutputSymbol {
+            directive: Print,
+            operator: "V",
+            symbol: "2",
+            kind: Node,
+            file_name: "bug_1148.cir",
+            line: 5,
+        }];
+        const BUG40: &[XyceExpectedOutputSymbol] = &[XyceExpectedOutputSymbol {
+            directive: Print,
+            operator: "V",
+            symbol: "bad",
+            kind: Node,
+            file_name: "bug_40.cir",
+            line: 39,
+        }];
+        const BUG718: &[XyceExpectedOutputSymbol] = &[
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "bogo1",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "bogo2",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "GND",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "bogo3",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "bogo4",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "bogo5",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "N",
+                symbol: "bogo6",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VR",
+                symbol: "bogo7",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VI",
+                symbol: "bogo8",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VP",
+                symbol: "bogo9",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VM",
+                symbol: "bogo9",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VDB",
+                symbol: "bogo10",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VR",
+                symbol: "bogo11",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VI",
+                symbol: "bogo12",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VP",
+                symbol: "bogo13",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VM",
+                symbol: "bogo14",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VDB",
+                symbol: "bogo15",
+                kind: Node,
+                file_name: "invalidNodes.cir",
+                line: 10,
+            },
+        ];
+        const BAD_NODENAME: &[XyceExpectedOutputSymbol] = &[
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "C",
+                kind: Node,
+                file_name: "bad_nodename.cir",
+                line: 8,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VM",
+                symbol: "D",
+                kind: Node,
+                file_name: "bad_nodename.cir",
+                line: 8,
+            },
+        ];
+        const BAD_VARIABLE: &[XyceExpectedOutputSymbol] = &[
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "C",
+                kind: Node,
+                file_name: "bad_variable.cir",
+                line: 8,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "VM",
+                symbol: "D",
+                kind: Node,
+                file_name: "bad_variable.cir",
+                line: 8,
+            },
+        ];
+        const LEAD: &[XyceExpectedOutputSymbol] = &[
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "I",
+                symbol: "RBogo",
+                kind: Device,
+                file_name: "lead_for_invalid_device.cir",
+                line: 20,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Print,
+                operator: "V",
+                symbol: "2",
+                kind: Node,
+                file_name: "lead_for_invalid_device.cir",
+                line: 20,
+            },
+        ];
+        const MEASURE_NODES: &[XyceExpectedOutputSymbol] = &[
+            XyceExpectedOutputSymbol {
+                directive: Measure,
+                operator: "V",
+                symbol: "bogoNode",
+                kind: Node,
+                file_name: "invalid_nodes.cir",
+                line: 14,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Measure,
+                operator: "N",
+                symbol: "missingNode",
+                kind: Node,
+                file_name: "invalid_nodes.cir",
+                line: 15,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Measure,
+                operator: "V",
+                symbol: "GND",
+                kind: Node,
+                file_name: "invalid_nodes.cir",
+                line: 20,
+            },
+        ];
+        const FOURIER: &[XyceExpectedOutputSymbol] = &[
+            XyceExpectedOutputSymbol {
+                directive: Four,
+                operator: "I",
+                symbol: "BogoDevice1",
+                kind: Device,
+                file_name: "bad_dot_four_line3.cir",
+                line: 22,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Four,
+                operator: "P",
+                symbol: "BogoDevice2",
+                kind: Device,
+                file_name: "bad_dot_four_line3.cir",
+                line: 22,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Four,
+                operator: "W",
+                symbol: "BogoDevice3",
+                kind: Device,
+                file_name: "bad_dot_four_line3.cir",
+                line: 22,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Four,
+                operator: "V",
+                symbol: "2",
+                kind: Node,
+                file_name: "bad_dot_four_line3.cir",
+                line: 22,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Four,
+                operator: "N",
+                symbol: "3",
+                kind: Node,
+                file_name: "bad_dot_four_line3.cir",
+                line: 22,
+            },
+            XyceExpectedOutputSymbol {
+                directive: Four,
+                operator: "V",
+                symbol: "GND",
+                kind: Node,
+                file_name: "bad_dot_four_line3.cir",
+                line: 22,
+            },
+        ];
+        match self {
+            Self::Bug1148UndefinedPrintNode => Some(BUG1148),
+            Self::Bug40UndefinedPrintNode => Some(BUG40),
+            Self::Bug718InvalidPrintNodes => Some(BUG718),
+            Self::MessagePrintBadNodeName => Some(BAD_NODENAME),
+            Self::MessagePrintBadVariable => Some(BAD_VARIABLE),
+            Self::LeadCurrentsInvalidDevice => Some(LEAD),
+            Self::MeasureInvalidNodes => Some(MEASURE_NODES),
+            Self::FourierBadLine3OutputSymbols => Some(FOURIER),
+            _ => None,
+        }
+    }
+
     fn expected_observation(self) -> XyceExpectedFailureObservation {
         match self {
+            Self::Bug1148UndefinedPrintNode
+            | Self::Bug40UndefinedPrintNode
+            | Self::Bug718InvalidPrintNodes
+            | Self::MessagePrintBadNodeName
+            | Self::MessagePrintBadVariable
+            | Self::LeadCurrentsInvalidDevice
+            | Self::MeasureInvalidNodes
+            | Self::FourierBadLine3OutputSymbols => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::UndefinedOutputSymbols,
+                identifiers: self
+                    .expected_output_symbols()
+                    .expect("output-symbol kind has a contract")
+                    .iter()
+                    .copied()
+                    .map(XyceExpectedOutputSymbol::identifier)
+                    .collect(),
+            },
             Self::Bug67BehavioralExpression => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::CircuitBuild,
                 category: XyceExpectedFailureCategory::BehavioralExpressionSyntax,
@@ -1390,6 +1919,57 @@ impl XyceExpectedFailureKind {
                 manifest_records_blake3: XYCE_BUG75_MANIFEST_CENSUS_BLAKE3,
                 require_manifest_bijection: true,
             }),
+            Self::Bug1148UndefinedPrintNode => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 1,
+                physical_names_blake3: XYCE_BUG1148_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 1,
+                manifest_records_blake3: XYCE_BUG1148_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            }),
+            Self::Bug40UndefinedPrintNode => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 1,
+                physical_names_blake3: XYCE_BUG40_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 1,
+                manifest_records_blake3: XYCE_BUG40_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            }),
+            Self::Bug718InvalidPrintNodes => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 2,
+                physical_names_blake3: XYCE_BUG718_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 2,
+                manifest_records_blake3: XYCE_BUG718_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            }),
+            Self::MessagePrintBadNodeName | Self::MessagePrintBadVariable => {
+                Some(XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 4,
+                    physical_names_blake3: XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 4,
+                    manifest_records_blake3: XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                })
+            }
+            Self::LeadCurrentsInvalidDevice => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 53,
+                physical_names_blake3: XYCE_LEAD_CURRENTS_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 9,
+                manifest_records_blake3: XYCE_LEAD_CURRENTS_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
+            }),
+            Self::MeasureInvalidNodes => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 80,
+                physical_names_blake3: XYCE_MEASURE_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 114,
+                manifest_records_blake3: XYCE_MEASURE_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
+            }),
+            Self::FourierBadLine3OutputSymbols => Some(XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 15,
+                physical_names_blake3: XYCE_FOURIER_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 13,
+                manifest_records_blake3: XYCE_FOURIER_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
+            }),
             _ => None,
         }
     }
@@ -1401,14 +1981,42 @@ impl XyceExpectedFailureKind {
                 bytes: 147,
                 blake3: XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3,
             }),
+            Self::Bug40UndefinedPrintNode => Some(XyceExpectedFailureRetainedArtifact {
+                file_name: "bug_40.cir.prn",
+                bytes: 150,
+                blake3: XYCE_BUG40_RETAINED_NON_ORACLE_PRN_BLAKE3,
+            }),
             _ => None,
         }
+    }
+
+    fn expected_source_sidecar(self) -> Option<XyceExpectedFailureSourceSidecar> {
+        let file_name = match self {
+            Self::Bug718InvalidPrintNodes => "invalidNodes.cir.options",
+            Self::LeadCurrentsInvalidDevice => "lead_for_invalid_device.cir.options",
+            Self::MeasureInvalidNodes => "invalid_nodes.cir.options",
+            Self::FourierBadLine3OutputSymbols => "bad_dot_four_line3.cir.options",
+            _ => return None,
+        };
+        Some(XyceExpectedFailureSourceSidecar {
+            file_name,
+            bytes: XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES,
+            blake3: XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3,
+        })
     }
 
     fn rejects_source_directory_sidecars(self) -> bool {
         matches!(
             self,
             Self::Bug75UndefinedMutualInductorReference
+                | Self::Bug1148UndefinedPrintNode
+                | Self::Bug40UndefinedPrintNode
+                | Self::Bug718InvalidPrintNodes
+                | Self::MessagePrintBadNodeName
+                | Self::MessagePrintBadVariable
+                | Self::LeadCurrentsInvalidDevice
+                | Self::MeasureInvalidNodes
+                | Self::FourierBadLine3OutputSymbols
                 | Self::MessageAcUnsupportedSweepType
                 | Self::MessageNoiseUnsupportedSweepType
                 | Self::MessageSubcircuitDuplicateBindingA2
@@ -1434,6 +2042,13 @@ impl XyceExpectedFailureKind {
     fn is_bug75(self) -> bool {
         self == Self::Bug75UndefinedMutualInductorReference
     }
+
+    fn has_complete_output_symbol_family_envelope(self) -> bool {
+        matches!(
+            self,
+            Self::Bug1148UndefinedPrintNode | Self::Bug40UndefinedPrintNode
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1450,6 +2065,7 @@ enum XyceExpectedFailureCategory {
     InvalidPwlFileEncoding,
     AdjacentCouplingSyntax,
     ConflictingIdealVoltageConstraints,
+    UndefinedOutputSymbols,
     MissingLibraryEndl,
     MissingSubcircuitName,
     MissingSubcircuitEnds,
@@ -4919,6 +5535,110 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn validate_output_symbol_complete_family_provenance(
+        &self,
+        kind: XyceExpectedFailureKind,
+        family_dir: &Path,
+    ) -> Result<(), String> {
+        let (label, relative_dir, expected_count, expected_census, retained) = match kind {
+            XyceExpectedFailureKind::Bug1148UndefinedPrintNode => (
+                "BUG1148",
+                "Netlists/Certification_Tests/BUG_1148",
+                3,
+                XYCE_BUG1148_SOURCE_DIRECTORY_CENSUS_BLAKE3,
+                vec![
+                    (
+                        "README",
+                        XYCE_BUG1148_README_BYTES,
+                        XYCE_BUG1148_README_BLAKE3,
+                    ),
+                    (
+                        "options",
+                        XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES,
+                        XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3,
+                    ),
+                ],
+            ),
+            XyceExpectedFailureKind::Bug40UndefinedPrintNode => (
+                "BUG40",
+                "Netlists/Certification_Tests/BUG_40",
+                4,
+                XYCE_BUG40_SOURCE_DIRECTORY_CENSUS_BLAKE3,
+                vec![
+                    ("README", XYCE_BUG40_README_BYTES, XYCE_BUG40_README_BLAKE3),
+                    (
+                        "options",
+                        XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES,
+                        XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3,
+                    ),
+                    ("bug_40.out", XYCE_BUG40_OUT_BYTES, XYCE_BUG40_OUT_BLAKE3),
+                ],
+            ),
+            _ => return Ok(()),
+        };
+        let expected_family = self.root.join(relative_dir);
+        if family_dir.canonicalize().ok() != expected_family.canonicalize().ok() {
+            return Err(format!(
+                "{label} family resolved outside its canonical corpus directory: {}",
+                family_dir.display()
+            ));
+        }
+        let mut names = BTreeSet::new();
+        for entry in fs::read_dir(family_dir)
+            .map_err(|error| format!("failed to inspect complete {label} family: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("failed to inspect {label} entry: {error}"))?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(|| format!("{label} filename is not UTF-8"))?
+                .to_ascii_lowercase();
+            if !names.insert(name.clone()) {
+                return Err(format!("{label} family has case-colliding name {name:?}"));
+            }
+        }
+        let names = names.into_iter().collect::<Vec<_>>();
+        let hash = blake3::hash(names.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        if names.len() != expected_count || hash != expected_census {
+            return Err(format!(
+                "{label} complete source-directory census changed: expected {expected_count} / {expected_census}, got {} / {hash}",
+                names.len()
+            ));
+        }
+        for (file_name, expected_bytes, expected_hash) in retained {
+            let path = family_dir.join(file_name);
+            let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                format!(
+                    "failed to inspect {label} retained source {}: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "{label} retained source {} must be a regular non-symlink file",
+                    path.display()
+                ));
+            }
+            let bytes = fs::read(&path).map_err(|error| {
+                format!(
+                    "failed to read {label} retained source {}: {error}",
+                    path.display()
+                )
+            })?;
+            let actual_hash = blake3::hash(&bytes).to_hex().to_string();
+            if bytes.len() != expected_bytes || actual_hash != expected_hash {
+                return Err(format!(
+                    "{label} retained source {file_name} changed: expected {expected_bytes} / {expected_hash}, got {} / {actual_hash}",
+                    bytes.len()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_bug702_complete_family_provenance(&self, family_dir: &Path) -> Result<(), String> {
         let expected_family = self.root.join("Netlists/Certification_Tests/BUG_702");
         if family_dir.canonicalize().ok() != expected_family.canonicalize().ok() {
@@ -5631,6 +6351,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference => {
                 Self::observe_bug75_undefined_mutual_inductor_reference_failure(source, &deck.path)?
             }
+            XyceExpectedFailureKind::Bug1148UndefinedPrintNode
+            | XyceExpectedFailureKind::Bug40UndefinedPrintNode
+            | XyceExpectedFailureKind::Bug718InvalidPrintNodes
+            | XyceExpectedFailureKind::MessagePrintBadNodeName
+            | XyceExpectedFailureKind::MessagePrintBadVariable
+            | XyceExpectedFailureKind::LeadCurrentsInvalidDevice
+            | XyceExpectedFailureKind::MeasureInvalidNodes
+            | XyceExpectedFailureKind::FourierBadLine3OutputSymbols => {
+                Self::observe_undefined_output_symbols_failure(source, &deck.path, kind)?
+            }
             XyceExpectedFailureKind::Bug387MissingLibraryEndl => {
                 Self::observe_bug387_missing_library_endl_failure(source, &deck.path)?
             }
@@ -5881,6 +6611,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if kind.is_bug75() {
             self.validate_bug75_complete_family_provenance(family_dir)?;
         }
+        if kind.has_complete_output_symbol_family_envelope() {
+            self.validate_output_symbol_complete_family_provenance(kind, family_dir)?;
+        }
         Self::validate_expected_failure_source_sidecars(kind, &deck.path)?;
 
         let output_anchor = self
@@ -6020,7 +6753,57 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
         sidecars.sort();
-        if !sidecars.is_empty() {
+        if let Some(expected) = kind.expected_source_sidecar() {
+            if sidecars.len() != 1 {
+                return Err(format!(
+                    "expected-failure record '{}' must retain exactly its pinned source sidecar '{}', found {sidecars:?}",
+                    kind.record(),
+                    expected.file_name
+                ));
+            }
+            let sidecar = &sidecars[0];
+            let actual_name = sidecar
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    "expected-failure source sidecar filename is not UTF-8".to_string()
+                })?;
+            if actual_name != expected.file_name {
+                return Err(format!(
+                    "expected-failure record '{}' source sidecar changed name: expected '{}', got '{actual_name}'",
+                    kind.record(),
+                    expected.file_name
+                ));
+            }
+            let metadata = fs::symlink_metadata(sidecar).map_err(|error| {
+                format!(
+                    "failed to inspect expected-failure source sidecar {}: {error}",
+                    sidecar.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "expected-failure source sidecar {} must be a regular non-symlink file",
+                    sidecar.display()
+                ));
+            }
+            let bytes = fs::read(sidecar).map_err(|error| {
+                format!(
+                    "failed to read expected-failure source sidecar {}: {error}",
+                    sidecar.display()
+                )
+            })?;
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            if bytes.len() != expected.bytes || hash != expected.blake3 {
+                return Err(format!(
+                    "expected-failure record '{}' source sidecar changed: expected {} bytes / {}, got {} bytes / {hash}",
+                    kind.record(),
+                    expected.bytes,
+                    expected.blake3,
+                    bytes.len()
+                ));
+            }
+        } else if !sidecars.is_empty() {
             return Err(format!(
                 "expected-failure record '{}' must not own source-directory sidecars: {sidecars:?}",
                 kind.record()
@@ -8655,6 +9438,183 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 error.reference_position.to_string(),
                 format!("line {}", error.origin.line),
             ],
+        })
+    }
+
+    fn observe_undefined_output_symbols_failure(
+        source: &str,
+        deck_path: &Path,
+        kind: XyceExpectedFailureKind,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        let (label, file_name, line_count, required_lines): (&str, &str, usize, &[(usize, &str)]) =
+            match kind {
+                XyceExpectedFailureKind::Bug1148UndefinedPrintNode => (
+                    "BUG 1148",
+                    "bug_1148.cir",
+                    6,
+                    &[(2, "v1 1 0 1"), (5, ".print tran V(2)"), (6, ".end")],
+                ),
+                XyceExpectedFailureKind::Bug40UndefinedPrintNode => (
+                    "BUG 40",
+                    "bug_40.cir",
+                    41,
+                    &[
+                        (29, "VDD 5 0 DC 18V "),
+                        (39, ".PRINT DC V(bad) V(3,2) V(1,2)"),
+                        (41, ".END"),
+                    ],
+                ),
+                XyceExpectedFailureKind::Bug718InvalidPrintNodes => (
+                    "BUG 718 invalid nodes",
+                    "invalidNodes.cir",
+                    22,
+                    &[
+                        (10, ".PRINT AC "),
+                        (11, "+ {V(bogo1)} {V(bogo2,GND)} "),
+                        (
+                            13,
+                            "+ {VR(bogo7)} {VI(bogo8)} {VP(bogo9)} {VM(bogo9)} {VDB(bogo10)}",
+                        ),
+                        (22, ".END"),
+                    ],
+                ),
+                XyceExpectedFailureKind::MessagePrintBadNodeName => (
+                    "Message Print bad node name",
+                    "bad_nodename.cir",
+                    9,
+                    &[
+                        (
+                            8,
+                            ".print ac V(A,C) VM(D,A) VP(A,B) VDB(A,B) VR(A,B) VI(A,B)",
+                        ),
+                        (9, ".end"),
+                    ],
+                ),
+                XyceExpectedFailureKind::MessagePrintBadVariable => (
+                    "Message Print bad variable",
+                    "bad_variable.cir",
+                    9,
+                    &[
+                        (
+                            8,
+                            ".print ac V(A,C) VM(D,B) VP(A,B) VDB(A,B) VR(A,B) VI(A,B) VQ(A,B)",
+                        ),
+                        (9, ".end"),
+                    ],
+                ),
+                XyceExpectedFailureKind::LeadCurrentsInvalidDevice => (
+                    "lead currents invalid device",
+                    "lead_for_invalid_device.cir",
+                    22,
+                    &[
+                        (14, "I1 1 0 sin(0 1 1KHz)"),
+                        (20, ".PRINT TRAN V(2) I(RBogo)"),
+                        (22, ".end"),
+                    ],
+                ),
+                XyceExpectedFailureKind::MeasureInvalidNodes => (
+                    "MEASURE invalid nodes",
+                    "invalid_nodes.cir",
+                    22,
+                    &[
+                        (14, ".MEASURE TRAN BOGONODEV MAX V(bogoNode)"),
+                        (15, ".MEASURE TRAN BOGONODEN MAX N(missingNode)"),
+                        (20, ".MEASURE TRAN NOREPLACEGROUND MAX V(GND)"),
+                        (22, ".END"),
+                    ],
+                ),
+                XyceExpectedFailureKind::FourierBadLine3OutputSymbols => (
+                    "FOURIER bad line 3",
+                    "bad_dot_four_line3.cir",
+                    25,
+                    &[
+                        (
+                            22,
+                            ".FOUR 1KHZ I(BogoDevice1) P(BogoDevice2) W(BogoDevice3) V(2) N(3) V(GND)",
+                        ),
+                        (24, ".END"),
+                    ],
+                ),
+                _ => {
+                    return Err(format!(
+                        "{} is not an output-symbol expected failure",
+                        kind.record()
+                    ));
+                }
+            };
+        Self::require_expected_failure_file_name(label, deck_path, file_name)?;
+        Self::require_expected_failure_source_lines(label, source, line_count, required_lines)?;
+
+        // Parsing and semantic output validation are intentionally separate.
+        // This proves each corpus record reaches the production post-parse
+        // validator instead of being recognized by a parser/path special case.
+        let netlist = Self::parse_xyce_netlist(source, deck_path).map_err(|error| {
+            format!("{label} failed before output-symbol validation: {error:?}")
+        })?;
+        let error = match validate_output_symbols(&netlist) {
+            Err(ParseError::OutputSymbolValidation(error)) => error,
+            Err(error) => {
+                return Err(format!(
+                    "{label} produced the wrong typed validation failure: {error:?}"
+                ));
+            }
+            Ok(()) => {
+                return Err(format!(
+                    "{label} unexpectedly passed output-symbol validation"
+                ));
+            }
+        };
+        let expected = kind
+            .expected_output_symbols()
+            .ok_or_else(|| format!("{label} has no typed output-symbol contract"))?;
+        if error.unresolved.len() != expected.len() {
+            return Err(format!(
+                "{label} unresolved output-symbol count changed: expected {}, got {}: {:?}",
+                expected.len(),
+                error.unresolved.len(),
+                error.unresolved
+            ));
+        }
+        let expected_path = deck_path
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize {label} deck: {error}"))?;
+        for (index, (actual, expected)) in error.unresolved.iter().zip(expected).enumerate() {
+            let actual_path = actual
+                .origin
+                .path
+                .as_deref()
+                .ok_or_else(|| format!("{label} unresolved item {index} lost its source path"))?
+                .canonicalize()
+                .map_err(|error| {
+                    format!("failed to canonicalize {label} item {index} origin: {error}")
+                })?;
+            if actual.directive != expected.directive
+                || actual.operator != expected.operator
+                || actual.symbol != expected.symbol
+                || actual.kind != expected.kind
+                || actual.origin.line != expected.line
+                || actual_path != expected_path
+                || actual
+                    .origin
+                    .path
+                    .as_deref()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    != Some(expected.file_name)
+            {
+                return Err(format!(
+                    "{label} unresolved output-symbol item {index} changed: expected {expected:?}, got {actual:?}"
+                ));
+            }
+        }
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::UndefinedOutputSymbols,
+            identifiers: expected
+                .iter()
+                .copied()
+                .map(XyceExpectedOutputSymbol::identifier)
+                .collect(),
         })
     }
 
@@ -58199,11 +59159,9 @@ R2 b out 1
             expression_dialect: crate::netlist::ExpressionDialect::Xyce,
             ..Default::default()
         };
-        let xyce = Netlist::parse_with_options(
-            "Xyce ordinary GND\nR1 GND 0 1k\n.END\n",
-            xyce_options.clone(),
-        )
-        .expect("Xyce deck without replacement parses");
+        let xyce =
+            Netlist::parse_with_options("Xyce ordinary GND\nR1 GND 0 1k\n.END\n", xyce_options)
+                .expect("Xyce deck without replacement parses");
         assert_ne!(XyceTestRunner::node_lookup_candidates(&xyce, "GND"), ["0"]);
 
         let replaced = Netlist::parse_with_options(
@@ -69404,7 +70362,7 @@ R2 2 0 1
     }
 
     #[test]
-    fn expected_failure_oracle_census_is_exactly_forty_distinct_records() {
+    fn expected_failure_oracle_census_is_exactly_forty_eight_distinct_records() {
         let root = expected_failure_test_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let mut records = runner
@@ -69423,6 +70381,10 @@ R2 2 0 1
         assert_eq!(
             records,
             vec![
+                (
+                    XYCE_BUG1148_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug1148UndefinedPrintNode,
+                ),
                 (
                     XYCE_BUG1578_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug1578InvalidDeviceType,
@@ -69446,6 +70408,10 @@ R2 2 0 1
                 (
                     XYCE_BUG387_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+                ),
+                (
+                    XYCE_BUG40_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug40UndefinedPrintNode,
                 ),
                 (
                     XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
@@ -69496,6 +70462,10 @@ R2 2 0 1
                     XyceExpectedFailureKind::Bug702MissingInitcondFile,
                 ),
                 (
+                    XYCE_BUG718_INVALID_NODES_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+                ),
+                (
                     XYCE_BUG726_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Bug726AdjacentCouplings,
                 ),
@@ -69522,6 +70492,18 @@ R2 2 0 1
                 (
                     XYCE_ISSUE455_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+                ),
+                (
+                    XYCE_FOURIER_BAD_LINE3_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+                ),
+                (
+                    XYCE_LEAD_CURRENTS_INVALID_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+                ),
+                (
+                    XYCE_MEASURE_INVALID_NODES_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MeasureInvalidNodes,
                 ),
                 (
                     XYCE_MESSAGE_DUPLICATE_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
@@ -69554,6 +70536,14 @@ R2 2 0 1
                 (
                     XYCE_NOISE_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD.to_string(),
                     XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+                ),
+                (
+                    XYCE_MESSAGE_PRINT_BAD_NODENAME_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessagePrintBadNodeName,
+                ),
+                (
+                    XYCE_MESSAGE_PRINT_BAD_VARIABLE_EXPECTED_FAILURE_RECORD.to_string(),
+                    XyceExpectedFailureKind::MessagePrintBadVariable,
                 ),
                 (
                     XYCE_SUBCKT_A2_DUP_BINDING_EXPECTED_FAILURE_RECORD.to_string(),
@@ -69591,7 +70581,7 @@ R2 2 0 1
             .collect::<BTreeSet<_>>();
         assert_eq!(
             contracts.len(),
-            40,
+            48,
             "each record requires a distinct contract"
         );
     }
@@ -69620,6 +70610,38 @@ R2 2 0 1
             (
                 "Netlists/Certification_Tests/BUG_75_SON/bug75.cir",
                 "expected_failure_bug75_undefined_mutual_inductor_reference_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_1148/bug_1148.cir",
+                "expected_failure_bug1148_undefined_print_node_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_40/bug_40.cir",
+                "expected_failure_bug40_undefined_print_node_parse",
+            ),
+            (
+                "Netlists/Certification_Tests/BUG_718_SON/invalidNodes.cir",
+                "expected_failure_bug718_invalid_print_nodes_parse",
+            ),
+            (
+                "Netlists/Message/Print/bad_nodename.cir",
+                "expected_failure_message_print_bad_nodename_parse",
+            ),
+            (
+                "Netlists/Message/Print/bad_variable.cir",
+                "expected_failure_message_print_bad_variable_parse",
+            ),
+            (
+                "Netlists/LEAD_CURRENTS/lead_for_invalid_device.cir",
+                "expected_failure_lead_currents_invalid_device_parse",
+            ),
+            (
+                "Netlists/MEASURE/invalid_nodes.cir",
+                "expected_failure_measure_invalid_nodes_parse",
+            ),
+            (
+                "Netlists/FOURIER/bad_dot_four_line3.cir",
+                "expected_failure_fourier_bad_dot_four_line3_symbols_parse",
             ),
             (
                 "Netlists/Certification_Tests/BUG_387_SON/bug_387.cir",
@@ -69768,6 +70790,196 @@ R2 2 0 1
                 "{relative} must execute its typed expected-failure oracle: {result:?}"
             );
             assert_eq!(result.contract, expected_contract);
+        }
+    }
+
+    #[test]
+    fn output_symbol_expected_failure_censuses_and_sidecars_are_exactly_pinned() {
+        for (kind, expected) in [
+            (
+                XyceExpectedFailureKind::Bug1148UndefinedPrintNode,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 1,
+                    physical_names_blake3: XYCE_BUG1148_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 1,
+                    manifest_records_blake3: XYCE_BUG1148_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                },
+            ),
+            (
+                XyceExpectedFailureKind::Bug40UndefinedPrintNode,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 1,
+                    physical_names_blake3: XYCE_BUG40_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 1,
+                    manifest_records_blake3: XYCE_BUG40_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                },
+            ),
+            (
+                XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 2,
+                    physical_names_blake3: XYCE_BUG718_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 2,
+                    manifest_records_blake3: XYCE_BUG718_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                },
+            ),
+            (
+                XyceExpectedFailureKind::MessagePrintBadNodeName,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 4,
+                    physical_names_blake3: XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 4,
+                    manifest_records_blake3: XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                },
+            ),
+            (
+                XyceExpectedFailureKind::MessagePrintBadVariable,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 4,
+                    physical_names_blake3: XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 4,
+                    manifest_records_blake3: XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                },
+            ),
+            (
+                XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 53,
+                    physical_names_blake3: XYCE_LEAD_CURRENTS_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 9,
+                    manifest_records_blake3: XYCE_LEAD_CURRENTS_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: false,
+                },
+            ),
+            (
+                XyceExpectedFailureKind::MeasureInvalidNodes,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 80,
+                    physical_names_blake3: XYCE_MEASURE_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 114,
+                    manifest_records_blake3: XYCE_MEASURE_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: false,
+                },
+            ),
+            (
+                XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+                XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 15,
+                    physical_names_blake3: XYCE_FOURIER_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 13,
+                    manifest_records_blake3: XYCE_FOURIER_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: false,
+                },
+            ),
+        ] {
+            assert_eq!(kind.shared_family_census(), Some(expected), "{kind:?}");
+        }
+        assert_eq!(
+            XyceExpectedFailureKind::Bug40UndefinedPrintNode.retained_non_oracle_artifact(),
+            Some(XyceExpectedFailureRetainedArtifact {
+                file_name: "bug_40.cir.prn",
+                bytes: 150,
+                blake3: XYCE_BUG40_RETAINED_NON_ORACLE_PRN_BLAKE3,
+            })
+        );
+        for (kind, file_name) in [
+            (
+                XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+                "invalidNodes.cir.options",
+            ),
+            (
+                XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+                "lead_for_invalid_device.cir.options",
+            ),
+            (
+                XyceExpectedFailureKind::MeasureInvalidNodes,
+                "invalid_nodes.cir.options",
+            ),
+            (
+                XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+                "bad_dot_four_line3.cir.options",
+            ),
+        ] {
+            assert_eq!(
+                kind.expected_source_sidecar(),
+                Some(XyceExpectedFailureSourceSidecar {
+                    file_name,
+                    bytes: XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES,
+                    blake3: XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn output_symbol_expected_failure_observers_reject_semantic_mutations() {
+        let root = expected_failure_test_root();
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let decks = runner.discover_tests();
+        for (kind, authored, replacement) in [
+            (
+                XyceExpectedFailureKind::Bug1148UndefinedPrintNode,
+                "V(2)",
+                "V(1)",
+            ),
+            (
+                XyceExpectedFailureKind::Bug40UndefinedPrintNode,
+                "V(bad)",
+                "V(3)",
+            ),
+            (
+                XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+                "V(bogo1)",
+                "V(a)",
+            ),
+            (
+                XyceExpectedFailureKind::MessagePrintBadNodeName,
+                "V(A,C)",
+                "V(A,B)",
+            ),
+            (
+                XyceExpectedFailureKind::MessagePrintBadVariable,
+                "V(A,C)",
+                "V(A,B)",
+            ),
+            (
+                XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+                "V(2)",
+                "V(1)",
+            ),
+            (
+                XyceExpectedFailureKind::MeasureInvalidNodes,
+                "V(bogoNode)",
+                "V(1)",
+            ),
+            (
+                XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+                "I(BogoDevice1)",
+                "I(VS)",
+            ),
+        ] {
+            let path = decks
+                .iter()
+                .find(|deck| {
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path) == kind.record()
+                })
+                .map(|deck| deck.path.clone())
+                .expect("discover output-symbol corpus record");
+            let source = fs::read_to_string(&path).expect("read output-symbol corpus source");
+            XyceTestRunner::observe_undefined_output_symbols_failure(&source, &path, kind)
+                .expect("canonical output-symbol observer contract");
+            let mutated = source.replacen(authored, replacement, 1);
+            assert_ne!(mutated, source, "{kind:?} mutation must apply");
+            assert!(
+                XyceTestRunner::observe_undefined_output_symbols_failure(&mutated, &path, kind)
+                    .is_err(),
+                "{kind:?} must reject a corrected semantic dependency"
+            );
         }
     }
 
