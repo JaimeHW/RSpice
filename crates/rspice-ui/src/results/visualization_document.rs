@@ -5,15 +5,37 @@
 //! place; presentation changes are committed atomically through [`DocumentEdit`].
 
 use std::collections::{HashMap, HashSet};
+use std::io::{self, Write};
 use std::num::NonZeroU64;
 
 use serde::{Deserialize, Deserializer, Serialize};
+use sha2::{Digest as _, Sha256};
 
 use crate::product::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId,
     RevisionError,
 };
 use crate::results::viewer_catalog::{ViewerArt, viewer_document};
+
+#[derive(Default)]
+struct Sha256Writer(Sha256);
+
+impl Sha256Writer {
+    fn finish(self) -> ContentDigest {
+        ContentDigest::from_bytes(self.0.finalize().into())
+    }
+}
+
+impl Write for Sha256Writer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 macro_rules! stable_id {
     ($name:ident) => {
@@ -2435,6 +2457,8 @@ pub enum VisualizationError {
     UnexpectedOutputDigest,
     #[error("operation recovery counter is exhausted")]
     RecoverySpaceExhausted,
+    #[error("visualization document serialization failed: {0}")]
+    Serialization(String),
     #[error(transparent)]
     Revision(#[from] RevisionError),
 }
@@ -2659,6 +2683,20 @@ impl VisualizationDocument {
     #[must_use]
     pub fn comparisons(&self) -> &[ComparisonReceipt] {
         &self.comparisons
+    }
+
+    /// Authenticates the complete validated document envelope.
+    ///
+    /// The digest includes schema, stable identity, revision, immutable source
+    /// datasets, presentation entities, and comparison receipts. It is the
+    /// publication boundary for references that must identify one exact
+    /// visualization revision rather than merely the underlying dataset.
+    pub fn content_digest(&self) -> Result<ContentDigest, VisualizationError> {
+        self.validate()?;
+        let mut writer = Sha256Writer::default();
+        serde_json::to_writer(&mut writer, self)
+            .map_err(|error| VisualizationError::Serialization(error.to_string()))?;
+        Ok(writer.finish())
     }
 
     /// Applies all edits to a candidate clone, validates the complete graph,
@@ -3860,6 +3898,28 @@ mod tests {
             VisualizationDocument::new("Transient review", vec![dataset(source, 0.0)]).unwrap(),
             source,
         )
+    }
+
+    #[test]
+    fn content_digest_authenticates_the_exact_document_revision() {
+        let (mut document, _) = document();
+        let first = document.content_digest().unwrap();
+        assert_eq!(document.content_digest().unwrap(), first);
+
+        let restored: VisualizationDocument =
+            serde_json::from_slice(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(restored.content_digest().unwrap(), first);
+
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::Rename {
+                    entity: EntityRef::Page(document.pages()[0].id),
+                    value: "Updated page".to_owned(),
+                }],
+            )
+            .unwrap();
+        assert_ne!(document.content_digest().unwrap(), first);
     }
 
     fn family_dataset(binding: DatasetBinding) -> SourceDataset {
