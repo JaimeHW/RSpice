@@ -381,27 +381,26 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     if let Some(action) = action {
         match action {
-            LauncherAction::Close => app.state.workbench.project_launcher_open = false,
+            LauncherAction::Close => dismiss_launcher(app),
             LauncherAction::EmptyWorkbench => {
                 if app.state.project_lifecycle.project_open {
                     crate::common::project_workflow::request_close_project_to_empty_workbench(
                         &mut app.state,
                     );
                 } else {
-                    app.state.workbench.project_launcher_open = false;
-                    app.state.workbench.activate(Workspace::Project);
+                    replace_launcher_with_workspace(app, Workspace::Project);
                 }
             }
             LauncherAction::Browse => {
-                app.state.workbench.project_launcher_open = false;
+                dismiss_launcher(app);
                 Command::OpenProject.execute(app);
             }
             LauncherAction::NewProject => {
-                app.state.workbench.project_launcher_open = false;
+                dismiss_launcher(app);
                 Command::NewProject.execute(app);
             }
             LauncherAction::Open(recent) => {
-                app.state.workbench.project_launcher_open = false;
+                dismiss_launcher(app);
                 app.open_recent_file(recent);
             }
             LauncherAction::Page(page) => {
@@ -414,7 +413,7 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 }
             }
             LauncherAction::Recover(candidate) => match open_comparison(app, &candidate) {
-                Ok(()) => app.state.workbench.project_launcher_open = false,
+                Ok(()) => dismiss_launcher(app),
                 Err(error) => app.state.workbench.project_launcher_recovery.warning(error),
             },
             LauncherAction::RequestDiscard(candidate) => {
@@ -443,6 +442,53 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
         restore_launcher_focus(ctx, focus_state_id, area_response.response.id, modal_layer);
     }
     show_discard_confirmation(ctx, app);
+}
+
+/// Close the modal presentation and leave its canonical route in the same
+/// transaction. Keeping those two state owners synchronized prevents a
+/// browser-back traversal from immediately reopening a dismissed launcher.
+fn dismiss_launcher(app: &mut RSpiceApp) {
+    app.state.workbench.project_launcher_open = false;
+    if app.state.workbench.current_route().surface_id() != super::SurfaceId::ProjectLauncher {
+        return;
+    }
+    if app
+        .state
+        .workbench
+        .navigate_back(super::RouteTransitionSource::User)
+        .is_some()
+    {
+        return;
+    }
+    let fallback = super::SurfaceRoute::surface(super::SurfaceId::from_workspace(
+        app.state.workbench.workspace,
+    ));
+    if let Err(error) = app
+        .state
+        .workbench
+        .replace_route(fallback, super::RouteTransitionSource::User)
+    {
+        app.state.workbench.record_route_diagnostic(format!(
+            "The Project Launcher closed, but its fallback workspace could not be restored: {error}"
+        ));
+    }
+}
+
+/// Continue into an empty/local workspace with one replace transition. A
+/// back traversal followed by a push is not atomic in browsers: the delayed
+/// `popstate` would clear the push and restore the launcher's predecessor.
+fn replace_launcher_with_workspace(app: &mut RSpiceApp, workspace: Workspace) {
+    app.state.workbench.project_launcher_open = false;
+    let destination = super::SurfaceRoute::surface(super::SurfaceId::from_workspace(workspace));
+    if let Err(error) = app
+        .state
+        .workbench
+        .replace_route(destination, super::RouteTransitionSource::User)
+    {
+        app.state.workbench.record_route_diagnostic(format!(
+            "The Project Launcher could not continue into the selected workspace: {error}"
+        ));
+    }
 }
 
 fn launcher_layout(
@@ -2548,6 +2594,75 @@ fn project_path_available(_path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launcher_dismissal_returns_through_canonical_history() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Results);
+        app.state.workbench.open_project_launcher();
+
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            super::super::SurfaceId::ProjectLauncher
+        );
+        assert!(app.state.workbench.project_launcher_open);
+
+        dismiss_launcher(&mut app);
+
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            super::super::SurfaceId::Results
+        );
+        assert!(!app.state.workbench.project_launcher_open);
+    }
+
+    #[test]
+    fn deep_linked_launcher_without_history_dismisses_to_owning_workspace() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .workbench
+            .replace_route(
+                super::super::SurfaceRoute::surface(super::super::SurfaceId::ProjectLauncher),
+                super::super::RouteTransitionSource::BrowserPop,
+            )
+            .expect("Project Launcher has a canonical executor");
+        app.state.workbench.project_launcher_open = true;
+
+        dismiss_launcher(&mut app);
+
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            super::super::SurfaceId::Design
+        );
+        assert!(!app.state.workbench.project_launcher_open);
+    }
+
+    #[test]
+    fn continue_without_project_emits_one_replace_effect_without_a_pop_race() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.clear_browser_history_effects();
+        app.state.workbench.activate(Workspace::Project);
+        assert!(matches!(
+            app.state.workbench.take_browser_history_effect(),
+            Some(super::super::BrowserHistoryEffect::Push(_))
+        ));
+        app.state.workbench.open_project_launcher();
+        assert!(matches!(
+            app.state.workbench.take_browser_history_effect(),
+            Some(super::super::BrowserHistoryEffect::Push(_))
+        ));
+
+        replace_launcher_with_workspace(&mut app, Workspace::Project);
+
+        let destination = super::super::SurfaceRoute::surface(super::super::SurfaceId::Project);
+        assert_eq!(app.state.workbench.current_route(), destination);
+        assert_eq!(
+            app.state.workbench.take_browser_history_effect(),
+            Some(super::super::BrowserHistoryEffect::Replace(destination))
+        );
+        assert!(app.state.workbench.take_browser_history_effect().is_none());
+        assert!(!app.state.workbench.project_launcher_open);
+    }
 
     #[test]
     fn desktop_launcher_matches_the_mockup_surface_contract() {

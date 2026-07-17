@@ -33,6 +33,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     breadcrumb(ui.ctx(), app, content_rect);
     if canvas_document {
         canvas_check_note(ui.ctx(), app, content_rect);
+        if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design {
+            crate::schematic::view::show_mobile_canvas_controls(ui.ctx(), app, content_rect);
+        }
     }
 }
 

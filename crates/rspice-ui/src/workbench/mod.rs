@@ -180,6 +180,17 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         docks::show_drawers(ctx, app, layout);
     }
 
+    // The launcher is a canonical route even though its mockup composition is
+    // an application-modal manager. Browser navigation and restored history
+    // therefore own its lifetime; the transient flag only retains modal focus
+    // state for the current frame.
+    let launcher_route_active =
+        app.state.workbench.current_route().surface_id() == SurfaceId::ProjectLauncher;
+    if launcher_route_active && !app.state.workbench.project_launcher_open {
+        app.state.workbench.open_project_launcher();
+    } else if !launcher_route_active && app.state.workbench.project_launcher_open {
+        app.state.workbench.project_launcher_open = false;
+    }
     project_launcher::show(ctx, app);
     preflight::show(ctx, app);
     notification_center::show(ctx, app);

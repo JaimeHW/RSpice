@@ -1577,7 +1577,8 @@ impl WorkbenchState {
             || self.simulation_workflow.is_some()
             || matches!(
                 self.current_route().surface_id(),
-                SurfaceId::Preferences
+                SurfaceId::ProjectLauncher
+                    | SurfaceId::Preferences
                     | SurfaceId::AccountOrganization
                     | SurfaceId::JobsManager
                     | SurfaceId::SpecialistToolBrowser
@@ -1587,6 +1588,15 @@ impl WorkbenchState {
     }
 
     pub fn open_project_launcher(&mut self) {
+        let route = SurfaceRoute::surface(SurfaceId::ProjectLauncher);
+        if self.current_route() != route
+            && let Err(error) = self.navigate(route, RouteTransitionSource::User)
+        {
+            self.record_route_diagnostic(format!(
+                "The Project Launcher could not be opened: {error}"
+            ));
+            return;
+        }
         self.project_launcher_open = true;
         self.project_launcher_page = ProjectLauncherPage::Projects;
         self.project_launcher_recovery.request_refresh();

@@ -21,6 +21,10 @@ const MODEL_TABLE_MIN_W: f32 = 780.0;
 const MODEL_PHONE_TABLE_MIN_W: f32 = 690.0;
 const GENERAL_TABLE_MIN_W: f32 = 760.0;
 const MODEL_PHONE_BREAKPOINT: f32 = 560.0;
+const MODEL_SUMMARY_BREAKPOINT: f32 = 820.0;
+const MODEL_TABLE_MIN_H: f32 = 120.0;
+const MODEL_WIDE_SUMMARY_H: f32 = 150.0;
+const MODEL_STACKED_SUMMARY_H: f32 = 300.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
@@ -248,7 +252,7 @@ fn models_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(event) = data_table(
         ui,
         "models.catalog",
-        model_catalog_min_width(ui.ctx().content_rect().width()),
+        model_catalog_min_width(ui.available_width()),
         &columns,
         &rows,
         ui.available_size(),
@@ -369,9 +373,7 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let available = ui.available_size();
-    let narrow = available.x <= 820.0 || t.metrics.ctl_h >= 44.0;
-    let summary_h = if narrow { 300.0 } else { 150.0 };
-    let table_h = (available.y - summary_h).max(120.0);
+    let layout = model_table_summary_layout(available, t.metrics.ctl_h >= 44.0);
     let columns = [
         ("Symbol", 0.20),
         ("Model family", 0.17),
@@ -380,15 +382,27 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
         ("Netlist template", 0.17),
         ("Status", 0.09),
     ];
-    if let Some(event) = data_table(
+    let event = table_summary_composition(
         ui,
-        "models.symbols",
-        GENERAL_TABLE_MIN_W,
-        &columns,
-        &rows,
-        egui::vec2(available.x, table_h),
-        "No symbol views are present in the loaded design libraries.",
-    ) && let Some(reference) = targets.get(&event.key).cloned()
+        "models.symbols.composition",
+        available,
+        layout,
+        |ui, table_h| {
+            let event = data_table(
+                ui,
+                "models.symbols",
+                GENERAL_TABLE_MIN_W,
+                &columns,
+                &rows,
+                egui::vec2(ui.available_width(), table_h),
+                "No symbol views are present in the loaded design libraries.",
+            );
+            symbol_summary(ui, stats, layout.narrow);
+            event
+        },
+    );
+    if let Some(event) = event
+        && let Some(reference) = targets.get(&event.key).cloned()
     {
         app.state
             .library_manager
@@ -398,7 +412,6 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.workbench.activate(Workspace::Design);
         }
     }
-    symbol_summary(ui, stats, narrow);
 }
 
 fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -483,9 +496,7 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let available = ui.available_size();
-    let narrow = available.x <= 820.0 || t.metrics.ctl_h >= 44.0;
-    let summary_h = if narrow { 300.0 } else { 150.0 };
-    let table_h = (available.y - summary_h).max(120.0);
+    let layout = model_table_summary_layout(available, t.metrics.ctl_h >= 44.0);
     let columns = [
         ("Corner", 0.11),
         ("NMOS section", 0.16),
@@ -495,22 +506,6 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
         ("Supply factor", 0.13),
         ("Status", 0.10),
     ];
-    if let Some(event) = data_table(
-        ui,
-        "models.corners",
-        GENERAL_TABLE_MIN_W,
-        &columns,
-        &rows,
-        egui::vec2(available.x, table_h),
-        "No process-corner bindings are present in the loaded model libraries.",
-    ) && let Some((library, corner)) = targets.get(&event.key).cloned()
-    {
-        app.state.model_library_manager.select_library(&library);
-        if let Some(library) = app.state.model_library_manager.get_library_mut(&library) {
-            library.select_corner(&corner);
-        }
-    }
-
     let temperature_axis = if temperatures.is_empty() {
         "not declared".to_owned()
     } else {
@@ -522,25 +517,51 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             .join(" / ")
     };
     let supply_axis = format_numeric_axis(&supplies, "× nominal");
-    summary_cards(
+    let event = table_summary_composition(
         ui,
-        narrow,
-        "Binding policy",
-        &[
-            ("Resolved bindings", resolved.to_string()),
-            ("Unresolved bindings", unresolved.to_string()),
-            ("Missing non-TT section", "fail closed".to_owned()),
-        ],
-        "Environment axes",
-        &[
-            ("Temperature", temperature_axis),
-            ("Supply factor", supply_axis),
-            (
-                "PDK search paths",
-                app.state.pdk_config.library_paths.len().to_string(),
-            ),
-        ],
+        "models.corners.composition",
+        available,
+        layout,
+        |ui, table_h| {
+            let event = data_table(
+                ui,
+                "models.corners",
+                GENERAL_TABLE_MIN_W,
+                &columns,
+                &rows,
+                egui::vec2(ui.available_width(), table_h),
+                "No process-corner bindings are present in the loaded model libraries.",
+            );
+            summary_cards(
+                ui,
+                layout.narrow,
+                "Binding policy",
+                &[
+                    ("Resolved bindings", resolved.to_string()),
+                    ("Unresolved bindings", unresolved.to_string()),
+                    ("Missing non-TT section", "fail closed".to_owned()),
+                ],
+                "Environment axes",
+                &[
+                    ("Temperature", temperature_axis),
+                    ("Supply factor", supply_axis),
+                    (
+                        "PDK search paths",
+                        app.state.pdk_config.library_paths.len().to_string(),
+                    ),
+                ],
+            );
+            event
+        },
     );
+    if let Some(event) = event
+        && let Some((library, corner)) = targets.get(&event.key).cloned()
+    {
+        app.state.model_library_manager.select_library(&library);
+        if let Some(library) = app.state.model_library_manager.get_library_mut(&library) {
+            library.select_corner(&corner);
+        }
+    }
 }
 
 fn include_graph(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -828,7 +849,7 @@ fn surface_title(
     has_actions: bool,
     actions: impl FnOnce(&mut Ui),
 ) {
-    let narrow = model_title_actions_stack(ui.ctx().content_rect().width());
+    let narrow = model_title_actions_stack(ui.available_width());
     workspace_title_row(ui, |ui| {
         if narrow {
             ui.vertical(|ui| {
@@ -868,16 +889,66 @@ fn model_tab_strip_height(touch: bool, filter_visible: bool) -> f32 {
     }
 }
 
-fn model_catalog_min_width(viewport_width: f32) -> f32 {
-    if viewport_width <= MODEL_PHONE_BREAKPOINT {
+fn model_catalog_min_width(surface_width: f32) -> f32 {
+    if surface_width <= MODEL_PHONE_BREAKPOINT {
         MODEL_PHONE_TABLE_MIN_W
     } else {
         MODEL_TABLE_MIN_W
     }
 }
 
-fn model_title_actions_stack(viewport_width: f32) -> bool {
-    viewport_width <= MODEL_PHONE_BREAKPOINT
+fn model_title_actions_stack(surface_width: f32) -> bool {
+    surface_width <= MODEL_PHONE_BREAKPOINT
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ModelTableSummaryLayout {
+    narrow: bool,
+    table_height: f32,
+    owns_vertical_scroll: bool,
+}
+
+fn model_table_summary_layout(available: Vec2, touch: bool) -> ModelTableSummaryLayout {
+    let narrow = available.x <= MODEL_SUMMARY_BREAKPOINT || touch;
+    let summary_height = if narrow {
+        MODEL_STACKED_SUMMARY_H
+    } else {
+        MODEL_WIDE_SUMMARY_H
+    };
+    let table_height = (available.y - summary_height).max(MODEL_TABLE_MIN_H);
+    ModelTableSummaryLayout {
+        narrow,
+        table_height,
+        owns_vertical_scroll: available.y < summary_height + MODEL_TABLE_MIN_H,
+    }
+}
+
+fn table_summary_composition<R>(
+    ui: &mut Ui,
+    salt: &'static str,
+    available: Vec2,
+    layout: ModelTableSummaryLayout,
+    content: impl FnOnce(&mut Ui, f32) -> R,
+) -> R {
+    if !layout.owns_vertical_scroll {
+        return content(ui, layout.table_height);
+    }
+
+    let (viewport, _) = ui.allocate_exact_size(available.max(Vec2::splat(1.0)), Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(viewport)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    child.spacing_mut().item_spacing = Vec2::ZERO;
+    ScrollArea::vertical()
+        .id_salt(salt)
+        .auto_shrink([false, false])
+        .show(&mut child, |ui| {
+            ui.set_min_width(viewport.width());
+            content(ui, layout.table_height)
+        })
+        .inner
 }
 
 #[derive(Debug, Clone)]
@@ -1809,6 +1880,33 @@ mod tests {
         assert!(!model_title_actions_stack(820.0));
         assert!(!model_title_actions_stack(561.0));
         assert!(model_title_actions_stack(560.0));
+    }
+
+    #[test]
+    fn symbol_and_corner_compositions_own_overflow_without_changing_desktop_geometry() {
+        let desktop = model_table_summary_layout(egui::vec2(1_120.0, 620.0), false);
+        assert!(!desktop.narrow);
+        assert_eq!(desktop.table_height, 470.0);
+        assert!(!desktop.owns_vertical_scroll);
+
+        let short_desktop = model_table_summary_layout(egui::vec2(1_120.0, 240.0), false);
+        assert!(!short_desktop.narrow);
+        assert_eq!(short_desktop.table_height, MODEL_TABLE_MIN_H);
+        assert!(short_desktop.owns_vertical_scroll);
+
+        let narrow = model_table_summary_layout(egui::vec2(560.0, 500.0), false);
+        assert!(narrow.narrow);
+        assert_eq!(narrow.table_height, 200.0);
+        assert!(!narrow.owns_vertical_scroll);
+
+        let short_narrow = model_table_summary_layout(egui::vec2(560.0, 380.0), false);
+        assert!(short_narrow.narrow);
+        assert_eq!(short_narrow.table_height, MODEL_TABLE_MIN_H);
+        assert!(short_narrow.owns_vertical_scroll);
+
+        let touch = model_table_summary_layout(egui::vec2(1_120.0, 380.0), true);
+        assert!(touch.narrow);
+        assert!(touch.owns_vertical_scroll);
     }
 
     #[test]
