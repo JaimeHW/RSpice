@@ -168,6 +168,20 @@ const XYCE_MEASURE_CONT_STEP_TRAN_MANIFEST_BLAKE3: &str =
     "cf8c3b451cb13d00e97e4e2057eb0502fdcebdf435b44b186bcb450eca539378";
 const XYCE_MEASURE_CONT_STEP_HISTORICAL_PROVENANCE_BLAKE3: &str =
     "d5665d4a8d8ecedf36e5ffb47c53b94a0d9fc867af1afc66076b500d645bd0b5";
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD: &str =
+    "netlists/measure_cont/step/derivtestnoise.cir";
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_SOURCE_BYTES: usize = 5_513;
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_SOURCE_BLAKE3: &str =
+    "0775c53a3da0aaa588a009a4093f8b3b38e6b941fc69fc2c0bf9a29bc973c6af";
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_GS_BYTES: usize = 13_934;
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_GS_BLAKE3: &str =
+    "e7d26b08ac8c3c0b79017e35848e4b40f48fac76bfeaf92c0934ff3879189193";
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA0_BYTES: usize = 2_196;
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA0_BLAKE3: &str =
+    "a93764f361eb2607864158496e2963d9b6c47f88583cf4b6ec0b8605a80a1a86";
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BYTES: usize = 2_138;
+const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BLAKE3: &str =
+    "56423533d5521d52bc2208b8230084e989de77818aadea97bada8e584d6d2b1f";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
@@ -3964,6 +3978,7 @@ struct XyceStaticNoisePlan {
     reference_path: Option<PathBuf>,
     measurement_reference_paths: Vec<PathBuf>,
     continuous_measurement_reference_paths: Vec<PathBuf>,
+    gs_reference_path: Option<PathBuf>,
     measurement_tolerance: XyceFileCompareTolerance,
     output_node: String,
     reference_node: Option<String>,
@@ -6613,6 +6628,18 @@ impl XyceTestRunner {
                 Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
                 Err(dc_reason) => match self.static_noise_plan_for_deck(deck) {
                     Ok(plan) => self.run_static_noise_plan(deck, plan, start),
+                    Err(noise_reason)
+                        if Self::normalize_manifest_key(&deck.relative_path)
+                            == XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD =>
+                    {
+                        self.failure_result(
+                            deck,
+                            start,
+                            "wrapper_scalar_measure_step_noise",
+                            noise_reason,
+                            Vec::new(),
+                        )
+                    }
                     Err(noise_reason) => match self.static_ac_plan_for_deck(deck) {
                         Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
                         Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
@@ -8598,7 +8625,9 @@ impl XyceTestRunner {
             let event_axis = fields
                 .windows(3)
                 .find(|window| {
-                    (window[0].eq_ignore_ascii_case("time") || window[0].eq_ignore_ascii_case("AT"))
+                    (window[0].eq_ignore_ascii_case("time")
+                        || window[0].eq_ignore_ascii_case("AT")
+                        || window[0].eq_ignore_ascii_case("freq"))
                         && window[1] == "="
                 })
                 .map(|window| Self::parse_measurement_reference_token(path, line_number, window[2]))
@@ -8620,6 +8649,161 @@ impl XyceTestRunner {
             ))
         } else {
             Ok(rows)
+        }
+    }
+
+    fn compare_noise_step_gs_semantics(
+        gs: &[XyceMeasureContGsRow],
+        offset: usize,
+        netlist: &Netlist,
+        scalar: &[crate::analysis::MeasureResult],
+        continuous: &[crate::analysis::ContinuousMeasureResult],
+        tolerance: XyceFileCompareTolerance,
+    ) -> Result<usize, String> {
+        for result in continuous {
+            result.validate_invariants().map_err(|error| {
+                format!("continuous result '{}' is invalid: {error}", result.name)
+            })?;
+        }
+        let actual = Self::mixed_measurement_rows(
+            scalar,
+            continuous,
+            &netlist.measurements,
+            "NOISE",
+            "NOISE_CONT",
+        )?;
+        let expected = gs.get(offset..offset + actual.len()).ok_or_else(|| {
+            format!(
+                "GS ended before step projection {offset}..{}",
+                offset + actual.len()
+            )
+        })?;
+        let mut mismatches = Vec::new();
+        for (row, (expected, actual)) in expected.iter().zip(&actual).enumerate() {
+            if !expected.mixed.name.eq_ignore_ascii_case(&actual.name) {
+                return Err(format!(
+                    "GS row {} is '{}' but declaration projection is '{}'",
+                    offset + row,
+                    expected.mixed.name,
+                    actual.name
+                ));
+            }
+            Self::compare_mixed_measurement_value(
+                &mut mismatches,
+                row,
+                &actual.name,
+                expected.mixed.value,
+                actual.value,
+                tolerance,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:trig", actual.name),
+                expected.mixed.trigger_axis,
+                actual.trigger_axis,
+                tolerance,
+            )?;
+            Self::compare_mixed_measurement_metadata(
+                &mut mismatches,
+                row,
+                &format!("{}:targ", actual.name),
+                expected.mixed.target_axis,
+                actual.target_axis,
+                tolerance,
+            )?;
+        }
+
+        let numeric = |value: Option<Value>| {
+            value.map(|value| XyceMeasurementReferenceValue::Numeric {
+                value,
+                quantization: None,
+            })
+        };
+        let mut projected_row = 0usize;
+        let mut scalar_index = 0usize;
+        let mut continuous_index = 0usize;
+        for declaration in &netlist.measurements {
+            if declaration.analysis.eq_ignore_ascii_case("NOISE") {
+                let result = scalar
+                    .get(scalar_index)
+                    .ok_or_else(|| format!("NOISE evaluator omitted '{}'", declaration.name))?;
+                scalar_index += 1;
+                let expected_row = expected.get(projected_row).ok_or_else(|| {
+                    format!("GS ended at scalar declaration '{}'", declaration.name)
+                })?;
+                Self::compare_mixed_measurement_metadata(
+                    &mut mismatches,
+                    projected_row,
+                    &format!("{}:event", declaration.name),
+                    expected_row.event_axis,
+                    numeric(result.event_axis),
+                    tolerance,
+                )?;
+                projected_row += 1;
+                continue;
+            }
+            if !declaration.analysis.eq_ignore_ascii_case("NOISE_CONT") {
+                return Err(format!(
+                    "unexpected measurement analysis '{}' in stepped NOISE GS projection",
+                    declaration.analysis
+                ));
+            }
+            let result = continuous
+                .get(continuous_index)
+                .ok_or_else(|| format!("NOISE_CONT evaluator omitted '{}'", declaration.name))?;
+            continuous_index += 1;
+            let row_count = if result.failure.is_some() {
+                1
+            } else {
+                result.records.len()
+            };
+            for record_index in 0..row_count {
+                let expected_row = expected
+                    .get(projected_row)
+                    .ok_or_else(|| format!("GS ended inside declaration '{}'", declaration.name))?;
+                let actual_axis = result
+                    .records
+                    .get(record_index)
+                    .and_then(|record| record.event_axis)
+                    .or_else(|| {
+                        (result.failure.is_some() && record_index == 0)
+                            .then_some(match &declaration.measure_type {
+                                crate::analysis::MeasureType::Derivative { at, .. }
+                                | crate::analysis::MeasureType::Find { at, .. } => *at,
+                                _ => None,
+                            })
+                            .flatten()
+                    });
+                Self::compare_mixed_measurement_metadata(
+                    &mut mismatches,
+                    projected_row,
+                    &format!("{}:event", declaration.name),
+                    expected_row.event_axis,
+                    numeric(actual_axis),
+                    tolerance,
+                )?;
+                projected_row += 1;
+            }
+        }
+        if scalar_index != scalar.len()
+            || continuous_index != continuous.len()
+            || projected_row != actual.len()
+        {
+            return Err(format!(
+                "stepped NOISE GS projection left rows/results unclaimed: rows={projected_row}/{}, scalar={scalar_index}/{}, continuous={continuous_index}/{}",
+                actual.len(),
+                scalar.len(),
+                continuous.len()
+            ));
+        }
+        if mismatches.is_empty() {
+            Ok(actual.len())
+        } else {
+            Err(format!(
+                "stepped NOISE GS semantic comparison produced {} mismatch(es): {mismatches:?}",
+                mismatches.len()
+            ))
         }
     }
 
@@ -19366,9 +19550,237 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         })
     }
 
+    fn validate_measure_cont_step_noise_deriv_provenance(
+        &self,
+        deck: &XyceDeck,
+    ) -> Result<Vec<u8>, String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path)
+                != XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err(
+                "MEASURE_CONT STEP NOISE derivative record lost exact wrapper ownership".into(),
+            );
+        }
+        let canonical_deck = deck.path.canonicalize().map_err(|error| {
+            format!("failed to canonicalize MEASURE_CONT STEP NOISE record: {error}")
+        })?;
+        let canonical_expected = self
+            .root
+            .join("Netlists/MEASURE_CONT/STEP/DerivTestNoise.cir")
+            .canonicalize()
+            .map_err(|error| {
+                format!("canonical MEASURE_CONT STEP NOISE record is missing: {error}")
+            })?;
+        if canonical_deck != canonical_expected {
+            return Err(
+                "MEASURE_CONT STEP NOISE record resolved outside its canonical corpus path".into(),
+            );
+        }
+
+        self.validate_measure_cont_manifest_family()?;
+        self.validate_measure_cont_family_census(
+            "Netlists/MEASURE_CONT",
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_COUNT,
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_NAMES_BLAKE3,
+            XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_CONTENT_BLAKE3,
+        )?;
+        self.validate_measure_cont_family_census(
+            "OutputData/MEASURE_CONT",
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_COUNT,
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_NAMES_BLAKE3,
+            XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_CONTENT_BLAKE3,
+        )?;
+        self.validate_measure_cont_step_case_sensitive_census()?;
+
+        let source = Self::validate_measure_cont_regular_text_identity(
+            &canonical_expected,
+            (
+                XYCE_MEASURE_CONT_STEP_NOISE_DERIV_SOURCE_BYTES,
+                XYCE_MEASURE_CONT_STEP_NOISE_DERIV_SOURCE_BLAKE3,
+            ),
+            "MEASURE_CONT STEP NOISE derivative source",
+        )?;
+        for (relative, identity, label) in [
+            (
+                "Netlists/MEASURE_CONT/STEP/DerivTestNoiseGSfile",
+                (
+                    XYCE_MEASURE_CONT_STEP_NOISE_DERIV_GS_BYTES,
+                    XYCE_MEASURE_CONT_STEP_NOISE_DERIV_GS_BLAKE3,
+                ),
+                "MEASURE_CONT STEP NOISE derivative GS",
+            ),
+            (
+                "OutputData/MEASURE_CONT/STEP/DerivTestNoise.cir.ma0",
+                (
+                    XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA0_BYTES,
+                    XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA0_BLAKE3,
+                ),
+                "MEASURE_CONT STEP NOISE derivative ma0",
+            ),
+            (
+                "OutputData/MEASURE_CONT/STEP/DerivTestNoise.cir.ma1",
+                (
+                    XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BYTES,
+                    XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BLAKE3,
+                ),
+                "MEASURE_CONT STEP NOISE derivative ma1",
+            ),
+        ] {
+            Self::validate_measure_cont_regular_text_identity(
+                &self.root.join(relative),
+                identity,
+                label,
+            )?;
+        }
+
+        let manifest_path = self.root.join(HARNESS_MANIFEST_FILE);
+        let manifest_bytes = fs::read(&manifest_path)
+            .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+        let canonical_manifest =
+            Self::canonical_lf_text_identity("MEASURE_CONT STEP NOISE manifest", &manifest_bytes)?;
+        let manifest = std::str::from_utf8(&canonical_manifest)
+            .map_err(|error| format!("MEASURE_CONT STEP NOISE manifest is not UTF-8: {error}"))?;
+        let owner = "Netlists/MEASURE_CONT/STEP/DerivTestNoise.cir\trequires_upstream_wrapper";
+        if manifest.lines().filter(|line| *line == owner).count() != 1 {
+            return Err(
+                "MEASURE_CONT STEP NOISE manifest lost its exact case-sensitive owner row".into(),
+            );
+        }
+
+        // Release-7.10.0's 4,973-byte wrapper (SHA-256
+        // f9c11614...5d605465) invokes MeasureCommon.pm and file_compare.pl.
+        // The latter owns the strict 1e-5/1e-3/1e-10 comparison contract;
+        // it does not invoke xyce_verify or perform a remeasure pass.
+        Ok(source)
+    }
+
+    fn validate_measure_cont_step_noise_deriv_plan(
+        netlist: &Netlist,
+        print: Option<&XycePrintRequest>,
+        frequencies: &[Value],
+    ) -> Result<(), String> {
+        let steps = Self::step_commands(netlist)?;
+        let exact_step = matches!(steps.as_slice(), [StepCommand {
+            target: StepTarget::Device,
+            name,
+            param_name: None,
+            sweep: StepSweep::Linear { start, stop, step },
+        }] if name.eq_ignore_ascii_case("RL")
+            && start.to_bits() == 1.0f64.to_bits()
+            && stop.to_bits() == 1.5f64.to_bits()
+            && step.to_bits() == 0.5f64.to_bits());
+        let probes = print
+            .map(|request| {
+                request
+                    .probes
+                    .iter()
+                    .map(|probe| Self::normalize_probe(probe))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let expected_probes = [
+            "vm(3)",
+            "vm(b)",
+            "vm(c)",
+            "vm(d)",
+            "vm(e)",
+            "derivcrossconttest2",
+            "derivcrossconttest3",
+            "derivcrossconttest4",
+            "derivcrossneg2",
+            "derivcrosscontneg2",
+            "derivcrossneg6",
+            "derivcrosscontneg6",
+        ];
+        if !exact_step
+            || probes != expected_probes
+            || frequencies.len() != 61
+            || frequencies.first().map(|value| value.to_bits()) != Some(1.0e-2f64.to_bits())
+            || frequencies
+                .last()
+                .is_none_or(|value| (*value - 10.0).abs() > 1.0e-12)
+            || netlist.options.measure_use_cont_files != Some(false)
+            || netlist.analyses.len() != 2
+            || netlist.output_requests.len() != netlist.measurements.len() + 1
+            || !netlist.diagnostics.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || netlist.elements.len() != 13
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP NOISE exact analysis/step/print/topology contract changed: step={steps:?}, probes={probes:?}, frequencies={:?}/{:?}/{}, use_cont={:?}, analyses={}, outputs={}, measurements={}, diagnostics={}, models={}, subcircuits={}, data={}, elements={}",
+                frequencies.first(),
+                frequencies.last(),
+                frequencies.len(),
+                netlist.options.measure_use_cont_files,
+                netlist.analyses.len(),
+                netlist.output_requests.len(),
+                netlist.measurements.len(),
+                netlist.diagnostics.len(),
+                netlist.models.len(),
+                netlist.subcircuits.len(),
+                netlist.data_tables.len(),
+                netlist.elements.len()
+            ));
+        }
+        let scalar = netlist
+            .measurements
+            .iter()
+            .filter(|statement| statement.analysis.eq_ignore_ascii_case("NOISE"))
+            .count();
+        let continuous = netlist
+            .measurements
+            .iter()
+            .filter(|statement| statement.analysis.eq_ignore_ascii_case("NOISE_CONT"))
+            .count();
+        let derivative = netlist
+            .measurements
+            .iter()
+            .filter(|statement| {
+                matches!(
+                    statement.measure_type,
+                    crate::analysis::MeasureType::Derivative { .. }
+                )
+            })
+            .count();
+        let last = netlist.measurements.last();
+        if scalar != 13
+            || continuous != 32
+            || scalar + continuous != netlist.measurements.len()
+            || derivative != 44
+            || !last.is_some_and(|statement| {
+                statement.analysis.eq_ignore_ascii_case("NOISE")
+                    && statement.name.eq_ignore_ascii_case("lastMeasure")
+                    && matches!(
+                        statement.measure_type,
+                        crate::analysis::MeasureType::Max { .. }
+                    )
+            })
+            || netlist
+                .measurements
+                .iter()
+                .any(|statement| statement.print_policy != crate::analysis::MeasurePrintPolicy::All)
+        {
+            return Err(format!(
+                "MEASURE_CONT STEP NOISE measurement census changed: NOISE={scalar}/13, NOISE_CONT={continuous}/32, DERIV={derivative}/44"
+            ));
+        }
+        Ok(())
+    }
+
     fn static_noise_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticNoisePlan, String> {
-        let source =
-            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        let qualified_step_cont_derivative = Self::normalize_manifest_key(&deck.relative_path)
+            == XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD;
+        let source = if qualified_step_cont_derivative {
+            let bytes = self.validate_measure_cont_step_noise_deriv_provenance(deck)?;
+            String::from_utf8(bytes)
+                .map_err(|error| format!("MEASURE_CONT STEP NOISE source is not UTF-8: {error}"))?
+        } else {
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?
+        };
         // The static-contract probes run in sequence for every corpus deck.
         // Fail closed before parsing an unrelated deck: some upstream stress
         // fixtures intentionally describe enormous circuits and must only be
@@ -19409,21 +19821,33 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let (output_node, reference_node, input_source, frequencies) =
             Self::noise_analysis_for_netlist(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        if !steps.is_empty()
-            && netlist.measurements.iter().any(|measurement| {
-                measurement.analysis.eq_ignore_ascii_case("NOISE")
-                    && matches!(
-                        measurement.measure_type,
-                        crate::analysis::MeasureType::Derivative { .. }
-                    )
-            })
-        {
+        let has_scalar_derivative = netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("NOISE")
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Derivative { .. }
+                )
+        });
+        let has_continuous_derivative = netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("NOISE_CONT")
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Derivative { .. }
+                )
+        });
+        if !steps.is_empty() && has_scalar_derivative && !has_continuous_derivative {
             return Err(
-                "native .STEP NOISE DERIV measurements are not yet qualified to Xyce precision"
+                "native scalar-only .STEP NOISE DERIV measurements are not yet qualified to Xyce precision"
                     .to_string(),
             );
         }
-
+        if qualified_step_cont_derivative {
+            Self::validate_measure_cont_step_noise_deriv_plan(
+                &netlist,
+                print.as_ref(),
+                &frequencies,
+            )?;
+        }
         let use_continuous_files = netlist.options.measure_use_cont_files();
         let measurement_reference_paths = if netlist.measurements.iter().any(|measurement| {
             measurement.print_policy == crate::analysis::MeasurePrintPolicy::All
@@ -19446,7 +19870,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string(),
             );
         }
-        let measurement_tolerance = if netlist.measurements.iter().any(|measurement| {
+        let measurement_tolerance = if qualified_step_cont_derivative {
+            // Both the aggregate measurement files and the captured stdout
+            // were checked by Release 7.10's file_compare.pl contract.
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT
+        } else if netlist.measurements.iter().any(|measurement| {
             (measurement.analysis.eq_ignore_ascii_case("NOISE")
                 || measurement.analysis.eq_ignore_ascii_case("NOISE_CONT"))
                 && matches!(
@@ -19495,6 +19923,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             reference_path,
             measurement_reference_paths,
             continuous_measurement_reference_paths,
+            gs_reference_path: qualified_step_cont_derivative.then(|| {
+                self.root
+                    .join("Netlists/MEASURE_CONT/STEP/DerivTestNoiseGSfile")
+            }),
             measurement_tolerance,
             output_node,
             reference_node,
@@ -22647,6 +23079,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             );
         }
 
+        let gs_rows = match plan.gs_reference_path.as_deref() {
+            Some(path) => match Self::parse_measure_cont_gs_file(path) {
+                Ok(rows) => Some(rows),
+                Err(error) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("stepped NOISE GS oracle is invalid: {error}"),
+                        Vec::new(),
+                    );
+                }
+            },
+            None => None,
+        };
+        let mut gs_offset = 0usize;
+
         let engine = self.create_xyce_engine();
         let mut all_mismatches = Vec::new();
         for (step_index, (run, reference_path)) in step_runs
@@ -22743,7 +23192,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     &run.netlist,
                     &results,
                 );
-                self.compare_mixed_measurement_references(
+                let comparison = self.compare_mixed_measurement_references(
                     std::slice::from_ref(reference_path),
                     &measurements,
                     &continuous,
@@ -22751,7 +23200,32 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     &run.netlist.measurements,
                     "NOISE",
                     "NOISE_CONT",
-                )
+                );
+                if let (Ok(_), Some(gs)) = (&comparison, gs_rows.as_deref()) {
+                    match Self::compare_noise_step_gs_semantics(
+                        gs,
+                        gs_offset,
+                        &run.netlist,
+                        &measurements,
+                        &continuous,
+                        plan.measurement_tolerance,
+                    ) {
+                        Ok(consumed) => gs_offset += consumed,
+                        Err(error) => {
+                            return self.failure_result(
+                                deck,
+                                start,
+                                contract,
+                                format!(
+                                    "NOISE step {} GS comparison error: {error}",
+                                    step_index + 1
+                                ),
+                                Vec::new(),
+                            );
+                        }
+                    }
+                }
+                comparison
             };
             let mut mismatches = match comparison {
                 Ok(mismatches) => mismatches,
@@ -22776,6 +23250,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 all_mismatches.truncate(self.config.max_mismatches);
                 break;
             }
+        }
+
+        if let Some(gs) = gs_rows.as_deref()
+            && gs_offset != gs.len()
+        {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "stepped NOISE GS oracle left rows unclaimed: consumed {gs_offset}/{}",
+                    gs.len()
+                ),
+                Vec::new(),
+            );
         }
 
         if all_mismatches.is_empty() {
@@ -84005,5 +84494,39 @@ R2 2 0 1
                 canonical
             );
         }
+    }
+
+    #[test]
+    fn noise_gs_parser_preserves_frequency_at_and_failure_metadata() {
+        let path =
+            std::env::temp_dir().join(format!("rspice-noise-gs-parser-{}.txt", std::process::id()));
+        fs::write(
+            &path,
+            "DERIVWHEN = 1.250000e+00 at freq = 2.500000e+00\n\
+             DERIVAT = -3.000000e+00 for AT = 4.000000e+00\n\
+             DERIVFAIL = 0.000000e+00 FAILED\n",
+        )
+        .expect("write NOISE GS parser fixture");
+
+        let rows = XyceTestRunner::parse_measure_cont_gs_file(&path)
+            .expect("parse NOISE frequency-bearing GS rows");
+        fs::remove_file(path).expect("remove NOISE GS parser fixture");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[0].event_axis,
+            Some(XyceMeasurementReferenceValue::Numeric {
+                value: 2.5,
+                quantization: Some(1.0e-6),
+            })
+        );
+        assert_eq!(
+            rows[1].event_axis,
+            Some(XyceMeasurementReferenceValue::Numeric {
+                value: 4.0,
+                quantization: Some(1.0e-6),
+            })
+        );
+        assert_eq!(rows[2].event_axis, None);
+        assert_eq!(rows[2].mixed.value, XyceMeasurementReferenceValue::Failed);
     }
 }
