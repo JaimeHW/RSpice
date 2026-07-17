@@ -8,7 +8,8 @@
 
 use krilla::color::rgb;
 use krilla::configure::{Archival, ConfigurationBuilder};
-use krilla::geom::Point;
+use krilla::geom::{Point, Size, Transform};
+use krilla::image::Image;
 use krilla::metadata::{DateTime, Metadata, PageLayout};
 use krilla::page::PageSettings;
 use krilla::paint::Fill;
@@ -18,8 +19,9 @@ use sha2::{Digest as _, Sha256};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::report_document::{
-    ProseStyle, ReportBlockId, ReportBlockKind, ReportDocument, ReportPage, ReportReferenceMode,
-    ReportSourceId, RequirementDisposition, ReviewNoteStatus, SpecificationDisposition, TableCell,
+    FigureSizing, PlotFigureBlock, ProseStyle, ReportBlockId, ReportBlockKind, ReportDocument,
+    ReportPage, ReportReferenceMode, ReportSourceId, RequirementDisposition, ReviewNoteStatus,
+    SpecificationDisposition, TableCell,
 };
 use crate::product::{ContentDigest, ObjectRevision};
 
@@ -36,8 +38,13 @@ const MAX_AUTHOR_BYTES: usize = 512;
 pub const MAX_REPORT_PDFA_SOURCE_TEXT_BYTES: usize = 4 * 1_048_576;
 /// Maximum aggregate table cells traversed by one PDF/A publication.
 pub const MAX_REPORT_PDFA_TABLE_CELLS: usize = 250_000;
+/// Maximum aggregate decoded raster pixels accepted by one PDF/A publication.
+pub const MAX_REPORT_PDFA_RASTER_PIXELS: usize = 100_000_000;
 /// Maximum serialized size of one PDF/A publication artifact.
 pub const MAX_REPORT_PDFA_ARTIFACT_BYTES: usize = 64 * 1_048_576;
+
+const MAX_FIGURE_HEIGHT: f32 = 560.0;
+const NATURAL_RASTER_POINTS_PER_PIXEL: f32 = 0.75;
 
 // IBM Plex is licensed for embedding under the SIL Open Font License 1.1;
 // the license is retained at assets/fonts/OFL-IBMPlex.txt.
@@ -198,6 +205,18 @@ pub enum ReportPdfAError {
         "plot figure block {block_id} cannot be published until its exact vector or raster artwork is resolved"
     )]
     UnresolvedPlotFigure { block_id: ReportBlockId },
+    #[error(
+        "plot figure block {block_id} uses unsupported PDF/A artwork media type `{media_type}`; use an opaque PNG or JPEG"
+    )]
+    UnsupportedPlotFigureMediaType {
+        block_id: ReportBlockId,
+        media_type: String,
+    },
+    #[error("plot figure block {block_id} contains invalid raster artwork: {detail}")]
+    InvalidPlotFigureArtwork {
+        block_id: ReportBlockId,
+        detail: String,
+    },
     #[error("embedded report font {0} is invalid")]
     InvalidEmbeddedFont(&'static str),
     #[error("could not configure PDF/A-2b validation: {0}")]
@@ -270,7 +289,7 @@ pub fn serialize_report_pdfa_2b(
         render_cover(&mut paginator, report);
         for page in report.pages() {
             paginator.begin_logical_page(page.title());
-            render_report_page(&mut paginator, page);
+            render_report_page(&mut paginator, page)?;
         }
         paginator.finish();
     }
@@ -302,6 +321,7 @@ fn preflight(report: &ReportDocument) -> Result<(), ReportPdfAError> {
 struct PublicationWorkload {
     source_text_bytes: usize,
     table_cells: usize,
+    raster_pixels: usize,
 }
 
 impl PublicationWorkload {
@@ -349,14 +369,39 @@ impl PublicationWorkload {
         Ok(())
     }
 
+    fn add_raster_pixels(&mut self, count: u64) -> Result<(), ReportPdfAError> {
+        let count = usize::try_from(count).map_err(|_| ReportPdfAError::ResourceLimit {
+            scope: "decoded raster pixels",
+            maximum: MAX_REPORT_PDFA_RASTER_PIXELS,
+        })?;
+        self.raster_pixels =
+            self.raster_pixels
+                .checked_add(count)
+                .ok_or(ReportPdfAError::ResourceLimit {
+                    scope: "decoded raster pixels",
+                    maximum: MAX_REPORT_PDFA_RASTER_PIXELS,
+                })?;
+        if self.raster_pixels > MAX_REPORT_PDFA_RASTER_PIXELS {
+            return Err(ReportPdfAError::ResourceLimit {
+                scope: "decoded raster pixels",
+                maximum: MAX_REPORT_PDFA_RASTER_PIXELS,
+            });
+        }
+        Ok(())
+    }
+
     fn add_block(
         &mut self,
         block_id: ReportBlockId,
         kind: &ReportBlockKind,
     ) -> Result<(), ReportPdfAError> {
         match kind {
-            ReportBlockKind::PlotFigure(_) => {
-                return Err(ReportPdfAError::UnresolvedPlotFigure { block_id });
+            ReportBlockKind::PlotFigure(block) => {
+                self.add_text(&block.caption)?;
+                self.add_text(&block.alternative_text)?;
+                self.add_reference(&block.reference)?;
+                let resolved = resolve_plot_figure(block_id, block)?;
+                self.add_raster_pixels(resolved.pixel_count())?;
             }
             ReportBlockKind::DataTable(block) => {
                 self.add_text(&block.title)?;
@@ -515,6 +560,25 @@ struct PlacedLine {
     y: f32,
 }
 
+struct PlacedImage {
+    image: Image,
+    size: Size,
+    y: f32,
+}
+
+struct ResolvedPlotFigure {
+    image: Image,
+    width_pixels: u32,
+    height_pixels: u32,
+    size: Size,
+}
+
+impl ResolvedPlotFigure {
+    fn pixel_count(&self) -> u64 {
+        u64::from(self.width_pixels) * u64::from(self.height_pixels)
+    }
+}
+
 struct Paginator<'a> {
     document: &'a mut Document,
     fonts: &'a Fonts,
@@ -523,6 +587,7 @@ struct Paginator<'a> {
     logical_page_title: String,
     publication_date: ReportPublicationDate,
     lines: Vec<PlacedLine>,
+    images: Vec<PlacedImage>,
     next_y: f32,
     page_number: usize,
 }
@@ -543,6 +608,7 @@ impl<'a> Paginator<'a> {
             logical_page_title: "Cover".to_owned(),
             publication_date,
             lines: Vec::new(),
+            images: Vec::new(),
             next_y: BODY_TOP,
             page_number: 0,
         }
@@ -571,15 +637,34 @@ impl<'a> Paginator<'a> {
     }
 
     fn spacer(&mut self, points: f32) {
-        if self.next_y + points > BODY_BOTTOM && !self.lines.is_empty() {
+        if self.next_y + points > BODY_BOTTOM && self.has_content() {
             self.flush();
         } else {
             self.next_y += points;
         }
     }
 
+    fn emit_image(&mut self, image: Image, size: Size) {
+        const TOP_GAP: f32 = 8.0;
+        let needed = TOP_GAP + size.height();
+        if self.next_y + needed > BODY_BOTTOM && self.has_content() {
+            self.flush();
+        }
+        self.next_y += TOP_GAP;
+        self.images.push(PlacedImage {
+            image,
+            size,
+            y: self.next_y,
+        });
+        self.next_y += size.height();
+    }
+
+    fn has_content(&self) -> bool {
+        !self.lines.is_empty() || !self.images.is_empty()
+    }
+
     fn flush(&mut self) {
-        if self.lines.is_empty() {
+        if !self.has_content() {
             return;
         }
         self.page_number += 1;
@@ -603,6 +688,11 @@ impl<'a> Paginator<'a> {
             &self.logical_page_title,
             Ink::Muted,
         );
+        for placed in &self.images {
+            surface.push_transform(&Transform::from_translate(MARGIN_X, placed.y));
+            surface.draw_image(placed.image.clone(), placed.size);
+            surface.pop();
+        }
         for line in &self.lines {
             let (font, ink) = match line.style {
                 LineStyle::Title | LineStyle::PageTitle | LineStyle::Section => {
@@ -647,6 +737,7 @@ impl<'a> Paginator<'a> {
         surface.finish();
         page.finish();
         self.lines.clear();
+        self.images.clear();
         self.next_y = BODY_TOP;
     }
 
@@ -681,7 +772,10 @@ fn render_cover(paginator: &mut Paginator<'_>, report: &ReportDocument) {
     );
 }
 
-fn render_report_page(paginator: &mut Paginator<'_>, page: &ReportPage) {
+fn render_report_page(
+    paginator: &mut Paginator<'_>,
+    page: &ReportPage,
+) -> Result<(), ReportPdfAError> {
     paginator.emit(
         &format!(
             "Page identity {} · revision {} · update policy {:?}",
@@ -696,7 +790,7 @@ fn render_report_page(paginator: &mut Paginator<'_>, page: &ReportPage) {
             "No report sections in this governed revision.",
             LineStyle::Body,
         );
-        return;
+        return Ok(());
     }
     for section in page.sections() {
         paginator.emit(section.title(), LineStyle::Section);
@@ -715,7 +809,7 @@ fn render_report_page(paginator: &mut Paginator<'_>, page: &ReportPage) {
             );
         }
         for block in section.blocks() {
-            render_block(paginator, block.kind());
+            render_block(paginator, block.id(), block.kind())?;
             paginator.emit(
                 &format!("Block {} · revision {}", block.id(), block.revision().get()),
                 LineStyle::Detail,
@@ -723,11 +817,22 @@ fn render_report_page(paginator: &mut Paginator<'_>, page: &ReportPage) {
             paginator.spacer(4.0);
         }
     }
+    Ok(())
 }
 
-fn render_block(paginator: &mut Paginator<'_>, kind: &ReportBlockKind) {
+fn render_block(
+    paginator: &mut Paginator<'_>,
+    block_id: ReportBlockId,
+    kind: &ReportBlockKind,
+) -> Result<(), ReportPdfAError> {
     match kind {
-        ReportBlockKind::PlotFigure(_) => unreachable!("plot figures are rejected by preflight"),
+        ReportBlockKind::PlotFigure(block) => {
+            let resolved = resolve_plot_figure(block_id, block)?;
+            paginator.emit(&block.caption, LineStyle::Section);
+            paginator.emit_image(resolved.image, resolved.size);
+            paginator.emit(&block.alternative_text, LineStyle::Detail);
+            render_reference(paginator, &block.reference);
+        }
         ReportBlockKind::DataTable(block) => {
             paginator.emit(&block.title, LineStyle::Section);
             let headings = block
@@ -837,6 +942,85 @@ fn render_block(paginator: &mut Paginator<'_>, kind: &ReportBlockKind) {
             render_reference(paginator, &block.reference);
         }
     }
+    Ok(())
+}
+
+fn resolve_plot_figure(
+    block_id: ReportBlockId,
+    block: &PlotFigureBlock,
+) -> Result<ResolvedPlotFigure, ReportPdfAError> {
+    let artifact = block
+        .reference
+        .frozen_artifact()
+        .ok_or(ReportPdfAError::UnresolvedPlotFigure { block_id })?;
+    let payload = artifact.payload().to_vec();
+    let image = match artifact.media_type() {
+        "image/png" => {
+            let reader = png::Decoder::new(std::io::Cursor::new(payload.as_slice()))
+                .read_info()
+                .map_err(|error| ReportPdfAError::InvalidPlotFigureArtwork {
+                    block_id,
+                    detail: error.to_string(),
+                })?;
+            let info = reader.info();
+            if matches!(
+                info.color_type,
+                png::ColorType::GrayscaleAlpha | png::ColorType::Rgba
+            ) || info.trns.is_some()
+            {
+                return Err(ReportPdfAError::InvalidPlotFigureArtwork {
+                    block_id,
+                    detail: "PDF/A-2b plot artwork must not use a PNG alpha channel".to_owned(),
+                });
+            }
+            if info.bit_depth == png::BitDepth::Sixteen {
+                return Err(ReportPdfAError::InvalidPlotFigureArtwork {
+                    block_id,
+                    detail: "PDF/A-2b plot artwork must use at most 8 bits per component"
+                        .to_owned(),
+                });
+            }
+            Image::from_png(payload.into(), false)
+        }
+        "image/jpeg" => Image::from_jpeg(payload.into(), false),
+        media_type => {
+            return Err(ReportPdfAError::UnsupportedPlotFigureMediaType {
+                block_id,
+                media_type: media_type.to_owned(),
+            });
+        }
+    }
+    .map_err(|detail| ReportPdfAError::InvalidPlotFigureArtwork { block_id, detail })?;
+    let (width_pixels, height_pixels) = image.size();
+    let (natural_width, natural_height) = match block.sizing {
+        FigureSizing::Natural => (
+            width_pixels as f32 * NATURAL_RASTER_POINTS_PER_PIXEL,
+            height_pixels as f32 * NATURAL_RASTER_POINTS_PER_PIXEL,
+        ),
+        FigureSizing::FitWidth | FigureSizing::FitPage => {
+            (width_pixels as f32, height_pixels as f32)
+        }
+    };
+    let width_scale = CONTENT_WIDTH / natural_width;
+    let height_scale = MAX_FIGURE_HEIGHT / natural_height;
+    let scale = match block.sizing {
+        FigureSizing::Natural => 1.0_f32.min(width_scale).min(height_scale),
+        FigureSizing::FitWidth => width_scale.min(height_scale),
+        FigureSizing::FitPage => width_scale.min(height_scale).min(1.0),
+    };
+    let width = natural_width * scale;
+    let height = natural_height * scale;
+    let size =
+        Size::from_wh(width, height).ok_or_else(|| ReportPdfAError::InvalidPlotFigureArtwork {
+            block_id,
+            detail: "decoded image dimensions cannot be represented on the PDF page".to_owned(),
+        })?;
+    Ok(ResolvedPlotFigure {
+        image,
+        width_pixels,
+        height_pixels,
+        size,
+    })
 }
 
 fn render_reference(paginator: &mut Paginator<'_>, reference: &ReportReferenceMode) {
@@ -1075,8 +1259,10 @@ mod tests {
     use lopdf::{Document as ParsedPdf, Object};
 
     use super::*;
+    use crate::product::ResultDocumentId;
     use crate::results::report_document::{
-        ProseBlock, ReportEdit, ReportEntityRef, ReportPageUpdatePolicy,
+        FrozenReportArtifact, PlotFigureBlock, ProseBlock, ReportEdit, ReportEntityRef,
+        ReportPageUpdatePolicy, ReportReferenceSnapshot,
     };
 
     fn publication_options() -> ReportPdfAOptions {
@@ -1144,6 +1330,74 @@ mod tests {
         report
     }
 
+    fn reference_snapshot() -> ReportReferenceSnapshot {
+        ReportReferenceSnapshot::new(
+            ReportSourceId::VisualizationDocument {
+                document_id: ResultDocumentId::new(),
+            },
+            Some(ObjectRevision::INITIAL),
+            ContentDigest::from_bytes([0xA5; 32]),
+            Vec::new(),
+        )
+        .unwrap()
+    }
+
+    fn figure_report(reference: ReportReferenceMode) -> (ReportDocument, ReportBlockId) {
+        let mut report = prose_report();
+        let section_id = report.pages()[0].sections()[0].id();
+        let receipt = report
+            .transact(
+                report.revision(),
+                vec![ReportEdit::AddBlock {
+                    section_id,
+                    kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
+                        caption: "Closed-loop gain and phase".to_owned(),
+                        alternative_text:
+                            "Gain remains above 20 dB through the retained measurement band."
+                                .to_owned(),
+                        sizing: FigureSizing::FitWidth,
+                        reference,
+                    }),
+                }],
+                4,
+            )
+            .unwrap();
+        let block_id = receipt
+            .created
+            .iter()
+            .find_map(|entity| match entity {
+                ReportEntityRef::Block(id) => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        (report, block_id)
+    }
+
+    fn encoded_png(color_type: png::ColorType) -> Vec<u8> {
+        let channels = match color_type {
+            png::ColorType::Rgb => 3,
+            png::ColorType::Rgba => 4,
+            _ => panic!("test helper only supports RGB and RGBA"),
+        };
+        let mut pixels = Vec::with_capacity(8 * channels);
+        for index in 0..8_u8 {
+            pixels.extend_from_slice(&[16 + index, 48 + index, 96 + index]);
+            if channels == 4 {
+                pixels.push(u8::MAX);
+            }
+        }
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut encoded, 4, 2);
+            encoder.set_color(color_type);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&pixels).unwrap();
+            writer.finish().unwrap();
+        }
+        encoded
+    }
+
     fn catalog(pdf: &ParsedPdf) -> &lopdf::Dictionary {
         let root_id = pdf.trailer.get(b"Root").unwrap().as_reference().unwrap();
         pdf.get_object(root_id).unwrap().as_dict().unwrap()
@@ -1208,6 +1462,70 @@ mod tests {
 
         let expected = ContentDigest::from_bytes(Sha256::digest(artifact.bytes()).into());
         assert_eq!(artifact.digest(), expected);
+    }
+
+    #[test]
+    fn writer_embeds_authenticated_opaque_plot_artwork_and_visible_description() {
+        let reference = ReportReferenceMode::Frozen {
+            snapshot: reference_snapshot(),
+            artifact: FrozenReportArtifact::new("image/png", encoded_png(png::ColorType::Rgb))
+                .unwrap(),
+        };
+        let (report, _) = figure_report(reference);
+        let artifact = serialize_report_pdfa_2b(&report, &publication_options()).unwrap();
+        let parsed = ParsedPdf::load_mem(artifact.bytes()).unwrap();
+        let pages = parsed.get_pages();
+        let text = parsed
+            .extract_text(&pages.keys().copied().collect::<Vec<_>>())
+            .unwrap();
+        assert!(text.contains("Closed-loop gain and phase"));
+        assert!(text.contains("Gain remains above 20 dB"));
+        assert!(String::from_utf8_lossy(artifact.bytes()).contains("/Subtype /Image"));
+
+        let repeated = serialize_report_pdfa_2b(&report, &publication_options()).unwrap();
+        assert_eq!(artifact, repeated);
+    }
+
+    #[test]
+    fn plot_artwork_fails_closed_when_linked_unsupported_invalid_or_transparent() {
+        let (linked, linked_id) = figure_report(ReportReferenceMode::Linked {
+            snapshot: reference_snapshot(),
+        });
+        assert!(matches!(
+            serialize_report_pdfa_2b(&linked, &publication_options()),
+            Err(ReportPdfAError::UnresolvedPlotFigure { block_id }) if block_id == linked_id
+        ));
+
+        let (unsupported, unsupported_id) = figure_report(ReportReferenceMode::Frozen {
+            snapshot: reference_snapshot(),
+            artifact: FrozenReportArtifact::new("image/svg+xml", b"<svg/>".to_vec()).unwrap(),
+        });
+        assert!(matches!(
+            serialize_report_pdfa_2b(&unsupported, &publication_options()),
+            Err(ReportPdfAError::UnsupportedPlotFigureMediaType { block_id, .. })
+                if block_id == unsupported_id
+        ));
+
+        let (invalid, invalid_id) = figure_report(ReportReferenceMode::Frozen {
+            snapshot: reference_snapshot(),
+            artifact: FrozenReportArtifact::new("image/png", b"not a PNG".to_vec()).unwrap(),
+        });
+        assert!(matches!(
+            serialize_report_pdfa_2b(&invalid, &publication_options()),
+            Err(ReportPdfAError::InvalidPlotFigureArtwork { block_id, .. })
+                if block_id == invalid_id
+        ));
+
+        let (transparent, transparent_id) = figure_report(ReportReferenceMode::Frozen {
+            snapshot: reference_snapshot(),
+            artifact: FrozenReportArtifact::new("image/png", encoded_png(png::ColorType::Rgba))
+                .unwrap(),
+        });
+        assert!(matches!(
+            serialize_report_pdfa_2b(&transparent, &publication_options()),
+            Err(ReportPdfAError::InvalidPlotFigureArtwork { block_id, detail })
+                if block_id == transparent_id && detail.contains("alpha channel")
+        ));
     }
 
     #[test]
@@ -1279,6 +1597,20 @@ mod tests {
             Err(ReportPdfAError::ResourceLimit {
                 scope: "table cells",
                 maximum: MAX_REPORT_PDFA_TABLE_CELLS,
+            })
+        ));
+
+        let mut raster_workload = PublicationWorkload::default();
+        assert!(
+            raster_workload
+                .add_raster_pixels(MAX_REPORT_PDFA_RASTER_PIXELS as u64)
+                .is_ok()
+        );
+        assert!(matches!(
+            raster_workload.add_raster_pixels(1),
+            Err(ReportPdfAError::ResourceLimit {
+                scope: "decoded raster pixels",
+                maximum: MAX_REPORT_PDFA_RASTER_PIXELS,
             })
         ));
     }
