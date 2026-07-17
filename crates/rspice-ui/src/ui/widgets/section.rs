@@ -28,6 +28,15 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
         ui.fonts_mut(|f| f.layout_job(job))
     };
 
+    let action_galley = action.map(|action_label| {
+        ui.fonts_mut(|f| {
+            f.layout_no_wrap(
+                action_label.to_owned(),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                c.text_faint,
+            )
+        })
+    });
     let width = ui.available_width();
     let height = title_galley.size().y + 9.0 + 5.0;
     let (rect, heading_response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
@@ -42,20 +51,23 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
 
     let painter = ui.painter();
     let baseline_y = rect.top() + 9.0;
-    painter.galley(
+    let title_right = action_galley
+        .as_ref()
+        .map_or(rect.right() - 12.0, |galley| {
+            rect.right() - 12.0 - galley.size().x - 12.0 - 6.0
+        });
+    let title_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 12.0, rect.top()),
+        egui::pos2(title_right.max(rect.left() + 12.0), rect.bottom()),
+    );
+    painter.with_clip_rect(title_rect).galley(
         egui::pos2(rect.left() + 12.0, baseline_y),
         title_galley,
         c.text_faint,
     );
 
     let action_label = action?;
-    let action_galley = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            action_label.to_owned(),
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            c.text_faint,
-        )
-    });
+    let action_galley = action_galley.expect("an action label always has a measured galley");
     let action_rect = egui::Rect::from_min_size(
         egui::pos2(
             rect.right() - 12.0 - action_galley.size().x - 12.0,

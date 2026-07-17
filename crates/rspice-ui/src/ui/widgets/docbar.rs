@@ -1,4 +1,4 @@
-//! Document toolbar — the 34 px strip at the top of each center view holding
+//! Document toolbar — the compact strip at the top of a center view holding
 //! the breadcrumb and view-local actions.
 
 use egui::{InnerResponse, Ui, vec2};
@@ -8,15 +8,41 @@ use crate::ui::tokens::{self, Tokens};
 
 /// Height of the document bar.
 pub const DOCBAR_HEIGHT: f32 = 34.0;
+const COMPACT_DOCBAR_INSET: f32 = 10.0;
+const RESULTS_DOCBAR_INSET: f32 = 8.0;
 
 /// Render a document bar across the available width. The closure lays out the
 /// bar's content left-to-right; use `ui.add_space(ui.available_width() - …)`
 /// or a right-to-left child for trailing actions.
 pub fn docbar<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
+    docbar_with_geometry(ui, DOCBAR_HEIGHT, COMPACT_DOCBAR_INSET, add_contents)
+}
+
+/// Render a document bar with a surface-specific height.
+///
+/// Results uses the mockup's 41 px desktop / 39 px phone strip, while compact
+/// editor surfaces retain [`DOCBAR_HEIGHT`]. Keeping allocation and painting
+/// here guarantees the border remains part of the exact owned height.
+pub fn docbar_at_height<R>(
+    ui: &mut Ui,
+    height: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> InnerResponse<R> {
+    docbar_with_geometry(ui, height, RESULTS_DOCBAR_INSET, add_contents)
+}
+
+fn docbar_with_geometry<R>(
+    ui: &mut Ui,
+    height: f32,
+    horizontal_inset: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> InnerResponse<R> {
+    debug_assert!(height.is_finite() && height > 0.0);
+    debug_assert!(horizontal_inset.is_finite() && horizontal_inset >= 0.0);
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, DOCBAR_HEIGHT), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
 
     let painter = ui.painter();
     painter.rect_filled(rect, 0.0, c.bg_panel);
@@ -26,7 +52,7 @@ pub fn docbar<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerR
         egui::Stroke::new(1.0, c.border),
     );
 
-    let content_rect = rect.shrink2(vec2(10.0, 0.0));
+    let content_rect = rect.shrink2(vec2(horizontal_inset, 0.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(content_rect)

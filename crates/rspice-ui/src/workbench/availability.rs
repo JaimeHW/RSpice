@@ -116,6 +116,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui persistent Visualization Studio result-document executor",
             evidence_boundary: "Versioned pane composition, native waveform/Bode/spectrum/Smith/table/histogram/eye/pole-zero viewers, exact source-row inspection, cursor/marker/annotation entities, retained-run overlays, display LOD policy, and CSV/Touchstone/PNG export are executable. Catalog viewers without a compatible native renderer or qualified external producer remain explicitly unavailable and never receive fabricated fallback data.",
         },
+        SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui retained notification and activity center",
+            evidence_boundary: "Filtering, read state, retention disclosure, notification settings routing, and clearing retained read activity operate on the real device-local activity stream; no external approval or remote background service is inferred.",
+        },
         SurfaceId::FeatureAvailability => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui capability and platform matrix manager",
             evidence_boundary: "Read-only disclosure executor present; bundled design fixtures are not product readiness evidence.",
@@ -169,6 +173,7 @@ mod tests {
                 SurfaceId::Preferences,
                 SurfaceId::AccountOrganization,
                 SurfaceId::JobsManager,
+                SurfaceId::NotificationCenter,
                 SurfaceId::FeatureAvailability,
                 SurfaceId::SpecialistToolBrowser,
             ]

@@ -826,7 +826,7 @@ fn property_row_with_tone(
     response.on_hover_text(format!("{full_label}: {full_value}"))
 }
 
-fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+pub(crate) fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
     if max_width <= 0.0 {
         return String::new();
     }

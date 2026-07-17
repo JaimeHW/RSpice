@@ -2314,11 +2314,25 @@ fn workflow_checkbox(ui: &mut Ui, label: &str, value: &mut bool) {
 
 fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
     if let Some(error) = error {
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(error)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(Tokens::get(ui.ctx()).color.err),
+        let t = Tokens::get(ui.ctx());
+        let response = egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(error)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.err),
+                    )
+                    .wrap(),
+                );
+            })
+            .response;
+        ui.painter().hline(
+            response.rect.x_range(),
+            response.rect.top(),
+            Stroke::new(1.0, t.color.border),
         );
     }
 }
@@ -2696,22 +2710,82 @@ fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) 
         .inner_margin(egui::Margin::symmetric(8, 6))
         .show(ui, |ui| {
             ui.set_width(content_width);
-            ui.horizontal_wrapped(|ui| {
-                status_dot(
-                    ui,
-                    if valid { t.color.ok } else { t.color.err },
-                    if valid {
-                        "Analysis configuration valid"
-                    } else {
-                        "Analysis configuration blocked"
-                    },
+            let status = if valid {
+                "Analysis configuration valid"
+            } else {
+                "Analysis configuration blocked"
+            };
+            let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+            let detail_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+            let status_galley =
+                ui.painter()
+                    .layout_no_wrap(status.to_owned(), status_font, t.color.text_dim);
+            let detail_galley =
+                ui.painter()
+                    .layout_no_wrap(note.to_owned(), detail_font.clone(), t.color.text_dim);
+            let status_text_width = status_galley.size().x;
+            let detail_width = detail_galley.size().x;
+            let status_gap = ui.spacing().item_spacing.x;
+            let status_width = 10.0 + status_gap + status_text_width;
+            let column_gap = 12.0;
+            let inline_height = status_galley.size().y.max(detail_galley.size().y).max(16.0);
+            debug_assert!(inline_height.is_finite() && inline_height >= 16.0);
+            let inline = status_width + column_gap + detail_width <= content_width;
+
+            if inline {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = column_gap;
+                    let (status_rect, status_response) = ui.allocate_exact_size(
+                        vec2(status_width, inline_height),
+                        egui::Sense::hover(),
+                    );
+                    status_response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), status)
+                    });
+                    ui.painter().circle_filled(
+                        egui::pos2(status_rect.left() + 5.0, status_rect.center().y),
+                        3.0,
+                        if valid { t.color.ok } else { t.color.err },
+                    );
+                    let status_text_rect = egui::Rect::from_min_max(
+                        egui::pos2(status_rect.left() + 10.0 + status_gap, status_rect.top()),
+                        status_rect.right_bottom(),
+                    );
+                    ui.painter().with_clip_rect(status_text_rect).galley(
+                        egui::pos2(
+                            status_text_rect.left(),
+                            status_text_rect.center().y - status_galley.size().y * 0.5,
+                        ),
+                        status_galley.clone(),
+                        t.color.text_dim,
+                    );
+                    ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), inline_height),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(note)
+                                        .font(detail_font.clone())
+                                        .color(t.color.text_dim),
+                                )
+                                .truncate(),
+                            );
+                        },
+                    );
+                });
+            } else {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                status_dot(ui, if valid { t.color.ok } else { t.color.err }, status);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(note)
+                            .font(detail_font)
+                            .color(t.color.text_dim),
+                    )
+                    .wrap(),
                 );
-                ui.label(
-                    egui::RichText::new(note)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-            });
+            }
         })
         .response;
     ui.painter().hline(

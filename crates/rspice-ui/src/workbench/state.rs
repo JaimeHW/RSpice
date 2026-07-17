@@ -1581,6 +1581,7 @@ impl WorkbenchState {
                     | SurfaceId::AccountOrganization
                     | SurfaceId::JobsManager
                     | SurfaceId::SpecialistToolBrowser
+                    | SurfaceId::NotificationCenter
                     | SurfaceId::FeatureAvailability
             )
     }

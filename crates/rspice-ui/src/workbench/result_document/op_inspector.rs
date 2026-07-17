@@ -15,6 +15,42 @@ use crate::ui::widgets::measurement_table;
 
 use super::well_hint;
 
+const NAME_W: f32 = 150.0;
+const REGION_W: f32 = 96.0;
+const VALUE_MIN_W: f32 = 82.0;
+const OP_MAX_VALUE_COLUMNS: usize = 8;
+const ROW_H: f32 = 25.0;
+const CELL_INSET: f32 = 10.0;
+
+fn op_table_min_width() -> f32 {
+    NAME_W + REGION_W + VALUE_MIN_W * OP_MAX_VALUE_COLUMNS as f32
+}
+
+fn op_column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(row.left() + offset, row.top()),
+        egui::vec2(width, row.height()),
+    )
+}
+
+fn paint_op_cell(
+    ui: &Ui,
+    cell: egui::Rect,
+    text: impl ToString,
+    align: egui::Align2,
+    font: egui::FontId,
+    color: egui::Color32,
+) {
+    let x = if align == egui::Align2::RIGHT_CENTER {
+        cell.right() - CELL_INSET
+    } else {
+        cell.left() + CELL_INSET
+    };
+    ui.painter()
+        .with_clip_rect(cell.shrink2(egui::vec2(2.0, 0.0)))
+        .text(egui::pos2(x, cell.center().y), align, text, font, color);
+}
+
 /// Column metadata per device family: header label and value unit.
 fn family_columns(device_kind: &str) -> &'static [(&'static str, &'static str)] {
     match device_kind {
@@ -114,15 +150,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let filter = state.ui.results.op_filter.clone();
     let sort = state.ui.results.op_sort.clone();
     let mut clicked_sort: Option<String> = None;
+    let viewport_width = ui.available_width().max(1.0);
 
-    const NAME_W: f32 = 150.0;
-    const REGION_W: f32 = 96.0;
-    const ROW_H: f32 = 25.0;
-
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         .id_salt("rspice.results.op")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            let table_width = viewport_width.max(op_table_min_width());
+            ui.set_min_width(table_width);
             ui.add_space(4.0);
             for family in ["MOSFET", "BJT", "DIODE"] {
                 let rows: Vec<Row> = report
@@ -146,17 +181,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 }
 
                 let columns = family_columns(family);
-                let width = ui.available_width();
+                let width = table_width;
                 let value_w =
-                    ((width - NAME_W - REGION_W - 16.0) / columns.len().max(1) as f32).max(64.0);
+                    ((width - NAME_W - REGION_W) / columns.len().max(1) as f32).max(VALUE_MIN_W);
 
                 // Family section header.
                 let (head, _) =
                     ui.allocate_exact_size(egui::vec2(width, 26.0), egui::Sense::hover());
-                ui.painter().text(
-                    egui::pos2(head.left() + 10.0, head.center().y),
-                    egui::Align2::LEFT_CENTER,
+                paint_op_cell(
+                    ui,
+                    head,
                     format!("{family}S — {}", rows.len()),
+                    egui::Align2::LEFT_CENTER,
                     theme::mono(tokens::FS_0, FontWeight::Medium),
                     c.text_faint,
                 );
@@ -169,22 +205,25 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     header.bottom() - 0.5,
                     egui::Stroke::new(1.0, c.border),
                 );
-                ui.painter().text(
-                    egui::pos2(header.left() + 10.0, header.center().y),
-                    egui::Align2::LEFT_CENTER,
+                paint_op_cell(
+                    ui,
+                    op_column_rect(header, 0.0, NAME_W),
                     "DEVICE",
+                    egui::Align2::LEFT_CENTER,
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     c.text_faint,
                 );
-                ui.painter().text(
-                    egui::pos2(header.left() + NAME_W + 10.0, header.center().y),
-                    egui::Align2::LEFT_CENTER,
+                paint_op_cell(
+                    ui,
+                    op_column_rect(header, NAME_W, REGION_W),
                     "REGION",
+                    egui::Align2::LEFT_CENTER,
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     c.text_faint,
                 );
                 for (i, (key, _unit)) in columns.iter().enumerate() {
-                    let x = header.left() + NAME_W + REGION_W + (i as f32 + 1.0) * value_w;
+                    let cell =
+                        op_column_rect(header, NAME_W + REGION_W + i as f32 * value_w, value_w);
                     let sorted_here = sort.as_ref().is_some_and(|(k, _)| k == key);
                     let label = key.to_uppercase();
                     let galley = ui.painter().layout_no_wrap(
@@ -194,16 +233,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     );
                     let arrow_width = if sorted_here { 10.0 } else { 0.0 };
                     let pos = egui::pos2(
-                        x - arrow_width - galley.size().x,
+                        cell.right() - CELL_INSET - arrow_width - galley.size().x,
                         header.center().y - galley.size().y / 2.0,
                     );
-                    let hit = egui::Rect::from_min_size(
-                        pos,
-                        egui::vec2(galley.size().x + arrow_width, galley.size().y),
-                    )
-                    .expand(4.0);
                     let response = ui.interact(
-                        hit,
+                        cell,
                         ui.id().with(("op-sort", family, key)),
                         egui::Sense::click(),
                     );
@@ -226,23 +260,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         )
                     });
                     if response.hovered() {
-                        ui.painter().rect_filled(hit, 2.0, c.bg_hover);
+                        ui.painter().rect_filled(cell, 0.0, c.bg_hover);
                     }
-                    ui.painter().galley(pos, galley, c.text_faint);
+                    ui.painter()
+                        .with_clip_rect(cell.shrink2(egui::vec2(2.0, 0.0)))
+                        .galley(pos, galley, c.text_faint);
                     if sorted_here {
                         let ascending = sort.as_ref().is_some_and(|(_, ascending)| *ascending);
-                        let center = egui::pos2(x - 3.5, header.center().y);
+                        let center = egui::pos2(cell.right() - CELL_INSET - 3.5, header.center().y);
                         let direction = if ascending { -1.0 } else { 1.0 };
-                        ui.painter().add(egui::Shape::closed_line(
-                            vec![
-                                center + egui::vec2(0.0, direction * 3.0),
-                                center + egui::vec2(3.0, -direction * 2.0),
-                                center + egui::vec2(-3.0, -direction * 2.0),
-                            ],
-                            egui::Stroke::new(1.0, c.accent),
-                        ));
+                        ui.painter()
+                            .with_clip_rect(cell)
+                            .add(egui::Shape::closed_line(
+                                vec![
+                                    center + egui::vec2(0.0, direction * 3.0),
+                                    center + egui::vec2(3.0, -direction * 2.0),
+                                    center + egui::vec2(-3.0, -direction * 2.0),
+                                ],
+                                egui::Stroke::new(1.0, c.accent),
+                            ));
                     }
-                    theme::paint_focus_ring(ui, &response, hit);
+                    theme::paint_focus_ring(ui, &response, cell.shrink(1.0));
                     if response.clicked() {
                         clicked_sort = Some((*key).to_owned());
                     }
@@ -297,15 +335,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         egui::Stroke::new(1.0, c.border.gamma_multiply(0.6)),
                     );
 
-                    ui.painter().text(
-                        egui::pos2(rect.left() + 10.0, rect.center().y),
+                    paint_op_cell(
+                        ui,
+                        op_column_rect(rect, 0.0, NAME_W),
+                        row.entry.name.as_str(),
                         egui::Align2::LEFT_CENTER,
-                        &row.entry.name,
                         theme::mono(tokens::FS_1, FontWeight::Regular),
                         c.text,
                     );
 
                     if let Some(region) = row.entry.region {
+                        let region_cell = op_column_rect(rect, NAME_W, REGION_W);
                         let (bg, fg) = region_colors(region, &t);
                         let galley = ui.painter().layout_no_wrap(
                             region.to_owned(),
@@ -314,18 +354,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         );
                         let chip = egui::Rect::from_min_size(
                             egui::pos2(
-                                rect.left() + NAME_W + 10.0,
+                                region_cell.left() + CELL_INSET,
                                 rect.center().y - galley.size().y / 2.0 - 2.0,
                             ),
                             galley.size() + egui::vec2(12.0, 4.0),
                         );
-                        ui.painter().rect_filled(chip, chip.height() / 2.0, bg);
-                        ui.painter()
-                            .galley(chip.min + egui::vec2(6.0, 2.0), galley, fg);
+                        let region_painter = ui
+                            .painter()
+                            .with_clip_rect(region_cell.shrink2(egui::vec2(2.0, 0.0)));
+                        region_painter.rect_filled(chip, chip.height() / 2.0, bg);
+                        region_painter.galley(chip.min + egui::vec2(6.0, 2.0), galley, fg);
                     }
 
                     for (i, (key, unit)) in columns.iter().enumerate() {
-                        let x = rect.left() + NAME_W + REGION_W + (i as f32 + 1.0) * value_w;
                         let text = row
                             .value(key)
                             .map(|value| {
@@ -336,10 +377,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 }
                             })
                             .unwrap_or_else(|| "—".to_owned());
-                        ui.painter().text(
-                            egui::pos2(x, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
+                        paint_op_cell(
+                            ui,
+                            op_column_rect(rect, NAME_W + REGION_W + i as f32 * value_w, value_w),
                             text,
+                            egui::Align2::RIGHT_CENTER,
                             theme::mono(tokens::FS_1, FontWeight::Regular),
                             c.text_dim,
                         );
@@ -357,6 +399,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             _ => Some((key, false)),
         };
         state.ui.results.op_sort = next;
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn op_table_keeps_all_mosfet_columns_at_phone_width() {
+        assert_eq!(family_columns("MOSFET").len(), OP_MAX_VALUE_COLUMNS);
+        assert_eq!(op_table_min_width(), 902.0);
+        assert!(op_table_min_width() > 390.0);
     }
 }
 

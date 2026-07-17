@@ -418,20 +418,30 @@ fn render_content(ui: &mut Ui, snapshot: &JobsSnapshot, requested_selection: &mu
     } else {
         let width = ui.available_width();
         let left_width = ((width - 1.0) * 0.695).max(560.0);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.allocate_ui_with_layout(vec2(left_width, 0.0), Layout::top_down(Align::Min), |ui| {
-                render_queue_and_graph(ui, snapshot, requested_selection)
-            });
-            let t = Tokens::get(ui.ctx());
-            let (divider, _) = ui.allocate_exact_size(vec2(1.0, 520.0), Sense::hover());
-            ui.painter().rect_filled(divider, 0.0, t.color.border);
-            ui.allocate_ui_with_layout(
-                vec2((width - left_width - 1.0).max(280.0), 0.0),
-                Layout::top_down(Align::Min),
-                |ui| render_inspector(ui, snapshot),
-            );
-        });
+        let mut divider_x = 0.0;
+        let response = ui
+            .horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.allocate_ui_with_layout(
+                    vec2(left_width, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| render_queue_and_graph(ui, snapshot, requested_selection),
+                );
+                let (divider, _) = ui.allocate_exact_size(vec2(1.0, 0.0), Sense::hover());
+                divider_x = divider.center().x;
+                ui.allocate_ui_with_layout(
+                    vec2((width - left_width - 1.0).max(280.0), 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| render_inspector(ui, snapshot),
+                );
+            })
+            .response;
+        let t = Tokens::get(ui.ctx());
+        ui.painter().vline(
+            divider_x,
+            response.rect.y_range(),
+            Stroke::new(1.0, t.color.border),
+        );
     }
     render_recovery(ui, snapshot);
 }
@@ -635,22 +645,34 @@ fn target_row(ui: &mut Ui, label: &str, status: &str, selected: bool) {
             t.color.text_faint
         },
     );
-    ui.painter().text(
-        pos2(rect.left() + 22.0, rect.center().y),
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let status_desired = ui
+        .painter()
+        .layout_no_wrap(status.to_owned(), status_font.clone(), t.color.text)
+        .size()
+        .x;
+    let (label_rect, status_rect) = trailing_text_regions(rect, 22.0, 9.0, status_desired);
+    let visible_label =
+        super::design_system::elide_text(ui, label, &label_font, label_rect.width());
+    let visible_status =
+        super::design_system::elide_text(ui, status, &status_font, status_rect.width());
+    ui.painter().with_clip_rect(label_rect).text(
+        label_rect.left_center(),
         Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
+        visible_label,
+        label_font,
         if selected {
             t.color.text
         } else {
             t.color.text_dim
         },
     );
-    ui.painter().text(
-        pos2(rect.right() - 9.0, rect.center().y),
+    ui.painter().with_clip_rect(status_rect).text(
+        status_rect.right_center(),
         Align2::RIGHT_CENTER,
-        status,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        visible_status,
+        status_font,
         if selected {
             t.color.ok
         } else {
@@ -738,20 +760,60 @@ fn section_head(ui: &mut Ui, title: &str, status: &str, tone: Color32) {
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    ui.painter().text(
-        pos2(rect.left() + 10.0, rect.center().y),
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let status_desired = ui
+        .painter()
+        .layout_no_wrap(status.to_owned(), status_font.clone(), tone)
+        .size()
+        .x;
+    let (title_rect, status_rect) = trailing_text_regions(rect, 10.0, 10.0, status_desired);
+    let visible_title =
+        super::design_system::elide_text(ui, title, &title_font, title_rect.width());
+    let visible_status =
+        super::design_system::elide_text(ui, status, &status_font, status_rect.width());
+    ui.painter().with_clip_rect(title_rect).text(
+        title_rect.left_center(),
         Align2::LEFT_CENTER,
-        title,
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        visible_title,
+        title_font,
         t.color.text,
     );
-    ui.painter().text(
-        pos2(rect.right() - 10.0, rect.center().y),
+    ui.painter().with_clip_rect(status_rect).text(
+        status_rect.right_center(),
         Align2::RIGHT_CENTER,
-        status,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        visible_status,
+        status_font,
         tone,
     );
+}
+
+fn trailing_text_regions(
+    rect: Rect,
+    left_inset: f32,
+    right_inset: f32,
+    desired_trailing_width: f32,
+) -> (Rect, Rect) {
+    let gap = 8.0;
+    let content = Rect::from_min_max(
+        pos2(rect.left() + left_inset, rect.top()),
+        pos2(
+            (rect.right() - right_inset).max(rect.left() + left_inset),
+            rect.bottom(),
+        ),
+    );
+    let columns_width = (content.width() - gap).max(0.0);
+    let trailing_width = desired_trailing_width.max(0.0).min(columns_width * 0.48);
+    let leading_width = (columns_width - trailing_width).max(0.0);
+    let leading = Rect::from_min_max(
+        content.min,
+        pos2(content.left() + leading_width, content.bottom()),
+    );
+    let trailing = Rect::from_min_max(
+        pos2((leading.right() + gap).min(content.right()), content.top()),
+        content.max,
+    );
+    (leading, trailing)
 }
 
 fn table_header(ui: &mut Ui, width: f32, labels: &[&str], fractions: &[f32]) {
@@ -1340,6 +1402,17 @@ mod tests {
         assert_eq!(jobs_status_columns(1_120.0), 4);
         assert_eq!(jobs_status_columns(820.0), 2);
         assert_eq!(jobs_status_columns(390.0), 2);
+    }
+
+    #[test]
+    fn trailing_row_copy_has_disjoint_measured_regions() {
+        let row = Rect::from_min_size(pos2(10.0, 20.0), vec2(280.0, 31.0));
+        let (leading, trailing) = trailing_text_regions(row, 22.0, 9.0, 300.0);
+
+        assert!(leading.right() <= trailing.left());
+        assert!(trailing.width() <= (row.width() - 22.0 - 9.0 - 8.0) * 0.48 + f32::EPSILON);
+        assert_eq!(leading.left(), row.left() + 22.0);
+        assert_eq!(trailing.right(), row.right() - 9.0);
     }
 
     #[test]

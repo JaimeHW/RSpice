@@ -17,6 +17,43 @@ use crate::ui::widgets::{measurement_table, section_header};
 
 use super::well_hint;
 
+const RANK_W: f32 = 44.0;
+const DEVICE_W: f32 = 170.0;
+const MECH_W: f32 = 110.0;
+const POWER_W: f32 = 130.0;
+const SHARE_W: f32 = 170.0;
+const ROW_H: f32 = 25.0;
+const CELL_INSET: f32 = 10.0;
+
+fn noise_table_min_width() -> f32 {
+    RANK_W + DEVICE_W + MECH_W + POWER_W + SHARE_W
+}
+
+fn column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(row.left() + offset, row.top()),
+        egui::vec2(width, row.height()),
+    )
+}
+
+fn paint_clipped_cell(
+    ui: &Ui,
+    cell: egui::Rect,
+    text: impl ToString,
+    align: egui::Align2,
+    font: egui::FontId,
+    color: egui::Color32,
+) {
+    let x = if align == egui::Align2::RIGHT_CENTER {
+        cell.right() - CELL_INSET
+    } else {
+        cell.left() + CELL_INSET
+    };
+    ui.painter()
+        .with_clip_rect(cell.shrink2(egui::vec2(2.0, 0.0)))
+        .text(egui::pos2(x, cell.center().y), align, text, font, color);
+}
+
 /// Mechanism chip color: thermal/flicker/shot/burst map onto stable trace
 /// hues so spectra and this table agree.
 fn mechanism_color(mechanism: &str, t: &Tokens) -> egui::Color32 {
@@ -50,19 +87,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let summary = summary.clone();
+    let viewport_width = ui.available_width().max(1.0);
 
-    const RANK_W: f32 = 44.0;
-    const DEVICE_W: f32 = 170.0;
-    const MECH_W: f32 = 110.0;
-    const POWER_W: f32 = 130.0;
-    const ROW_H: f32 = 25.0;
-
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         .id_salt("rspice.results.noise-contrib")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            let width = viewport_width.max(noise_table_min_width());
+            ui.set_min_width(width);
             ui.add_space(4.0);
-            let width = ui.available_width();
 
             // Header row.
             let (header, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::hover());
@@ -71,28 +104,51 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 header.bottom() - 0.5,
                 egui::Stroke::new(1.0, c.border),
             );
-            let head = |x: f32, label: &str, align: egui::Align2| {
-                ui.painter().text(
-                    egui::pos2(x, header.center().y),
-                    align,
-                    label,
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    c.text_faint,
-                );
-            };
-            head(header.left() + 10.0, "#", egui::Align2::LEFT_CENTER);
-            head(header.left() + RANK_W, "DEVICE", egui::Align2::LEFT_CENTER);
-            head(
-                header.left() + RANK_W + DEVICE_W,
+            let header_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+            paint_clipped_cell(
+                ui,
+                column_rect(header, 0.0, RANK_W),
+                "#",
+                egui::Align2::LEFT_CENTER,
+                header_font.clone(),
+                c.text_faint,
+            );
+            paint_clipped_cell(
+                ui,
+                column_rect(header, RANK_W, DEVICE_W),
+                "DEVICE",
+                egui::Align2::LEFT_CENTER,
+                header_font.clone(),
+                c.text_faint,
+            );
+            paint_clipped_cell(
+                ui,
+                column_rect(header, RANK_W + DEVICE_W, MECH_W),
                 "MECHANISM",
                 egui::Align2::LEFT_CENTER,
+                header_font.clone(),
+                c.text_faint,
             );
-            head(
-                header.left() + RANK_W + DEVICE_W + MECH_W + POWER_W,
+            paint_clipped_cell(
+                ui,
+                column_rect(header, RANK_W + DEVICE_W + MECH_W, POWER_W),
                 "POWER (V²)",
                 egui::Align2::RIGHT_CENTER,
+                header_font.clone(),
+                c.text_faint,
             );
-            head(header.right() - 10.0, "SHARE", egui::Align2::RIGHT_CENTER);
+            paint_clipped_cell(
+                ui,
+                column_rect(
+                    header,
+                    RANK_W + DEVICE_W + MECH_W + POWER_W,
+                    width - RANK_W - DEVICE_W - MECH_W - POWER_W,
+                ),
+                "SHARE",
+                egui::Align2::RIGHT_CENTER,
+                header_font,
+                c.text_faint,
+            );
 
             // Contributor rows, ranked (rows arrive sorted from the engine).
             for (rank, row) in summary.rows.iter().enumerate() {
@@ -127,17 +183,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     egui::Stroke::new(1.0, c.border.gamma_multiply(0.6)),
                 );
 
-                ui.painter().text(
-                    egui::pos2(rect.left() + 10.0, rect.center().y),
+                paint_clipped_cell(
+                    ui,
+                    column_rect(rect, 0.0, RANK_W),
+                    (rank + 1).to_string(),
                     egui::Align2::LEFT_CENTER,
-                    format!("{}", rank + 1),
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     c.text_faint,
                 );
-                ui.painter().text(
-                    egui::pos2(rect.left() + RANK_W, rect.center().y),
+                paint_clipped_cell(
+                    ui,
+                    column_rect(rect, RANK_W, DEVICE_W),
+                    row.device.as_str(),
                     egui::Align2::LEFT_CENTER,
-                    &row.device,
                     theme::mono(tokens::FS_1, FontWeight::Regular),
                     c.text,
                 );
@@ -149,37 +207,40 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     fg,
                 );
+                let mechanism_cell = column_rect(rect, RANK_W + DEVICE_W, MECH_W);
                 let chip = egui::Rect::from_min_size(
                     egui::pos2(
-                        rect.left() + RANK_W + DEVICE_W,
+                        mechanism_cell.left() + CELL_INSET,
                         rect.center().y - galley.size().y / 2.0 - 2.0,
                     ),
                     galley.size() + egui::vec2(12.0, 4.0),
                 );
-                ui.painter()
+                let mechanism_painter = ui
+                    .painter()
+                    .with_clip_rect(mechanism_cell.shrink2(egui::vec2(2.0, 0.0)));
+                mechanism_painter
                     .rect_filled(chip, chip.height() / 2.0, fg.gamma_multiply(0.16));
-                ui.painter()
-                    .galley(chip.min + egui::vec2(6.0, 2.0), galley, fg);
+                mechanism_painter.galley(chip.min + egui::vec2(6.0, 2.0), galley, fg);
 
-                ui.painter().text(
-                    egui::pos2(
-                        rect.left() + RANK_W + DEVICE_W + MECH_W + POWER_W,
-                        rect.center().y,
-                    ),
-                    egui::Align2::RIGHT_CENTER,
+                paint_clipped_cell(
+                    ui,
+                    column_rect(rect, RANK_W + DEVICE_W + MECH_W, POWER_W),
                     format!("{:.3e}", row.power),
+                    egui::Align2::RIGHT_CENTER,
                     theme::mono(tokens::FS_1, FontWeight::Regular),
                     c.text_dim,
                 );
 
                 // Share: tinted bar under the percentage, width ∝ share.
-                let share_left = rect.left() + RANK_W + DEVICE_W + MECH_W + POWER_W + 24.0;
-                let share_rect = egui::Rect::from_min_max(
-                    egui::pos2(share_left, rect.top() + 4.0),
-                    egui::pos2(rect.right() - 10.0, rect.bottom() - 4.0),
+                let share_cell = column_rect(
+                    rect,
+                    RANK_W + DEVICE_W + MECH_W + POWER_W,
+                    width - RANK_W - DEVICE_W - MECH_W - POWER_W,
                 );
+                let share_rect = share_cell.shrink2(egui::vec2(CELL_INSET, 4.0));
                 let fill = share_rect.width() * (row.share_pct as f32 / 100.0).clamp(0.0, 1.0);
-                ui.painter().rect_filled(
+                let share_painter = ui.painter().with_clip_rect(share_cell);
+                share_painter.rect_filled(
                     egui::Rect::from_min_size(
                         share_rect.min,
                         egui::vec2(fill, share_rect.height()),
@@ -187,7 +248,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     2.0,
                     c.accent_dim,
                 );
-                ui.painter().text(
+                share_painter.text(
                     egui::pos2(share_rect.right() - 4.0, rect.center().y),
                     egui::Align2::RIGHT_CENTER,
                     format!("{:.1} %", row.share_pct),
@@ -196,6 +257,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 );
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noise_table_preserves_every_desktop_column_at_phone_width() {
+        assert_eq!(noise_table_min_width(), 624.0);
+        assert!(noise_table_min_width() > 390.0);
+        assert!(SHARE_W >= 150.0);
+    }
 }
 
 /// Right panel: band, total, dominant contributor.

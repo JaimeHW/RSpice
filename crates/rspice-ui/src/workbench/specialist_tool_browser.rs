@@ -44,6 +44,11 @@ const TOUCH_ACTION_SIDE: f32 = 44.0;
 const GRID_MAX_HEIGHT: f32 = 560.0;
 const GRID_VIEWPORT_RATIO: f32 = 0.58;
 const COMPACT_BREAKPOINT: f32 = 820.0;
+const FILTER_GAP: f32 = 4.0;
+const CARD_TEXT_GAP: f32 = 8.0;
+const CARD_STATUS_GAP: f32 = 8.0;
+const CARD_STATUS_MIN_WIDTH: f32 = 62.0;
+const CARD_INLINE_TITLE_MIN_WIDTH: f32 = 104.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BrowserAction {
@@ -316,14 +321,15 @@ fn count_label(ui: &mut Ui, visible: usize) {
     });
 }
 
-fn filter_bar(ui: &mut Ui, browser: &mut SpecialistToolBrowserState) {
+fn filter_bar(ui: &mut Ui, browser: &mut SpecialistToolBrowserState) -> Response {
     let t = Tokens::get(ui.ctx());
     let frame = Frame::NONE
         .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(FILTER_PADDING_X, FILTER_PADDING_Y))
         .show(ui, |ui| {
-            let group = ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::ZERO;
+            ui.set_width(ui.available_width());
+            let group = ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::splat(FILTER_GAP);
                 for (index, filter) in SpecialistToolFilter::ALL.into_iter().enumerate() {
                     let selected = browser.filter == filter;
                     let response = filter_button(
@@ -348,7 +354,9 @@ fn filter_bar(ui: &mut Ui, browser: &mut SpecialistToolBrowserState) {
                 egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Specialist tool filter")
             });
         });
-    horizontal_rule(ui, frame.response.rect.bottom(), t.color.border);
+    let response = frame.response;
+    horizontal_rule(ui, response.rect.bottom(), t.color.border);
+    response
 }
 
 fn filter_button(ui: &mut Ui, label: &str, selected: bool, last: bool) -> Response {
@@ -556,8 +564,80 @@ fn tool_grid(
 }
 
 fn compact_layout(ui: &Ui) -> bool {
-    ui.ctx().content_rect().width() <= COMPACT_BREAKPOINT
-        || ui.ctx().input(|input| input.has_touch_screen())
+    compact_layout_for_width(
+        ui.available_width(),
+        ui.ctx().input(|input| input.has_touch_screen()),
+    )
+}
+
+const fn compact_layout_for_width(local_width: f32, has_touch_screen: bool) -> bool {
+    local_width <= COMPACT_BREAKPOINT || has_touch_screen
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ToolCardLayout {
+    icon: Rect,
+    text: Rect,
+    status: Option<Rect>,
+    favorite_action: Rect,
+    pin_action: Rect,
+}
+
+fn tool_card_layout(rect: Rect, action_side: f32, status_text_width: f32) -> ToolCardLayout {
+    let actions_width = if action_side >= TOUCH_ACTION_SIDE {
+        108.0
+    } else {
+        70.0
+    };
+    let icon = Rect::from_center_size(
+        pos2(rect.left() + 24.0, rect.center().y),
+        Vec2::splat(CARD_ICON_SIDE),
+    );
+    let favorite_action = Rect::from_center_size(
+        pos2(
+            rect.right() - 7.0 - action_side * 1.5 - 2.0,
+            rect.center().y,
+        ),
+        Vec2::splat(action_side),
+    );
+    let pin_action = Rect::from_center_size(
+        pos2(rect.right() - 7.0 - action_side * 0.5, rect.center().y),
+        Vec2::splat(action_side),
+    );
+    let content_right = (rect.right() - actions_width).max(icon.right() + CARD_TEXT_GAP);
+    let text_left = (icon.right() + CARD_TEXT_GAP).min(content_right);
+    let available_copy_width = (content_right - text_left).max(0.0);
+    let desired_status_width = (status_text_width + 11.0).max(CARD_STATUS_MIN_WIDTH);
+    let inline_status = available_copy_width
+        >= CARD_INLINE_TITLE_MIN_WIDTH + CARD_STATUS_GAP + CARD_STATUS_MIN_WIDTH;
+
+    let (text_right, status) = if inline_status {
+        let status_width = desired_status_width.min(
+            (available_copy_width - CARD_INLINE_TITLE_MIN_WIDTH - CARD_STATUS_GAP)
+                .max(CARD_STATUS_MIN_WIDTH),
+        );
+        let status = Rect::from_min_max(
+            pos2(content_right - status_width, rect.top() + 8.0),
+            pos2(content_right, rect.bottom() - 8.0),
+        );
+        (
+            (status.left() - CARD_STATUS_GAP).max(text_left),
+            Some(status),
+        )
+    } else {
+        (content_right, None)
+    };
+
+    ToolCardLayout {
+        icon,
+        text: Rect::from_min_max(
+            pos2(text_left, rect.top() + 8.0),
+            pos2(text_right.max(text_left), rect.bottom() - 8.0),
+        ),
+        status,
+        favorite_action,
+        pin_action,
+    }
 }
 
 fn tool_card(
@@ -575,11 +655,6 @@ fn tool_card(
         TOUCH_ACTION_SIDE
     } else {
         CARD_ACTION_SIDE
-    };
-    let actions_width = if action_side >= TOUCH_ACTION_SIDE {
-        108.0
-    } else {
-        70.0
     };
     let main_rect = rect;
     let main = ui.interact(
@@ -608,16 +683,6 @@ fn tool_card(
         );
     }
 
-    let icon_rect = Rect::from_center_size(
-        pos2(rect.left() + 24.0, rect.center().y),
-        Vec2::splat(CARD_ICON_SIDE),
-    );
-    owner_icon(row.owner).paint(
-        ui.painter(),
-        Rect::from_center_size(icon_rect.center(), Vec2::splat(18.0)),
-        t.color.accent,
-    );
-    let content_right = rect.right() - actions_width;
     let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let profile_copy = if row.shown_in_profile(profile) {
         "active profile"
@@ -633,16 +698,14 @@ fn tool_card(
         )
         .size()
         .x;
-    let status_width =
-        (status_text_width + 11.0).min((content_right - icon_rect.right() - 48.0).max(62.0));
-    let status_rect = Rect::from_min_max(
-        pos2(content_right - status_width, rect.top() + 8.0),
-        pos2(content_right, rect.bottom() - 8.0),
+    let layout = tool_card_layout(rect, action_side, status_text_width);
+    let icon_rect = layout.icon;
+    owner_icon(row.owner).paint(
+        ui.painter(),
+        Rect::from_center_size(icon_rect.center(), Vec2::splat(18.0)),
+        t.color.accent,
     );
-    let text_rect = Rect::from_min_max(
-        pos2(icon_rect.right() + 8.0, rect.top() + 8.0),
-        pos2(status_rect.left() - 8.0, rect.bottom() - 8.0),
-    );
+    let text_rect = layout.text;
     let painter = ui.painter().with_clip_rect(text_rect);
     let title_font = theme::sans(tokens::FS_1, FontWeight::SemiBold);
     let detail_font = theme::sans(tokens::FS_0, FontWeight::Regular);
@@ -671,29 +734,56 @@ fn tool_card(
         detail_font,
         t.color.text_dim,
     );
-    let dot_center = pos2(status_rect.left() + 2.5, status_rect.center().y);
-    ui.painter().circle_filled(
-        dot_center,
-        2.5,
-        if row.shown_in_profile(profile) {
-            t.color.ok
-        } else {
-            t.color.text_faint
-        },
-    );
-    let status = elide_to_width(
-        ui.painter(),
-        profile_copy,
-        &status_font,
-        (status_rect.width() - 11.0).max(1.0),
-    );
-    ui.painter().text(
-        pos2(status_rect.left() + 11.0, status_rect.center().y),
-        Align2::LEFT_CENTER,
-        status,
-        status_font,
-        t.color.text_dim,
-    );
+    let status_tone = if row.shown_in_profile(profile) {
+        t.color.ok
+    } else {
+        t.color.text_faint
+    };
+    if let Some(status_rect) = layout.status {
+        let status_painter = ui.painter().with_clip_rect(status_rect);
+        status_painter.circle_filled(
+            pos2(status_rect.left() + 2.5, status_rect.center().y),
+            2.5,
+            status_tone,
+        );
+        let status = elide_to_width(
+            &status_painter,
+            profile_copy,
+            &status_font,
+            (status_rect.width() - 11.0).max(1.0),
+        );
+        status_painter.text(
+            pos2(status_rect.left() + 11.0, status_rect.center().y),
+            Align2::LEFT_CENTER,
+            status,
+            status_font.clone(),
+            t.color.text_dim,
+        );
+    } else {
+        let status_line = Rect::from_min_max(
+            pos2(text_rect.left(), text_rect.top() + 34.0),
+            text_rect.right_bottom(),
+        );
+        let status_painter = ui.painter().with_clip_rect(status_line);
+        status_painter.circle_filled(
+            pos2(status_line.left() + 2.5, status_line.center().y),
+            2.5,
+            status_tone,
+        );
+        let status = elide_to_width(
+            &status_painter,
+            profile_copy,
+            &status_font,
+            (status_line.width() - 11.0).max(1.0),
+        );
+        status_painter.text(
+            pos2(status_line.left() + 11.0, status_line.center().y),
+            Align2::LEFT_CENTER,
+            status,
+            status_font,
+            t.color.text_dim,
+        );
+    }
 
     main.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -708,27 +798,26 @@ fn tool_card(
     });
     ui.ctx().accesskit_node_builder(main.id, |node| {
         node.set_description(format!(
-            "{}; {}; {}; {}",
+            "{}; {}; {}; {}; {}",
             row.purpose,
             row.owner.owner_label(),
+            profile_copy,
             row.engine_service_boundary(),
             availability_copy(availability)
         ));
     });
     theme::paint_focus_ring(ui, &main, main_rect.shrink(1.0));
-    let main = main.on_hover_text(availability_copy(availability));
+    let main = main.on_hover_text(format!(
+        "{}\n{} · {}\n{}\n{}",
+        row.label(),
+        row.owner.owner_label(),
+        phone_mode(row.surface_id),
+        profile_copy,
+        availability_copy(availability)
+    ));
 
-    let favorite_rect = Rect::from_center_size(
-        pos2(
-            rect.right() - 7.0 - action_side * 1.5 - 2.0,
-            rect.center().y,
-        ),
-        Vec2::splat(action_side),
-    );
-    let pin_rect = Rect::from_center_size(
-        pos2(rect.right() - 7.0 - action_side * 0.5, rect.center().y),
-        Vec2::splat(action_side),
-    );
+    let favorite_rect = layout.favorite_action;
+    let pin_rect = layout.pin_action;
     let favorite = card_action(
         ui,
         favorite_rect,
@@ -855,12 +944,13 @@ fn ownership_banner(ui: &mut Ui) {
     dashed_rect(ui, response.response.rect, t.radius, t.color.border_strong);
 }
 
-fn empty_state(ui: &mut Ui) {
+fn empty_state(ui: &mut Ui) -> Response {
     let t = Tokens::get(ui.ctx());
     let frame = Frame::NONE
         .fill(t.color.bg_inset)
         .inner_margin(Margin::same(24))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.set_min_height(92.0);
             ui.vertical_centered(|ui| {
                 ui.add_space(18.0);
@@ -869,16 +959,21 @@ fn empty_state(ui: &mut Ui) {
                         .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
                         .color(t.color.text),
                 );
-                ui.label(
-                    RichText::new(
-                        "Clear the search or choose a broader filter. Profile-hidden tools remain available under All.",
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(
+                            "Clear the search or choose a broader filter. Profile-hidden tools remain available under All.",
+                        )
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
                     )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
+                    .wrap(),
                 );
             });
         });
-    horizontal_rule(ui, frame.response.rect.bottom(), t.color.border);
+    let response = frame.response;
+    horizontal_rule(ui, response.rect.bottom(), t.color.border);
+    response
 }
 
 fn owner_icon(owner: Workspace) -> WorkbenchIcon {
@@ -993,6 +1088,27 @@ fn elide_to_width(
 mod tests {
     use super::*;
 
+    fn rendered_filter_height(width: f32) -> f32 {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut height = 0.0;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 240.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ctx, |ui| {
+                        let mut browser = SpecialistToolBrowserState::default();
+                        height = filter_bar(ui, &mut browser).rect.height();
+                    });
+            },
+        );
+        height
+    }
+
     #[test]
     fn empty_query_projects_all_41_governed_specialist_owners() {
         let browser = SpecialistToolBrowserState::default();
@@ -1083,5 +1199,100 @@ mod tests {
             phone_mode(SurfaceId::VisualizationStudio),
             "full compact task · author · review · monitor"
         );
+    }
+
+    #[test]
+    fn specialist_filter_group_wraps_with_the_mockup_gap() {
+        assert_eq!(FILTER_GAP, 4.0);
+        let wide_height = rendered_filter_height(900.0);
+        let phone_height = rendered_filter_height(280.0);
+        assert!(
+            phone_height >= wide_height + 28.0,
+            "phone filters did not wrap: wide={wide_height}, phone={phone_height}"
+        );
+    }
+
+    #[test]
+    fn compact_decision_uses_the_local_surface_width() {
+        assert!(compact_layout_for_width(320.0, false));
+        assert!(compact_layout_for_width(COMPACT_BREAKPOINT, false));
+        assert!(!compact_layout_for_width(COMPACT_BREAKPOINT + 1.0, false));
+        assert!(compact_layout_for_width(1_440.0, true));
+    }
+
+    #[test]
+    fn phone_card_geometry_keeps_copy_status_and_actions_disjoint() {
+        for width in [280.0, 320.0] {
+            let card = Rect::from_min_size(egui::Pos2::ZERO, vec2(width, TOUCH_CARD_HEIGHT));
+            let layout = tool_card_layout(card, TOUCH_ACTION_SIDE, 132.0);
+
+            assert!(layout.status.is_none(), "{width}px should stack status");
+            assert!(layout.text.is_positive());
+            assert!(layout.text.width() >= width - 154.0);
+            assert!(layout.text.right() <= layout.favorite_action.left());
+            assert!(layout.favorite_action.right() <= layout.pin_action.left());
+            assert!(layout.favorite_action.left() >= card.left());
+            assert!(layout.pin_action.right() <= card.right());
+        }
+    }
+
+    #[test]
+    fn desktop_card_preserves_measured_inline_title_and_status_regions() {
+        let card = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, CARD_HEIGHT));
+        let layout = tool_card_layout(card, CARD_ACTION_SIDE, 132.0);
+        let status = layout.status.expect("desktop card keeps inline status");
+
+        assert!(layout.text.width() >= CARD_INLINE_TITLE_MIN_WIDTH);
+        assert!(layout.text.right() + CARD_STATUS_GAP <= status.left());
+        assert!(status.right() <= layout.favorite_action.left());
+        assert!(layout.favorite_action.right() <= layout.pin_action.left());
+    }
+
+    #[test]
+    fn long_specialist_copy_elides_inside_the_phone_text_region() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut rendered_width = 0.0;
+        let card = Rect::from_min_size(egui::Pos2::ZERO, vec2(280.0, TOUCH_CARD_HEIGHT));
+        let layout = tool_card_layout(card, TOUCH_ACTION_SIDE, 180.0);
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ctx, |ui| {
+                    let font = theme::sans(tokens::FS_1, FontWeight::SemiBold);
+                    let text = elide_to_width(
+                        ui.painter(),
+                        "Extremely long localized specialist engineering workspace identity",
+                        &font,
+                        layout.text.width(),
+                    );
+                    rendered_width = ui
+                        .painter()
+                        .layout_no_wrap(text, font, Color32::WHITE)
+                        .size()
+                        .x;
+                });
+        });
+        assert!(rendered_width <= layout.text.width() + 0.5);
+    }
+
+    #[test]
+    fn specialist_empty_state_owns_the_full_local_surface_width() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut rect = Rect::NOTHING;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 240.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ctx, |ui| rect = empty_state(ui).rect);
+            },
+        );
+        assert!((rect.width() - 320.0).abs() <= 0.5, "empty state: {rect:?}");
+        assert!(rect.height() >= 140.0);
     }
 }

@@ -5,7 +5,8 @@
 //! project history when a project has not produced that evidence yet.
 
 use egui::{
-    Align, Align2, Color32, Context, Layout, Margin, Rect, ScrollArea, Sense, Stroke, Ui, vec2,
+    Align, Align2, Color32, Context, Layout, Margin, Rect, ScrollArea, Sense, Stroke, Ui, pos2,
+    vec2,
 };
 
 use crate::common::{RSpiceApp, app::ConsoleMessage};
@@ -33,6 +34,14 @@ const RECENT_RUN_ROW_HEIGHT: f32 = 72.0;
 const CONFIGURATION_TABLE_HEADER_HEIGHT: f32 = 27.0;
 const CONFIGURATION_TABLE_ROW_HEIGHT: f32 = 28.0;
 const CONFIGURATION_TABLE_MIN_WIDTH: f32 = 540.0;
+const WORKSPACE_TABLE_HEADER_HEIGHT: f32 = 37.0;
+const WORKSPACE_TABLE_COLUMN_HEADER_HEIGHT: f32 = 27.0;
+const WORKSPACE_TABLE_ROW_HEIGHT: f32 = 36.0;
+const RECOVERY_TABLE_MIN_WIDTH: f32 = 820.0;
+const TECHNOLOGY_TABLE_MIN_WIDTH: f32 = 760.0;
+const RECOVERY_STATUS_HEIGHT: f32 = 68.0;
+const TECHNOLOGY_METRIC_HEIGHT: f32 = 84.0;
+const TECHNOLOGY_METRIC_COMPACT_HEIGHT: f32 = 70.0;
 const TECHNOLOGY_SURFACE_TITLE: &str = "Model-library technology contract";
 const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology…";
 const TECHNOLOGY_DIALOG_TITLE: &str = "Attach model-library technology";
@@ -128,6 +137,46 @@ struct ProjectEntryLayout {
     height: f32,
     status_below_title: bool,
     phone: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ProjectContractLayout {
+    status_columns: usize,
+    status_cell_width: f32,
+    operation_columns: usize,
+    operation_cell_width: f32,
+}
+
+impl ProjectContractLayout {
+    fn resolve(content_width: f32) -> Self {
+        let content_width = content_width.max(0.0);
+        let status_columns = if content_width <= PROJECT_PHONE_BREAKPOINT {
+            1
+        } else if content_width <= PROJECT_RESPONSIVE_BREAKPOINT {
+            2
+        } else {
+            4
+        };
+        let operation_columns = if content_width <= PROJECT_RESPONSIVE_BREAKPOINT {
+            1
+        } else {
+            3
+        };
+        Self {
+            status_columns,
+            status_cell_width: content_width / status_columns as f32,
+            operation_columns,
+            operation_cell_width: content_width / operation_columns as f32,
+        }
+    }
+
+    fn technology_metric_height(self) -> f32 {
+        if self.status_columns == 4 {
+            TECHNOLOGY_METRIC_HEIGHT
+        } else {
+            TECHNOLOGY_METRIC_COMPACT_HEIGHT
+        }
+    }
 }
 
 impl ProjectEntryLayout {
@@ -1484,13 +1533,312 @@ fn configuration_policy_cards(ui: &mut Ui, app: &RSpiceApp) {
     });
 }
 
+struct WorkspaceBandSpec {
+    label: &'static str,
+    value: String,
+    detail: String,
+    value_color: Color32,
+}
+
+fn workspace_status_band(
+    ui: &mut Ui,
+    id: &'static str,
+    specs: &[WorkspaceBandSpec; 4],
+    layout: ProjectContractLayout,
+    cell_height: f32,
+    metric: bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let shown = egui::Grid::new(id)
+        .num_columns(layout.status_columns)
+        .spacing(vec2(0.0, 0.0))
+        .show(ui, |ui| {
+            for (index, spec) in specs.iter().enumerate() {
+                ui.allocate_ui_with_layout(
+                    vec2(layout.status_cell_width, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(layout.status_cell_width);
+                        workspace_status_cell(
+                            ui,
+                            spec,
+                            cell_height,
+                            metric,
+                            (index + 1) % layout.status_columns != 0,
+                            index + layout.status_columns < specs.len(),
+                        );
+                    },
+                );
+                if (index + 1) % layout.status_columns == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+    ui.painter().hline(
+        shown.response.rect.x_range(),
+        shown.response.rect.bottom(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+}
+
+fn workspace_status_cell(
+    ui: &mut Ui,
+    spec: &WorkspaceBandSpec,
+    height: f32,
+    metric: bool,
+    right_divider: bool,
+    bottom_divider: bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    if right_divider {
+        ui.painter().vline(
+            rect.right(),
+            rect.y_range(),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
+    if bottom_divider {
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom(),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
+    let content = rect.shrink2(vec2(12.0, 0.0));
+    let painter = ui
+        .painter()
+        .with_clip_rect(content.intersect(ui.clip_rect()));
+    let compact_metric = metric && height <= TECHNOLOGY_METRIC_COMPACT_HEIGHT;
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::mono(
+        if metric { 19.0 } else { 13.0 },
+        if metric {
+            FontWeight::Medium
+        } else {
+            FontWeight::SemiBold
+        },
+    );
+    let detail_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let label = elide_text(ui, spec.label, &label_font, content.width());
+    let value = elide_text(ui, &spec.value, &value_font, content.width());
+    let detail = elide_text(ui, &spec.detail, &detail_font, content.width());
+    painter.text(
+        pos2(
+            content.left(),
+            rect.top()
+                + if compact_metric {
+                    7.0
+                } else if metric {
+                    11.0
+                } else {
+                    9.0
+                },
+        ),
+        Align2::LEFT_TOP,
+        label,
+        label_font,
+        t.color.text_dim,
+    );
+    painter.text(
+        pos2(
+            content.left(),
+            rect.top()
+                + if compact_metric {
+                    25.0
+                } else if metric {
+                    32.0
+                } else {
+                    26.0
+                },
+        ),
+        Align2::LEFT_TOP,
+        value,
+        value_font,
+        spec.value_color,
+    );
+    painter.text(
+        pos2(
+            content.left(),
+            rect.top()
+                + if compact_metric {
+                    51.0
+                } else if metric {
+                    60.0
+                } else {
+                    47.0
+                },
+        ),
+        Align2::LEFT_TOP,
+        detail,
+        detail_font,
+        t.color.text_faint,
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            format!("{}: {}. {}", spec.label, spec.value, spec.detail),
+        )
+    });
+}
+
+fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(width, WORKSPACE_TABLE_HEADER_HEIGHT), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let content = rect.shrink2(vec2(11.0, 0.0));
+    let gap = 8.0;
+    let title_width = ((content.width() - gap) * 0.62).max(0.0);
+    let title_rect = Rect::from_min_max(
+        content.min,
+        pos2(content.left() + title_width, content.bottom()),
+    );
+    let meta_rect = Rect::from_min_max(
+        pos2(
+            (title_rect.right() + gap).min(content.right()),
+            content.top(),
+        ),
+        content.max,
+    );
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let title = elide_text(ui, title, &title_font, title_rect.width());
+    let meta = elide_text(ui, meta, &meta_font, meta_rect.width());
+    ui.painter().with_clip_rect(title_rect).text(
+        title_rect.left_center(),
+        Align2::LEFT_CENTER,
+        title,
+        title_font,
+        t.color.text,
+    );
+    ui.painter().with_clip_rect(meta_rect).text(
+        meta_rect.right_center(),
+        Align2::RIGHT_CENTER,
+        meta,
+        meta_font,
+        meta_color,
+    );
+}
+
+fn workspace_table_row<const N: usize>(
+    ui: &mut Ui,
+    width: f32,
+    cells: [&str; N],
+    fractions: [f32; N],
+    header: bool,
+    mono_columns: &[usize],
+    colored_cells: &[(usize, Color32)],
+) -> (egui::Response, Vec<Rect>) {
+    let t = Tokens::get(ui.ctx());
+    let height = if header {
+        WORKSPACE_TABLE_COLUMN_HEADER_HEIGHT
+    } else {
+        WORKSPACE_TABLE_ROW_HEIGHT
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    if header {
+        painter.rect_filled(rect, 0.0, t.color.bg_panel_2);
+    }
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let mut left = rect.left();
+    let mut cell_rects = Vec::with_capacity(N);
+    for (index, (text, fraction)) in cells.iter().zip(fractions.iter()).enumerate() {
+        let right = if index + 1 == N {
+            rect.right()
+        } else {
+            left + rect.width() * fraction
+        };
+        let cell = Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
+        if index > 0 {
+            painter.vline(left, rect.y_range(), Stroke::new(1.0, t.color.border));
+        }
+        let text_color = colored_cells
+            .iter()
+            .find_map(|(column, color)| (*column == index).then_some(*color))
+            .unwrap_or(if header {
+                t.color.text_faint
+            } else {
+                t.color.text_dim
+            });
+        let font = if header {
+            theme::sans(tokens::FS_0, FontWeight::Medium)
+        } else if mono_columns.contains(&index) {
+            theme::mono(tokens::FS_0, FontWeight::Regular)
+        } else {
+            theme::sans(tokens::FS_0, FontWeight::Regular)
+        };
+        let text_rect = cell.shrink2(vec2(8.0, 0.0));
+        let text = elide_text(ui, text, &font, text_rect.width());
+        painter.with_clip_rect(text_rect).text(
+            cell.left_center() + vec2(8.0, 0.0),
+            Align2::LEFT_CENTER,
+            text,
+            font,
+            text_color,
+        );
+        cell_rects.push(cell);
+        left = right;
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), cells.join(", "))
+    });
+    (response, cell_rects)
+}
+
+fn workspace_empty_table_row(ui: &mut Ui, width: f32, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(width, WORKSPACE_TABLE_ROW_HEIGHT), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let text_rect = rect.shrink2(vec2(10.0, 0.0));
+    let visible_text = elide_text(ui, text, &font, text_rect.width());
+    ui.painter().with_clip_rect(text_rect).text(
+        rect.left_center() + vec2(10.0, 0.0),
+        Align2::LEFT_CENTER,
+        visible_text,
+        font,
+        t.color.text_faint,
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+}
+
 fn technology(ui: &mut Ui, app: &mut RSpiceApp) {
+    let layout = ProjectContractLayout::resolve(ui.available_width());
     header_with_actions(
         ui,
         "TECHNOLOGY ATTACHMENT",
         TECHNOLOGY_SURFACE_TITLE,
         "Project-owned authenticated binding for parsed models, process sections, dependency edges, and exact source bytes.",
         |ui, app| {
+            if Button::new("Project").show(ui).clicked() {
+                Command::ProjectPage(ProjectPage::Dashboard).execute(app);
+            }
             if Button::new(TECHNOLOGY_SURFACE_ACTION)
                 .accent()
                 .show(ui)
@@ -1501,97 +1849,383 @@ fn technology(ui: &mut Ui, app: &mut RSpiceApp) {
         },
         app,
     );
-    card(ui, "Attached model technology", |ui| {
-        let project = &app.state.workspace.project;
-        match project.technology_binding() {
-            Some(binding) => {
-                property_row(ui, "Attachment", &binding.display_label());
-                property_row(ui, "Model library", binding.model_library());
-                property_row(
-                    ui,
-                    "Root model source",
-                    &binding.root_source().display().to_string(),
-                );
-                property_row(
-                    ui,
-                    "Pinned source closure",
-                    &format!(
-                        "{} exact file{}",
-                        binding.source_closure().len(),
-                        plural(binding.source_closure().len())
-                    ),
-                );
-                property_row(
-                    ui,
-                    "Parsed device models",
-                    &binding.model_count().to_string(),
-                );
-                property_row(
-                    ui,
-                    "Process sections",
-                    &if binding.process_sections().is_empty() {
-                        "No named sections".to_owned()
-                    } else {
-                        binding.process_sections().join(", ")
-                    },
-                );
-                match app
-                    .state
-                    .model_library_manager
-                    .validate_attached_technology(Some(binding))
-                {
-                    Ok(()) => status_dot(
-                        ui,
-                        Tokens::get(ui.ctx()).color.ok,
-                        "Authoritative authenticated binding matches the execution catalog",
-                    ),
-                    Err(error) => status_dot(
-                        ui,
-                        Tokens::get(ui.ctx()).color.err,
-                        &format!("Attached binding is not executable · {error}"),
-                    ),
-                }
+    technology_metric_strip(ui, app, layout);
+    technology_resource_table(ui, app);
+    technology_migration_strip(ui, app, layout);
+}
+
+fn technology_metric_strip(ui: &mut Ui, app: &RSpiceApp, layout: ProjectContractLayout) {
+    let t = Tokens::get(ui.ctx());
+    let binding = app.state.workspace.project.technology_binding();
+    let catalog = technology_candidates(app);
+    let replacement_count = catalog
+        .candidates
+        .iter()
+        .filter(|candidate| Some(&candidate.binding) != binding)
+        .count();
+    let validation = binding.map(|binding| {
+        app.state
+            .model_library_manager
+            .validate_attached_technology(Some(binding))
+    });
+    let (attachment_value, attachment_detail, attachment_color) = match validation {
+        Some(Ok(())) => (
+            "resolved".to_owned(),
+            binding
+                .map(ProjectTechnologyBinding::display_label)
+                .unwrap_or_default(),
+            t.color.ok,
+        ),
+        Some(Err(_)) => (
+            "stale".to_owned(),
+            "reattach the authenticated execution catalog".to_owned(),
+            t.color.err,
+        ),
+        None if app.state.workspace.project.technology.is_some() => (
+            "legacy label".to_owned(),
+            "no exact source contract attached".to_owned(),
+            t.color.warn,
+        ),
+        None => (
+            "not attached".to_owned(),
+            "simulation fails closed without a binding".to_owned(),
+            t.color.warn,
+        ),
+    };
+    let sections = binding
+        .map(|binding| binding.process_sections().len())
+        .unwrap_or(0);
+    let section_detail = binding
+        .filter(|binding| !binding.process_sections().is_empty())
+        .map(|binding| binding.process_sections().join(" · "))
+        .unwrap_or_else(|| "No named process sections".to_owned());
+    let source_count = binding
+        .map(|binding| binding.source_closure().len())
+        .unwrap_or(0);
+    let source_detail = binding
+        .map(|binding| {
+            format!(
+                "{} parsed model{} · exact bytes retained",
+                binding.model_count(),
+                plural(binding.model_count())
+            )
+        })
+        .unwrap_or_else(|| "No authenticated source closure".to_owned());
+    let replacement_detail = if catalog.diagnostics.is_empty() {
+        format!(
+            "{} authenticated candidate{} in catalog",
+            catalog.candidates.len(),
+            plural(catalog.candidates.len())
+        )
+    } else {
+        format!(
+            "{} catalog diagnostic{} require attention",
+            catalog.diagnostics.len(),
+            plural(catalog.diagnostics.len())
+        )
+    };
+    let specs = [
+        WorkspaceBandSpec {
+            label: "Attachment",
+            value: attachment_value,
+            detail: attachment_detail,
+            value_color: attachment_color,
+        },
+        WorkspaceBandSpec {
+            label: "Model sections",
+            value: sections.to_string(),
+            detail: section_detail,
+            value_color: t.color.text,
+        },
+        WorkspaceBandSpec {
+            label: "Model sources",
+            value: source_count.to_string(),
+            detail: source_detail,
+            value_color: if source_count > 0 {
+                t.color.text
+            } else {
+                t.color.warn
+            },
+        },
+        WorkspaceBandSpec {
+            label: "Replacement candidates",
+            value: replacement_count.to_string(),
+            detail: replacement_detail,
+            value_color: if catalog.diagnostics.is_empty() {
+                t.color.text
+            } else {
+                t.color.warn
+            },
+        },
+    ];
+    workspace_status_band(
+        ui,
+        "workbench.project.technology.metrics",
+        &specs,
+        layout,
+        layout.technology_metric_height(),
+        true,
+    );
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TechnologyResourceRow {
+    resource: String,
+    identity: String,
+    scope: String,
+    platform: String,
+    status: String,
+    healthy: bool,
+}
+
+fn technology_resource_rows(app: &RSpiceApp) -> Vec<TechnologyResourceRow> {
+    let binding = app.state.workspace.project.technology_binding();
+    let mut rows = Vec::new();
+    if let Some(binding) = binding {
+        let binding_healthy = app
+            .state
+            .model_library_manager
+            .validate_attached_technology(Some(binding))
+            .is_ok();
+        rows.push(TechnologyResourceRow {
+            resource: "Project technology binding".to_owned(),
+            identity: binding.display_label(),
+            scope: "project execution".to_owned(),
+            platform: "desktop · web · mobile".to_owned(),
+            status: if binding_healthy { "resolved" } else { "stale" }.to_owned(),
+            healthy: binding_healthy,
+        });
+        let source_identity = binding
+            .source_closure()
+            .first()
+            .map(|source| {
+                format!(
+                    "{} files · {}",
+                    binding.source_closure().len(),
+                    short_identity(&source.digest.to_string())
+                )
+            })
+            .unwrap_or_else(|| "0 files".to_owned());
+        rows.push(TechnologyResourceRow {
+            resource: "SPICE model source closure".to_owned(),
+            identity: source_identity,
+            scope: "simulation".to_owned(),
+            platform: "desktop · web · mobile".to_owned(),
+            status: if binding_healthy {
+                "verified"
+            } else {
+                "unavailable"
             }
-            None => {
-                property_row(
-                    ui,
-                    "Attachment",
-                    project
-                        .technology
-                        .as_deref()
-                        .unwrap_or("No authenticated model technology attached"),
-                );
-                if project.technology.is_some() {
-                    status_dot(
-                        ui,
-                        Tokens::get(ui.ctx()).color.warn,
-                        "Legacy label only; reattach to pin the model-source contract",
-                    );
-                }
+            .to_owned(),
+            healthy: binding_healthy,
+        });
+        rows.push(TechnologyResourceRow {
+            resource: "Process-section catalog".to_owned(),
+            identity: if binding.process_sections().is_empty() {
+                "No named sections".to_owned()
+            } else {
+                binding.process_sections().join(" · ")
+            },
+            scope: "corner selection".to_owned(),
+            platform: "desktop · web · mobile".to_owned(),
+            status: if binding_healthy { "attached" } else { "stale" }.to_owned(),
+            healthy: binding_healthy,
+        });
+        rows.push(TechnologyResourceRow {
+            resource: "Source dependency graph".to_owned(),
+            identity: format!(
+                "{} edge{}",
+                binding.source_edges().len(),
+                plural(binding.source_edges().len())
+            ),
+            scope: "include resolution".to_owned(),
+            platform: "desktop · web · mobile".to_owned(),
+            status: if binding_healthy {
+                "authenticated"
+            } else {
+                "stale"
             }
+            .to_owned(),
+            healthy: binding_healthy,
+        });
+    } else {
+        rows.push(TechnologyResourceRow {
+            resource: "Project technology binding".to_owned(),
+            identity: app
+                .state
+                .workspace
+                .project
+                .technology
+                .clone()
+                .unwrap_or_else(|| "Not attached".to_owned()),
+            scope: "project execution".to_owned(),
+            platform: "desktop · web · mobile".to_owned(),
+            status: "not executable".to_owned(),
+            healthy: false,
+        });
+    }
+    let search_catalog_ready = !app.state.pdk_config.library_paths.is_empty()
+        && !app.state.pdk_config.discovered_files.is_empty()
+        && app.state.pdk_config.scan_errors.is_empty();
+    rows.push(TechnologyResourceRow {
+        resource: "Configured model search catalog".to_owned(),
+        identity: format!(
+            "{} path{} · {} discovered file{}",
+            app.state.pdk_config.library_paths.len(),
+            plural(app.state.pdk_config.library_paths.len()),
+            app.state.pdk_config.discovered_files.len(),
+            plural(app.state.pdk_config.discovered_files.len()),
+        ),
+        scope: "model discovery".to_owned(),
+        platform: "active workspace".to_owned(),
+        status: if !app.state.pdk_config.scan_errors.is_empty() {
+            "diagnostics"
+        } else if search_catalog_ready {
+            "available"
+        } else {
+            "empty"
         }
-        property_row(
-            ui,
-            "Configured search paths",
-            &app.state.pdk_config.library_paths.len().to_string(),
-        );
-        property_row(
-            ui,
-            "Discovered model files",
-            &app.state.pdk_config.discovered_files.len().to_string(),
-        );
-        property_row(
-            ui,
-            "Scan diagnostics",
-            &app.state.pdk_config.scan_errors.len().to_string(),
-        );
-        for path in &app.state.pdk_config.library_paths {
-            ui.label(
-                egui::RichText::new(path.display_name())
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(Tokens::get(ui.ctx()).color.text_dim),
+        .to_owned(),
+        healthy: search_catalog_ready,
+    });
+    rows
+}
+
+fn technology_resource_table(ui: &mut Ui, app: &RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let rows = technology_resource_rows(app);
+    let healthy = rows.iter().all(|row| row.healthy);
+    workspace_table_panel_header(
+        ui,
+        "Model technology resources",
+        if healthy { "LOCKED" } else { "REVIEW REQUIRED" },
+        if healthy { t.color.ok } else { t.color.warn },
+    );
+    let visible_width = ui.available_width().max(1.0);
+    ScrollArea::horizontal()
+        .id_salt("workbench.project.technology.resources")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            let width = visible_width.max(TECHNOLOGY_TABLE_MIN_WIDTH);
+            ui.set_min_width(width);
+            let fractions = [0.24, 0.25, 0.17, 0.21, 0.13];
+            workspace_table_row(
+                ui,
+                width,
+                [
+                    "RESOURCE",
+                    "VERSION / IDENTITY",
+                    "SCOPE",
+                    "PLATFORM",
+                    "STATUS",
+                ],
+                fractions,
+                true,
+                &[],
+                &[],
             );
-        }
+            for row in &rows {
+                workspace_table_row(
+                    ui,
+                    width,
+                    [
+                        row.resource.as_str(),
+                        row.identity.as_str(),
+                        row.scope.as_str(),
+                        row.platform.as_str(),
+                        row.status.as_str(),
+                    ],
+                    fractions,
+                    false,
+                    &[1],
+                    &[(
+                        4,
+                        if row.healthy {
+                            t.color.ok
+                        } else {
+                            t.color.warn
+                        },
+                    )],
+                );
+            }
+        });
+}
+
+fn technology_migration_strip(ui: &mut Ui, app: &mut RSpiceApp, layout: ProjectContractLayout) {
+    let t = Tokens::get(ui.ctx());
+    let attached = app.state.workspace.project.technology_binding().is_some();
+    let copy = if attached {
+        "A replacement is accepted only after its authenticated source contract is validated and a whole-project recovery checkpoint is written and read-back verified. The current binding remains authoritative until commit."
+    } else {
+        "Attachment validates an authenticated source contract and writes and read-back verifies a whole-project recovery checkpoint before the project binding changes."
+    };
+    let shown = egui::Frame::new()
+        .fill(t.color.bg_panel)
+        .inner_margin(Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if layout.status_columns == 1 {
+                ui.vertical(|ui| {
+                    migration_safety_copy(ui, copy);
+                    ui.add_space(7.0);
+                    if Button::new(if attached {
+                        "Review replacement…"
+                    } else {
+                        TECHNOLOGY_SURFACE_ACTION
+                    })
+                    .show(ui)
+                    .clicked()
+                    {
+                        open_technology_attachment_dialog(app);
+                    }
+                });
+            } else {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if Button::new(if attached {
+                        "Review replacement…"
+                    } else {
+                        TECHNOLOGY_SURFACE_ACTION
+                    })
+                    .show(ui)
+                    .clicked()
+                    {
+                        open_technology_attachment_dialog(app);
+                    }
+                    let width = ui.available_width().max(1.0);
+                    ui.allocate_ui_with_layout(
+                        vec2(width, 0.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            migration_safety_copy(ui, copy);
+                        },
+                    );
+                });
+            }
+        });
+    ui.painter().hline(
+        shown.response.rect.x_range(),
+        shown.response.rect.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+}
+
+fn migration_safety_copy(ui: &mut Ui, copy: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 12.0;
+        ui.label(
+            egui::RichText::new("Migration safety")
+                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                .color(t.color.text),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(copy)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            )
+            .wrap(),
+        );
     });
 }
 
@@ -2361,21 +2995,22 @@ fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
     ensure_project_recovery_catalog(ui.ctx(), app);
+    let layout = ProjectContractLayout::resolve(ui.available_width());
     header_with_actions(
         ui,
-        "PROJECT RECOVERY · NON-DESTRUCTIVE",
-        "Recovery Center",
-        "Review live working changes and save a durable project copy without replacing recoverable state.",
+        "RECOVERY · CHECKPOINTS · STORE INTEGRITY",
+        "Project recovery center",
+        "Review recoverable working state and integrity-verified full-project checkpoints. Saved projects and live working state are never overwritten by a recovery-copy operation.",
         |ui, app| {
+            if Button::new("Project").show(ui).clicked() {
+                Command::ProjectPage(ProjectPage::Dashboard).execute(app);
+            }
             if Button::new("Save current project")
                 .accent()
                 .show(ui)
                 .clicked()
             {
                 Command::Save.execute(app);
-            }
-            if Button::new("Save project copy…").show(ui).clicked() {
-                Command::SaveAs.execute(app);
             }
         },
         app,
@@ -2388,59 +3023,107 @@ fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|view| view.dirty)
         .map(|view| view.reference.display_path())
         .collect();
-    card(ui, "Recoverable working state", |ui| {
-        property_row(
-            ui,
-            "Open documents",
-            &app.state.workspace.open_views.len().to_string(),
-        );
-        property_row(ui, "Modified documents", &dirty_documents.len().to_string());
-        property_row(
-            ui,
-            "Active schematic",
-            if app.state.schematic.is_dirty {
-                "Modified"
+    recovery_status_strip(ui, app, &dirty_documents, layout);
+    recovery_checkpoint_table(ui, app);
+    recovery_operation_grid(ui, app, layout);
+}
+
+fn recovery_status_strip(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    dirty_documents: &[String],
+    layout: ProjectContractLayout,
+) {
+    let t = Tokens::get(ui.ctx());
+    let recovery = &app.state.dialogs.project_checkpoint_recovery;
+    let modified_count = dirty_documents.len()
+        + usize::from(app.state.schematic.is_dirty)
+        + usize::from(app.state.workspace.netlist_source_dirty);
+    let checkpoint_count = recovery.checkpoints.len();
+    let integrity_healthy = recovery.error.is_none() && recovery.quarantined.is_empty();
+    let project_path = app
+        .state
+        .workspace
+        .project
+        .path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "No saved project path".to_owned());
+    let specs = [
+        WorkspaceBandSpec {
+            label: "Working state",
+            value: if modified_count == 0 {
+                "current".to_owned()
             } else {
-                "Current"
+                format!("{modified_count} modified")
             },
-        );
-        property_row(
-            ui,
-            "Manual netlist",
-            if app.state.workspace.netlist_source_dirty {
-                "Modified"
+            detail: format!(
+                "{} open document{}",
+                app.state.workspace.open_views.len(),
+                plural(app.state.workspace.open_views.len())
+            ),
+            value_color: if modified_count == 0 {
+                t.color.ok
             } else {
-                "Current"
+                t.color.warn
             },
-        );
-        property_row(
-            ui,
-            "Project path",
-            &app.state
-                .workspace
-                .project
-                .path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "Not saved yet".to_owned()),
-        );
-        if dirty_documents.is_empty()
-            && !app.state.schematic.is_dirty
-            && !app.state.workspace.netlist_source_dirty
-        {
-            status_dot(
-                ui,
-                Tokens::get(ui.ctx()).color.ok,
-                "No recovery action required",
-            );
-        } else {
-            for document in dirty_documents {
-                muted(ui, &document);
-            }
-        }
-    });
-    ui.add_space(PROJECT_GRID_GAP);
-    project_checkpoint_card(ui, app);
+        },
+        WorkspaceBandSpec {
+            label: "Recovery points",
+            value: checkpoint_count.to_string(),
+            detail: if checkpoint_count == 0 {
+                "No integrity-verified checkpoint available".to_owned()
+            } else {
+                "whole-project snapshots protected".to_owned()
+            },
+            value_color: if checkpoint_count > 0 {
+                t.color.ok
+            } else {
+                t.color.text
+            },
+        },
+        WorkspaceBandSpec {
+            label: "Store integrity",
+            value: if recovery.error.is_some() {
+                "error".to_owned()
+            } else if recovery.quarantined.is_empty() {
+                "verified".to_owned()
+            } else {
+                format!("{} quarantined", recovery.quarantined.len())
+            },
+            detail: recovery
+                .error
+                .clone()
+                .unwrap_or_else(|| "checkpoint manifests and payloads inspected".to_owned()),
+            value_color: if integrity_healthy {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        },
+        WorkspaceBandSpec {
+            label: "Project storage",
+            value: if app.state.workspace.project.path.is_some() {
+                "saved path".to_owned()
+            } else {
+                "unsaved".to_owned()
+            },
+            detail: project_path,
+            value_color: if app.state.workspace.project.path.is_some() {
+                t.color.text
+            } else {
+                t.color.warn
+            },
+        },
+    ];
+    workspace_status_band(
+        ui,
+        "workbench.project.recovery.status",
+        &specs,
+        layout,
+        RECOVERY_STATUS_HEIGHT,
+        false,
+    );
 }
 
 fn ensure_project_recovery_catalog(ctx: &Context, app: &mut RSpiceApp) {
@@ -2499,7 +3182,7 @@ fn ensure_project_recovery_catalog(ctx: &Context, app: &mut RSpiceApp) {
     }
 }
 
-fn project_checkpoint_card(ui: &mut Ui, app: &mut RSpiceApp) {
+fn recovery_checkpoint_table(ui: &mut Ui, app: &mut RSpiceApp) {
     let loading = {
         #[cfg(target_arch = "wasm32")]
         {
@@ -2523,69 +3206,212 @@ fn project_checkpoint_card(ui: &mut Ui, app: &mut RSpiceApp) {
         .project_checkpoint_recovery
         .quarantined
         .clone();
-
-    card(ui, "Full-project recovery checkpoints", |ui| {
-        if loading {
-            muted(ui, "Loading and verifying recovery artifacts…");
-            return;
-        }
-        if let Some(error) = error.as_deref() {
-            status_dot(ui, Tokens::get(ui.ctx()).color.err, error);
-        }
-        if !quarantined.is_empty() {
-            status_dot(
+    let t = Tokens::get(ui.ctx());
+    let (meta, meta_color) = if loading {
+        ("LOADING", t.color.text_dim)
+    } else if error.is_some() {
+        ("CATALOG ERROR", t.color.err)
+    } else if !quarantined.is_empty() {
+        ("QUARANTINED ARTIFACTS", t.color.warn)
+    } else if checkpoints.is_empty() {
+        ("NO VERIFIED POINTS", t.color.text_faint)
+    } else {
+        ("PROTECTED", t.color.ok)
+    };
+    workspace_table_panel_header(ui, "Recovery points", meta, meta_color);
+    let visible_width = ui.available_width().max(1.0);
+    ScrollArea::horizontal()
+        .id_salt("workbench.project.recovery.checkpoints")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            let width = visible_width.max(RECOVERY_TABLE_MIN_WIDTH);
+            ui.set_min_width(width);
+            let fractions = [0.14, 0.24, 0.12, 0.13, 0.13, 0.24];
+            workspace_table_row(
                 ui,
-                Tokens::get(ui.ctx()).color.warn,
-                &format!(
-                    "{} owned recovery artifact{} quarantined",
-                    quarantined.len(),
-                    plural(quarantined.len())
-                ),
+                width,
+                ["CHECKPOINT", "CAUSE", "BASE REVISION", "SNAPSHOT", "INTEGRITY", "ACTIONS"],
+                fractions,
+                true,
+                &[],
+                &[],
             );
-            for record in &quarantined {
-                property_row(
+            if loading {
+                workspace_empty_table_row(ui, width, "Loading and verifying recovery artifacts…");
+            } else if checkpoints.is_empty() && quarantined.is_empty() {
+                workspace_empty_table_row(
                     ui,
-                    record.label(),
-                    &format!(
-                        "{} · {} artifact{} retained",
-                        record.reason(),
-                        record.artifact_count(),
-                        plural(record.artifact_count())
+                    width,
+                    error.as_deref().unwrap_or(
+                        "No integrity-verified full-project checkpoints are available for this project.",
                     ),
                 );
             }
-        }
-        if checkpoints.is_empty() {
-            muted(
-                ui,
-                "No integrity-verified full-project checkpoints are available for this project.",
-            );
-            return;
-        }
-
-        for checkpoint in checkpoints {
-            ui.separator();
-            property_row(
-                ui,
-                checkpoint.reason().label(),
-                &format!(
-                    "Revision {} · {} · {}",
-                    checkpoint.project_revision(),
-                    short_identity(&checkpoint.checkpoint_id().to_string()),
-                    format_byte_count(checkpoint.snapshot_byte_len()),
-                ),
-            );
-            ui.horizontal(|ui| {
-                if Button::new("Save recovered copy…").show(ui).clicked() {
-                    export_project_checkpoint_copy(ui.ctx(), app, checkpoint.clone());
-                }
-                muted(
+            for checkpoint in checkpoints {
+                let identity = short_identity(&checkpoint.checkpoint_id().to_string());
+                let revision = checkpoint.project_revision().to_string();
+                let size = format_byte_count(checkpoint.snapshot_byte_len());
+                let (_, cells) = workspace_table_row(
                     ui,
-                    "Creates an independent project identity; the live project is not overwritten.",
+                    width,
+                    [
+                        identity.as_str(),
+                        checkpoint.reason().label(),
+                        revision.as_str(),
+                        size.as_str(),
+                        "verified",
+                        "",
+                    ],
+                    fractions,
+                    false,
+                    &[0, 2, 3],
+                    &[(4, t.color.ok)],
                 );
-            });
+                let action_rect = cells[5].shrink2(vec2(6.0, 4.0));
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(action_rect)
+                        .layout(Layout::left_to_right(Align::Center)),
+                    |ui| {
+                        if Button::new("Save recovered copy…").show(ui).clicked() {
+                            export_project_checkpoint_copy(ui.ctx(), app, checkpoint.clone());
+                        }
+                    },
+                );
+            }
+            for record in quarantined {
+                let artifacts = format!(
+                    "{} artifact{}",
+                    record.artifact_count(),
+                    plural(record.artifact_count())
+                );
+                let (response, _) = workspace_table_row(
+                    ui,
+                    width,
+                    [
+                        record.label(),
+                        record.reason(),
+                        "—",
+                        artifacts.as_str(),
+                        "quarantined",
+                        "not recoverable",
+                    ],
+                    fractions,
+                    false,
+                    &[0, 2, 3],
+                    &[(4, t.color.warn)],
+                );
+                response.on_hover_text(record.reason());
+            }
+        });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryOperationAction {
+    SaveCurrent,
+    RefreshCatalog,
+    SaveProjectCopy,
+}
+
+fn recovery_operation_grid(ui: &mut Ui, app: &mut RSpiceApp, layout: ProjectContractLayout) {
+    let t = Tokens::get(ui.ctx());
+    let operations = [
+        (
+            "Current working state",
+            "Persist current editable project state transactionally without altering any retained recovery point.",
+            "Save current project",
+            RecoveryOperationAction::SaveCurrent,
+        ),
+        (
+            "Verified checkpoint recovery",
+            "Refresh the owned checkpoint catalog. Each row can publish an independent recovered project identity without overwriting the live project.",
+            "Refresh recovery points",
+            RecoveryOperationAction::RefreshCatalog,
+        ),
+        (
+            "Archives and portability",
+            "Create a separate project copy through the platform file workflow while the current project and retained checkpoints remain available.",
+            "Save project copy…",
+            RecoveryOperationAction::SaveProjectCopy,
+        ),
+    ];
+    let mut requested = None;
+    let mut panel_rects = Vec::with_capacity(operations.len());
+    let shown = egui::Grid::new("workbench.project.recovery.operations")
+        .num_columns(layout.operation_columns)
+        .spacing(vec2(0.0, 0.0))
+        .show(ui, |ui| {
+            for (index, (title, copy, action_label, action)) in operations.iter().enumerate() {
+                let panel = ui.allocate_ui_with_layout(
+                    vec2(layout.operation_cell_width, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(layout.operation_cell_width);
+                        if recovery_operation_panel(ui, title, copy, action_label) {
+                            requested = Some(*action);
+                        }
+                    },
+                );
+                panel_rects.push(panel.response.rect);
+                if (index + 1) % layout.operation_columns == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+    if layout.operation_columns == 1 {
+        for rect in panel_rects.iter().take(panel_rects.len().saturating_sub(1)) {
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom(),
+                Stroke::new(1.0, t.color.border_strong),
+            );
         }
-    });
+    } else {
+        for column in 1..layout.operation_columns {
+            ui.painter().vline(
+                shown.response.rect.left() + layout.operation_cell_width * column as f32,
+                shown.response.rect.y_range(),
+                Stroke::new(1.0, t.color.border_strong),
+            );
+        }
+    }
+    if let Some(action) = requested {
+        match action {
+            RecoveryOperationAction::SaveCurrent => Command::Save.execute(app),
+            RecoveryOperationAction::RefreshCatalog => {
+                app.state.dialogs.project_checkpoint_recovery.invalidate();
+                let ctx = ui.ctx().clone();
+                ensure_project_recovery_catalog(&ctx, app);
+            }
+            RecoveryOperationAction::SaveProjectCopy => Command::SaveAs.execute(app),
+        }
+    }
+}
+
+fn recovery_operation_panel(ui: &mut Ui, title: &str, copy: &str, action_label: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let shown = egui::Frame::new()
+        .inner_margin(Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(title)
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.text),
+            );
+            ui.add_space(4.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(copy)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
+            ui.add_space(9.0);
+            Button::new(action_label).show(ui).clicked()
+        });
+    shown.inner
 }
 
 fn format_byte_count(bytes: u64) -> String {
@@ -2861,6 +3687,48 @@ mod tests {
     }
 
     #[test]
+    fn recovery_and_technology_use_local_four_two_one_status_geometry() {
+        let wide = ProjectContractLayout::resolve(PROJECT_RESPONSIVE_BREAKPOINT + 180.0);
+        assert_eq!(wide.status_columns, 4);
+        assert_eq!(wide.operation_columns, 3);
+        assert_close(wide.status_cell_width, 250.0);
+        assert_close(wide.operation_cell_width, 1000.0 / 3.0);
+        assert_close(wide.technology_metric_height(), TECHNOLOGY_METRIC_HEIGHT);
+
+        let tablet = ProjectContractLayout::resolve(PROJECT_RESPONSIVE_BREAKPOINT);
+        assert_eq!(tablet.status_columns, 2);
+        assert_eq!(tablet.operation_columns, 1);
+        assert_close(tablet.status_cell_width, 410.0);
+        assert_close(tablet.operation_cell_width, 820.0);
+        assert_close(
+            tablet.technology_metric_height(),
+            TECHNOLOGY_METRIC_COMPACT_HEIGHT,
+        );
+
+        let phone = ProjectContractLayout::resolve(PROJECT_PHONE_BREAKPOINT);
+        assert_eq!(phone.status_columns, 1);
+        assert_eq!(phone.operation_columns, 1);
+        assert_close(phone.status_cell_width, 560.0);
+        assert_close(phone.operation_cell_width, 560.0);
+
+        let above_phone = ProjectContractLayout::resolve(PROJECT_PHONE_BREAKPOINT + 0.01);
+        assert_eq!(above_phone.status_columns, 2);
+    }
+
+    #[test]
+    fn recovery_and_technology_tables_preserve_complete_horizontal_geometry() {
+        assert_close(WORKSPACE_TABLE_COLUMN_HEADER_HEIGHT, 27.0);
+        assert_close(WORKSPACE_TABLE_ROW_HEIGHT, 36.0);
+        assert!(RECOVERY_TABLE_MIN_WIDTH > PROJECT_PHONE_BREAKPOINT);
+        assert!(TECHNOLOGY_TABLE_MIN_WIDTH > PROJECT_PHONE_BREAKPOINT);
+        assert_close(
+            [0.14_f32, 0.24, 0.12, 0.13, 0.13, 0.24].into_iter().sum(),
+            1.0,
+        );
+        assert_close([0.24_f32, 0.25, 0.17, 0.21, 0.13].into_iter().sum(), 1.0);
+    }
+
+    #[test]
     fn dashboard_rows_and_headers_expand_for_responsive_touch_contracts() {
         let tablet = ProjectEntryLayout::resolve(PROJECT_RESPONSIVE_BREAKPOINT, false);
         assert_close(tablet.height, TOUCH_TARGET_HEIGHT);
@@ -2944,6 +3812,29 @@ mod tests {
             assert!(!copy.contains("pdk"));
             assert!(!copy.contains("qualified"));
         }
+    }
+
+    #[test]
+    fn technology_resource_table_reports_absence_without_inventing_resources() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.model_library_manager.clear();
+        app.state.pdk_config.library_paths.clear();
+        app.state.pdk_config.discovered_files.clear();
+        app.state.pdk_config.scan_errors.clear();
+
+        let rows = technology_resource_rows(&app);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].resource, "Project technology binding");
+        assert_eq!(rows[0].status, "not executable");
+        assert!(!rows[0].healthy);
+        assert_eq!(rows[1].resource, "Configured model search catalog");
+        assert_eq!(rows[1].status, "empty");
+        assert!(!rows[1].healthy);
+        assert!(rows.iter().all(|row| {
+            let copy = format!("{} {}", row.resource, row.status).to_ascii_lowercase();
+            !copy.contains("qualified") && !copy.contains("rule deck")
+        }));
     }
 
     #[test]

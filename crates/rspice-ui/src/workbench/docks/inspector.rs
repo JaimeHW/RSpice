@@ -1127,13 +1127,55 @@ fn normalized_yield_margin(
     }
 }
 
-fn failure_row(ui: &mut Ui, failure: &FailedSample) {
+const FAILURE_ROW_PADDING_X: f32 = 9.0;
+const FAILURE_ROW_PADDING_Y: f32 = 8.0;
+const FAILURE_ROW_COLUMN_GAP: f32 = 8.0;
+const FAILURE_ROW_DETAIL_GAP: f32 = 4.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FailureRowColumns {
+    target_width: f32,
+    margin_width: f32,
+}
+
+fn failure_row_columns(row_width: f32, measured_margin_width: f32) -> FailureRowColumns {
+    let content_width = (row_width - FAILURE_ROW_PADDING_X * 2.0).max(1.0);
+    let margin_width = measured_margin_width.max(1.0).min(content_width);
+    let target_width = (content_width - margin_width - FAILURE_ROW_COLUMN_GAP).max(1.0);
+    FailureRowColumns {
+        target_width,
+        margin_width,
+    }
+}
+
+fn failure_row(ui: &mut Ui, failure: &FailedSample) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let height = if t.metrics.ctl_h >= 44.0 { 58.0 } else { 47.0 };
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
+    let width = ui.available_width().max(1.0);
+    let title = format!("#{:04} · {}", failure.sample_index + 1, failure.target);
+    let margin = format!("{:+.2}%", failure.normalized_margin * 100.0);
+    let detail = format!("observed {:.6} {}", failure.value, failure.unit);
+    let title_font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let margin_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let detail_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let measured_margin = ui
+        .painter()
+        .layout_no_wrap(margin, margin_font, t.color.err);
+    let columns = failure_row_columns(width, measured_margin.size().x);
+    let title_galley = ui
+        .painter()
+        .layout(title, title_font, t.color.text, columns.target_width);
+    let content_width = (width - FAILURE_ROW_PADDING_X * 2.0).max(1.0);
+    let detail_galley = ui
+        .painter()
+        .layout(detail, detail_font, t.color.text_faint, content_width);
+    let title_height = title_galley.size().y.max(measured_margin.size().y);
+    let natural_height = FAILURE_ROW_PADDING_Y * 2.0
+        + title_height
+        + FAILURE_ROW_DETAIL_GAP
+        + detail_galley.size().y;
+    let minimum_height = if t.metrics.ctl_h >= 44.0 { 58.0 } else { 47.0 };
+    let height = natural_height.max(minimum_height);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Label,
@@ -1153,30 +1195,42 @@ fn failure_row(ui: &mut Ui, failure: &FailedSample) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let painter = ui
-        .painter()
-        .with_clip_rect(rect.shrink2(egui::vec2(9.0, 0.0)));
-    painter.text(
-        rect.left_top() + egui::vec2(9.0, 8.0),
-        egui::Align2::LEFT_TOP,
-        format!("#{:04} · {}", failure.sample_index + 1, failure.target),
-        theme::sans(tokens::FS_0, FontWeight::Medium),
+    let title_top = rect.top() + FAILURE_ROW_PADDING_Y;
+    let target_rect = Rect::from_min_size(
+        Pos2::new(rect.left() + FAILURE_ROW_PADDING_X, title_top),
+        Vec2::new(columns.target_width, title_height),
+    );
+    ui.painter().with_clip_rect(target_rect).galley(
+        target_rect.left_top(),
+        title_galley,
         t.color.text,
     );
-    painter.text(
-        rect.right_top() + egui::vec2(-9.0, 8.0),
-        egui::Align2::RIGHT_TOP,
-        format!("{:+.2}%", failure.normalized_margin * 100.0),
-        theme::mono(tokens::FS_0, FontWeight::Medium),
+    let margin_rect = Rect::from_min_size(
+        Pos2::new(
+            rect.right() - FAILURE_ROW_PADDING_X - columns.margin_width,
+            title_top,
+        ),
+        Vec2::new(columns.margin_width, title_height),
+    );
+    ui.painter().with_clip_rect(margin_rect).galley(
+        Pos2::new(
+            margin_rect.right() - measured_margin.size().x,
+            margin_rect.top(),
+        ),
+        measured_margin,
         t.color.err,
     );
-    painter.text(
-        rect.left_bottom() + egui::vec2(9.0, -8.0),
-        egui::Align2::LEFT_BOTTOM,
-        format!("observed {:.6} {}", failure.value, failure.unit),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+    let detail_top = title_top + title_height + FAILURE_ROW_DETAIL_GAP;
+    let detail_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + FAILURE_ROW_PADDING_X, detail_top),
+        Pos2::new(rect.right() - FAILURE_ROW_PADDING_X, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(detail_rect).galley(
+        detail_rect.left_top(),
+        detail_galley,
         t.color.text_faint,
     );
+    response
 }
 
 fn joint_yield(results: &[crate::services::yield_manager::YieldResult]) -> Option<(usize, usize)> {
@@ -1689,6 +1743,46 @@ mod tests {
     fn inspector_property_lists_keep_mockup_vertical_padding() {
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_TOP, 7.0);
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM, 10.0);
+    }
+
+    #[test]
+    fn failure_row_reserves_a_non_overlapping_margin_column_at_drawer_width() {
+        let row_width = 228.0;
+        let columns = failure_row_columns(row_width, 48.0);
+        let target_right = FAILURE_ROW_PADDING_X + columns.target_width;
+        let margin_left = row_width - FAILURE_ROW_PADDING_X - columns.margin_width;
+
+        assert!(target_right + FAILURE_ROW_COLUMN_GAP <= margin_left + f32::EPSILON);
+        assert_eq!(columns.margin_width, 48.0);
+    }
+
+    #[test]
+    fn failure_row_height_grows_from_wrapped_target_copy_at_drawer_width() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(228.0, 400.0))),
+            ..egui::RawInput::default()
+        };
+        let failure = FailedSample {
+            target: "an intentionally long production specification target that must wrap"
+                .to_owned(),
+            unit: "V".to_owned(),
+            sample_index: 16,
+            value: 0.912_345,
+            normalized_margin: -0.1834,
+        };
+        let mut row_height = 0.0;
+
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::new())
+                .show(ctx, |ui| {
+                    row_height = failure_row(ui, &failure).rect.height();
+                });
+        });
+
+        assert!(row_height > 58.0, "wrapped row height was {row_height}");
     }
 
     #[test]

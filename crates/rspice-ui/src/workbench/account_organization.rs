@@ -20,6 +20,17 @@ use crate::ui::{
 use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const ACCOUNT_DESCRIPTION: &str = "Review the local application session, account and organization authority boundary, and verified on-device license.";
+const ACCOUNT_SPLIT_BREAKPOINT: f32 = 720.0;
+// The 920 pt dialog loses a small amount to its vertical scrollbar; retain the
+// mockup's six-column table on the full desktop surface and collapse only when
+// the actual content track is materially narrower.
+const ACCOUNT_TABLE_BREAKPOINT: f32 = 860.0;
+const ACCOUNT_PROPERTY_TOP: i8 = 7;
+const ACCOUNT_PROPERTY_BOTTOM: i8 = 10;
+const ACCOUNT_TABLE_CELL_INSET: f32 = 8.0;
+const ACCOUNT_TABLE_COLUMNS: f32 = 6.0;
+const ACCOUNT_LICENSE_ACTION_BREAKPOINT: f32 = 560.0;
+const ACCOUNT_SECTION_HEADER_HEIGHT: f32 = 29.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AccountOrganizationSnapshot {
@@ -118,7 +129,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         "Close",
     )
     .description(ACCOUNT_DESCRIPTION)
-    .size(DialogSize::WideWorkflow)
+    .size(DialogSize::AccountManager)
     .flush_body()
     .show(ctx, |ui| {
         render_summary(ui, &snapshot);
@@ -313,44 +324,79 @@ fn render_owner_actions(ui: &mut Ui, action: &mut Option<AccountAction>) {
 }
 
 fn render_authority_sections(ui: &mut Ui) {
-    let wide = ui.available_width() >= 720.0;
+    let t = Tokens::get(ui.ctx());
+    let wide = ui.available_width() >= ACCOUNT_SPLIT_BREAKPOINT;
     if wide {
-        ui.columns(2, |columns| {
-            render_organization_authority(&mut columns[0]);
-            render_authentication_authority(&mut columns[1]);
+        let top = ui.cursor().top();
+        let left = ui.cursor().left();
+        let width = ui.available_width();
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.columns(2, |columns| {
+                account_section(&mut columns[0], render_organization_authority);
+                account_section(&mut columns[1], render_authentication_authority);
+            });
         });
+        let bottom = ui.cursor().top();
+        ui.painter().vline(
+            left + width * 0.5,
+            top..=bottom,
+            Stroke::new(1.0, t.color.border_strong),
+        );
+        horizontal_rule(ui, t.color.border_strong);
     } else {
-        render_organization_authority(ui);
-        render_authentication_authority(ui);
+        account_section(ui, render_organization_authority);
+        horizontal_rule(ui, t.color.border_strong);
+        account_section(ui, render_authentication_authority);
+        horizontal_rule(ui, t.color.border_strong);
     }
+}
+
+fn account_section(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+    body(ui);
+}
+
+fn property_list(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+    Frame::NONE
+        .inner_margin(Margin {
+            left: 0,
+            right: 0,
+            top: ACCOUNT_PROPERTY_TOP,
+            bottom: ACCOUNT_PROPERTY_BOTTOM,
+        })
+        .show(ui, body);
 }
 
 fn render_organization_authority(ui: &mut Ui) {
     section_title(ui, "Organization and role");
-    property_row(ui, "Organization", "Not connected");
-    property_row(ui, "Workspace role", "Local project editor");
-    property_row(
-        ui,
-        "Approval authority",
-        "Unavailable without organization service",
-    );
-    property_row(
-        ui,
-        "Managed policy",
-        "No organization policy provider configured",
-    );
+    property_list(ui, |ui| {
+        property_row(ui, "Organization", "Not connected");
+        property_row(ui, "Workspace role", "Local project editor");
+        property_row(
+            ui,
+            "Approval authority",
+            "Unavailable without organization service",
+        );
+        property_row(
+            ui,
+            "Managed policy",
+            "No organization policy provider configured",
+        );
+    });
 }
 
 fn render_authentication_authority(ui: &mut Ui) {
     section_title(ui, "Authentication");
-    property_row(ui, "Sign-in provider", "Not configured");
-    property_row(ui, "Account session", "No authenticated account session");
-    property_row(ui, "Multi-factor", "Not applicable to this local session");
-    property_row(
-        ui,
-        "Recovery methods",
-        "No account recovery authority available",
-    );
+    property_list(ui, |ui| {
+        property_row(ui, "Sign-in provider", "Not configured");
+        property_row(ui, "Account session", "No authenticated account session");
+        property_row(ui, "Multi-factor", "Not applicable to this local session");
+        property_row(
+            ui,
+            "Recovery methods",
+            "No account recovery authority available",
+        );
+    });
 }
 
 fn render_session_section(ui: &mut Ui, snapshot: &AccountOrganizationSnapshot) {
@@ -359,17 +405,17 @@ fn render_session_section(ui: &mut Ui, snapshot: &AccountOrganizationSnapshot) {
         "RSpice · this application\n{} · current process\nLocation not collected · local trust boundary",
         snapshot.platform
     );
-    if ui.available_width() < 920.0 {
+    if ui.available_width() < ACCOUNT_TABLE_BREAKPOINT {
         property_row(ui, "Current session", &detail);
         return;
     }
 
-    let t = Tokens::get(ui.ctx());
+    let column_width = ui.available_width() / ACCOUNT_TABLE_COLUMNS;
     egui::Grid::new("account-organization.sessions")
         .num_columns(6)
         .striped(false)
-        .min_col_width(80.0)
-        .spacing(vec2(8.0, 0.0))
+        .min_col_width(0.0)
+        .spacing(Vec2::ZERO)
         .show(ui, |ui| {
             for heading in [
                 "DEVICE",
@@ -379,22 +425,17 @@ fn render_session_section(ui: &mut Ui, snapshot: &AccountOrganizationSnapshot) {
                 "TRUST",
                 "ACTION",
             ] {
-                ui.label(
-                    RichText::new(heading)
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_dim),
-                );
+                table_header_cell(ui, heading, column_width);
             }
             ui.end_row();
-            table_cell(ui, "RSpice · this application");
-            table_cell(ui, snapshot.platform);
-            table_cell(ui, "Not collected");
-            table_cell(ui, "Now");
-            table_cell(ui, "Local process");
-            table_cell(ui, "Current");
+            table_cell(ui, "RSpice · this application", column_width);
+            table_cell(ui, snapshot.platform, column_width);
+            table_cell(ui, "Not collected", column_width);
+            table_cell(ui, "Now", column_width);
+            table_cell(ui, "Local process", column_width);
+            table_cell(ui, "Current", column_width);
             ui.end_row();
         });
-    ui.add_space(8.0);
 }
 
 fn render_license_section(
@@ -403,43 +444,122 @@ fn render_license_section(
     action: &mut Option<AccountAction>,
 ) {
     section_title(ui, "Licensing and entitlements");
-    property_row(ui, "State", &snapshot.license_status);
-    property_row(ui, "Licensed to", &snapshot.licensee);
-    property_row(ui, "Tier", &snapshot.tier);
-    property_row(ui, "Updates until", &snapshot.updates_until);
-    property_row(ui, "License ID", &snapshot.license_id);
-    property_row(ui, "Local storage", &snapshot.storage);
     let entitled_features = if snapshot.features.is_empty() {
         "No feature grants in an activated local license".to_owned()
     } else {
         snapshot.features.join(" · ")
     };
-    property_row(ui, "Entitled features", &entitled_features);
+    property_list(ui, |ui| {
+        property_row(ui, "State", &snapshot.license_status);
+        property_row(ui, "Licensed to", &snapshot.licensee);
+        property_row(ui, "Tier", &snapshot.tier);
+        property_row(ui, "Updates until", &snapshot.updates_until);
+        property_row(ui, "License ID", &snapshot.license_id);
+        property_row(ui, "Local storage", &snapshot.storage);
+        property_row(ui, "Entitled features", &entitled_features);
+    });
     let t = Tokens::get(ui.ctx());
     Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new(
-                        "License verification is local and signed. Server pools, borrowing, usage history, and organization entitlements are not configured.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if Button::new("Manage local license…").show(ui).clicked() {
+            let copy = "License verification is local and signed. Server pools, borrowing, usage history, and organization entitlements are not configured.";
+            let action_label = "Manage local license…";
+            if ui.available_width() >= ACCOUNT_LICENSE_ACTION_BREAKPOINT {
+                let gap = 8.0;
+                let action_width = button_width(ui, action_label);
+                let copy_width = (ui.available_width() - action_width - gap).max(1.0);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(copy_width, 0.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(copy)
+                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                        .color(t.color.text_dim),
+                                )
+                                .wrap(),
+                            );
+                        },
+                    );
+                    if Button::new(action_label).show(ui).clicked() {
                         *action = Some(AccountAction::LicenseManager);
                     }
                 });
-            });
+            } else {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(copy)
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        )
+                        .wrap(),
+                    );
+                    if Button::new(action_label)
+                        .min_width(ui.available_width())
+                        .show(ui)
+                        .clicked()
+                    {
+                        *action = Some(AccountAction::LicenseManager);
+                    }
+                });
+            }
         });
 }
 
+fn button_width(ui: &Ui, label: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            Color32::WHITE,
+        )
+        .size()
+        .x
+        + 20.0
+}
+
 fn section_title(ui: &mut Ui, title: &str) {
-    super::design_system::section_header(ui, title, None);
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), ACCOUNT_SECTION_HEADER_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        Color32::from_rgba_unmultiplied(
+            t.color.bg_panel_2.r(),
+            t.color.bg_panel_2.g(),
+            t.color.bg_panel_2.b(),
+            204,
+        ),
+    );
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &title.to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: title_font,
+            color: t.color.text_dim,
+            extra_letter_spacing: 0.055 * tokens::FS_0,
+            ..Default::default()
+        },
+    );
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let text_rect = rect.shrink2(vec2(10.0, 0.0));
+    ui.painter().with_clip_rect(text_rect).galley(
+        text_rect.left_center() - vec2(0.0, galley.size().y * 0.5),
+        galley,
+        t.color.text_dim,
+    );
 }
 
 fn property_row(ui: &mut Ui, label: &str, value: &str) {
@@ -451,18 +571,39 @@ fn property_row(ui: &mut Ui, label: &str, value: &str) {
     accessible_text(ui, &response, &accessible_label);
 }
 
-fn table_cell(ui: &mut Ui, value: &str) {
+fn table_header_cell(ui: &mut Ui, value: &str, width: f32) {
     let t = Tokens::get(ui.ctx());
-    ui.add_sized(
-        [145.0, 34.0],
-        egui::Label::new(
-            RichText::new(value)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text),
-        )
-        .truncate(),
-    )
-    .on_hover_text(value);
+    let font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 27.0), Sense::hover());
+    let text_rect = rect.shrink2(vec2(ACCOUNT_TABLE_CELL_INSET, 0.0));
+    let text = super::design_system::elide_text(ui, value, &font, text_rect.width());
+    ui.painter().text(
+        text_rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        text,
+        font,
+        t.color.text_dim,
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), value));
+}
+
+fn table_cell(ui: &mut Ui, value: &str, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.row_h), Sense::hover());
+    let text_rect = rect.shrink2(vec2(ACCOUNT_TABLE_CELL_INSET, 0.0));
+    let text = super::design_system::elide_text(ui, value, &font, text_rect.width());
+    ui.painter().text(
+        text_rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        text,
+        font,
+        t.color.text,
+    );
+    response
+        .on_hover_text(value)
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, value));
 }
 
 fn horizontal_rule(ui: &mut Ui, color: Color32) {
