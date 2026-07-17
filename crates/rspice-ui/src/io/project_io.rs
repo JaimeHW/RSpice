@@ -22,11 +22,12 @@ use crate::product::{
 use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
-    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
-    CellViewRef, DcOpResult, ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary,
-    OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-    ProjectWorkspace, SavedOutputMaterializationStatus, SavedOutputReceipt, SimulationRun,
-    SimulationRunLifecycle, SimulationRunProvenance, SimulationState, ViewType, WaveformData,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance,
+    AnalysisResultSourceDomain, AnalysisType, CellViewRef, DcOpResult, ExecutionTarget,
+    LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue, PreparedRunReceipt,
+    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, ProjectWorkspace,
+    SavedOutputMaterializationStatus, SavedOutputReceipt, SimulationRun, SimulationRunLifecycle,
+    SimulationRunProvenance, SimulationState, ViewType, WaveformData,
 };
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -859,7 +860,9 @@ const STABLE_DATASET_RESULTS_SCHEMA_VERSION: u32 = 2;
 const PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION: u32 = 3;
 const EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION: u32 = 4;
 const SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION: u32 = 5;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 6;
+const EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION: u32 = 6;
+const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 8;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
@@ -1112,7 +1115,12 @@ impl ProjectSimulationResults {
     /// that fact explicitly per run so provenance cannot disappear from a
     /// current prepared-task result history without validation failing. Runs
     /// written before v6 become explicitly `LegacyUnknown`: execution identity
-    /// and lifecycle are never inferred from historical result payloads.
+    /// and lifecycle are never inferred from historical result payloads. V6
+    /// analyses migrate with `family_metadata: None`; metadata absent from an
+    /// historical payload is never reconstructed from display waveforms.
+    /// Result schemas through v7 acquire canonical result-data and dataset
+    /// digests from the exact retained values during migration; no samples or
+    /// analysis evidence are reconstructed.
     pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
@@ -1125,6 +1133,17 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if matches!(
+            source_schema,
+            EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION | FAMILY_METADATA_RESULTS_SCHEMA_VERSION
+        ) {
+            for run in &mut self.runs {
+                require_legacy_result_digest_absence(run, source_schema)?;
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         let migrate_v1_references = match source_schema {
             PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION => return Ok(()),
             LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION => true,
@@ -1314,6 +1333,7 @@ impl ProjectSimulationResults {
             };
             run.provenance_mode = PersistedField::Value(migrated_mode);
             run.lifecycle = Some(SimulationRunLifecycle::LegacyUnknown);
+            seal_project_result_digests(run)?;
             run.validate(run_idx)?;
         }
         self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -1345,6 +1365,7 @@ impl ProjectSimulationResults {
         }
 
         for (run_idx, run) in self.runs.iter().enumerate() {
+            require_legacy_result_digest_absence(run, source_schema)?;
             if run.job_id.is_some() || run.execution_target.is_some() || run.lifecycle.is_some() {
                 return Err(format!(
                     "runs[{run_idx}] contains execution identity or lifecycle introduced after schema v{source_schema}"
@@ -1554,6 +1575,39 @@ impl ProjectSimulationResults {
     }
 }
 
+fn require_legacy_result_digest_absence(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if run.dataset_content_digest.is_present() {
+        return Err(format!(
+            "schema-v{source_schema} simulation run {} contains a dataset content digest introduced by schema v8",
+            run.id
+        ));
+    }
+    if let Some(analysis) = run
+        .analyses
+        .iter()
+        .find(|analysis| analysis.result_data_digest.is_present())
+    {
+        return Err(format!(
+            "schema-v{source_schema} analysis {} contains a result data digest introduced by schema v8",
+            analysis.id
+        ));
+    }
+    Ok(())
+}
+
+fn seal_project_result_digests(run: &mut ProjectSimulationRun) -> Result<(), String> {
+    for analysis in &mut run.analyses {
+        let digest = analysis.clone().into_analysis()?.result_data_digest();
+        analysis.result_data_digest = PersistedField::Value(digest);
+    }
+    let digest = run.clone().into_run()?.dataset_content_digest();
+    run.dataset_content_digest = PersistedField::Value(digest);
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectRunProvenanceMode {
@@ -1719,6 +1773,10 @@ pub struct ProjectSimulationRun {
     pub timestamp: f64,
     #[serde(default)]
     pub analyses: Vec<ProjectAnalysisResult>,
+    /// Canonical identity of the ordered retained analysis content. Schemas
+    /// through v7 omitted this field and acquire it during migration.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub dataset_content_digest: PersistedField<ContentDigest>,
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub provenance_mode: PersistedField<ProjectRunProvenanceMode>,
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
@@ -1742,6 +1800,12 @@ impl ProjectSimulationRun {
             .into_iter()
             .map(ProjectAnalysisResult::into_analysis)
             .collect::<Result<Vec<_>, _>>()?;
+        if self.dataset_content_digest.is_null() {
+            return Err(format!(
+                "simulation run sequence {} has an explicitly null dataset content digest",
+                self.id
+            ));
+        }
         if self.provenance_mode.is_null() {
             return Err(format!(
                 "simulation run sequence {} has an explicitly null provenance mode",
@@ -2037,6 +2101,21 @@ impl ProjectSimulationRun {
                 .collect::<Result<Vec<_>, _>>()?;
             receipt.validate_result_prefix(&analyses)?;
         }
+        let retained_digest = self.dataset_content_digest.as_ref().copied().ok_or_else(|| {
+            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v8")
+        })?;
+        let computed_digest = self
+            .clone()
+            .into_run()
+            .map_err(|error| {
+                format!("runs[{run_idx}] cannot compute its dataset content digest: {error}")
+            })?
+            .dataset_content_digest();
+        if retained_digest != computed_digest {
+            return Err(format!(
+                "runs[{run_idx}].dataset_content_digest does not match retained analysis content"
+            ));
+        }
         Ok(())
     }
 }
@@ -2082,6 +2161,7 @@ impl From<&SimulationRun> for ProjectSimulationRun {
                 .iter()
                 .map(ProjectAnalysisResult::from)
                 .collect(),
+            dataset_content_digest: PersistedField::Value(run.dataset_content_digest()),
             provenance_mode,
             prepared_receipt,
             elapsed_time: run.elapsed_time,
@@ -2097,6 +2177,10 @@ pub struct ProjectAnalysisResult {
     pub analysis_type: String,
     pub label: String,
     pub timestamp: f64,
+    /// Canonical identity of authoritative result samples and evidence.
+    /// Schemas through v7 omitted this field and acquire it during migration.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub result_data_digest: PersistedField<ContentDigest>,
     #[serde(default)]
     pub waveforms: Vec<ProjectWaveformData>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2105,6 +2189,10 @@ pub struct ProjectAnalysisResult {
     pub device_op: Option<ProjectDeviceOpReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise_summary: Option<ProjectNoiseSummary>,
+    /// Exact source metadata for multi-run and advanced analysis families.
+    /// Result schemas through v6 omitted this field and migrate to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_metadata: Option<AnalysisResultFamilyMetadata>,
     #[serde(default)]
     pub measurements: Vec<ProjectMeasurement>,
     /// Authenticated outcomes for the immutable saved-output contracts that
@@ -2176,6 +2264,12 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
 
 impl ProjectAnalysisResult {
     fn into_analysis(self) -> Result<AnalysisResult, String> {
+        if self.result_data_digest.is_null() {
+            return Err(format!(
+                "analysis sequence {} has an explicitly null result data digest",
+                self.id
+            ));
+        }
         let analysis_type = analysis_type_from_key(&self.analysis_type)
             .ok_or_else(|| format!("unknown persisted analysis type '{}'", self.analysis_type))?;
         let provenance = self
@@ -2197,6 +2291,7 @@ impl ProjectAnalysisResult {
             noise_summary: self
                 .noise_summary
                 .map(ProjectNoiseSummary::into_noise_summary),
+            family_metadata: self.family_metadata,
             measurements: self
                 .measurements
                 .into_iter()
@@ -2256,6 +2351,14 @@ impl ProjectAnalysisResult {
         }
         if let Some(noise_summary) = &self.noise_summary {
             noise_summary.validate(&format!("{prefix}.noise_summary"))?;
+        }
+        if let Some(metadata) = &self.family_metadata {
+            metadata
+                .validate_for(
+                    analysis_type_from_key(&self.analysis_type)
+                        .expect("analysis type was checked above"),
+                )
+                .map_err(|error| format!("{prefix}.family_metadata is invalid: {error}"))?;
         }
         for (measurement_idx, measurement) in self.measurements.iter().enumerate() {
             measurement.validate(&format!("{prefix}.measurements[{measurement_idx}]"))?;
@@ -2354,6 +2457,19 @@ impl ProjectAnalysisResult {
                 .validate()
                 .map_err(|error| format!("{prefix}.provenance is invalid: {error}"))?;
         }
+        let retained_digest = self.result_data_digest.as_ref().copied().ok_or_else(|| {
+            format!("{prefix}.result_data_digest is required by simulation results schema v8")
+        })?;
+        let computed_digest = self
+            .clone()
+            .into_analysis()
+            .map_err(|error| format!("{prefix} cannot compute its result data digest: {error}"))?
+            .result_data_digest();
+        if retained_digest != computed_digest {
+            return Err(format!(
+                "{prefix}.result_data_digest does not match retained analysis content"
+            ));
+        }
         Ok(())
     }
 }
@@ -2365,6 +2481,7 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
             analysis_type: analysis_type_key(analysis.analysis_type).to_string(),
             label: analysis.label.clone(),
             timestamp: analysis.timestamp,
+            result_data_digest: PersistedField::Value(analysis.result_data_digest()),
             waveforms: analysis
                 .waveforms
                 .iter()
@@ -2376,6 +2493,7 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
                 .noise_summary
                 .as_ref()
                 .map(ProjectNoiseSummary::from),
+            family_metadata: analysis.family_metadata.clone(),
             measurements: analysis
                 .measurements
                 .iter()
@@ -3225,6 +3343,10 @@ mod tests {
             run.job_id = None;
             run.execution_target = None;
             run.lifecycle = None;
+            run.dataset_content_digest = PersistedField::Missing;
+            for analysis in &mut run.analyses {
+                analysis.result_data_digest = PersistedField::Missing;
+            }
         }
     }
 
@@ -3237,6 +3359,17 @@ mod tests {
             run.remove("job_id");
             run.remove("execution_target");
             run.remove("lifecycle");
+            run.remove("dataset_content_digest");
+            for analysis in run
+                .get_mut("analyses")
+                .and_then(serde_json::Value::as_array_mut)
+                .expect("simulation analysis array")
+            {
+                analysis
+                    .as_object_mut()
+                    .expect("simulation analysis object")
+                    .remove("result_data_digest");
+            }
         }
     }
 
@@ -3807,6 +3940,16 @@ mod tests {
         legacy_run.remove("job_id");
         legacy_run.remove("execution_target");
         legacy_run.remove("lifecycle");
+        legacy_run.remove("dataset_content_digest");
+        for analysis in legacy_run["analyses"]
+            .as_array_mut()
+            .expect("legacy analysis array")
+        {
+            analysis
+                .as_object_mut()
+                .expect("legacy analysis object")
+                .remove("result_data_digest");
+        }
         legacy_run.remove("provenance_mode");
         let unversioned_json =
             serde_json::to_string(&unversioned_value).expect("unversioned project serializes");
@@ -3831,6 +3974,207 @@ mod tests {
             migrated_run.lifecycle,
             Some(SimulationRunLifecycle::LegacyUnknown)
         );
+    }
+
+    #[test]
+    fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let metadata = crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+            seed: 42,
+            runs_requested: 3,
+            runs_completed: 2,
+            failures: 1,
+            all_converged: false,
+            variables: vec![crate::state::MonteCarloVariableMetadata {
+                name: "V(out)".to_owned(),
+                samples: vec![0.975, 1.025],
+                mean: 1.0,
+                std_dev: 0.025,
+                min: 0.975,
+                max: 1.025,
+            }],
+        };
+        let mut run = SimulationRun::new(1);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC")
+                .with_family_metadata(metadata.clone()),
+        );
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 1;
+        simulation.active_run_idx = Some(0);
+        simulation.active_analysis_idx = Some(0);
+
+        let project = ProjectFile::new_with_simulation_results(
+            workspace,
+            libraries,
+            ProjectSimulationResults::from_state(&simulation),
+        );
+        let json = serialize_project_file(&project).expect("family metadata serializes");
+        let loaded = load_project_text(&json, None).expect("family metadata reloads");
+        let restored = loaded
+            .simulation_results
+            .into_simulation_state()
+            .expect("family metadata restores");
+        assert_eq!(
+            restored
+                .active_analysis()
+                .and_then(|analysis| analysis.family_metadata.as_ref()),
+            Some(&metadata)
+        );
+
+        let mut v6: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
+        v6["simulation_results"]["schema_version"] =
+            serde_json::Value::from(EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION);
+        v6["simulation_results"]["runs"][0]
+            .as_object_mut()
+            .expect("run object")
+            .remove("dataset_content_digest");
+        v6["simulation_results"]["runs"][0]["analyses"][0]
+            .as_object_mut()
+            .expect("analysis object")
+            .remove("family_metadata");
+        v6["simulation_results"]["runs"][0]["analyses"][0]
+            .as_object_mut()
+            .expect("analysis object")
+            .remove("result_data_digest");
+        let migrated = load_project_text(&v6.to_string(), None).expect("v6 project migrates");
+        assert_eq!(
+            migrated.simulation_results.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        let migrated = migrated
+            .simulation_results
+            .into_simulation_state()
+            .expect("migrated v6 results restore");
+        assert!(
+            migrated
+                .active_analysis()
+                .expect("migrated analysis")
+                .family_metadata
+                .is_none(),
+            "legacy absence must remain explicit instead of being inferred from waveforms"
+        );
+    }
+
+    #[test]
+    fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
+        let mut run = SimulationRun::new(2);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![1.0, 10.0], vec![0.25, 0.5], "#00aaff")
+                    .with_complex_components("V(out)", vec![0.25, 0.5], vec![-0.75, -0.5]),
+            ]),
+        );
+        seal_legacy_unattributed(&mut run);
+        let expected_analysis_digest = run.analyses[0].result_data_digest();
+        let expected_dataset_digest = run.dataset_content_digest();
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 2;
+
+        let persisted = ProjectSimulationResults::from_state(&simulation);
+        assert_eq!(
+            persisted.runs[0].analyses[0]
+                .result_data_digest
+                .as_ref()
+                .copied(),
+            Some(expected_analysis_digest)
+        );
+        assert_eq!(
+            persisted.runs[0].dataset_content_digest.as_ref().copied(),
+            Some(expected_dataset_digest)
+        );
+
+        let json = serde_json::to_string(&persisted).expect("result data serializes");
+        let restored: ProjectSimulationResults =
+            serde_json::from_str(&json).expect("result data deserializes");
+        restored.validate().expect("retained digests validate");
+        let restored_run = restored
+            .into_simulation_state()
+            .expect("retained result data restores")
+            .runs
+            .remove(0);
+        assert_eq!(
+            restored_run.analyses[0].result_data_digest(),
+            expected_analysis_digest
+        );
+        assert_eq!(
+            restored_run.dataset_content_digest(),
+            expected_dataset_digest
+        );
+
+        let mut tampered: serde_json::Value =
+            serde_json::from_str(&json).expect("result document JSON");
+        tampered["runs"][0]["analyses"][0]["waveforms"][0]["complex"]["imag"][1] =
+            serde_json::json!(-0.499_999_999_999_999_94_f64);
+        let tampered: ProjectSimulationResults =
+            serde_json::from_value(tampered).expect("tampered result remains structurally valid");
+        assert!(
+            tampered
+                .validate()
+                .expect_err("a changed complex sample invalidates its retained digest")
+                .contains("result_data_digest does not match retained analysis content")
+        );
+    }
+
+    #[test]
+    fn schema_v7_digest_migration_is_deterministic_and_rejects_anachronistic_fields() {
+        let mut run = SimulationRun::new(3);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            ]),
+        );
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 3;
+        let mut legacy = ProjectSimulationResults::from_state(&simulation);
+        legacy.schema_version = FAMILY_METADATA_RESULTS_SCHEMA_VERSION;
+        legacy.runs[0].dataset_content_digest = PersistedField::Missing;
+        legacy.runs[0].analyses[0].result_data_digest = PersistedField::Missing;
+
+        let mut first = legacy.clone();
+        let mut second = legacy;
+        let project_id = ProjectId::new();
+        first
+            .migrate_to_current(project_id)
+            .expect("first schema-v7 migration succeeds");
+        second
+            .migrate_to_current(project_id)
+            .expect("identical schema-v7 migration succeeds");
+        assert_eq!(
+            first.runs[0].analyses[0].result_data_digest,
+            second.runs[0].analyses[0].result_data_digest
+        );
+        assert_eq!(
+            first.runs[0].dataset_content_digest,
+            second.runs[0].dataset_content_digest
+        );
+        first.validate().expect("migrated digests validate");
+
+        let mut relabeled = first;
+        relabeled.schema_version = FAMILY_METADATA_RESULTS_SCHEMA_VERSION;
+        let before = relabeled.clone();
+        assert!(
+            relabeled
+                .migrate_to_current(project_id)
+                .expect_err("schema v7 cannot carry schema-v8 digest fields")
+                .contains("introduced by schema v8")
+        );
+        assert_eq!(relabeled, before, "failed migration is transactional");
     }
 
     #[test]
@@ -3885,7 +4229,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_v6_requires_coherent_lifecycle_and_execution_identity() {
+    fn current_schema_requires_coherent_lifecycle_and_execution_identity() {
         let mut run = SimulationRun::new(15);
         seal_legacy_unattributed(&mut run);
         let mut simulation = SimulationState::default();
@@ -5134,6 +5478,16 @@ mod tests {
             run.remove("job_id");
             run.remove("execution_target");
             run.remove("lifecycle");
+            run.remove("dataset_content_digest");
+            for analysis in run["analyses"]
+                .as_array_mut()
+                .expect("legacy analysis array")
+            {
+                analysis
+                    .as_object_mut()
+                    .expect("legacy analysis object")
+                    .remove("result_data_digest");
+            }
             run.remove("provenance_mode");
         }
 
@@ -5236,6 +5590,7 @@ mod tests {
                     analysis_type: "Transient".to_string(),
                     label: "TRAN".to_string(),
                     timestamp: 1.0,
+                    result_data_digest: PersistedField::Missing,
                     waveforms: vec![
                         ProjectWaveformData {
                             name: "V(out)".to_string(),
@@ -5257,12 +5612,14 @@ mod tests {
                     dc_op: None,
                     device_op: None,
                     noise_summary: None,
+                    family_metadata: None,
                     measurements: Vec::new(),
                     saved_output_receipts: Vec::new(),
                     success: true,
                     error_message: None,
                     provenance: None,
                 }],
+                dataset_content_digest: PersistedField::Missing,
                 provenance_mode: PersistedField::Value(
                     ProjectRunProvenanceMode::LegacyUnattributed,
                 ),
@@ -5308,6 +5665,7 @@ mod tests {
                     analysis_type: "Transient".to_string(),
                     label: "TRAN".to_string(),
                     timestamp: 1.0,
+                    result_data_digest: PersistedField::Missing,
                     waveforms: vec![ProjectWaveformData {
                         name: "V(out)".to_string(),
                         x: vec![0.0, 2.0, 1.0, 3.0],
@@ -5319,12 +5677,14 @@ mod tests {
                     dc_op: None,
                     device_op: None,
                     noise_summary: None,
+                    family_metadata: None,
                     measurements: Vec::new(),
                     saved_output_receipts: Vec::new(),
                     success: true,
                     error_message: None,
                     provenance: None,
                 }],
+                dataset_content_digest: PersistedField::Missing,
                 provenance_mode: PersistedField::Value(
                     ProjectRunProvenanceMode::LegacyUnattributed,
                 ),
@@ -5354,7 +5714,7 @@ mod tests {
     fn project_results_preserve_core_noise_mechanism_labels() {
         let run_id = RunId::new();
         let dataset_id = DatasetId::new();
-        let results = ProjectSimulationResults {
+        let mut results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![ProjectSimulationRun {
                 job_id: None,
@@ -5370,6 +5730,7 @@ mod tests {
                     analysis_type: "Noise".to_string(),
                     label: "NOISE".to_string(),
                     timestamp: 1.0,
+                    result_data_digest: PersistedField::Missing,
                     waveforms: Vec::new(),
                     dc_op: None,
                     device_op: None,
@@ -5391,12 +5752,14 @@ mod tests {
                         total_rms: 1.0e-6,
                         band: (1.0, 1.0e6),
                     }),
+                    family_metadata: None,
                     measurements: Vec::new(),
                     saved_output_receipts: Vec::new(),
                     success: true,
                     error_message: None,
                     provenance: None,
                 }],
+                dataset_content_digest: PersistedField::Missing,
                 provenance_mode: PersistedField::Value(
                     ProjectRunProvenanceMode::LegacyUnattributed,
                 ),
@@ -5413,6 +5776,8 @@ mod tests {
             active_analysis_id: None,
             overlay_run_ids: Vec::new(),
         };
+
+        seal_project_result_digests(&mut results.runs[0]).expect("fixture digests seal");
 
         results.validate().expect("core noise labels are valid");
 

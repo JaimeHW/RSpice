@@ -7,11 +7,13 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::product::{
-    ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId, RevisionError,
+    AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId,
+    RevisionError,
 };
+use crate::results::viewer_catalog::{ViewerArt, viewer_document};
 
 macro_rules! stable_id {
     ($name:ident) => {
@@ -894,6 +896,100 @@ pub enum PaneKind {
     Table,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+pub enum PageLayout {
+    SinglePane,
+    #[default]
+    Rows,
+    Columns,
+    Grid {
+        columns: u8,
+    },
+}
+
+impl PageLayout {
+    fn validate(self) -> Result<(), VisualizationError> {
+        if let Self::Grid { columns } = self
+            && !(2..=16).contains(&columns)
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "page.layout.columns",
+                message: "grid columns must be between 2 and 16".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PageUpdatePolicy {
+    #[default]
+    RefreshLinkedFigures,
+    FreezeFigureRevision,
+}
+
+fn default_page_template_id() -> String {
+    "engineering-dark".to_owned()
+}
+
+fn default_viewer_id() -> String {
+    "viewer-waveform".to_owned()
+}
+
+const fn default_viewer_id_for_kind(kind: PaneKind) -> &'static str {
+    match kind {
+        PaneKind::Cartesian => "viewer-waveform",
+        PaneKind::Smith => "viewer-smith",
+        PaneKind::Polar => "viewer-polar",
+        PaneKind::Histogram => "viewer-histogram",
+        PaneKind::Table => "viewer-table",
+    }
+}
+
+const fn pane_kind_for_viewer_art(art: ViewerArt) -> PaneKind {
+    match art {
+        ViewerArt::Smith => PaneKind::Smith,
+        ViewerArt::Polar => PaneKind::Polar,
+        ViewerArt::Histogram => PaneKind::Histogram,
+        ViewerArt::Table => PaneKind::Table,
+        ViewerArt::Wave
+        | ViewerArt::Bode
+        | ViewerArt::Spectrum
+        | ViewerArt::Phase
+        | ViewerArt::Field
+        | ViewerArt::Contour
+        | ViewerArt::Wireless
+        | ViewerArt::Scatter
+        | ViewerArt::Eye
+        | ViewerArt::Bathtub
+        | ViewerArt::Margin
+        | ViewerArt::PoleZero
+        | ViewerArt::Thermal
+        | ViewerArt::Mesh => PaneKind::Cartesian,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneDataBinding {
+    pub analysis_id: AnalysisInstanceId,
+    pub dataset: DatasetBinding,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+pub enum PanePlacement {
+    #[default]
+    Primary,
+    Below {
+        anchor_pane_id: PaneId,
+    },
+    RightOf {
+        anchor_pane_id: PaneId,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AxisOrientation {
@@ -936,6 +1032,12 @@ impl AxisRange {
 pub struct Page {
     pub id: PageId,
     pub title: String,
+    #[serde(default)]
+    pub layout: PageLayout,
+    #[serde(default = "default_page_template_id")]
+    pub template_id: String,
+    #[serde(default)]
+    pub update_policy: PageUpdatePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -944,6 +1046,14 @@ pub struct Pane {
     pub page_id: PageId,
     pub title: String,
     pub kind: PaneKind,
+    #[serde(default = "default_viewer_id")]
+    pub viewer_id: String,
+    #[serde(default)]
+    pub binding: Option<PaneDataBinding>,
+    #[serde(default)]
+    pub placement: PanePlacement,
+    #[serde(default)]
+    pub order: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1073,16 +1183,64 @@ pub struct NewTrace {
     pub label: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewPage {
+    pub title: String,
+    pub layout: PageLayout,
+    pub template_id: String,
+    pub update_policy: PageUpdatePolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewPane {
+    pub page_id: PageId,
+    pub title: String,
+    pub kind: PaneKind,
+    pub viewer_id: String,
+    pub binding: Option<PaneDataBinding>,
+    pub placement: PanePlacement,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewPagePane {
+    pub title: String,
+    pub kind: PaneKind,
+    pub viewer_id: String,
+    pub binding: Option<PaneDataBinding>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DocumentEdit {
     AttachDataset(SourceDataset),
     AddPage {
         title: String,
     },
+    AddComposedPage(NewPage),
     AddPane {
         page_id: PageId,
         title: String,
         kind: PaneKind,
+    },
+    AddBoundPane(NewPane),
+    AddPaneOnNewPage {
+        page: NewPage,
+        pane: NewPagePane,
+    },
+    SetPageComposition {
+        page_id: PageId,
+        layout: PageLayout,
+        template_id: String,
+        update_policy: PageUpdatePolicy,
+    },
+    SetPaneSource {
+        pane_id: PaneId,
+        viewer_id: String,
+        binding: Option<PaneDataBinding>,
+    },
+    PlacePane {
+        pane_id: PaneId,
+        page_id: PageId,
+        placement: PanePlacement,
     },
     AddAxis(NewAxis),
     AddTrace(NewTrace),
@@ -1515,7 +1673,7 @@ pub enum VisualizationError {
     Revision(#[from] RevisionError),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct VisualizationDocument {
     schema_version: u16,
     id: ResultDocumentId,
@@ -1536,8 +1694,73 @@ pub struct VisualizationDocument {
     comparisons: Vec<ComparisonReceipt>,
 }
 
+#[derive(Deserialize)]
+struct VisualizationDocumentWire {
+    #[serde(default = "legacy_visualization_schema_version")]
+    schema_version: u16,
+    id: ResultDocumentId,
+    revision: ObjectRevision,
+    title: String,
+    next_serial: u64,
+    datasets: Vec<SourceDataset>,
+    pages: Vec<Page>,
+    panes: Vec<Pane>,
+    axes: Vec<Axis>,
+    traces: Vec<Trace>,
+    cursors: Vec<Cursor>,
+    markers: Vec<Marker>,
+    measurements: Vec<Measurement>,
+    annotations: Vec<Annotation>,
+    link_groups: Vec<LinkGroup>,
+    tombstones: Vec<Tombstone>,
+    comparisons: Vec<ComparisonReceipt>,
+}
+
+const fn legacy_visualization_schema_version() -> u16 {
+    1
+}
+
+impl<'de> Deserialize<'de> for VisualizationDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = VisualizationDocumentWire::deserialize(deserializer)?;
+        let mut document = Self {
+            schema_version: wire.schema_version,
+            id: wire.id,
+            revision: wire.revision,
+            title: wire.title,
+            next_serial: wire.next_serial,
+            datasets: wire.datasets,
+            pages: wire.pages,
+            panes: wire.panes,
+            axes: wire.axes,
+            traces: wire.traces,
+            cursors: wire.cursors,
+            markers: wire.markers,
+            measurements: wire.measurements,
+            annotations: wire.annotations,
+            link_groups: wire.link_groups,
+            tombstones: wire.tombstones,
+            comparisons: wire.comparisons,
+        };
+        match document.schema_version {
+            1 => document.migrate_v1_to_v2(),
+            Self::SCHEMA_VERSION => {}
+            version => {
+                return Err(serde::de::Error::custom(format!(
+                    "unsupported visualization document schema version {version}"
+                )));
+            }
+        }
+        document.validate().map_err(serde::de::Error::custom)?;
+        Ok(document)
+    }
+}
+
 impl VisualizationDocument {
-    pub const SCHEMA_VERSION: u16 = 1;
+    pub const SCHEMA_VERSION: u16 = 2;
 
     pub fn new(
         title: impl Into<String>,
@@ -1564,12 +1787,19 @@ impl VisualizationDocument {
             pages: vec![Page {
                 id: page_id,
                 title: "Page 1".to_owned(),
+                layout: PageLayout::default(),
+                template_id: default_page_template_id(),
+                update_policy: PageUpdatePolicy::default(),
             }],
             panes: vec![Pane {
                 id: pane_id,
                 page_id,
                 title: "Plot 1".to_owned(),
                 kind: PaneKind::Cartesian,
+                viewer_id: default_viewer_id(),
+                binding: None,
+                placement: PanePlacement::Primary,
+                order: 0,
             }],
             axes: Vec::new(),
             traces: Vec::new(),
@@ -1786,6 +2016,232 @@ impl VisualizationDocument {
         Ok(serial)
     }
 
+    fn migrate_v1_to_v2(&mut self) {
+        for page in &mut self.pages {
+            page.layout = PageLayout::default();
+            page.template_id = default_page_template_id();
+            page.update_policy = PageUpdatePolicy::default();
+        }
+        let mut previous_by_page = HashMap::<PageId, PaneId>::new();
+        let mut next_order_by_page = HashMap::<PageId, u32>::new();
+        for pane in &mut self.panes {
+            pane.viewer_id = default_viewer_id_for_kind(pane.kind).to_owned();
+            pane.binding = None;
+            pane.order = *next_order_by_page.entry(pane.page_id).or_default();
+            pane.placement = previous_by_page
+                .get(&pane.page_id)
+                .copied()
+                .map_or(PanePlacement::Primary, |anchor_pane_id| {
+                    PanePlacement::Below { anchor_pane_id }
+                });
+            previous_by_page.insert(pane.page_id, pane.id);
+            next_order_by_page
+                .entry(pane.page_id)
+                .and_modify(|order| *order = order.saturating_add(1));
+        }
+        self.schema_version = Self::SCHEMA_VERSION;
+    }
+
+    fn validate_page_definition(page: &NewPage) -> Result<(), VisualizationError> {
+        validate_label("page.title", &page.title)?;
+        page.layout.validate()?;
+        validate_key("page.template-id", &page.template_id)
+    }
+
+    fn validate_pane_source(
+        &self,
+        kind: PaneKind,
+        viewer_id: &str,
+        binding: Option<PaneDataBinding>,
+    ) -> Result<(), VisualizationError> {
+        validate_key("pane.viewer-id", viewer_id)?;
+        let viewer =
+            viewer_document(viewer_id).ok_or_else(|| VisualizationError::InvalidValue {
+                field: "pane.viewer-id",
+                message: format!("unknown viewer document '{viewer_id}'"),
+            })?;
+        let expected_kind = pane_kind_for_viewer_art(viewer.art);
+        if kind != expected_kind {
+            return Err(VisualizationError::InvalidValue {
+                field: "pane.kind",
+                message: format!(
+                    "viewer '{viewer_id}' requires pane kind {expected_kind:?}, received {kind:?}"
+                ),
+            });
+        }
+        if let Some(binding) = binding {
+            self.dataset_for_binding(binding.dataset)?;
+        }
+        Ok(())
+    }
+
+    fn create_page(&mut self, page: NewPage) -> Result<PageId, VisualizationError> {
+        Self::validate_page_definition(&page)?;
+        let id = PageId::allocate(self.allocate_serial()?)?;
+        self.pages.push(Page {
+            id,
+            title: page.title,
+            layout: page.layout,
+            template_id: page.template_id,
+            update_policy: page.update_policy,
+        });
+        Ok(id)
+    }
+
+    fn placement_order(
+        &self,
+        page_id: PageId,
+        placement: PanePlacement,
+        excluded: Option<PaneId>,
+    ) -> Result<u32, VisualizationError> {
+        self.require_page(page_id)?;
+        let pane_count = self
+            .panes
+            .iter()
+            .filter(|pane| pane.page_id == page_id && Some(pane.id) != excluded)
+            .count();
+        match placement {
+            PanePlacement::Primary if pane_count == 0 => Ok(0),
+            PanePlacement::Primary => Err(VisualizationError::InvalidValue {
+                field: "pane.placement",
+                message: "primary placement requires an empty page".to_owned(),
+            }),
+            PanePlacement::Below { anchor_pane_id } | PanePlacement::RightOf { anchor_pane_id } => {
+                if Some(anchor_pane_id) == excluded {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "pane.placement",
+                        message: "a pane cannot be placed relative to itself".to_owned(),
+                    });
+                }
+                let anchor = self
+                    .panes
+                    .iter()
+                    .find(|pane| pane.id == anchor_pane_id && Some(pane.id) != excluded)
+                    .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(
+                        anchor_pane_id,
+                    )))?;
+                if anchor.page_id != page_id {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "pane.placement",
+                        message: "placement anchor must belong to the destination page".to_owned(),
+                    });
+                }
+                anchor
+                    .order
+                    .checked_add(1)
+                    .ok_or(VisualizationError::IdentitySpaceExhausted)
+            }
+        }
+    }
+
+    fn create_pane(&mut self, pane: NewPane) -> Result<PaneId, VisualizationError> {
+        validate_label("pane.title", &pane.title)?;
+        self.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
+        let order = self.placement_order(pane.page_id, pane.placement, None)?;
+        for existing in &mut self.panes {
+            if existing.page_id == pane.page_id && existing.order >= order {
+                existing.order = existing
+                    .order
+                    .checked_add(1)
+                    .ok_or(VisualizationError::IdentitySpaceExhausted)?;
+            }
+        }
+        let id = PaneId::allocate(self.allocate_serial()?)?;
+        self.panes.push(Pane {
+            id,
+            page_id: pane.page_id,
+            title: pane.title,
+            kind: pane.kind,
+            viewer_id: pane.viewer_id,
+            binding: pane.binding,
+            placement: pane.placement,
+            order,
+        });
+        Ok(id)
+    }
+
+    fn default_append_placement(&self, page_id: PageId) -> PanePlacement {
+        self.panes
+            .iter()
+            .filter(|pane| pane.page_id == page_id)
+            .max_by_key(|pane| pane.order)
+            .map_or(PanePlacement::Primary, |pane| PanePlacement::Below {
+                anchor_pane_id: pane.id,
+            })
+    }
+
+    fn normalize_page_pane_layout(&mut self, page_id: PageId, excluded: Option<PaneId>) {
+        let mut ordered: Vec<_> = self
+            .panes
+            .iter()
+            .filter(|pane| pane.page_id == page_id && Some(pane.id) != excluded)
+            .map(|pane| (pane.id, pane.order, pane.placement))
+            .collect();
+        ordered.sort_by_key(|(id, order, _)| (*order, *id));
+        let mut preceding = HashSet::new();
+        let mut previous = None;
+        for (order, (pane_id, _, placement)) in ordered.into_iter().enumerate() {
+            let normalized_placement = if order == 0 {
+                PanePlacement::Primary
+            } else {
+                match placement {
+                    PanePlacement::Below { anchor_pane_id }
+                        if preceding.contains(&anchor_pane_id) =>
+                    {
+                        placement
+                    }
+                    PanePlacement::RightOf { anchor_pane_id }
+                        if preceding.contains(&anchor_pane_id) =>
+                    {
+                        placement
+                    }
+                    _ => PanePlacement::Below {
+                        anchor_pane_id: previous.expect("a non-primary pane has a predecessor"),
+                    },
+                }
+            };
+            let pane = self
+                .panes
+                .iter_mut()
+                .find(|pane| pane.id == pane_id)
+                .expect("pane identity was projected from this document");
+            pane.order = u32::try_from(order).expect("pane count exceeds u32 address space");
+            pane.placement = normalized_placement;
+            preceding.insert(pane_id);
+            previous = Some(pane_id);
+        }
+    }
+
+    fn place_pane(
+        &mut self,
+        pane_id: PaneId,
+        page_id: PageId,
+        placement: PanePlacement,
+    ) -> Result<(), VisualizationError> {
+        let source_page_id = self
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .map(|pane| pane.page_id)
+            .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
+        self.require_page(page_id)?;
+        self.normalize_page_pane_layout(source_page_id, Some(pane_id));
+        let order = self.placement_order(page_id, placement, Some(pane_id))?;
+        for pane in &mut self.panes {
+            if pane.id != pane_id && pane.page_id == page_id && pane.order >= order {
+                pane.order = pane
+                    .order
+                    .checked_add(1)
+                    .ok_or(VisualizationError::IdentitySpaceExhausted)?;
+            }
+        }
+        let pane = self.pane_mut(pane_id)?;
+        pane.page_id = page_id;
+        pane.placement = placement;
+        pane.order = order;
+        Ok(())
+    }
+
     fn apply_edit(
         &mut self,
         edit: DocumentEdit,
@@ -1796,9 +2252,17 @@ impl VisualizationDocument {
         match edit {
             DocumentEdit::AttachDataset(dataset) => self.attach_dataset(dataset),
             DocumentEdit::AddPage { title } => {
-                validate_label("page.title", &title)?;
-                let id = PageId::allocate(self.allocate_serial()?)?;
-                self.pages.push(Page { id, title });
+                let id = self.create_page(NewPage {
+                    title,
+                    layout: PageLayout::default(),
+                    template_id: default_page_template_id(),
+                    update_policy: PageUpdatePolicy::default(),
+                })?;
+                created.push(EntityRef::Page(id));
+                Ok(())
+            }
+            DocumentEdit::AddComposedPage(page) => {
+                let id = self.create_page(page)?;
                 created.push(EntityRef::Page(id));
                 Ok(())
             }
@@ -1807,18 +2271,77 @@ impl VisualizationDocument {
                 title,
                 kind,
             } => {
-                validate_label("pane.title", &title)?;
-                self.require_page(page_id)?;
-                let id = PaneId::allocate(self.allocate_serial()?)?;
-                self.panes.push(Pane {
-                    id,
+                let placement = self.default_append_placement(page_id);
+                let id = self.create_pane(NewPane {
                     page_id,
                     title,
                     kind,
-                });
+                    viewer_id: default_viewer_id_for_kind(kind).to_owned(),
+                    binding: None,
+                    placement,
+                })?;
                 created.push(EntityRef::Pane(id));
                 Ok(())
             }
+            DocumentEdit::AddBoundPane(pane) => {
+                let id = self.create_pane(pane)?;
+                created.push(EntityRef::Pane(id));
+                Ok(())
+            }
+            DocumentEdit::AddPaneOnNewPage { page, pane } => {
+                let page_id = self.create_page(page)?;
+                created.push(EntityRef::Page(page_id));
+                let pane_id = self.create_pane(NewPane {
+                    page_id,
+                    title: pane.title,
+                    kind: pane.kind,
+                    viewer_id: pane.viewer_id,
+                    binding: pane.binding,
+                    placement: PanePlacement::Primary,
+                })?;
+                created.push(EntityRef::Pane(pane_id));
+                Ok(())
+            }
+            DocumentEdit::SetPageComposition {
+                page_id,
+                layout,
+                template_id,
+                update_policy,
+            } => {
+                Self::validate_page_definition(&NewPage {
+                    title: self.page_mut(page_id)?.title.clone(),
+                    layout,
+                    template_id: template_id.clone(),
+                    update_policy,
+                })?;
+                let page = self.page_mut(page_id)?;
+                page.layout = layout;
+                page.template_id = template_id;
+                page.update_policy = update_policy;
+                Ok(())
+            }
+            DocumentEdit::SetPaneSource {
+                pane_id,
+                viewer_id,
+                binding,
+            } => {
+                let kind = self
+                    .panes
+                    .iter()
+                    .find(|pane| pane.id == pane_id)
+                    .map(|pane| pane.kind)
+                    .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
+                self.validate_pane_source(kind, &viewer_id, binding)?;
+                let pane = self.pane_mut(pane_id)?;
+                pane.viewer_id = viewer_id;
+                pane.binding = binding;
+                Ok(())
+            }
+            DocumentEdit::PlacePane {
+                pane_id,
+                page_id,
+                placement,
+            } => self.place_pane(pane_id, page_id, placement),
             DocumentEdit::AddAxis(axis) => {
                 self.require_pane(axis.pane_id)?;
                 validate_label("axis.label", &axis.label)?;
@@ -2240,7 +2763,15 @@ impl VisualizationDocument {
             .retain(|measurement| measurement.pane_id != pane_id);
         self.annotations
             .retain(|annotation| annotation.pane_id != pane_id);
+        let page_id = self
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .map(|pane| pane.page_id);
         self.panes.retain(|pane| pane.id != pane_id);
+        if let Some(page_id) = page_id {
+            self.normalize_page_pane_layout(page_id, None);
+        }
         for entity in removed {
             self.record_tombstone(entity, revision, tombstoned);
         }
@@ -2306,12 +2837,69 @@ impl VisualizationDocument {
         let mut identities = HashSet::new();
         for page in &self.pages {
             validate_label("page.title", &page.title)?;
+            page.layout.validate()?;
+            validate_key("page.template-id", &page.template_id)?;
+            if page.layout == PageLayout::SinglePane
+                && self
+                    .panes
+                    .iter()
+                    .filter(|pane| pane.page_id == page.id)
+                    .count()
+                    > 1
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "page.layout",
+                    message: "single-pane layout cannot contain more than one pane".to_owned(),
+                });
+            }
             ensure_identity(&mut identities, EntityRef::Page(page.id))?;
         }
         for pane in &self.panes {
             validate_label("pane.title", &pane.title)?;
             self.require_page(pane.page_id)?;
+            self.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
             ensure_identity(&mut identities, EntityRef::Pane(pane.id))?;
+        }
+        for page in &self.pages {
+            let mut panes: Vec<_> = self
+                .panes
+                .iter()
+                .filter(|pane| pane.page_id == page.id)
+                .collect();
+            panes.sort_by_key(|pane| (pane.order, pane.id));
+            let mut preceding = HashSet::new();
+            for (expected_order, pane) in panes.into_iter().enumerate() {
+                if pane.order != u32::try_from(expected_order).unwrap_or(u32::MAX) {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "pane.order",
+                        message: format!(
+                            "pane orders on page {} must be unique and contiguous from zero",
+                            page.id.get()
+                        ),
+                    });
+                }
+                match pane.placement {
+                    PanePlacement::Primary if expected_order == 0 => {}
+                    PanePlacement::Primary => {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "pane.placement",
+                            message: "only the first pane on a page may be primary".to_owned(),
+                        });
+                    }
+                    PanePlacement::Below { anchor_pane_id }
+                    | PanePlacement::RightOf { anchor_pane_id }
+                        if preceding.contains(&anchor_pane_id) => {}
+                    PanePlacement::Below { .. } | PanePlacement::RightOf { .. } => {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "pane.placement",
+                            message:
+                                "pane placement must reference an earlier pane on the same page"
+                                    .to_owned(),
+                        });
+                    }
+                }
+                preceding.insert(pane.id);
+            }
         }
         for axis in &self.axes {
             validate_label("axis.label", &axis.label)?;
@@ -2883,5 +3471,282 @@ mod tests {
             Err(VisualizationError::UnexpectedOutputDigest)
         );
         assert_eq!(operation, before);
+    }
+
+    #[test]
+    fn composed_page_and_bound_pane_commit_exact_source_identity() {
+        let (mut document, source) = document();
+        let analysis_id = AnalysisInstanceId::new();
+        let page_receipt = document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::AddComposedPage(NewPage {
+                    title: "Publication".to_owned(),
+                    layout: PageLayout::Columns,
+                    template_id: "design-review".to_owned(),
+                    update_policy: PageUpdatePolicy::FreezeFigureRevision,
+                })],
+            )
+            .unwrap();
+        let page_id = match page_receipt.created[0] {
+            EntityRef::Page(id) => id,
+            _ => unreachable!(),
+        };
+        let pane_receipt = document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::AddBoundPane(NewPane {
+                    page_id,
+                    title: "Exact transient".to_owned(),
+                    kind: PaneKind::Cartesian,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id,
+                        dataset: source,
+                    }),
+                    placement: PanePlacement::Primary,
+                })],
+            )
+            .unwrap();
+        let pane_id = match pane_receipt.created[0] {
+            EntityRef::Pane(id) => id,
+            _ => unreachable!(),
+        };
+        let page = document
+            .pages()
+            .iter()
+            .find(|page| page.id == page_id)
+            .unwrap();
+        assert_eq!(page.layout, PageLayout::Columns);
+        assert_eq!(page.template_id, "design-review");
+        assert_eq!(page.update_policy, PageUpdatePolicy::FreezeFigureRevision);
+        let pane = document
+            .panes()
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .unwrap();
+        assert_eq!(pane.viewer_id, "viewer-waveform");
+        assert_eq!(pane.binding.unwrap().analysis_id, analysis_id);
+        assert_eq!(pane.binding.unwrap().dataset, source);
+        assert_eq!(pane.placement, PanePlacement::Primary);
+        assert_eq!(pane.order, 0);
+        let restored: VisualizationDocument =
+            serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+        assert_eq!(restored, document);
+    }
+
+    #[test]
+    fn invalid_pane_binding_and_single_pane_layout_roll_back_atomically() {
+        let (mut document, source) = document();
+        let page_id = document.pages()[0].id;
+        let primary = document.panes()[0].id;
+        let wrong_digest =
+            DatasetBinding::new(source.dataset_id, ContentDigest::from_bytes([99; 32]));
+        let before = document.clone();
+        assert!(matches!(
+            document.transact(
+                document.revision(),
+                vec![DocumentEdit::AddBoundPane(NewPane {
+                    page_id,
+                    title: "Mismatched viewer".to_owned(),
+                    kind: PaneKind::Table,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: None,
+                    placement: PanePlacement::Below {
+                        anchor_pane_id: primary,
+                    },
+                })],
+            ),
+            Err(VisualizationError::InvalidValue {
+                field: "pane.kind",
+                ..
+            })
+        ));
+        assert_eq!(document, before);
+        assert!(matches!(
+            document.transact(
+                document.revision(),
+                vec![DocumentEdit::AddBoundPane(NewPane {
+                    page_id,
+                    title: "Invalid".to_owned(),
+                    kind: PaneKind::Cartesian,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id: AnalysisInstanceId::new(),
+                        dataset: wrong_digest,
+                    }),
+                    placement: PanePlacement::Below {
+                        anchor_pane_id: primary,
+                    },
+                })],
+            ),
+            Err(VisualizationError::SourceDigestMismatch { .. })
+        ));
+        assert_eq!(document, before);
+
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::AddPane {
+                    page_id,
+                    title: "Second".to_owned(),
+                    kind: PaneKind::Table,
+                }],
+            )
+            .unwrap();
+        let before = document.clone();
+        assert!(matches!(
+            document.transact(
+                document.revision(),
+                vec![DocumentEdit::SetPageComposition {
+                    page_id,
+                    layout: PageLayout::SinglePane,
+                    template_id: "engineering-dark".to_owned(),
+                    update_policy: PageUpdatePolicy::RefreshLinkedFigures,
+                }],
+            ),
+            Err(VisualizationError::InvalidValue {
+                field: "page.layout",
+                ..
+            })
+        ));
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn pane_placement_orders_are_stable_across_insert_move_and_remove() {
+        let (mut document, _) = document();
+        let page_id = document.pages()[0].id;
+        let primary = document.panes()[0].id;
+        let first = document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::AddBoundPane(NewPane {
+                    page_id,
+                    title: "Below".to_owned(),
+                    kind: PaneKind::Table,
+                    viewer_id: "viewer-table".to_owned(),
+                    binding: None,
+                    placement: PanePlacement::Below {
+                        anchor_pane_id: primary,
+                    },
+                })],
+            )
+            .unwrap();
+        let below = match first.created[0] {
+            EntityRef::Pane(id) => id,
+            _ => unreachable!(),
+        };
+        let second = document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::AddBoundPane(NewPane {
+                    page_id,
+                    title: "Right".to_owned(),
+                    kind: PaneKind::Histogram,
+                    viewer_id: "viewer-histogram".to_owned(),
+                    binding: None,
+                    placement: PanePlacement::RightOf {
+                        anchor_pane_id: primary,
+                    },
+                })],
+            )
+            .unwrap();
+        let right = match second.created[0] {
+            EntityRef::Pane(id) => id,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            document
+                .panes()
+                .iter()
+                .find(|pane| pane.id == right)
+                .unwrap()
+                .order,
+            1
+        );
+        assert_eq!(
+            document
+                .panes()
+                .iter()
+                .find(|pane| pane.id == below)
+                .unwrap()
+                .order,
+            2
+        );
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::PlacePane {
+                    pane_id: below,
+                    page_id,
+                    placement: PanePlacement::RightOf {
+                        anchor_pane_id: right,
+                    },
+                }],
+            )
+            .unwrap();
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::Remove(EntityRef::Pane(right))],
+            )
+            .unwrap();
+        let mut panes: Vec<_> = document.panes().iter().collect();
+        panes.sort_by_key(|pane| pane.order);
+        assert_eq!(
+            panes.iter().map(|pane| pane.order).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(panes[0].placement, PanePlacement::Primary);
+        assert!(matches!(panes[1].placement, PanePlacement::Below { .. }));
+    }
+
+    #[test]
+    fn schema_v1_documents_migrate_page_and_pane_composition_deterministically() {
+        let (mut document, _) = document();
+        let page_id = document.pages()[0].id;
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::AddPane {
+                    page_id,
+                    title: "Legacy table".to_owned(),
+                    kind: PaneKind::Table,
+                }],
+            )
+            .unwrap();
+        let mut legacy = serde_json::to_value(&document).unwrap();
+        legacy["schema_version"] = serde_json::json!(1);
+        for page in legacy["pages"].as_array_mut().unwrap() {
+            let page = page.as_object_mut().unwrap();
+            page.remove("layout");
+            page.remove("template_id");
+            page.remove("update_policy");
+        }
+        for pane in legacy["panes"].as_array_mut().unwrap() {
+            let pane = pane.as_object_mut().unwrap();
+            pane.remove("viewer_id");
+            pane.remove("binding");
+            pane.remove("placement");
+            pane.remove("order");
+        }
+        let migrated: VisualizationDocument = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            migrated.schema_version,
+            VisualizationDocument::SCHEMA_VERSION
+        );
+        assert_eq!(migrated.pages()[0].layout, PageLayout::Rows);
+        assert_eq!(migrated.pages()[0].template_id, "engineering-dark");
+        assert_eq!(migrated.panes()[0].viewer_id, "viewer-waveform");
+        assert_eq!(migrated.panes()[1].viewer_id, "viewer-table");
+        assert_eq!(migrated.panes()[0].order, 0);
+        assert_eq!(migrated.panes()[1].order, 1);
+        assert_eq!(
+            migrated.panes()[1].placement,
+            PanePlacement::Below {
+                anchor_pane_id: migrated.panes()[0].id,
+            }
+        );
     }
 }

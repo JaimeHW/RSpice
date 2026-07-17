@@ -9,8 +9,8 @@
 use std::collections::{BTreeMap, HashSet};
 
 use egui::{
-    Align, Color32, Frame, Grid, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui,
-    Vec2, vec2,
+    Align, Align2, Color32, Frame, Grid, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense,
+    Stroke, Ui, Vec2, vec2,
 };
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,20 @@ const OWNERSHIP: &str =
 const COMPACT_BREAKPOINT: f32 = 820.0;
 const NARROW_VIEWER_BREAKPOINT: f32 = 1_100.0;
 const TOUCH_DOCK_HEIGHT: f32 = 52.0;
+const WORKSPACE_HEADER_HEIGHT: f32 = 58.0;
+const WORKSPACE_HEADER_VERTICAL_MARGIN: f32 = 7.0;
+const SECTION_NAVIGATION_HEIGHT: f32 = 36.0;
+const VIEWER_TOOLBAR_HEIGHT: f32 = 36.0;
+const VIEWER_TOOLBAR_VERTICAL_MARGIN: f32 = 5.0;
+const VIEWER_STAGE_HEADER_HEIGHT: f32 = 44.0;
+const VIEWER_STAGE_HEADER_VERTICAL_MARGIN: f32 = 6.0;
+const VIEWER_STAGE_STATUS_HEIGHT: f32 = 27.0;
+const VIEWER_STAGE_STATUS_VERTICAL_MARGIN: f32 = 4.0;
+const PANEL_HEADING_HEIGHT: f32 = 29.0;
+const EXACT_DATA_CARD_PADDING: f32 = 12.0;
+const EXACT_DATA_TABLE_HEIGHT: f32 = 102.0;
+const EXACT_DATA_DOCK_HEIGHT: f32 =
+    EXACT_DATA_CARD_PADDING * 2.0 + PANEL_HEADING_HEIGHT + EXACT_DATA_TABLE_HEIGHT;
 const NATIVE_VIEWERS: [ResultViewer; 8] = [
     ResultViewer::Waves,
     ResultViewer::Bode,
@@ -49,6 +63,31 @@ const NATIVE_VIEWERS: [ResultViewer; 8] = [
     ResultViewer::Smith,
     ResultViewer::PoleZero,
 ];
+
+const fn bar_content_height(target_height: f32, vertical_margin: f32) -> f32 {
+    target_height - vertical_margin * 2.0
+}
+
+const fn uses_horizontal_kpi_strip(width: f32, coarse_pointer: bool, touch_screen: bool) -> bool {
+    width <= COMPACT_BREAKPOINT || coarse_pointer || touch_screen
+}
+
+fn viewer_column_rects(rect: Rect, library_width: f32, inspector_width: f32) -> [Rect; 3] {
+    let library = Rect::from_min_size(rect.min, vec2(library_width, rect.height()));
+    let inspector = Rect::from_min_max(
+        egui::pos2(rect.right() - inspector_width, rect.top()),
+        rect.max,
+    );
+    let stage = Rect::from_min_max(
+        egui::pos2(library.right() + 1.0, rect.top()),
+        egui::pos2(inspector.left() - 1.0, rect.bottom()),
+    );
+    [library, stage, inspector]
+}
+
+fn visible_available_width(available: f32, cursor_left: f32, clip_right: f32) -> f32 {
+    available.min((clip_right - cursor_left).max(1.0)).max(1.0)
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -156,6 +195,31 @@ pub enum VisualizationTouchPane {
     Actions,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VisualizationPanePlacement {
+    #[default]
+    BelowSelected,
+    RightOfSelected,
+    NewWorksheetPage,
+}
+
+impl VisualizationPanePlacement {
+    const ALL: [Self; 3] = [
+        Self::BelowSelected,
+        Self::RightOfSelected,
+        Self::NewWorksheetPage,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::BelowSelected => "Below selected pane",
+            Self::RightOfSelected => "Right of selected pane",
+            Self::NewWorksheetPage => "New worksheet page",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VisualizationDock {
     AddPane,
@@ -185,6 +249,8 @@ pub struct VisualizationPane {
     pub x_link: Option<u64>,
     pub cursor_group: Option<u64>,
     pub page: String,
+    #[serde(default)]
+    pub placement: VisualizationPanePlacement,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -347,6 +413,14 @@ pub struct VisualizationStudioState {
     #[serde(skip)]
     draft_viewer: ResultViewer,
     #[serde(skip)]
+    draft_dataset_id: Option<DatasetId>,
+    #[serde(skip)]
+    draft_analysis_sequence: Option<u64>,
+    #[serde(skip)]
+    draft_pane_placement: VisualizationPanePlacement,
+    #[serde(skip)]
+    draft_page_title: String,
+    #[serde(skip)]
     draft_annotation: String,
     #[serde(skip)]
     draft_measurement: String,
@@ -419,6 +493,10 @@ impl Default for VisualizationStudioState {
             viewer_query: String::new(),
             dock: None,
             draft_viewer: ResultViewer::Waves,
+            draft_dataset_id: None,
+            draft_analysis_sequence: None,
+            draft_pane_placement: VisualizationPanePlacement::BelowSelected,
+            draft_page_title: String::new(),
             draft_annotation: String::new(),
             draft_measurement: String::new(),
             draft_page_pane: None,
@@ -723,6 +801,12 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
         .visualization_studio
         .active_pane()
         .cloned();
+    let active_binding = app.state.simulation.active_run().and_then(|run| {
+        app.state
+            .simulation
+            .active_analysis()
+            .map(|analysis| (run.dataset_id, analysis.id))
+    });
     let trace_source = app.state.simulation.active_run().and_then(|run| {
         app.state
             .simulation
@@ -731,8 +815,22 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
     });
     let overlay_ids = app.state.simulation.overlay_dataset_ids.clone();
     let phase_continuous = app.state.ui.results.phase_continuous;
+    let active_viewer = app.state.ui.results.viewer;
     let studio = &mut app.state.workbench.visualization_studio;
     match dock {
+        VisualizationDock::AddPane => {
+            studio.draft_viewer = active_viewer;
+            studio.draft_dataset_id = active_binding.map(|binding| binding.0);
+            studio.draft_analysis_sequence = active_binding.map(|binding| binding.1);
+            studio.draft_pane_placement = VisualizationPanePlacement::BelowSelected;
+            let page_count = studio
+                .panes
+                .iter()
+                .map(|pane| pane.page.as_str())
+                .collect::<HashSet<_>>()
+                .len();
+            studio.draft_page_title = format!("Page {}", page_count.saturating_add(1));
+        }
         VisualizationDock::TraceManager => {
             if let Some((dataset_id, analysis_id, waveforms)) = trace_source {
                 studio.draft_trace_dataset = Some(dataset_id);
@@ -776,8 +874,7 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
         VisualizationDock::FamilyEncoding => {
             studio.draft_phase_continuous = Some(phase_continuous);
         }
-        VisualizationDock::AddPane
-        | VisualizationDock::CursorManager
+        VisualizationDock::CursorManager
         | VisualizationDock::Annotation
         | VisualizationDock::Export => {}
     }
@@ -846,6 +943,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
             x_link: Some(1),
             cursor_group: Some(1),
             page: "Engineering".to_owned(),
+            placement: VisualizationPanePlacement::BelowSelected,
         });
         studio.active_pane = Some(id);
         studio.selected_viewer_document = viewer_document_id;
@@ -1048,11 +1146,14 @@ fn workspace_header(ui: &mut Ui, app: &mut RSpiceApp) {
     let wide = ui.available_width() > 1_120.0;
     let phone = ui.available_width() <= 600.0;
     let show_origin = ui.available_width() <= 760.0;
-    Frame::NONE
+    let bar = Frame::NONE
         .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(12, 7))
+        .inner_margin(Margin::symmetric(14, 7))
         .show(ui, |ui| {
-            ui.set_min_height(44.0);
+            ui.set_min_height(bar_content_height(
+                WORKSPACE_HEADER_HEIGHT,
+                WORKSPACE_HEADER_VERTICAL_MARGIN,
+            ));
             ui.horizontal(|ui| {
                 let (mark, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
                 ui.painter().rect(
@@ -1133,7 +1234,7 @@ fn workspace_header(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             });
         });
-    separator(ui, t.color.border_strong);
+    paint_bottom_rule(ui, bar.response.rect, t.color.border_strong);
 }
 
 fn status_label(ui: &mut Ui, label: &str, color: Color32) -> egui::Response {
@@ -1302,16 +1403,14 @@ fn status_strip(ui: &mut Ui, app: &RSpiceApp) {
             "exact source samples".to_owned(),
         ),
     ];
-    let phone = ui.available_width() <= 600.0
-        || ui.ctx().input(|input| input.has_touch_screen())
-        || app.state.workbench.coarse_pointer;
-    let columns = if ui.available_width() <= COMPACT_BREAKPOINT {
-        2
-    } else {
-        4
-    };
+    let touch_screen = ui.ctx().input(|input| input.has_touch_screen());
+    let horizontal_strip = uses_horizontal_kpi_strip(
+        ui.available_width(),
+        app.state.workbench.coarse_pointer,
+        touch_screen,
+    );
     let t = Tokens::get(ui.ctx());
-    if phone {
+    if horizontal_strip {
         ScrollArea::horizontal()
             .id_salt("visualization.status-strip.mobile")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -1325,14 +1424,14 @@ fn status_strip(ui: &mut Ui, app: &RSpiceApp) {
             });
         return;
     }
-    let card_width = (ui.available_width() / columns as f32).max(1.0);
+    let card_width = (ui.available_width() / 4.0).max(1.0);
     Grid::new("visualization.status-strip")
-        .num_columns(columns)
+        .num_columns(4)
         .spacing(Vec2::ZERO)
         .show(ui, |ui| {
             for (index, (label, value, detail)) in metrics.iter().enumerate() {
                 status_metric_card(ui, &t, card_width, label, value, detail);
-                if (index + 1) % columns == 0 {
+                if (index + 1) % 4 == 0 {
                     ui.end_row();
                 }
             }
@@ -1379,7 +1478,7 @@ fn engineering_count(value: usize) -> String {
 
 fn section_navigation(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
+    let bar = Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
         ScrollArea::horizontal()
             .id_salt("visualization.sections")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -1391,8 +1490,10 @@ fn section_navigation(ui: &mut Ui, app: &mut RSpiceApp) {
                         let id = Id::new(("visualization.section", section));
                         let response = ui
                             .push_id(id, |ui| {
-                                let (rect, response) =
-                                    ui.allocate_exact_size(vec2(142.0, 36.0), Sense::click());
+                                let (rect, response) = ui.allocate_exact_size(
+                                    vec2(142.0, SECTION_NAVIGATION_HEIGHT),
+                                    Sense::click(),
+                                );
                                 let fill = if active {
                                     t.color.bg_active
                                 } else if response.hovered() {
@@ -1468,7 +1569,7 @@ fn section_navigation(ui: &mut Ui, app: &mut RSpiceApp) {
                 });
             });
     });
-    separator(ui, t.color.border_strong);
+    paint_bottom_rule(ui, bar.response.rect, t.color.border_strong);
 }
 
 fn compact_section_picker(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2207,6 +2308,7 @@ fn export_row(
 }
 
 fn viewers_section(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
+    section_heading(ui, VisualizationSection::Viewers);
     viewer_toolbar(ui, app, compact);
     let height = ui.available_height().max(1.0);
     if compact {
@@ -2218,45 +2320,70 @@ fn viewers_section(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
         return;
     }
 
-    let available = ui.available_width();
+    // A horizontally scrollable ancestor may expose a logical available
+    // width wider than the visible canvas. The mockup columns are viewport
+    // columns, so clamp their allocation to the active clip rectangle.
+    let available = visible_available_width(
+        ui.available_width(),
+        ui.cursor().left(),
+        ui.clip_rect().right(),
+    );
     let (library_width, inspector_width) = if available <= NARROW_VIEWER_BREAKPOINT {
         (158.0, 196.0)
     } else {
         (190.0, 224.0)
     };
-    ui.allocate_ui_with_layout(
-        vec2(available, height),
-        Layout::left_to_right(Align::Min),
-        |ui| {
-            ui.allocate_ui_with_layout(
-                vec2(library_width, height),
-                Layout::top_down(Align::Min),
-                |ui| viewer_library(ui, app),
-            );
-            vertical_separator(ui);
-            let stage_width = (ui.available_width() - inspector_width - 1.0).max(300.0);
-            ui.allocate_ui_with_layout(
-                vec2(stage_width, height),
-                Layout::top_down(Align::Min),
-                |ui| viewer_stage(ui, app),
-            );
-            vertical_separator(ui);
-            ui.allocate_ui_with_layout(
-                vec2(inspector_width.min(ui.available_width()), height),
-                Layout::top_down(Align::Min),
-                |ui| viewer_inspector(ui, app, false),
-            );
-        },
+    // `allocate_ui_with_layout` is allowed to grow beyond its requested size
+    // when a descendant reports a larger minimum. The exact-data table and
+    // long status strings therefore used to steal width from the inspector at
+    // 1280 px even though the mockup declares fixed 190/224 px side columns.
+    // Reserve and clip all three column rectangles up front so content can
+    // scroll or elide within its owner, never resize a sibling pane.
+    let (rect, _) = ui.allocate_exact_size(vec2(available, height), Sense::hover());
+    let [library_rect, stage_rect, inspector_rect] =
+        viewer_column_rects(rect, library_width, inspector_width);
+    let t = Tokens::get(ui.ctx());
+    for x in [library_rect.right() + 0.5, inspector_rect.left() - 0.5] {
+        ui.painter()
+            .vline(x, rect.y_range(), Stroke::new(1.0, t.color.border_strong));
+    }
+
+    let mut library_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(library_rect)
+            .layout(Layout::top_down(Align::Min)),
     );
+    library_ui.set_clip_rect(library_ui.clip_rect().intersect(library_rect));
+    viewer_library(&mut library_ui, app);
+
+    let mut stage_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(stage_rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    stage_ui.set_clip_rect(stage_ui.clip_rect().intersect(stage_rect));
+    viewer_stage(&mut stage_ui, app);
+
+    let mut inspector_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(inspector_rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    inspector_ui.set_clip_rect(inspector_ui.clip_rect().intersect(inspector_rect));
+    viewer_inspector(&mut inspector_ui, app, false);
 }
 
 fn viewer_toolbar(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
     let t = Tokens::get(ui.ctx());
-    Frame::NONE
+    let bar = Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(8, 5))
         .show(ui, |ui| {
-            ui.set_min_height(if compact { 44.0 } else { 26.0 });
+            ui.set_min_height(if compact {
+                44.0
+            } else {
+                bar_content_height(VIEWER_TOOLBAR_HEIGHT, VIEWER_TOOLBAR_VERTICAL_MARGIN)
+            });
             ScrollArea::horizontal()
                 .id_salt("visualization.viewer-toolbar")
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -2305,45 +2432,46 @@ fn viewer_toolbar(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
                         toolbar_action(ui, "Annotate", || {
                             open_dock(app, VisualizationDock::Annotation);
                         });
-                        ui.add_space(8.0);
-                        if ui
-                            .add_enabled(waveform_coordinates, egui::Button::new("−"))
-                            .on_hover_text("Zoom out")
-                            .clicked()
-                        {
-                            zoom_active(app, 0.8);
-                        }
-                        ui.label(
-                            RichText::new(format!(
-                                "{}%",
-                                (app.state.workbench.visualization_studio.zoom * 100.0).round()
-                                    as u32
-                            ))
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_dim),
-                        );
-                        if ui
-                            .add_enabled(waveform_coordinates, egui::Button::new("+"))
-                            .on_hover_text("Zoom in")
-                            .clicked()
-                        {
-                            zoom_active(app, 1.25);
-                        }
-                        if ui
-                            .add_enabled(waveform_coordinates, egui::Button::new("Fit"))
-                            .clicked()
-                        {
-                            fit_active_view(app);
-                        }
-                        toolbar_action(ui, "Axes & display…", || {
-                            app.state.workbench.visualization_studio.section =
-                                VisualizationSection::Axes;
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            toolbar_action(ui, "Export…", || export_document(app));
+                            toolbar_action(ui, "Axes & display…", || {
+                                app.state.workbench.visualization_studio.section =
+                                    VisualizationSection::Axes;
+                            });
+                            if ui
+                                .add_enabled(waveform_coordinates, egui::Button::new("Fit"))
+                                .clicked()
+                            {
+                                fit_active_view(app);
+                            }
+                            if ui
+                                .add_enabled(waveform_coordinates, egui::Button::new("+"))
+                                .on_hover_text("Zoom in")
+                                .clicked()
+                            {
+                                zoom_active(app, 1.25);
+                            }
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}%",
+                                    (app.state.workbench.visualization_studio.zoom * 100.0).round()
+                                        as u32
+                                ))
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                .color(t.color.text_dim),
+                            );
+                            if ui
+                                .add_enabled(waveform_coordinates, egui::Button::new("−"))
+                                .on_hover_text("Zoom out")
+                                .clicked()
+                            {
+                                zoom_active(app, 0.8);
+                            }
                         });
-                        toolbar_action(ui, "Export…", || export_document(app));
                     });
                 });
         });
-    separator(ui, t.color.border_strong);
+    paint_bottom_rule(ui, bar.response.rect, t.color.border_strong);
 }
 
 fn toolbar_action(ui: &mut Ui, label: &'static str, action: impl FnOnce()) {
@@ -2369,16 +2497,28 @@ fn toolbar_action_enabled(
 }
 
 fn viewer_library(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
     panel_heading(ui, "Viewer library", &VIEWER_DOCUMENTS.len().to_string());
     let query = &mut app.state.workbench.visualization_studio.viewer_query;
-    ui.add_sized(
-        [ui.available_width(), 28.0],
-        egui::TextEdit::singleline(query)
-            .hint_text("Filter viewers")
-            .desired_width(f32::INFINITY),
-    );
-    separator(ui, t.color.border);
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE.inner_margin(Margin::same(8)).show(ui, |ui| {
+        let response = ui.add_sized(
+            [ui.available_width(), 28.0],
+            egui::TextEdit::singleline(query)
+                .hint_text("Filter viewers")
+                .margin(Margin {
+                    left: 29,
+                    right: 8,
+                    top: 4,
+                    bottom: 4,
+                })
+                .desired_width(f32::INFINITY),
+        );
+        let icon_rect = Rect::from_center_size(
+            egui::pos2(response.rect.left() + 13.5, response.rect.center().y),
+            Vec2::splat(13.0),
+        );
+        WorkbenchIcon::Search.paint(ui.painter(), icon_rect, t.color.text_faint);
+    });
 
     let query = query.trim().to_ascii_lowercase();
     let analysis_ids = available_analysis_ids(&app.state);
@@ -2404,11 +2544,7 @@ fn viewer_library(ui: &mut Ui, app: &mut RSpiceApp) {
                 if rows.is_empty() {
                     continue;
                 }
-                ui.label(
-                    RichText::new(group.label().to_uppercase())
-                        .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_faint),
-                );
+                viewer_group_heading(ui, group.label());
                 for definition in rows {
                     let availability =
                         resolved_viewer_availability(&app.state, definition, capabilities);
@@ -2440,6 +2576,26 @@ fn viewer_library(ui: &mut Ui, app: &mut RSpiceApp) {
             add_viewer_pane(app, id, viewer);
         }
     }
+}
+
+fn viewer_group_heading(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    let heading = Frame::NONE
+        .inner_margin(Margin {
+            left: 8,
+            right: 8,
+            top: 7,
+            bottom: 5,
+        })
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(label.to_uppercase())
+                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.text_faint),
+            );
+        });
+    paint_top_rule(ui, heading.response.rect, t.color.border);
+    paint_bottom_rule(ui, heading.response.rect, t.color.border);
 }
 
 fn viewer_library_row(
@@ -2572,6 +2728,95 @@ fn resolved_viewer_availability(
     Ok(viewer)
 }
 
+fn resolved_viewer_availability_for_binding(
+    state: &AppState,
+    definition: &ViewerDocumentDefinition,
+    dataset_id: Option<DatasetId>,
+    analysis_sequence: Option<u64>,
+) -> Result<ResultViewer, String> {
+    let dataset_id = dataset_id.ok_or_else(|| "Select a retained dataset".to_owned())?;
+    let analysis_sequence =
+        analysis_sequence.ok_or_else(|| "Select a retained analysis".to_owned())?;
+    let run = state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == dataset_id)
+        .ok_or_else(|| "The selected dataset is no longer retained".to_owned())?;
+    let analysis_index = run
+        .analyses
+        .iter()
+        .position(|analysis| analysis.id == analysis_sequence)
+        .ok_or_else(|| "The selected analysis is no longer retained".to_owned())?;
+    let analysis = &run.analyses[analysis_index];
+    let analysis_ids = [analysis_manifest_id(analysis.analysis_type)];
+    match viewer_compatibility(
+        definition.id,
+        ViewerCapabilities {
+            analysis_ids: &analysis_ids,
+            external_capabilities: &[],
+        },
+    ) {
+        ViewerCompatibility::Compatible => {}
+        ViewerCompatibility::MissingAnalysis {
+            accepted_analysis_ids,
+        } => {
+            return Err(format!(
+                "Requires {} analysis data",
+                accepted_analysis_ids.join(" / ")
+            ));
+        }
+        ViewerCompatibility::MissingExternalCapability { capability_id } => {
+            return Err(format!("Requires {capability_id} result capability"));
+        }
+        ViewerCompatibility::UnknownDocument | ViewerCompatibility::UnknownQuickMode => {
+            return Err("Viewer identity is not registered".to_owned());
+        }
+    }
+    let viewer = renderer_for_viewer_document(definition.id)
+        .ok_or_else(|| "No exact Rust renderer is registered for this viewer".to_owned())?;
+    let binding_is_active = state
+        .simulation
+        .active_run()
+        .is_some_and(|active| active.dataset_id == dataset_id)
+        && state
+            .simulation
+            .active_analysis()
+            .is_some_and(|active| active.id == analysis_sequence);
+    let available = match viewer {
+        ResultViewer::Waves => !analysis.waveforms.is_empty(),
+        ResultViewer::Bode => {
+            crate::state::ac_bode_summary_for_selection(run, Some(analysis_index)).is_some()
+        }
+        ResultViewer::Fft | ResultViewer::Eye => {
+            crate::simulation::SimulationController::analysis_supports_transient_derivation(
+                analysis.analysis_type,
+            ) && !analysis.waveforms.is_empty()
+        }
+        ResultViewer::Specs => {
+            !analysis.measurements.is_empty() || !state.workspace.specs.is_empty()
+        }
+        ResultViewer::Hist
+        | ResultViewer::Smith
+        | ResultViewer::PoleZero
+        | ResultViewer::Op
+        | ResultViewer::NoiseContrib
+        | ResultViewer::Nyquist => {
+            binding_is_active && result_document::viewer_is_available(state, viewer)
+        }
+    };
+    if !available {
+        return Err(if binding_is_active {
+            result_document::viewer_unavailability_reason(state, viewer)
+                .unwrap_or("The selected analysis does not satisfy this renderer contract")
+                .to_owned()
+        } else {
+            "This renderer requires derived state owned by the currently active analysis".to_owned()
+        });
+    }
+    Ok(viewer)
+}
+
 fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
     match id {
         "viewer-waveform" => Some(ResultViewer::Waves),
@@ -2664,35 +2909,132 @@ fn add_viewer_pane(app: &mut RSpiceApp, document_id: &str, viewer: ResultViewer)
         ));
         return;
     };
-    let studio = &mut app.state.workbench.visualization_studio;
-    let Some(id) = studio.allocate_identity() else {
-        app.state.push_user_message(ConsoleMessage::error(
-            "Visualization pane identity space is exhausted.",
+    add_viewer_pane_bound(
+        app,
+        document_id,
+        viewer,
+        dataset_id,
+        analysis_sequence,
+        VisualizationPanePlacement::BelowSelected,
+        String::new(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_viewer_pane_bound(
+    app: &mut RSpiceApp,
+    document_id: &str,
+    viewer: ResultViewer,
+    dataset_id: DatasetId,
+    analysis_sequence: u64,
+    placement: VisualizationPanePlacement,
+    requested_page_title: String,
+) {
+    let binding = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .enumerate()
+        .find_map(|(run_index, run)| {
+            (run.dataset_id == dataset_id).then(|| {
+                run.analyses
+                    .iter()
+                    .position(|analysis| analysis.id == analysis_sequence)
+                    .map(|analysis_index| (run_index, analysis_index))
+            })?
+        });
+    let Some((run_index, analysis_index)) = binding else {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "The selected immutable dataset or analysis is no longer retained.",
         ));
         return;
     };
-    let insertion_index = studio
-        .active_pane
-        .and_then(|active| studio.panes.iter().position(|pane| pane.id == active))
-        .map_or(studio.panes.len(), |index| index + 1);
-    studio.panes.insert(
-        insertion_index,
-        VisualizationPane {
-            id,
-            viewer,
-            viewer_document_id: document_id.to_owned(),
-            dataset_id,
-            analysis_sequence,
-            x_link: Some(1),
-            cursor_group: Some(1),
-            page: "Engineering".to_owned(),
-        },
-    );
-    studio.active_pane = Some(id);
-    studio.selected_viewer_document = document_id.to_owned();
-    let commit = studio.commit_revision();
-    report_visualization_commit(app, commit);
-    app.state.ui.results.viewer = viewer;
+    let Some(definition) = viewer_document(document_id) else {
+        app.state.push_user_message(ConsoleMessage::error(
+            "The selected visualization viewer is not registered.",
+        ));
+        return;
+    };
+    if let Err(error) = resolved_viewer_availability_for_binding(
+        &app.state,
+        definition,
+        Some(dataset_id),
+        Some(analysis_sequence),
+    ) {
+        app.state.push_user_message(ConsoleMessage::warning(error));
+        return;
+    }
+    let active_pane = app
+        .state
+        .workbench
+        .visualization_studio
+        .active_pane()
+        .cloned();
+    let page = if placement == VisualizationPanePlacement::NewWorksheetPage {
+        requested_page_title.trim().to_owned()
+    } else {
+        active_pane
+            .as_ref()
+            .map_or_else(|| "Engineering".to_owned(), |pane| pane.page.clone())
+    };
+    if page.is_empty() {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "A new worksheet page requires a non-blank title.",
+        ));
+        return;
+    }
+    let x_link = if placement == VisualizationPanePlacement::NewWorksheetPage {
+        None
+    } else {
+        active_pane.as_ref().and_then(|pane| pane.x_link)
+    };
+    let cursor_group = if placement == VisualizationPanePlacement::NewWorksheetPage {
+        None
+    } else {
+        active_pane.as_ref().and_then(|pane| pane.cursor_group)
+    };
+    let studio = &mut app.state.workbench.visualization_studio;
+    let document_id = document_id.to_owned();
+    let result = studio.transact(|studio| {
+        let id = studio
+            .allocate_identity()
+            .ok_or_else(|| "Visualization pane identity space is exhausted".to_owned())?;
+        let insertion_index = if placement == VisualizationPanePlacement::NewWorksheetPage {
+            studio.panes.len()
+        } else {
+            studio
+                .active_pane
+                .and_then(|active| studio.panes.iter().position(|pane| pane.id == active))
+                .map_or(studio.panes.len(), |index| index + 1)
+        };
+        studio.panes.insert(
+            insertion_index,
+            VisualizationPane {
+                id,
+                viewer,
+                viewer_document_id: document_id.clone(),
+                dataset_id,
+                analysis_sequence,
+                x_link,
+                cursor_group,
+                page,
+                placement,
+            },
+        );
+        studio.active_pane = Some(id);
+        studio.selected_viewer_document = document_id;
+        studio.applied_link_pane = None;
+        Ok(id)
+    });
+    match result {
+        Ok(_) => {
+            let _ = app.state.simulation.select_run(run_index);
+            let _ = app.state.simulation.select_analysis(analysis_index);
+            app.state.ui.results.viewer = viewer;
+        }
+        Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+    }
 }
 
 fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2720,11 +3062,14 @@ fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
         Err,
     );
     let compatible = availability.is_ok();
-    Frame::NONE
-        .fill(t.color.bg_panel)
+    let header = Frame::NONE
+        .fill(t.color.bg_app)
         .inner_margin(Margin::symmetric(9, 6))
         .show(ui, |ui| {
-            ui.set_min_height(32.0);
+            ui.set_min_height(bar_content_height(
+                VIEWER_STAGE_HEADER_HEIGHT,
+                VIEWER_STAGE_HEADER_VERTICAL_MARGIN,
+            ));
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.label(
@@ -2755,11 +3100,10 @@ fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
                 });
             });
         });
-    separator(ui, t.color.border);
+    paint_bottom_rule(ui, header.response.rect, t.color.border_strong);
 
-    let dock_height = exact_rows_height(app);
-    let status_height = 27.0;
-    let plot_height = (ui.available_height() - dock_height - status_height).max(80.0);
+    let dock_height = exact_rows_height();
+    let plot_height = (ui.available_height() - dock_height - VIEWER_STAGE_STATUS_HEIGHT).max(80.0);
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), plot_height),
         Layout::top_down(Align::Min),
@@ -2926,20 +3270,35 @@ fn unavailable_viewer(ui: &mut Ui, definition: Option<&ViewerDocumentDefinition>
 
 fn viewer_stage_status(ui: &mut Ui, app: &RSpiceApp, compatible: bool) {
     let t = Tokens::get(ui.ctx());
-    Frame::NONE
+    let status = Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(8, 4))
         .show(ui, |ui| {
-            ui.set_min_height(19.0);
+            ui.set_min_height(bar_content_height(
+                VIEWER_STAGE_STATUS_HEIGHT,
+                VIEWER_STAGE_STATUS_VERTICAL_MARGIN,
+            ));
             ui.horizontal(|ui| {
-                ui.label(format!(
-                    "Document  VIS-{:04} · revision {}",
-                    1, app.state.workbench.visualization_studio.revision
-                ));
+                ui.label(
+                    RichText::new(format!(
+                        "Document  VIS-{:04} · revision {}",
+                        1, app.state.workbench.visualization_studio.revision
+                    ))
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+                );
                 ui.separator();
-                ui.label("Source  immutable result samples");
+                ui.label(
+                    RichText::new("Source  immutable result samples")
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
                 ui.separator();
-                ui.label("Interpolation  source exact on dock queries");
+                ui.label(
+                    RichText::new("Interpolation  source exact on dock queries")
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         RichText::new(if compatible {
@@ -2957,58 +3316,67 @@ fn viewer_stage_status(ui: &mut Ui, app: &RSpiceApp, compatible: bool) {
                 });
             });
         });
-    separator(ui, t.color.border);
+    paint_top_rule(ui, status.response.rect, t.color.border_strong);
 }
 
-fn exact_rows_height(app: &RSpiceApp) -> f32 {
-    if app.state.simulation.active_analysis().is_some() {
-        132.0
-    } else {
-        64.0
-    }
+const fn exact_rows_height() -> f32 {
+    EXACT_DATA_DOCK_HEIGHT
 }
 
 fn exact_data_dock(ui: &mut Ui, app: &RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     let rows = exact_source_rows(&app.state);
-    panel_heading(
-        ui,
-        "Exact-data dock",
-        &format!("{} source rows · no display interpolation", rows.len()),
-    );
-    ScrollArea::both()
-        .id_salt("visualization.exact-data")
-        .max_height(102.0)
+    Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .corner_radius(8.0)
+        .inner_margin(Margin::same(12))
         .show(ui, |ui| {
-            Grid::new("visualization.exact-data.grid")
-                .num_columns(5)
-                .striped(true)
-                .spacing(vec2(14.0, 5.0))
-                .show(ui, |ui| {
-                    table_header(ui, "Binding");
-                    table_header(ui, "Stable row");
-                    table_header(ui, "Typed coordinate");
-                    table_header(ui, "Exact f64 value");
-                    table_header(ui, "Origin");
-                    ui.end_row();
-                    if rows.is_empty() {
-                        ui.label(
-                            RichText::new("No exact source row is available").color(t.color.warn),
-                        );
-                        for _ in 0..4 {
-                            ui.label("—");
-                        }
-                        ui.end_row();
-                    }
-                    for row in rows {
-                        ui.monospace(row.binding);
-                        ui.monospace(row.stable_row);
-                        ui.monospace(row.coordinate);
-                        ui.monospace(row.value);
-                        ui.label(row.origin);
-                        ui.end_row();
-                    }
-                });
+            panel_heading(
+                ui,
+                "Exact-data dock",
+                &format!("{} source rows · no display interpolation", rows.len()),
+            );
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), EXACT_DATA_TABLE_HEIGHT),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ScrollArea::both()
+                        .id_salt("visualization.exact-data")
+                        .show(ui, |ui| {
+                            Grid::new("visualization.exact-data.grid")
+                                .num_columns(5)
+                                .striped(true)
+                                .spacing(vec2(14.0, 5.0))
+                                .show(ui, |ui| {
+                                    table_header(ui, "Binding");
+                                    table_header(ui, "Stable row");
+                                    table_header(ui, "Typed coordinate");
+                                    table_header(ui, "Exact f64 value");
+                                    table_header(ui, "Origin");
+                                    ui.end_row();
+                                    if rows.is_empty() {
+                                        ui.label(
+                                            RichText::new("No exact source row is available")
+                                                .color(t.color.warn),
+                                        );
+                                        for _ in 0..4 {
+                                            ui.label("—");
+                                        }
+                                        ui.end_row();
+                                    }
+                                    for row in rows {
+                                        ui.monospace(row.binding);
+                                        ui.monospace(row.stable_row);
+                                        ui.monospace(row.coordinate);
+                                        ui.monospace(row.value);
+                                        ui.label(row.origin);
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                },
+            );
         });
 }
 
@@ -3073,71 +3441,194 @@ fn short_dataset(id: DatasetId) -> String {
     id.to_string().chars().take(8).collect()
 }
 
+struct ResultEntityRow {
+    identity: String,
+    kind: &'static str,
+    binding: String,
+    state: String,
+}
+
+fn result_entity_rows(state: &AppState) -> Vec<ResultEntityRow> {
+    let mut rows = Vec::new();
+    if let (Some(run), Some(analysis)) = (
+        state.simulation.active_run(),
+        state.simulation.active_analysis(),
+    ) {
+        let dataset = short_dataset(run.dataset_id);
+        if let Some(waveform) = analysis.waveforms.first() {
+            rows.push(ResultEntityRow {
+                identity: format!("axis:{}:x", analysis.id),
+                kind: "axis",
+                binding: format!("{} · source X coordinate", dataset),
+                state: format!("{} exact rows", waveform.x.len()),
+            });
+        }
+        for (index, waveform) in analysis.waveforms.iter().enumerate() {
+            rows.push(ResultEntityRow {
+                identity: format!("trace:{}:{index}", analysis.id),
+                kind: "trace",
+                binding: format!("{} · {}", dataset, waveform.name),
+                state: if waveform.visible {
+                    "visible · source exact".to_owned()
+                } else {
+                    "hidden · retained".to_owned()
+                },
+            });
+        }
+    }
+    for (label, coordinate) in [
+        ("A", state.ui.results.cursors.a),
+        ("B", state.ui.results.cursors.b),
+    ] {
+        if let Some(coordinate) = coordinate {
+            rows.push(ResultEntityRow {
+                identity: format!("cursor:{label}"),
+                kind: "cursor",
+                binding: format!("x={coordinate:.17e}"),
+                state: "nearest source row".to_owned(),
+            });
+        }
+    }
+    for marker in &state.workbench.visualization_studio.markers {
+        rows.push(ResultEntityRow {
+            identity: format!("marker:{}", marker.id),
+            kind: "marker",
+            binding: format!(
+                "{} · {}[{}]",
+                short_dataset(marker.dataset_id),
+                marker.waveform_name,
+                marker.sample_index
+            ),
+            state: marker.label.clone(),
+        });
+    }
+    for measurement in &state.workbench.visualization_studio.measurements {
+        rows.push(ResultEntityRow {
+            identity: format!("measurement:{}", measurement.id),
+            kind: "measurement",
+            binding: measurement.expression.clone(),
+            state: format!("{:.17e}", measurement.value),
+        });
+    }
+    for annotation in &state.workbench.visualization_studio.annotations {
+        rows.push(ResultEntityRow {
+            identity: format!("annotation:{}", annotation.id),
+            kind: "annotation",
+            binding: format!(
+                "{} · analysis {} · x={:.9e}",
+                short_dataset(annotation.dataset_id),
+                annotation.analysis_sequence,
+                annotation.x
+            ),
+            state: annotation.text.clone(),
+        });
+    }
+    rows
+}
+
+fn fixed_table_row<const N: usize>(
+    ui: &mut Ui,
+    fractions: [f32; N],
+    cells: [&str; N],
+    header: bool,
+    minimum_width: f32,
+) {
+    let t = Tokens::get(ui.ctx());
+    let height = if header { 27.0 } else { 28.0 };
+    let width = ui.available_width().max(minimum_width);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    if header {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    let font = if header {
+        theme::sans(tokens::FS_0, FontWeight::Medium)
+    } else {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    };
+    let color = if header {
+        t.color.text_faint
+    } else {
+        t.color.text_dim
+    };
+    let mut left = rect.left();
+    for index in 0..N {
+        let right = if index + 1 == N {
+            rect.right()
+        } else {
+            left + rect.width() * fractions[index]
+        };
+        let cell = Rect::from_min_max(
+            egui::pos2(left, rect.top()),
+            egui::pos2(right, rect.bottom()),
+        );
+        if index + 1 < N {
+            ui.painter().vline(
+                right - 0.5,
+                rect.y_range(),
+                Stroke::new(1.0, t.color.border),
+            );
+        }
+        ui.painter().with_clip_rect(cell).text(
+            egui::pos2(cell.left() + 8.0, cell.center().y),
+            Align2::LEFT_CENTER,
+            cells[index],
+            font.clone(),
+            color,
+        );
+        left = right;
+    }
+}
+
+fn result_entity_table(ui: &mut Ui, rows: &[ResultEntityRow]) {
+    const FRACTIONS: [f32; 4] = [0.23, 0.16, 0.37, 0.24];
+    ScrollArea::both()
+        .id_salt("visualization.result-entities")
+        .max_height(196.0)
+        .show(ui, |ui| {
+            fixed_table_row(
+                ui,
+                FRACTIONS,
+                ["IDENTITY", "TYPE", "BINDING / DEFINITION", "STATE"],
+                true,
+                520.0,
+            );
+            if rows.is_empty() {
+                fixed_table_row(
+                    ui,
+                    FRACTIONS,
+                    ["—", "none", "No versioned result entities", "empty"],
+                    false,
+                    520.0,
+                );
+            }
+            for row in rows {
+                fixed_table_row(
+                    ui,
+                    FRACTIONS,
+                    [&row.identity, row.kind, &row.binding, &row.state],
+                    false,
+                    520.0,
+                );
+            }
+        });
+}
+
 fn viewer_inspector(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
     let t = Tokens::get(ui.ctx());
-    let pane_count = app.state.workbench.visualization_studio.panes.len();
-    panel_heading(ui, "Pane navigator", &pane_count.to_string());
+    let entities = result_entity_rows(&app.state);
+    panel_heading(ui, "Versioned result entities", &entities.len().to_string());
     ScrollArea::vertical()
         .id_salt("visualization.entity-inspector")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            if pane_count == 0 {
-                empty_note(ui, "No panes are bound to an immutable dataset.");
-            }
-            let mut selected = None;
-            let mut remove = None;
-            for pane in &app.state.workbench.visualization_studio.panes {
-                let active = app.state.workbench.visualization_studio.active_pane == Some(pane.id);
-                Frame::NONE
-                    .fill(if active { t.color.bg_active } else { t.color.bg_inset })
-                    .stroke(Stroke::new(1.0, t.color.border))
-                    .inner_margin(Margin::symmetric(8, 6))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if ui
-                                .selectable_label(active, format!("Pane {:02}", pane.id))
-                                .clicked()
-                            {
-                                selected = Some((pane.id, pane.viewer, pane.viewer_document_id.clone()));
-                            }
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if Button::new("×")
-                                    .ghost()
-                                    .show(ui)
-                                    .on_hover_text("Remove pane from this document revision")
-                                    .clicked()
-                                {
-                                    remove = Some(pane.id);
-                                }
-                            });
-                        });
-                        ui.label(
-                            RichText::new(format!(
-                                "{} · {} · {}",
-                                pane.viewer.label(),
-                                short_dataset(pane.dataset_id),
-                                pane.page
-                            ))
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_faint),
-                        );
-                    });
-                ui.add_space(3.0);
-            }
-            if let Some((id, viewer, document)) = selected {
-                app.state.workbench.visualization_studio.active_pane = Some(id);
-                app.state.workbench.visualization_studio.selected_viewer_document = document;
-                app.state.ui.results.viewer = viewer;
-                app.state.workbench.visualization_studio.touch_pane =
-                    VisualizationTouchPane::Stage;
-            }
-            if let Some(id) = remove {
-                let studio = &mut app.state.workbench.visualization_studio;
-                studio.panes.retain(|pane| pane.id != id);
-                studio.active_pane = studio.panes.last().map(|pane| pane.id);
-                let commit = studio.commit_revision();
-                report_visualization_commit(app, commit);
-            }
+            result_entity_table(ui, &entities);
 
             separator(ui, t.color.border);
             panel_heading(ui, "Comparison receipt", "none");
@@ -3512,25 +4003,23 @@ fn add_marker_at_midpoint(app: &mut RSpiceApp) {
         ));
         return;
     };
-    let studio = &mut app.state.workbench.visualization_studio;
-    let Some(id) = studio.allocate_identity() else {
-        app.state.push_user_message(ConsoleMessage::error(
-            "Visualization marker identity space is exhausted.",
-        ));
-        return;
-    };
-    studio.markers.push(VisualizationMarker {
-        id,
-        dataset_id,
-        analysis_sequence,
-        waveform_name,
-        sample_index,
-        x,
-        y,
-        label: format!("M{id}"),
+    let result = app.state.workbench.visualization_studio.transact(|studio| {
+        let id = studio
+            .allocate_identity()
+            .ok_or_else(|| "Visualization marker identity space is exhausted".to_owned())?;
+        studio.markers.push(VisualizationMarker {
+            id,
+            dataset_id,
+            analysis_sequence,
+            waveform_name,
+            sample_index,
+            x,
+            y,
+            label: format!("M{id}"),
+        });
+        Ok(())
     });
-    let commit = studio.commit_revision();
-    report_visualization_commit(app, commit);
+    report_visualization_commit(app, result);
 }
 
 fn source_midpoint(state: &AppState) -> Option<(DatasetId, u64, String, usize, f64, f64)> {
@@ -3643,23 +4132,83 @@ fn dock_body(ui: &mut Ui, app: &mut RSpiceApp, dock: VisualizationDock) -> bool 
     }
 }
 
+fn normalize_add_pane_draft(state: &mut AppState) {
+    let draft_dataset = state.workbench.visualization_studio.draft_dataset_id;
+    let draft_analysis = state.workbench.visualization_studio.draft_analysis_sequence;
+    let draft_is_valid =
+        draft_dataset
+            .zip(draft_analysis)
+            .is_some_and(|(dataset_id, analysis_sequence)| {
+                state.simulation.runs.iter().any(|run| {
+                    run.dataset_id == dataset_id
+                        && run
+                            .analyses
+                            .iter()
+                            .any(|analysis| analysis.id == analysis_sequence)
+                })
+            });
+    if draft_is_valid {
+        return;
+    }
+    let fallback = state
+        .simulation
+        .active_run()
+        .and_then(|run| {
+            state
+                .simulation
+                .active_analysis()
+                .map(|analysis| (run.dataset_id, analysis.id))
+        })
+        .or_else(|| {
+            state.simulation.runs.iter().find_map(|run| {
+                run.analyses
+                    .first()
+                    .map(|analysis| (run.dataset_id, analysis.id))
+            })
+        });
+    state.workbench.visualization_studio.draft_dataset_id = fallback.map(|binding| binding.0);
+    state.workbench.visualization_studio.draft_analysis_sequence =
+        fallback.map(|binding| binding.1);
+}
+
+fn selected_draft_analysis(state: &AppState) -> Option<&crate::state::AnalysisResult> {
+    let studio = &state.workbench.visualization_studio;
+    let dataset_id = studio.draft_dataset_id?;
+    let analysis_sequence = studio.draft_analysis_sequence?;
+    state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == dataset_id)?
+        .analyses
+        .iter()
+        .find(|analysis| analysis.id == analysis_sequence)
+}
+
 fn add_pane_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     dock_intro(
         ui,
         "RESULTS · WORKSHEET LAYOUT",
         "Create a compatible viewer pane without disturbing existing link groups.",
     );
-    let analysis_ids = available_analysis_ids(&app.state);
-    let capabilities = ViewerCapabilities {
-        analysis_ids: &analysis_ids,
-        external_capabilities: &[],
-    };
+    normalize_add_pane_draft(&mut app.state);
+    let draft_dataset = app.state.workbench.visualization_studio.draft_dataset_id;
+    let draft_analysis = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_analysis_sequence;
     let options = NATIVE_VIEWERS.map(|viewer| {
         let definition = viewer_document(viewer_document_id(viewer));
         let availability = definition
             .ok_or_else(|| "Viewer document is not registered".to_owned())
             .and_then(|definition| {
-                resolved_viewer_availability(&app.state, definition, capabilities)
+                resolved_viewer_availability_for_binding(
+                    &app.state,
+                    definition,
+                    draft_dataset,
+                    draft_analysis,
+                )
             });
         (viewer, availability)
     });
@@ -3685,17 +4234,145 @@ fn add_pane_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
                 }
             }
         });
-    let source = app.state.simulation.active_run().map_or_else(
-        || "No immutable result dataset".to_owned(),
-        |run| format!("{} · {}", run.label, short_dataset(run.dataset_id)),
+
+    let selected_dataset_text = draft_dataset
+        .and_then(|dataset_id| {
+            app.state
+                .simulation
+                .runs
+                .iter()
+                .find(|run| run.dataset_id == dataset_id)
+        })
+        .map_or_else(
+            || "Select retained dataset".to_owned(),
+            |run| format!("{} · {}", run.label, short_dataset(run.dataset_id)),
+        );
+    egui::ComboBox::from_label("Dataset")
+        .selected_text(selected_dataset_text)
+        .show_ui(ui, |ui| {
+            let rows: Vec<_> = app
+                .state
+                .simulation
+                .runs
+                .iter()
+                .map(|run| {
+                    (
+                        run.dataset_id,
+                        run.label.clone(),
+                        run.analyses.first().map(|a| a.id),
+                    )
+                })
+                .collect();
+            for (dataset_id, label, first_analysis) in rows {
+                if ui
+                    .selectable_value(
+                        &mut app.state.workbench.visualization_studio.draft_dataset_id,
+                        Some(dataset_id),
+                        format!("{} · {}", label, short_dataset(dataset_id)),
+                    )
+                    .clicked()
+                {
+                    app.state
+                        .workbench
+                        .visualization_studio
+                        .draft_analysis_sequence = first_analysis;
+                }
+            }
+        });
+
+    let draft_dataset = app.state.workbench.visualization_studio.draft_dataset_id;
+    let selected_analysis_text = selected_draft_analysis(&app.state).map_or_else(
+        || "Select retained analysis".to_owned(),
+        |analysis| format!("{} · {}", analysis.label, analysis.id),
     );
-    property_row(ui, "Dataset", &source);
-    property_row(ui, "Placement", "Below selected pane · Engineering page");
+    ui.add_enabled_ui(draft_dataset.is_some(), |ui| {
+        egui::ComboBox::from_label("Analysis")
+            .selected_text(selected_analysis_text)
+            .show_ui(ui, |ui| {
+                let rows: Vec<_> = draft_dataset
+                    .and_then(|dataset_id| {
+                        app.state
+                            .simulation
+                            .runs
+                            .iter()
+                            .find(|run| run.dataset_id == dataset_id)
+                    })
+                    .map(|run| {
+                        run.analyses
+                            .iter()
+                            .map(|analysis| {
+                                (
+                                    analysis.id,
+                                    analysis.label.clone(),
+                                    analysis_manifest_id(analysis.analysis_type),
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for (analysis_id, label, kind) in rows {
+                    ui.selectable_value(
+                        &mut app
+                            .state
+                            .workbench
+                            .visualization_studio
+                            .draft_analysis_sequence,
+                        Some(analysis_id),
+                        format!("{label} · {kind} · {analysis_id}"),
+                    );
+                }
+            });
+    });
+
+    let placement = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_pane_placement;
+    egui::ComboBox::from_label("Placement")
+        .selected_text(placement.label())
+        .show_ui(ui, |ui| {
+            for placement in VisualizationPanePlacement::ALL {
+                ui.selectable_value(
+                    &mut app
+                        .state
+                        .workbench
+                        .visualization_studio
+                        .draft_pane_placement,
+                    placement,
+                    placement.label(),
+                );
+            }
+        });
+    if app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_pane_placement
+        == VisualizationPanePlacement::NewWorksheetPage
+    {
+        ui.label("New page title");
+        ui.text_edit_singleline(&mut app.state.workbench.visualization_studio.draft_page_title);
+    }
+
     let selected_viewer = app.state.workbench.visualization_studio.draft_viewer;
     let selected_compatibility = options
         .iter()
         .find_map(|(viewer, availability)| (*viewer == selected_viewer).then_some(availability));
-    let enabled = selected_compatibility.is_some_and(Result::is_ok);
+    let page_valid = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_pane_placement
+        != VisualizationPanePlacement::NewWorksheetPage
+        || !app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_page_title
+            .trim()
+            .is_empty();
+    let enabled = selected_compatibility.is_some_and(Result::is_ok) && page_valid;
     ui.add_space(10.0);
     let add = ui
         .add_enabled(enabled, egui::Button::new("Add pane"))
@@ -3710,7 +4387,39 @@ fn add_pane_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         .clicked();
     if add {
         let viewer = app.state.workbench.visualization_studio.draft_viewer;
-        add_viewer_pane(app, viewer_document_id(viewer), viewer);
+        let dataset_id = app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_dataset_id
+            .expect("enabled add-pane action has a retained dataset");
+        let analysis_sequence = app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_analysis_sequence
+            .expect("enabled add-pane action has a retained analysis");
+        let placement = app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_pane_placement;
+        let page_title = app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_page_title
+            .trim()
+            .to_owned();
+        add_viewer_pane_bound(
+            app,
+            viewer_document_id(viewer),
+            viewer,
+            dataset_id,
+            analysis_sequence,
+            placement,
+            page_title,
+        );
     }
     add
 }
@@ -3841,8 +4550,11 @@ fn cursor_manager_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             app.state.ui.results.clear_cursors();
         }
         if Button::new("Clear markers").show(ui).clicked() {
-            app.state.workbench.visualization_studio.markers.clear();
-            commit_visualization_revision(app);
+            let result = app.state.workbench.visualization_studio.transact(|studio| {
+                studio.markers.clear();
+                Ok(())
+            });
+            report_visualization_commit(app, result);
         }
     });
     Button::new("Done").show(ui).clicked()
@@ -3874,23 +4586,27 @@ fn properties_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     ui.checkbox(phase_continuous, "Continuous (unwrapped) phase display");
     let save = Button::new("Save properties").accent().show(ui).clicked();
     if save {
-        if let Some(significant_digits) = app
+        let significant_digits = app
             .state
             .workbench
             .visualization_studio
-            .draft_significant_digits
-        {
-            app.state.workbench.visualization_studio.significant_digits = significant_digits;
-        }
-        if let Some(phase_continuous) = app
+            .draft_significant_digits;
+        let phase_continuous = app
             .state
             .workbench
             .visualization_studio
-            .draft_phase_continuous
+            .draft_phase_continuous;
+        let result = app.state.workbench.visualization_studio.transact(|studio| {
+            if let Some(significant_digits) = significant_digits {
+                studio.significant_digits = significant_digits;
+            }
+            Ok(())
+        });
+        if report_visualization_commit(app, result)
+            && let Some(phase_continuous) = phase_continuous
         {
             app.state.ui.results.phase_continuous = phase_continuous;
         }
-        commit_visualization_revision(app);
     }
     save
 }
@@ -3961,17 +4677,16 @@ fn reorder_panes_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             .visualization_studio
             .draft_pane_order
             .clone();
-        app.state
-            .workbench
-            .visualization_studio
-            .panes
-            .sort_by_key(|pane| {
+        let result = app.state.workbench.visualization_studio.transact(|studio| {
+            studio.panes.sort_by_key(|pane| {
                 order
                     .iter()
                     .position(|pane_id| *pane_id == pane.id)
                     .unwrap_or(usize::MAX)
             });
-        commit_visualization_revision(app);
+            Ok(())
+        });
+        report_visualization_commit(app, result);
     }
     apply
 }
@@ -4025,19 +4740,18 @@ fn link_groups_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     if apply {
         let x_link = app.state.workbench.visualization_studio.draft_x_link;
         let cursor_group = app.state.workbench.visualization_studio.draft_cursor_group;
-        if let Some(pane) = app
-            .state
-            .workbench
-            .visualization_studio
-            .panes
-            .iter_mut()
-            .find(|pane| pane.id == pane_id)
-        {
+        let result = app.state.workbench.visualization_studio.transact(|studio| {
+            let pane = studio
+                .panes
+                .iter_mut()
+                .find(|pane| pane.id == pane_id)
+                .ok_or_else(|| "The selected visualization pane no longer exists".to_owned())?;
             pane.x_link = (x_link != 0).then_some(x_link);
             pane.cursor_group = (cursor_group != 0).then_some(cursor_group);
-            app.state.workbench.visualization_studio.applied_link_pane = None;
-            commit_visualization_revision(app);
-        }
+            studio.applied_link_pane = None;
+            Ok(())
+        });
+        report_visualization_commit(app, result);
     }
     apply
 }
@@ -4078,17 +4792,17 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     let apply = ui
         .add_enabled(valid, egui::Button::new("Save report page"))
         .clicked();
-    if apply
-        && let Some(pane) = app
-            .state
-            .workbench
-            .visualization_studio
-            .panes
-            .iter_mut()
-            .find(|pane| pane.id == pane_id)
-    {
-        pane.page = page;
-        commit_visualization_revision(app);
+    if apply {
+        let result = app.state.workbench.visualization_studio.transact(|studio| {
+            let pane = studio
+                .panes
+                .iter_mut()
+                .find(|pane| pane.id == pane_id)
+                .ok_or_else(|| "The selected visualization pane no longer exists".to_owned())?;
+            pane.page = page;
+            Ok(())
+        });
+        report_visualization_commit(app, result);
     }
     apply
 }
@@ -4236,22 +4950,32 @@ fn annotation_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     if add {
         let (dataset_id, analysis_sequence, _, _, x, _) =
             anchor.expect("enabled annotation has an exact anchor");
-        let studio = &mut app.state.workbench.visualization_studio;
-        if let Some(id) = studio.allocate_identity() {
+        let text = app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_annotation
+            .trim()
+            .to_owned();
+        let result = app.state.workbench.visualization_studio.transact(|studio| {
+            let id = studio
+                .allocate_identity()
+                .ok_or_else(|| "Visualization annotation identity space is exhausted".to_owned())?;
             studio.annotations.push(VisualizationAnnotation {
                 id,
                 dataset_id,
                 analysis_sequence,
                 x,
-                text: studio.draft_annotation.trim().to_owned(),
+                text,
             });
-            studio.draft_annotation.clear();
-            let commit = studio.commit_revision();
-            report_visualization_commit(app, commit);
-        } else {
-            app.state.push_user_message(ConsoleMessage::error(
-                "Visualization annotation identity space is exhausted.",
-            ));
+            Ok(())
+        });
+        if report_visualization_commit(app, result) {
+            app.state
+                .workbench
+                .visualization_studio
+                .draft_annotation
+                .clear();
         }
     }
     add
@@ -4469,27 +5193,28 @@ fn separator(ui: &mut Ui, color: Color32) {
         .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, color));
 }
 
-fn vertical_separator(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(1.0, ui.available_height()), Sense::hover());
-    ui.painter().vline(
-        rect.center().x,
-        rect.y_range(),
-        Stroke::new(1.0, t.color.border),
-    );
+fn paint_top_rule(ui: &Ui, rect: Rect, color: Color32) {
+    ui.painter()
+        .hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, color));
+}
+
+fn paint_bottom_rule(ui: &Ui, rect: Rect, color: Color32) {
+    ui.painter()
+        .hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, color));
 }
 
 fn panel_heading(ui: &mut Ui, title: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE
         .fill(t.color.bg_panel_2)
-        .inner_margin(Margin::symmetric(8, 5))
+        .inner_margin(Margin::symmetric(8, 0))
         .show(ui, |ui| {
+            ui.set_min_height(PANEL_HEADING_HEIGHT);
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(title)
-                        .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                        .color(t.color.text),
+                    RichText::new(title.to_uppercase())
+                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                        .color(t.color.text_dim),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
@@ -4755,5 +5480,191 @@ mod integrity_scan_tests {
         );
         assert_eq!(app.state.ui.results.cursors.a, Some(0.3));
         assert_eq!(app.state.ui.results.cursors.b, Some(0.7));
+    }
+
+    #[test]
+    fn add_pane_binds_the_requested_retained_analysis_and_selects_its_run() {
+        let mut app = app_with_exact_source();
+        reconcile_document(&mut app);
+
+        let historical_analysis =
+            AnalysisResult::new(23, AnalysisType::Transient, "TRAN 23").with_waveforms(vec![
+                WaveformData::new("V(history)", vec![0.0, 1.0], vec![0.0, 1.0], "#55ddaa"),
+            ]);
+        let mut historical_run = SimulationRun::new(2);
+        historical_run.add_analysis(historical_analysis);
+        let historical_dataset = historical_run.dataset_id;
+        app.state.simulation.runs.push(historical_run);
+
+        add_viewer_pane_bound(
+            &mut app,
+            "viewer-waveform",
+            ResultViewer::Waves,
+            historical_dataset,
+            23,
+            VisualizationPanePlacement::RightOfSelected,
+            String::new(),
+        );
+
+        let studio = &app.state.workbench.visualization_studio;
+        let pane = studio.active_pane().expect("new pane becomes active");
+        assert_eq!(pane.dataset_id, historical_dataset);
+        assert_eq!(pane.analysis_sequence, 23);
+        assert_eq!(pane.placement, VisualizationPanePlacement::RightOfSelected);
+        assert_eq!(pane.page, "Engineering");
+        assert_eq!(pane.x_link, Some(1));
+        assert_eq!(pane.cursor_group, Some(1));
+        assert_eq!(app.state.simulation.active_run_idx, Some(1));
+        assert_eq!(app.state.simulation.active_analysis_idx, Some(0));
+    }
+
+    #[test]
+    fn new_page_pane_is_unlinked_and_commits_as_one_valid_transaction() {
+        let mut app = app_with_exact_source();
+        reconcile_document(&mut app);
+        let binding = app
+            .state
+            .simulation
+            .active_run()
+            .and_then(|run| {
+                app.state
+                    .simulation
+                    .active_analysis()
+                    .map(|analysis| (run.dataset_id, analysis.id))
+            })
+            .expect("fixture has an active immutable binding");
+        let before_revision = app.state.workbench.visualization_studio.revision;
+
+        add_viewer_pane_bound(
+            &mut app,
+            "viewer-waveform",
+            ResultViewer::Waves,
+            binding.0,
+            binding.1,
+            VisualizationPanePlacement::NewWorksheetPage,
+            "Statistics".to_owned(),
+        );
+
+        let studio = &app.state.workbench.visualization_studio;
+        assert_eq!(studio.revision, before_revision + 1);
+        assert_eq!(studio.panes.len(), 2);
+        let pane = studio.active_pane().expect("new page pane becomes active");
+        assert_eq!(pane.page, "Statistics");
+        assert_eq!(pane.placement, VisualizationPanePlacement::NewWorksheetPage);
+        assert_eq!(pane.x_link, None);
+        assert_eq!(pane.cursor_group, None);
+        studio
+            .validate_presentation()
+            .expect("the aggregate pane edit remains valid");
+    }
+
+    #[test]
+    fn unavailable_add_pane_binding_leaves_the_document_unchanged() {
+        let mut app = app_with_exact_source();
+        reconcile_document(&mut app);
+        let before = app.state.workbench.visualization_studio.clone();
+
+        add_viewer_pane_bound(
+            &mut app,
+            "viewer-waveform",
+            ResultViewer::Waves,
+            DatasetId::new(),
+            17,
+            VisualizationPanePlacement::BelowSelected,
+            String::new(),
+        );
+
+        assert_eq!(app.state.workbench.visualization_studio, before);
+    }
+
+    #[test]
+    fn versioned_entity_projection_retains_exact_bindings_and_stable_identities() {
+        let mut app = app_with_exact_source();
+        let dataset_id = app
+            .state
+            .simulation
+            .active_run()
+            .expect("fixture retains an active run")
+            .dataset_id;
+        app.state.ui.results.cursors.a = Some(0.5);
+        app.state
+            .workbench
+            .visualization_studio
+            .markers
+            .push(VisualizationMarker {
+                id: 31,
+                dataset_id,
+                analysis_sequence: 17,
+                waveform_name: "V(out)".to_owned(),
+                sample_index: 1,
+                x: 0.5,
+                y: 2.5,
+                label: "source sample".to_owned(),
+            });
+        app.state
+            .workbench
+            .visualization_studio
+            .measurements
+            .push(VisualizationMeasurement {
+                id: 32,
+                dataset_id,
+                analysis_sequence: 17,
+                expression: "rms(V(out))".to_owned(),
+                value: 2.0,
+            });
+        app.state
+            .workbench
+            .visualization_studio
+            .annotations
+            .push(VisualizationAnnotation {
+                id: 33,
+                dataset_id,
+                analysis_sequence: 17,
+                x: 0.5,
+                text: "review exact point".to_owned(),
+            });
+
+        let rows = result_entity_rows(&app.state);
+        assert_eq!(
+            rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
+            [
+                "axis",
+                "trace",
+                "trace",
+                "cursor",
+                "marker",
+                "measurement",
+                "annotation",
+            ]
+        );
+        assert_eq!(rows[0].identity, "axis:17:x");
+        assert_eq!(rows[1].identity, "trace:17:0");
+        assert!(rows[1].binding.contains("V(out)"));
+        assert_eq!(rows[3].identity, "cursor:A");
+        assert_eq!(rows[4].identity, "marker:31");
+        assert_eq!(rows[5].identity, "measurement:32");
+        assert_eq!(rows[6].identity, "annotation:33");
+        let dataset_prefix = short_dataset(dataset_id);
+        assert!(rows[1].binding.starts_with(&dataset_prefix));
+        assert!(rows[4].binding.starts_with(&dataset_prefix));
+        assert!(rows[6].binding.starts_with(&dataset_prefix));
+    }
+
+    #[test]
+    fn viewer_columns_preserve_the_mockup_side_widths_exactly() {
+        assert_eq!(visible_available_width(1_312.0, 50.0, 1_280.0), 1_230.0);
+        let desktop = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_230.0, 540.0));
+        let [library, stage, inspector] = viewer_column_rects(desktop, 190.0, 224.0);
+        assert_eq!(library.width(), 190.0);
+        assert_eq!(inspector.width(), 224.0);
+        assert_eq!(stage.width(), 814.0);
+        assert_eq!(stage.left() - library.right(), 1.0);
+        assert_eq!(inspector.left() - stage.right(), 1.0);
+
+        let tablet = Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 430.0));
+        let [library, stage, inspector] = viewer_column_rects(tablet, 158.0, 196.0);
+        assert_eq!(library.width(), 158.0);
+        assert_eq!(inspector.width(), 196.0);
+        assert_eq!(stage.width(), 544.0);
     }
 }

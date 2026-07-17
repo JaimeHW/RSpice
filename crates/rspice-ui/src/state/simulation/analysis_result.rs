@@ -1,6 +1,6 @@
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// Durable source domain for a prepared analysis identity.
 ///
@@ -157,6 +157,209 @@ pub struct NoiseSummary {
     pub band: (f64, f64),
 }
 
+/// Exact per-variable evidence retained from a Monte Carlo execution.
+///
+/// Histogram bins are deliberately not duplicated here: the presentation
+/// histogram is already materialized as a waveform, while these source
+/// samples and statistics are the immutable evidence needed to recompute any
+/// future distribution view without inventing data.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MonteCarloVariableMetadata {
+    pub name: String,
+    pub samples: Vec<f64>,
+    pub mean: f64,
+    pub std_dev: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+/// Typed, lossless metadata for result families whose execution contract is
+/// richer than a collection of plotted waveforms.
+///
+/// This payload is part of the immutable analysis result. It preserves exact
+/// axes, labels, run counts, statistical samples, and convergence outcomes
+/// that cannot be reconstructed truthfully from display waveforms alone.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "family", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnalysisResultFamilyMetadata {
+    Parametric {
+        target: String,
+        sweep_values: Vec<f64>,
+        failed_points: usize,
+    },
+    Corner {
+        x_values: Vec<f64>,
+        x_label: String,
+        x_unit: String,
+        temperatures_c: Vec<f64>,
+        corner_labels: Vec<String>,
+        failed_corners: usize,
+    },
+    MonteCarlo {
+        seed: u64,
+        runs_requested: usize,
+        runs_completed: usize,
+        failures: usize,
+        all_converged: bool,
+        variables: Vec<MonteCarloVariableMetadata>,
+    },
+    Reliability {
+        years: Vec<f64>,
+    },
+    Optimization {
+        iterations: Vec<f64>,
+        best_cost: f64,
+        best_variables: BTreeMap<String, f64>,
+        converged: bool,
+    },
+    Soa {
+        time: Vec<f64>,
+    },
+}
+
+impl AnalysisResultFamilyMetadata {
+    /// Validate retained source evidence independently of any viewer.
+    pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
+        let compatible = matches!(
+            (self, analysis_type),
+            (Self::Parametric { .. }, AnalysisType::Parametric)
+                | (Self::Corner { .. }, AnalysisType::Corner)
+                | (Self::MonteCarlo { .. }, AnalysisType::MonteCarlo)
+                | (Self::Reliability { .. }, AnalysisType::Reliability)
+                | (Self::Optimization { .. }, AnalysisType::Optimization)
+                | (Self::Soa { .. }, AnalysisType::Soa)
+        );
+        if !compatible {
+            return Err(format!(
+                "retained family metadata does not match analysis type {analysis_type:?}"
+            ));
+        }
+
+        match self {
+            Self::Parametric {
+                target,
+                sweep_values,
+                ..
+            } => {
+                require_non_empty(target, "parametric target")?;
+                require_finite_values(sweep_values, "parametric sweep values")?;
+            }
+            Self::Corner {
+                x_values,
+                x_label,
+                temperatures_c,
+                corner_labels,
+                ..
+            } => {
+                require_non_empty(x_label, "corner x-axis label")?;
+                require_finite_values(x_values, "corner x-axis values")?;
+                require_finite_values(temperatures_c, "corner temperatures")?;
+                if temperatures_c.len() != x_values.len() || corner_labels.len() != x_values.len() {
+                    return Err(
+                        "corner x values, temperatures, and labels have different lengths"
+                            .to_owned(),
+                    );
+                }
+                if corner_labels.iter().any(|label| label.trim().is_empty()) {
+                    return Err("corner metadata contains an empty corner label".to_owned());
+                }
+            }
+            Self::MonteCarlo {
+                runs_requested,
+                runs_completed,
+                failures,
+                all_converged,
+                variables,
+                ..
+            } => {
+                if runs_completed.saturating_add(*failures) > *runs_requested {
+                    return Err(
+                        "Monte Carlo completed and failed counts exceed requested runs".to_owned(),
+                    );
+                }
+                if *all_converged && (*failures != 0 || runs_completed != runs_requested) {
+                    return Err(
+                        "Monte Carlo all_converged contradicts retained run counts".to_owned()
+                    );
+                }
+                let mut names = HashSet::with_capacity(variables.len());
+                for variable in variables {
+                    require_non_empty(&variable.name, "Monte Carlo variable name")?;
+                    if !names.insert(variable.name.as_str()) {
+                        return Err(format!(
+                            "Monte Carlo metadata repeats variable '{}'",
+                            variable.name
+                        ));
+                    }
+                    require_finite_values(&variable.samples, "Monte Carlo samples")?;
+                    for (label, value) in [
+                        ("mean", variable.mean),
+                        ("standard deviation", variable.std_dev),
+                        ("minimum", variable.min),
+                        ("maximum", variable.max),
+                    ] {
+                        if !value.is_finite() {
+                            return Err(format!(
+                                "Monte Carlo variable '{}' has non-finite {label}",
+                                variable.name
+                            ));
+                        }
+                    }
+                    if variable.std_dev < 0.0 || variable.min > variable.max {
+                        return Err(format!(
+                            "Monte Carlo variable '{}' has inconsistent statistics",
+                            variable.name
+                        ));
+                    }
+                }
+            }
+            Self::Reliability { years } => {
+                require_finite_values(years, "reliability years")?;
+            }
+            Self::Optimization {
+                iterations,
+                best_cost,
+                best_variables,
+                ..
+            } => {
+                require_finite_values(iterations, "optimization iterations")?;
+                if !best_cost.is_finite() {
+                    return Err("optimization best cost is non-finite".to_owned());
+                }
+                for (name, value) in best_variables {
+                    require_non_empty(name, "optimization variable name")?;
+                    if !value.is_finite() {
+                        return Err(format!(
+                            "optimization variable '{name}' has a non-finite best value"
+                        ));
+                    }
+                }
+            }
+            Self::Soa { time } => {
+                require_finite_values(time, "SOA time")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn require_non_empty(value: &str, label: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        Err(format!("{label} is empty"))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_finite_values(values: &[f64], label: &str) -> Result<(), String> {
+    if values.iter().any(|value| !value.is_finite()) {
+        Err(format!("{label} contain a non-finite value"))
+    } else {
+        Ok(())
+    }
+}
+
 /// Single analysis result with metadata and waveforms.
 ///
 /// This represents one analysis within a simulation run, containing
@@ -180,6 +383,10 @@ pub struct AnalysisResult {
     pub device_op: Option<rspice_core::circuit::DeviceOpReport>,
     /// Ranked, band-integrated noise contributors, for noise analyses.
     pub noise_summary: Option<NoiseSummary>,
+    /// Exact typed metadata for multi-run and advanced result families. This
+    /// is source evidence, not presentation state, and must survive project
+    /// and session persistence unchanged.
+    pub family_metadata: Option<AnalysisResultFamilyMetadata>,
     /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
     pub measurements: Vec<rspice_core::MeasureResult>,
     /// Authenticated application receipts for plan-owned saved-output
@@ -207,6 +414,7 @@ impl AnalysisResult {
             dc_op: None,
             device_op: None,
             noise_summary: None,
+            family_metadata: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: true,
@@ -231,6 +439,7 @@ impl AnalysisResult {
             dc_op: None,
             device_op: None,
             noise_summary: None,
+            family_metadata: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: false,
@@ -264,6 +473,14 @@ impl AnalysisResult {
         if !summary.rows.is_empty() {
             self.noise_summary = Some(summary);
         }
+        self
+    }
+
+    /// Attach exact source metadata for an advanced result family.
+    #[must_use]
+    pub fn with_family_metadata(mut self, metadata: AnalysisResultFamilyMetadata) -> Self {
+        debug_assert!(metadata.validate_for(self.analysis_type).is_ok());
+        self.family_metadata = Some(metadata);
         self
     }
 

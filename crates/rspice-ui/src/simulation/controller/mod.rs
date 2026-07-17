@@ -35,7 +35,8 @@ use crate::simulation::runner::SimulationError;
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
-    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType, DcOpResult,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance,
+    AnalysisResultSourceDomain, AnalysisType, DcOpResult, MonteCarloVariableMetadata,
     OperatingPointValue, SimulationRunIntent, SimulationRunLifecycle,
 };
 
@@ -2203,6 +2204,158 @@ mod tests {
                 .iter()
                 .all(|waveform| waveform.x.len() == waveform.y.len()),
             "converted noise traces must never pair mismatched x/y arrays"
+        );
+    }
+
+    #[test]
+    fn advanced_result_conversion_retains_exact_family_metadata() {
+        use crate::state::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata};
+
+        let controller = SimulationController::new();
+        let empty_waveforms = || std::collections::HashMap::new();
+
+        let monte_carlo = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::MonteCarlo {
+                seed: 0x5eed,
+                runs_requested: 4,
+                runs_completed: 3,
+                num_failures: 1,
+                all_converged: false,
+                variables: vec![crate::simulation::results::MonteCarloVariableResult {
+                    name: "V(out)".to_owned(),
+                    samples: vec![0.9, 1.0, 1.1],
+                    mean: 1.0,
+                    std_dev: 0.1,
+                    min: 0.9,
+                    max: 1.1,
+                    histogram: vec![1, 2],
+                    bin_edges: vec![0.85, 1.0, 1.15],
+                }],
+            },
+            AnalysisType::MonteCarlo,
+            "MC",
+        );
+        assert_eq!(
+            monte_carlo.family_metadata,
+            Some(AnalysisResultFamilyMetadata::MonteCarlo {
+                seed: 0x5eed,
+                runs_requested: 4,
+                runs_completed: 3,
+                failures: 1,
+                all_converged: false,
+                variables: vec![MonteCarloVariableMetadata {
+                    name: "V(out)".to_owned(),
+                    samples: vec![0.9, 1.0, 1.1],
+                    mean: 1.0,
+                    std_dev: 0.1,
+                    min: 0.9,
+                    max: 1.1,
+                }],
+            })
+        );
+        assert_eq!(monte_carlo.waveforms[0].name, "hist(V(out))");
+
+        let parametric = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Parametric {
+                target: "PARAM rload".to_owned(),
+                sweep_values: vec![1_000.0, 2_000.0],
+                waveforms: empty_waveforms(),
+                num_failures: 1,
+            },
+            AnalysisType::Parametric,
+            "STEP",
+        );
+        assert_eq!(
+            parametric.family_metadata,
+            Some(AnalysisResultFamilyMetadata::Parametric {
+                target: "PARAM rload".to_owned(),
+                sweep_values: vec![1_000.0, 2_000.0],
+                failed_points: 1,
+            })
+        );
+
+        let corner = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Corner {
+                x_values: vec![0.0, 1.0],
+                x_label: "Corner Index".to_owned(),
+                x_unit: String::new(),
+                temperatures_c: vec![-40.0, 125.0],
+                corner_labels: vec!["SS_0.9V_-40C".to_owned(), "FF_1.1V_125C".to_owned()],
+                waveforms: empty_waveforms(),
+                num_failures: 0,
+            },
+            AnalysisType::Corner,
+            "Corner",
+        );
+        assert_eq!(
+            corner.family_metadata,
+            Some(AnalysisResultFamilyMetadata::Corner {
+                x_values: vec![0.0, 1.0],
+                x_label: "Corner Index".to_owned(),
+                x_unit: String::new(),
+                temperatures_c: vec![-40.0, 125.0],
+                corner_labels: vec!["SS_0.9V_-40C".to_owned(), "FF_1.1V_125C".to_owned()],
+                failed_corners: 0,
+            })
+        );
+
+        let reliability = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Reliability {
+                years: vec![0.0, 1.0, 10.0],
+                waveforms: empty_waveforms(),
+                device_results: Vec::new(),
+            },
+            AnalysisType::Reliability,
+            "Reliability",
+        );
+        assert_eq!(
+            reliability.family_metadata,
+            Some(AnalysisResultFamilyMetadata::Reliability {
+                years: vec![0.0, 1.0, 10.0],
+            })
+        );
+
+        let optimization = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Optimization {
+                iterations: vec![0.0, 1.0, 2.0],
+                waveforms: empty_waveforms(),
+                best_cost: 0.125,
+                best_variables: std::collections::HashMap::from([
+                    ("w".to_owned(), 2.0e-6),
+                    ("l".to_owned(), 180.0e-9),
+                ]),
+                converged: true,
+            },
+            AnalysisType::Optimization,
+            "Optimization",
+        );
+        assert_eq!(
+            optimization.family_metadata,
+            Some(AnalysisResultFamilyMetadata::Optimization {
+                iterations: vec![0.0, 1.0, 2.0],
+                best_cost: 0.125,
+                best_variables: std::collections::BTreeMap::from([
+                    ("l".to_owned(), 180.0e-9),
+                    ("w".to_owned(), 2.0e-6),
+                ]),
+                converged: true,
+            })
+        );
+
+        let soa = controller.convert_to_analysis_result_with_metadata_owned(
+            crate::simulation::SimulationResult::Soa {
+                time: vec![0.0, 1.0e-9],
+                waveforms: empty_waveforms(),
+                violations: Vec::new(),
+            },
+            AnalysisType::Soa,
+            "SOA",
+        );
+        assert_eq!(
+            soa.family_metadata,
+            Some(AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 1.0e-9],
+            })
         );
     }
 

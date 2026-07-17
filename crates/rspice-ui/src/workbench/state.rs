@@ -2240,6 +2240,7 @@ mod tests {
                 x_link: None,
                 cursor_group: None,
                 page: "Page 1".to_owned(),
+                placement: Default::default(),
             },
             VisualizationPane {
                 id: 42,
@@ -2250,6 +2251,7 @@ mod tests {
                 x_link: None,
                 cursor_group: None,
                 page: "Page 1".to_owned(),
+                placement: Default::default(),
             },
         ];
         state.visualization_studio.annotations = vec![VisualizationAnnotation {

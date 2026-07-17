@@ -805,6 +805,14 @@ mod tests {
         persisted_run.remove("job_id");
         persisted_run.remove("execution_target");
         persisted_run.remove("lifecycle");
+        persisted_run.remove("dataset_content_digest");
+        persisted_run
+            .get_mut("analyses")
+            .and_then(serde_json::Value::as_array_mut)
+            .and_then(|analyses| analyses.first_mut())
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("persisted analysis object")
+            .remove("result_data_digest");
         persisted_run.remove("provenance_mode");
 
         let restored: AppState = serde_json::from_value(value).expect("legacy session migrates");
@@ -821,6 +829,40 @@ mod tests {
         assert!(!active_run.dataset_id.as_uuid().is_nil());
         assert_eq!(active_run.id, 3);
         assert_eq!(active_analysis.id, 7);
+    }
+
+    #[test]
+    fn app_state_session_round_trips_exact_result_family_metadata() {
+        let metadata = crate::state::AnalysisResultFamilyMetadata::Corner {
+            x_values: vec![0.0, 1.0],
+            x_label: "Corner Index".to_owned(),
+            x_unit: String::new(),
+            temperatures_c: vec![-40.0, 125.0],
+            corner_labels: vec!["SS_0.9V_-40C".to_owned(), "FF_1.1V_125C".to_owned()],
+            failed_corners: 0,
+        };
+        let mut state = AppState::default();
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Corner, "Corner")
+                .with_family_metadata(metadata.clone()),
+        );
+        seal_legacy_unattributed(&mut run);
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 1;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+
+        let json = serde_json::to_string(&state).expect("session metadata serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session metadata restores");
+
+        assert_eq!(
+            restored
+                .simulation
+                .active_analysis()
+                .and_then(|analysis| analysis.family_metadata.as_ref()),
+            Some(&metadata)
+        );
     }
 
     #[test]

@@ -112,41 +112,106 @@ impl SimulationController {
                 AnalysisResult::new(1, analysis_type, label.to_string())
             }
 
-            SimulationResult::MonteCarlo { variables, .. } => {
+            SimulationResult::MonteCarlo {
+                seed,
+                runs_requested,
+                runs_completed,
+                num_failures,
+                all_converged,
+                variables,
+            } => {
+                let (waveforms, variables) = self.build_monte_carlo_payload_owned(variables);
                 AnalysisResult::new(1, analysis_type, label.to_string())
-                    .with_waveforms(self.build_monte_carlo_waveforms_owned(variables))
+                    .with_waveforms(waveforms)
+                    .with_family_metadata(AnalysisResultFamilyMetadata::MonteCarlo {
+                        seed,
+                        runs_requested,
+                        runs_completed,
+                        failures: num_failures,
+                        all_converged,
+                        variables,
+                    })
             }
 
             SimulationResult::Parametric {
+                target,
                 sweep_values,
                 waveforms,
-                ..
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_waveforms_with_shared_x_owned(sweep_values, waveforms)),
+                num_failures,
+            } => {
+                let retained_sweep_values = sweep_values.clone();
+                AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(
+                        self.build_waveforms_with_shared_x_owned(sweep_values, waveforms),
+                    )
+                    .with_family_metadata(AnalysisResultFamilyMetadata::Parametric {
+                        target,
+                        sweep_values: retained_sweep_values,
+                        failed_points: num_failures,
+                    })
+            }
 
             SimulationResult::Corner {
                 x_values,
+                x_label,
+                x_unit,
+                temperatures_c,
+                corner_labels,
                 waveforms,
-                ..
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_waveforms_with_shared_x_owned(x_values, waveforms)),
+                num_failures,
+            } => {
+                let retained_x_values = x_values.clone();
+                AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.build_waveforms_with_shared_x_owned(x_values, waveforms))
+                    .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
+                        x_values: retained_x_values,
+                        x_label,
+                        x_unit,
+                        temperatures_c,
+                        corner_labels,
+                        failed_corners: num_failures,
+                    })
+            }
 
             SimulationResult::Reliability {
                 years, waveforms, ..
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_waveforms_with_shared_x_owned(years, waveforms)),
+            } => {
+                let retained_years = years.clone();
+                AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.build_waveforms_with_shared_x_owned(years, waveforms))
+                    .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
+                        years: retained_years,
+                    })
+            }
 
             SimulationResult::Optimization {
                 iterations,
                 waveforms,
-                ..
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_waveforms_with_shared_x_owned(iterations, waveforms)),
+                best_cost,
+                best_variables,
+                converged,
+            } => {
+                let retained_iterations = iterations.clone();
+                AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.build_waveforms_with_shared_x_owned(iterations, waveforms))
+                    .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                        iterations: retained_iterations,
+                        best_cost,
+                        best_variables: best_variables.into_iter().collect(),
+                        converged,
+                    })
+            }
 
             SimulationResult::Soa {
                 time, waveforms, ..
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_waveforms_with_shared_x_owned(time, waveforms)),
+            } => {
+                let retained_time = time.clone();
+                AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.build_waveforms_with_shared_x_owned(time, waveforms))
+                    .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                        time: retained_time,
+                    })
+            }
 
             SimulationResult::MeasurementsOnly { .. } => {
                 AnalysisResult::new(1, analysis_type, label.to_string())
@@ -212,30 +277,49 @@ impl SimulationController {
         results
     }
 
-    fn build_monte_carlo_waveforms_owned(
+    fn build_monte_carlo_payload_owned(
         &self,
         variables: Vec<crate::simulation::results::MonteCarloVariableResult>,
-    ) -> Vec<crate::state::WaveformData> {
-        variables
-            .into_iter()
-            .filter_map(|var| {
-                if var.histogram.is_empty() || var.bin_edges.len() < 2 {
-                    return None;
-                }
-                let x: Vec<f64> = var
-                    .bin_edges
+    ) -> (
+        Vec<crate::state::WaveformData>,
+        Vec<MonteCarloVariableMetadata>,
+    ) {
+        let mut waveforms = Vec::with_capacity(variables.len());
+        let mut metadata = Vec::with_capacity(variables.len());
+        for variable in variables {
+            let crate::simulation::results::MonteCarloVariableResult {
+                name,
+                samples,
+                mean,
+                std_dev,
+                min,
+                max,
+                histogram,
+                bin_edges,
+            } = variable;
+            if !histogram.is_empty() && bin_edges.len() == histogram.len().saturating_add(1) {
+                let x: Vec<f64> = bin_edges
                     .windows(2)
                     .map(|window| (window[0] + window[1]) * 0.5)
                     .collect();
-                let y: Vec<f64> = var.histogram.iter().map(|count| *count as f64).collect();
-                Some(crate::state::WaveformData::new(
-                    format!("hist({})", var.name),
+                let y: Vec<f64> = histogram.into_iter().map(|count| count as f64).collect();
+                waveforms.push(crate::state::WaveformData::new(
+                    format!("hist({name})"),
                     x,
                     y,
-                    Self::color_for_index(0),
-                ))
-            })
-            .collect()
+                    Self::color_for_index(waveforms.len()),
+                ));
+            }
+            metadata.push(MonteCarloVariableMetadata {
+                name,
+                samples,
+                mean,
+                std_dev,
+                min,
+                max,
+            });
+        }
+        (waveforms, metadata)
     }
 
     fn build_ac_waveforms_owned(

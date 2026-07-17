@@ -14,6 +14,7 @@ mod ac_bode;
 mod analysis_result;
 mod analysis_type;
 mod cross_probe;
+mod result_digest;
 mod run;
 mod run_receipt;
 mod saved_output;
@@ -28,8 +29,9 @@ pub use ac_bode::{
     ac_bode_summary_for_source_instance,
 };
 pub use analysis_result::{
-    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, DcOpResult,
-    NoiseContributorRow, NoiseSummary, OperatingPointValue,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance,
+    AnalysisResultSourceDomain, DcOpResult, MonteCarloVariableMetadata, NoiseContributorRow,
+    NoiseSummary, OperatingPointValue,
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;

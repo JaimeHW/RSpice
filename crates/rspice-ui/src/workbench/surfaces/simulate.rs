@@ -4079,41 +4079,42 @@ mod tests {
             }
         }
 
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let output = ctx.run(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(420.0, 320.0))),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    design_variables_card(ui, &[], 92.0, SetupCardBorder::All);
-                    outputs_specifications_card(
-                        ui,
-                        &[],
-                        &[],
-                        &[],
-                        None,
-                        92.0,
-                        SetupCardBorder::All,
-                    );
-                });
-            },
-        );
-        let mut rendered = String::new();
-        for clipped in &output.shapes {
-            collect_text(&clipped.shape, &mut rendered);
-        }
+        for (width, design_border, outputs_border) in [
+            (420.0, SetupCardBorder::All, SetupCardBorder::All),
+            (
+                960.0,
+                SetupCardBorder::SplitLeft,
+                SetupCardBorder::SplitRight,
+            ),
+        ] {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 320.0))),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        design_variables_card(ui, &[], 92.0, design_border);
+                        outputs_specifications_card(ui, &[], &[], &[], None, 92.0, outputs_border);
+                    });
+                },
+            );
+            let mut rendered = String::new();
+            for clipped in &output.shapes {
+                collect_text(&clipped.shape, &mut rendered);
+            }
 
-        assert!(rendered.contains("Design variables"));
-        assert!(rendered.contains("Outputs & specifications"));
-        assert!(
-            !rendered.contains("First use of")
-                && !rendered.contains("Second use of")
-                && !rendered.contains("Double use of"),
-            "egui rendered an ID-clash diagnostic:\n{rendered}"
-        );
+            assert!(rendered.contains("Design variables"));
+            assert!(rendered.contains("Outputs & specifications"));
+            assert!(
+                !rendered.contains("First use of")
+                    && !rendered.contains("Second use of")
+                    && !rendered.contains("Double use of"),
+                "egui rendered an ID-clash diagnostic at {width}px:\n{rendered}"
+            );
+        }
     }
 
     #[test]
