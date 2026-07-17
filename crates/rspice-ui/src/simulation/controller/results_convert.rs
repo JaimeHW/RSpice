@@ -239,14 +239,84 @@ impl SimulationController {
             }
 
             SimulationResult::Reliability {
-                years, waveforms, ..
+                years,
+                waveforms,
+                device_results,
             } => {
                 let retained_years = years.clone();
-                AnalysisResult::new(1, analysis_type, label.to_string())
-                    .with_waveforms(self.build_waveforms_with_shared_x_owned(years, waveforms))
+                let retained_waveforms = self.build_waveforms_with_shared_x_owned(years, waveforms);
+                let mut devices = Vec::with_capacity(device_results.len());
+                for mut device in device_results {
+                    let mut checkpoints = Vec::with_capacity(retained_years.len());
+                    for years in &retained_years {
+                        let checkpoint_label = format!("{years}y");
+                        let Some(shift) = device.shifts.remove(&checkpoint_label) else {
+                            return AnalysisResult::failed(
+                                1,
+                                analysis_type,
+                                label.to_string(),
+                                format!(
+                                    "Invalid retained reliability payload: device '{}' is missing checkpoint {years} years",
+                                    device.device_id
+                                ),
+                            );
+                        };
+                        checkpoints.push(ReliabilityCheckpointEvidence {
+                            years: *years,
+                            shift: ReliabilityShiftEvidence {
+                                threshold_voltage_shift_v: shift.vth_shift,
+                                mobility_shift: shift.mobility_shift,
+                                drain_source_resistance_shift: shift.rds_shift,
+                            },
+                        });
+                    }
+                    if !device.shifts.is_empty() {
+                        return AnalysisResult::failed(
+                            1,
+                            analysis_type,
+                            label.to_string(),
+                            format!(
+                                "Invalid retained reliability payload: device '{}' has checkpoints outside the retained lifetime axis",
+                                device.device_id
+                            ),
+                        );
+                    }
+                    devices.push(ReliabilityDeviceEvidence {
+                        device_id: device.device_id,
+                        stress: ReliabilityStressEvidence {
+                            average_gate_stress_v: device.stress.avg_vgs_stress,
+                            average_drain_stress_v: device.stress.avg_vds_stress,
+                            average_temperature_k: device.stress.avg_temp,
+                            duration_s: device.stress.duration,
+                        },
+                        checkpoints,
+                    });
+                }
+                devices.sort_by(|left, right| left.device_id.cmp(&right.device_id));
+                let payload = AnalysisResultPayload::Reliability { devices };
+                if let Err(error) = payload.validate_for(analysis_type) {
+                    return AnalysisResult::failed(
+                        1,
+                        analysis_type,
+                        label.to_string(),
+                        format!("Invalid retained reliability payload: {error}"),
+                    );
+                }
+                let result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(retained_waveforms)
                     .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
                         years: retained_years,
                     })
+                    .with_result_payload(payload);
+                match result.validate_retained_evidence() {
+                    Ok(()) => result,
+                    Err(error) => AnalysisResult::failed(
+                        1,
+                        analysis_type,
+                        label.to_string(),
+                        format!("Invalid retained reliability payload: {error}"),
+                    ),
+                }
             }
 
             SimulationResult::Optimization {
@@ -268,14 +338,102 @@ impl SimulationController {
             }
 
             SimulationResult::Soa {
-                time, waveforms, ..
+                time,
+                waveforms,
+                violations,
+                evaluations,
             } => {
                 let retained_time = time.clone();
-                AnalysisResult::new(1, analysis_type, label.to_string())
-                    .with_waveforms(self.build_waveforms_with_shared_x_owned(time, waveforms))
+                let retained_waveforms = self.build_waveforms_with_shared_x_owned(time, waveforms);
+                let mut violations = violations
+                    .into_iter()
+                    .map(|violation| SoaViolationEvidence {
+                        device_id: violation.device_id,
+                        parameter: retain_soa_parameter(violation.parameter),
+                        limit_value: violation.limit_value,
+                        actual_value: violation.actual_value,
+                        time_s: violation.time,
+                        severity: match violation.severity {
+                            crate::services::safety::ViolationSeverity::Warning => {
+                                SoaViolationSeverityEvidence::Warning
+                            }
+                            crate::services::safety::ViolationSeverity::Violation => {
+                                SoaViolationSeverityEvidence::Violation
+                            }
+                            crate::services::safety::ViolationSeverity::Critical => {
+                                SoaViolationSeverityEvidence::Critical
+                            }
+                        },
+                    })
+                    .collect::<Vec<_>>();
+                violations.sort_by(|left, right| {
+                    left.device_id
+                        .cmp(&right.device_id)
+                        .then_with(|| left.time_s.total_cmp(&right.time_s))
+                        .then_with(|| left.parameter.cmp(&right.parameter))
+                        .then_with(|| left.severity.cmp(&right.severity))
+                        .then_with(|| left.limit_value.total_cmp(&right.limit_value))
+                        .then_with(|| left.actual_value.total_cmp(&right.actual_value))
+                });
+                let mut evaluations = evaluations
+                    .into_iter()
+                    .map(|evaluation| SoaEvaluationEvidence {
+                        device_id: evaluation.device_id,
+                        parameter: retain_soa_parameter(evaluation.parameter),
+                        limit_value: evaluation.limit_value,
+                        worst_actual_value: evaluation.worst_actual_value,
+                        worst_time_s: evaluation.worst_time,
+                        sample_count: evaluation.sample_count,
+                        unit: evaluation.unit,
+                        description: evaluation.description,
+                        verdict: match evaluation.verdict {
+                            crate::services::safety::SoARuleVerdict::Pass => {
+                                SoaRuleVerdictEvidence::Pass
+                            }
+                            crate::services::safety::SoARuleVerdict::Warning => {
+                                SoaRuleVerdictEvidence::Warning
+                            }
+                            crate::services::safety::SoARuleVerdict::Violation => {
+                                SoaRuleVerdictEvidence::Violation
+                            }
+                            crate::services::safety::SoARuleVerdict::Critical => {
+                                SoaRuleVerdictEvidence::Critical
+                            }
+                        },
+                    })
+                    .collect::<Vec<_>>();
+                evaluations.sort_by(|left, right| {
+                    left.device_id
+                        .cmp(&right.device_id)
+                        .then_with(|| left.parameter.cmp(&right.parameter))
+                });
+                let payload = AnalysisResultPayload::Soa {
+                    evaluations,
+                    violations,
+                };
+                if let Err(error) = payload.validate_for(analysis_type) {
+                    return AnalysisResult::failed(
+                        1,
+                        analysis_type,
+                        label.to_string(),
+                        format!("Invalid retained SOA payload: {error}"),
+                    );
+                }
+                let result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(retained_waveforms)
                     .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
                         time: retained_time,
                     })
+                    .with_result_payload(payload);
+                match result.validate_retained_evidence() {
+                    Ok(()) => result,
+                    Err(error) => AnalysisResult::failed(
+                        1,
+                        analysis_type,
+                        label.to_string(),
+                        format!("Invalid retained SOA payload: {error}"),
+                    ),
+                }
             }
 
             SimulationResult::MeasurementsOnly { measurements } => {
@@ -517,5 +675,20 @@ impl SimulationController {
             "#EF4444", // Red
         ];
         COLORS[idx % COLORS.len()].to_string()
+    }
+}
+
+fn retain_soa_parameter(parameter: crate::services::safety::SoAParameter) -> SoaParameterEvidence {
+    match parameter {
+        crate::services::safety::SoAParameter::Vgs => SoaParameterEvidence::GateSourceVoltage,
+        crate::services::safety::SoAParameter::Vds => SoaParameterEvidence::DrainSourceVoltage,
+        crate::services::safety::SoAParameter::Vgd => SoaParameterEvidence::GateDrainVoltage,
+        crate::services::safety::SoAParameter::Vbe => SoaParameterEvidence::BaseEmitterVoltage,
+        crate::services::safety::SoAParameter::Vce => SoaParameterEvidence::CollectorEmitterVoltage,
+        crate::services::safety::SoAParameter::Vbc => SoaParameterEvidence::BaseCollectorVoltage,
+        crate::services::safety::SoAParameter::Id => SoaParameterEvidence::DrainCurrent,
+        crate::services::safety::SoAParameter::Ic => SoaParameterEvidence::CollectorCurrent,
+        crate::services::safety::SoAParameter::Pdiss => SoaParameterEvidence::PowerDissipation,
+        crate::services::safety::SoAParameter::Temp => SoaParameterEvidence::Temperature,
     }
 }

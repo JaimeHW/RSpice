@@ -16,13 +16,18 @@ function executableAsset(name) {
 
 let initPromise = null;
 let runWorkerRequest = null;
+const WORKER_PROTOCOL_VERSION = 3;
 
 function asErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
 function responseTransferList(response) {
-  if (!response || response.protocolVersion !== 2 || !Array.isArray(response.buffers)) {
+  if (
+    !response ||
+    response.protocolVersion !== WORKER_PROTOCOL_VERSION ||
+    !Array.isArray(response.buffers)
+  ) {
     return [];
   }
 

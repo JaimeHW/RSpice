@@ -1,6 +1,15 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_worker_transfer_protocol_matches_rust_transport() {
+        let source = include_str!("../../../web/simulation-worker.js");
+        assert!(source.contains(&format!(
+            "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
+        )));
+        assert!(source.contains("response.protocolVersion !== WORKER_PROTOCOL_VERSION"));
+    }
     use crate::simulation::config::{
         AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
         PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
@@ -1533,6 +1542,17 @@ mod tests {
                 time: 1e-6,
                 severity: crate::services::safety::ViolationSeverity::Critical,
             }],
+            evaluations: vec![crate::services::safety::SoAEvaluation {
+                device_id: "M1".to_string(),
+                parameter: crate::services::safety::SoAParameter::Vgs,
+                limit_value: 1.2,
+                worst_actual_value: 1.35,
+                worst_time: 1e-6,
+                sample_count: 2,
+                unit: "V".to_string(),
+                description: "Maximum gate-source voltage".to_string(),
+                verdict: crate::services::safety::SoARuleVerdict::Violation,
+            }],
         };
         let soa = round_trip_result(soa);
         match soa {
@@ -1540,6 +1560,7 @@ mod tests {
                 time,
                 waveforms,
                 violations,
+                evaluations,
             } => {
                 assert_eq!(time, vec![0.0, 1e-6]);
                 assert_eq!(waveforms["SOA_VIOLATION_COUNT"].y_values, vec![0.0, 1.0]);
@@ -1547,6 +1568,11 @@ mod tests {
                 assert_eq!(
                     violations[0].severity,
                     crate::services::safety::ViolationSeverity::Critical
+                );
+                assert_eq!(evaluations[0].sample_count, 2);
+                assert_eq!(
+                    evaluations[0].verdict,
+                    crate::services::safety::SoARuleVerdict::Violation
                 );
             }
             other => panic!("expected SOA result, got {other:?}"),
@@ -1961,7 +1987,9 @@ use std::sync::{Arc, Mutex, atomic::AtomicBool};
 use serde::{Deserialize, Serialize};
 
 use super::{NetlistInput, SimulationError, SimulationRequest, SpecExecutionOptions};
-use crate::services::safety::{SoAParameter, SoAViolation, ViolationSeverity};
+use crate::services::safety::{
+    SoAEvaluation, SoAParameter, SoARuleVerdict, SoAViolation, ViolationSeverity,
+};
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
@@ -4119,6 +4147,7 @@ pub(crate) enum WorkerSimulationResult {
         time: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         violations: Vec<WorkerSoAViolation>,
+        evaluations: Vec<WorkerSoAEvaluation>,
     },
     MeasurementsOnly {
         measurements: HashMap<String, f64>,
@@ -4248,10 +4277,12 @@ impl WorkerSimulationResult {
                 time,
                 waveforms,
                 violations,
+                evaluations,
             } => sum_payload_bytes([
                 f64_payload_bytes(time.len()),
                 waveforms_payload_bytes(waveforms),
                 soa_violations_payload_bytes(violations),
+                soa_evaluations_payload_bytes(evaluations),
             ]),
             WorkerSimulationResult::MeasurementsOnly { measurements } => {
                 f64_payload_bytes(measurements.len())
@@ -4260,7 +4291,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 2;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -4426,6 +4457,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         violations: Vec<WorkerSoAViolation>,
+        evaluations: Vec<WorkerSoAEvaluation>,
     },
 }
 
@@ -4531,10 +4563,12 @@ impl WorkerSimulationResultTransport {
                 time,
                 waveforms,
                 violations,
+                evaluations,
             } => Self::Soa {
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 violations,
+                evaluations,
             },
             other => Self::Inline(other),
         }
@@ -4644,10 +4678,12 @@ impl WorkerSimulationResultTransport {
                 time,
                 waveforms,
                 violations,
+                evaluations,
             } => Ok(WorkerSimulationResult::Soa {
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 violations,
+                evaluations,
             }),
         }
     }
@@ -4896,12 +4932,17 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 time,
                 waveforms,
                 violations,
+                evaluations,
             } => Ok(Self::Soa {
                 time,
                 waveforms: worker_waveforms(waveforms),
                 violations: violations
                     .into_iter()
                     .map(WorkerSoAViolation::from)
+                    .collect(),
+                evaluations: evaluations
+                    .into_iter()
+                    .map(WorkerSoAEvaluation::from)
                     .collect(),
             }),
             SimulationResult::MeasurementsOnly { measurements } => {
@@ -5061,10 +5102,12 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 time,
                 waveforms,
                 violations,
+                evaluations,
             } => Self::Soa {
                 time,
                 waveforms: waveform_map(waveforms),
                 violations: violations.into_iter().map(SoAViolation::from).collect(),
+                evaluations: evaluations.into_iter().map(SoAEvaluation::from).collect(),
             },
             WorkerSimulationResult::MeasurementsOnly { measurements } => {
                 Self::MeasurementsOnly { measurements }
@@ -5326,6 +5369,88 @@ impl From<WorkerParamShift> for ParamShift {
             vth_shift: value.vth_shift,
             mobility_shift: value.mobility_shift,
             rds_shift: value.rds_shift,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerSoAEvaluation {
+    pub device_id: String,
+    pub parameter: WorkerSoAParameter,
+    pub limit_value: f64,
+    pub worst_actual_value: f64,
+    pub worst_time: f64,
+    pub sample_count: u64,
+    pub unit: String,
+    pub description: String,
+    pub verdict: WorkerSoARuleVerdict,
+}
+
+#[cfg(test)]
+impl WorkerSoAEvaluation {
+    fn estimated_numeric_payload_bytes(&self) -> usize {
+        f64_payload_bytes(3).saturating_add(std::mem::size_of::<u64>())
+    }
+}
+
+impl From<SoAEvaluation> for WorkerSoAEvaluation {
+    fn from(value: SoAEvaluation) -> Self {
+        Self {
+            device_id: value.device_id,
+            parameter: WorkerSoAParameter::from(value.parameter),
+            limit_value: value.limit_value,
+            worst_actual_value: value.worst_actual_value,
+            worst_time: value.worst_time,
+            sample_count: value.sample_count,
+            unit: value.unit,
+            description: value.description,
+            verdict: WorkerSoARuleVerdict::from(value.verdict),
+        }
+    }
+}
+
+impl From<WorkerSoAEvaluation> for SoAEvaluation {
+    fn from(value: WorkerSoAEvaluation) -> Self {
+        Self {
+            device_id: value.device_id,
+            parameter: SoAParameter::from(value.parameter),
+            limit_value: value.limit_value,
+            worst_actual_value: value.worst_actual_value,
+            worst_time: value.worst_time,
+            sample_count: value.sample_count,
+            unit: value.unit,
+            description: value.description,
+            verdict: SoARuleVerdict::from(value.verdict),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum WorkerSoARuleVerdict {
+    Pass,
+    Warning,
+    Violation,
+    Critical,
+}
+
+impl From<SoARuleVerdict> for WorkerSoARuleVerdict {
+    fn from(value: SoARuleVerdict) -> Self {
+        match value {
+            SoARuleVerdict::Pass => Self::Pass,
+            SoARuleVerdict::Warning => Self::Warning,
+            SoARuleVerdict::Violation => Self::Violation,
+            SoARuleVerdict::Critical => Self::Critical,
+        }
+    }
+}
+
+impl From<WorkerSoARuleVerdict> for SoARuleVerdict {
+    fn from(value: WorkerSoARuleVerdict) -> Self {
+        match value {
+            WorkerSoARuleVerdict::Pass => Self::Pass,
+            WorkerSoARuleVerdict::Warning => Self::Warning,
+            WorkerSoARuleVerdict::Violation => Self::Violation,
+            WorkerSoARuleVerdict::Critical => Self::Critical,
         }
     }
 }
@@ -5929,6 +6054,14 @@ fn soa_violations_payload_bytes(violations: &[WorkerSoAViolation]) -> usize {
     violations
         .iter()
         .map(WorkerSoAViolation::estimated_numeric_payload_bytes)
+        .fold(0usize, |total, bytes| total.saturating_add(bytes))
+}
+
+#[cfg(test)]
+fn soa_evaluations_payload_bytes(evaluations: &[WorkerSoAEvaluation]) -> usize {
+    evaluations
+        .iter()
+        .map(WorkerSoAEvaluation::estimated_numeric_payload_bytes)
         .fold(0usize, |total, bytes| total.saturating_add(bytes))
 }
 

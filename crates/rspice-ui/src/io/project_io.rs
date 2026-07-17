@@ -863,7 +863,8 @@ const SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION: u32 = 5;
 const EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION: u32 = 6;
 const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
 const CONTENT_DIGEST_RESULTS_SCHEMA_VERSION: u32 = 8;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 9;
+const TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION: u32 = 9;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 10;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
@@ -1122,8 +1123,10 @@ impl ProjectSimulationResults {
     /// Result schemas through v7 acquire canonical result-data and dataset
     /// digests from the exact retained values during migration; no samples or
     /// analysis evidence are reconstructed. Schema v8 digests are verified
-    /// with their original encoding before payload absence is migrated and the
-    /// result is resealed with the current encoding.
+    /// with their original encoding before payload absence is migrated. Schema
+    /// v9 digests are likewise authenticated before Reliability/SOA evidence
+    /// absence is preserved and the result is resealed with the current
+    /// encoding.
     pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
@@ -1136,6 +1139,26 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema == TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION {
+            for run in &mut self.runs {
+                validate_v9_result_digests(run)?;
+                if let Some(analysis) = run.analyses.iter().find(|analysis| {
+                    matches!(
+                        analysis.result_payload.as_ref(),
+                        Some(AnalysisResultPayload::Reliability { .. })
+                            | Some(AnalysisResultPayload::Soa { .. })
+                    )
+                }) {
+                    return Err(format!(
+                        "schema-v9 analysis {} contains Reliability/SOA evidence introduced by schema v10",
+                        analysis.id
+                    ));
+                }
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema == CONTENT_DIGEST_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v8_result_digests(run)?;
@@ -1160,6 +1183,7 @@ impl ProjectSimulationResults {
         ) {
             for run in &mut self.runs {
                 require_legacy_result_digest_absence(run, source_schema)?;
+                validate_result_fields_for_source_schema(run, source_schema)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -1387,6 +1411,7 @@ impl ProjectSimulationResults {
 
         for (run_idx, run) in self.runs.iter().enumerate() {
             require_legacy_result_digest_absence(run, source_schema)?;
+            validate_result_fields_for_source_schema(run, source_schema)?;
             if run.job_id.is_some() || run.execution_target.is_some() || run.lifecycle.is_some() {
                 return Err(format!(
                     "runs[{run_idx}] contains execution identity or lifecycle introduced after schema v{source_schema}"
@@ -1619,6 +1644,31 @@ fn require_legacy_result_digest_absence(
     Ok(())
 }
 
+fn validate_result_fields_for_source_schema(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    for analysis in &run.analyses {
+        if source_schema < FAMILY_METADATA_RESULTS_SCHEMA_VERSION
+            && analysis.family_metadata.is_some()
+        {
+            return Err(format!(
+                "schema-v{source_schema} analysis {} contains family metadata introduced by schema v7",
+                analysis.id
+            ));
+        }
+        if source_schema < TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION
+            && analysis.result_payload.is_present()
+        {
+            return Err(format!(
+                "schema-v{source_schema} analysis {} contains a typed result payload introduced by schema v9",
+                analysis.id
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Authenticate a schema-v8 run with the exact digest encoding that wrote it.
 /// This must run before any v9 fields are introduced or digests are resealed.
 fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
@@ -1665,6 +1715,62 @@ fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> 
     if retained != computed {
         return Err(format!(
             "schema-v8 simulation run {} dataset content digest does not match retained content",
+            run.id
+        ));
+    }
+    Ok(())
+}
+
+/// Authenticate a schema-v9 run with the exact typed-payload digest encoding
+/// that wrote it before schema-v10 Reliability/SOA evidence is admitted.
+fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    for analysis in &run.analyses {
+        if matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::Reliability { .. })
+                | Some(AnalysisResultPayload::Soa { .. })
+        ) {
+            return Err(format!(
+                "schema-v9 analysis {} contains Reliability/SOA evidence introduced by schema v10",
+                analysis.id
+            ));
+        }
+        let retained = analysis
+            .result_data_digest
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "schema-v9 analysis {} is missing its result data digest",
+                    analysis.id
+                )
+            })?;
+        let computed = analysis
+            .clone()
+            .into_analysis()?
+            .legacy_v2_result_data_digest();
+        if retained != computed {
+            return Err(format!(
+                "schema-v9 analysis {} result data digest does not match retained content",
+                analysis.id
+            ));
+        }
+    }
+
+    let retained = run
+        .dataset_content_digest
+        .as_ref()
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "schema-v9 simulation run {} is missing its dataset content digest",
+                run.id
+            )
+        })?;
+    let computed = run.clone().into_run()?.legacy_v2_dataset_content_digest();
+    if retained != computed {
+        return Err(format!(
+            "schema-v9 simulation run {} dataset content digest does not match retained content",
             run.id
         ));
     }
@@ -2175,7 +2281,7 @@ impl ProjectSimulationRun {
             receipt.validate_result_prefix(&analyses)?;
         }
         let retained_digest = self.dataset_content_digest.as_ref().copied().ok_or_else(|| {
-            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v9")
+            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v10")
         })?;
         let computed_digest = self
             .clone()
@@ -2461,6 +2567,10 @@ impl ProjectAnalysisResult {
                 ));
             }
         }
+        self.clone()
+            .into_analysis()?
+            .validate_retained_evidence()
+            .map_err(|error| format!("{prefix}.retained evidence is invalid: {error}"))?;
         for (measurement_idx, measurement) in self.measurements.iter().enumerate() {
             measurement.validate(&format!("{prefix}.measurements[{measurement_idx}]"))?;
         }
@@ -2559,13 +2669,16 @@ impl ProjectAnalysisResult {
                 .map_err(|error| format!("{prefix}.provenance is invalid: {error}"))?;
         }
         let retained_digest = self.result_data_digest.as_ref().copied().ok_or_else(|| {
-            format!("{prefix}.result_data_digest is required by simulation results schema v9")
+            format!("{prefix}.result_data_digest is required by simulation results schema v10")
         })?;
-        let computed_digest = self
+        let analysis = self
             .clone()
             .into_analysis()
-            .map_err(|error| format!("{prefix} cannot compute its result data digest: {error}"))?
-            .result_data_digest();
+            .map_err(|error| format!("{prefix} cannot compute its result data digest: {error}"))?;
+        analysis
+            .validate_retained_evidence()
+            .map_err(|error| format!("{prefix} retained evidence is inconsistent: {error}"))?;
+        let computed_digest = analysis.result_data_digest();
         if retained_digest != computed_digest {
             return Err(format!(
                 "{prefix}.result_data_digest does not match retained analysis content"
@@ -4317,6 +4430,58 @@ mod tests {
                 },
             ),
         );
+        run.add_analysis(
+            AnalysisResult::new(4, AnalysisType::Reliability, "Reliability")
+                .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
+                    years: vec![10.0],
+                })
+                .with_result_payload(AnalysisResultPayload::Reliability {
+                    devices: vec![crate::state::ReliabilityDeviceEvidence {
+                        device_id: "M1".to_owned(),
+                        stress: crate::state::ReliabilityStressEvidence {
+                            average_gate_stress_v: 1.2,
+                            average_drain_stress_v: 1.8,
+                            average_temperature_k: 358.15,
+                            duration_s: 3_600.0,
+                        },
+                        checkpoints: vec![crate::state::ReliabilityCheckpointEvidence {
+                            years: 10.0,
+                            shift: crate::state::ReliabilityShiftEvidence {
+                                threshold_voltage_shift_v: 0.03,
+                                mobility_shift: -0.004,
+                                drain_source_resistance_shift: 0.0015,
+                            },
+                        }],
+                    }],
+                }),
+        );
+        run.add_analysis(
+            AnalysisResult::new(5, AnalysisType::Soa, "SOA")
+                .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                    time: vec![0.0, 1.0],
+                })
+                .with_result_payload(AnalysisResultPayload::Soa {
+                    evaluations: vec![crate::state::SoaEvaluationEvidence {
+                        device_id: "M1".to_owned(),
+                        parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                        limit_value: 3.3,
+                        worst_actual_value: 3.2,
+                        worst_time_s: 1.0,
+                        sample_count: 2,
+                        unit: "V".to_owned(),
+                        description: "Maximum drain-source voltage".to_owned(),
+                        verdict: crate::state::SoaRuleVerdictEvidence::Warning,
+                    }],
+                    violations: vec![crate::state::SoaViolationEvidence {
+                        device_id: "M1".to_owned(),
+                        parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                        limit_value: 3.3,
+                        actual_value: 3.2,
+                        time_s: 1.0,
+                        severity: crate::state::SoaViolationSeverityEvidence::Warning,
+                    }],
+                }),
+        );
         seal_legacy_unattributed(&mut run);
         let dataset_id = run.dataset_id;
         let mut simulation = SimulationState::default();
@@ -4353,6 +4518,14 @@ mod tests {
             restored.runs[0].analyses[2].result_payload,
             simulation.runs[0].analyses[2].result_payload
         );
+        assert_eq!(
+            restored.runs[0].analyses[3].result_payload,
+            simulation.runs[0].analyses[3].result_payload
+        );
+        assert_eq!(
+            restored.runs[0].analyses[4].result_payload,
+            simulation.runs[0].analyses[4].result_payload
+        );
 
         let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
         tampered["runs"][0]["analyses"][0]["result_payload"]["gain"] =
@@ -4363,6 +4536,33 @@ mod tests {
             tampered
                 .validate()
                 .expect_err("payload tampering invalidates the result digest")
+                .contains("result_data_digest does not match retained analysis content")
+        );
+
+        let mut reliability_tampered: serde_json::Value =
+            serde_json::from_str(&json).expect("project JSON");
+        reliability_tampered["runs"][0]["analyses"][3]["result_payload"]["devices"][0]["checkpoints"]
+            [0]["shift"]["mobility_shift"] = serde_json::json!(-0.004_000_000_000_000_001_f64);
+        let reliability_tampered: ProjectSimulationResults =
+            serde_json::from_value(reliability_tampered)
+                .expect("tampered reliability payload remains structural");
+        assert!(
+            reliability_tampered
+                .validate()
+                .expect_err("reliability field tampering invalidates the result digest")
+                .contains("result_data_digest does not match retained analysis content")
+        );
+
+        let mut soa_tampered: serde_json::Value =
+            serde_json::from_str(&json).expect("project JSON");
+        soa_tampered["runs"][0]["analyses"][4]["result_payload"]["evaluations"][0]["description"] =
+            serde_json::json!("Changed rule description");
+        let soa_tampered: ProjectSimulationResults =
+            serde_json::from_value(soa_tampered).expect("tampered SOA payload remains structural");
+        assert!(
+            soa_tampered
+                .validate()
+                .expect_err("SOA field tampering invalidates the result digest")
                 .contains("result_data_digest does not match retained analysis content")
         );
 
@@ -4422,10 +4622,12 @@ mod tests {
             migrated.schema_version,
             PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
         );
-        migrated.validate().expect("resealed v9 results validate");
+        migrated
+            .validate()
+            .expect("resealed current results validate");
         assert_ne!(
             migrated.runs[0].dataset_content_digest, v8.runs[0].dataset_content_digest,
-            "v9 uses the new canonical digest domain"
+            "current results use the new canonical digest domain"
         );
 
         let mut tampered = v8.clone();
@@ -4451,6 +4653,103 @@ mod tests {
     }
 
     #[test]
+    fn schema_v9_digests_are_authenticated_before_v10_resealing() {
+        let mut run = SimulationRun::new(33);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Tf, "TF").with_result_payload(
+                AnalysisResultPayload::ScalarMeasurements {
+                    values: std::collections::BTreeMap::from([("gain".to_owned(), 10.0)]),
+                },
+            ),
+        );
+        run.add_analysis(
+            AnalysisResult::new(2, AnalysisType::Reliability, "Reliability").with_family_metadata(
+                AnalysisResultFamilyMetadata::Reliability {
+                    years: vec![1.0, 5.0, 10.0],
+                },
+            ),
+        );
+        seal_legacy_unattributed(&mut run);
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 33;
+        let mut v9 = ProjectSimulationResults::from_state(&simulation);
+        v9.schema_version = TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION;
+        for analysis in &mut v9.runs[0].analyses {
+            analysis.result_data_digest = PersistedField::Value(
+                analysis
+                    .clone()
+                    .into_analysis()
+                    .expect("v9 analysis fixture")
+                    .legacy_v2_result_data_digest(),
+            );
+        }
+        v9.runs[0].dataset_content_digest = PersistedField::Value(
+            v9.runs[0]
+                .clone()
+                .into_run()
+                .expect("v9 run fixture")
+                .legacy_v2_dataset_content_digest(),
+        );
+
+        let mut migrated = v9.clone();
+        migrated
+            .migrate_to_current(ProjectId::new())
+            .expect("authentic v9 results migrate");
+        assert_eq!(
+            migrated.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        migrated.validate().expect("resealed v10 results validate");
+        assert!(
+            migrated.runs[0].analyses[1].result_payload.is_missing(),
+            "migration preserves the absence of v10 reliability evidence"
+        );
+        assert_ne!(
+            migrated.runs[0].dataset_content_digest, v9.runs[0].dataset_content_digest,
+            "v10 uses the v3 canonical digest domain"
+        );
+
+        let mut tampered = v9.clone();
+        let Some(AnalysisResultPayload::ScalarMeasurements { values }) =
+            tampered.runs[0].analyses[0].result_payload.as_mut()
+        else {
+            panic!("schema-v9 scalar payload")
+        };
+        values.insert("gain".to_owned(), 10.000_000_000_000_002);
+        assert!(
+            tampered
+                .migrate_to_current(ProjectId::new())
+                .expect_err("v9 tampering is rejected before resealing")
+                .contains("schema-v9 analysis 1 result data digest")
+        );
+
+        let mut injected = v9;
+        injected.runs[0].analyses[0].result_payload =
+            PersistedField::Value(AnalysisResultPayload::Reliability {
+                devices: vec![crate::state::ReliabilityDeviceEvidence {
+                    device_id: "M1".to_owned(),
+                    stress: crate::state::ReliabilityStressEvidence {
+                        average_gate_stress_v: 1.0,
+                        average_drain_stress_v: 1.0,
+                        average_temperature_k: 300.0,
+                        duration_s: 1.0,
+                    },
+                    checkpoints: Vec::new(),
+                }],
+            });
+        assert!(
+            injected
+                .migrate_to_current(ProjectId::new())
+                .expect_err("schema-v9 cannot inject v10 evidence")
+                .contains("Reliability/SOA evidence introduced by schema v10")
+        );
+    }
+
+    #[test]
     fn schema_v7_digest_migration_is_deterministic_and_rejects_anachronistic_fields() {
         let mut run = SimulationRun::new(3);
         run.mark_running().expect("fixture run starts");
@@ -4471,7 +4770,7 @@ mod tests {
         legacy.runs[0].analyses[0].result_data_digest = PersistedField::Missing;
 
         let mut first = legacy.clone();
-        let mut second = legacy;
+        let mut second = legacy.clone();
         let project_id = ProjectId::new();
         first
             .migrate_to_current(project_id)
@@ -4489,6 +4788,23 @@ mod tests {
         );
         first.validate().expect("migrated digests validate");
 
+        let mut injected_payload = legacy;
+        injected_payload.runs[0].analyses[0].result_payload =
+            PersistedField::Value(AnalysisResultPayload::ScalarMeasurements {
+                values: std::collections::BTreeMap::from([("gain".to_owned(), 1.0)]),
+            });
+        let injected_before = injected_payload.clone();
+        assert!(
+            injected_payload
+                .migrate_to_current(project_id)
+                .expect_err("schema v7 cannot carry schema-v9 typed evidence")
+                .contains("typed result payload introduced by schema v9")
+        );
+        assert_eq!(
+            injected_payload, injected_before,
+            "failed typed-payload migration is transactional"
+        );
+
         let mut relabeled = first;
         relabeled.schema_version = FAMILY_METADATA_RESULTS_SCHEMA_VERSION;
         let before = relabeled.clone();
@@ -4499,6 +4815,63 @@ mod tests {
                 .contains("introduced by schema v8")
         );
         assert_eq!(relabeled, before, "failed migration is transactional");
+    }
+
+    #[test]
+    fn legacy_schema_field_gate_rejects_relabelled_typed_evidence() {
+        let mut run = SimulationRun::new(4);
+        run.add_analysis(AnalysisResult::new(
+            1,
+            AnalysisType::Reliability,
+            "Reliability",
+        ));
+        seal_legacy_unattributed(&mut run);
+        let mut persisted_run = ProjectSimulationRun::from(&run);
+        persisted_run.analyses[0].result_data_digest = PersistedField::Missing;
+        persisted_run.dataset_content_digest = PersistedField::Missing;
+        persisted_run.analyses[0].result_payload =
+            PersistedField::Value(AnalysisResultPayload::Reliability {
+                devices: vec![crate::state::ReliabilityDeviceEvidence {
+                    device_id: "M1".to_owned(),
+                    stress: crate::state::ReliabilityStressEvidence {
+                        average_gate_stress_v: 1.0,
+                        average_drain_stress_v: 1.0,
+                        average_temperature_k: 300.0,
+                        duration_s: 1.0,
+                    },
+                    checkpoints: vec![crate::state::ReliabilityCheckpointEvidence {
+                        years: 1.0,
+                        shift: crate::state::ReliabilityShiftEvidence {
+                            threshold_voltage_shift_v: 0.01,
+                            mobility_shift: -0.001,
+                            drain_source_resistance_shift: 0.0001,
+                        },
+                    }],
+                }],
+            });
+
+        for source_schema in
+            LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION..=CONTENT_DIGEST_RESULTS_SCHEMA_VERSION
+        {
+            assert!(
+                validate_result_fields_for_source_schema(&persisted_run, source_schema)
+                    .expect_err("pre-v9 schema cannot carry a typed payload")
+                    .contains("typed result payload introduced by schema v9")
+            );
+        }
+
+        persisted_run.analyses[0].result_payload = PersistedField::Missing;
+        persisted_run.analyses[0].family_metadata =
+            Some(AnalysisResultFamilyMetadata::Reliability { years: vec![1.0] });
+        for source_schema in
+            LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION..FAMILY_METADATA_RESULTS_SCHEMA_VERSION
+        {
+            assert!(
+                validate_result_fields_for_source_schema(&persisted_run, source_schema)
+                    .expect_err("pre-v7 schema cannot carry family metadata")
+                    .contains("family metadata introduced by schema v7")
+            );
+        }
     }
 
     #[test]

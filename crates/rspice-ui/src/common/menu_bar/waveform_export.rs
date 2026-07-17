@@ -19,7 +19,7 @@ pub(crate) fn action_export_csv_with_io(
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &typed),
             EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
                 crate::common::app::ConsoleMessage::warning(
-                    "Touchstone export is not compatible with the active scalar result; select CSV export."
+                    "Touchstone export is not compatible with the active typed result; select CSV export."
                         .to_owned(),
                 ),
             ),
@@ -62,7 +62,7 @@ struct PreparedTypedResultCsv {
 fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     let analysis = state.simulation.active_analysis()?;
     let payload = analysis.result_payload.as_ref()?;
-    if !analysis.success || payload.validate_for(analysis.analysis_type).is_err() {
+    if !analysis.success || analysis.validate_retained_evidence().is_err() {
         return None;
     }
 
@@ -126,6 +126,120 @@ fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResu
                 detail: format!("{} exact scalar values", values.len()),
             })
         }
+        AnalysisResultPayload::Reliability { devices } => {
+            let mut contents = String::from(
+                "device,lifetime_years,average_gate_stress_v,average_drain_stress_v,average_temperature_k,duration_s,threshold_voltage_shift_v,mobility_shift,drain_source_resistance_shift\n",
+            );
+            let row_count = devices
+                .iter()
+                .map(|device| device.checkpoints.len())
+                .sum::<usize>();
+            for device in devices {
+                for checkpoint in &device.checkpoints {
+                    let shift = &checkpoint.shift;
+                    contents.push_str(&format!(
+                        "{},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e}\n",
+                        csv_text(&device.device_id),
+                        checkpoint.years,
+                        device.stress.average_gate_stress_v,
+                        device.stress.average_drain_stress_v,
+                        device.stress.average_temperature_k,
+                        device.stress.duration_s,
+                        shift.threshold_voltage_shift_v,
+                        shift.mobility_shift,
+                        shift.drain_source_resistance_shift,
+                    ));
+                }
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "reliability-evidence.csv",
+                contents,
+                detail: format!(
+                    "{} devices, {} exact lifetime-shift rows",
+                    devices.len(),
+                    row_count
+                ),
+            })
+        }
+        AnalysisResultPayload::Soa {
+            evaluations,
+            violations,
+        } => {
+            let mut contents = String::from(
+                "record,device,parameter,limit_value,actual_value,time_s,sample_count,unit,description,verdict\n",
+            );
+            for evaluation in evaluations {
+                contents.push_str(&format!(
+                    "evaluation,{},{},{:.17e},{:.17e},{:.17e},{},{},{},{}\n",
+                    csv_text(&evaluation.device_id),
+                    soa_parameter_csv(evaluation.parameter),
+                    evaluation.limit_value,
+                    evaluation.worst_actual_value,
+                    evaluation.worst_time_s,
+                    evaluation.sample_count,
+                    csv_text(&evaluation.unit),
+                    csv_text(&evaluation.description),
+                    soa_verdict_csv(evaluation.verdict),
+                ));
+            }
+            for violation in violations {
+                contents.push_str(&format!(
+                    "event,{},{},{:.17e},{:.17e},{:.17e},,,,{}\n",
+                    csv_text(&violation.device_id),
+                    soa_parameter_csv(violation.parameter),
+                    violation.limit_value,
+                    violation.actual_value,
+                    violation.time_s,
+                    soa_violation_severity_csv(violation.severity),
+                ));
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "soa-evidence.csv",
+                contents,
+                detail: format!(
+                    "{} evaluated rules, {} warning/violation events",
+                    evaluations.len(),
+                    violations.len()
+                ),
+            })
+        }
+    }
+}
+
+fn soa_parameter_csv(parameter: crate::state::SoaParameterEvidence) -> &'static str {
+    use crate::state::SoaParameterEvidence;
+    match parameter {
+        SoaParameterEvidence::GateSourceVoltage => "vgs",
+        SoaParameterEvidence::DrainSourceVoltage => "vds",
+        SoaParameterEvidence::GateDrainVoltage => "vgd",
+        SoaParameterEvidence::BaseEmitterVoltage => "vbe",
+        SoaParameterEvidence::CollectorEmitterVoltage => "vce",
+        SoaParameterEvidence::BaseCollectorVoltage => "vbc",
+        SoaParameterEvidence::DrainCurrent => "id",
+        SoaParameterEvidence::CollectorCurrent => "ic",
+        SoaParameterEvidence::PowerDissipation => "pdiss",
+        SoaParameterEvidence::Temperature => "temperature",
+    }
+}
+
+fn soa_verdict_csv(verdict: crate::state::SoaRuleVerdictEvidence) -> &'static str {
+    use crate::state::SoaRuleVerdictEvidence;
+    match verdict {
+        SoaRuleVerdictEvidence::Pass => "pass",
+        SoaRuleVerdictEvidence::Warning => "warning",
+        SoaRuleVerdictEvidence::Violation => "violation",
+        SoaRuleVerdictEvidence::Critical => "critical",
+    }
+}
+
+fn soa_violation_severity_csv(
+    severity: crate::state::SoaViolationSeverityEvidence,
+) -> &'static str {
+    use crate::state::SoaViolationSeverityEvidence;
+    match severity {
+        SoaViolationSeverityEvidence::Warning => "warning",
+        SoaViolationSeverityEvidence::Violation => "violation",
+        SoaViolationSeverityEvidence::Critical => "critical",
     }
 }
 
@@ -677,8 +791,11 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use crate::state::{
-        AnalysisResult, AnalysisResultPayload, AnalysisType, ComplexResultValue,
-        SensitivityResultMode, SensitivityResultRow, SimulationRun, WaveformData,
+        AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
+        ComplexResultValue, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
+        ReliabilityShiftEvidence, ReliabilityStressEvidence, SensitivityResultMode,
+        SensitivityResultRow, SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence,
+        SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
     };
 
     #[derive(Debug)]
@@ -837,6 +954,114 @@ mod tests {
                 "width,2.00000000000000000e0,5.00000000000000000e-1,\"V(out), differential\",ac,1.00000000000000000e4\n",
             )
         );
+    }
+
+    #[test]
+    fn csv_export_publishes_exact_reliability_device_and_shift_evidence() {
+        let analysis = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Reliability { years: vec![10.0] })
+            .with_result_payload(AnalysisResultPayload::Reliability {
+                devices: vec![ReliabilityDeviceEvidence {
+                    device_id: "M1".to_owned(),
+                    stress: ReliabilityStressEvidence {
+                        average_gate_stress_v: 1.2,
+                        average_drain_stress_v: 1.8,
+                        average_temperature_k: 358.15,
+                        duration_s: 3_600.0,
+                    },
+                    checkpoints: vec![ReliabilityCheckpointEvidence {
+                        years: 10.0,
+                        shift: ReliabilityShiftEvidence {
+                            threshold_voltage_shift_v: 0.0125,
+                            mobility_shift: -0.003,
+                            drain_source_resistance_shift: 0.001,
+                        },
+                    }],
+                }],
+            });
+        let mut state = state_with_typed_result(analysis);
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("reliability-evidence.csv"));
+        assert!(
+            files[0]
+                .1
+                .starts_with("device,lifetime_years,average_gate_stress_v")
+        );
+        assert!(
+            files[0]
+                .1
+                .contains("M1,1.00000000000000000e1,1.19999999999999996e0")
+        );
+        assert!(files[0].1.contains("1.25000000000000007e-2"));
+    }
+
+    #[test]
+    fn typed_csv_rejects_payloads_that_contradict_their_retained_axis() {
+        let analysis = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Reliability { years: vec![1.0] })
+            .with_result_payload(AnalysisResultPayload::Reliability {
+                devices: vec![ReliabilityDeviceEvidence {
+                    device_id: "M1".to_owned(),
+                    stress: ReliabilityStressEvidence {
+                        average_gate_stress_v: 1.2,
+                        average_drain_stress_v: 1.8,
+                        average_temperature_k: 358.15,
+                        duration_s: 3_600.0,
+                    },
+                    checkpoints: vec![ReliabilityCheckpointEvidence {
+                        years: 10.0,
+                        shift: ReliabilityShiftEvidence {
+                            threshold_voltage_shift_v: 0.0125,
+                            mobility_shift: -0.003,
+                            drain_source_resistance_shift: 0.001,
+                        },
+                    }],
+                }],
+            });
+        let state = state_with_typed_result(analysis);
+
+        assert!(prepare_active_typed_result_csv(&state).is_none());
+    }
+
+    #[test]
+    fn csv_export_publishes_complete_soa_rules_and_exact_events() {
+        let analysis = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: vec![1.0e-6] })
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![SoaEvaluationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    worst_actual_value: 3.2,
+                    worst_time_s: 1.0e-6,
+                    sample_count: 1,
+                    unit: "V".to_owned(),
+                    description: "Maximum drain-source voltage".to_owned(),
+                    verdict: SoaRuleVerdictEvidence::Warning,
+                }],
+                violations: vec![SoaViolationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    actual_value: 3.2,
+                    time_s: 1.0e-6,
+                    severity: SoaViolationSeverityEvidence::Warning,
+                }],
+            });
+        let mut state = state_with_typed_result(analysis);
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("soa-evidence.csv"));
+        assert!(files[0].1.contains("evaluation,M1,vds"));
+        assert!(files[0].1.contains("Maximum drain-source voltage,warning"));
+        assert!(files[0].1.contains("event,M1,vds"));
     }
 
     #[test]

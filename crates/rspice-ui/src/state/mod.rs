@@ -27,11 +27,13 @@ pub use simulation::{
     ComplexResultValue, CrossProbeMapping, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult,
     DisplayWaveformCache, ExecutionTarget, MonteCarloVariableMetadata, NoiseContributorRow,
     NoiseSummary, OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SimulationExecutionIdentity,
-    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
-    SimulationState, WaveformData, ac_bode_summary_for_run, ac_bode_summary_for_selection,
-    ac_bode_summary_for_source_instance,
+    PreparedSourceCheckReceipt, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
+    ReliabilityShiftEvidence, ReliabilityStressEvidence, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SensitivityResultMode, SensitivityResultRow, SharedWaveformValues,
+    SimulationExecutionIdentity, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
+    SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
+    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
+    ac_bode_summary_for_run, ac_bode_summary_for_selection, ac_bode_summary_for_source_instance,
 };
 pub use symbol::{
     PinFinding, PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_TERMINAL_GRID,
