@@ -11,6 +11,28 @@ function asErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function asErrorDetails(error) {
+  const message = asErrorMessage(error);
+  if (!error || typeof error !== "object") {
+    return { message };
+  }
+
+  const details = error.details && typeof error.details === "object" ? error.details : error;
+  const structured = { message };
+  for (const field of [
+    "kind",
+    "category",
+    "primarySource",
+    "primaryLine",
+    "unresolvedOutputSymbols",
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(details, field)) {
+      structured[field] = details[field];
+    }
+  }
+  return structured;
+}
+
 async function ensureReady() {
   if (!initPromise) {
     initPromise = init().catch((error) => {
@@ -54,11 +76,13 @@ async function handleRequest(message) {
       result,
     });
   } catch (error) {
+    const errorDetails = asErrorDetails(error);
     postMessage({
       type: "error",
       id,
       operation,
-      error: asErrorMessage(error),
+      error: errorDetails.message,
+      errorDetails,
     });
   }
 }
@@ -75,5 +99,12 @@ ensureReady()
     postMessage({ type: "ready" });
   })
   .catch((error) => {
-    postMessage({ type: "error", id: 0, operation: "init", error: asErrorMessage(error) });
+    const errorDetails = asErrorDetails(error);
+    postMessage({
+      type: "error",
+      id: 0,
+      operation: "init",
+      error: errorDetails.message,
+      errorDetails,
+    });
   });

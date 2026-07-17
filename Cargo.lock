@@ -4288,9 +4288,11 @@ dependencies = [
 name = "rspice-wasm"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "rspice-core",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
 ]
 
