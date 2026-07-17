@@ -1503,7 +1503,7 @@ impl Engine {
         }
 
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit(netlist)?;
+        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
             "SP noise",
@@ -1817,7 +1817,7 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit(netlist)?;
+        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         let resolve_node = |name: &str| {
             circuit.get_node_by_name(name.trim()).ok_or_else(|| {
                 SimulationError::Circuit(format!(

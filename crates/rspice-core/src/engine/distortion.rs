@@ -44,7 +44,7 @@ impl Engine {
         check_abort(abort)?;
 
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit(netlist)?;
+        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         if !circuit.coupled_tlines.is_empty() {
             return Err(SimulationError::Circuit(
                 "Distortion analysis does not support coupled multiconductor (CPL) transmission lines"

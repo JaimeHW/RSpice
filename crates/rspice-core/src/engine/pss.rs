@@ -233,7 +233,7 @@ impl Engine {
         config.validate().map_err(PssError::InvalidConfig)?;
 
         // Build and prepare circuit
-        let mut circuit = self.build_circuit(netlist)?;
+        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 

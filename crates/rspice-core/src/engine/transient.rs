@@ -646,7 +646,7 @@ impl Engine {
         }
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
-        let mut circuit = self.build_circuit(netlist)?;
+        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             let result = TransientResult {
                 time: vec![0.0],

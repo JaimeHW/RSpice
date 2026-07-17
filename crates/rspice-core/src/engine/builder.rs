@@ -5,11 +5,13 @@
 
 #![allow(clippy::needless_range_loop)]
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::device::{JfetChannelModel, MosBodyJunctionModel};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
-    Element, ElementKind, SourceSpec, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, XspiceAutoBridgeNodeHint,
-    XspiceAutoBridgeTemplate, XspicePort, flatten_netlist_with_models, reduce_supernode_topology,
+    Element, ElementKind, ParseWithAbortError, SourceSpec, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    XspiceAutoBridgeNodeHint, XspiceAutoBridgeTemplate, XspicePort, flatten_netlist_with_models,
+    flatten_netlist_with_models_with_abort, reduce_supernode_topology,
 };
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
@@ -63,6 +65,24 @@ use generated_model_routing::{
     try_route_generated_bjt_model, try_route_generated_diode_model, try_route_generated_mos_model,
     try_route_generated_resistor_model,
 };
+
+#[inline]
+fn check_build_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+fn map_build_parse_error(context: &str, error: ParseWithAbortError) -> SimulationError {
+    match error {
+        ParseWithAbortError::Aborted => SimulationError::Aborted,
+        ParseWithAbortError::Parse(error) => {
+            SimulationError::Netlist(format!("{context} error: {error}"))
+        }
+    }
+}
 
 fn validate_source_file_inputs(
     source_name: &str,
@@ -2985,6 +3005,18 @@ set auto_bridge_parm_d = vdd
             "explicit zero NRD/NRS must suppress both generated resistors"
         );
     }
+
+    #[test]
+    fn circuit_builder_honors_cancellation_before_construction() {
+        let netlist = Netlist::parse("cancelled build\nV1 in 0 1\nR1 in 0 1k\n.end")
+            .expect("cancellation fixture parses");
+
+        assert!(matches!(
+            Engine::default()
+                .build_circuit_with_abort(&netlist, &crate::abort_signal::ImmediateAbort,),
+            Err(SimulationError::Aborted)
+        ));
+    }
 }
 
 impl Engine {
@@ -3152,20 +3184,36 @@ impl Engine {
         .map(Some)
     }
 
-    /// Build circuit from netlist (flattens subcircuits first)
+    /// Build a circuit from a netlist, using a non-cancellable compatibility path.
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
+        self.build_circuit_with_abort(netlist, &NoAbort)
+    }
+
+    /// Build a circuit while observing cooperative cancellation throughout
+    /// validation, hierarchy flattening, and device instantiation.
+    ///
+    /// All public cancellable analyses use this entry point so a large or
+    /// deeply hierarchical deck cannot make a timeout, UI stop request, or
+    /// Python interrupt wait for construction to finish.
+    pub fn build_circuit_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<CircuitData, SimulationError> {
         self.ensure_valid_configuration()?;
+        check_build_abort(abort)?;
         let mut startup_validated;
         let netlist = if netlist.startup_directives.is_empty() {
             netlist
         } else {
             startup_validated = netlist.clone();
-            crate::netlist::validate_startup_directives(&mut startup_validated)
-                .map_err(|error| SimulationError::Netlist(error.to_string()))?;
+            crate::netlist::validate_startup_directives_with_abort(&mut startup_validated, abort)
+                .map_err(|error| map_build_parse_error("startup validation", error))?;
             &startup_validated
         };
-        crate::netlist::validate_output_symbols(netlist)
-            .map_err(|error| SimulationError::Netlist(error.to_string()))?;
+        crate::netlist::validate_output_symbols_with_abort(netlist, abort)
+            .map_err(|error| map_build_parse_error("output validation", error))?;
+        check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
         circuit.b3soi_gmin_scale = if self.config.b3soi_gmin_scaling {
             1.0e-6
@@ -3174,8 +3222,8 @@ impl Engine {
         };
 
         // Flatten subcircuit instances into top-level elements
-        let flattened = flatten_netlist_with_models(netlist)
-            .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
+        let flattened = flatten_netlist_with_models_with_abort(netlist, abort)
+            .map_err(|error| map_build_parse_error("subcircuit flattening", error))?;
         let mut effective_model_netlist;
         let netlist = if flattened.scoped_models.is_empty() {
             netlist
@@ -3198,15 +3246,16 @@ impl Engine {
             flat_elements = reduction.elements;
         }
 
-        // Debug: log all elements
-        log::info!("Building circuit with {} elements:", flat_elements.len());
-        for element in &flat_elements {
-            log::info!(
-                "  Element: {} nodes={:?} kind={:?}",
-                element.name,
-                element.nodes,
-                element.kind
-            );
+        log::debug!("Building circuit with {} elements", flat_elements.len());
+        if log::log_enabled!(log::Level::Trace) {
+            for element in &flat_elements {
+                log::trace!(
+                    "Element {} nodes={:?} kind={:?}",
+                    element.name,
+                    element.nodes,
+                    element.kind
+                );
+            }
         }
 
         // One shared Arc per model: instances share the (megabyte-scale)
@@ -3256,7 +3305,10 @@ impl Engine {
 
         warn_floating_nodes(&flat_elements);
 
-        for element in &flat_elements {
+        for (element_index, element) in flat_elements.iter().enumerate() {
+            if element_index.is_multiple_of(64) {
+                check_build_abort(abort)?;
+            }
             match &element.kind {
                 ElementKind::Resistor {
                     value,
@@ -5843,6 +5895,8 @@ impl Engine {
             }
         }
 
+        check_build_abort(abort)?;
+
         // Ensure ground reference exists
         // If no node "0" was specified, auto-select a reference node
         circuit.ensure_ground_reference();
@@ -5868,7 +5922,10 @@ impl Engine {
         // mutual terms (see CoupledInductorPair). K cards with 3+ inductors
         // couple every pair with the same k (ngspice semantics).
         let couplings = std::mem::take(&mut circuit.couplings);
-        for coupling in &couplings {
+        for (coupling_index, coupling) in couplings.iter().enumerate() {
+            if coupling_index.is_multiple_of(64) {
+                check_build_abort(abort)?;
+            }
             if coupling.inductor_names.len() < 2 {
                 return Err(SimulationError::Circuit(format!(
                     "coupling {} names fewer than two inductors",
@@ -5942,6 +5999,7 @@ impl Engine {
             dev.set_eval_gmin(b3soi_gmin);
         }
 
+        check_build_abort(abort)?;
         Ok(circuit)
     }
 }

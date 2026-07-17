@@ -196,7 +196,7 @@ impl Engine {
         }
 
         // Build circuit using SoA architecture
-        let circuit = self.build_circuit(netlist)?;
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
 
         // Get node count (excluding ground)
         let num_nodes = circuit.num_nodes();

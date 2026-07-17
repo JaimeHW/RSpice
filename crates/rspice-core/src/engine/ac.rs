@@ -2271,7 +2271,7 @@ impl Engine {
         }
         validate_ac_frequencies(frequencies)?;
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit(netlist)?;
+        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             return Ok(frequencies
                 .iter()

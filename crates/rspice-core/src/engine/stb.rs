@@ -95,7 +95,7 @@ impl Engine {
         }
 
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit(netlist)?;
+        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         if circuit.num_nodes() == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }

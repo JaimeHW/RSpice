@@ -70,7 +70,7 @@ impl Engine {
             .clone()
             .ok_or_else(|| SimulationError::Circuit("PAC requires an input source".to_string()))?;
 
-        let circuit = self.build_circuit(netlist)?;
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
         let num_nodes = circuit.num_nodes();
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));

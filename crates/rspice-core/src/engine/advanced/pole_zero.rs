@@ -313,7 +313,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let mut circuit = self.build_circuit(netlist)?;
+        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
             "Pole-zero",
