@@ -320,16 +320,17 @@ fn apply_resistor_instance_scaling(
     Ok(resistance)
 }
 
-fn resolve_level1_model_default_resistance(
+fn resolve_level1_model_geometry_resistance(
     element_name: &str,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
     eval_ctx: &crate::netlist::ParamContext,
-    dialect: crate::netlist::ExpressionDialect,
-) -> Result<f64, SimulationError> {
+    expression_dialect: crate::netlist::ExpressionDialect,
+    spice_dialect: SpiceDialect,
+) -> Result<Option<f64>, SimulationError> {
     let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?;
     let Some(rsh) = rsh.filter(|value| value.is_finite() && *value != 0.0) else {
-        return Ok(1000.0);
+        return Ok(None);
     };
 
     let squares = if let Some(nsq) =
@@ -346,6 +347,7 @@ fn resolve_level1_model_default_resistance(
                 .ok()
                 .flatten()
         })
+        .or_else(|| (spice_dialect == SpiceDialect::Ngspice).then_some(10.0e-6))
         .filter(|value| value.is_finite() && *value != 0.0)
     {
         let w = instance_param(instance_params, &["W", "WIDTH"])
@@ -356,12 +358,12 @@ fn resolve_level1_model_default_resistance(
             })
             .unwrap_or(10.0e-6);
         let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
-        let short = if dialect == crate::netlist::ExpressionDialect::Xyce {
+        let short = if expression_dialect == crate::netlist::ExpressionDialect::Xyce {
             0.0
         } else {
             resolve_model_param(model_def, &["SHORT"], eval_ctx)?.unwrap_or(0.0)
         };
-        let (l_eff, w_eff) = if dialect == crate::netlist::ExpressionDialect::Xyce {
+        let (l_eff, w_eff) = if expression_dialect == crate::netlist::ExpressionDialect::Xyce {
             // Xyce 7.10 defines no resistor-model SHORT parameter and uses
             // the same one-sided NARROW correction for both dimensions.
             (l - narrow, w - narrow)
@@ -381,7 +383,7 @@ fn resolve_level1_model_default_resistance(
             l_eff / w_eff
         }
     } else {
-        return Ok(1000.0);
+        return Ok(None);
     };
 
     if !(squares.is_infinite() && squares.is_sign_positive())
@@ -393,7 +395,7 @@ fn resolve_level1_model_default_resistance(
         )));
     }
 
-    Ok(rsh * squares)
+    Ok(Some(rsh * squares))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -421,6 +423,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<ResolvedResistorParameters, SimulationError> {
     let model_def = if let Some(model_name) = model_name {
         let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
@@ -498,25 +501,46 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     };
 
     if let Some(model_def) = model_def {
-        let resistance_multiplier = resolve_model_param(
+        let model_resistance = resolve_model_param(
             model_def,
             &["R", "RES", "R0", "VALUE", "RESISTANCE"],
             &eval_ctx,
         )?;
 
-        if resistance.is_none() {
-            resistance = Some(resolve_level1_model_default_resistance(
-                element_name,
-                model_def,
-                instance_params,
-                &eval_ctx,
-                netlist.params.expression_dialect(),
-            )?);
-        }
-
         if resistor_level != Some(2) {
-            let resistance_multiplier = resistance_multiplier.unwrap_or(1.0);
-            resistance = resistance.map(|value| value * resistance_multiplier);
+            let geometry_resistance = if resistance.is_none() {
+                resolve_level1_model_geometry_resistance(
+                    element_name,
+                    model_def,
+                    instance_params,
+                    &eval_ctx,
+                    netlist.params.expression_dialect(),
+                    spice_dialect,
+                )?
+            } else {
+                None
+            };
+
+            match spice_dialect {
+                SpiceDialect::Ngspice => {
+                    // ngspice treats model R/RES as an absolute fallback:
+                    // explicit instance R wins, followed by usable RSH geometry,
+                    // then model R, then its 1 mOhm safety default.
+                    if resistance.is_none() {
+                        resistance = geometry_resistance.or(model_resistance).or(Some(1.0e-3));
+                    }
+                }
+                SpiceDialect::BestAvailable | SpiceDialect::Xyce => {
+                    // Preserve RSpice's established default and Xyce behavior:
+                    // a value-less instance has a 1 kOhm base, and model R is
+                    // a multiplier applied to explicit values and RSH geometry.
+                    if resistance.is_none() {
+                        resistance = Some(geometry_resistance.unwrap_or(1000.0));
+                    }
+                    let resistance_multiplier = model_resistance.unwrap_or(1.0);
+                    resistance = resistance.map(|value| value * resistance_multiplier);
+                }
+            }
         }
     } else if resistance.is_none() && uses_xyce_default {
         resistance = Some(1000.0);
@@ -620,6 +644,7 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<f64, SimulationError> {
     resolve_resistor_effective_parameters(
         netlist,
@@ -629,6 +654,7 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         model_name,
         instance_params,
         temperature_kelvin,
+        spice_dialect,
     )
     .map(|parameters| parameters.resistance)
 }
@@ -650,6 +676,7 @@ pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<ResolvedBehavioralResistorPolicy, SimulationError> {
     let model_def = if let Some(model_name) = model_name {
         Some(find_model_def(netlist, model_name).ok_or_else(|| {
@@ -671,6 +698,7 @@ pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
         model_name,
         instance_params,
         temperature_kelvin,
+        spice_dialect,
     )?;
     Ok(ResolvedBehavioralResistorPolicy {
         scale,
@@ -719,7 +747,12 @@ mod tests {
         temperature_kelvin: f64,
     ) -> (f64, Option<f64>) {
         let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
-        resolve_resistor_from_netlist_at(&netlist, name, temperature_kelvin)
+        resolve_resistor_from_netlist_at(
+            &netlist,
+            name,
+            temperature_kelvin,
+            SpiceDialect::BestAvailable,
+        )
     }
 
     fn resolve_xyce_resistor_from_source(source: &str, name: &str) -> f64 {
@@ -731,13 +764,31 @@ mod tests {
             },
         )
         .expect("Xyce test netlist parses");
-        resolve_resistor_from_netlist_at(&netlist, name, crate::constants::TEMP_REFERENCE).0
+        resolve_resistor_from_netlist_at(
+            &netlist,
+            name,
+            crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Xyce,
+        )
+        .0
+    }
+
+    fn resolve_ngspice_resistor_from_source(source: &str, name: &str) -> f64 {
+        let netlist = crate::netlist::Netlist::parse(source).expect("ngspice test netlist parses");
+        resolve_resistor_from_netlist_at(
+            &netlist,
+            name,
+            crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Ngspice,
+        )
+        .0
     }
 
     fn resolve_resistor_from_netlist_at(
         netlist: &crate::netlist::Netlist,
         name: &str,
         temperature_kelvin: f64,
+        spice_dialect: SpiceDialect,
     ) -> (f64, Option<f64>) {
         let element = netlist
             .elements
@@ -764,6 +815,7 @@ mod tests {
             model.as_deref(),
             instance_params,
             temperature_kelvin,
+            spice_dialect,
         )
         .expect("resistor resolves");
         let ac = instance_param(instance_params, &["AC"])
@@ -809,6 +861,7 @@ mod tests {
             model.as_deref(),
             instance_params,
             crate::analysis::temperature::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0)),
+            SpiceDialect::Xyce,
         )
         .expect("effective resistor parameters resolve")
     }
@@ -1009,6 +1062,7 @@ R1 a 0 0
             model.as_deref(),
             instance_params,
             crate::constants::TEMP_REFERENCE,
+            SpiceDialect::BestAvailable,
         )
         .expect("zero-ohm resistor resolves before branch-form stamping");
 
@@ -1068,6 +1122,49 @@ R2 a 0 rmod
             "R2",
         );
         assert_eq!(model_res_alias, 500.0);
+    }
+
+    #[test]
+    fn ngspice_level1_model_r_is_an_absolute_fallback() {
+        let model_only = resolve_ngspice_resistor_from_source(
+            r#"ngspice model default resistance
+R1 a 0 rmod
+.model rmod R R=2k
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(model_only, 2_000.0);
+
+        let explicit_instance = resolve_ngspice_resistor_from_source(
+            r#"ngspice explicit resistance wins over model default
+R2 a 0 500 rmod
+.model rmod R R=2k
+.end
+"#,
+            "R2",
+        );
+        assert_eq!(explicit_instance, 500.0);
+
+        let sheet_geometry = resolve_ngspice_resistor_from_source(
+            r#"ngspice sheet geometry wins over model default
+R3 a 0 rmod L=2 W=1
+.model rmod R RSH=100 R=2k
+.end
+"#,
+            "R3",
+        );
+        assert_eq!(sheet_geometry, 200.0);
+
+        let safety_default = resolve_ngspice_resistor_from_source(
+            r#"ngspice missing resistance safety default
+R4 a 0 rmod
+.model rmod R TC1=0
+.end
+"#,
+            "R4",
+        );
+        assert_eq!(safety_default, 1.0e-3);
     }
 
     #[test]

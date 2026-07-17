@@ -44,6 +44,7 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
     temperature_kelvin: f64,
     expression_gmin: Value,
     resource_limits: ResourceLimits,
+    spice_dialect: SpiceDialect,
 ) -> Result<(), SimulationError> {
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -53,6 +54,7 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
         model_name,
         instance_params,
         temperature_kelvin,
+        spice_dialect,
     )?;
     if !policy.scale.is_finite() || policy.scale == 0.0 {
         return Err(SimulationError::Circuit(format!(

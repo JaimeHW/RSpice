@@ -1681,6 +1681,7 @@ fn add_generated_xspice_auto_bridge_resistor(
     generated: &Netlist,
     element: &Element,
     temperature: crate::Value,
+    spice_dialect: SpiceDialect,
 ) -> Result<(), SimulationError> {
     let ElementKind::Resistor {
         value,
@@ -1719,6 +1720,7 @@ fn add_generated_xspice_auto_bridge_resistor(
         model.as_deref(),
         instance_params,
         temperature,
+        spice_dialect,
     )?;
     let small_signal_resistance =
         resolve_resistor_small_signal_value(&element.name, resistance, instance_params)?;
@@ -2003,6 +2005,7 @@ fn add_generated_xspice_auto_bridge_subcircuit(
                     generated,
                     element,
                     temperature,
+                    spice_dialect,
                 )?;
             }
             ElementKind::Capacitor { .. } => {
@@ -3163,6 +3166,7 @@ impl Engine {
             model.as_deref(),
             instance_params,
             engine.config.temperature,
+            engine.config.spice_dialect,
         )
         .map(Some)
     }
@@ -3473,6 +3477,7 @@ impl Engine {
                             self.config.temperature,
                             self.config.convergence_config.junction_gmin_target,
                             self.config.resource_limits,
+                            self.config.spice_dialect,
                         )?;
                         continue;
                     }
@@ -3485,6 +3490,7 @@ impl Engine {
                         model.as_deref(),
                         instance_params,
                         self.config.temperature,
+                        self.config.spice_dialect,
                     )?;
                     let small_signal_resistance = resolve_resistor_small_signal_value(
                         &element.name,
