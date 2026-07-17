@@ -13,6 +13,62 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
+/// One unresolved circuit symbol retained by an aggregate output-validation
+/// error. The string-valued tags are deliberately stable across core enum
+/// evolution so Python automation does not need to parse display messages.
+#[pyclass(
+    name = "UnresolvedOutputSymbol",
+    module = "rspice",
+    frozen,
+    from_py_object
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PyUnresolvedOutputSymbol {
+    #[pyo3(get)]
+    pub directive: String,
+    #[pyo3(get)]
+    pub operator: String,
+    #[pyo3(get)]
+    pub symbol: String,
+    #[pyo3(get)]
+    pub kind: String,
+    #[pyo3(get)]
+    pub line: usize,
+    #[pyo3(get)]
+    pub source: Option<String>,
+}
+
+impl From<&rspice_core::netlist::UnresolvedOutputSymbol> for PyUnresolvedOutputSymbol {
+    fn from(item: &rspice_core::netlist::UnresolvedOutputSymbol) -> Self {
+        use rspice_core::netlist::{OutputDirectiveKind, OutputSymbolKind};
+
+        let directive = match item.directive {
+            OutputDirectiveKind::Save => "save",
+            OutputDirectiveKind::Probe => "probe",
+            OutputDirectiveKind::Print => "print",
+            OutputDirectiveKind::Plot => "plot",
+            OutputDirectiveKind::Measure => "measure",
+            OutputDirectiveKind::Four => "four",
+        };
+        let kind = match item.kind {
+            OutputSymbolKind::Node => "node",
+            OutputSymbolKind::Device => "device",
+        };
+        Self {
+            directive: directive.to_string(),
+            operator: item.operator.clone(),
+            symbol: item.symbol.clone(),
+            kind: kind.to_string(),
+            line: item.origin.line,
+            source: item
+                .origin
+                .path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+        }
+    }
+}
+
 #[derive(Default)]
 struct ParseErrorAttributes {
     kind: &'static str,
@@ -57,6 +113,7 @@ struct ParseErrorAttributes {
     expected: Option<String>,
     actual: Option<usize>,
     device_type: Option<String>,
+    unresolved_output_symbols: Option<Vec<PyUnresolvedOutputSymbol>>,
 }
 
 impl ParseErrorAttributes {
@@ -146,6 +203,23 @@ fn undefined_mutual_inductor_reference_attributes(
     attributes.qualified_inductor_name = Some(error.qualified_inductor_name.clone());
     attributes.scope_name = error.scope_name.clone();
     attributes.reference_position = Some(error.reference_position);
+    attributes
+}
+
+fn output_symbol_validation_attributes(
+    error: &rspice_core::netlist::OutputSymbolValidationError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("undefined_output_symbols");
+    attributes.category = Some("output_symbol_validation");
+    let count = error.unresolved.len();
+    attributes.detail = Some(format!(
+        "{count} unresolved output symbol{}",
+        if count == 1 { "" } else { "s" }
+    ));
+    attributes.unresolved_output_symbols = Some(error.unresolved.iter().map(Into::into).collect());
+    if let Some(first) = error.unresolved.first() {
+        attributes.set_primary(&first.origin);
+    }
     attributes
 }
 
@@ -266,6 +340,7 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::UndefinedMutualInductorReference(error) => {
             undefined_mutual_inductor_reference_attributes(error)
         }
+        CoreParseError::OutputSymbolValidation(error) => output_symbol_validation_attributes(error),
         CoreParseError::DeviceInitialCondition(error) => {
             let mut attributes = ParseErrorAttributes::new("device_initial_condition");
             attributes.category = Some("device_initial_condition");
@@ -439,6 +514,10 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         value.setattr("expected", attributes.expected)?;
         value.setattr("actual", attributes.actual)?;
         value.setattr("device_type", attributes.device_type)?;
+        value.setattr(
+            "unresolved_output_symbols",
+            attributes.unresolved_output_symbols,
+        )?;
         Ok::<_, PyErr>(())
     });
     error
@@ -474,7 +553,8 @@ mod tests {
     use super::*;
     use rspice_core::netlist::{
         DuplicateSubcircuitPortBindingError, GlobalSubcircuitPortBindingError,
-        NetlistSourceLocation, UndefinedMutualInductorReferenceError,
+        NetlistSourceLocation, OutputDirectiveKind, OutputSymbolKind, OutputSymbolValidationError,
+        UndefinedMutualInductorReferenceError, UnresolvedOutputSymbol,
     };
 
     #[test]
@@ -551,5 +631,56 @@ mod tests {
         assert_eq!(attributes.authored_coupling_name.as_deref(), Some("K3"));
         assert_eq!(attributes.authored_inductor_name.as_deref(), Some("L2"));
         assert_eq!(attributes.reference_position, Some(2));
+    }
+
+    #[test]
+    fn output_symbol_validation_preserves_order_repetitions_and_provenance() {
+        let item = |operator: &str, symbol: &str, kind| UnresolvedOutputSymbol {
+            directive: OutputDirectiveKind::Print,
+            origin: NetlistSourceLocation::in_file("invalid.cir", 17),
+            operator: operator.into(),
+            symbol: symbol.into(),
+            kind,
+        };
+        let error = OutputSymbolValidationError {
+            unresolved: vec![
+                item("I", "RBogo", OutputSymbolKind::Device),
+                item("VP", "bogo9", OutputSymbolKind::Node),
+                item("VM", "bogo9", OutputSymbolKind::Node),
+            ],
+        };
+        let attributes = output_symbol_validation_attributes(&error);
+
+        assert_eq!(attributes.kind, "undefined_output_symbols");
+        assert_eq!(attributes.category, Some("output_symbol_validation"));
+        assert_eq!(attributes.line, Some(17));
+        assert_eq!(attributes.source.as_deref(), Some("invalid.cir"));
+        assert_eq!(
+            attributes.detail.as_deref(),
+            Some("3 unresolved output symbols")
+        );
+        let unresolved = attributes
+            .unresolved_output_symbols
+            .expect("aggregate items are exposed");
+        assert_eq!(
+            unresolved
+                .iter()
+                .map(|item| {
+                    (
+                        item.directive.as_str(),
+                        item.operator.as_str(),
+                        item.symbol.as_str(),
+                        item.kind.as_str(),
+                        item.line,
+                        item.source.as_deref(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ("print", "I", "RBogo", "device", 17, Some("invalid.cir")),
+                ("print", "VP", "bogo9", "node", 17, Some("invalid.cir")),
+                ("print", "VM", "bogo9", "node", 17, Some("invalid.cir")),
+            ]
+        );
     }
 }

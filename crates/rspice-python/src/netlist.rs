@@ -15,6 +15,8 @@
 //!   line is always the title.
 //! - [`PyNetlist::parse_file`] keeps raw SPICE semantics, matching every
 //!   other SPICE tool's treatment of `.sp`/`.cir` files.
+//! - All four public entry points perform strict output-symbol validation;
+//!   permissive AST parsing remains an explicit core-only tooling facility.
 
 use pyo3::prelude::*;
 use rspice_core::netlist::{AnalysisCommand, DcSecondSweep, DcSweepMode};
@@ -250,7 +252,7 @@ impl PyNetlist {
     ///     Netlist: Parsed netlist object
     ///
     /// Raises:
-    ///     ParseError: If the netlist contains syntax errors
+    ///     ParseError: If the netlist contains syntax or semantic errors
     ///
     /// Example:
     ///     >>> netlist = Netlist.parse('''
@@ -263,7 +265,8 @@ impl PyNetlist {
     #[staticmethod]
     pub fn parse(content: &str) -> PyResult<Self> {
         let normalized = ensure_statement_content(content);
-        let inner = Netlist::parse(&normalized).map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner =
+            Netlist::parse_validated(&normalized).map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -279,13 +282,14 @@ impl PyNetlist {
     ///     Netlist: Parsed netlist object
     ///
     /// Raises:
-    ///     ParseError: If the netlist contains syntax errors
+    ///     ParseError: If the netlist contains syntax or semantic errors
     ///
     /// Example:
     ///     >>> netlist = Netlist.parse_spice("My Amplifier\nV1 1 0 10\n.end")
     #[staticmethod]
     pub fn parse_spice(content: &str) -> PyResult<Self> {
-        let inner = Netlist::parse(content).map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner =
+            Netlist::parse_validated(content).map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -302,14 +306,16 @@ impl PyNetlist {
     ///     Netlist: Parsed netlist object
     ///
     /// Raises:
-    ///     ParseError: If the file cannot be read or contains syntax errors
+    ///     ParseError: If the file cannot be read or contains syntax or semantic errors
     ///
     /// Example:
     ///     >>> netlist = Netlist.parse_file("circuits/amplifier.sp")
     ///     >>> netlist = Netlist.parse_file(pathlib.Path("circuits") / "amplifier.sp")
     #[staticmethod]
     pub fn parse_file(path: std::path::PathBuf) -> PyResult<Self> {
-        let inner = Netlist::parse_file(&path).map_err(crate::errors::parse_error_to_pyerr)?;
+        let content = Netlist::read_source(&path).map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner = Netlist::parse_validated_with_path(&content, &path)
+            .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -326,7 +332,7 @@ impl PyNetlist {
     ///     Netlist: Parsed netlist object
     ///
     /// Raises:
-    ///     ParseError: If the netlist contains syntax errors
+    ///     ParseError: If the netlist contains syntax or semantic errors
     #[staticmethod]
     pub fn parse_with_includes(content: &str, base_path: std::path::PathBuf) -> PyResult<Self> {
         let normalized = ensure_statement_content(content);
@@ -338,7 +344,7 @@ impl PyNetlist {
         } else {
             base_path
         };
-        let inner = Netlist::parse_with_path(&normalized, &anchor)
+        let inner = Netlist::parse_validated_with_path(&normalized, &anchor)
             .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }

@@ -101,6 +101,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Core classes
     m.add_class::<netlist::PyNetlist>()?;
     m.add_class::<netlist::PyParseDiagnostic>()?;
+    m.add_class::<errors::PyUnresolvedOutputSymbol>()?;
     m.add_class::<engine::PyEngine>()?;
 
     // Configuration classes
@@ -176,6 +177,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "__author__",
             "Netlist",
             "ParseDiagnostic",
+            "UnresolvedOutputSymbol",
             "Engine",
             "SimulationConfig",
             "ConvergenceConfig",

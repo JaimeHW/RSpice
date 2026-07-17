@@ -13,6 +13,7 @@ __all__ = [
     "__author__",
     "Netlist",
     "ParseDiagnostic",
+    "UnresolvedOutputSymbol",
     "Engine",
     "SimulationConfig",
     "ConvergenceConfig",
@@ -75,6 +76,7 @@ class ParseError(RSpiceError):
         "duplicate_subcircuit_port_binding",
         "global_subcircuit_port_binding",
         "undefined_mutual_inductor_reference",
+        "undefined_output_symbols",
         "device_initial_condition_duplicate_directive",
         "device_initial_condition_missing_information",
         "device_initial_condition_malformed_directive",
@@ -93,6 +95,7 @@ class ParseError(RSpiceError):
         "device_initial_condition",
         "subcircuit_binding",
         "mutual_inductor_reference",
+        "output_symbol_validation",
     ] | None
     line: int | None
     detail: str | None
@@ -134,6 +137,7 @@ class ParseError(RSpiceError):
     expected: str | None
     actual: int | None
     device_type: str | None
+    unresolved_output_symbols: list[UnresolvedOutputSymbol] | None
 
 class SimulationError(RSpiceError):
     """Raised when simulation fails due to circuit or solver errors."""
@@ -164,6 +168,21 @@ class ParseDiagnostic:
     def code(self) -> str: ...
     @property
     def message(self) -> str: ...
+
+@final
+class UnresolvedOutputSymbol:
+    @property
+    def directive(self) -> Literal["save", "probe", "print", "plot", "measure", "four"]: ...
+    @property
+    def operator(self) -> str: ...
+    @property
+    def symbol(self) -> str: ...
+    @property
+    def kind(self) -> Literal["node", "device"]: ...
+    @property
+    def line(self) -> int: ...
+    @property
+    def source(self) -> str | None: ...
 
 @final
 class Netlist:

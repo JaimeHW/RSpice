@@ -53,6 +53,43 @@ class TestParseStatementSemantics:
         netlist = rspice.Netlist.parse("\n\n  \nV1 1 0 10\nR1 1 0 1k\n.end")
         assert netlist.num_elements == 2
 
+    def test_undefined_output_symbols_are_typed_ordered_and_repeated(self):
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse(
+                "* invalid outputs\n"
+                "V1 1 0 1\n"
+                ".PRINT OP I(RBogo) V(2) {VP(bogo9)} {VM(bogo9)}\n"
+                ".OP\n"
+                ".END\n"
+            )
+
+        error = exc_info.value
+        assert error.kind == "undefined_output_symbols"
+        assert error.category == "output_symbol_validation"
+        assert error.detail == "4 unresolved output symbols"
+        assert error.line == 3
+        assert error.source is None
+        assert [
+            (
+                item.directive,
+                item.operator,
+                item.symbol,
+                item.kind,
+                item.line,
+                item.source,
+            )
+            for item in error.unresolved_output_symbols
+        ] == [
+            ("print", "I", "RBogo", "device", 3, None),
+            ("print", "V", "2", "node", 3, None),
+            ("print", "VP", "bogo9", "node", 3, None),
+            ("print", "VM", "bogo9", "node", 3, None),
+        ]
+        assert all(
+            isinstance(item, rspice.UnresolvedOutputSymbol)
+            for item in error.unresolved_output_symbols
+        )
+
 
 class TestParseSpice:
     def test_first_line_is_always_title(self):
@@ -77,6 +114,23 @@ class TestParseFile:
     def test_parse_file_missing_raises(self, tmp_path: pathlib.Path):
         with pytest.raises(rspice.ParseError):
             rspice.Netlist.parse_file(tmp_path / "nope.sp")
+
+    def test_output_symbol_error_retains_file_provenance(self, tmp_path: pathlib.Path):
+        deck = tmp_path / "invalid-output.cir"
+        deck.write_text("invalid output\nV1 1 0 1\n.PRINT OP V(missing)\n.END\n")
+
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse_file(deck)
+
+        error = exc_info.value
+        assert error.kind == "undefined_output_symbols"
+        assert pathlib.Path(error.source).resolve() == deck.resolve()
+        assert error.line == 3
+        assert error.detail == "1 unresolved output symbol"
+        assert len(error.unresolved_output_symbols) == 1
+        item = error.unresolved_output_symbols[0]
+        assert pathlib.Path(item.source).resolve() == deck.resolve()
+        assert item.line == 3
 
     def test_parse_with_includes(self, tmp_path: pathlib.Path):
         (tmp_path / "load.inc").write_text("R2 out 0 1k\n")
