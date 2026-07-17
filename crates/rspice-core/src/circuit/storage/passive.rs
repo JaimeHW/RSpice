@@ -280,6 +280,13 @@ pub struct Capacitors {
     pub i_eq: Vec<Value>,
     /// Initial condition voltage (IC=)
     pub ic: Vec<Option<Value>>,
+    /// Xyce-only MNA branch ordinal allocated for an `IC=` voltage
+    /// constraint. Other dialects retain the IC for UIC history seeding but
+    /// do not allocate or stamp this operating-point branch.
+    pub ic_branch_indices: Vec<Option<NodeId>>,
+    /// Pre-linked entries for the IC branch stamp:
+    /// `[branch,pos; pos,branch; branch,neg; neg,branch; branch,branch]`.
+    ic_branch_csc_indices: Vec<[Option<CscIndex>; 5]>,
 }
 
 impl Capacitors {
@@ -297,6 +304,8 @@ impl Capacitors {
         self.i_prev.push(0.0); // Initial capacitor current is zero
         self.i_eq.push(0.0);
         self.ic.push(None);
+        self.ic_branch_indices.push(None);
+        self.ic_branch_csc_indices.push([None; 5]);
     }
 
     pub fn add_with_ic(
@@ -316,6 +325,26 @@ impl Capacitors {
         self.i_prev.push(0.0); // Initial capacitor current is zero (DC steady state)
         self.i_eq.push(0.0);
         self.ic.push(Some(ic));
+        self.ic_branch_indices.push(None);
+        self.ic_branch_csc_indices.push([None; 5]);
+    }
+
+    /// Add a capacitor whose `IC=` is enforced as an ideal voltage source
+    /// during Xyce operating-point solves.
+    pub fn add_with_ic_branch(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        capacitance: Value,
+        ic: Value,
+        branch_ordinal: NodeId,
+    ) {
+        self.add_with_ic(name, node_pos, node_neg, capacitance, ic);
+        *self
+            .ic_branch_indices
+            .last_mut()
+            .expect("capacitor IC branch storage follows capacitor storage") = Some(branch_ordinal);
     }
 
     /// Apply initial conditions to v_prev
@@ -363,9 +392,154 @@ impl Capacitors {
     }
 
     /// Link all stamps to a StaticMatrix for O(1) access
-    pub fn link_indices(&mut self, matrix: &StaticMatrix) {
-        for stamp in &mut self.stamps {
+    pub fn link_indices(
+        &mut self,
+        matrix: &StaticMatrix,
+        get_branch_idx: impl Fn(NodeId) -> usize,
+    ) {
+        for (index, stamp) in self.stamps.iter_mut().enumerate() {
             stamp.link(matrix);
+
+            let Some(branch_ordinal) = self.ic_branch_indices[index] else {
+                self.ic_branch_csc_indices[index] = [None; 5];
+                continue;
+            };
+            let branch = get_branch_idx(branch_ordinal);
+            let pos = stamp.pp.row;
+            let neg = stamp.nn.row;
+            self.ic_branch_csc_indices[index] = [
+                (pos > 0)
+                    .then(|| matrix.get_index(branch - 1, pos - 1))
+                    .flatten(),
+                (pos > 0)
+                    .then(|| matrix.get_index(pos - 1, branch - 1))
+                    .flatten(),
+                (neg > 0)
+                    .then(|| matrix.get_index(branch - 1, neg - 1))
+                    .flatten(),
+                (neg > 0)
+                    .then(|| matrix.get_index(neg - 1, branch - 1))
+                    .flatten(),
+                matrix.get_index(branch - 1, branch - 1),
+            ];
+        }
+    }
+
+    /// Stamp Xyce capacitor `IC=` constraints for an operating-point solve.
+    /// The branch current participates in terminal KCL and the branch row
+    /// enforces `V(pos) - V(neg) = IC`.
+    #[inline]
+    pub fn stamp_ic_operating_point_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+    ) {
+        for index in 0..self.len() {
+            let Some(branch_ordinal) = self.ic_branch_indices[index] else {
+                continue;
+            };
+            let branch = num_nodes + branch_ordinal;
+            let entries = self.ic_branch_csc_indices[index];
+            if let Some(entry) = entries[0] {
+                matrix.stamp_direct(entry, 1.0);
+            }
+            if let Some(entry) = entries[1] {
+                matrix.stamp_direct(entry, 1.0);
+            }
+            if let Some(entry) = entries[2] {
+                matrix.stamp_direct(entry, -1.0);
+            }
+            if let Some(entry) = entries[3] {
+                matrix.stamp_direct(entry, -1.0);
+            }
+            rhs[branch - 1] = self.ic[index].unwrap_or(0.0);
+        }
+    }
+
+    /// Stamp the unit coefficient for a Xyce capacitor lead-current
+    /// observation branch outside operating-point mode. The companion stamp
+    /// supplies the branch-row voltage terms and history RHS.
+    #[inline]
+    pub fn stamp_ic_observation_branch_diagonal_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+    ) {
+        for (index, branch_ordinal) in self.ic_branch_indices.iter().enumerate() {
+            let Some(branch_ordinal) = branch_ordinal else {
+                continue;
+            };
+            if let Some(entry) = self.ic_branch_csc_indices[index][4] {
+                matrix.stamp_direct(entry, 1.0);
+            }
+            rhs[num_nodes + branch_ordinal - 1] = 0.0;
+        }
+    }
+
+    /// Triplet-matrix form of the Xyce operating-point IC constraint.
+    #[inline]
+    pub fn stamp_ic_operating_point(
+        &self,
+        matrix: &mut TripletMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+    ) {
+        for index in 0..self.len() {
+            let Some(branch_ordinal) = self.ic_branch_indices[index] else {
+                continue;
+            };
+            let branch = num_nodes + branch_ordinal;
+            let pos = self.stamps[index].pp.row;
+            let neg = self.stamps[index].nn.row;
+            if pos > 0 {
+                matrix.push(branch - 1, pos - 1, 1.0);
+                matrix.push(pos - 1, branch - 1, 1.0);
+            }
+            if neg > 0 {
+                matrix.push(branch - 1, neg - 1, -1.0);
+                matrix.push(neg - 1, branch - 1, -1.0);
+            }
+            rhs[branch - 1] = self.ic[index].unwrap_or(0.0);
+        }
+    }
+
+    /// Project the physical small-signal lead current of every IC capacitor
+    /// into its public branch-current slot. The OP-only branch equation is
+    /// intentionally reused as the stable observable identity across AC,
+    /// noise, and distortion results.
+    pub fn project_complex_ic_branch_currents(
+        &self,
+        solution: &[Complex64],
+        currents: &mut [Complex64],
+        omega: Value,
+    ) {
+        for (index, branch_ordinal) in self.ic_branch_indices.iter().copied().enumerate() {
+            let Some(branch_ordinal) = branch_ordinal else {
+                continue;
+            };
+            let stamp = self.stamps[index];
+            let v_pos = stamp
+                .pp
+                .row
+                .checked_sub(1)
+                .and_then(|slot| solution.get(slot))
+                .copied()
+                .unwrap_or_default();
+            let v_neg = stamp
+                .nn
+                .row
+                .checked_sub(1)
+                .and_then(|slot| solution.get(slot))
+                .copied()
+                .unwrap_or_default();
+            if let Some(current) = branch_ordinal
+                .checked_sub(1)
+                .and_then(|slot| currents.get_mut(slot))
+            {
+                *current = Complex64::new(0.0, omega) * self.capacitances[index] * (v_pos - v_neg);
+            }
         }
     }
 
@@ -379,6 +553,7 @@ impl Capacitors {
         rhs: &mut [Value],
         dt: Value,
         coeff: &CompanionCoefficients,
+        num_nodes: usize,
     ) {
         for (i, stamp) in self.stamps.iter().enumerate() {
             // geq = coeff_g * C / dt
@@ -399,6 +574,22 @@ impl Capacitors {
             }
             if stamp.nn.row != 0 {
                 rhs[stamp.nn.row - 1] -= i_eq;
+            }
+
+            // Outside the operating point, an IC capacitor's extra unknown
+            // is a physical lead-current observation equation rather than a
+            // voltage constraint: Ibranch = geq*(Vpos-Vneg) - i_eq. This
+            // keeps every in-circuit I(C) consumer analysis-correct while the
+            // ordinary companion stamp above remains the sole terminal KCL.
+            if let Some(branch_ordinal) = self.ic_branch_indices[i] {
+                let entries = self.ic_branch_csc_indices[i];
+                if let Some(entry) = entries[0] {
+                    matrix.stamp_direct(entry, -geq);
+                }
+                if let Some(entry) = entries[2] {
+                    matrix.stamp_direct(entry, geq);
+                }
+                rhs[num_nodes + branch_ordinal - 1] = -i_eq;
             }
         }
     }

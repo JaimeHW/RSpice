@@ -128,7 +128,7 @@ impl Engine {
 
         circuit
             .capacitors
-            .stamp_transient_companion(matrix, rhs, dt, ctx.coeff);
+            .stamp_transient_companion(matrix, rhs, dt, ctx.coeff, num_nodes);
         circuit
             .inductors
             .stamp_transient_companion(matrix, rhs, dt, ctx.coeff, num_nodes);

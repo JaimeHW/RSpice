@@ -852,6 +852,106 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::Netlist;
+    use crate::engine::SpiceDialect;
+
+    fn xyce_engine() -> Engine {
+        Engine::new(
+            crate::engine::SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce),
+        )
+    }
+
+    fn assert_voltage(result: &SimulationResult, node: &str, expected: Value) {
+        let actual = result
+            .try_voltage_named(node)
+            .unwrap_or_else(|| panic!("missing voltage for node {node}"));
+        assert!(
+            (actual - expected).abs() <= 1.0e-10,
+            "expected V({node})={expected:.17e}, got {actual:.17e}"
+        );
+    }
+
+    #[test]
+    fn xyce_capacitor_ic_constrains_floating_terminal_during_dc_op() {
+        let netlist = Netlist::parse(
+            "floating capacitor IC constraint\n\
+             V1 fixed 0 1\n\
+             C1 fixed floating 1 IC=0\n\
+             .OP\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let result = xyce_engine()
+            .run_dc_op(&netlist)
+            .expect("Xyce capacitor IC operating point solves");
+
+        assert_voltage(&result, "fixed", 1.0);
+        assert_voltage(&result, "floating", 1.0);
+        assert_eq!(result.branch_names, ["V1", "C1"]);
+        assert!(result.branch_current_named("C1").unwrap().abs() <= 1.0e-12);
+    }
+
+    #[test]
+    fn xyce_capacitor_ic_supports_grounded_and_non_ground_constraints() {
+        for (label, capacitor, expected) in [
+            ("positive grounded", "C1 node 0 1 IC=2", 2.0),
+            ("negative grounded", "C1 0 node 1 IC=2", -2.0),
+            ("non-ground", "C1 fixed node 1 IC=2", 3.0),
+        ] {
+            let fixed_source = if label == "non-ground" {
+                "V1 fixed 0 5\n"
+            } else {
+                ""
+            };
+            let deck =
+                format!("{label} capacitor IC constraint\n{fixed_source}{capacitor}\n.OP\n.END\n");
+            let netlist = Netlist::parse(&deck).expect("deck parses");
+            let result = xyce_engine()
+                .run_dc_op(&netlist)
+                .unwrap_or_else(|error| panic!("{label} constraint must solve: {error}"));
+            assert_voltage(&result, "node", expected);
+        }
+    }
+
+    #[test]
+    fn capacitor_without_ic_keeps_ordinary_open_circuit_dc_behavior() {
+        let netlist = Netlist::parse(
+            "ordinary capacitor DC\n\
+             V1 source 0 4\n\
+             R1 source out 1k\n\
+             C1 out 0 1u\n\
+             .OP\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let engine = xyce_engine();
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        assert_eq!(circuit.num_branches(), 1, "C1 must not allocate a branch");
+        assert_eq!(circuit.capacitors.ic_branch_indices, [None]);
+
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("DC operating point solves");
+        assert_voltage(&result, "out", 4.0);
+    }
+
+    #[test]
+    fn xyce_rejects_f_and_h_control_by_capacitor_lead_current() {
+        for control in ["F1 out 0 C1 1", "H1 out 0 C1 1"] {
+            let deck = format!(
+                "invalid capacitor current control\nC1 n 0 1 IC=1\nR1 n 0 1\n{control}\nR2 out 0 1\n.OP\n.END\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("deck parses");
+            let error = xyce_engine()
+                .run_dc_op(&netlist)
+                .expect_err("Xyce F/H capacitor-current control must be rejected");
+            assert!(
+                error
+                    .to_string()
+                    .contains("require a voltage-source branch"),
+                "unexpected rejection: {error}"
+            );
+        }
+    }
 
     fn missing_pwl_path(name: &str) -> String {
         let unique = std::time::SystemTime::now()

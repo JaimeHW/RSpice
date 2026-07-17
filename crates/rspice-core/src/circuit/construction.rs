@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 impl CircuitData {
     pub fn new() -> Self {
@@ -446,12 +447,26 @@ impl CircuitData {
         let mut names = Vec::with_capacity(
             self.inductors.names.len()
                 + self.resistor_branches.names.len()
+                + self
+                    .capacitors
+                    .ic_branch_indices
+                    .iter()
+                    .filter(|branch| branch.is_some())
+                    .count()
                 + self.voltage_sources.names.len()
                 + self.ccvs.len()
                 + self.behavioral_sources.voltage_sources.len(),
         );
         names.extend(self.inductors.names.iter().cloned());
         names.extend(self.resistor_branches.names.iter().cloned());
+        names.extend(
+            self.capacitors
+                .names
+                .iter()
+                .zip(&self.capacitors.ic_branch_indices)
+                .filter(|(_, branch)| branch.is_some())
+                .map(|(name, _)| name.clone()),
+        );
         names.extend(self.voltage_sources.names.iter().cloned());
         names.extend(self.ccvs.names.iter().cloned());
         names.extend(
@@ -552,8 +567,24 @@ impl CircuitData {
     /// Call this after all elements have been added to the circuit
     /// Returns an error if any control element is not found
     pub fn resolve_control_elements(&mut self) -> Result<(), CircuitError> {
+        let capacitor_ic_names = self
+            .capacitors
+            .names
+            .iter()
+            .zip(&self.capacitors.ic_branch_indices)
+            .filter(|(_, branch)| branch.is_some())
+            .map(|(name, _)| name.to_ascii_uppercase())
+            .collect::<HashSet<_>>();
+        let capacitor_ic_control_is_unsupported =
+            |name: &str| capacitor_ic_names.contains(&name.to_ascii_uppercase());
         // Resolve CCCS control branches
         for (cccs_idx, control_name) in self.pending_cccs.drain(..).collect::<Vec<_>>() {
+            if capacitor_ic_control_is_unsupported(&control_name) {
+                return Err(CircuitError::InvalidComponent(format!(
+                    "CCCS control '{}' is a capacitor lead current; Xyce F/H and current-switch controls require a voltage-source branch",
+                    control_name
+                )));
+            }
             let branch = self.get_branch_by_name(&control_name).ok_or_else(|| {
                 CircuitError::InvalidComponent(format!(
                     "CCCS control element not found: {}",
@@ -567,6 +598,12 @@ impl CircuitData {
 
         // Resolve CCVS control branches
         for (ccvs_idx, control_name) in self.pending_ccvs.drain(..).collect::<Vec<_>>() {
+            if capacitor_ic_control_is_unsupported(&control_name) {
+                return Err(CircuitError::InvalidComponent(format!(
+                    "CCVS control '{}' is a capacitor lead current; Xyce F/H and current-switch controls require a voltage-source branch",
+                    control_name
+                )));
+            }
             let branch = self.get_branch_by_name(&control_name).ok_or_else(|| {
                 CircuitError::InvalidComponent(format!(
                     "CCVS control element not found: {}",
@@ -582,6 +619,12 @@ impl CircuitData {
         // CurrentSwitch expects a matrix variable index (1-based) so convert
         // from branch ordinal after final node count is known.
         for (iswitch_idx, control_name) in self.pending_iswitch.drain(..).collect::<Vec<_>>() {
+            if capacitor_ic_control_is_unsupported(&control_name) {
+                return Err(CircuitError::InvalidComponent(format!(
+                    "ISWITCH control '{}' is a capacitor lead current; Xyce F/H and current-switch controls require a voltage-source branch",
+                    control_name
+                )));
+            }
             let branch_ordinal = self.get_branch_by_name(&control_name).ok_or_else(|| {
                 CircuitError::InvalidComponent(format!(
                     "ISWITCH control element not found: {}",
@@ -601,11 +644,22 @@ impl CircuitData {
     /// elements have been allocated.
     pub fn resolve_xspice_branch_references(&mut self) -> Result<(), CircuitError> {
         let branch_lookup = self.branch_names.clone();
+        let capacitor_ic_names = self
+            .capacitors
+            .names
+            .iter()
+            .zip(&self.capacitors.ic_branch_indices)
+            .filter(|(_, branch)| branch.is_some())
+            .map(|(name, _)| name.to_ascii_uppercase())
+            .collect::<HashSet<_>>();
         let current_sources = self.current_sources.clone();
         for instance in &mut self.xspice_instances {
             instance
                 .resolve_branch_references(
                     |name| {
+                        if capacitor_ic_names.contains(&name.to_ascii_uppercase()) {
+                            return None;
+                        }
                         branch_lookup
                             .get(name)
                             .or_else(|| branch_lookup.get(&name.to_uppercase()))
@@ -644,6 +698,26 @@ impl CircuitData {
 mod tests {
     use super::*;
     use crate::device::Vdmos;
+
+    #[test]
+    fn current_switch_rejects_capacitor_lead_current_control() {
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n");
+        let branch = circuit.allocate_branch_named("C1");
+        circuit
+            .capacitors
+            .add_with_ic_branch("C1".to_string(), node, 0, 1.0, 1.0, branch);
+        circuit.add_iswitch_pending(0, "C1".to_string());
+
+        let error = circuit
+            .resolve_control_elements()
+            .expect_err("ISWITCH capacitor-current control must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("require a voltage-source branch")
+        );
+    }
 
     #[test]
     fn vdmos_remap_updates_drain_drift_node() {

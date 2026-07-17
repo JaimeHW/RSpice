@@ -1726,6 +1726,28 @@ impl Engine {
             if stamp.nn.row > 0 && stamp.nn.col > 0 {
                 ac_matrix.add_imag(stamp.nn.row - 1, stamp.nn.col - 1, jwc);
             }
+            if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[i] {
+                let branch = circuit.get_branch_matrix_index(branch_ordinal) - 1;
+                if stamp.pp.row > 0 {
+                    ac_matrix.add_imag(branch, stamp.pp.row - 1, -jwc);
+                }
+                if stamp.nn.row > 0 {
+                    ac_matrix.add_imag(branch, stamp.nn.row - 1, jwc);
+                }
+            }
+        }
+        // The extra branch allocated for a Xyce capacitor IC becomes the
+        // small-signal lead-current observation equation. Its unit diagonal
+        // combines with the -jωC/+jωC branch-row terms stamped above.
+        for branch_ordinal in circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .flatten()
+            .copied()
+        {
+            let branch = circuit.get_branch_matrix_index(branch_ordinal);
+            ac_matrix.add_real(branch - 1, branch - 1, 1.0);
         }
 
         // Nonlinear semiconductor junction capacitances at the operating point.
@@ -2298,16 +2320,21 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
 
+            let mut currents = if size > num_nodes {
+                solution[num_nodes..].to_vec()
+            } else {
+                Vec::new()
+            };
+            circuit
+                .capacitors
+                .project_complex_ic_branch_currents(&solution, &mut currents, omega);
+
             Ok(AcResult {
                 frequency: freq,
                 node_names: node_names.clone(),
                 branch_names: branch_names.clone(),
                 voltages: solution[..num_nodes].to_vec(),
-                currents: if size > num_nodes {
-                    solution[num_nodes..].to_vec()
-                } else {
-                    vec![]
-                },
+                currents,
             })
         };
 
@@ -2406,5 +2433,43 @@ mod tests {
                 "unexpected error for freq={freq:?}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn xyce_capacitor_ic_branch_reports_physical_ac_lead_current() {
+        let netlist = Netlist::parse(
+            "Xyce capacitor IC AC current\n\
+             V1 in 0 DC 0 AC 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1u IC=0\n\
+             .AC LIN 1 1k 1k\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let result = engine
+            .run_ac(&netlist, &[1.0e3])
+            .expect("AC solve succeeds");
+        let point = &result[0];
+        assert_eq!(point.branch_names, ["V1", "C1"]);
+        let current = point.currents[1];
+        let omega_c = 2.0 * PI * 1.0e3 * 1.0e-6;
+        let expected = Complex64::new(0.0, omega_c) / Complex64::new(1.0, omega_c * 1.0e3);
+        assert!(
+            (current - expected).norm() <= 1.0e-12,
+            "expected I(C1)={expected}, got {current}"
+        );
+        assert_eq!(
+            point
+                .branch_names
+                .iter()
+                .filter(|name| name.eq_ignore_ascii_case("C1"))
+                .count(),
+            1,
+            "capacitor IC current must not be duplicated"
+        );
     }
 }

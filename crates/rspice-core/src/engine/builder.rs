@@ -1735,9 +1735,21 @@ fn add_generated_xspice_auto_bridge_capacitor(
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
     if let Some(ic) = *initial_voltage {
-        circuit
-            .capacitors
-            .add_with_ic(element.name.clone(), np, nn, capacitance, ic);
+        if spice_dialect == SpiceDialect::Xyce {
+            let branch = circuit.allocate_branch_named(&element.name);
+            circuit.capacitors.add_with_ic_branch(
+                element.name.clone(),
+                np,
+                nn,
+                capacitance,
+                ic,
+                branch,
+            );
+        } else {
+            circuit
+                .capacitors
+                .add_with_ic(element.name.clone(), np, nn, capacitance, ic);
+        }
     } else {
         circuit
             .capacitors
@@ -3322,13 +3334,25 @@ impl Engine {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     if let Some(ic) = *initial_voltage {
-                        circuit.capacitors.add_with_ic(
-                            element.name.clone(),
-                            np,
-                            nn,
-                            capacitance,
-                            ic,
-                        );
+                        if self.config.spice_dialect == SpiceDialect::Xyce {
+                            let branch = circuit.allocate_branch_named(&element.name);
+                            circuit.capacitors.add_with_ic_branch(
+                                element.name.clone(),
+                                np,
+                                nn,
+                                capacitance,
+                                ic,
+                                branch,
+                            );
+                        } else {
+                            circuit.capacitors.add_with_ic(
+                                element.name.clone(),
+                                np,
+                                nn,
+                                capacitance,
+                                ic,
+                            );
+                        }
                     } else {
                         circuit
                             .capacitors

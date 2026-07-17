@@ -2115,12 +2115,19 @@ impl Engine {
                     };
                 }
 
+                let mut branch_currents = ac_solution[num_nodes..].to_vec();
+                circuit.capacitors.project_complex_ic_branch_currents(
+                    &ac_solution,
+                    &mut branch_currents,
+                    omega,
+                );
+
                 Ok(NoiseResult {
                     frequency: freq,
                     node_names: node_names.clone(),
                     branch_names: branch_names.clone(),
                     voltages: ac_solution[..num_nodes].to_vec(),
-                    currents: ac_solution[num_nodes..].to_vec(),
+                    currents: branch_currents,
                     output_noise_density: total_noise_v2_hz,
                     input_referred_density: if has_input_source {
                         total_noise_v2_hz / input_gain_sq

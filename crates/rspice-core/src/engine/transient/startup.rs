@@ -61,6 +61,14 @@ impl Engine {
     ) -> Vec<(usize, Value)> {
         let mut hints = Vec::new();
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            // A Xyce `IC=` capacitor already owns an ideal-voltage branch
+            // equation during the transient operating point. Replacing one
+            // of its terminal KCL rows with the same value as a NODESET-style
+            // hint would duplicate the constraint and leave the capacitor
+            // branch current underdetermined during fallback startup.
+            if circuit.capacitors.ic_branch_indices[cap_idx].is_some() {
+                continue;
+            }
             let np = cap.pp.row;
             let nn = cap.nn.row;
             match (np, nn) {
@@ -855,6 +863,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::SimulationConfig;
 
     fn assert_close(lhs: Value, rhs: Value) {
         let scale = lhs.abs().max(rhs.abs()).max(1.0);
@@ -862,6 +871,46 @@ mod tests {
             (lhs - rhs).abs() <= 1e-15 * scale,
             "left={lhs:.16e}, right={rhs:.16e}"
         );
+    }
+
+    #[test]
+    fn grounded_startup_hints_do_not_duplicate_xyce_capacitor_ic_branches() {
+        let netlist = Netlist::parse(
+            "capacitor startup hint ownership\n\
+             C1 node 0 1 IC=2\n\
+             .TRAN 1u 1u\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let xyce = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let circuit = xyce.build_circuit(&netlist).expect("Xyce circuit builds");
+        let node = circuit.get_node_by_name("node").expect("node exists");
+        let mut dc_solution = vec![0.0; circuit.matrix_size()];
+        dc_solution[node - 1] = 2.0;
+
+        assert!(
+            Engine::grounded_capacitor_startup_voltage_hints(&circuit, &dc_solution).is_empty(),
+            "the capacitor branch equation already owns the Xyce IC constraint"
+        );
+
+        let ngspice =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
+        let negative = Netlist::parse(
+            "negative grounded capacitor hint\n\
+             C1 0 node 1 IC=2\n\
+             .TRAN 1u 1u\n\
+             .END\n",
+        )
+        .expect("negative-terminal deck parses");
+        let circuit = ngspice
+            .build_circuit(&negative)
+            .expect("ordinary capacitor circuit builds");
+        let node = circuit.get_node_by_name("node").expect("node exists");
+        let hints = Engine::grounded_capacitor_startup_voltage_hints(
+            &circuit,
+            &vec![0.0; circuit.matrix_size()],
+        );
+        assert_eq!(hints, [(node, -2.0)]);
     }
 
     #[test]

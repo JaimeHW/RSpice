@@ -102,8 +102,15 @@ impl Engine {
                 abort,
             };
             let h1 = context.solve(f1, &rhs_f1)?;
-            let fundamental_f1 =
-                make_ac_result(f1, &h1, 2.0, num_nodes, &node_names, &branch_names);
+            let fundamental_f1 = make_ac_result(
+                &circuit,
+                f1,
+                &h1,
+                2.0,
+                num_nodes,
+                &node_names,
+                &branch_names,
+            );
 
             let point = if let (Some(f2), Some(rhs_f2)) = (f2, rhs_f2.as_ref()) {
                 context.two_tone_point(
@@ -250,6 +257,7 @@ impl VolterraContext<'_> {
             fundamental_f2: None,
             products: vec![
                 make_product_result(
+                    self.circuit,
                     DistortionProduct::SecondHarmonic,
                     2.0 * f1,
                     &h11,
@@ -259,6 +267,7 @@ impl VolterraContext<'_> {
                     branch_names,
                 ),
                 make_product_result(
+                    self.circuit,
                     DistortionProduct::ThirdHarmonic,
                     3.0 * f1,
                     &h111,
@@ -307,6 +316,7 @@ impl VolterraContext<'_> {
         Ok(DistortionPointResult {
             fundamental_f1,
             fundamental_f2: Some(make_ac_result(
+                self.circuit,
                 f2,
                 &h2,
                 2.0,
@@ -316,6 +326,7 @@ impl VolterraContext<'_> {
             )),
             products: vec![
                 make_product_result(
+                    self.circuit,
                     DistortionProduct::Sum,
                     f1 + f2,
                     &h12,
@@ -325,6 +336,7 @@ impl VolterraContext<'_> {
                     branch_names,
                 ),
                 make_product_result(
+                    self.circuit,
                     DistortionProduct::Difference,
                     f1 - f2,
                     &h1m2,
@@ -334,6 +346,7 @@ impl VolterraContext<'_> {
                     branch_names,
                 ),
                 make_product_result(
+                    self.circuit,
                     DistortionProduct::ThirdOrderDifference,
                     output_frequency,
                     &h11m2,
@@ -610,6 +623,7 @@ fn normalize_real_direction(
 }
 
 fn make_product_result(
+    circuit: &CircuitData,
     product: DistortionProduct,
     frequency: Value,
     kernel: &[Complex64],
@@ -621,6 +635,7 @@ fn make_product_result(
     DistortionProductResult {
         product,
         response: make_ac_result(
+            circuit,
             frequency,
             kernel,
             sinusoid_scale,
@@ -632,6 +647,7 @@ fn make_product_result(
 }
 
 fn make_ac_result(
+    circuit: &CircuitData,
     frequency: Value,
     kernel: &[Complex64],
     sinusoid_scale: Value,
@@ -639,18 +655,28 @@ fn make_ac_result(
     node_names: &[String],
     branch_names: &[String],
 ) -> AcResult {
+    let voltages = kernel[..num_nodes]
+        .iter()
+        .map(|value| sinusoid_scale * *value)
+        .collect::<Vec<_>>();
+    let mut currents = kernel[num_nodes..]
+        .iter()
+        .map(|value| sinusoid_scale * *value)
+        .collect::<Vec<_>>();
+    let mut scaled_solution = Vec::with_capacity(voltages.len() + currents.len());
+    scaled_solution.extend_from_slice(&voltages);
+    scaled_solution.extend_from_slice(&currents);
+    circuit.capacitors.project_complex_ic_branch_currents(
+        &scaled_solution,
+        &mut currents,
+        2.0 * PI * frequency,
+    );
     AcResult {
         frequency,
         node_names: node_names.to_vec(),
         branch_names: branch_names.to_vec(),
-        voltages: kernel[..num_nodes]
-            .iter()
-            .map(|value| sinusoid_scale * *value)
-            .collect(),
-        currents: kernel[num_nodes..]
-            .iter()
-            .map(|value| sinusoid_scale * *value)
-            .collect(),
+        voltages,
+        currents,
     }
 }
 

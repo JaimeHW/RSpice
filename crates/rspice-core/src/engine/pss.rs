@@ -1086,6 +1086,16 @@ impl Engine {
             if nn > 0 {
                 rhs[nn - 1] -= ieq;
             }
+            if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx] {
+                let branch = num_nodes + branch_ordinal - 1;
+                if np > 0 {
+                    matrix.add(branch, np - 1, -geq);
+                }
+                if nn > 0 {
+                    matrix.add(branch, nn - 1, geq);
+                }
+                rhs[branch] = -ieq;
+            }
         }
 
         // Stamp inductors

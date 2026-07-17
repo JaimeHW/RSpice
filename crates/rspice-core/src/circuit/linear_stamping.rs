@@ -471,6 +471,8 @@ impl CircuitData {
         let num_nodes = self.num_nodes;
         self.resistor_branches
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
+        self.capacitors
+            .stamp_ic_operating_point_direct(matrix, rhs, num_nodes);
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
         self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
@@ -501,7 +503,7 @@ impl CircuitData {
     /// companion stamps. Stamping their DC shorts here as well doubled the
     /// branch incidence (`2*v - r_eq*i = -v_eq`), which silently corrupted
     /// every transient solve containing an inductor.
-    pub fn stamp_transient_linear_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+    fn stamp_transient_linear_base_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
         self.resistor_branches
@@ -519,6 +521,12 @@ impl CircuitData {
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
     }
 
+    pub fn stamp_transient_linear_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        self.stamp_transient_linear_base_direct(matrix, rhs);
+        self.capacitors
+            .stamp_ic_observation_branch_diagonal_direct(matrix, rhs, self.num_nodes);
+    }
+
     /// Stamp the linear part of the t=0 transient operating point.
     ///
     /// Time-varying independent sources are evaluated at the requested
@@ -534,7 +542,9 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
     ) {
-        self.stamp_transient_linear_direct(matrix, rhs);
+        self.stamp_transient_linear_base_direct(matrix, rhs);
+        self.capacitors
+            .stamp_ic_operating_point_direct(matrix, rhs, self.num_nodes);
         self.inductors
             .stamp_transient_operating_point_direct(matrix, rhs, self.num_nodes);
         self.stamp_coupled_inductors_dc_direct(matrix, rhs);
@@ -557,7 +567,9 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
     ) {
-        self.stamp_transient_linear_direct(matrix, rhs);
+        self.stamp_transient_linear_base_direct(matrix, rhs);
+        self.capacitors
+            .stamp_ic_operating_point_direct(matrix, rhs, self.num_nodes);
         self.inductors
             .stamp_transient_current_seed_direct(matrix, rhs, self.num_nodes);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
@@ -576,6 +588,8 @@ impl CircuitData {
         let num_nodes = self.num_nodes;
         self.resistor_branches
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
+        self.capacitors
+            .stamp_ic_operating_point_direct(matrix, rhs, num_nodes);
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
         self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
@@ -598,6 +612,8 @@ impl CircuitData {
         let num_nodes = self.num_nodes;
         self.resistors.stamp_all(matrix);
         self.resistor_branches.stamp_all(matrix, rhs, num_nodes);
+        self.capacitors
+            .stamp_ic_operating_point(matrix, rhs, num_nodes);
         self.inductors.stamp_dc_short(matrix, rhs, num_nodes);
         self.stamp_coupled_inductors_dc(matrix, rhs);
         self.stamp_multi_winding_transformers_dc(matrix, rhs);

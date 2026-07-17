@@ -52,6 +52,34 @@ impl Engine {
             }
         }
 
+        // Xyce capacitor IC branches use voltage-source incidence during the
+        // operating point and a physical lead-current observation row during
+        // transient/small-signal analyses. Reserve the union of both.
+        for (index, branch_ordinal) in circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let Some(branch_ordinal) = branch_ordinal else {
+                continue;
+            };
+            let stamp = &circuit.capacitors.stamps[index];
+            let pos = stamp.pp.row;
+            let neg = stamp.nn.row;
+            let branch = circuit.get_branch_matrix_index(branch_ordinal);
+            if pos > 0 {
+                triplets.push((branch - 1, pos - 1, 0.0));
+                triplets.push((pos - 1, branch - 1, 0.0));
+            }
+            if neg > 0 {
+                triplets.push((branch - 1, neg - 1, 0.0));
+                triplets.push((neg - 1, branch - 1, 0.0));
+            }
+            triplets.push((branch - 1, branch - 1, 0.0));
+        }
+
         // Voltage source stamps
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];

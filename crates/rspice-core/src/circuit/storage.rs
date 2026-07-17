@@ -5,12 +5,12 @@
 //! branch allocation, and whole-circuit orchestration.
 
 use super::{NodeId, TwoTerminalStamp, project_two_terminal_voltage};
-use crate::Value;
 use crate::analysis::{CompanionCoefficients, IntegrationMethod};
 use crate::device::{
     Bjt, Diode, Ekv3Device, EkvMosfet, MatrixStamper, Mosfet, NonlinearConvergenceCriteria, Vdmos,
 };
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
+use crate::{Complex64, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, RwLock};
 mod inductors;

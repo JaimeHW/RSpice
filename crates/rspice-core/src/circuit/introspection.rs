@@ -383,7 +383,8 @@ impl CircuitData {
         let num_nodes = self.num_nodes;
         self.resistor_branches
             .link_indices(matrix, |br_ordinal| num_nodes + br_ordinal);
-        self.capacitors.link_indices(matrix);
+        self.capacitors
+            .link_indices(matrix, |br_ordinal| num_nodes + br_ordinal);
         self.voltage_sources
             .link_indices(matrix, |br_ordinal| num_nodes + br_ordinal);
 

@@ -343,6 +343,27 @@ impl Engine {
         {
             currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
         }
+        // Keep public I(Cname) aligned with the committed companion history;
+        // this is the accepted-point current represented by the dynamic
+        // observation branch equation.
+        for (capacitor, branch_ordinal) in circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let Some(branch_ordinal) = branch_ordinal else {
+                continue;
+            };
+            if let Some(current) = result
+                .branch_currents
+                .get_mut(branch_ordinal - 1)
+                .and_then(|waveform| waveform.last_mut())
+            {
+                *current = circuit.capacitors.i_prev[capacitor];
+            }
+        }
         for (branch, currents) in derived_branches
             .iter()
             .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
@@ -768,8 +789,6 @@ impl Engine {
                     *slot = *ic;
                 }
             }
-        } else if self.config.spice_dialect == SpiceDialect::Xyce {
-            Self::apply_capacitor_element_initial_conditions(&circuit, &mut solution);
         }
         let startup_voltage_hints_active = resume.is_none()
             && !self
@@ -1116,6 +1135,22 @@ impl Engine {
         voltage_lte_excluded_nodes.sort_unstable();
         voltage_lte_excluded_nodes.dedup();
         let mut xyce_lte_excluded_indices = Vec::new();
+        // Capacitor lead-current observation branches are algebraic outputs,
+        // not integration states, and must never drive LTE rejection or
+        // accepted-reference timestep control.
+        for branch_ordinal in circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .flatten()
+            .copied()
+        {
+            let matrix_index = num_nodes + branch_ordinal - 1;
+            xyce_lte_excluded_indices.push(matrix_index);
+            if let Some(excluded) = solution_lte_excluded.get_mut(matrix_index) {
+                *excluded = true;
+            }
+        }
         for binding in &circuit.coupled_inductor_pairs {
             for branch in [binding.branch1_ordinal, binding.branch2_ordinal] {
                 if branch > 0 {
@@ -1212,6 +1247,26 @@ impl Engine {
             checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
+            // The checkpointed companion history is authoritative for the
+            // accepted capacitor lead current across an integration restart.
+            for (capacitor, branch_ordinal) in circuit
+                .capacitors
+                .ic_branch_indices
+                .iter()
+                .copied()
+                .enumerate()
+            {
+                let Some(branch_ordinal) = branch_ordinal else {
+                    continue;
+                };
+                if let Some(current) = result
+                    .branch_currents
+                    .get_mut(branch_ordinal - 1)
+                    .and_then(|waveform| waveform.first_mut())
+                {
+                    *current = circuit.capacitors.i_prev[capacitor];
+                }
+            }
         }
 
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
@@ -4309,7 +4364,139 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SimulationConfig;
+    use crate::{Netlist, SimulationConfig};
+
+    #[test]
+    fn xyce_capacitor_ic_floating_terminal_is_constrained_at_start_then_held_by_companion() {
+        let netlist = Netlist::parse(
+            "floating capacitor IC transient\n\
+             V1 fixed 0 1\n\
+             C1 fixed floating 1 IC=0\n\
+             .TRAN 100u 1m\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let result = engine
+            .run_tran(&netlist, 1.0e-3, 1.0e-4)
+            .expect("floating IC capacitor transient solves");
+        let fixed = result
+            .try_voltage_waveform_named("fixed")
+            .expect("fixed waveform exists");
+        let floating = result
+            .try_voltage_waveform_named("floating")
+            .expect("floating waveform exists");
+
+        assert!(result.time.len() > 1);
+        for (sample, (&fixed, &floating)) in fixed.iter().zip(floating).enumerate() {
+            assert!(
+                (fixed - 1.0).abs() <= 1.0e-10,
+                "sample {sample}: fixed source changed to {fixed:.17e}"
+            );
+            assert!(
+                (floating - 1.0).abs() <= 1.0e-10,
+                "sample {sample}: IC-constrained floating node changed to {floating:.17e}"
+            );
+        }
+
+        let current = result
+            .try_branch_current_waveform_named("C1")
+            .expect("capacitor branch-current waveform exists");
+        assert_eq!(current.len(), result.time.len());
+        assert!(
+            current.iter().all(|value| value.abs() <= 1.0e-10),
+            "zero-voltage constant capacitor should carry no current: {current:?}"
+        );
+    }
+
+    #[test]
+    fn xyce_capacitor_ic_branch_handoff_allows_parallel_capacitor_rc_decay() {
+        let netlist = Netlist::parse(
+            "Xyce IC branch to capacitor companion handoff\n\
+             V1 fixed 0 1\n\
+             C1 fixed out 0.5 IC=0\n\
+             C2 fixed out 0.5\n\
+             R1 out 0 1\n\
+             .OPTIONS TIMEINT ABSTOL=1e-12 RELTOL=1e-6\n\
+             .TRAN 0 2 1m\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let result = engine
+            .run_tran(&netlist, 2.0, 1.0e-3)
+            .expect("IC branch must hand off to the transient capacitor companion");
+        let out = result
+            .try_voltage_waveform_named("out")
+            .expect("out waveform exists");
+        assert!((out[0] - 1.0).abs() <= 1.0e-10);
+        for (&time, &voltage) in result.time.iter().zip(out) {
+            let expected = (-time).exp();
+            assert!(
+                (voltage - expected).abs() <= 2.0e-3,
+                "at t={time:.9e}, expected {expected:.9e}, got {voltage:.9e}"
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_behavioral_capacitor_current_uses_physical_companion_current() {
+        let netlist = Netlist::parse(
+            "behavioral capacitor lead current\n\
+             C1 n 0 1 IC=1\n\
+             R1 n 0 1\n\
+             B1 sense 0 I={I(C1)}\n\
+             RS sense 0 1\n\
+             .TRAN 0 0.1 1m\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let result = engine
+            .run_tran(&netlist, 0.1, 1.0e-3)
+            .expect("behavioral I(C1) transient solves");
+        let capacitor_node = result.try_voltage_waveform_named("n").unwrap();
+        let sense = result.try_voltage_waveform_named("sense").unwrap();
+        for (&expected, &actual) in capacitor_node.iter().zip(sense) {
+            assert!(
+                (actual - expected).abs() <= 1.0e-8,
+                "behavioral I(C1) was not the physical capacitor current: expected sense={expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_capacitor_current_checkpoint_resume_starts_from_restored_history() {
+        let netlist = Netlist::parse(
+            "checkpointed capacitor current\nC1 n 0 1 IC=1\nR1 n 0 1\n.TRAN 0 0.1 1m\n.END\n",
+        )
+        .expect("deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let (first, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, 0.05, 1.0e-3)
+            .expect("first segment solves");
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 0.1, 1.0e-3)
+            .expect("resumed segment solves");
+        let before = *first
+            .try_branch_current_waveform_named("C1")
+            .unwrap()
+            .last()
+            .unwrap();
+        let after = resumed.try_branch_current_waveform_named("C1").unwrap()[0];
+        assert!(
+            before.abs() > 0.5,
+            "test must retain nonzero current: {before}"
+        );
+        assert!(
+            (after - before).abs() <= 1.0e-12,
+            "resume current discontinuity: before={before}, resumed={after}"
+        );
+    }
 
     #[test]
     fn transient_merit_rollback_restores_circuit_and_vbic_cache() {
