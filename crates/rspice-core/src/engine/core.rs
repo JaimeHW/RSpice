@@ -5,6 +5,7 @@ use super::{
     resolve_simulation_config,
 };
 use crate::netlist::{ElementKind, SubcircuitDef};
+use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
 /// Main simulation engine
@@ -71,6 +72,60 @@ impl Engine {
             Some(error) => Err(error.clone().into()),
             None => Ok(()),
         }
+    }
+
+    #[inline]
+    pub(crate) fn ensure_analysis_points(&self, requested: usize) -> Result<(), SimulationError> {
+        ResourceLimitError::ensure(
+            ResourceKind::AnalysisPoints,
+            requested,
+            self.config.resource_limits.max_analysis_points,
+        )?;
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn ensure_result_values(&self, requested: usize) -> Result<(), SimulationError> {
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            requested,
+            self.config.resource_limits.max_result_values,
+        )?;
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn ensure_batch_runs(&self, requested: usize) -> Result<(), SimulationError> {
+        ResourceLimitError::ensure(
+            ResourceKind::BatchRuns,
+            requested,
+            self.config.resource_limits.max_batch_runs,
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn ensure_result_shape(
+        &self,
+        points: usize,
+        values_per_point: usize,
+    ) -> Result<(), SimulationError> {
+        self.ensure_result_values(points.saturating_mul(values_per_point))
+    }
+
+    pub(crate) fn simulation_result_value_count(result: &crate::solver::SimulationResult) -> usize {
+        result
+            .node_voltages
+            .len()
+            .saturating_add(result.branch_currents.len())
+            .saturating_add(result.dc_observables.len())
+            .saturating_add(result.time_points.len())
+            .saturating_add(
+                result
+                    .voltage_waveforms
+                    .iter()
+                    .map(Vec::len)
+                    .fold(0usize, usize::saturating_add),
+            )
     }
 
     /// Get a reference to the simulation configuration

@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use rspice_core::analysis::HbConfig;
 use rspice_core::netlist::{IncludeProcessor, NetlistParseOptions, ParseError};
 use rspice_core::{
     Engine, Netlist, ResourceKind, ResourceLimitError, ResourceLimits, SimulationConfig,
@@ -158,5 +159,161 @@ fn locked_time_grid_is_rejected_during_configuration_validation() {
             requested: 3,
             limit: 2,
         }))
+    ));
+}
+
+#[test]
+fn frequency_and_dc_sweeps_enforce_point_budgets_before_solving() {
+    let netlist =
+        Netlist::parse("limited analyses\nV1 1 0 1 AC 1\nR1 1 0 1k\n.end").expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_analysis_points = 2),
+        ..SimulationConfig::default()
+    };
+    let engine = Engine::new(config);
+
+    assert!(matches!(
+        engine.run_ac(&netlist, &[1.0, 10.0, 100.0]),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::AnalysisPoints,
+            requested: 3,
+            limit: 2,
+        }))
+    ));
+    assert!(matches!(
+        engine.run_dc_sweep(&netlist, "V1", 0.0, 2.0, 1.0),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::AnalysisPoints,
+            requested: 3,
+            limit: 2,
+        }))
+    ));
+}
+
+#[test]
+fn transient_preflight_rejects_a_minimum_point_count_over_budget() {
+    let netlist =
+        Netlist::parse("limited transient\nV1 1 0 1\nR1 1 0 1k\n.end").expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_analysis_points = 4),
+        ..SimulationConfig::default()
+    };
+
+    assert!(matches!(
+        Engine::new(config).run_tran(&netlist, 1.0, 0.25),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::AnalysisPoints,
+            requested: 5,
+            limit: 4,
+        }))
+    ));
+}
+
+#[test]
+fn independent_batch_analyses_enforce_run_budgets() {
+    let netlist =
+        Netlist::parse("limited batch\n.param P=1\nR1 1 0 {P}\n.end").expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_batch_runs = 2),
+        ..SimulationConfig::default()
+    };
+    let engine = Engine::new(config);
+
+    assert!(matches!(
+        engine.run_monte_carlo(&netlist, 3, 7),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::BatchRuns,
+            requested: 3,
+            limit: 2,
+        }))
+    ));
+    assert!(matches!(
+        engine.run_step(&netlist, "P", &[1.0, 2.0, 3.0]),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::BatchRuns,
+            requested: 3,
+            limit: 2,
+        }))
+    ));
+}
+
+#[test]
+fn result_shapes_are_bounded_independently_of_point_counts() {
+    let netlist =
+        Netlist::parse("limited result\n.param RVAL=1k\nV1 1 0 1 AC 1\nR1 1 0 {RVAL}\n.end")
+            .expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_result_values = 2),
+        ..SimulationConfig::default()
+    };
+    let engine = Engine::new(config);
+
+    assert!(matches!(
+        engine.run_ac(&netlist, &[1.0]),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ResultValues,
+            requested,
+            limit: 2,
+        })) if requested > 2
+    ));
+    assert!(matches!(
+        engine.run_dc_op(&netlist),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ResultValues,
+            requested,
+            limit: 2,
+        })) if requested > 2
+    ));
+    assert!(matches!(
+        engine.run_monte_carlo(&netlist, 1, 7),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ResultValues,
+            requested,
+            limit: 2,
+        })) if requested > 2
+    ));
+}
+
+#[test]
+fn step_results_enforce_the_aggregate_result_budget() {
+    let netlist = Netlist::parse(
+        "limited aggregate\n\
+         .param RVAL=1k\n\
+         V1 in 0 1\n\
+         R1 in out {RVAL}\n\
+         R2 out 0 1k\n\
+         .end",
+    )
+    .expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_result_values = 15),
+        ..SimulationConfig::default()
+    };
+
+    assert!(matches!(
+        Engine::new(config).run_step(&netlist, "RVAL", &[1_000.0, 2_000.0]),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ResultValues,
+            requested,
+            limit: 15,
+        })) if requested > 15
+    ));
+}
+
+#[test]
+fn harmonic_balance_rejects_oversized_collocation_before_circuit_build() {
+    let netlist = Netlist::parse("limited harmonic balance\n.end").expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_analysis_points = 3),
+        ..SimulationConfig::default()
+    };
+
+    assert!(matches!(
+        Engine::new(config).run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(3)),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::AnalysisPoints,
+            requested,
+            limit: 3,
+        })) if requested > 3
     ));
 }

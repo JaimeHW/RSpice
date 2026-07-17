@@ -1488,6 +1488,9 @@ impl Engine {
             )));
         }
 
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_analysis_points(frequencies.len())?;
+
         let mut unique_names = HashSet::with_capacity(port_sources.len());
         for source in port_sources {
             if source.trim().is_empty() {
@@ -1502,7 +1505,6 @@ impl Engine {
             }
         }
 
-        let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
@@ -1556,6 +1558,13 @@ impl Engine {
 
         let size = circuit.matrix_size();
         let num_ports = branch_matrix_indices.len();
+        engine.ensure_result_shape(
+            frequencies.len(),
+            num_ports
+                .saturating_mul(num_ports)
+                .saturating_mul(2)
+                .saturating_add(1),
+        )?;
         let zero = Complex64::new(0.0, 0.0);
         let mut rhs = vec![zero; size];
         let mut results = Vec::with_capacity(frequencies.len());
@@ -1816,7 +1825,26 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        if frequencies.is_empty() {
+            return Err(SimulationError::Circuit(
+                "Noise analysis requires at least one frequency".to_string(),
+            ));
+        }
+        if let Some(frequency) = frequencies
+            .iter()
+            .find(|frequency| !frequency.is_finite() || **frequency <= 0.0)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "Noise frequencies must be finite and strictly positive, got {frequency}"
+            )));
+        }
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise temperature must be finite and strictly positive, got {temperature}"
+            )));
+        }
         let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_analysis_points(frequencies.len())?;
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         let resolve_node = |name: &str| {
             circuit.get_node_by_name(name.trim()).ok_or_else(|| {
@@ -1856,6 +1884,19 @@ impl Engine {
         circuit.prepare_behavioral_small_signal(&dc_solution);
         let (noise_sources, correlated_noise_sources) =
             Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+        engine.ensure_result_shape(
+            frequencies.len(),
+            circuit
+                .matrix_size()
+                .saturating_mul(2)
+                .saturating_add(4)
+                .saturating_add(
+                    noise_sources
+                        .len()
+                        .saturating_add(correlated_noise_sources.len())
+                        .saturating_mul(3),
+                ),
+        )?;
 
         // Compute noise at each frequency
         let mut contribution_catalog = noise_sources

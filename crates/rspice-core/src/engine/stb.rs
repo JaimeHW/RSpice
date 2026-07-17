@@ -76,6 +76,11 @@ impl Engine {
         config
             .validate()
             .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
+        let frequency_count = config
+            .frequency_point_count()
+            .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
+        self.ensure_analysis_points(frequency_count)?;
+        self.ensure_result_shape(frequency_count, 3)?;
 
         let probe_name = config
             .probe_node

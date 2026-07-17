@@ -96,6 +96,9 @@ impl Engine {
             ));
         }
         let max_sideband = max_sideband.max(1);
+        self.ensure_analysis_points(offsets.len())?;
+        let sideband_count = (max_sideband as usize).saturating_mul(2).saturating_add(1);
+        self.ensure_analysis_points(sideband_count)?;
 
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         let num_nodes = circuit.num_nodes();
@@ -106,11 +109,13 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
 
-        let span = (2 * max_sideband).unsigned_abs() as usize;
+        let span = (max_sideband as usize).saturating_mul(2);
         let op_harmonics = span.max(8);
         let hb_config = HbConfig::new(fundamental_freq)
             .with_harmonics(op_harmonics)
             .with_oversample(4);
+        self.ensure_analysis_points(hb_config.fft_size())?;
+        self.ensure_result_shape(op_harmonics.saturating_add(1), num_nodes.saturating_mul(2))?;
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
 
         let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
@@ -248,6 +253,13 @@ impl Engine {
 
         // Cyclostationary device sources from the converged waveforms.
         sources.extend(solver.device_noise_sources(&state, temperature));
+        self.ensure_result_shape(
+            offsets.len(),
+            sources
+                .len()
+                .saturating_add(2)
+                .saturating_add(usize::from(input_source.is_some())),
+        )?;
 
         // Input transfer for input-referred noise: the conversion transfer
         // from the named source (unit excitation at sideband 0) to the

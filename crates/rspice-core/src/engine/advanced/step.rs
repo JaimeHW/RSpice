@@ -174,6 +174,21 @@ impl MaterializedStepRun {
 }
 
 impl Engine {
+    fn push_step_result(
+        &self,
+        results: &mut Vec<(Value, SimulationResult)>,
+        retained_values: &mut usize,
+        value: Value,
+        result: SimulationResult,
+    ) -> Result<(), SimulationError> {
+        *retained_values = retained_values
+            .saturating_add(Self::simulation_result_value_count(&result))
+            .saturating_add(1);
+        self.ensure_result_values(*retained_values)?;
+        results.push((value, result));
+        Ok(())
+    }
+
     /// Build a checked Cartesian plan without materializing any run netlists.
     pub fn plan_step_commands<'a>(
         &self,
@@ -195,6 +210,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        self.ensure_batch_runs(1)?;
         let configured_limits = [
             ("max_runs", limits.max_runs),
             ("max_dimensions", limits.max_dimensions),
@@ -306,6 +322,7 @@ impl Engine {
                 limits.max_runs,
                 dimension_index,
             )?;
+            self.ensure_batch_runs(total_runs)?;
             dimensions.push(dimension);
         }
 
@@ -407,6 +424,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        self.ensure_batch_runs(plan.total_runs)?;
 
         let mut runs = Vec::with_capacity(plan.total_runs);
         for run_index in 0..plan.total_runs {
@@ -759,8 +777,10 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         validate_step_values(values)?;
+        self.ensure_batch_runs(values.len())?;
 
         let mut results = Vec::with_capacity(values.len());
+        let mut retained_values = 0usize;
         let mut any_binding = false;
 
         for &value in values {
@@ -772,7 +792,9 @@ impl Engine {
             any_binding |= rebuilt > 0;
 
             match self.run_dc_op_with_abort(&modified_netlist, abort) {
-                Ok(result) => results.push((value, result)),
+                Ok(result) => {
+                    self.push_step_result(&mut results, &mut retained_values, value, result)?
+                }
                 Err(e) => return Err(step_point_error("PARAM", param_name, value, e)),
             }
         }
@@ -808,15 +830,19 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        self.ensure_batch_runs(values.len())?;
         if matches!(step_cmd.sweep, StepSweep::Data { .. }) {
             let stepped_netlists = self.step_netlists_for_command(netlist, step_cmd, values)?;
             let mut results = Vec::with_capacity(stepped_netlists.len());
+            let mut retained_values = 0usize;
             for (index, stepped_netlist) in stepped_netlists {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 match self.run_dc_op_with_abort(&stepped_netlist, abort) {
-                    Ok(result) => results.push((index, result)),
+                    Ok(result) => {
+                        self.push_step_result(&mut results, &mut retained_values, index, result)?
+                    }
                     Err(e) => return Err(step_point_error("DATA", &step_cmd.name, index, e)),
                 }
             }
@@ -850,10 +876,11 @@ impl Engine {
         values: &[Value],
     ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
         if let StepSweep::Data { table_name } = &step_cmd.sweep {
-            return Self::data_step_netlists_for_table(netlist, table_name);
+            return self.data_step_netlists_for_table(netlist, table_name);
         }
 
         validate_step_values(values)?;
+        self.ensure_batch_runs(values.len())?;
 
         let mut stepped = Vec::with_capacity(values.len());
         let mut any_binding = false;
@@ -875,10 +902,12 @@ impl Engine {
     }
 
     fn data_step_netlists_for_table(
+        &self,
         netlist: &Netlist,
         table_name: &str,
     ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
         let table = Self::validated_data_step_table(netlist, table_name, &NoAbort)?;
+        self.ensure_batch_runs(table.rows.len())?;
 
         let mut stepped = Vec::with_capacity(table.rows.len());
         for (row_index, row) in table.rows.iter().enumerate() {
@@ -1085,8 +1114,10 @@ impl Engine {
         if values.is_empty() {
             return Ok(Vec::new());
         }
+        self.ensure_batch_runs(values.len())?;
 
         let mut results = Vec::with_capacity(values.len());
+        let mut retained_values = 0usize;
         for &value in values {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -1094,7 +1125,12 @@ impl Engine {
             let (stepped, _) = Self::step_temperature_netlist(netlist, value)?;
 
             match self.run_dc_op_with_abort(&stepped, abort) {
-                Ok(result) => results.push((value, result)),
+                Ok(result) => {
+                    self.push_step_result(&mut results, &mut retained_values, value, result)?
+                }
+                Err(error @ SimulationError::Aborted)
+                | Err(error @ SimulationError::ResourceLimit(_))
+                | Err(error @ SimulationError::Configuration(_)) => return Err(error),
                 Err(e) => {
                     log::warn!("Step TEMP = {} failed: {}", value, e);
                 }
@@ -1113,18 +1149,25 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         validate_step_values(values)?;
+        self.ensure_batch_runs(values.len())?;
 
         if device_name.contains(':') {
             let mut results = Vec::with_capacity(values.len());
+            let mut retained_values = 0usize;
             for &value in values {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 let stepped = Self::hierarchical_device_step_netlist(
                     netlist,
                     device_name,
                     param_name,
                     value,
                 )?;
-                match self.run_dc_op(&stepped) {
-                    Ok(result) => results.push((value, result)),
+                match self.run_dc_op_with_abort(&stepped, abort) {
+                    Ok(result) => {
+                        self.push_step_result(&mut results, &mut retained_values, value, result)?
+                    }
                     Err(error) => {
                         let target = format!(
                             "{}{}",
@@ -1143,6 +1186,7 @@ impl Engine {
         let resolved = Self::resolve_device_or_model_step_target(netlist, device_name, param_name)?;
 
         let mut results = Vec::with_capacity(values.len());
+        let mut retained_values = 0usize;
         for &value in values {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -1176,7 +1220,9 @@ impl Engine {
             Self::mark_ast_stepped_netlist(&mut stepped);
 
             match self.run_dc_op_with_abort(&stepped, abort) {
-                Ok(result) => results.push((value, result)),
+                Ok(result) => {
+                    self.push_step_result(&mut results, &mut retained_values, value, result)?
+                }
                 Err(e) => {
                     return Err(step_point_error("DEVICE", &target, value, e));
                 }
@@ -1195,6 +1241,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         validate_step_values(values)?;
+        self.ensure_batch_runs(values.len())?;
 
         let param_name = param_name.ok_or_else(|| {
             SimulationError::Circuit(format!(
@@ -1204,6 +1251,7 @@ impl Engine {
         })?;
 
         let mut results = Vec::with_capacity(values.len());
+        let mut retained_values = 0usize;
         for &value in values {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -1214,7 +1262,9 @@ impl Engine {
             Self::mark_ast_stepped_netlist(&mut stepped);
 
             match self.run_dc_op_with_abort(&stepped, abort) {
-                Ok(result) => results.push((value, result)),
+                Ok(result) => {
+                    self.push_step_result(&mut results, &mut retained_values, value, result)?
+                }
                 Err(e) => {
                     let target = format!("{}.{}", model_name, param_name.to_ascii_uppercase());
                     return Err(step_point_error("MODEL", &target, value, e));
@@ -1870,12 +1920,14 @@ fn step_point_error(
     value: Value,
     error: SimulationError,
 ) -> SimulationError {
-    if matches!(error, SimulationError::Aborted) {
-        return SimulationError::Aborted;
+    match error {
+        error @ SimulationError::Aborted
+        | error @ SimulationError::ResourceLimit(_)
+        | error @ SimulationError::Configuration(_) => error,
+        error => SimulationError::Circuit(format!(
+            ".STEP {target_kind} {target_name} = {value} failed: {error}"
+        )),
     }
-    SimulationError::Circuit(format!(
-        ".STEP {target_kind} {target_name} = {value} failed: {error}"
-    ))
 }
 
 fn validate_step_values(values: &[Value]) -> Result<(), SimulationError> {
@@ -1946,10 +1998,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn step_point_error_preserves_only_typed_cancellation() {
+    fn step_point_error_preserves_typed_control_plane_errors() {
         assert!(matches!(
             step_point_error("PARAM", "RLOAD", 1_000.0, SimulationError::Aborted),
             SimulationError::Aborted
+        ));
+        let resource = crate::resource::ResourceLimitError {
+            resource: crate::resource::ResourceKind::ResultValues,
+            requested: 2,
+            limit: 1,
+        };
+        assert!(matches!(
+            step_point_error(
+                "PARAM",
+                "RLOAD",
+                1_000.0,
+                SimulationError::ResourceLimit(resource),
+            ),
+            SimulationError::ResourceLimit(error) if error == resource
         ));
 
         let adversarial = step_point_error(

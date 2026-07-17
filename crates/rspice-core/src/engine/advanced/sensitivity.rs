@@ -192,6 +192,8 @@ impl Engine {
         if let Some(output_neg) = output_neg {
             Self::validate_sensitivity_node("reference", output_neg, circuit.num_nodes())?;
         }
+        let matrix_size = circuit.matrix_size();
+        engine.ensure_result_shape(matrix_size, matrix_size.saturating_mul(4).saturating_add(1))?;
 
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
@@ -217,6 +219,7 @@ impl Engine {
                     .to_string(),
             ));
         }
+        engine.ensure_result_values(elements.len().saturating_mul(3).saturating_add(1))?;
 
         let mut analyzer = SensitivityAnalyzer::new(dense_g, dc_solution, elements);
         analyzer
@@ -821,9 +824,29 @@ impl Engine {
             .collect()
     }
 
-    fn flattened_sensitivity_netlist(netlist: &Netlist) -> Result<Netlist, SimulationError> {
-        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
-            .map_err(|error| SimulationError::Netlist(error.to_string()))?;
+    fn flattened_sensitivity_netlist(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<Netlist, SimulationError> {
+        let flattened = crate::netlist::flatten_netlist_with_models_config_with_abort(
+            netlist,
+            crate::netlist::FlattenerConfig {
+                max_depth: self.config.resource_limits.max_hierarchy_depth,
+                max_elements: self.config.resource_limits.max_flattened_elements,
+                ..crate::netlist::FlattenerConfig::default()
+            },
+            abort,
+        )
+        .map_err(|error| match error {
+            crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+            crate::netlist::ParseWithAbortError::Parse(
+                crate::netlist::ParseError::ResourceLimit(error),
+            ) => SimulationError::ResourceLimit(error),
+            crate::netlist::ParseWithAbortError::Parse(error) => {
+                SimulationError::Netlist(error.to_string())
+            }
+        })?;
         let mut flat = netlist.clone();
         flat.elements = flattened.elements;
         flat.subcircuits.clear();
@@ -2204,9 +2227,7 @@ impl Engine {
             ));
         }
 
-        let flat = Self::flattened_sensitivity_netlist(netlist)?;
-        let nominal_result = self.run_dc_op_with_abort(&flat, abort)?;
-        let nominal_output = Self::dc_sensitivity_output_value(&nominal_result, &output)?;
+        let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         let targets = Self::collect_ac_sensitivity_targets(&flat)?
             .into_iter()
             .filter(Self::dc_sensitivity_target_active)
@@ -2222,6 +2243,11 @@ impl Engine {
                 "DC sensitivity cannot run: {detail}"
             )));
         }
+        self.ensure_batch_runs(targets.len().saturating_mul(3).saturating_add(1))?;
+        self.ensure_result_values(targets.len().saturating_mul(3).saturating_add(1))?;
+
+        let nominal_result = self.run_dc_op_with_abort(&flat, abort)?;
+        let nominal_output = Self::dc_sensitivity_output_value(&nominal_result, &output)?;
 
         let output_name = match &output {
             AcSensitivityOutput::Voltage { positive, negative } => negative.map_or_else(
@@ -2362,15 +2388,14 @@ impl Engine {
                     .to_string(),
             ));
         }
+        self.ensure_analysis_points(frequencies.len())?;
         if let AcSensitivityOutput::Voltage { positive: 0, .. } = output {
             return Err(SimulationError::Circuit(
                 "Sensitivity output node must not be ground".to_string(),
             ));
         }
 
-        let flat = Self::flattened_sensitivity_netlist(netlist)?;
-        let nominal_results = self.run_ac_with_abort(&flat, frequencies, abort)?;
-        let nominal_output = Self::ac_sensitivity_outputs(&nominal_results, &output, frequencies)?;
+        let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         let targets = Self::collect_ac_sensitivity_targets(&flat)?
             .into_iter()
             .filter(|target| Self::sensitivity_target_selected(target, filters))
@@ -2385,6 +2410,14 @@ impl Engine {
                 "AC sensitivity cannot run: {detail}"
             )));
         }
+        self.ensure_batch_runs(targets.len().saturating_mul(3).saturating_add(1))?;
+        self.ensure_result_shape(
+            frequencies.len(),
+            targets.len().saturating_mul(6).saturating_add(3),
+        )?;
+
+        let nominal_results = self.run_ac_with_abort(&flat, frequencies, abort)?;
+        let nominal_output = Self::ac_sensitivity_outputs(&nominal_results, &output, frequencies)?;
 
         let output_name = match &output {
             AcSensitivityOutput::Voltage { positive, negative } => negative.map_or_else(

@@ -195,25 +195,6 @@ impl Engine {
             );
         }
 
-        // Build circuit using SoA architecture
-        let circuit = self.build_circuit_with_abort(netlist, abort)?;
-
-        // Get node count (excluding ground)
-        let num_nodes = circuit.num_nodes();
-        if num_nodes == 0 {
-            return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
-        }
-
-        // No reactive-element gate: junction devices carry their own charge
-        // storage, and HB on a resistive nonlinear circuit is legitimate
-        // distortion analysis (every harmonic system is solvable regardless).
-        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
-            return Err(HbError::UnsupportedNonlinearDevices(summary).into());
-        }
-        let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
-        let drive_tones = Self::hb_collect_drive_tones(&config)?;
-        Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
-
         let minimum_points = config.minimum_collocation_points().ok_or_else(|| {
             HbError::InvalidConfig(format!(
                 "harmonic count {} exceeds the addressable collocation grid",
@@ -230,6 +211,31 @@ impl Engine {
             ))
             .into());
         }
+        self.ensure_analysis_points(config.fft_size())?;
+        self.ensure_analysis_points(config.num_harmonics.saturating_add(1))?;
+
+        // Build circuit using SoA architecture
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+
+        // Get node count (excluding ground)
+        let num_nodes = circuit.num_nodes();
+        if num_nodes == 0 {
+            return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
+        }
+        self.ensure_result_shape(
+            config.num_harmonics.saturating_add(1),
+            num_nodes.saturating_mul(2),
+        )?;
+
+        // No reactive-element gate: junction devices carry their own charge
+        // storage, and HB on a resistive nonlinear circuit is legitimate
+        // distortion analysis (every harmonic system is solvable regardless).
+        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
+            return Err(HbError::UnsupportedNonlinearDevices(summary).into());
+        }
+        let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
+        let drive_tones = Self::hb_collect_drive_tones(&config)?;
+        Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
         // Create solver
         let mut solver = HbSolver::new(config.clone(), num_nodes);

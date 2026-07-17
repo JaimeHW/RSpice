@@ -150,6 +150,22 @@ impl StbConfig {
         }
     }
 
+    /// Number of sweep points that will be generated, without allocating the
+    /// frequency vector.
+    pub fn frequency_point_count(&self) -> Result<usize, String> {
+        self.validate()?;
+        let count = match self.sweep_type {
+            StbSweepType::Linear => self.num_points,
+            StbSweepType::Decade => ((self.freq_stop.log10() - self.freq_start.log10())
+                * self.num_points as Value)
+                .ceil() as usize,
+            StbSweepType::Octave => ((self.freq_stop.log2() - self.freq_start.log2())
+                * self.num_points as Value)
+                .ceil() as usize,
+        };
+        Ok(count.max(1))
+    }
+
     fn linear_points(&self) -> Vec<Value> {
         if self.num_points <= 1 {
             return vec![self.freq_start];

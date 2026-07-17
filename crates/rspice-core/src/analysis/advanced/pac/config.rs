@@ -203,6 +203,22 @@ impl PacConfig {
         })
     }
 
+    /// Number of points the configured sweep will generate, without
+    /// allocating the frequency vector.
+    pub fn frequency_point_count(&self) -> Result<usize, String> {
+        self.validate()?;
+        let count = match self.sweep_type {
+            PacSweepType::Linear => self.num_points,
+            PacSweepType::Decade => ((self.sweep_stop.log10() - self.sweep_start.log10())
+                * self.num_points as Value)
+                .ceil() as usize,
+            PacSweepType::Octave => ((self.sweep_stop.log2() - self.sweep_start.log2())
+                * self.num_points as Value)
+                .ceil() as usize,
+        };
+        Ok(count.max(1))
+    }
+
     /// Generate linear frequency sweep points
     fn linear_points(&self) -> Vec<Value> {
         if self.num_points <= 1 {
@@ -259,7 +275,8 @@ impl PacConfig {
 
     /// Get the number of sidebands being analyzed
     pub fn num_sidebands(&self) -> usize {
-        (self.sideband_max - self.sideband_min + 1) as usize
+        usize::try_from(i64::from(self.sideband_max) - i64::from(self.sideband_min) + 1)
+            .unwrap_or(usize::MAX)
     }
 
     /// Get sideband indices as a vector

@@ -231,6 +231,7 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         config.validate().map_err(PssError::InvalidConfig)?;
+        self.ensure_analysis_points(config.points_per_period)?;
 
         // Build and prepare circuit
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
@@ -242,6 +243,18 @@ impl Engine {
         if state_dimension == 0 {
             return Err(PssError::NoReactiveElements.into());
         }
+        self.ensure_result_values(
+            config
+                .points_per_period
+                .saturating_mul(
+                    circuit
+                        .matrix_size()
+                        .saturating_add(state_dimension)
+                        .saturating_add(1),
+                )
+                .saturating_add(state_dimension.saturating_mul(state_dimension))
+                .saturating_add(state_dimension.saturating_mul(2)),
+        )?;
 
         // Get DC operating point as initial condition.
         let dc_solution =

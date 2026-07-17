@@ -52,6 +52,13 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        self.ensure_valid_configuration()?;
+        if num_runs == 0 {
+            return Err(SimulationError::Circuit(
+                "Monte Carlo requires at least one run".to_string(),
+            ));
+        }
+        self.ensure_batch_runs(num_runs)?;
         let spread = match distribution {
             Distribution::Gaussian { sigma } => sigma,
             Distribution::Uniform { tolerance } => tolerance,
@@ -147,40 +154,54 @@ impl Engine {
             }
         }
 
-        // Phase 1 (serial): draw every run's variations from the seeded
-        // stream and build the perturbed netlists. Sampling order is
-        // byte-identical to the historical serial implementation, so a
-        // given seed reproduces the same runs regardless of how phase 2
-        // schedules them.
+        // Phase 1 (serial): draw every run's compact variation vector from
+        // the seeded stream. Sampling order remains byte-identical across
+        // worker counts, but full netlists are no longer cloned and retained
+        // for every run. Each worker materializes one deck immediately before
+        // its solve and drops it immediately afterward.
         let mut rng = Xorshift128Plus::new(seed);
-        let mut run_netlists = Vec::with_capacity(num_runs);
-        for _run in 0..num_runs {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let netlist_for_run = if monte_params.is_empty() {
-                netlist.clone()
-            } else {
-                let overrides: Vec<(String, Value)> = monte_params
+        let mut run_variations = if monte_params.is_empty() {
+            Vec::new()
+        } else {
+            Vec::with_capacity(num_runs)
+        };
+        if !monte_params.is_empty() {
+            self.ensure_result_shape(num_runs, monte_params.len())?;
+            for _run in 0..num_runs {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let variations: Vec<Value> = monte_params
                     .iter()
-                    .map(|(name, nominal)| {
-                        let varied =
-                            Self::sample_monte_carlo_value(&mut rng, *nominal, distribution);
-                        (name.clone(), varied)
+                    .map(|(_, nominal)| {
+                        Self::sample_monte_carlo_value(&mut rng, *nominal, distribution)
                     })
                     .collect();
-                let (perturbed, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
-                perturbed
-            };
-            run_netlists.push(netlist_for_run);
+                run_variations.push(variations);
+            }
         }
+
+        let materialize_run =
+            |run_index: usize| -> Result<std::borrow::Cow<'_, Netlist>, SimulationError> {
+                if monte_params.is_empty() {
+                    return Ok(std::borrow::Cow::Borrowed(netlist));
+                }
+                let overrides = monte_params
+                    .iter()
+                    .zip(&run_variations[run_index])
+                    .map(|((name, _), value)| (name.clone(), *value))
+                    .collect::<Vec<_>>();
+                let (perturbed, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+                Ok(std::borrow::Cow::Owned(perturbed))
+            };
 
         // Phase 2 (parallel): solve the independent runs across worker
         // threads, each with its own engine. Index-addressed slots keep
         // results in run order, so statistics match a serial sweep exactly;
         // failed runs are skipped just as before.
         // (node voltages, node names) of a converged run; None = failed run.
-        type RunOutcome = Option<(Vec<Value>, Vec<String>)>;
+        type RunResult = Option<(Vec<Value>, Vec<String>)>;
+        type RunOutcome = Result<RunResult, SimulationError>;
 
         let workers = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -188,23 +209,27 @@ impl Engine {
             .min(num_runs.max(1));
         let mut run_outcomes: Vec<RunOutcome> = Vec::new();
         if workers <= 1 {
-            for run_netlist in &run_netlists {
+            for run_index in 0..num_runs {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                run_outcomes.push(
-                    self.run_dc_op_with_abort(run_netlist, abort)
-                        .ok()
-                        .map(|result| (result.node_voltages, result.node_names)),
-                );
+                let run_netlist = materialize_run(run_index)?;
+                let outcome = match self.run_dc_op_with_abort(&run_netlist, abort) {
+                    Ok(result) => Ok(Some((result.node_voltages, result.node_names))),
+                    Err(error @ SimulationError::Aborted)
+                    | Err(error @ SimulationError::ResourceLimit(_))
+                    | Err(error @ SimulationError::Configuration(_)) => Err(error),
+                    Err(_) => Ok(None),
+                };
+                run_outcomes.push(outcome);
             }
         } else {
             use std::sync::Mutex;
             use std::sync::atomic::{AtomicUsize, Ordering};
 
             let next = AtomicUsize::new(0);
-            let slots: Vec<Mutex<RunOutcome>> =
-                (0..run_netlists.len()).map(|_| Mutex::new(None)).collect();
+            let slots: Vec<Mutex<Option<RunOutcome>>> =
+                (0..num_runs).map(|_| Mutex::new(None)).collect();
             let config = self.config().clone();
 
             std::thread::scope(|scope| {
@@ -216,23 +241,40 @@ impl Engine {
                                 break;
                             }
                             let index = next.fetch_add(1, Ordering::SeqCst);
-                            if index >= run_netlists.len() {
+                            if index >= num_runs {
                                 break;
                             }
-                            if let Ok(result) =
-                                engine.run_dc_op_with_abort(&run_netlists[index], abort)
-                            {
-                                *slots[index].lock().expect("mc slot") =
-                                    Some((result.node_voltages, result.node_names));
-                            }
+                            let run_netlist = match materialize_run(index) {
+                                Ok(run_netlist) => run_netlist,
+                                Err(error) => {
+                                    *slots[index].lock().expect("mc slot") = Some(Err(error));
+                                    continue;
+                                }
+                            };
+                            let outcome = match engine.run_dc_op_with_abort(&run_netlist, abort) {
+                                Ok(result) => Ok(Some((result.node_voltages, result.node_names))),
+                                Err(error @ SimulationError::Aborted)
+                                | Err(error @ SimulationError::ResourceLimit(_))
+                                | Err(error @ SimulationError::Configuration(_)) => Err(error),
+                                Err(_) => Ok(None),
+                            };
+                            *slots[index].lock().expect("mc slot") = Some(outcome);
                         }
                     });
                 }
             });
 
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+
             run_outcomes = slots
                 .into_iter()
-                .map(|slot| slot.into_inner().expect("mc slot lock"))
+                .map(|slot| {
+                    slot.into_inner()
+                        .expect("mc slot lock")
+                        .expect("every Monte Carlo slot is processed without cancellation")
+                })
                 .collect();
         }
 
@@ -240,12 +282,16 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
 
+        let run_outcomes = run_outcomes.into_iter().collect::<Result<Vec<_>, _>>()?;
         let mut results = Vec::with_capacity(num_runs);
         let mut first_node_names: Option<Vec<String>> = None;
+        let mut retained_values = 0usize;
         for (node_voltages, node_names) in run_outcomes.into_iter().flatten() {
             if first_node_names.is_none() {
                 first_node_names = Some(node_names);
             }
+            retained_values = retained_values.saturating_add(node_voltages.len());
+            self.ensure_result_values(retained_values)?;
             results.push(node_voltages);
         }
 
@@ -256,6 +302,16 @@ impl Engine {
             .map(|r| r.len().saturating_sub(1))
             .unwrap_or(0);
         let mut variables: HashMap<String, VariableStatistics> = HashMap::new();
+        let mut output_values = 0usize;
+
+        let variable_value_count = |statistics: &VariableStatistics| {
+            statistics
+                .samples
+                .len()
+                .saturating_add(statistics.histogram.len())
+                .saturating_add(statistics.bin_edges.len())
+                .saturating_add(4)
+        };
 
         for node_id in 1..=max_node_id {
             let samples: Vec<Value> = results
@@ -267,6 +323,8 @@ impl Engine {
                 let numeric_name = format!("V({})", node_id);
                 let numeric_label = numeric_name.clone();
                 let stats = VariableStatistics::from_samples(&numeric_name, samples.clone(), 20);
+                output_values = output_values.saturating_add(variable_value_count(&stats));
+                self.ensure_result_values(retained_values.saturating_add(output_values))?;
                 variables.insert(numeric_name, stats);
 
                 if let Some(node_names) = &first_node_names
@@ -275,6 +333,9 @@ impl Engine {
                     let named_key = format!("V({})", node_name);
                     if named_key != numeric_label {
                         let alias_stats = VariableStatistics::from_samples(&named_key, samples, 20);
+                        output_values =
+                            output_values.saturating_add(variable_value_count(&alias_stats));
+                        self.ensure_result_values(retained_values.saturating_add(output_values))?;
                         variables.insert(named_key, alias_stats);
                     }
                 }

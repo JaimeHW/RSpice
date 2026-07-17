@@ -320,7 +320,69 @@ impl Engine {
         currents
     }
 
+    fn transient_result_value_count(result: &TransientResult) -> usize {
+        result
+            .time
+            .len()
+            .saturating_add(
+                result
+                    .voltages
+                    .iter()
+                    .map(Vec::len)
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                result
+                    .branch_currents
+                    .iter()
+                    .map(Vec::len)
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                result
+                    .device_op_traces
+                    .iter()
+                    .map(|trace| trace.values.len())
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                result
+                    .digital_traces
+                    .iter()
+                    .map(|trace| trace.points.len().saturating_mul(2))
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                result
+                    .real_traces
+                    .iter()
+                    .map(|trace| trace.points.len().saturating_mul(2))
+                    .fold(0usize, usize::saturating_add),
+            )
+    }
+
+    fn ensure_transient_result_limits(
+        &self,
+        result: &TransientResult,
+    ) -> Result<(), SimulationError> {
+        self.ensure_analysis_points(result.time.len())?;
+        self.ensure_result_values(Self::transient_result_value_count(result))
+    }
+
+    fn ensure_transient_request_floor(
+        &self,
+        duration: Value,
+        max_step: Value,
+    ) -> Result<(), SimulationError> {
+        if let Some(grid) = self.config.locked_time_grid.as_deref() {
+            return self.ensure_analysis_points(grid.len());
+        }
+        let requested = (duration / max_step).ceil() as usize;
+        self.ensure_analysis_points(requested.saturating_add(1))
+    }
+
     fn record_transient_solution_sample(
+        &self,
         result: &mut TransientResult,
         circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
@@ -328,7 +390,17 @@ impl Engine {
         time: Value,
         derived_branches: &[DerivedTransientBranchCurrent],
         record_device_op_traces: bool,
-    ) {
+    ) -> Result<(), SimulationError> {
+        let next_point_count = result.time.len().saturating_add(1);
+        self.ensure_analysis_points(next_point_count)?;
+        self.ensure_result_shape(
+            next_point_count,
+            result
+                .voltages
+                .len()
+                .saturating_add(result.branch_currents.len())
+                .saturating_add(1),
+        )?;
         result.time.push(time);
         for (i, voltages) in result.voltages.iter_mut().enumerate() {
             voltages.push(solution.get(i).copied().unwrap_or(0.0));
@@ -375,6 +447,7 @@ impl Engine {
         if record_device_op_traces {
             result.record_device_op_sample(circuit.device_op_report());
         }
+        self.ensure_transient_result_limits(result)
     }
 
     fn backfill_initial_linear_capacitor_branch_currents(
@@ -478,6 +551,7 @@ impl Engine {
     ) -> Result<TransientResult, SimulationError> {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_transient_request_floor(tstop, max_step)?;
         // TRNOISE sources expand into seeded, deterministic PWL sample
         // trains covering [0, tstop] before circuit construction; decks
         // without noise sources pass through untouched (no clone).
@@ -511,6 +585,7 @@ impl Engine {
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_transient_request_floor(tstop, max_step)?;
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => engine
                 .run_tran_resolved_with_resume(&expanded, netlist, tstop, max_step, abort, None),
@@ -554,6 +629,7 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        validate_transient_window(tstop, max_step)?;
         if !tstop.is_finite() || tstop <= checkpoint.time {
             return Err(SimulationError::Circuit(format!(
                 "resume stop time {tstop:e} must exceed the checkpoint time {:e}",
@@ -562,6 +638,7 @@ impl Engine {
         }
 
         let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => engine.run_tran_resolved_with_resume(
                 &expanded,
@@ -991,11 +1068,12 @@ impl Engine {
         // Initialize result storage with actual node names from netlist
         let node_names = circuit.node_names_sorted();
 
-        // Debug: log node names and their indices to verify alignment
-        log::info!("Node mapping (index -> name, DC voltage):");
-        for (i, name) in node_names.iter().enumerate() {
-            let dc_v = solution.get(i).copied().unwrap_or(0.0);
-            log::info!("  Node[{}] = '{}', V_dc = {:.4}", i, name, dc_v);
+        log::debug!("Transient node mapping contains {} nodes", node_names.len());
+        if log::log_enabled!(log::Level::Trace) {
+            for (i, name) in node_names.iter().enumerate() {
+                let dc_v = solution.get(i).copied().unwrap_or(0.0);
+                log::trace!("Transient node[{i}] = '{name}', V_dc = {dc_v:.4}");
+            }
         }
         if applied_ic > 0 {
             log::info!(
@@ -1053,6 +1131,7 @@ impl Engine {
             circuit.fill_xspice_real_snapshot(&mut real_snapshot);
             result.record_real_snapshot(resume_time, &real_snapshot, &mut real_trace_indices);
         }
+        self.ensure_transient_result_limits(&result)?;
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
@@ -1210,7 +1289,7 @@ impl Engine {
             circuit.capacitors.v_prev[cap_idx] = v_dc;
             circuit.capacitors.v_prev_prev[cap_idx] = v_dc;
             circuit.capacitors.v_prev_prev_prev[cap_idx] = v_dc;
-            log::info!(
+            log::trace!(
                 "Capacitor {} init: v_dc={:.4}, np={}, nn={}",
                 circuit.capacitors.names[cap_idx],
                 v_dc,
@@ -2774,7 +2853,7 @@ impl Engine {
                         &circuit,
                         &derived_branch_currents,
                     );
-                    Self::record_transient_solution_sample(
+                    self.record_transient_solution_sample(
                         &mut result,
                         &mut circuit,
                         &solution,
@@ -2782,7 +2861,7 @@ impl Engine {
                         t,
                         &derived_branch_currents,
                         record_device_op_traces,
-                    );
+                    )?;
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                         result.record_digital_snapshot(
@@ -2793,6 +2872,7 @@ impl Engine {
                         circuit.fill_xspice_real_snapshot(&mut real_snapshot);
                         result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
                     }
+                    self.ensure_transient_result_limits(&result)?;
 
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
@@ -3673,7 +3753,7 @@ impl Engine {
                         &circuit,
                         &derived_branch_currents,
                     );
-                    Self::record_transient_solution_sample(
+                    self.record_transient_solution_sample(
                         &mut result,
                         &mut circuit,
                         &solution,
@@ -3681,7 +3761,7 @@ impl Engine {
                         t,
                         &derived_branch_currents,
                         record_device_op_traces,
-                    );
+                    )?;
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                         result.record_digital_snapshot(
@@ -3692,6 +3772,7 @@ impl Engine {
                         circuit.fill_xspice_real_snapshot(&mut real_snapshot);
                         result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
                     }
+                    self.ensure_transient_result_limits(&result)?;
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -3932,7 +4013,7 @@ impl Engine {
                 &circuit,
                 &derived_branch_currents,
             );
-            Self::record_transient_solution_sample(
+            self.record_transient_solution_sample(
                 &mut result,
                 &mut circuit,
                 &solution,
@@ -3940,13 +4021,14 @@ impl Engine {
                 t,
                 &derived_branch_currents,
                 record_device_op_traces,
-            );
+            )?;
             if record_xspice_event_traces {
                 circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                 result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
                 circuit.fill_xspice_real_snapshot(&mut real_snapshot);
                 result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
             }
+            self.ensure_transient_result_limits(&result)?;
             if first_accepted_transient_step {
                 timestep.set_max_dt(hinted_max_step);
                 let next_dt = if lte_estimator.uses_accepted_solution_reference() {
@@ -4087,7 +4169,7 @@ impl Engine {
             )));
         }
         let transient_wall = transient_wall_start.elapsed();
-        log::info!(
+        log::debug!(
             "Transient Newton phases: {} iterations, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
             total_iterations,
             total_merit_trials,
@@ -4125,15 +4207,16 @@ impl Engine {
             transient_wall.as_secs_f64(),
         );
 
-        // Debug: verify stored voltage range for node 0 (SIN source)
-        if let Some(node0_voltages) = result.voltages.first() {
-            let v_min = node0_voltages.iter().cloned().fold(f64::INFINITY, f64::min);
+        if log::log_enabled!(log::Level::Debug)
+            && let Some(node0_voltages) = result.voltages.first()
+        {
+            let v_min = node0_voltages.iter().copied().fold(f64::INFINITY, f64::min);
             let v_max = node0_voltages
                 .iter()
-                .cloned()
+                .copied()
                 .fold(f64::NEG_INFINITY, f64::max);
-            log::info!(
-                "Stored voltages for node0 (SIN source): {} points, y_min={:.4}, y_max={:.4}",
+            log::debug!(
+                "Stored voltages for node0: {} points, y_min={:.4}, y_max={:.4}",
                 node0_voltages.len(),
                 v_min,
                 v_max

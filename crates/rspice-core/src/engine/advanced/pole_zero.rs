@@ -380,6 +380,8 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
         }
+        let matrix_size = circuit.matrix_size();
+        self.ensure_result_shape(matrix_size, matrix_size.saturating_mul(8).saturating_add(1))?;
 
         // Reuse the AC linearization path so pole-zero analysis sees the same
         // nonlinear small-signal conductances and capacitances as AC analysis.
@@ -444,6 +446,14 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        self.ensure_result_values(
+            result
+                .poles
+                .len()
+                .saturating_add(result.zeros.len())
+                .saturating_mul(2)
+                .saturating_add(2),
+        )?;
         abort.observe_progress(1.0);
         Ok(result)
     }

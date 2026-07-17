@@ -2271,8 +2271,10 @@ impl Engine {
         }
         validate_ac_frequencies(frequencies)?;
         let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_analysis_points(frequencies.len())?;
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
+            engine.ensure_result_shape(frequencies.len(), 1)?;
             return Ok(frequencies
                 .iter()
                 .map(|&frequency| AcResult {
@@ -2320,6 +2322,7 @@ impl Engine {
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
+        engine.ensure_result_shape(frequencies.len(), size.saturating_mul(2).saturating_add(1))?;
         let node_names = circuit.node_names_sorted();
         let branch_names = circuit.branch_names_sorted();
 

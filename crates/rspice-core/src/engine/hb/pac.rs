@@ -64,6 +64,29 @@ impl Engine {
         config
             .validate()
             .map_err(|e| SimulationError::Circuit(format!("Invalid PAC config: {e}")))?;
+        let frequency_count = config.frequency_point_count().map_err(|error| {
+            SimulationError::Circuit(format!("Invalid PAC frequency sweep: {error}"))
+        })?;
+        self.ensure_analysis_points(frequency_count)?;
+        let sideband_count = config.num_sidebands();
+        self.ensure_analysis_points(sideband_count)?;
+
+        // The operating point needs enough harmonics that every conversion
+        // coupling G[k-m] over the sideband span exists, with headroom for
+        // the drive itself. Compute in i64 so extreme public i32 bounds
+        // cannot overflow before the resource policy rejects them.
+        let span = usize::try_from(
+            (i64::from(config.sideband_max) - i64::from(config.sideband_min)).unsigned_abs(),
+        )
+        .unwrap_or(usize::MAX);
+        let extreme = usize::try_from(
+            i64::from(config.sideband_min)
+                .unsigned_abs()
+                .max(i64::from(config.sideband_max).unsigned_abs()),
+        )
+        .unwrap_or(usize::MAX);
+        let op_harmonics = span.max(extreme).max(8);
+        self.ensure_analysis_points(op_harmonics.saturating_add(1))?;
 
         let input_name = config
             .input_source
@@ -75,23 +98,27 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
+        let spectra_values = frequency_count
+            .saturating_mul(sideband_count)
+            .saturating_mul(num_nodes)
+            .saturating_mul(2);
+        let conversion_values = if config.output_node.is_some() {
+            frequency_count
+                .saturating_mul(sideband_count)
+                .saturating_mul(sideband_count)
+                .saturating_mul(2)
+        } else {
+            0
+        };
+        self.ensure_result_values(spectra_values.saturating_add(conversion_values))?;
         if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
 
-        // The operating point needs enough harmonics that every conversion
-        // coupling G[k-m] over the sideband span exists, with headroom for
-        // the drive itself.
-        let span = (config.sideband_max - config.sideband_min).unsigned_abs() as usize;
-        let extreme = (config
-            .sideband_min
-            .unsigned_abs()
-            .max(config.sideband_max.unsigned_abs())) as usize;
-        let op_harmonics = span.max(extreme).max(8);
-
         let mut hb_config = HbConfig::new(config.fundamental_freq)
             .with_harmonics(op_harmonics)
             .with_oversample(4);
+        self.ensure_analysis_points(hb_config.fft_size())?;
         // PAC's tolerances govern the nonlinear periodic operating point.
         // The subsequent sideband systems use deterministic direct solves and
         // therefore have no iterative tolerance of their own.

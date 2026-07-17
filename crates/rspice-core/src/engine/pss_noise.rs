@@ -88,6 +88,7 @@ impl Engine {
                 "oscillator pnoise needs at least one offset frequency".to_string(),
             ));
         }
+        self.ensure_analysis_points(offsets.len())?;
         if let Some(offset) = offsets
             .iter()
             .copied()
@@ -134,6 +135,12 @@ impl Engine {
                 "oscillator pnoise: trajectory too short".to_string(),
             ));
         }
+        self.ensure_result_values(
+            n_grid
+                .saturating_mul(n_state)
+                .saturating_mul(n_state)
+                .saturating_add(offsets.len().saturating_mul(4)),
+        )?;
 
         // ------------------------------------------------------------------
         // State-transition matrices Phi(t_k, 0) by central differences on

@@ -8,11 +8,31 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::solver::{SimulationResult, StaticMatrix};
 use crate::{CircuitData, Netlist, Value};
 
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 const DC_SWEEP_RESULT_PREALLOC_LIMIT: usize = 4096;
+
+fn bounded_dc_sweep_points(
+    engine: &Engine,
+    spec: &crate::netlist::DcSweepSpec,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SimulationError> {
+    spec.points_bounded_with_abort(engine.config.resource_limits.max_analysis_points, abort)
+        .map_err(|error| match error {
+            crate::netlist::SweepPointGenerationError::Aborted => SimulationError::Aborted,
+            crate::netlist::SweepPointGenerationError::LimitExceeded { requested, limit } => {
+                ResourceLimitError {
+                    resource: ResourceKind::AnalysisPoints,
+                    requested,
+                    limit,
+                }
+                .into()
+            }
+        })
+}
 
 /// One accepted point from a DC sweep, including the solved node/branch result
 /// and the per-device operating-point report cached at that bias.
@@ -21,6 +41,23 @@ pub struct DcSweepPointResult {
     pub sweep_value: Value,
     pub result: SimulationResult,
     pub device_op_report: crate::circuit::DeviceOpReport,
+}
+
+fn dc_result_value_count(
+    result: &SimulationResult,
+    device_op_report: &crate::circuit::DeviceOpReport,
+) -> usize {
+    Engine::simulation_result_value_count(result).saturating_add(
+        device_op_report
+            .entries
+            .iter()
+            .map(|entry| entry.params.len())
+            .fold(0usize, usize::saturating_add),
+    )
+}
+
+fn dc_sweep_point_value_count(point: &DcSweepPointResult) -> usize {
+    dc_result_value_count(&point.result, &point.device_op_report).saturating_add(1)
 }
 
 enum DcSweepSource {
@@ -282,10 +319,10 @@ impl Engine {
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
 
         if circuit.num_nodes() == 0 {
-            return Ok((
-                Self::build_empty_dc_result(),
-                crate::circuit::DeviceOpReport::default(),
-            ));
+            let result = Self::build_empty_dc_result();
+            let report = crate::circuit::DeviceOpReport::default();
+            engine.ensure_result_values(dc_result_value_count(&result, &report))?;
+            return Ok((result, report));
         }
 
         // Build matrix structure (done once)
@@ -340,8 +377,10 @@ impl Engine {
             }
         }
         Self::populate_dc_observables(&circuit, &solution, &mut result);
+        let device_op_report = circuit.device_op_report();
+        engine.ensure_result_values(dc_result_value_count(&result, &device_op_report))?;
 
-        Ok((result, circuit.device_op_report()))
+        Ok((result, device_op_report))
     }
 
     /// Run DC sweep analysis
@@ -426,18 +465,22 @@ impl Engine {
             );
         };
 
-        let outer_points = sweep2.spec().points();
+        let engine = self.resolved_for_netlist(netlist);
+        let outer_points = bounded_dc_sweep_points(&engine, &sweep2.spec(), abort)?;
         if outer_points.is_empty() {
             return Err(SimulationError::Circuit(
                 "Invalid second-source sweep parameters".to_string(),
             ));
         }
+        let inner_point_count = bounded_dc_sweep_points(&engine, primary, abort)?.len();
+        engine.ensure_analysis_points(outer_points.len().saturating_mul(inner_point_count))?;
 
         let outer_is_temp = sweep2.source.eq_ignore_ascii_case("TEMP")
             || sweep2.source.eq_ignore_ascii_case("TEMPER");
         let outer_is_parameter = Self::netlist_has_numeric_parameter(netlist, &sweep2.source);
 
         let mut results = Vec::new();
+        let mut retained_values = 0usize;
         let mut any_outer_parameter_binding = false;
         for &outer_value in &outer_points {
             if abort.is_aborted() {
@@ -467,6 +510,10 @@ impl Engine {
             };
             let inner =
                 self.run_dc_sweep_spec_with_report_and_abort(&swept, source_name, primary, abort)?;
+            retained_values = inner.iter().fold(retained_values, |total, point| {
+                total.saturating_add(dc_sweep_point_value_count(point))
+            });
+            engine.ensure_result_values(retained_values)?;
             results.extend(inner);
         }
         if outer_is_parameter && netlist.source_text.is_some() && !any_outer_parameter_binding {
@@ -547,7 +594,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        let sweep_points = spec.points();
+        let sweep_points = bounded_dc_sweep_points(&engine, spec, abort)?;
 
         if sweep_points.is_empty() {
             return Err(SimulationError::Circuit(
@@ -558,6 +605,7 @@ impl Engine {
         if source_name.eq_ignore_ascii_case("TEMP") || source_name.eq_ignore_ascii_case("TEMPER") {
             let mut results =
                 Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
+            let mut retained_values = 0usize;
             for &sweep_value in &sweep_points {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -572,12 +620,17 @@ impl Engine {
                         crate::analysis::temperature::celsius_to_kelvin(sweep_value),
                     ),
                 );
-                let (result, device_op_report) = self.run_dc_op_with_report(&swept)?;
-                results.push(DcSweepPointResult {
+                let (result, device_op_report) =
+                    self.run_dc_op_with_report_and_abort(&swept, abort)?;
+                let point = DcSweepPointResult {
                     sweep_value,
                     result,
                     device_op_report,
-                });
+                };
+                retained_values =
+                    retained_values.saturating_add(dc_sweep_point_value_count(&point));
+                engine.ensure_result_values(retained_values)?;
+                results.push(point);
             }
             return Ok(results);
         }
@@ -595,6 +648,7 @@ impl Engine {
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
 
         if circuit.num_nodes() == 0 {
+            engine.ensure_result_shape(sweep_points.len(), 2)?;
             return Ok(sweep_points
                 .into_iter()
                 .map(|value| DcSweepPointResult {
@@ -650,6 +704,7 @@ impl Engine {
         let sweep_result = (|| -> Result<Vec<DcSweepPointResult>, SimulationError> {
             let mut results =
                 Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
+            let mut retained_values = 0usize;
 
             // Use previous solution as initial guess for next point.
             // For the first point, apply .NODESET/.IC hints if present.
@@ -781,11 +836,15 @@ impl Engine {
                 }
                 Self::populate_dc_observables(&circuit, &solution, &mut result);
 
-                results.push(DcSweepPointResult {
+                let point = DcSweepPointResult {
                     sweep_value,
                     result,
                     device_op_report: circuit.device_op_report(),
-                });
+                };
+                retained_values =
+                    retained_values.saturating_add(dc_sweep_point_value_count(&point));
+                engine.ensure_result_values(retained_values)?;
+                results.push(point);
                 prev_solution = Some(solution);
                 prev_sweep_value = Some(sweep_value);
             }
@@ -808,6 +867,7 @@ impl Engine {
         let mut results =
             Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
         let mut any_binding = false;
+        let mut retained_values = 0usize;
 
         for &sweep_value in sweep_points {
             if abort.is_aborted() {
@@ -816,17 +876,24 @@ impl Engine {
             let (swept, bindings) =
                 Self::create_perturbed_netlist(netlist, param_name, sweep_value)?;
             any_binding |= bindings > 0;
-            let (result, device_op_report) = self.run_dc_op_with_report(&swept).map_err(|err| {
-                SimulationError::Circuit(format!(
-                    "DC parameter sweep {} = {} failed: {}",
-                    param_name, sweep_value, err
-                ))
-            })?;
-            results.push(DcSweepPointResult {
+            let (result, device_op_report) = self
+                .run_dc_op_with_report_and_abort(&swept, abort)
+                .map_err(|error| match error {
+                    error @ SimulationError::Aborted
+                    | error @ SimulationError::ResourceLimit(_)
+                    | error @ SimulationError::Configuration(_) => error,
+                    error => SimulationError::Circuit(format!(
+                        "DC parameter sweep {param_name} = {sweep_value} failed: {error}"
+                    )),
+                })?;
+            let point = DcSweepPointResult {
                 sweep_value,
                 result,
                 device_op_report,
-            });
+            };
+            retained_values = retained_values.saturating_add(dc_sweep_point_value_count(&point));
+            self.ensure_result_values(retained_values)?;
+            results.push(point);
         }
 
         if netlist.source_text.is_some() && !any_binding {

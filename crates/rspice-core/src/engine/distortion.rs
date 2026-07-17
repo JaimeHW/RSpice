@@ -44,6 +44,7 @@ impl Engine {
         check_abort(abort)?;
 
         let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_analysis_points(frequencies.len())?;
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         if !circuit.coupled_tlines.is_empty() {
             return Err(SimulationError::Circuit(
@@ -88,6 +89,12 @@ impl Engine {
 
         let f2 = f2_over_f1.map(|ratio| ratio * frequencies[0]);
         let num_nodes = circuit.num_nodes();
+        let response_count: usize = if f2_over_f1.is_some() { 5 } else { 3 };
+        let response_values = circuit.matrix_size().saturating_mul(2).saturating_add(1);
+        engine.ensure_result_shape(
+            frequencies.len(),
+            response_count.saturating_mul(response_values),
+        )?;
         let node_names = circuit.node_names_sorted();
         let branch_names = circuit.branch_names_sorted();
         let mut points = Vec::with_capacity(frequencies.len());
