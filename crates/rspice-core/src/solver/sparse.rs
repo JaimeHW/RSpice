@@ -80,6 +80,9 @@ pub struct StaticMatrix {
     csc: SymbolicSparseColMat<usize>,
     /// CSC values (mutable - updated each iteration)
     values: Vec<Value>,
+    /// Maximum structural nonzeros in any row, retained for scale-invariant
+    /// backward-error acceptance of every numeric backend.
+    max_row_nnz: usize,
     /// Mapping from (row, col) to index in values array
     /// This enables O(1) stamping during simulation. FxHash: stamp lookups
     /// are integer pairs on the Newton hot path, and the map is never
@@ -310,6 +313,7 @@ impl StaticMatrix {
             ncols: self.ncols,
             csc: self.csc.clone(),
             values: vec![0.0; self.values.len()],
+            max_row_nnz: self.max_row_nnz,
             position_map: self.position_map.clone(),
             lu: None,
             klu: None,
@@ -416,6 +420,12 @@ impl StaticMatrix {
             col_ptrs[i] += col_ptrs[i - 1];
         }
 
+        let mut row_nnz = vec![0_usize; nrows];
+        for &row in &row_indices {
+            row_nnz[row] = row_nnz[row].saturating_add(1);
+        }
+        let max_row_nnz = row_nnz.into_iter().max().unwrap_or(0);
+
         // Validate the pattern once here; every solve afterwards borrows it
         // without re-checking.
         let csc = SymbolicSparseColMat::new_checked(nrows, ncols, col_ptrs, None, row_indices);
@@ -425,6 +435,7 @@ impl StaticMatrix {
             ncols,
             csc,
             values,
+            max_row_nnz,
             position_map,
             lu: None,
             klu: None,
@@ -745,11 +756,6 @@ impl StaticMatrix {
         .map_err(|_| SolverError::SingularMatrix)?;
         let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Value>(1, par))
             .map_err(|_| SolverError::SingularMatrix)?;
-        let mut row_nnz = vec![0_usize; self.nrows];
-        for &row in self.csc.row_idx() {
-            row_nnz[row] = row_nnz[row].saturating_add(1);
-        }
-        let max_row_nnz = row_nnz.into_iter().max().unwrap_or(0);
         self.lu = Some(LuWorkspace {
             symbolic: Arc::new(symbolic),
             numeric: sparse_lu::NumericLu::new(),
@@ -760,7 +766,7 @@ impl StaticMatrix {
             scaled_rhs: Vec::new(),
             row_scale: Vec::new(),
             col_scale: Vec::new(),
-            max_row_nnz,
+            max_row_nnz: self.max_row_nnz,
         });
         Ok(())
     }
@@ -938,6 +944,9 @@ impl StaticMatrix {
             csc,
             values,
             klu,
+            max_row_nnz,
+            residual_scratch,
+            residual_gross_scratch,
             ..
         } = self;
         let n = *nrows;
@@ -962,7 +971,59 @@ impl StaticMatrix {
         }
         let mut out = Vec::new();
         backend.solve(rhs, &mut out).ok()?;
-        Some(out)
+        let target_error = faer_backward_error_tolerance(*max_row_nnz);
+        let mut backward_error = componentwise_backward_error(
+            csc,
+            values,
+            &out,
+            rhs,
+            residual_scratch,
+            residual_gross_scratch,
+            *max_row_nnz,
+        )
+        .ok()?;
+        if backward_error <= target_error {
+            return Some(out);
+        }
+
+        // KLU's unscaled factors are substantially faster on the ordinary
+        // Newton hot path, but ill-scaled MNA rows (for example a 1e12-ohm
+        // bias path beside ideal source constraints) can require refinement.
+        // Reuse the same factors to solve A*delta = b-A*x, and accept only a
+        // componentwise backward error comparable to the equilibrated faer
+        // backend. Failure falls through to faer instead of exposing a
+        // finite-but-inaccurate circuit state.
+        const MAX_KLU_REFINEMENTS: usize = 5;
+        const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
+        let mut correction = Vec::new();
+        for _ in 0..MAX_KLU_REFINEMENTS {
+            backend.solve(residual_scratch, &mut correction).ok()?;
+            for (value, &delta) in out.iter_mut().zip(&correction) {
+                let refined = *value + delta;
+                if !delta.is_finite() || !refined.is_finite() {
+                    return None;
+                }
+                *value = refined;
+            }
+            let refined_error = componentwise_backward_error(
+                csc,
+                values,
+                &out,
+                rhs,
+                residual_scratch,
+                residual_gross_scratch,
+                *max_row_nnz,
+            )
+            .ok()?;
+            if refined_error <= target_error {
+                return Some(out);
+            }
+            if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
+                break;
+            }
+            backward_error = refined_error;
+        }
+        None
     }
 
     /// Solve Ax = b via dense Gaussian elimination.
@@ -1707,6 +1768,31 @@ mod tests {
         }
         let changed = matrix.solve_faer(&changed_rhs).unwrap();
         assert_relative_solution(&changed, &changed_expected);
+    }
+
+    #[test]
+    fn klu_accepts_only_backward_stable_ill_scaled_solutions() {
+        let (triplets, rhs, expected) = scaled_tridiagonal_system(
+            [1.0e-20, 1.0e-10, 1.0, 1.0e10, 1.0e20],
+            [1.0e20, 1.0e10, 1.0, 1.0e-10, 1.0e-20],
+        );
+        let mut matrix = StaticMatrix::from_triplets(5, 5, &triplets).unwrap();
+        let solution = matrix
+            .try_solve_klu(&rhs)
+            .expect("KLU refinement must recover this finite ill-scaled system");
+        assert_relative_solution(&solution, &expected);
+
+        let backward_error = componentwise_backward_error(
+            &matrix.csc,
+            &matrix.values,
+            &solution,
+            &rhs,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            matrix.max_row_nnz,
+        )
+        .unwrap();
+        assert!(backward_error <= faer_backward_error_tolerance(matrix.max_row_nnz));
     }
 
     #[test]
